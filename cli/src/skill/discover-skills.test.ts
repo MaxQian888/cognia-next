@@ -1,6 +1,9 @@
 /**
  * @jest-environment node
  */
+import nodeFs from "node:fs/promises"
+import nodeOs from "node:os"
+import nodePath from "node:path"
 import {
   discoverDiskSkills,
   findDiskSkillByCanonicalId,
@@ -347,4 +350,24 @@ describe("seedDiskSkills", () => {
     const res = await seedDiskSkills({ cwd: "/work", home: "/home/u/.cognia" }, upsert, fs)
     expect(res.created).toBe(1) // b succeeded; a swallowed
   })
+})
+
+it("lists deeply nested files without traversing symlink cycles or outside directories", async () => {
+  const dir = await nodeFs.mkdtemp(nodePath.join(nodeOs.tmpdir(), "skill-tree-"))
+  const root = nodePath.join(dir, "skill")
+  const nested = nodePath.join(root, "a/b/c/d/e/f")
+  await nodeFs.mkdir(nested, { recursive: true })
+  try {
+    await nodeFs.writeFile(nodePath.join(root, "SKILL.md"), "skill")
+    await nodeFs.writeFile(nodePath.join(nested, "guide.md"), "nested")
+    await nodeFs.symlink(root, nodePath.join(nested, "cycle"))
+    const outside = nodePath.join(dir, "outside")
+    await nodeFs.mkdir(outside)
+    await nodeFs.writeFile(nodePath.join(outside, "private.md"), "outside")
+    await nodeFs.symlink(outside, nodePath.join(root, "external"))
+    const files = await listSkillBundledFiles(root)
+    expect(files.map((f) => f.relPath)).toEqual(["SKILL.md", "a/b/c/d/e/f/guide.md"])
+  } finally {
+    await nodeFs.rm(dir, { recursive: true, force: true })
+  }
 })

@@ -11,11 +11,29 @@ import { fuzzyFilter } from "./fuzzy-filter"
 
 /** A server's status as the panel shows it — the probe's four states plus a
  * `pending` placeholder shown while the async probe has not yet resolved. */
-export type McpPanelStatus = McpServerStatus | "pending"
+export type McpPanelStatus = McpServerStatus | "pending" | "unknown"
 
 /** One row in the server list. `status` mutates live as probes resolve. */
 export interface McpPanelServer {
   name: string
+  /** Stable identity when different sources advertise the same server name. */
+  id?: string
+  source?: "cognia" | "agent" | "bridge"
+  readOnly?: boolean
+  sessionStatus?:
+    | "available"
+    | "submitted"
+    | "pending"
+    | "unknown"
+    | "needs_auth"
+    | "failed"
+    | "disabled"
+    | "unsupported"
+  sessionScope?: "session" | "agent"
+  sessionToolCount?: number
+  sessionError?: string
+  conflict?: string
+  probedAt?: number
   transport: string
   /** Whether the server is enabled (the `/mcp disable` overlay is off). */
   enabled: boolean
@@ -28,6 +46,7 @@ export interface McpPanelServer {
 
 /** One row in a server's per-tool toggle list. */
 export interface McpPanelTool {
+  inputSchema?: Record<string, unknown>
   /** The bare tool name (as advertised by the server). */
   name: string
   description?: string
@@ -48,12 +67,23 @@ const STATUS_BADGE: Record<McpPanelStatus, McpStatusBadge> = {
   needs_auth: { glyph: "●", label: "needs auth", token: "warning" },
   failed: { glyph: "●", label: "failed", token: "danger" },
   disabled: { glyph: "○", label: "disabled", token: "muted" },
-  pending: { glyph: "◌", label: "connecting…", token: "info" },
+  pending: { glyph: "◌", label: "probing…", token: "info" },
+  unknown: { glyph: "○", label: "unknown", token: "muted" },
 }
 
 /** The coloured-bullet badge for a status. A disabled server always reads as
  * `disabled` regardless of its last probe. */
 export function statusBadge(server: McpPanelServer): McpStatusBadge {
+  if (server.sessionStatus) {
+    const status = server.sessionStatus
+    if (status === "available") return { glyph: "●", label: status, token: "success" }
+    if (status === "pending" || status === "submitted")
+      return { glyph: "◌", label: status, token: "info" }
+    if (status === "failed") return { glyph: "●", label: status, token: "danger" }
+    if (status === "needs_auth" || status === "unsupported")
+      return { glyph: "●", label: status, token: "warning" }
+    return { glyph: "○", label: status, token: "muted" }
+  }
   if (!server.enabled) return STATUS_BADGE.disabled
   return STATUS_BADGE[server.status]
 }
@@ -71,6 +101,7 @@ export function fixHint(server: McpPanelServer): string | null {
     case "failed":
       return server.error ? `enter reconnects · ${truncate(server.error, 40)}` : "enter reconnects"
     case "pending":
+    case "unknown":
       return null
     case "connected":
       return server.toolCount != null ? `${server.toolCount} tools · enter` : "enter for tools"
@@ -123,6 +154,8 @@ export function connectionIssueTitle(server: McpPanelServer): string {
 export type McpEnterAction = "tools" | "auth" | "reconnect" | "enable" | "none"
 
 export function enterAction(server: McpPanelServer): McpEnterAction {
+  if (server.readOnly || server.source === "agent" || server.source === "bridge")
+    return server.sessionStatus === "available" ? "tools" : "none"
   if (!server.enabled) return "enable"
   switch (server.status) {
     case "connected":
@@ -135,6 +168,8 @@ export function enterAction(server: McpPanelServer): McpEnterAction {
       return "enable"
     case "pending":
       return "none"
+    case "unknown":
+      return "reconnect"
   }
 }
 
@@ -158,9 +193,9 @@ export function filterMcpTools(tools: McpPanelTool[], query: string): McpPanelTo
 export function patchServerStatus(
   servers: McpPanelServer[],
   name: string,
-  patch: Partial<Pick<McpPanelServer, "status" | "error" | "toolCount" | "enabled">>
+  patch: Partial<McpPanelServer>
 ): McpPanelServer[] {
-  return servers.map((s) => (s.name === name ? { ...s, ...patch } : s))
+  return servers.map((s) => ((s.id ?? s.name) === name ? { ...s, ...patch } : s))
 }
 
 export const MCP_PANEL_FOOTER =

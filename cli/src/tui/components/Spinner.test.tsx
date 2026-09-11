@@ -3,6 +3,9 @@ import React from "react"
 import { act, render, within } from "@testing-library/react"
 
 import { Spinner, ThinkingPulse, SPINNER_FRAMES, PULSE_FRAMES, frameAt } from "./Spinner"
+import { RenderPrefsProvider } from "../render/context"
+import { CliI18nProvider } from "../i18n"
+import { RENDER_DEFAULTS } from "../../config/schema"
 import { animationClock } from "../render/animation-clock"
 import { ThemeProvider } from "../theme/context"
 import { BUILTIN_THEMES } from "../theme/builtins"
@@ -27,6 +30,23 @@ describe("Spinner", () => {
   afterEach(() => {
     animationClock.stopAll()
     jest.useRealTimers()
+  })
+
+  it("speaks localized static status without animation", () => {
+    const view = withTheme(
+      <CliI18nProvider locale="zh-CN">
+        <RenderPrefsProvider prefs={RENDER_DEFAULTS} screenReader>
+          <Spinner />
+          <ThinkingPulse />
+        </RenderPrefsProvider>
+      </CliI18nProvider>
+    )
+    const before = view.container.textContent
+    expect(before).toContain("思考")
+    expect(before).not.toContain(SPINNER_FRAMES[0])
+    expect(animationClock.timerCount).toBe(0)
+    act(() => jest.advanceTimersByTime(5000))
+    expect(view.container.textContent).toBe(before)
   })
 
   it("animates through its frames", () => {

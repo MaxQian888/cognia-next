@@ -17,6 +17,17 @@ describe("AppErrorBoundary", () => {
   })
   afterEach(() => errSpy.mockRestore())
 
+  it("localizes the fallback while retaining raw error details", () => {
+    const { container } = render(
+      <AppErrorBoundary locale="zh-CN">
+        <Boom />
+      </AppErrorBoundary>
+    )
+    expect(container.textContent).toContain("出现错误")
+    expect(container.textContent).toContain("重置会话")
+    expect(container.textContent).toContain("kaboom in render")
+  })
+
   it("renders children when nothing throws", () => {
     const { container } = render(
       <AppErrorBoundary>

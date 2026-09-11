@@ -69,3 +69,27 @@ describe("computeAddDir", () => {
     expect(computeAddDir("remove", "", { ...base, config: {} }).message).toContain("Usage")
   })
 })
+
+it("localizes directory configuration outcomes without promising external access", () => {
+  const deps = { ...base, config: { locale: "zh-CN" as const, additionalRoots: [ABS] } }
+  expect(computeAddDir("list", "", deps).message).toContain("额外目录")
+  expect(computeAddDir("list", "", { ...deps, config: { locale: "zh-CN" } }).message).toContain(
+    "尚未配置"
+  )
+  expect(computeAddDir("add", "sub", deps)).toMatchObject({
+    roots: [ABS, SUB],
+    message: expect.stringContaining("实际访问取决于当前 Agent 及其权限"),
+  })
+  expect(computeAddDir("add", ABS, deps).message).toContain("目录已添加")
+  expect(computeAddDir("add", "/invalid", deps).message).toContain("不是有效目录")
+  expect(computeAddDir("remove", "/invalid", deps).message).toContain("此目录未添加")
+  expect(computeAddDir("remove", "1", deps)).toMatchObject({
+    roots: [],
+    message: `已移除 ${ABS}。`,
+  })
+  expect(computeAddDir("add", "", deps).message).toContain("用法：/add-dir <path>")
+  expect(computeAddDir("remove", "", deps).message).toContain("用法：/add-dir remove")
+  expect(computeAddDir("add", "sub", { ...base, config: {} }).message).toContain(
+    "Access depends on the active agent and its permissions"
+  )
+})

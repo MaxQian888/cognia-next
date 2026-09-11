@@ -9,12 +9,14 @@
  */
 import React from "react"
 import { Box, Text } from "ink"
+import { useCliTranslations } from "../../i18n"
 import { useModalInput } from "../../input/input-router"
 
 import { markdownLineSpans } from "../../render/cell-terminal-block"
 import { ansiToSpans } from "../../render/ansi-spans"
 import { wrapTerminalSpans, type TerminalStyle } from "../../render/terminal-block"
 import { parseMouseEvent } from "../../input/mouse"
+import { useScreenReader } from "../../render/context"
 import { useTheme } from "../../theme/context"
 import { clampScroll, maxScroll, positionLabel, prepareDocumentLines } from "../document-view"
 import type { DocumentFormat } from "../../state/types"
@@ -31,6 +33,8 @@ export interface DocumentViewerProps {
   /** Test seam: viewport height in rows (defaults to the terminal height). */
   viewportRows?: number
   columns?: number
+  /** Whether this pane owns keyboard navigation in a split view. */
+  focused?: boolean
 }
 
 /** Rows reserved for the border, title, and footer chrome. */
@@ -48,8 +52,11 @@ export function DocumentViewer({
   onCopy,
   viewportRows,
   columns = 80,
+  focused,
 }: DocumentViewerProps) {
   const theme = useTheme()
+  const screenReader = useScreenReader()
+  const t = useCliTranslations("cliUiDiff")
   const [scroll, setScroll] = React.useState(0)
   const [searchDraft, setSearchDraft] = React.useState<string | null>(null)
   const [search, setSearch] = React.useState({ query: "", matches: [] as number[], index: 0 })
@@ -153,8 +160,10 @@ export function DocumentViewer({
       width={width}
       height={viewportRows ?? 24}
       overflow="hidden"
-      borderStyle="round"
-      borderColor={theme.border}
+      borderStyle={screenReader ? undefined : "round"}
+      borderColor={
+        focused === undefined ? theme.border : focused ? theme.accent : theme.borderSubtle
+      }
       paddingX={1}
     >
       <Text bold color={theme.accent} wrap="truncate-end">
@@ -167,7 +176,7 @@ export function DocumentViewer({
               ? line.spans.map((span, j) => (
                   <Text
                     key={j}
-                    color={span.color ?? colors[span.style]}
+                    color={screenReader ? undefined : (span.color ?? colors[span.style])}
                     bold={span.bold}
                     italic={span.italic}
                     underline={span.underline}
@@ -181,8 +190,21 @@ export function DocumentViewer({
       </Box>
       <Text color={theme.muted} dimColor wrap="truncate-end">
         {searchDraft !== null
-          ? `/${searchDraft}█ · enter search · esc cancel`
-          : `${positionLabel(start, viewport, total)}${search.query ? ` · ${search.matches.length === 0 ? "0" : search.index + 1}/${search.matches.length} matches` : ""} · ↑/↓ scroll · PgUp/PgDn page · g/G top/bottom · / search · n/N next/prev${onCopy ? " · y copy all" : ""} · q/esc close`}
+          ? t("searchDraft", { query: searchDraft, cursor: screenReader ? "" : "█" })
+          : [
+              total <= viewport ? t("allVisible") : positionLabel(start, viewport, total),
+              search.query
+                ? t("matches", {
+                    current: search.matches.length === 0 ? 0 : search.index + 1,
+                    total: search.matches.length,
+                  })
+                : "",
+              t("viewerNavigation"),
+              onCopy ? t("copy") : "",
+              t("close"),
+            ]
+              .filter(Boolean)
+              .join(" · ")}
       </Text>
     </Box>
   )

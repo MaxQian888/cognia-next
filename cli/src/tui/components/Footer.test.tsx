@@ -180,3 +180,16 @@ describe("Footer", () => {
     expect(container.textContent).not.toContain("⚙ /settings")
   })
 })
+
+it("updates average output speed for each completed turn and hides missing telemetry", () => {
+  const props = { config, turnStatus: "idle" as const, columns: 200 }
+  const { container, rerender } = render(
+    <Footer {...props} usage={{ outputTokens: 120, durationMs: 3000 }} />
+  )
+  expect(container.textContent).toContain("40.0 tok/s avg")
+  rerender(<Footer {...props} usage={{ outputTokens: 150, durationMs: 1000 }} />)
+  expect(container.textContent).toContain("150.0 tok/s avg")
+  expect(container.textContent).not.toContain("40.0 tok/s")
+  rerender(<Footer {...props} usage={{ outputTokens: 150 }} />)
+  expect(container.textContent).not.toContain("tok/s")
+})

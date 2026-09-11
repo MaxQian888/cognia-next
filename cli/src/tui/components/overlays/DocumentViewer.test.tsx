@@ -1,3 +1,6 @@
+import { RenderPrefsProvider } from "../../render/context"
+import { RENDER_DEFAULTS } from "../../../config/schema"
+import { CliI18nProvider } from "../../i18n"
 import React from "react"
 import { execFileSync } from "node:child_process"
 import { mkdtempSync, rmSync } from "node:fs"
@@ -318,4 +321,27 @@ describe("DocumentViewer", () => {
     fire("y")
     expect(onCopy).toHaveBeenCalledWith(longBody)
   })
+})
+
+it("keeps reader search editable and navigable without a decorative caret", () => {
+  __resetInk()
+  const onCopy = jest.fn()
+  const body = "first match\nother\nlast match"
+  const { container } = render(
+    <CliI18nProvider locale="zh-CN">
+      <RenderPrefsProvider prefs={RENDER_DEFAULTS} screenReader>
+        <DocumentViewer title="Doc" body={body} format="text" onClose={() => {}} onCopy={onCopy} />
+      </RenderPrefsProvider>
+    </CliI18nProvider>
+  )
+  fire("/")
+  fire("match")
+  expect(container.textContent).toContain("/match")
+  expect(container.textContent).not.toContain("█")
+  fire("", { return: true })
+  expect(container.textContent).toContain("1/2")
+  fire("n")
+  expect(container.textContent).toContain("2/2")
+  fire("y")
+  expect(onCopy).toHaveBeenCalledWith(body)
 })

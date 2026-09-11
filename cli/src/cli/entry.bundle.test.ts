@@ -71,6 +71,25 @@ describe("cognia-agent bundle", () => {
     }
   })
 
+  it("loads the HTTP MCP helper with the CLI runtime dependencies", () => {
+    const manifest = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "cli/package.json"), "utf8"))
+    expect(manifest.dependencies.undici).toBeDefined()
+    const chunks = path.join(REPO_ROOT, "cli/dist/chunks")
+    const helpers = fs.readdirSync(chunks).filter((name) => /^mcp-oauth-helper-.*\.mjs$/.test(name))
+    expect(helpers.length).toBeGreaterThan(0)
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        'import { pathToFileURL } from "node:url"; for (const file of process.argv.slice(1)) await import(pathToFileURL(file).href);',
+        ...helpers.map((name) => path.join(chunks, name)),
+      ],
+      { cwd: REPO_ROOT, encoding: "utf8", timeout: 30_000 }
+    )
+    expect({ status: result.status, stderr: result.stderr }).toEqual({ status: 0, stderr: "" })
+  })
+
   it("prints its version", () => {
     const result = run(["--version"])
     expect(result.status).toBe(0)

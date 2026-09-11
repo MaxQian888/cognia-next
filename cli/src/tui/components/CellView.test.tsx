@@ -12,6 +12,20 @@ function renderCell(cell: Cell) {
 }
 
 describe("CellView", () => {
+  it("shows compact image labels in scrollback", () => {
+    const text = renderCell({
+      id: "image-user",
+      kind: "user",
+      text: 'before @"/tmp/Screen Shot.png" after',
+    })
+    expect(text).toContain("[Image 1]")
+    expect(text).toContain("before ")
+    expect(text).toContain(" after")
+    // OSC8 terminals may carry the path in link metadata, never as visible text.
+    expect(text.replace(/\u001b\][\s\S]*?(?:\u0007|\u001b\\)/g, "")).not.toContain(
+      "Screen Shot.png"
+    )
+  })
   it("renders a user cell", () => {
     expect(renderCell({ id: "1", kind: "user", text: "hello" })).toContain("hello")
   })

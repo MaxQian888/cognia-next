@@ -1,5 +1,6 @@
+import { CliI18nProvider } from "../../i18n"
 import React from "react"
-import { render } from "@testing-library/react"
+import { act, render } from "@testing-library/react"
 import { __fireInput, __resetInk } from "ink"
 
 import { Help, helpNameColumn } from "./Help"
@@ -35,4 +36,33 @@ describe("Help", () => {
     __fireInput("", { return: true })
     expect(onClose).toHaveBeenCalled()
   })
+})
+
+it("shows configured shortcuts and terminal alternatives", () => {
+  const { container } = render(
+    <Help
+      onClose={() => {}}
+      keybindings={{ historySearch: "ctrl+x ctrl+r", collapseAll: "ctrl+d" }}
+    />
+  )
+  expect(container.textContent).toContain("Ctrl+X Ctrl+R history search")
+  expect(container.textContent).toContain("Ctrl+D expand/collapse")
+  expect(container.textContent).toContain("Ctrl+X Ctrl+G")
+  expect(container.textContent).toContain("tmux")
+})
+
+it("localizes built-in help and honors an overridden workflow shortcut", () => {
+  const onClose = jest.fn()
+  const { container } = render(
+    <CliI18nProvider locale="zh-CN">
+      <Help onClose={onClose} keybindings={{ workflowInspect: "ctrl+x ctrl+w" }} />
+    </CliI18nProvider>
+  )
+  expect(container.textContent).toContain("切换模型")
+  expect(container.textContent).toContain("Ctrl+X Ctrl+W")
+  expect(container.textContent).not.toContain("Ctrl+X Ctrl+G")
+  act(() => __fireInput("", { downArrow: true }))
+  expect(onClose).not.toHaveBeenCalled()
+  __fireInput("", { escape: true })
+  expect(onClose).toHaveBeenCalledTimes(1)
 })

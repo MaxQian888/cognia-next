@@ -8,6 +8,7 @@
  * pill and the `ctx` segment / `/context` report.
  */
 import fs from "node:fs"
+import { createCliTranslator } from "../i18n"
 import path from "node:path"
 
 import { resolveActiveModel } from "../../config/active-model"
@@ -26,6 +27,7 @@ import {
   contextTokens,
   formatCost,
   formatTokens,
+  outputTokensPerSecond,
   hasCacheTelemetry,
   shortenCwd,
 } from "./usage"
@@ -137,10 +139,13 @@ export function modeSegmentText(
   config: ResolvedConfig,
   capabilities?: BackendCapabilities
 ): string {
+  const t = createCliTranslator(config.locale, "cliUiCommon")
   const picked = config.permissionMode
   const effective = effectivePermissionMode(capabilities, picked)
   const marker = permissionModeMeta(picked).risk === "danger" ? "⚠ " : ""
-  return effective === picked ? `${marker}${picked}` : `${marker}${picked}→${effective}`
+  return effective === picked
+    ? `${marker}${t(`permissionModes.${picked}`)}`
+    : `${marker}${t(`permissionModes.${picked}`)}→${t(`permissionModes.${effective}`)}`
 }
 
 /** True when the `mode` segment must be forced to the warning colour: either the
@@ -165,6 +170,7 @@ function segmentText(
   }
 ): string | null {
   const { config, usage, totals } = ctx
+  const t = createCliTranslator(config.locale, "cliUiCommon")
   switch (id) {
     case "model": {
       // The model actually dispatched is the active provider's resolved model —
@@ -176,7 +182,7 @@ function segmentText(
       // `cost` already refuse to print.
       const model = backendIdentity(config).model
       if (model) return model
-      return isBuiltinBackend(config.agentBackend) ? "default" : null
+      return isBuiltinBackend(config.agentBackend) ? t("defaultModel") : null
     }
     case "provider":
       // The provider segment is an identity readout, so it must follow the
@@ -190,7 +196,8 @@ function segmentText(
       const total = totals
         ? totals.inputTokens + totals.outputTokens
         : (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0)
-      return `${formatTokens(total)} tok`
+      const rate = outputTokensPerSecond(usage)
+      return `${t("tokenUsage", { count: formatTokens(total) })}${rate === null ? "" : ` · ${t("tokenRate", { rate: rate.toFixed(1) })}`}`
     }
     case "backend":
       return backendSegmentText(config)
@@ -200,14 +207,18 @@ function segmentText(
       // would be invented. Show nothing instead.
       return externalWithoutKnownWindow(config, ctx.contextWindow)
         ? null
-        : `${contextPercent(usage, resolveActiveModel(config), ctx.contextWindow)}% ctx`
+        : t("contextUsage", {
+            percent: contextPercent(usage, resolveActiveModel(config), ctx.contextWindow),
+          })
     case "cache":
       // Prefix-cache hit rate. Hidden until a turn reports prompt tokens — a
       // "0%" before the first turn would just be noise in the footer.
       if (!usage || contextTokens(usage) <= 0 || !hasCacheTelemetry(usage)) return null
       const cache = cacheSummary(usage)
       return `⚡ ${Math.round(cache.hitRate * 100)}%${
-        cache.reusedTokens > 0 ? ` · ${formatTokens(cache.reusedTokens)} reused` : ""
+        cache.reusedTokens > 0
+          ? ` · ${t("cacheReused", { count: formatTokens(cache.reusedTokens) })}`
+          : ""
       }`
     case "cost":
       // Same reason as `ctx`: the cost would be this session's tokens priced

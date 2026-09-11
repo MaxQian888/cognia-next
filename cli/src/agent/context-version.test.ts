@@ -50,7 +50,7 @@ describe("contextVersionProjection", () => {
     const sep = String.fromCharCode(31)
     const servers = (projection.mcpServers as string[]).map((row) => row.split(sep))
     expect(servers.map((f) => f[0])).toEqual(["alpha", "beta"])
-    expect(servers[0].slice(1)).toEqual(["on", "", "srv", "--x", ""])
+    expect(servers[0].slice(1, 6)).toEqual(["on", "", "srv", "--x", ""])
   })
 
   it("never carries credentials from the send options", () => {
@@ -114,4 +114,26 @@ describe("hashContextVersion", () => {
     )
     expect(withKnobs).toBe(hashContextVersion(input()))
   })
+})
+
+test("MCP nested connection and credential changes invalidate the session without exposing credentials", () => {
+  const server = {
+    id: "one",
+    name: "one",
+    enabled: true,
+    transport: "stdio",
+    config: { command: "one", env: { KEY: "secret-one" } },
+  } as unknown as McpServer
+  const original = { ...input(), mcpServers: [server] }
+  const changed = {
+    ...original,
+    mcpServers: [{ ...server, config: { ...server.config, command: "two" } }],
+  }
+  expect(hashContextVersion(original)).not.toBe(hashContextVersion(changed))
+  const changedAuth = {
+    ...original,
+    mcpServers: [{ ...server, config: { ...server.config, env: { KEY: "secret-two" } } }],
+  }
+  expect(hashContextVersion(original)).not.toBe(hashContextVersion(changedAuth))
+  expect(JSON.stringify(contextVersionProjection(original))).not.toContain("secret-one")
 })

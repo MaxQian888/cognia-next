@@ -194,6 +194,21 @@ describe("canonicalEnvelopeToActions", () => {
     event,
   })
 
+  it("routes native quota pushes and recovery to account state without requesting a refresh", () => {
+    for (const status of ["allowed_warning", "rejected", "allowed"] as const) {
+      const event: CanonicalAgentEvent = {
+        kind: "rate-limit",
+        status,
+        rateLimitType: "five_hour",
+        utilization: 0.72,
+        resetsAt: 1800000000,
+      }
+      expect(canonicalEnvelopeToActions(envelope(event))).toEqual([
+        { type: "SET_AGENT_RATE_LIMIT", event, receivedAt: Date.parse(envelope(event).timestamp) },
+      ])
+    }
+  })
+
   it.each<PiEvent>([
     { type: "extension_ui_request", id: "w", method: "setWidget", widgetLines: ["bg status"] },
     { type: "extension_ui_request", id: "s", method: "setStatus", statusText: "working" },

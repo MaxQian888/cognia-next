@@ -18,13 +18,12 @@ import type { TerminalLayoutBudget } from "../../layout/terminal-layout"
 
 export interface TranscriptRegionProps {
   state: TuiState
-  /** Effective layout: fullscreen pins a status banner + own scroll viewport;
+  /** Effective layout: fullscreen shows a welcome banner + own scroll viewport;
    * scrollback prints the transcript into the terminal's native scrollback. */
   fullscreen: boolean
   /** Memoized welcome banner — the scrollback transcript header. */
   banner: React.ReactNode
-  /** Who is actually answering. The fullscreen banner pins this line on screen
-   * for the whole session, so it must be the same resolved identity the
+  /** Who is actually answering. The fullscreen welcome uses the same resolved identity the
    * scrollback banner and the footer use — never the raw built-in config. */
   identity: BackendIdentity
   /** Active model id (catalog-resolved). Only used to price the built-in
@@ -43,12 +42,23 @@ export interface TranscriptRegionProps {
 }
 
 /**
- * The transcript region: history + the live turn. In fullscreen it pins a status
- * banner above an app-managed scroll viewport (with a "scrolled up" hint); in
- * scrollback mode it prints straight into the terminal's native scrollback with
- * the welcome banner as the header. The in-flight tools + workflow-run panel
- * follow the transcript in both layouts.
+ * Static tracks its append position by index, so removing a previously printed
+ * header slot would skip the first user cell. Latch the slot for each replay;
+ * a new session or replay mounts fresh and can omit an obsolete welcome.
  */
+function ScrollbackTranscript(props: React.ComponentProps<typeof Transcript>) {
+  const [hasHeaderSlot] = React.useState(() => Boolean(props.header))
+  const [lastHeader, setLastHeader] = React.useState(props.header)
+  // Keep startup identity current until the first user arrives. Afterwards the
+  // existing slot retains its last content without shifting Static's indices.
+  if (hasHeaderSlot && props.header !== undefined && props.header !== lastHeader) {
+    setLastHeader(props.header)
+  }
+  const header = hasHeaderSlot ? <>{props.header ?? lastHeader}</> : undefined
+  return <Transcript {...props} header={header} />
+}
+
+/** History + live turn. Welcome is shown only before the first user message. */
 export function TranscriptRegion({
   state,
   fullscreen,
@@ -69,15 +79,13 @@ export function TranscriptRegion({
     composerRows: 3,
   },
 }: TranscriptRegionProps): React.ReactElement {
+  const hasUserMessage = state.cells.some((cell) => cell.kind === "user")
   if (fullscreen) {
     const virtualized = process.env.COGNIA_TUI_RENDERER !== "legacy"
     return (
       <>
-        {/* Fixed top banner — rendered outside the scroll viewport so it never
-            scrolls away (the whole point of fullscreen). It carries a live status
-            line (mode / context / tokens) since, unlike the scrollback banner, it
-            stays on screen for the whole session. */}
-        {layout.showBanner ? (
+        {/* Once conversation starts, the footer already carries this status. */}
+        {layout.showBanner && !hasUserMessage ? (
           <Banner
             version={VERSION}
             provider={identity.provider}
@@ -90,7 +98,7 @@ export function TranscriptRegion({
               // context window: the percentage would be derived from the built-in
               // provider's catalog window, which says nothing about that agent.
               // Same rule (and same helper) as the footer's `ctx` segment — this
-              // fixed header was the last surface still inventing one.
+              // welcome header must follow the same identity rule.
               ...(externalWithoutKnownWindow(state.config, state.modelMeta?.contextWindow)
                 ? {}
                 : {
@@ -155,9 +163,10 @@ export function TranscriptRegion({
 
   return (
     <>
-      <Transcript
+      <ScrollbackTranscript
+        key={`${state.sessionId}:${state.renderEpoch}`}
         cells={state.cells}
-        header={banner}
+        header={hasUserMessage ? undefined : banner}
         verbose={state.verbose}
         epoch={state.renderEpoch}
         replayMaxRows={state.config.render?.terminalResizeReplayMaxRows ?? 10_000}

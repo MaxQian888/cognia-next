@@ -9,17 +9,20 @@
 import { useEffect, useState } from "react"
 
 import { animationClock } from "./animation-clock"
+import { useScreenReader } from "./context"
 
 export function useAnimationTick(intervalMs: number, active = true): number {
+  const screenReader = useScreenReader()
+  const enabled = active && !screenReader
   // Seeded from the clock so a component mounting mid-animation joins the frame
   // its neighbours are already on instead of restarting the cycle. Read in the
   // initializer rather than an effect, which would be a cascading render.
   const [tick, setTick] = useState(() => animationClock.tick(intervalMs))
 
   useEffect(() => {
-    if (!active) return
+    if (!enabled) return
     return animationClock.subscribe(intervalMs, setTick)
-  }, [intervalMs, active])
+  }, [intervalMs, enabled])
 
-  return active ? tick : 0
+  return enabled ? tick : 0
 }

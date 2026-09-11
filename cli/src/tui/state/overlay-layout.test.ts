@@ -46,10 +46,11 @@ describe("inlineOverlayRows", () => {
     expect(inlineOverlayRows(60)).toBe(20)
   })
 
-  it("never shrinks below the frame plus its choices", () => {
+  it("caps the preferred minimum to the actual available rows", () => {
     // A prompt has to stay answerable on a short terminal, even at the cost of
     // most of the transcript.
     expect(inlineOverlayRows(12)).toBe(9)
-    expect(inlineOverlayRows(4)).toBe(9)
+    expect(inlineOverlayRows(4)).toBe(4)
+    expect(inlineOverlayRows(0)).toBe(1)
   })
 })

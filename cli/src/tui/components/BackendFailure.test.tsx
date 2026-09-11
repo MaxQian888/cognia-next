@@ -1,3 +1,4 @@
+import { CliI18nProvider } from "../i18n"
 import React from "react"
 import { render } from "@testing-library/react"
 import { __fireInput, __resetInk } from "ink"
@@ -143,4 +144,21 @@ describe("backendFailureAction", () => {
     expect(backendFailureAction(99)).toBe("quit")
     expect(BACKEND_FAILURE_CHOICE_COUNT).toBe(4)
   })
+})
+
+it("renders Chinese startup copy and preserves technical content", () => {
+  __resetInk()
+  const { container } = render(
+    <CliI18nProvider locale="zh-CN">
+      <BackendFailure
+        backend="codex"
+        failure={{ kind: "command", stage: "command", message: "ENOENT codex" }}
+        index={0}
+        onIndexChange={() => {}}
+        onSelect={() => {}}
+      />
+    </CliI18nProvider>
+  )
+  expect(container.textContent).toContain("重试")
+  expect(container.textContent).toContain("ENOENT codex")
 })

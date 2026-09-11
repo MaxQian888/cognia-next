@@ -1,3 +1,4 @@
+import { settingsSections } from "../runtime/settings-sections"
 /**
  * @jest-environment node
  */
@@ -29,6 +30,132 @@ const result = (usage?: RunAndCaptureResult["usage"]): RunAndCaptureResult => ({
 })
 
 describe("tuiReducer — startup", () => {
+  it("updates an open quota panel from pushes and rejects an older loaded snapshot", () => {
+    let state = reduce(base(), { type: "SET_BACKEND", backend: "claude-code" })
+    state = reduce(state, {
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "limits",
+        snapshots: [],
+        loading: true,
+        requestId: 55,
+        now: 1000,
+        analysis: { turns: 0 } as never,
+      },
+    })
+    state = reduce(state, {
+      type: "SET_AGENT_RATE_LIMIT",
+      event: {
+        kind: "rate-limit",
+        status: "allowed_warning",
+        rateLimitType: "five_hour",
+        utilization: 0.72,
+      },
+    })
+    expect(state.overlay).toMatchObject({
+      kind: "limits",
+      loading: false,
+      snapshots: [
+        expect.objectContaining({
+          provider: "anthropic",
+          meters: [expect.objectContaining({ usedPct: 72 })],
+        }),
+      ],
+    })
+    expect(reduce(state, { type: "LIMITS_LOADED", requestId: 55, snapshots: [] })).toBe(state)
+    state = reduce(state, { type: "SET_BACKEND", backend: "gemini-cli" })
+    expect(state.agentRateLimits).toBeUndefined()
+    expect(state.overlay.kind).toBe("none")
+  })
+  it("keeps native quota buckets separate and replaces rejected state on recovery", () => {
+    let state = reduce(
+      base(),
+      {
+        type: "SET_AGENT_RATE_LIMIT",
+        event: {
+          kind: "rate-limit",
+          status: "rejected",
+          rateLimitType: "five_hour",
+          utilization: 1,
+        },
+      },
+      {
+        type: "SET_AGENT_RATE_LIMIT",
+        event: {
+          kind: "rate-limit",
+          status: "allowed",
+          rateLimitType: "seven_day",
+          utilization: 0.35,
+        },
+      },
+      {
+        type: "SET_AGENT_RATE_LIMIT",
+        event: { kind: "rate-limit", status: "allowed", rateLimitType: "five_hour" },
+      }
+    )
+    expect(state.agentRateLimits?.five_hour).toEqual({
+      kind: "rate-limit",
+      status: "allowed",
+      rateLimitType: "five_hour",
+    })
+    expect(state.agentRateLimits?.seven_day.utilization).toBe(0.35)
+    expect(state.toasts).toHaveLength(0)
+    state = reduce(state, { type: "CLEAR_AGENT_RATE_LIMITS" })
+    expect(state.agentRateLimits).toBeUndefined()
+  })
+  it("deduplicates quota warnings until the native status changes", () => {
+    const event = {
+      kind: "rate-limit",
+      status: "allowed_warning",
+      rateLimitType: "five_hour",
+    } as const
+    let state = reduce(base(), { type: "SET_AGENT_RATE_LIMIT", event })
+    const first = state.toasts
+    state = reduce(
+      state,
+      ...Array.from({ length: 40 }, () => ({ type: "SET_AGENT_RATE_LIMIT", event }) as const)
+    )
+    expect(state.toasts).toBe(first)
+    expect(state.toasts).toHaveLength(1)
+    state = reduce(state, { type: "SET_AGENT_RATE_LIMIT", event: { ...event, status: "allowed" } })
+    expect(state.toasts).toHaveLength(0)
+  })
+  it.each(["gemini-cli", "claude-code", "codex-acp", "opencode-server", "pi"])(
+    "does not attribute built-in headers to %s",
+    (backend) => {
+      const state = reduce(base(), { type: "SET_BACKEND", backend })
+      expect(reduce(state, { type: "SET_RATE_LIMITS", snapshot: { meters: [] } as never })).toBe(
+        state
+      )
+    }
+  )
+  it.each([
+    { type: "SET_BACKEND", backend: "codex-app-server" },
+    { type: "SET_PROVIDER", provider: "openai" },
+  ] as const)("clears stale quota when routing changes: %j", (action) => {
+    let state: TuiState = { ...base(), rateLimits: { provider: "deepseek" } as never }
+    state = reduce(state, {
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "limits",
+        requestId: 123,
+        loading: true,
+        snapshots: [],
+        now: 0,
+        analysis: { turns: 0 } as never,
+      },
+    })
+    state = reduce(state, action)
+    expect(state.rateLimits).toBeUndefined()
+    expect(state.overlay.kind).toBe("none")
+    const after = reduce(state, {
+      type: "LIMITS_LOADED",
+      requestId: 123,
+      snapshots: [{ provider: "deepseek", meters: [], fetchedAt: 0 }],
+    })
+    expect(after).toBe(state)
+  })
+
   it("STARTUP_TRUST flips the phase to chat", () => {
     const start = createInitialState(config, "ses1", false)
     expect(start.phase).toBe("startup")
@@ -2738,6 +2865,39 @@ describe("tuiReducer — workflow copilot mode", () => {
 })
 
 describe("tuiReducer — toasts & completion signals", () => {
+  it("ignores a diff result after closing review or opening a newer request", () => {
+    const opened = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "gitDiff", review: { files: [] }, requestId: 2, loading: true },
+    })
+    expect(reduce(opened, { type: "GIT_DIFF_RESULT", requestId: 1, error: "obsolete" })).toBe(
+      opened
+    )
+    const completed = reduce(opened, {
+      type: "GIT_DIFF_RESULT",
+      requestId: 2,
+      review: { files: [] },
+    })
+    expect(completed.overlay).toMatchObject({ kind: "gitDiff", loading: false })
+    const closed = reduce(opened, { type: "OVERLAY_CLOSE" })
+    expect(reduce(closed, { type: "GIT_DIFF_RESULT", requestId: 2, error: "late" })).toBe(closed)
+  })
+  it("retains an error and recovery hint in the transcript after its toast expires", () => {
+    const pushed = reduce(base(), {
+      type: "TOAST_PUSH",
+      severity: "error",
+      message: "Connection lost",
+      hint: "Reconnect with /backend",
+    })
+    const dismissed = reduce(pushed, { type: "TOAST_DISMISS", id: pushed.toasts[0].id })
+    expect(dismissed.toasts).toHaveLength(0)
+    expect(dismissed.cells).toContainEqual(
+      expect.objectContaining({
+        kind: "notice",
+        message: "Connection lost\nReconnect with /backend",
+      })
+    )
+  })
   it("TOAST_PUSH appends a toast and caps at three (oldest dropped)", () => {
     const s = reduce(
       base(),
@@ -3244,4 +3404,80 @@ describe("tuiReducer — queued segment updates", () => {
     expect(s.cells.map((cell) => cell.kind)).toEqual(["tool", "todo", "notice"])
     expect(s.cells[1]).toMatchObject({ todos: [{ content: "done", status: "completed" }] })
   })
+})
+
+describe("MCP runtime inventory updates", () => {
+  it("ignores inventory from an old session or backend", () => {
+    const state = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "mcp", servers: [], probing: false },
+    })
+    expect(
+      reduce(state, {
+        type: "MCP_SERVERS_REPLACE",
+        servers: [],
+        sessionId: "old-session",
+      })
+    ).toBe(state)
+    expect(
+      reduce(state, {
+        type: "MCP_SERVERS_REPLACE",
+        servers: [],
+        runtimeBackend: "pi-rpc",
+      })
+    ).toBe(state)
+  })
+  it("does not reopen a panel after an asynchronous refresh", () => {
+    const state = base()
+    expect(
+      reduce(state, { type: "MCP_SERVERS_REPLACE", servers: [], runtimeBackend: "pi-rpc" })
+    ).toBe(state)
+  })
+  it("preserves probing and backend while replacing and patching same-name rows", () => {
+    const servers = [
+      { name: "github", transport: "http", enabled: true, status: "pending" as const },
+      {
+        id: "agent:github",
+        name: "github",
+        transport: "http",
+        enabled: true,
+        status: "unknown" as const,
+      },
+    ]
+    const state = reduce(
+      createInitialState({ ...config, agentBackend: "pi-rpc" }, "ses1"),
+      { type: "OVERLAY_OPEN", overlay: { kind: "mcp", servers: [], probing: true } },
+      { type: "MCP_SERVERS_REPLACE", servers, runtimeBackend: "pi-rpc" },
+      { type: "MCP_STATUS_PATCH", name: "github", patch: { status: "connected" } }
+    )
+    expect(state.overlay).toMatchObject({
+      kind: "mcp",
+      probing: true,
+      runtimeBackend: "pi-rpc",
+      servers: [
+        { name: "github", status: "connected" },
+        { id: "agent:github", status: "unknown" },
+      ],
+    })
+  })
+})
+
+it("refreshes workspace rows after removing an additional root", () => {
+  const initial = createInitialState({ ...config, additionalRoots: ["/a", "/b"] }, "ses1")
+  const sections = settingsSections(initial.config)
+  const section = sections.findIndex((entry) => entry.id === "workspace")
+  const state = reduce(
+    initial,
+    {
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "settings", sections, section, index: sections[section].rows.length - 1 },
+    },
+    { type: "SET_ADDITIONAL_ROOTS", roots: ["/b"] }
+  )
+  expect(state.overlay.kind).toBe("settings")
+  if (state.overlay.kind !== "settings") return
+  const rows = state.overlay.sections[section].rows
+  expect(rows.find((row) => row.id === "root:1")?.value).toBe("/b")
+  expect(rows.some((row) => row.id === "root:2")).toBe(false)
+  expect(state.overlay.index).toBeLessThan(rows.length)
 })

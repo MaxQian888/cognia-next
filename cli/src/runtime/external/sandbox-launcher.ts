@@ -105,13 +105,35 @@ export function buildSandboxLauncherArgs(
   homedir: string
 ): string[] {
   if (!config.cwd) throw new Error("external-agent sandbox requires a working directory")
-  const writable = [config.cwd, ...agentStateWritableRoots(config, homedir), toolHostRuntimeDir()]
+  const taskHome = config.env?.COGNIA_GATEWAY_TASK_HOME
+  const effectiveHome = taskHome ?? homedir
+  const writable = [
+    config.cwd,
+    ...(taskHome ? [taskHome] : agentStateWritableRoots(config, homedir)),
+    toolHostRuntimeDir(),
+  ]
   return [
     "--cwd",
     config.cwd,
     ...writable.flatMap((root) => ["--writable", root]),
     "--readable",
-    homedir,
+    effectiveHome,
+    ...(taskHome
+      ? [
+          "--readable",
+          homedir,
+          ...[
+            ".codex",
+            ".claude",
+            ".claude.json",
+            ".pi",
+            ".qwen",
+            ".config/opencode",
+            ".local/share/opencode",
+            ".local/share/cognia-agent-tasks",
+          ].flatMap((relative) => ["--deny-readable", path.join(homedir, relative)]),
+        ]
+      : []),
     "--network",
     "--",
     config.command,

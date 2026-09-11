@@ -27,7 +27,11 @@ export function createCliAgentHost(
   }
 }
 
-const defaultHost = createCliAgentHost(new NodeExternalAgentBackend())
+const defaultBackend = new NodeExternalAgentBackend()
+const defaultHost = createCliAgentHost(defaultBackend)
+
+/** Called by the trusted local CLI connect flow, never by an agent RPC. */
+export const selectCliAgentWorkspace = (cwd: string): void => defaultBackend.selectWorkspace(cwd)
 
 export const supportsExternalAgents = defaultHost.supportsExternalAgents
 export const runsExternalAgentProcessesLocally = defaultHost.runsExternalAgentProcessesLocally

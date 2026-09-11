@@ -443,7 +443,7 @@ describe("xCommand", () => {
         launchConfig = cfg
         return 0
       },
-      persistModel: () => {},
+      persistModel: () => "/tmp/config.json",
     })
     expect(code).toBe(0)
     expect(connectDeps?.ticketRequest).toMatchObject({
@@ -489,7 +489,7 @@ describe("xCommand", () => {
         mode: "node-proxy" as const,
       }),
       launch: async () => 0,
-      persistModel: () => {},
+      persistModel: () => "/tmp/config.json",
     })
     expect(errors.join("")).toContain("No API key found for Anthropic")
   })

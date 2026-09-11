@@ -11,12 +11,13 @@
  * Pure presenter apart from the spinner, which owns its own frame timer exactly
  * like the footer's, and is never asserted.
  */
+import { useCliTranslations } from "../i18n"
 import React from "react"
 import { Box, Text } from "ink"
 import { Spinner } from "./Spinner"
 
 import { useTheme } from "../theme/context"
-import { connectProgressLine, type BackendConnectStage } from "../runtime/backend-controller"
+import { type BackendConnectStage } from "../runtime/backend-controller"
 
 export function BackendConnect({
   backend,
@@ -28,16 +29,17 @@ export function BackendConnect({
   width?: number | string
 }) {
   const theme = useTheme()
+  const t = useCliTranslations("cliUiStartup")
   return (
     <Box flexDirection="column" width={width}>
       <Box>
         <Text color={theme.accent}>
           <Spinner />
         </Text>
-        <Text color={theme.muted}>{` ${connectProgressLine(backend, stage)}`}</Text>
+        <Text color={theme.muted}>{` ${t("progress", { backend, stage: t(stage) })}`}</Text>
       </Box>
       <Text color={theme.muted} dimColor>
-        {"Esc to cancel"}
+        {t("cancel")}
       </Text>
     </Box>
   )

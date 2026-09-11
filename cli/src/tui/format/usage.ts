@@ -92,6 +92,25 @@ export function accumulateModelTotals(
   return { ...modelTotals, [key]: accumulateUsage(prev, usage, pricing) }
 }
 
+/** Average reported output tokens per wall-clock second of the latest turn.
+ * Includes tool/approval time in the provider duration; not model decode speed.
+ * Missing telemetry is unknown, rather than an estimated character count. */
+export function outputTokensPerSecond(usage: UsageInfo | undefined): number | null {
+  const tokens = usage?.outputTokens
+  const duration = usage?.durationMs
+  if (
+    tokens === undefined ||
+    !Number.isFinite(tokens) ||
+    tokens < 0 ||
+    duration === undefined ||
+    !Number.isFinite(duration) ||
+    duration <= 0
+  )
+    return null
+  const rate = tokens / (duration / 1000)
+  return Number.isFinite(rate) ? rate : null
+}
+
 /** Tokens currently occupying the context window (the prompt side of a turn). */
 export function contextTokens(usage: UsageInfo | undefined): number {
   return usage ? tokensInWindow(usage) : 0
@@ -314,10 +333,14 @@ export function usagePanelRows(
     windowOverride && windowOverride > 0 ? windowOverride : getModelContextWindow(modelId)
   const costKnown = hasBaseRate(pricing)
   const cacheReported = hasCacheTelemetry(usage)
+  const outputRate = outputTokensPerSecond(usage)
   const rows: UsageRow[] = [
     { label: "Model", value: modelId || "default" },
     { label: "Input", value: formatTokens(u.inputTokens) },
     { label: "Output", value: formatTokens(u.outputTokens) },
+    ...(outputRate === null
+      ? []
+      : [{ label: "Output rate (turn avg)", value: `${outputRate.toFixed(1)} tok/s` }]),
     // Reasoning tokens are a subset of output (already billed at the output
     // rate) — shown only when the provider broke them out, for observability.
     ...(u.reasoningTokens && u.reasoningTokens > 0

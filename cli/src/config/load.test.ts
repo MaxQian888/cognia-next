@@ -46,6 +46,19 @@ describe("resolveHome", () => {
 })
 
 describe("resolveConfig defaults", () => {
+  it("loads terminal language and screen-reader preferences with environment overrides", () => {
+    const files = {
+      [userConfigPath(HOME)]: JSON.stringify({ locale: "zh-CN", screenReader: true }),
+    }
+    expect(run(files)).toMatchObject({ locale: "zh-CN", screenReader: true })
+    expect(
+      run(files, { env: { COGNIA_LOCALE: "en", COGNIA_SCREEN_READER: "false" } })
+    ).toMatchObject({ locale: "en", screenReader: false })
+    expect(run({}, { env: { INK_SCREEN_READER: "true" } }).screenReader).toBe(true)
+    expect(
+      run(files, { env: { COGNIA_LOCALE: "unknown", COGNIA_SCREEN_READER: "invalid" } })
+    ).toMatchObject({ locale: "zh-CN", screenReader: true })
+  })
   it("resolves to defaults with no files/env/flags", () => {
     const cfg = run({})
     expect(cfg.provider).toBe("anthropic")
@@ -577,7 +590,9 @@ describe("applyLayer covers the config schema", () => {
 
     const here = path.dirname(url.fileURLToPath(import.meta.url))
     const source = fs.readFileSync(path.join(here, "load.ts"), "utf8")
-    const read = new Set(Array.from(source.matchAll(/\blayer\.([A-Za-z0-9_]+)/g), (m) => m[1]!))
+    const read = new Set(
+      Array.from(source.matchAll(/\b(?:layer\.|userFile\?\.)([A-Za-z0-9_]+)/g), (m) => m[1]!)
+    )
     expect(read.size).toBeGreaterThan(20)
 
     const schemaKeys = Object.keys(cliConfigFileSchema.shape)
@@ -593,7 +608,9 @@ describe("applyLayer covers the config schema", () => {
     const url = await import("node:url")
     const here = path.dirname(url.fileURLToPath(import.meta.url))
     const source = fs.readFileSync(path.join(here, "load.ts"), "utf8")
-    const read = new Set(Array.from(source.matchAll(/\blayer\.([A-Za-z0-9_]+)/g), (m) => m[1]!))
+    const read = new Set(
+      Array.from(source.matchAll(/\b(?:layer\.|userFile\?\.)([A-Za-z0-9_]+)/g), (m) => m[1]!)
+    )
     const stale = [...KNOWN_UNMERGED].filter((key) => read.has(key))
     expect(stale).toEqual([])
   })
@@ -670,4 +687,15 @@ describe("CLI coding policy defaults", () => {
     expect(config.sandbox?.enabled).toBe(false)
     expect(run({}).permissionModeExplicit).toBe(false)
   })
+})
+
+it("only honors bypass confirmation consent from user configuration", () => {
+  expect(run({}).bypassConfirmation).toBe("ask")
+  expect(
+    run({ [projectConfigPath(CWD)]: JSON.stringify({ bypassConfirmation: "never" }) })
+      .bypassConfirmation
+  ).toBe("ask")
+  const loaded = run({ [userConfigPath(HOME)]: JSON.stringify({ bypassConfirmation: "never" }) })
+  expect(loaded.bypassConfirmation).toBe("never")
+  expect(loaded.permissionMode).not.toBe("bypassPermissions")
 })

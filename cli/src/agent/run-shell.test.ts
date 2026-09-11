@@ -217,6 +217,61 @@ describe("runShell", () => {
 })
 
 describe("runInteractiveShell", () => {
+  it("consumes terminal SIGINT only until the child closes and marks interruption", async () => {
+    const before = process.listeners("SIGINT")
+    const handlers: Record<string, ((...args: unknown[]) => void)[]> = {}
+    const kill = jest.fn()
+    const promise = runInteractiveShell("top", {
+      spawn: () => ({
+        on(event, cb) {
+          ;(handlers[event] ??= []).push(cb as (...args: unknown[]) => void)
+        },
+        kill,
+      }),
+    })
+    const installed = process.listeners("SIGINT").filter((listener) => !before.includes(listener))
+    expect(installed).toHaveLength(1)
+    installed[0]()
+    expect(kill).not.toHaveBeenCalled()
+    handlers.close?.forEach((cb) => cb(0, null))
+    await expect(promise).resolves.toMatchObject({ code: 0, aborted: true })
+    expect(process.listeners("SIGINT")).toEqual(before)
+  })
+
+  it.each(["throw", "error"])("restores SIGINT handling after a spawn %s", async (failure) => {
+    const before = process.listeners("SIGINT")
+    const handlers: Record<string, ((...args: unknown[]) => void)[]> = {}
+    const promise = runInteractiveShell("top", {
+      spawn: () => {
+        if (failure === "throw") throw new Error("spawn failed")
+        return {
+          on(event, cb) {
+            ;(handlers[event] ??= []).push(cb as (...args: unknown[]) => void)
+          },
+        }
+      },
+    })
+    handlers.error?.forEach((cb) => cb(new Error("spawn failed")))
+    await expect(promise).resolves.toMatchObject({ code: 1 })
+    expect(process.listeners("SIGINT")).toEqual(before)
+  })
+
+  it.each([
+    [null, "SIGINT"],
+    [130, null],
+  ])("recognizes native child interruption (%s, %s)", async (code, signal) => {
+    const handlers: Record<string, ((...args: unknown[]) => void)[]> = {}
+    const promise = runInteractiveShell("top", {
+      spawn: () => ({
+        on(event, cb) {
+          ;(handlers[event] ??= []).push(cb as (...args: unknown[]) => void)
+        },
+      }),
+    })
+    handlers.close?.forEach((cb) => cb(code, signal))
+    await expect(promise).resolves.toMatchObject({ code: 130, aborted: true })
+  })
+
   it("attaches the child to inherited terminal I/O", async () => {
     const handlers: Record<string, ((...args: unknown[]) => void)[]> = {}
     const spawn: InteractiveShellSpawn = jest.fn((_command, opts) => {

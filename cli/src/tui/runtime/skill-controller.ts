@@ -287,6 +287,16 @@ export async function skillShow(id: string, deps: SkillDeps): Promise<void> {
     deps.dispatch({ type: "NOTICE", message: `Skill ${id} not found.` })
     return
   }
+  if (isDiskSkill(skill) && skill.canonicalId) {
+    const find =
+      deps.findDisk ?? ((cid: string) => findDiskSkillByCanonicalId(scanOptionsOf(deps), cid))
+    const discovered = await find(skill.canonicalId)
+    if (deps.signal?.aborted) return
+    if (discovered?.dir) {
+      await skillFiles(id, { ...deps, get: async () => skill, findDisk: async () => discovered })
+      return
+    }
+  }
   const enabled = enabledOf(deps).has(skill.id)
   openDocument(deps.dispatch, {
     title: `Skill · ${skill.name}`,
@@ -297,7 +307,7 @@ export async function skillShow(id: string, deps: SkillDeps): Promise<void> {
 
 /**
  * `/skill files <id>` — browse the files bundled inside a folder skill's
- * directory. Selecting one chains into `/view <abspath>`. Only on-disk folder
+ * directory with persistent tree navigation and a preview. Only on-disk folder
  * skills bundle files; everything else reports that there are none.
  */
 export async function skillFiles(id: string, deps: SkillDeps): Promise<void> {
@@ -336,13 +346,7 @@ export async function skillFiles(id: string, deps: SkillDeps): Promise<void> {
   }
   deps.dispatch({
     type: "OVERLAY_OPEN",
-    overlay: {
-      kind: "select",
-      title: `${skill.name} — files (Enter opens)`,
-      items: files.map((f) => ({ id: f.absPath, label: f.relPath })),
-      index: 0,
-      onSelectCommand: "view",
-    },
+    overlay: { kind: "skillFiles", title: skill.name, root: discovered.dir, files },
   })
 }
 

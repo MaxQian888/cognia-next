@@ -7,15 +7,16 @@ import { Box, Text } from "ink"
 import { useModalInput } from "../../input/input-router"
 
 import { listVisibleCommands } from "../../commands/registry"
-import { groupByCategory } from "../../commands/help-model"
+import { groupByCategory, localizedCommandDescription } from "../../commands/help-model"
 import { formatArgHint } from "../../commands/arg-hint"
-import { useTheme } from "../../theme/context"
+import { useCliTranslations } from "../../i18n"
 import {
-  PANEL_CHROME_ROWS,
-  PanelViewport,
-  panelFooterHint,
-  usePanelScroll,
-} from "../../hooks/usePanelScroll"
+  resolveKeybindings,
+  formatKeySpec,
+  workflowInspectionFallback,
+} from "../../input/keybindings"
+import { useTheme } from "../../theme/context"
+import { PANEL_CHROME_ROWS, PanelViewport, usePanelScroll } from "../../hooks/usePanelScroll"
 
 /** Narrowest and widest the command-name column may be. The floor keeps short
  * catalogues from looking cramped, the ceiling keeps one long name from pushing
@@ -33,11 +34,16 @@ export function helpNameColumn(names: string[]): number {
 export function Help({
   onClose,
   viewportRows = 24,
+  keybindings,
 }: {
   onClose: () => void
   viewportRows?: number
+  keybindings?: Record<string, string>
 }) {
   const theme = useTheme()
+  const t = useCliTranslations("cliUiCommands")
+  const bindings = resolveKeybindings(keybindings)
+  const fallback = workflowInspectionFallback(bindings)
   const contentViewportRows = Math.max(1, viewportRows - PANEL_CHROME_ROWS)
   const scroll = usePanelScroll(contentViewportRows)
   useModalInput((input, key) => {
@@ -53,13 +59,13 @@ export function Help({
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={theme.border} paddingX={1}>
       <Text bold color={theme.accent}>
-        Commands
+        {t("title")}
       </Text>
       <PanelViewport viewportRows={contentViewportRows} scroll={scroll}>
         {groups.map((group) => (
           <Box key={group.category} flexDirection="column">
             <Text bold color={theme.warning}>
-              {group.label}
+              {t(`category${group.category}`)}
             </Text>
             {group.commands.map((cmd) => {
               const hint = formatArgHint(cmd)
@@ -73,7 +79,7 @@ export function Help({
                   </Box>
                   <Box flexGrow={1}>
                     <Text color={theme.muted}>
-                      {cmd.description}
+                      {localizedCommandDescription(cmd, t)}
                       {hint ? <Text dimColor>{` ${hint}`}</Text> : null}
                     </Text>
                   </Box>
@@ -83,17 +89,24 @@ export function Help({
           </Box>
         ))}
         <Text color={theme.muted} dimColor>
-          Enter submit · Shift+Enter newline · Tab complete · ↑/↓ history · @ files · Ctrl+R history
-          search · Ctrl+T expand/collapse tool output · Ctrl+I inspect workflow step · Ctrl+V paste
-          image · Ctrl+C exit · Esc interrupt
+          {t("keys")}
+          {" · "}
+          {t("shortcuts", {
+            history: formatKeySpec(bindings.historySearch),
+            collapse: formatKeySpec(bindings.collapseAll),
+            workflow: formatKeySpec(bindings.workflowInspect),
+            paste: formatKeySpec(bindings.pasteImage),
+          })}
         </Text>
         <Text color={theme.muted} dimColor>
-          btw: type while a /goal or /loop run is working to steer it — your message is queued and
-          delivered at the next turn boundary (never interrupts the turn).
+          {t("steering")}
+        </Text>
+        <Text color={theme.muted} dimColor>
+          {fallback ? t("terminal", { alternate: formatKeySpec(fallback) }) : t("terminalCustom")}
         </Text>
       </PanelViewport>
       <Text color={theme.muted} dimColor>
-        {panelFooterHint(scroll.hidden)}
+        {t("footer")}
       </Text>
     </Box>
   )

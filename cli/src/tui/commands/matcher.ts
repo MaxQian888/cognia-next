@@ -60,8 +60,31 @@ function isSubsequence(q: string, s: string): boolean {
  * chosen tier.
  */
 export function matchSlash(query: string, opts: MatchSlashOptions = {}): SlashCommand[] {
-  const all = listVisibleCommands()
   const q = query.toLowerCase()
+  if (/[\r\n]/.test(q)) return []
+  if (/\s/.test(q)) {
+    const nested = /^([^\s]+)[ \t]+([^\s]*)$/.exec(q)
+    if (!nested) return []
+    const root = getCommand(nested[1])
+    if (!root || root.hidden || !root.subcommands?.length) return []
+    const children: SlashCommand[] = root.subcommands.map((child) => ({
+      ...child,
+      name: `${root.name} ${child.name}`,
+      category: root.category,
+    }))
+    const partial = nested[2]
+    const prefix = children.filter((child) =>
+      child.name.slice(root.name.length + 1).startsWith(partial)
+    )
+    if (prefix.length) return prefix
+    const fuzzy = children.filter((child) =>
+      isSubsequence(partial, child.name.slice(root.name.length + 1))
+    )
+    return fuzzy.length
+      ? fuzzy
+      : children.filter((child) => child.description.toLowerCase().includes(partial))
+  }
+  const all = listVisibleCommands()
   let matches: SlashCommand[]
   if (q.length === 0) {
     matches = all
@@ -91,12 +114,15 @@ export function matchSlash(query: string, opts: MatchSlashOptions = {}): SlashCo
 }
 
 /**
- * Whether the current editor text is a bare slash query — `/` at the line start
- * with no space yet — meaning the palette should be shown. Returns the query
- * (text after `/`) or null.
+ * Return the palette query while typing a root command or its first subcommand.
+ * Arguments and multiline input belong to the editor, not the command palette.
  */
 export function slashQuery(text: string): string | null {
-  if (!text.startsWith("/")) return null
-  if (/\s/.test(text)) return null
-  return text.slice(1)
+  if (!text.startsWith("/") || /[\r\n]/.test(text)) return null
+  const query = text.slice(1)
+  if (!/\s/.test(query)) return query
+  const nested = /^([^\s]+)[ \t]+([^\s]*)$/.exec(query)
+  if (!nested) return null
+  const root = getCommand(nested[1])
+  return root && !root.hidden && root.subcommands?.length ? query : null
 }

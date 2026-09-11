@@ -196,6 +196,37 @@ describe("createGateController auto-approve", () => {
 })
 
 describe("runTurn", () => {
+  it("ignores buffered quota pushes after the turn is cancelled", async () => {
+    const controller = new AbortController()
+    const actions: TuiAction[] = []
+    const session: TurnSession = {
+      async send(_prompt, opts) {
+        controller.abort()
+        opts.onEnvelope?.({
+          schemaVersion: 1,
+          sequence: 1,
+          sessionId: "s",
+          runId: "r",
+          turnId: "t",
+          attemptId: "a",
+          hostRef: "cli",
+          runtime: "claude-agent-sdk",
+          timestamp: new Date(0).toISOString(),
+          eventId: "old-quota",
+          event: { kind: "rate-limit", status: "rejected" },
+        })
+        return okResult()
+      },
+    }
+    await runTurn({
+      session,
+      prompt: "hello",
+      dispatch: (a) => actions.push(a),
+      gate: async () => ({ decision: "deny" }),
+      signal: controller.signal,
+    })
+    expect(actions.some((a) => a.type === "SET_AGENT_RATE_LIMIT")).toBe(false)
+  })
   it("routes canonical envelopes to the reducer, hooks, tool tracking, and diagnostics", async () => {
     resetRenderDiagnostics()
     const actions: TuiAction[] = []
@@ -514,6 +545,62 @@ describe("runTurn", () => {
         message: error.message,
       },
     ])
+  })
+
+  it("reports a repeated recovery error once per session and reports changes or recurrence", async () => {
+    const actions: TuiAction[] = []
+    let error: CliDbSnapshotError | undefined = new CliDbSnapshotError(
+      "Snapshot requires recovery",
+      "/db/manifest.json",
+      "/db/manifest.json.incompatible-1"
+    )
+    const session: TurnSession = {
+      async send(_prompt, opts) {
+        if (error) opts.onDatabaseError?.(error)
+        return okResult()
+      },
+    }
+    const turn = (currentSession = session) =>
+      runTurn({
+        session: currentSession,
+        prompt: "go",
+        dispatch: (action) => actions.push(action),
+        gate: async () => ({ decision: "allow" }),
+      })
+    const warnings = () => actions.filter((action) => action.type === "TURN_ERROR")
+
+    await turn()
+    // A new Error instance with the same recovery details is still the same warning.
+    error = new CliDbSnapshotError(error.message, error.snapshotPath, error.preservedPath)
+    await turn()
+    expect(warnings()).toHaveLength(1)
+    expect(actions.filter((action) => action.type === "TURN_COMMIT")).toHaveLength(2)
+
+    error = new CliDbSnapshotError(
+      error.message,
+      error.snapshotPath,
+      "/db/manifest.json.incompatible-2"
+    )
+    await turn()
+    expect(warnings()).toHaveLength(2)
+    error = new CliDbSnapshotError(
+      "Different recovery problem",
+      error.snapshotPath,
+      error.preservedPath
+    )
+    await turn()
+    expect(warnings()).toHaveLength(3)
+
+    await turn({ send: session.send })
+    expect(warnings()).toHaveLength(4)
+
+    const recoveredError = error
+    error = undefined
+    await turn()
+    expect(warnings()).toHaveLength(4)
+    error = recoveredError
+    await turn()
+    expect(warnings()).toHaveLength(5)
   })
 
   it("suppresses the active-skills NOTICE by default (showActiveSkills off)", async () => {

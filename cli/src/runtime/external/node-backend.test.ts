@@ -36,6 +36,19 @@ function nextEvent<T>(
 }
 
 describe("NodeExternalAgentBackend", () => {
+  it("preserves Devin authentication inputs without admitting unrelated secrets", () => {
+    const env = buildExternalAgentChildEnv(
+      { NODE_ENV: "test", DEVIN_API_KEY: "ambient-devin", AWS_SECRET_ACCESS_KEY: "unrelated" },
+      { WINDSURF_API_KEY: "configured-windsurf", DEVIN_MODEL: "swe-2" }
+    )
+    expect(env).toMatchObject({
+      DEVIN_API_KEY: "ambient-devin",
+      WINDSURF_API_KEY: "configured-windsurf",
+      DEVIN_MODEL: "swe-2",
+    })
+    expect(env).not.toHaveProperty("AWS_SECRET_ACCESS_KEY")
+  })
+
   it("inherits plain credential env, accepts configured agent credentials, and strips loaders", () => {
     const env = buildExternalAgentChildEnv(
       {
@@ -206,6 +219,81 @@ describe("NodeExternalAgentBackend", () => {
     })
   })
 
+  it("launches in an explicitly selected sibling workspace without broadening the root", async () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-workspace-switch-"))
+    const selected = path.join(parent, "selected")
+    const sibling = path.join(parent, "unselected")
+    fs.mkdirSync(selected)
+    fs.mkdirSync(sibling)
+    const envRoot = process.env.COGNIA_WORKSPACES_DIR
+    delete process.env.COGNIA_WORKSPACES_DIR
+    const backend = new NodeExternalAgentBackend({
+      allowSmokeAgent: true,
+      resolveLaunch: async () => ({ command: "node", args: ["-e", "console.log(process.cwd())"] }),
+    })
+    if (envRoot !== undefined) process.env.COGNIA_WORKSPACES_DIR = envRoot
+    try {
+      const config = {
+        id: "workspace-test",
+        command: "node",
+        args: ["stub-acp-agent.mjs"],
+        cwd: selected,
+      }
+      await expect(backend.invoke("spawn_external_agent", { config })).rejects.toThrow(/escapes/)
+      backend.selectWorkspace(selected)
+      const output = nextEvent<{ data: string }>(
+        backend,
+        "external-agent://stdout",
+        (row) => row.data === fs.realpathSync(selected)
+      )
+      const exited = nextEvent(backend, "external-agent://exit")
+      await backend.invoke("spawn_external_agent", { config })
+      await output
+      await exited
+      await expect(
+        backend.invoke("spawn_external_agent", { config: { ...config, cwd: sibling } })
+      ).rejects.toThrow(/escapes/)
+      expect(() => backend.selectWorkspace(path.join(parent, "missing"))).toThrow()
+      await expect(
+        backend.invoke("spawn_external_agent", { config: { ...config, command: "/bin/sh" } })
+      ).rejects.toThrow(/allowlisted/)
+      fs.rmdirSync(selected)
+      await expect(backend.invoke("spawn_external_agent", { config })).rejects.toThrow()
+      expect(fs.existsSync(selected)).toBe(false)
+      fs.symlinkSync(sibling, selected)
+      await expect(backend.invoke("spawn_external_agent", { config })).rejects.toThrow(
+        /workspace changed/
+      )
+    } finally {
+      fs.rmSync(parent, { recursive: true, force: true })
+    }
+  })
+
+  it("preserves environment-configured confinement when selecting a workspace", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-env-workspaces-"))
+    const previous = process.env.COGNIA_WORKSPACES_DIR
+    try {
+      process.env.COGNIA_WORKSPACES_DIR = root
+      const backend = new NodeExternalAgentBackend()
+      expect(() => backend.selectWorkspace(os.tmpdir())).toThrow(/escapes/)
+    } finally {
+      if (previous === undefined) delete process.env.COGNIA_WORKSPACES_DIR
+      else process.env.COGNIA_WORKSPACES_DIR = previous
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it("keeps an explicitly configured workspace confinement during selection", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-fixed-workspaces-"))
+    try {
+      const backend = new NodeExternalAgentBackend({ workspacesRoot: root })
+      expect(() => backend.selectWorkspace(os.tmpdir())).toThrow(/escapes/)
+      expect(() => backend.selectWorkspace(root)).not.toThrow()
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it("enforces the preset command and workspace policy before spawning", async () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-agent-policy-"))
     const backend = new NodeExternalAgentBackend({
@@ -231,6 +319,7 @@ describe("NodeExternalAgentBackend", () => {
     ["pi", ["--mode", "rpc"]],
     ["copilot", ["--acp"]],
     ["kiro-cli", ["acp"]],
+    ["devin", ["acp"]],
     ["droid", ["exec", "--output-format", "acp"]],
   ])("allows the shipped executable preset %s %j", async (command, args) => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-agent-preset-"))

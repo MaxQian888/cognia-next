@@ -78,7 +78,7 @@ describe("buildDiskReport", () => {
       home: HOME,
       repoRoot: ROOT,
       fsx: facade,
-      statfs: async () => ({ bavail: 1000n, bsize: 4096n }),
+      statfs: async () => ({ bavail: BigInt(1000), bsize: BigInt(4096) }),
       now: () => 42,
     })
     expect(mutations).toEqual([])

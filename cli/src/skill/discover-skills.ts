@@ -32,9 +32,11 @@ export interface SkillFs {
   readDir(path: string): Promise<string[]>
   readText(path: string): Promise<string>
   isDirectory(path: string): Promise<boolean>
+  realPath?(path: string): Promise<string>
 }
 
 const defaultFs: SkillFs = {
+  realPath: (p) => nodeFs.realpath(p),
   async exists(p) {
     try {
       await nodeFs.access(p)
@@ -265,18 +267,30 @@ export interface SkillBundledFile {
 }
 
 /**
- * List the files bundled inside a folder skill's directory (recursively, depth-
- * capped), sorted with `SKILL.md` first. Used by `/skill files` so the user can
+ * List the files bundled inside a folder skill's directory (recursively, with
+ * canonical-directory cycle detection), sorted with `SKILL.md` first. Used by `/skill files` so the user can
  * open a skill's references / scripts in the viewer.
  */
 export async function listSkillBundledFiles(
   dir: string,
   fs: SkillFs = defaultFs,
-  maxDepth = 4
+  maxDepth = Infinity
 ): Promise<SkillBundledFile[]> {
   const out: SkillBundledFile[] = []
+  const realRoot = fs.realPath ? await fs.realPath(dir) : path.resolve(dir)
+  const visited = new Set<string>()
   async function walk(current: string, depth: number): Promise<void> {
     if (depth > maxDepth) return
+    const real = fs.realPath ? await fs.realPath(current) : path.resolve(current)
+    const relative = path.relative(realRoot, real)
+    if (
+      relative === ".." ||
+      relative.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(relative) ||
+      visited.has(real)
+    )
+      return
+    visited.add(real)
     for (const entry of await fs.readDir(current)) {
       const abs = path.join(current, entry)
       if (await fs.isDirectory(abs)) {

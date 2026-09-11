@@ -89,7 +89,9 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
   // manages this for live `/layout` toggles — the escapes are idempotent). The
   // `finally` below restores the terminal on every exit path as a safety net in
   // case React's unmount cleanup is skipped on a hard signal.
-  const fullscreen = resolveLayoutMode(config.layout, readLayoutCapability()) === "fullscreen"
+  const fullscreen =
+    !config.screenReader &&
+    resolveLayoutMode(config.layout, readLayoutCapability()) === "fullscreen"
   // In-app drag-to-select needs to know what is on screen, so Ink renders
   // through a tap that remembers each committed frame. Created unconditionally
   // (it is a transparent passthrough) so `/select` can be switched on mid-session
@@ -109,7 +111,10 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
   }
   const instance = render(
     <TuiInputProvider>
-      <AppErrorBoundary onCrash={(err, stack) => crashLogger("render", err, stack)}>
+      <AppErrorBoundary
+        locale={config.locale}
+        onCrash={(err, stack) => crashLogger("render", err, stack)}
+      >
         <App
           config={config}
           sessionId={sessionId}
@@ -143,7 +148,12 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
     // lines interleaved with cursor moves, so a single write would no longer be
     // a complete frame and a selection would copy the wrong text. See
     // `selection/frame-buffer.ts`.
-    { exitOnCtrlC: false, stdout: frames.stdout, incrementalRendering: false }
+    {
+      exitOnCtrlC: false,
+      stdout: frames.stdout,
+      incrementalRendering: false,
+      isScreenReaderEnabled: config.screenReader ?? false,
+    }
   )
   try {
     await instance.waitUntilExit()

@@ -1,3 +1,5 @@
+import { localizedCommandDescription } from "./help-model"
+import { createCliTranslator } from "../i18n"
 /**
  * @jest-environment node
  */
@@ -34,4 +36,14 @@ describe("groupByCategory", () => {
     expect(groups).toHaveLength(1)
     expect(groups[0].commands[0].name).toBe("x")
   })
+})
+
+it("localizes built-in descriptions and preserves contributed command copy", () => {
+  const t = createCliTranslator("zh-CN", "cliUiCommands")
+  expect(localizedCommandDescription({ name: "help", description: "fallback" }, t)).toContain(
+    "查看命令列表"
+  )
+  expect(localizedCommandDescription({ name: "my-plugin", description: "Plugin help" }, t)).toBe(
+    "Plugin help"
+  )
 })

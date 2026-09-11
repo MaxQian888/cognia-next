@@ -17,6 +17,7 @@ import React, { useEffect, useRef, useState } from "react"
 import { Box, Text, type DOMElement } from "ink"
 import { Spinner } from "./Spinner"
 
+import { useScreenReader } from "../render/context"
 import { useTheme } from "../theme/context"
 import { formatElapsed } from "../format/usage"
 import { runningToolLines } from "../format/tools"
@@ -133,13 +134,14 @@ function BottomStatusImpl({
   suppressAgentTree?: boolean
 }) {
   const theme = useTheme()
+  const screenReader = useScreenReader()
   const busy = turnStatus !== "idle"
   const streaming = turnStatus === "streaming"
 
   // Elapsed-time ticker: only mounts while streaming, so an idle CLI never ticks.
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
-    if (!streaming || since == null) return
+    if (!streaming || since == null || screenReader) return
     const tick = () => setNow(Date.now())
     // Seed off the synchronous effect body (set-state-in-effect) so the baseline
     // re-syncs on (re)mount without a cascading render, then tick once a second.
@@ -149,8 +151,19 @@ function BottomStatusImpl({
       clearTimeout(seed)
       clearInterval(id)
     }
-  }, [streaming, since])
-  const elapsed = since != null ? formatElapsed(now - since) : null
+  }, [streaming, since, screenReader])
+  const elapsed = since != null && !screenReader ? formatElapsed(now - since) : null
+
+  // Readers need the stall transition, not a fresh elapsed-time announcement
+  // each second. A new stream event reschedules this single meaningful update.
+  useEffect(() => {
+    if (!screenReader || !streaming || lastActivityAt == null) return
+    const timer = setTimeout(
+      () => setNow(Date.now()),
+      Math.max(0, lastActivityAt + STALL_MS - Date.now())
+    )
+    return () => clearTimeout(timer)
+  }, [screenReader, streaming, lastActivityAt])
 
   // Stall hint: the stream has gone quiet (no delta for ≥ STALL_MS) while still
   // streaming. Reuses the same once-a-second `now` tick as the elapsed timer.
@@ -291,7 +304,12 @@ function BottomStatusImpl({
 
       {busy ? (
         <Text color={theme.warning}>
-          <Spinner /> <WorkingIndicator turnStatus={turnStatus} />
+          {!screenReader ? (
+            <>
+              <Spinner />{" "}
+            </>
+          ) : null}
+          <WorkingIndicator turnStatus={turnStatus} />
           {elapsed ? ` · ${elapsed}` : ""} · esc to interrupt
         </Text>
       ) : null}

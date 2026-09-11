@@ -2,6 +2,7 @@ import React from "react"
 import { act, render } from "@testing-library/react"
 import { __fireInput, __resetInk } from "ink"
 
+import { CliI18nProvider } from "../i18n"
 import { McpPanel } from "./McpPanel"
 import { absoluteTopLeft } from "../input/element-position"
 import type { McpPanelServer } from "../runtime/mcp-panel-model"
@@ -60,9 +61,9 @@ describe("McpPanel", () => {
     const text = wrap().container.textContent ?? ""
     expect(text).toContain("MCP servers · 4")
     expect(text).toContain("github")
-    expect(text).toContain("12 tools")
-    expect(text).toContain("enter authorizes") // brave needs auth
-    expect(text).toContain("enter reconnects") // broken failed
+    expect(text).toContain("12 Cognia-probed tools")
+    expect(text).toContain("enter authorizes Cognia") // brave needs auth
+    expect(text).toContain("enter probes Cognia") // broken failed
     expect(text).toContain("space enables") // filesystem (disabled)
   })
 
@@ -181,5 +182,94 @@ describe("McpPanel", () => {
     expect(container.textContent ?? "").toContain("github")
     key("", { escape: true }) // second Esc closes
     expect(onCancel).toHaveBeenCalled()
+  })
+})
+
+describe("MCP session and probe separation", () => {
+  beforeEach(() => __resetInk())
+
+  it("does not present a successful Cognia probe as Agent availability", () => {
+    const { container } = wrap({
+      servers: [{ ...servers[0], sessionStatus: "unknown" }],
+      runtimeBackend: "pi-rpc",
+    })
+    expect(container.textContent).toContain("Session: unknown")
+    expect(container.textContent).toContain("Cognia probe: reachable")
+    expect(container.textContent).toContain("Cognia probes do not confirm Agent availability")
+  })
+
+  it("blocks mutations of native rows but permits inspecting confirmed tools by stable id", () => {
+    const cb = wrap({
+      servers: [
+        {
+          ...servers[0],
+          id: "agent:github",
+          source: "agent",
+          readOnly: true,
+          sessionStatus: "available",
+          sessionToolCount: 3,
+        },
+      ],
+    })
+    key(" ")
+    key("x", { ctrl: true })
+    key("", { return: true })
+    expect(cb.onToggle).not.toHaveBeenCalled()
+    expect(cb.onRemove).not.toHaveBeenCalled()
+    expect(cb.onTools).toHaveBeenCalledWith("agent:github")
+  })
+
+  it("keeps refresh and apply actions separate", () => {
+    const onRefresh = jest.fn(),
+      onApply = jest.fn()
+    wrap({ onRefresh, onApply })
+    key("r", { ctrl: true })
+    expect(onRefresh).toHaveBeenCalledTimes(1)
+    expect(onApply).not.toHaveBeenCalled()
+    key("a", { ctrl: true })
+    expect(onApply).toHaveBeenCalledTimes(1)
+  })
+
+  it("translates provenance, conflicting names, unknown status and pending application", () => {
+    const cb = {
+      onTools: jest.fn(),
+      onAuth: jest.fn(),
+      onReconnect: jest.fn(),
+      onToggle: jest.fn(),
+      onAdd: jest.fn(),
+      onRemove: jest.fn(),
+      onCancel: jest.fn(),
+    }
+    const { container } = render(
+      <CliI18nProvider locale="zh-CN">
+        <McpPanel
+          {...cb}
+          probing={false}
+          runtimeBackend="pi-rpc"
+          servers={[
+            {
+              ...servers[0],
+              source: "cognia",
+              sessionStatus: "pending",
+              conflict: "github",
+              sessionToolCount: 2,
+            },
+            {
+              ...servers[0],
+              id: "bridge:github",
+              source: "bridge",
+              status: "unknown",
+              sessionStatus: "unknown",
+              readOnly: true,
+            },
+          ]}
+        />
+      </CliI18nProvider>
+    )
+    expect(container.textContent).toContain("当前会话：待生效")
+    expect(container.textContent).toContain("Cognia 内置桥接")
+    expect(container.textContent).toContain("名称冲突：github")
+    expect(container.textContent).toContain("当前会话：状态未知")
+    expect(container.textContent).not.toContain("Cognia config")
   })
 })

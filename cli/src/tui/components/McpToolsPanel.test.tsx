@@ -34,12 +34,12 @@ describe("McpToolsPanel", () => {
     mockPos.mockReturnValue(null)
   })
 
-  it("toggles the clicked tool row (header is 2 rows)", () => {
+  it("opens clicked tool details without toggling", () => {
     mockPos.mockReturnValue({ top: 0, left: 0 })
     const { onToggle } = wrap()
     // border(1)+title(1)+filter(1) → first item at SGR row 4 = create_issue.
     key("[<0;5;4M")
-    expect(onToggle).toHaveBeenCalledWith("create_issue", false)
+    expect(onToggle).not.toHaveBeenCalled()
   })
 
   it("lists the server's tools and the enabled count", () => {
@@ -84,21 +84,21 @@ describe("McpToolsPanel", () => {
     )
     key("", { upArrow: true }) // clamp at top
     for (let i = 0; i < 8; i++) key("", { downArrow: true })
-    expect(container.textContent ?? "").toContain("more")
+    expect(container.textContent ?? "").toContain("Page 3/")
   })
 
   it("shows a no-matches hint and ignores toggle when nothing matches", () => {
     const { container, onToggle } = wrap()
     for (const ch of "zzzz") key(ch)
-    expect(container.textContent ?? "").toContain("no matches")
+    expect(container.textContent ?? "").toContain("No matching tools")
     key(" ")
     expect(onToggle).not.toHaveBeenCalled()
   })
 
-  it("Enter also toggles the highlighted tool", () => {
+  it("Enter inspects without toggling the highlighted tool", () => {
     const { onToggle } = wrap()
     key("", { return: true })
-    expect(onToggle).toHaveBeenCalledWith("create_issue", false)
+    expect(onToggle).not.toHaveBeenCalled()
   })
 
   it("Escape returns to the server panel (after clearing any filter)", () => {
@@ -109,4 +109,26 @@ describe("McpToolsPanel", () => {
     key("", { escape: true }) // goes back
     expect(onBack).toHaveBeenCalled()
   })
+})
+
+it("shows full descriptions and required parameter schemas without running or toggling tools", () => {
+  const { container, onToggle } = wrap({
+    tools: [
+      {
+        name: "create_issue",
+        description: "Create an issue with a title and detailed body.",
+        enabled: true,
+        inputSchema: {
+          type: "object",
+          required: ["title"],
+          properties: { title: { type: "string", description: "Issue heading" } },
+        },
+      },
+    ],
+  })
+  key("", { return: true })
+  expect(container.textContent).toContain("Create an issue with a title and detailed body.")
+  key("G")
+  expect(container.textContent).toContain("Issue heading")
+  expect(onToggle).not.toHaveBeenCalled()
 })

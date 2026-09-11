@@ -1,5 +1,10 @@
 import React from "react"
-import { render, waitFor } from "@testing-library/react"
+import { act, render, waitFor } from "@testing-library/react"
+import { __fireInput, __resetInk } from "ink"
+import { absoluteTopLeft } from "../input/element-position"
+import { openBrowser } from "../../mcp/open-browser"
+jest.mock("../input/element-position", () => ({ absoluteTopLeft: jest.fn(() => null) }))
+jest.mock("../../mcp/open-browser", () => ({ openBrowser: jest.fn(async () => true) }))
 
 import { terminalBlockCacheStats, VirtualizedTranscript } from "./VirtualizedTranscript"
 import { RenderPrefsProvider } from "../render/context"
@@ -9,6 +14,31 @@ import { stringWidth } from "../markdown/width"
 import type { Cell, ToolCell } from "../state/types"
 
 describe("VirtualizedTranscript", () => {
+  it("opens the correct wrapped image at its measured row and ignores clipped/nonimage positions", () => {
+    __resetInk()
+    jest.mocked(openBrowser).mockClear()
+    jest.mocked(absoluteTopLeft).mockReturnValue({ top: 4, left: 3 })
+    const cells: Cell[] = [
+      { id: "click-image", kind: "user", text: '中 @"/tmp/a b.png" @/tmp/b.png' },
+    ]
+    const { rerender } = render(
+      <VirtualizedTranscript cells={cells} width={13} top={0} viewportRows={3} verbose={false} />
+    )
+    // safeWidth=12: row 0 "› 中 [Image ", row 1 "1] [Image 2]".
+    act(() => __fireInput("\u001b[<0;4;6M", {}))
+    expect(openBrowser).toHaveBeenLastCalledWith("file:///tmp/a%20b.png")
+    act(() => __fireInput("\u001b[<0;8;6M", {}))
+    expect(openBrowser).toHaveBeenLastCalledWith("file:///tmp/b.png")
+    act(() => __fireInput("\u001b[<0;4;5M", {}))
+    act(() => __fireInput("\u001b[<0;18;6M", {}))
+    expect(openBrowser).toHaveBeenCalledTimes(2)
+    rerender(
+      <VirtualizedTranscript cells={cells} width={13} top={1} viewportRows={1} verbose={false} />
+    )
+    act(() => __fireInput("\u001b[<0;10;5M", {}))
+    expect(openBrowser).toHaveBeenCalledTimes(2)
+    jest.mocked(absoluteTopLeft).mockReturnValue(null)
+  })
   it("renders only the visible window plus overscan", () => {
     const cells: Cell[] = Array.from({ length: 1000 }, (_, index) => ({
       id: `c${index}`,

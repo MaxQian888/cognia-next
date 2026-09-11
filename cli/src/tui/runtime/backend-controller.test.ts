@@ -52,6 +52,42 @@ function deps(overrides: Partial<BackendConnectDeps> = {}): BackendConnectDeps {
 }
 
 describe("connectBackend", () => {
+  it("selects the trusted workspace before registering and connecting the process", async () => {
+    const order: string[] = []
+    const host = fakeHost({
+      selectWorkspace: (cwd) => {
+        order.push(`workspace:${cwd}`)
+      },
+      addAgent: async () => {
+        order.push("add")
+      },
+      connect: async () => {
+        order.push("connect")
+      },
+    })
+    const result = await connectBackend(deps({ host, config: { ...config, cwd: "/sibling" } }))
+    expect(result.ok).toBe(true)
+    expect(order).toEqual(["workspace:/sibling", "add", "connect"])
+  })
+
+  it("explains workspace policy failures without blaming authentication", async () => {
+    const host = fakeHost({
+      selectWorkspace: () => {
+        throw new Error("outside fixed boundary")
+      },
+    })
+    const result = await connectBackend(deps({ host, config: { ...config, locale: "zh-CN" } }))
+    expect(result).toMatchObject({
+      ok: false,
+      failure: {
+        message: "outside fixed boundary",
+        hint: expect.stringContaining("COGNIA_WORKSPACES_DIR"),
+      },
+    })
+    expect(host.addAgent).not.toHaveBeenCalled()
+    expect(host.connect).not.toHaveBeenCalled()
+  })
+
   it("walks the stages in order and reports a live connection", async () => {
     const stages: BackendConnectStage[] = []
     const host = fakeHost({ getAgentCapabilities: () => ({ multiTurn: true }) })

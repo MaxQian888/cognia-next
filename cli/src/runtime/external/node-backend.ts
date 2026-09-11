@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events"
 import fs from "node:fs"
 import path from "node:path"
 import readline from "node:readline"
+import { deleteGatewayTask, gatewayRuntimeEnvironment, prepareGatewayTask } from "./gateway-task"
 
 import {
   agentSearchDirs,
@@ -76,6 +77,7 @@ const BINARY_ALLOWLIST = new Set([
   "copilot",
   "kiro-cli",
   "droid",
+  "devin",
   // Pi's own binary, driven natively over `pi --mode rpc` (ADR-0119).
   "pi",
 ])
@@ -83,6 +85,7 @@ const NPX_ALLOWLIST = new Set([
   "@agentclientprotocol/claude-agent-acp",
   "@zed-industries/claude-code-acp",
   "@zed-industries/codex-acp",
+  "@agentclientprotocol/codex-acp",
   "@anthropic-ai/claude-code",
   "@google/gemini-cli",
   "@qwen-code/qwen-code",
@@ -102,6 +105,7 @@ const CONFIG_ENV_KEYS = new Set([
   // it DSH falls back to ~/.dsh, where a user-writable cordis.patch.yml can
   // inject plugins and arbitrary JS into a certified composition.
   "DSH_HOME",
+  "MODEL_PROVIDER",
 ])
 const RUNTIME_ENV_KEYS = new Set([
   "PATH",
@@ -155,6 +159,8 @@ const CONFIG_ENV_PREFIXES = [
   "KIRO_",
   "FACTORY_",
   "DROID_",
+  "DEVIN_",
+  "WINDSURF_",
   "ACP_",
   "COGNIA_AGENT_",
   // DeepSeek Harness: the provider credential plus the composition's own
@@ -265,6 +271,12 @@ export function buildExternalAgentChildEnv(
   ambient: NodeJS.ProcessEnv,
   overrides: Record<string, string> | undefined
 ): NodeJS.ProcessEnv {
+  if (overrides?.COGNIA_GATEWAY_TASK_HOME) {
+    const env = { ...gatewayRuntimeEnvironment(ambient), ...overrides }
+    delete env.COGNIA_GATEWAY_TASK_HOME
+    delete env.COGNIA_GATEWAY_TASK_CONFIG
+    return env
+  }
   const env: NodeJS.ProcessEnv = { NODE_ENV: ambient.NODE_ENV ?? "production" }
   for (const [key, value] of Object.entries(ambient)) {
     if (
@@ -298,15 +310,30 @@ export class NodeExternalAgentBackend {
   private readonly events = new EventEmitter()
   private readonly processes = new Map<string, ProcessRecord>()
   private readonly workspacesRoot: string
+  private readonly fixedWorkspaceBoundary: boolean
+  private selectedWorkspaceRoot?: string
   private readonly allowSmokeAgent: boolean
   private readonly resolveLaunch: ExternalAgentLaunchResolver
 
   constructor(options: NodeExternalAgentBackendOptions = {}) {
+    this.fixedWorkspaceBoundary =
+      options.workspacesRoot !== undefined || process.env.COGNIA_WORKSPACES_DIR !== undefined
     this.workspacesRoot = path.resolve(
       options.workspacesRoot ?? process.env.COGNIA_WORKSPACES_DIR ?? process.cwd()
     )
     this.allowSmokeAgent = options.allowSmokeAgent ?? process.env.COGNIA_SMOKE_AGENT === "1"
     this.resolveLaunch = options.resolveLaunch ?? defaultResolveLaunch
+  }
+
+  /** Local UI authority only; intentionally not exposed through agentInvoke. */
+  selectWorkspace(requested: string): void {
+    const canonical = fs.realpathSync(path.resolve(requested))
+    if (!fs.statSync(canonical).isDirectory()) throw new Error(`Not a directory: ${requested}`)
+    fs.accessSync(canonical, fs.constants.R_OK | fs.constants.X_OK)
+    // An explicit deployment confinement remains authoritative. The implicit
+    // process.cwd() default, however, must follow a user's workspace selection.
+    if (this.fixedWorkspaceBoundary) validateCwd(this.workspacesRoot, canonical)
+    this.selectedWorkspaceRoot = canonical
   }
 
   listen<T>(channel: string, handler: (payload: T) => void): () => void {
@@ -321,6 +348,14 @@ export class NodeExternalAgentBackend {
 
   async invoke<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {
     switch (name) {
+      case "external_agent_delete_gateway_task": {
+        const taskId = String(args.taskId)
+        const prefix = `gateway-task-${taskId}`
+        if ([...this.processes.keys()].some((id) => id === prefix || id.startsWith(`${prefix}:`)))
+          throw new Error("Stop the gateway task before deleting its state")
+        deleteGatewayTask(taskId)
+        return undefined as T
+      }
       case "spawn_external_agent":
         return (await this.spawn(args.config as NodeExternalAgentSpawnConfig)) as T
       case "send_to_external_agent":
@@ -396,9 +431,20 @@ export class NodeExternalAgentBackend {
   private async spawn(config: NodeExternalAgentSpawnConfig): Promise<string> {
     if (this.processes.has(config.id)) throw new Error(`agent already running: ${config.id}`)
     validateCommand(config, this.allowSmokeAgent, this.workspacesRoot)
-    const cwd = validateCwd(this.workspacesRoot, config.cwd)
-    const normalized = { ...config, cwd }
-    const launch = await this.resolveLaunch(normalized)
+    const root = this.selectedWorkspaceRoot ?? this.workspacesRoot
+    if (this.selectedWorkspaceRoot && fs.realpathSync(root) !== root) {
+      throw new Error(`Selected workspace changed on disk: ${root}`)
+    }
+    const cwd = validateCwd(root, config.cwd)
+    const prepared = prepareGatewayTask({ ...config, cwd })
+    config = prepared.config
+    let launch: ExternalAgentLaunch
+    try {
+      launch = await this.resolveLaunch(config)
+    } catch (error) {
+      prepared.cleanup()
+      throw error
+    }
     this.emit(CHANNEL.spawn, { agentId: config.id, status: "starting" })
     this.emit(CHANNEL.state, { agentId: config.id, state: "Starting" })
     const env = buildExternalAgentChildEnv(process.env, config.env)
@@ -435,11 +481,13 @@ export class NodeExternalAgentBackend {
       this.emit(CHANNEL.state, { agentId: config.id, state: "Running" })
     })
     child.once("error", (error) => {
+      prepared.cleanup()
       this.processes.delete(config.id)
       this.emit(CHANNEL.state, { agentId: config.id, state: "Failed" })
       this.emit(CHANNEL.stderr, { agentId: config.id, data: error.message })
     })
     child.once("exit", (code, signal) => {
+      prepared.cleanup()
       this.processes.delete(config.id)
       this.emit(CHANNEL.state, { agentId: config.id, state: "Stopped" })
       this.emit(CHANNEL.exit, { agentId: config.id, code: code ?? 0, signal })

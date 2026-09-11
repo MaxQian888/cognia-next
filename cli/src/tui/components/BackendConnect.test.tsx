@@ -1,3 +1,4 @@
+import { CliI18nProvider } from "../i18n"
 import React from "react"
 import { render } from "@testing-library/react"
 import { __resetInk } from "ink"
@@ -27,4 +28,15 @@ describe("BackendConnect", () => {
     // something the user actually saw go by.
     expect(renderLine("claude-code", stage)).toContain(label)
   })
+})
+
+it("renders Chinese startup copy and preserves technical content", () => {
+  __resetInk()
+  const { container } = render(
+    <CliI18nProvider locale="zh-CN">
+      <BackendConnect backend="codex" stage="sandbox" />
+    </CliI18nProvider>
+  )
+  expect(container.textContent).toContain("检查沙箱")
+  expect(container.textContent).toContain("codex")
 })

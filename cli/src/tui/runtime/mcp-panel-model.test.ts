@@ -158,3 +158,26 @@ describe("patchServerStatus", () => {
     expect(servers[0].status).toBe("pending") // original untouched
   })
 })
+
+describe("runtime availability evidence", () => {
+  it("unknown and pending session states override successful local probes", () => {
+    expect(statusBadge(srv({ sessionStatus: "unknown" })).token).toBe("muted")
+    expect(statusBadge(srv({ sessionStatus: "pending" })).token).toBe("info")
+    expect(statusBadge(srv({ sessionStatus: "available", status: "failed" })).token).toBe("success")
+  })
+  it("preserves last applied availability when local config has just been disabled", () => {
+    expect(statusBadge(srv({ sessionStatus: "available", enabled: false })).token).toBe("success")
+  })
+  it("does not authorize or reconnect agent-owned rows through Cognia", () => {
+    expect(
+      enterAction(srv({ source: "agent", status: "needs_auth", sessionStatus: "needs_auth" }))
+    ).toBe("none")
+    expect(
+      enterAction(srv({ source: "bridge", status: "failed", sessionStatus: "available" }))
+    ).toBe("tools")
+  })
+  it("patches identities without altering a same-name server from another source", () => {
+    const rows = [srv(), srv({ id: "agent:github", source: "agent" })]
+    expect(patchServerStatus(rows, "github", { status: "failed" })[1]).toBe(rows[1])
+  })
+})

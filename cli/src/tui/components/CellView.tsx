@@ -53,6 +53,8 @@ import { planStats, planTitle } from "../runtime/plan"
 import { fileUri } from "../runtime/editor"
 import { osc8Link, supportsHyperlinks } from "../markdown/hyperlink"
 import path from "node:path"
+import { pathToFileURL } from "node:url"
+import { userMessageSpans } from "../render/cell-terminal-block"
 import type {
   AssistantCell,
   Cell,
@@ -77,7 +79,19 @@ function UserView({ cell }: { cell: UserCell }) {
       <Text color={theme.userPrompt} bold>
         ›{" "}
       </Text>
-      <Text>{cell.text}</Text>
+      <Text>
+        {userMessageSpans(cell.text).map((span, index) => (
+          <Text
+            key={index}
+            color={span.attachmentPath ? theme.accent : undefined}
+            underline={Boolean(span.attachmentPath)}
+          >
+            {span.attachmentPath && supportsHyperlinks(process.env)
+              ? osc8Link(pathToFileURL(path.resolve(span.attachmentPath)).href, span.text, true)
+              : span.text}
+          </Text>
+        ))}
+      </Text>
     </Box>
   )
 }

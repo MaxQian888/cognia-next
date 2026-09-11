@@ -16,11 +16,13 @@
  * `process.on('uncaughtException'|'unhandledRejection')` guards in `mount.tsx`.
  */
 import React from "react"
+import { CliI18nProvider, useCliTranslations, type CliLocale } from "../i18n"
 import { Box, Text, useApp } from "ink"
 import { useCriticalInput } from "../input/input-router"
 
 export interface AppErrorBoundaryProps {
   children: React.ReactNode
+  locale?: CliLocale
   /** Called once per caught error with the error + the React component stack
    * (which React may report as null). */
   onCrash?: (error: Error, componentStack?: string | null) => void
@@ -60,7 +62,11 @@ export class AppErrorBoundary extends React.Component<
 
   render(): React.ReactNode {
     if (this.state.error) {
-      return <CrashFallback error={this.state.error} onReset={this.reset} />
+      return (
+        <CliI18nProvider locale={this.props.locale}>
+          <CrashFallback error={this.state.error} onReset={this.reset} />
+        </CliI18nProvider>
+      )
     }
     // `key` forces a full remount when reset is pressed.
     return <React.Fragment key={this.state.resetKey}>{this.props.children}</React.Fragment>
@@ -77,6 +83,7 @@ function CrashFallback({
   onReset: () => void
 }): React.ReactElement {
   const { exit } = useApp()
+  const t = useCliTranslations("cliUiStartup")
   useCriticalInput(
     (input, key) => {
       if (input === "r") onReset()
@@ -95,9 +102,9 @@ function CrashFallback({
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="red" paddingX={1}>
       <Text color="red" bold>
-        ✗ Something went wrong
+        {t("crash")}
       </Text>
-      <Text>{error.message || "Unknown error"}</Text>
+      <Text>{error.message || t("unknownError")}</Text>
       {stackTail.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
           {stackTail.map((line, i) => (
@@ -109,7 +116,7 @@ function CrashFallback({
       )}
       <Box marginTop={1}>
         <Text color="gray" dimColor>
-          The error was logged. Press r to reset the session · q or Esc to quit.
+          {t("crashHint")}
         </Text>
       </Box>
     </Box>

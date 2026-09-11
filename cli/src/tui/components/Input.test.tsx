@@ -1,12 +1,30 @@
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
+import { openBrowser } from "../../mcp/open-browser"
+import { TuiInputProvider, useGlobalInput } from "../input/input-router"
+import * as elementPosition from "../input/element-position"
+import { RenderPrefsProvider } from "../render/context"
+import { RENDER_DEFAULTS } from "../../config/schema"
 import React, { useReducer } from "react"
 import { act, render } from "@testing-library/react"
 import { __fireInput, __resetInk } from "ink"
+
+jest.mock("../../mcp/open-browser", () => ({ openBrowser: jest.fn(async () => true) }))
+
+jest.mock("../input/element-position", () => {
+  const actual = jest.requireActual("../input/element-position")
+  return { ...actual, absoluteTopLeft: jest.fn(actual.absoluteTopLeft) }
+})
 
 jest.mock("../mention/highlight", () => {
   const actual = jest.requireActual("../mention/highlight")
   return { ...actual, highlightMentions: jest.fn(actual.highlightMentions) }
 })
 
+import { getCommand, registerCommand } from "../commands/registry"
+import { SKILL_COMMANDS } from "../commands/skill-commands"
+import { CliI18nProvider } from "../i18n"
 import { Input, routePasteInsert } from "./Input"
 import { createInitialState } from "../state/initial"
 import { tuiReducer } from "../state/reducer"
@@ -79,6 +97,7 @@ function Harness({
   onToggleSkill,
   onPopupOpenChange,
   vimEnabled,
+  width,
 }: {
   onSubmit: (t: string) => void
   disabled?: boolean
@@ -90,11 +109,13 @@ function Harness({
   onToggleSkill?: (id: string, enabled: boolean) => void
   onPopupOpenChange?: (open: boolean) => void
   vimEnabled?: boolean
+  width?: number
 }) {
   const [state, dispatch] = useReducer(tuiReducer, undefined, () => createInitialState(config, "s"))
   const ld = listDirProp ?? listDir
   return (
     <Input
+      width={width}
       input={state.input}
       dispatch={dispatch}
       onSubmit={onSubmit}
@@ -120,7 +141,10 @@ function type(text: string) {
 }
 
 describe("Input (rich composer)", () => {
-  beforeEach(() => __resetInk())
+  beforeEach(() => {
+    __resetInk()
+    if (!getCommand("skill")) registerCommand(SKILL_COMMANDS[0])
+  })
 
   it("types and submits a line", () => {
     const onSubmit = jest.fn()
@@ -561,6 +585,43 @@ describe("Input (rich composer)", () => {
     expect(container.textContent).toContain("/copy [n|code|tool|user]")
   })
 
+  it("opens subcommands before running and completes a filtered action", () => {
+    const onSubmit = jest.fn()
+    const { container } = render(<Harness onSubmit={onSubmit} />)
+    type("/skil")
+    key("", { return: true })
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(container.textContent).toContain("enable")
+    type("en")
+    key("", { tab: true })
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(container.textContent).toContain("/skill enable")
+    type("my-skill")
+    key("", { return: true })
+    expect(onSubmit).toHaveBeenCalledWith("/skill enable my-skill")
+  })
+
+  it("runs a selected subcommand and Escape returns to the root level", () => {
+    const onSubmit = jest.fn()
+    const { container } = render(<Harness onSubmit={onSubmit} />)
+    type("/skill ")
+    key("", { escape: true })
+    expect(onSubmit).not.toHaveBeenCalled()
+    key("", { return: true })
+    expect(container.textContent).toContain("panel")
+    key("", { downArrow: true })
+    key("", { return: true })
+    expect(onSubmit).toHaveBeenCalledWith("/skill list")
+  })
+
+  it("Enter on a subcommand with arguments submits to the parameter form dispatcher", () => {
+    const onSubmit = jest.fn()
+    render(<Harness onSubmit={onSubmit} />)
+    type("/skill create")
+    key("", { return: true })
+    expect(onSubmit).toHaveBeenCalledWith("/skill create")
+  })
+
   it("Tab completes a slash command in place without submitting", () => {
     const onSubmit = jest.fn()
     const { container } = render(<Harness onSubmit={onSubmit} />)
@@ -577,9 +638,11 @@ describe("Input (rich composer)", () => {
 function GhostHarness({
   history,
   aiComplete,
+  agentComplete,
 }: {
   history: string[]
   aiComplete?: InlineCompleteFn | null
+  agentComplete?: InlineCompleteFn | null
 }) {
   const [state, dispatch] = useReducer(tuiReducer, undefined, () => createInitialState(config, "s"))
   const seeded = React.useRef(false)
@@ -597,6 +660,7 @@ function GhostHarness({
       listDir={listDir}
       mentionProviders={stubProviders(listDir)}
       aiComplete={aiComplete ?? null}
+      agentComplete={agentComplete ?? null}
       suggestDebounceMs={200}
     />
   )
@@ -779,4 +843,225 @@ describe("Input vim mode (/vim)", () => {
     key("", { return: true })
     expect(onSubmit).toHaveBeenCalledWith("helloz")
   })
+})
+
+it("omits the decorative caret for screen readers while preserving editable text", async () => {
+  __resetInk()
+  const { container } = render(
+    <RenderPrefsProvider prefs={RENDER_DEFAULTS} screenReader>
+      <Harness onSubmit={() => {}} />
+    </RenderPrefsProvider>
+  )
+  expect(container.textContent).not.toContain("█")
+  await act(async () => {
+    type("hello")
+    await Promise.resolve()
+  })
+  expect(container.textContent).toContain("hello")
+  expect(container.textContent).not.toContain("█")
+})
+
+describe("Input mouse selection and manual completion", () => {
+  beforeEach(() => __resetInk())
+  afterEach(() => {
+    jest
+      .mocked(elementPosition.absoluteTopLeft)
+      .mockReset()
+      .mockImplementation(jest.requireActual("../input/element-position").absoluteTopLeft)
+  })
+
+  it("accepts a slash command by clicking its visible popup row", () => {
+    jest.mocked(elementPosition.absoluteTopLeft).mockReturnValue({ top: 0, left: 0 })
+    const onSubmit = jest.fn()
+    render(<Harness onSubmit={onSubmit} />)
+    type("/help")
+    key("[<0;4;2M")
+    expect(onSubmit).toHaveBeenCalledWith("/help")
+  })
+
+  it("accepts a file mention by clicking below the popup header", async () => {
+    jest.mocked(elementPosition.absoluteTopLeft).mockReturnValue({ top: 0, left: 0 })
+    const onSubmit = jest.fn()
+    render(<Harness onSubmit={onSubmit} />)
+    type("@read")
+    await settleGhost()
+    key("[<0;4;3M")
+    key("", { return: true })
+    expect(onSubmit).toHaveBeenCalledWith("@readme.md")
+  })
+
+  it("positions the cursor using terminal columns and ignores clicks outside the editor", () => {
+    jest.mocked(elementPosition.absoluteTopLeft).mockReturnValue({ top: 0, left: 0 })
+    const onSubmit = jest.fn()
+    render(<Harness onSubmit={onSubmit} />)
+    type("你好")
+    key("[<0;5;1M")
+    type("X")
+    key("[<0;6;99M")
+    key("", { return: true })
+    expect(onSubmit).toHaveBeenCalledWith("你X好")
+  })
+
+  it("does not submit when clicking a slash popup border", () => {
+    jest.mocked(elementPosition.absoluteTopLeft).mockReturnValue({ top: 0, left: 0 })
+    const onSubmit = jest.fn()
+    render(<Harness onSubmit={onSubmit} />)
+    type("/help")
+    key("[<0;4;1M")
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it("runs manual agent completion only on demand and accepts its result with Tab", async () => {
+    let resolveCompletion!: (value: string) => void
+    const completion = jest.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveCompletion = resolve
+        })
+    )
+    const { container } = render(<GhostHarness history={[]} agentComplete={completion} />)
+    type("write ")
+    await settleGhost()
+    expect(container.textContent).toContain("agent")
+    expect(completion).not.toHaveBeenCalled()
+    key("\\", { meta: true })
+    await settleGhost()
+    expect(completion).toHaveBeenCalledTimes(1)
+    expect(container.textContent).toContain("asking the agent")
+    await act(async () => {
+      resolveCompletion("the release notes")
+      await Promise.resolve()
+    })
+    await settleGhost()
+    key("", { tab: true })
+    expect(container.textContent).toContain("write the release notes")
+  })
+
+  it("cycles backward through history completions", async () => {
+    const { container } = render(<GhostHarness history={["deploy to staging", "deploy to prod"]} />)
+    type("deploy to ")
+    await settleGhost()
+    key("[", { meta: true })
+    expect(container.textContent).toContain("staging")
+  })
+
+  it("routes Vim undo and redo to the composer history", () => {
+    const onSubmit = jest.fn()
+    render(<Harness onSubmit={onSubmit} vimEnabled />)
+    type("abc")
+    key("", { escape: true })
+    key("x")
+    key("u")
+    key("r", { ctrl: true })
+    key("", { return: true })
+    expect(onSubmit).toHaveBeenCalledWith("ab")
+  })
+})
+
+describe("image attachments in the composer", () => {
+  let dir: string
+  let image: string
+  beforeEach(() => {
+    __resetInk()
+    jest.mocked(openBrowser).mockClear()
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-images-"))
+    image = path.join(dir, "屏幕 shot.png")
+    fs.writeFileSync(
+      image,
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aP1sAAAAASUVORK5CYII=",
+        "base64"
+      )
+    )
+  })
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }))
+
+  it("pastes at the cursor, numbers multiple images and sends their actual paths", () => {
+    const onSubmit = jest.fn()
+    const { container } = render(<Harness onSubmit={onSubmit} />)
+    type("beforeafter")
+    for (let i = 0; i < 5; i++) key("", { leftArrow: true })
+    key(image.replace(/ /g, "\\ "))
+    expect(container.textContent).toContain("before[Image 1]")
+    expect(container.textContent).toContain("after")
+    expect(container.textContent).not.toContain(dir)
+    key(`"${image}"`)
+    expect(container.textContent).toContain("[Image 2]")
+    key("", { return: true })
+    expect(onSubmit).toHaveBeenCalledWith(`before@"${image}"@"${image}"after`)
+  })
+
+  it("removes an image atomically, restores it with undo, and recalls a sendable attachment", () => {
+    const onSubmit = jest.fn()
+    const { container } = render(<Harness onSubmit={onSubmit} />)
+    key(`"${image}"`)
+    key("", { backspace: true })
+    expect(container.textContent).not.toContain("[Image")
+    key("z", { ctrl: true })
+    expect(container.textContent).toContain("[Image 1]")
+    key("", { return: true })
+    key("", { upArrow: true })
+    expect(container.textContent).toContain("[Image 1]")
+    expect(container.textContent).not.toContain(dir)
+    key("", { return: true })
+    expect(onSubmit.mock.calls.map(([text]) => text)).toEqual([`@"${image}"`, `@"${image}"`])
+  })
+
+  it("does not open an attachment when the click hits the preceding wide character", () => {
+    jest.mocked(elementPosition.absoluteTopLeft).mockReturnValue({ top: 0, left: 0 })
+    render(<Harness onSubmit={jest.fn()} />)
+    type("中")
+    key(`"${image}"`)
+    key("[<0;4;1M")
+    expect(openBrowser).not.toHaveBeenCalled()
+    key("[<0;5;1M")
+    expect(openBrowser).toHaveBeenCalledTimes(1)
+  })
+
+  it("opens a wrapped image label at its actual terminal coordinates before the global mouse handler", () => {
+    const global = jest.fn()
+    function Global() {
+      useGlobalInput(global, { shouldHandle: (text) => text.startsWith("[<") })
+      return null
+    }
+    jest.mocked(elementPosition.absoluteTopLeft).mockReturnValue({ top: 10, left: 4 })
+    render(
+      <TuiInputProvider>
+        <Global />
+        <Harness onSubmit={jest.fn()} width={20} />
+      </TuiInputProvider>
+    )
+    type("你好abcdefgh")
+    key(`"${image}"`)
+    // 14 text columns: the first two label cells wrap after the 12-cell prefix.
+    key("[<0;8;12M")
+    expect(openBrowser).toHaveBeenCalledTimes(1)
+    expect(jest.mocked(openBrowser).mock.calls[0][0]).toContain(encodeURIComponent("屏幕 shot.png"))
+    expect(global).not.toHaveBeenCalledWith("[<0;8;12M", expect.anything())
+    key("[<0;8;30M")
+    expect(openBrowser).toHaveBeenCalledTimes(1)
+  })
+})
+
+it("updates the default composer placeholder when the locale changes", () => {
+  const onSubmit = jest.fn()
+  const view = render(
+    <CliI18nProvider locale="en">
+      <Harness onSubmit={onSubmit} />
+    </CliI18nProvider>
+  )
+  expect(view.container.textContent).toContain("Ask, run /commands")
+  view.rerender(
+    <CliI18nProvider locale="zh-CN">
+      <Harness onSubmit={onSubmit} />
+    </CliI18nProvider>
+  )
+  expect(view.container.textContent).toContain("输入问题")
+  expect(view.container.textContent).not.toContain("Ask, run")
+  view.rerender(
+    <CliI18nProvider locale="zh-CN">
+      <Harness onSubmit={onSubmit} placeholder="custom hint" />
+    </CliI18nProvider>
+  )
+  expect(view.container.textContent).toContain("custom hint")
 })

@@ -45,6 +45,7 @@ export function TuiViewportFrame({
           ref={overlayRegionRef}
           data-testid="fullscreen-overlay-region"
           flexDirection="column"
+          justifyContent="flex-end"
           flexGrow={1}
           overflow="hidden"
         >

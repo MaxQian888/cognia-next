@@ -16,13 +16,14 @@
  *
  * Reuses {@link SelectList} so the keys match the trust gate one screen earlier.
  */
+import { useCliTranslations } from "../i18n"
 import React from "react"
 import { Box, Text } from "ink"
 
 import { SelectList } from "./SelectList"
 import { moveIndex } from "./select-list-state"
 import { useTheme } from "../theme/context"
-import { connectFailureHeadline, type BackendConnectFailure } from "../runtime/backend-controller"
+import { type BackendConnectFailure } from "../runtime/backend-controller"
 import type { BackendInstallOption } from "../state/types"
 
 /** What the user chose on the failure page. */
@@ -84,10 +85,11 @@ export function BackendFailure({
   maxRows?: number
 }) {
   const theme = useTheme()
+  const t = useCliTranslations("cliUiStartup")
   const choices = failureChoices(failure, installOption)
   return (
     <Box flexDirection="column" width={width}>
-      <Text color={theme.danger}>{connectFailureHeadline(backend, failure)}</Text>
+      <Text color={theme.danger}>{t("failure", { backend, stage: t(failure.stage) })}</Text>
       <Text>{failure.message}</Text>
       {failure.hint ? (
         <Text color={theme.muted} dimColor>
@@ -96,7 +98,13 @@ export function BackendFailure({
       ) : null}
       {installError ? <Text color={theme.danger}>{installError}</Text> : null}
       <SelectList
-        items={choices.map((choice) => ({ label: choice.label }))}
+        footerHint={t("selectHint")}
+        items={choices.map((choice) => ({
+          label:
+            choice.action === "install" && installOption
+              ? t("install", { name: installOption.name, method: installOption.method.label })
+              : t(choice.action),
+        }))}
         index={index}
         width={width}
         maxRows={maxRows}

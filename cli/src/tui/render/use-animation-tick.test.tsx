@@ -4,6 +4,8 @@ import { act, render, within, type RenderResult } from "@testing-library/react"
 
 import { animationClock } from "./animation-clock"
 import { useAnimationTick } from "./use-animation-tick"
+import { RenderPrefsProvider } from "./context"
+import { RENDER_DEFAULTS } from "../../config/schema"
 
 function Probe({ active, interval = 80 }: { active: boolean; interval?: number }) {
   const tick = useAnimationTick(interval, active)
@@ -11,6 +13,16 @@ function Probe({ active, interval = 80 }: { active: boolean; interval?: number }
 }
 
 describe("useAnimationTick", () => {
+  it("does not animate a screen-reader surface", () => {
+    const { getByTestId } = render(
+      <RenderPrefsProvider prefs={RENDER_DEFAULTS} screenReader>
+        <Probe active />
+      </RenderPrefsProvider>
+    )
+    expect(animationClock.timerCount).toBe(0)
+    act(() => void jest.advanceTimersByTime(400))
+    expect(getByTestId("tick").textContent).toBe("0")
+  })
   beforeEach(() => jest.useFakeTimers())
   afterEach(() => {
     animationClock.stopAll()

@@ -192,7 +192,7 @@ describe("skillFiles", () => {
   const diskSkill = (id: string): Skill =>
     ({ id, name: id, content: "x", canonicalId: `cli-disk:project:${id}` }) as Skill
 
-  it("opens a select overlay of bundled files chaining into /view", async () => {
+  it("opens a persistent skill file tree with nested paths", async () => {
     const { dispatch, actions } = recorder()
     await skillFiles("d1", {
       ...base,
@@ -208,11 +208,11 @@ describe("skillFiles", () => {
     expect(actions[0]).toMatchObject({
       type: "OVERLAY_OPEN",
       overlay: {
-        kind: "select",
-        onSelectCommand: "view",
-        items: [
-          { id: "/work/.cognia/skills/d1/SKILL.md", label: "SKILL.md" },
-          { id: "/work/.cognia/skills/d1/ref/x.md", label: "ref/x.md" },
+        kind: "skillFiles",
+        root: "/work/.cognia/skills/d1",
+        files: [
+          { absPath: "/work/.cognia/skills/d1/SKILL.md", relPath: "SKILL.md" },
+          { absPath: "/work/.cognia/skills/d1/ref/x.md", relPath: "ref/x.md" },
         ],
       },
     })
@@ -458,4 +458,25 @@ it("does not enable a skill if cancelled while resolving its id", async () => {
   })
   expect(setSkillEnabled).not.toHaveBeenCalled()
   expect(actions).toEqual([])
+})
+
+it("opens the tree when showing a folder skill directly", async () => {
+  const { dispatch, actions } = recorder()
+  await skillShow("folder", {
+    ...base,
+    dispatch,
+    get: async () =>
+      ({
+        id: "folder",
+        name: "Folder",
+        content: "body",
+        canonicalId: "cli-disk:project:folder",
+      }) as Skill,
+    findDisk: async () => ({ dir: "/skills/folder" }),
+    listFiles: async () => [{ relPath: "SKILL.md", absPath: "/skills/folder/SKILL.md" }],
+  })
+  expect(actions[0]).toMatchObject({
+    type: "OVERLAY_OPEN",
+    overlay: { kind: "skillFiles", root: "/skills/folder" },
+  })
 })

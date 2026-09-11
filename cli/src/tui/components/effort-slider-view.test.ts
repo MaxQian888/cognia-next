@@ -4,6 +4,7 @@ import {
   EFFORT_WIDE_MIN_WIDTH,
   effortCellToIndex,
   effortGaugeCells,
+  effortScaleLabels,
   effortGaugeWidth,
   effortKeyToIndex,
   effortLayout,
@@ -20,9 +21,9 @@ describe("effortLayout", () => {
     expect(effortLayout(20)).toBe("compact")
   })
 
-  it("defaults to wide when width is unknown", () => {
-    expect(effortLayout(undefined)).toBe("wide")
-    expect(effortLayout(NaN)).toBe("wide")
+  it("uses compact labels when track width is unknown", () => {
+    expect(effortLayout(undefined)).toBe("compact")
+    expect(effortLayout(NaN)).toBe("compact")
   })
 })
 
@@ -173,5 +174,18 @@ describe("effortSliderClick", () => {
 
   it("exposes the gauge prefix constant", () => {
     expect(EFFORT_GAUGE_PREFIX).toBe(9)
+  })
+})
+
+describe("effortScaleLabels", () => {
+  it.each([69, 72])("anchors labels to the marker cells at width %i", (width) => {
+    const labels = effortScaleLabels(width)
+    labels.forEach(({ level, start }, i) => {
+      const marker = effortGaugeCells(i, labels.length - 1, width).indexOf("marker")
+      if (i === 0) expect(start).toBe(marker)
+      else if (i === labels.length - 1) expect(start + level.length - 1).toBe(marker)
+      else expect(start + Math.floor(level.length / 2)).toBe(marker)
+      if (i > 0) expect(start).toBeGreaterThan(labels[i - 1].start + labels[i - 1].level.length)
+    })
   })
 })

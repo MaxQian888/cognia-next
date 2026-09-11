@@ -12,20 +12,31 @@ import React, { createContext, useContext } from "react"
 import { RENDER_DEFAULTS, type ResolvedRenderConfig } from "../../config/schema"
 
 const RenderPrefsContext = createContext<ResolvedRenderConfig>(RENDER_DEFAULTS)
+const ScreenReaderContext = createContext(false)
 
 export interface RenderPrefsProviderProps {
   prefs: ResolvedRenderConfig
   children: React.ReactNode
+  screenReader?: boolean
 }
 
 export function RenderPrefsProvider({
   prefs,
   children,
+  screenReader = false,
 }: RenderPrefsProviderProps): React.ReactElement {
-  return <RenderPrefsContext.Provider value={prefs}>{children}</RenderPrefsContext.Provider>
+  return (
+    <ScreenReaderContext.Provider value={screenReader}>
+      <RenderPrefsContext.Provider value={prefs}>{children}</RenderPrefsContext.Provider>
+    </ScreenReaderContext.Provider>
+  )
 }
 
 /** Read the active render preferences. Returns the defaults outside a provider. */
 export function useRenderPrefs(): ResolvedRenderConfig {
   return useContext(RenderPrefsContext)
+}
+
+export function useScreenReader(): boolean {
+  return useContext(ScreenReaderContext)
 }

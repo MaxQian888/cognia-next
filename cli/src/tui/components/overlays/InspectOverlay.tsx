@@ -6,6 +6,7 @@
  * list rows; navigation/selection are the parent's (reducer-driven) concern.
  */
 import React from "react"
+import { useCliTranslations } from "../../i18n"
 
 import { SelectList } from "../SelectList"
 import type { InspectItem } from "../../state/types"
@@ -33,25 +34,31 @@ export function InspectOverlay({
   onSelect: (index: number) => void
   onCancel: () => void
 }): React.ReactElement {
+  const t = useCliTranslations("cliUiCommands")
   const rows = items.map((it) => ({
-    label: it.summary ? `${it.label}  ${it.summary}` : it.label,
-    hint: it.lines > 0 ? `${it.lines} line${it.lines === 1 ? "" : "s"}` : undefined,
+    label: it.summary
+      ? `${it.label}  ${it.summary === "shell" ? t("inspectShell") : it.summary === "subagent" ? t("inspectSubagent") : it.summary}`
+      : it.label,
+    hint:
+      it.lines > 0
+        ? t(it.lines === 1 ? "inspectLine" : "inspectLines", { count: it.lines })
+        : undefined,
   }))
   return (
     <SelectList
-      title="Inspect output"
+      title={t("inspectTitle")}
       items={rows}
       index={index}
       width={width}
       maxRows={maxRows}
       query={query}
-      searchPlaceholder="type to filter output"
-      emptyHint="no output matches"
+      searchPlaceholder={t("inspectSearch")}
+      emptyHint={t("inspectNoMatches")}
       onQueryChange={onQueryChange}
       onMove={onMove}
       onSelect={onSelect}
       onCancel={onCancel}
-      footerHint="↑/↓ select · Enter view full output · Esc close"
+      footerHint={t("inspectNavigation")}
     />
   )
 }

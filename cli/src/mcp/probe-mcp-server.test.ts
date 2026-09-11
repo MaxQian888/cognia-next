@@ -324,6 +324,8 @@ describe("probeMcpServer", () => {
             listTools: async () => ({ tools: [] }),
             listResources: async () => ({ resources: [] }),
             listPrompts: async () => ({ prompts: [] }),
+            readResource: async () => ({ contents: [] }),
+            getPrompt: async () => ({ messages: [] }),
             close: async () => undefined,
           } as OpenedMcp["client"],
           transport: {},
@@ -355,7 +357,7 @@ describe("bounded discovery", () => {
       await jest.advanceTimersByTimeAsync(11)
       expect(result).toMatchObject({ status: "failed", error: "MCP probe timed out after 10ms" })
       expect(open).toHaveBeenCalledTimes(1)
-      expect(open.mock.calls[0][1].signal.aborted).toBe(true)
+      expect(open.mock.calls[0][1].signal?.aborted).toBe(true)
       expect(close).toHaveBeenCalledTimes(1)
     }
   )

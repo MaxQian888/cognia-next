@@ -41,6 +41,7 @@ function sessionContext(overrides: Partial<SendOptions> = {}): ResolvedCliSessio
     agents: [],
     subagentToolEnabled: false,
     activeSkillIds: [],
+    contextualSkills: [],
     databaseError: null,
     contextVersion: "ctx-e2e",
     sendOptions: {

@@ -1,3 +1,5 @@
+import { RenderPrefsProvider } from "../render/context"
+import { RENDER_DEFAULTS } from "../../config/schema"
 import React from "react"
 import { act, render } from "@testing-library/react"
 
@@ -324,4 +326,32 @@ describe("agentTreeRowTarget", () => {
     expect(agentTreeRowTarget(4, 2)).toBe(1)
     expect(agentTreeRowTarget(5, 2)).toBe("more")
   })
+})
+
+it("keeps screen-reader output stable until a meaningful stall transition", () => {
+  jest.useFakeTimers()
+  try {
+    const { container, unmount } = render(
+      <RenderPrefsProvider prefs={RENDER_DEFAULTS} screenReader>
+        <BottomStatus
+          turnStatus="streaming"
+          since={Date.now()}
+          lastActivityAt={Date.now()}
+          getLiveEntries={() => []}
+        />
+      </RenderPrefsProvider>
+    )
+    const initial = container.textContent
+    act(() => jest.advanceTimersByTime(5000))
+    expect(container.textContent).toBe(initial)
+    expect(container.textContent).not.toMatch(/ · \d+s/)
+    act(() => jest.advanceTimersByTime(5001))
+    expect(container.textContent).toContain("Waiting for API response")
+    const stalled = container.textContent
+    act(() => jest.advanceTimersByTime(5000))
+    expect(container.textContent).toBe(stalled)
+    unmount()
+  } finally {
+    jest.useRealTimers()
+  }
 })

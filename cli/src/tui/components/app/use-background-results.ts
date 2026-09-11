@@ -136,7 +136,7 @@ export function useBackgroundResults(deps: UseBackgroundResultsDeps): UseBackgro
       dispatch({
         type: "NOTICE",
         message: backgroundSettleNotice(event, idleRef.current),
-        ...(event.status === "done" ? {} : { severity: "warning" as const }),
+        ...(event.status === "done" ? {} : { severity: "warn" as const }),
       })
       void markDelivery([event.runId], "pending", event.home ?? home)
       enqueue([event.entry])

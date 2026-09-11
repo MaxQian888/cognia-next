@@ -6,6 +6,7 @@
  * two surfaces cannot drift on what a tool call says.
  */
 import { stringWidth, truncateToWidth } from "../markdown/width"
+import { collapseImageRefs, imagePlaceholderAt } from "../input/image-attachments"
 import { tokenizeCached } from "../markdown/render-cache"
 import {
   cellRefText,
@@ -636,6 +637,22 @@ function subagentSpans(
   return out
 }
 
+/** Shared display projection; the stored user message remains the original prompt. */
+export function userMessageSpans(text: string): TerminalSpan[] {
+  const compact = collapseImageRefs(sanitizeTerminalText(text))
+  const spans: TerminalSpan[] = []
+  let offset = 0
+  for (const match of compact.text.matchAll(/\[Image \d+\]/g)) {
+    const image = imagePlaceholderAt(compact.text, match.index, compact.pastes)
+    if (!image) continue
+    if (image.start > offset) spans.push(seg(compact.text.slice(offset, image.start)))
+    spans.push(seg(image.label, "accent", { underline: true, attachmentPath: image.path }))
+    offset = image.end
+  }
+  if (offset < compact.text.length) spans.push(seg(compact.text.slice(offset)))
+  return spans
+}
+
 function cellSpans(
   cell: Cell,
   verbose: boolean,
@@ -645,7 +662,12 @@ function cellSpans(
 ): { spans: TerminalSpan[]; target?: string } {
   switch (cell.kind) {
     case "user":
-      return { spans: [seg("› ", "accent", { bold: true }), seg(cell.text, "plain")] }
+      return {
+        spans: [
+          seg("› ", "accent", { bold: true }),
+          ...(prefs === VERBATIM_RENDER_PREFS ? [seg(cell.text)] : userMessageSpans(cell.text)),
+        ],
+      }
     case "assistant":
       return { spans: markdownSpans(cell.raw, prefs.syntaxHighlightInline, palette, maxWidth) }
     case "thinking":

@@ -6,6 +6,7 @@
  * what the user is looking at rather than every byte the app ever wrote.
  */
 import { nodePtyAvailable } from "./node-pty-harness"
+import { TerminalScreen } from "./terminal-screen"
 import { runConversation } from "./conversation-driver"
 
 const maybe = nodePtyAvailable() ? describe : describe.skip
@@ -21,6 +22,45 @@ maybe("conversation: startup and basic exchange", () => {
       // first thing a user has to guess at.
       await session.waitForText("Cognia Agent")
     })
+  })
+
+  it("paints the submitted user turn before initializing the agent session", async () => {
+    const prompt = "unique echo before initialization"
+    const geometry = { columns: 100, rows: 30 }
+    const result = await runConversation(
+      {
+        geometry,
+        scenario: {
+          turns: [
+            {
+              steps: [
+                { kind: "delay", ms: 350 },
+                { kind: "text", delta: "initialization reply" },
+              ],
+            },
+          ],
+        },
+      },
+      async (session) => {
+        await session.send(prompt)
+        await session.waitForMarker("SESSION-CREATE")
+        const marker = "\u001b]777;cognia;SESSION-CREATE\u0007"
+        const beforeCreate = session.transcript().split(marker)[0]
+        const atInitialization = new TerminalScreen(geometry)
+        atInitialization.write(beforeCreate)
+        // Reconstruct the frame at the initialization boundary: a raw substring
+        // alone could have matched the text while it was still in the composer.
+        const promptRows = atInitialization.lines().filter((row) => row.includes(prompt))
+        expect(promptRows).toHaveLength(1)
+        expect(promptRows[0].trimStart()).toBe(`› ${prompt}`)
+        expect(atInitialization.text()).not.toContain("Cognia Agent")
+        expect(atInitialization.text()).not.toContain("initialization reply")
+        await session.waitForText("initialization reply")
+        expect(session.flat().split(prompt)).toHaveLength(2)
+        expect(session.flat()).not.toContain("Cognia Agent")
+      }
+    )
+    expect(result.record.prompts).toEqual([prompt])
   })
 
   it("streams a reply, in chunks, into the transcript", async () => {

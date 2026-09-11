@@ -10,7 +10,7 @@
  */
 import { execFile, type ExecFileOptionsWithStringEncoding } from "node:child_process"
 
-/** 16 MB capture ceiling — a big diff/log truncates rather than hard-erroring. */
+/** 16 MB capture ceiling; overflow is reported explicitly, never a successful diff. */
 const MAX_BUFFER = 16 * 1024 * 1024
 const DEFAULT_TIMEOUT_MS = 60_000
 
@@ -19,6 +19,8 @@ export interface ExecResult {
   stderr: string
   /** Process exit code. `127` when the executable was not found (ENOENT). */
   code: number
+  /** Transport/capture failure (timeout, overflow, spawn), distinct from process exit. */
+  error?: string
 }
 
 export interface ExecOpts {
@@ -53,7 +55,12 @@ export const runExec: ExecFn = (file, args, opts = {}) =>
         else if (e.code === "ENOENT") code = 127
         else code = 1
       }
-      resolve({ stdout: String(stdout ?? ""), stderr: String(stderr ?? ""), code })
+      resolve({
+        stdout: String(stdout ?? ""),
+        stderr: String(stderr ?? ""),
+        code,
+        ...(e && typeof e.code !== "number" ? { error: e.message } : {}),
+      })
     })
   })
 

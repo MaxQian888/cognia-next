@@ -10,6 +10,7 @@ import type { CliProviderExecutor } from "../../provider/local"
 import { localProviderTransport } from "../../provider/transport"
 import type { TuiAction } from "../state/types"
 import { runProvider, type ProviderControllerDeps } from "./provider-controller"
+import { runLimits } from "./limits-controller"
 
 const NOW = 1_700_000_000_000
 
@@ -166,6 +167,43 @@ describe("runProvider", () => {
     expect(notices(d.actions)).toContain("openai: needs-auth: no key")
   })
 
+  it("balance: uses the active Codex account without probing the saved built-in provider", async () => {
+    const loadCodexLimits = jest.fn(async () => [
+      { provider: "codex", accountId: "codex", fetchedAt: NOW, meters: [] },
+    ])
+    const loadLimits = jest.fn(async () => [])
+    const createExecutor = jest.fn()
+    const d = deps("balance", {
+      config: {
+        ...DEFAULT_RESOLVED_CONFIG,
+        provider: "deepseek",
+        agentBackend: "codex",
+        cwd: "/work",
+      },
+      presetId: "codex-app-server",
+      backendAgentId: "live-agent",
+      loadCodexLimits,
+      loadLimits,
+      createExecutor,
+    })
+    await runProvider(d)
+    expect(opened(d.actions, "limits")[0]!.overlay).toMatchObject({ activeProvider: "codex" })
+    expect(loadCodexLimits).toHaveBeenCalledWith("live-agent", NOW, d.config.locale)
+    expect(loadLimits).not.toHaveBeenCalled()
+    expect(createExecutor).not.toHaveBeenCalled()
+  })
+
+  it("allocates distinct panel requests across /limits and /balance", async () => {
+    const d = deps("balance", { loadLimits: async () => [] })
+    runLimits({ config: d.config, dispatch: d.dispatch, loadLimits: async () => [] })
+    await runProvider(d)
+    const panels = opened(d.actions, "limits").map(({ overlay }) => overlay)
+    expect(panels).toHaveLength(2)
+    expect(panels[0].kind === "limits" && panels[0].requestId).not.toBe(
+      panels[1].kind === "limits" && panels[1].requestId
+    )
+  })
+
   it("balance: opens the limits panel loading, then loads only balance meters", async () => {
     const snapshots: ProviderLimits[] = [
       {
@@ -283,3 +321,26 @@ describe("runProvider", () => {
     expect(notices(d.actions).at(-1)).toBe("Inspecting openai failed: executor exploded")
   })
 })
+
+it.each(["claude-code", "builtin"])(
+  "balance uses pushed native quotas for %s without creating a provider executor",
+  async (backend) => {
+    const createExecutor = jest.fn()
+    const d = deps("balance", {
+      config: {
+        ...DEFAULT_RESOLVED_CONFIG,
+        cwd: "/work",
+        provider: "anthropic",
+        agentBackend: backend,
+      },
+      agentRateLimits: { five_hour: { kind: "rate-limit", status: "allowed", utilization: 0.32 } },
+      createExecutor,
+    })
+    await runProvider(d)
+    await flush()
+    expect(createExecutor).not.toHaveBeenCalled()
+    expect(d.actions.find((action) => action.type === "LIMITS_LOADED")).toMatchObject({
+      snapshots: [expect.objectContaining({ meters: [expect.objectContaining({ usedPct: 32 })] })],
+    })
+  }
+)

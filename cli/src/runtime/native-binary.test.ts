@@ -40,19 +40,19 @@ describe("defaultNativeCandidates", () => {
   it("checks the env override first so an operator can point at a fresh build", () => {
     const candidates = defaultNativeCandidates({
       ...options,
-      env: { COGNIA_SANDBOX_EXEC: "/custom/helper" },
+      env: { NODE_ENV: "test", COGNIA_SANDBOX_EXEC: "/custom/helper" },
     })
     expect(candidates[0]).toBe("/custom/helper")
   })
 
   it("omits the override when unset rather than emitting an empty candidate", () => {
-    const candidates = defaultNativeCandidates({ ...options, env: {} })
+    const candidates = defaultNativeCandidates({ ...options, env: { NODE_ENV: "test" } })
     expect(candidates).not.toContain("")
     expect(candidates[0]).toBe(path.join("/opt/app", "cognia-sandbox-exec"))
   })
 
   it("puts the repo target directories last so a stale debug build never wins", () => {
-    const candidates = defaultNativeCandidates({ ...options, env: {} })
+    const candidates = defaultNativeCandidates({ ...options, env: { NODE_ENV: "test" } })
     const shipped = candidates.indexOf(path.join("/usr/local/bin", "cognia-sandbox-exec"))
     const debug = candidates.indexOf(path.join("/repo", "target", "debug", "cognia-sandbox-exec"))
     expect(shipped).toBeGreaterThanOrEqual(0)
@@ -60,12 +60,16 @@ describe("defaultNativeCandidates", () => {
   })
 
   it("applies the platform extension across every candidate", () => {
-    const candidates = defaultNativeCandidates({ ...options, platform: "win32", env: {} })
+    const candidates = defaultNativeCandidates({
+      ...options,
+      platform: "win32",
+      env: { NODE_ENV: "test" },
+    })
     expect(candidates.every((c) => c.endsWith(".exe"))).toBe(true)
   })
 
   it("uses the platform-arch directory the CLI stages native helpers into", () => {
-    const candidates = defaultNativeCandidates({ ...options, env: {} })
+    const candidates = defaultNativeCandidates({ ...options, env: { NODE_ENV: "test" } })
     expect(candidates).toContain(
       path.join("/repo", "cli", "dist", "native", "linux-arm64", "cognia-sandbox-exec")
     )

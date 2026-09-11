@@ -22,6 +22,12 @@ import type {
   ExternalAgentResult,
 } from "@/types/agent/external-agent"
 
+import {
+  applySessionMcpStatus,
+  readSessionMcpStatus,
+  refreshSessionMcpStatus,
+} from "./tool-host/mcp-status"
+
 import { DEFAULT_RESOLVED_CONFIG } from "../config/schema"
 import { DEFAULT_PERMISSION_CHOICES } from "../tui/components/overlays/PermissionOverlay"
 import { createGateController, runTurn } from "../tui/hooks/turn-engine"
@@ -1314,6 +1320,92 @@ describe("external-agent turn bounds", () => {
     expect(manager.cancel).toHaveBeenCalledWith("preconnected-1", "acp-session-1")
   })
 
+  it.each([
+    ["low", "low"],
+    ["high", "high"],
+    ["ultracode", "xhigh"],
+  ] as const)(
+    "forwards current Codex effort %s through a reused connection",
+    async (level, effort) => {
+      const { manager, getExecuteOptions } = fakeManager()
+      const connection = { agentId: "connected-codex", presetId: "codex-app-server" }
+      const session = createExternalAgentSession({
+        disableToolHost: true,
+        config: { ...baseConfig, agentBackend: "codex", thinkingLevel: level },
+        manager,
+        connection,
+        transcriptFs: memoryTranscript().fs,
+      })
+      try {
+        await session.send("go", { gate: async () => ({ decision: "allow" }) })
+        expect(manager.addAgent).not.toHaveBeenCalled()
+        expect(getExecuteOptions()?.reasoningEffort).toBe(effort)
+      } finally {
+        await session.close()
+      }
+    }
+  )
+
+  it.each([false, true])(
+    "resets Codex effort to its model default with precreated=%s",
+    async (precreated) => {
+      const { manager, getExecuteOptions } = fakeManager()
+      let catalog: Array<{ id: string; isDefault: boolean; defaultReasoningEffort: string }> = []
+      const listModels = jest.fn(async () => {
+        catalog = [{ id: "native-model", isDefault: true, defaultReasoningEffort: "medium" }]
+        return catalog.map(({ id }) => ({ id }))
+      })
+      manager.getCodexAppServerAdapter = () => ({
+        refreshMcpServers: async () => [],
+        getModelCatalog: () => catalog,
+        listModels,
+      })
+      manager.createSession = jest.fn(async () => ({ id: "precreated-codex" }))
+      const session = createExternalAgentSession({
+        disableToolHost: true,
+        config: { ...baseConfig, agentBackend: "codex", thinkingLevel: "off" },
+        manager,
+        connection: { agentId: "connected-codex", presetId: "codex-app-server" },
+        transcriptFs: memoryTranscript().fs,
+      })
+      try {
+        if (precreated) await applySessionMcpStatus(session.sessionId, true)
+        await session.send("go", { gate: async () => ({ decision: "allow" }) })
+        expect(listModels).toHaveBeenCalledTimes(1)
+        expect(getExecuteOptions()?.reasoningEffort).toBe("medium")
+        expect(manager.addAgent).not.toHaveBeenCalled()
+      } finally {
+        await session.close()
+      }
+    }
+  )
+
+  it("lists native Codex models without creating a thread or starting MCP bridges", async () => {
+    const { manager } = fakeManager()
+    const models = [{ id: "native-model", name: "Native model" }]
+    const listModels = jest.fn(async () => models)
+    manager.getCodexAppServerAdapter = () => ({ refreshMcpServers: async () => [], listModels })
+    manager.createSession = jest.fn(async () => ({ id: "unexpected-thread" }))
+    const startToolHost = jest.fn()
+    const session = createExternalAgentSession({
+      config: { ...baseConfig, agentBackend: "codex" },
+      manager,
+      connection: { agentId: "connected-codex", presetId: "codex-app-server" },
+      transcriptFs: memoryTranscript().fs,
+      startToolHost,
+      buildToolHostServers: () => [],
+    })
+    try {
+      expect(await session.listModels?.()).toEqual(models)
+      expect(listModels).toHaveBeenCalledTimes(1)
+      expect(manager.createSession).not.toHaveBeenCalled()
+      expect(startToolHost).not.toHaveBeenCalled()
+      expect(manager.execute).not.toHaveBeenCalled()
+    } finally {
+      await session.close()
+    }
+  })
+
   it("forwards the user's MCP servers into session/new", async () => {
     const { manager, getExecuteOptions } = fakeManager()
     const session = createExternalAgentSession({
@@ -1340,6 +1432,112 @@ describe("external-agent turn bounds", () => {
     expect(getExecuteOptions()?.context?.custom).toMatchObject({
       mcpServers: [{ name: "files", command: "node", args: ["server.js"] }],
     })
+  })
+
+  it("publishes supplied config as unconfirmed and requires consent to recreate the protocol session", async () => {
+    let command = "first"
+    const { manager } = fakeManager()
+    manager.createSession = jest.fn(async () => ({ id: "applied-session" }))
+    manager.closeSession = jest.fn(async () => undefined)
+    const session = createExternalAgentSession({
+      disableToolHost: true,
+      config: baseConfig,
+      manager,
+      sessionId: "mcp-runtime-test",
+      transcriptFs: memoryTranscript().fs,
+      resolveMcpServers: () =>
+        [
+          { id: "files", name: "files", transport: "stdio", enabled: true, config: { command } },
+        ] as never,
+    })
+    await session.send("go", { gate: async () => ({ decision: "allow" }) })
+    expect(readSessionMcpStatus(session.sessionId)?.servers[0]).toMatchObject({
+      name: "files",
+      state: "forwarded",
+      source: "cognia",
+    })
+    command = "second"
+    session.invalidateOptions?.()
+    expect(readSessionMcpStatus(session.sessionId)?.pending).toBe(true)
+    expect(await applySessionMcpStatus(session.sessionId)).toMatchObject({
+      restarted: false,
+      requiresRestart: true,
+    })
+    expect(manager.cancel).not.toHaveBeenCalled()
+    expect(manager.createSession).not.toHaveBeenCalled()
+    expect(await applySessionMcpStatus(session.sessionId, true)).toMatchObject({ restarted: true })
+    expect(manager.closeSession).toHaveBeenCalledWith(expect.any(String), "acp-session-1")
+    expect(manager.createSession).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ mcpServers: [expect.objectContaining({ command: "second" })] })
+    )
+    expect(readSessionMcpStatus(session.sessionId)).toMatchObject({
+      externalSessionId: "applied-session",
+      pending: false,
+    })
+    expect(manager.execute).toHaveBeenCalledTimes(1)
+    await session.close()
+    expect(readSessionMcpStatus(session.sessionId)).toBeUndefined()
+  })
+
+  it("Pi reports unsupported supplied MCP configs and refuses misleading apply", async () => {
+    const { manager } = fakeManager()
+    const session = createExternalAgentSession({
+      disableToolHost: true,
+      config: { ...baseConfig, agentBackend: "pi-rpc" },
+      manager,
+      connection: { agentId: "pi-existing", presetId: "pi-rpc" },
+      sessionId: "pi-mcp-test",
+      transcriptFs: memoryTranscript().fs,
+      resolveMcpServers: () =>
+        [
+          {
+            id: "files",
+            name: "files",
+            transport: "stdio",
+            enabled: true,
+            config: { command: "node" },
+          },
+        ] as never,
+    })
+    await session.send("go", { gate: async () => ({ decision: "allow" }) })
+    expect(readSessionMcpStatus(session.sessionId)?.servers[0]).toMatchObject({
+      name: "files",
+      state: "unknown",
+      reasonCode: "protocol_unsupported",
+    })
+    expect(readSessionMcpStatus(session.sessionId)?.appliedConfigVersion).toBeUndefined()
+    await expect(applySessionMcpStatus(session.sessionId)).rejects.toThrow(
+      "does not consume supplied MCP"
+    )
+    await session.close()
+  })
+
+  it("failed native inventory refresh does not retain a stale available result", async () => {
+    const { manager } = fakeManager()
+    const refresh = jest
+      .fn()
+      .mockResolvedValueOnce([{ name: "native", tools: { read: {} } }])
+      .mockRejectedValueOnce(new Error("offline"))
+    manager.getCodexAppServerAdapter = () => ({ refreshMcpServers: refresh })
+    const session = createExternalAgentSession({
+      disableToolHost: true,
+      config: baseConfig,
+      manager,
+      sessionId: "mcp-refresh-test",
+      transcriptFs: memoryTranscript().fs,
+      resolveMcpServers: () => [],
+    })
+    await session.send("go", { gate: async () => ({ decision: "allow" }) })
+    expect((await refreshSessionMcpStatus(session.sessionId))?.servers).toEqual([
+      expect.objectContaining({ name: "native", state: "available", source: "agent" }),
+    ])
+    expect(await refreshSessionMcpStatus(session.sessionId)).toMatchObject({
+      telemetry: "failed",
+      error: "offline",
+      servers: [expect.objectContaining({ name: "native", state: "unknown" })],
+    })
+    await session.close()
   })
 
   it("re-resolves MCP servers after an invalidate, without respawning the agent", async () => {
@@ -1432,6 +1630,43 @@ describe("external-agent turn bounds", () => {
 
     // Without this the transcript came back but the agent remembered nothing.
     expect(getExecuteOptions()?.sessionId).toBe("acp-earlier")
+  })
+
+  it("starts a fresh external context in the new cwd instead of resuming the previous workspace", async () => {
+    const previous = memoryTranscript()
+    const first = fakeManager()
+    const oldSession = createExternalAgentSession({
+      disableToolHost: true,
+      config: baseConfig,
+      sessionId: "cli-1",
+      home: "/home/.cognia",
+      manager: first.manager,
+      transcriptFs: previous.fs,
+    })
+    await oldSession.send("first", { gate: async () => ({ decision: "allow" }) })
+    const recorded = previous.written["/home/.cognia/sessions/cli-1.external.json"]!
+    await oldSession.close()
+    const nextTranscript = memoryTranscript({
+      "/home/.cognia/sessions/cli-1.external.json": recorded,
+    })
+    const next = fakeManager()
+    const newSession = createExternalAgentSession({
+      disableToolHost: true,
+      config: { ...baseConfig, cwd: "/another-workspace" },
+      sessionId: "cli-1",
+      home: "/home/.cognia",
+      manager: next.manager,
+      transcriptFs: nextTranscript.fs,
+    })
+    await newSession.send("next", { gate: async () => ({ decision: "allow" }) })
+    expect(next.getExecuteOptions()?.sessionId).toBeUndefined()
+    expect(next.getExecuteOptions()?.workingDirectory).toBe("/another-workspace")
+    expect(next.manager.addAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        process: expect.objectContaining({ cwd: "/another-workspace" }),
+      })
+    )
+    await newSession.close()
   })
 
   it("refuses to resume a link recorded before context versions existed", async () => {
@@ -1734,4 +1969,56 @@ describe("external-agent turn bounds", () => {
       await session.close()
     }
   })
+})
+
+it("reserves turn startup before allowing an MCP apply", async () => {
+  const { manager } = fakeManager()
+  let release!: () => void
+  manager.addAgent = jest.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve
+      })
+  )
+  const session = createExternalAgentSession({
+    disableToolHost: true,
+    config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "claude-code" },
+    manager,
+    transcriptFs: memoryTranscript().fs,
+  })
+  const sending = session.send("go", { gate: async () => ({ decision: "allow" }) })
+  await expect(applySessionMcpStatus(session.sessionId, true)).rejects.toThrow(
+    "Wait for the active agent turn"
+  )
+  release()
+  await sending
+  await session.close()
+})
+
+it("keeps stale native rows unknown and reports failed inventory refresh", async () => {
+  const { manager } = fakeManager()
+  const refreshMcpServers = jest
+    .fn()
+    .mockResolvedValueOnce([{ name: "native", status: "ready", tools: { read: {} } }])
+    .mockRejectedValueOnce(new Error("inventory unavailable"))
+  manager.getCodexAppServerAdapter = () => ({ refreshMcpServers })
+  const session = createExternalAgentSession({
+    disableToolHost: true,
+    config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "claude-code" },
+    manager,
+    transcriptFs: memoryTranscript().fs,
+  })
+  await session.send("go", { gate: async () => ({ decision: "allow" }) })
+  const { refreshSessionMcpStatus } = await import("./tool-host/mcp-status")
+  await refreshSessionMcpStatus(session.sessionId)
+  expect(
+    readSessionMcpStatus(session.sessionId)?.servers.some((row) => row.state === "available")
+  ).toBe(true)
+  await refreshSessionMcpStatus(session.sessionId)
+  expect(readSessionMcpStatus(session.sessionId)).toMatchObject({
+    telemetry: "failed",
+    error: "inventory unavailable",
+    servers: [expect.objectContaining({ name: "native", state: "unknown" })],
+  })
+  await session.close()
 })

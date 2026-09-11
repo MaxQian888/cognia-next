@@ -243,6 +243,8 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
     git: layer.git ? { ...acc.git, ...stripUndefined(layer.git) } : acc.git,
     keybindings: layer.keybindings ? { ...acc.keybindings, ...layer.keybindings } : acc.keybindings,
     layout: layer.layout ?? acc.layout,
+    locale: layer.locale ?? acc.locale,
+    screenReader: layer.screenReader ?? acc.screenReader,
     mouse: layer.mouse ?? acc.mouse,
     vim: layer.vim ?? acc.vim,
     // Merged per-key (like `render`/`git`/`clipboard`) so a project layer can
@@ -343,6 +345,11 @@ function envLayer(env: Record<string, string | undefined>): CliConfigFile {
   // throwing — the schema only validates files, not env.
   const layout = env.COGNIA_LAYOUT?.trim().toLowerCase()
   if (layout === "fullscreen" || layout === "scrollback") layer.layout = layout
+  const locale = env.COGNIA_LOCALE?.trim().toLowerCase()
+  if (locale === "en" || locale === "zh-cn") layer.locale = locale === "en" ? "en" : "zh-CN"
+  const screenReader = (env.COGNIA_SCREEN_READER ?? env.INK_SCREEN_READER)?.trim().toLowerCase()
+  if (["1", "true", "on"].includes(screenReader ?? "")) layer.screenReader = true
+  if (["0", "false", "off"].includes(screenReader ?? "")) layer.screenReader = false
 
   // Fullscreen mouse model override (`select` / `scroll`). Same lenient parse.
   const mouse = env.COGNIA_MOUSE?.trim().toLowerCase()
@@ -470,7 +477,7 @@ export function resolveConfig(input: ResolveConfigInput): ResolvedConfig {
   // A flag/config cwd may be relative — resolve it against the process cwd so
   // the agent always hands the sidecar an absolute working directory.
   acc.cwd = path.isAbsolute(acc.cwd) ? acc.cwd : path.resolve(cwd, acc.cwd)
-  return { ...acc, cliHome: home }
+  return { ...acc, bypassConfirmation: userFile?.bypassConfirmation ?? "ask", cliHome: home }
 }
 
 /** Real-fs reader: returns file text or `null` when missing. */

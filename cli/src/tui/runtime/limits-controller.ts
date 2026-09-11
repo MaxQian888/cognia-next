@@ -8,7 +8,10 @@
  * analysis, and opens the themed `limits` bar panel. Never throws — a failed or
  * absent provider degrades to "no limit data" for that account.
  */
-import { buildCliLimits, nodeAuthedGet } from "./limits-data"
+import { agentStatusLimits, buildCliLimits, loadCodexLimits, nodeAuthedGet } from "./limits-data"
+import { createCliTranslator } from "../i18n"
+import { backendModelMetaTarget } from "./backend-identity"
+import { isBuiltinBackend } from "./backend-capabilities"
 import { analyzeSession } from "../format/usage-analysis"
 import type { ResolvedConfig } from "../../config/schema"
 import type { ProviderLimits } from "@/types/subscription"
@@ -18,6 +21,10 @@ import type { ToolStat, TuiAction } from "../state/types"
 export interface LimitsDeps {
   dispatch: (action: TuiAction) => void
   config: ResolvedConfig
+  presetId?: string
+  backendAgentId?: string
+  agentRateLimits?: Parameters<typeof agentStatusLimits>[1]
+  loadCodexLimits?: typeof loadCodexLimits
   /** Per-turn token history (drives the >150k-context analysis). */
   usageHistory?: number[]
   /** Per-tool call/error tallies (drives the subagent/top-tools analysis). */
@@ -43,9 +50,16 @@ function defaultLoad(config: ResolvedConfig, now: number): Promise<ProviderLimit
 
 let nextLimitsRequestId = 0
 
+/** Shared by /limits and /balance so late reads cannot match another panel. */
+export function allocateLimitsRequestId(): number {
+  return ++nextLimitsRequestId
+}
+
 export function runLimits(deps: LimitsDeps): void {
   const now = (deps.now ?? (() => Date.now()))()
-  const requestId = ++nextLimitsRequestId
+  const external = !isBuiltinBackend(deps.config.agentBackend)
+  const activeProvider = backendModelMetaTarget(deps.config, deps.presetId).provider
+  const requestId = allocateLimitsRequestId()
   const analysis = analyzeSession({
     usageHistory: deps.usageHistory,
     toolStats: deps.toolStats,
@@ -60,15 +74,38 @@ export function runLimits(deps: LimitsDeps): void {
       requestId,
       analysis,
       now,
-      rateLimits: deps.rateLimits,
-      activeProvider: deps.config.provider,
+      rateLimits: external ? undefined : deps.rateLimits,
+      activeProvider,
     },
   })
 
   // Loading is deliberately detached from the runtime request. The panel is
   // interactive immediately and the shared runtime busy marker is released, so
   // a slow provider cannot turn subsequent command input into a queued steer.
-  void (deps.loadLimits ?? defaultLoad)(deps.config, now)
+  const preset = deps.presetId ?? deps.config.agentBackend
+  const nativeCodex = preset === "codex-app-server"
+  const hasNativeLimits = deps.agentRateLimits && Object.keys(deps.agentRateLimits).length > 0
+  const t = createCliTranslator(deps.config.locale, "cliUiCommon")
+  const load =
+    nativeCodex && deps.backendAgentId
+      ? (deps.loadCodexLimits ?? loadCodexLimits)(deps.backendAgentId, now, deps.config.locale)
+      : hasNativeLimits
+        ? Promise.resolve(
+            agentStatusLimits(activeProvider, deps.agentRateLimits!, now, deps.config.locale)
+          )
+        : external
+          ? Promise.resolve([
+              {
+                provider: activeProvider,
+                accountId: activeProvider,
+                accountLabel: preset,
+                fetchedAt: now,
+                meters: [],
+                notice: t(nativeCodex ? "codexLimits.notConnected" : "agentLimits.unavailable"),
+              },
+            ])
+          : (deps.loadLimits ?? defaultLoad)(deps.config, now)
+  void load
     .then((snapshots) => deps.dispatch({ type: "LIMITS_LOADED", requestId, snapshots }))
     .catch((error: unknown) =>
       deps.dispatch({
@@ -76,9 +113,9 @@ export function runLimits(deps: LimitsDeps): void {
         requestId,
         snapshots: [
           {
-            provider: deps.config.provider,
-            accountId: deps.config.provider,
-            accountLabel: deps.config.provider,
+            provider: activeProvider,
+            accountId: activeProvider,
+            accountLabel: activeProvider,
             fetchedAt: now,
             meters: [],
             error: error instanceof Error ? error.message : String(error),

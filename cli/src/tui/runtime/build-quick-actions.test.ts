@@ -1,3 +1,4 @@
+import type { BackendCapabilities } from "./backend-capabilities"
 import { buildQuickActions } from "./build-quick-actions"
 import type { ResolvedConfig } from "../../config/schema"
 
@@ -64,4 +65,22 @@ describe("buildQuickActions", () => {
     const ids = buildQuickActions(makeConfig()).map((r) => r.id)
     expect(new Set(ids).size).toBe(ids.length)
   })
+})
+
+it("shows the launched backend identity and effective permission", () => {
+  const rows = buildQuickActions(
+    makeConfig({ agentBackend: "codex", model: "stale", permissionMode: "auto" }),
+    {
+      backendCapabilities: {
+        backend: "codex",
+        presetId: "codex-app-server",
+        protocol: "codex-app-server",
+        builtin: false,
+        features: {},
+      } as BackendCapabilities,
+    }
+  )
+  expect(rows.find((r) => r.id === "provider")?.hint).toBe("codex (codex-app-server)")
+  expect(rows.find((r) => r.id === "model")?.hint).not.toBe("stale")
+  expect(rows.find((r) => r.id === "mode")?.hint).toBe("default")
 })

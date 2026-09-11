@@ -11,6 +11,7 @@ import {
   parseKeySequence,
   parseKeySpec,
   resolveChordEvent,
+  workflowInspectionFallback,
   resolveKeybindings,
 } from "./keybindings"
 import type { KeyFlags } from "./keymap"
@@ -175,4 +176,37 @@ describe("resolveChordEvent (leader chords)", () => {
     // Ctrl+B no longer triggers the panel once rebound to the sequence.
     expect(resolveChordEvent(b, "b", { ctrl: true }, null)).toEqual({ kind: "none" })
   })
+})
+
+describe("workflow terminal fallback", () => {
+  it("allows Ctrl+X Ctrl+G when Ctrl+I is also Tab", () => {
+    const bindings = resolveKeybindings(undefined)
+    expect(resolveChordEvent(bindings, "x", { ctrl: true }, null)).toEqual({
+      kind: "prefix",
+      prefix: "Ctrl+X",
+    })
+    expect(resolveChordEvent(bindings, "g", { ctrl: true }, "Ctrl+X")).toEqual({
+      kind: "action",
+      action: "workflowInspect",
+    })
+  })
+  it("respects explicit sequence ownership and workflow overrides", () => {
+    const bindings = resolveKeybindings({ find: "ctrl+x ctrl+g" })
+    expect(resolveChordEvent(bindings, "g", { ctrl: true }, "Ctrl+X")).toEqual({
+      kind: "action",
+      action: "find",
+    })
+    expect(
+      resolveChordEvent(
+        resolveKeybindings({ workflowInspect: "ctrl+j" }),
+        "g",
+        { ctrl: true },
+        "Ctrl+X"
+      )
+    ).toEqual({ kind: "none" })
+  })
+})
+
+it("does not advertise a fallback when its leader is a bound action", () => {
+  expect(workflowInspectionFallback(resolveKeybindings({ find: "ctrl+x" }))).toBeUndefined()
 })

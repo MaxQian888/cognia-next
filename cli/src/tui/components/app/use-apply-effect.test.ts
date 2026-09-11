@@ -1,5 +1,10 @@
 /** @jest-environment jsdom */
-import { renderHook } from "@testing-library/react"
+import * as configMutations from "../../../config/mutate"
+jest.mock("../../../config/mutate", () => ({
+  ...jest.requireActual("../../../config/mutate"),
+  setAdditionalRoots: jest.fn(),
+}))
+import { act, renderHook } from "@testing-library/react"
 import fs from "node:fs"
 import os from "node:os"
 import nodePath from "node:path"
@@ -211,6 +216,17 @@ describe("useApplyEffect", () => {
     expect(deps.dispatch).toHaveBeenCalledWith({ type: "NOTICE", message: "detached" })
   })
 
+  it("passes the actual connected agent to quota commands after session identity changes", async () => {
+    const deps = buildDeps()
+    deps.getBackendAgentId = () => "original-connected-agent"
+    run(deps)({ kind: "runtime", runtime: { feature: "limits", action: "show" } })
+    await flush()
+    expect(runRuntimeRequestMock).toHaveBeenCalledWith(
+      { feature: "limits", action: "show" },
+      expect.objectContaining({ backendAgentId: "original-connected-agent" })
+    )
+  })
+
   it("does NOT invalidate the session for a read-only /mcp action (panel open)", async () => {
     const deps = buildDeps()
     run(deps)({ kind: "runtime", runtime: { feature: "mcp", action: "panel" } })
@@ -396,21 +412,75 @@ describe("useApplyEffect", () => {
     expect(deps.resumeMostRecent).toHaveBeenCalled()
   })
 
+  it("reports session-only additional roots when persistence fails", () => {
+    const deps = buildDeps()
+    jest.mocked(configMutations.setAdditionalRoots).mockImplementationOnce(() => {
+      throw new Error("read-only")
+    })
+    const exists = jest.spyOn(fs, "existsSync").mockReturnValue(true)
+    const stat = jest.spyOn(fs, "statSync").mockReturnValue({ isDirectory: () => true } as never)
+    try {
+      run(deps)({ kind: "addDir", op: "add", arg: "/shared" })
+      expect(deps.dispatch).toHaveBeenCalledWith({
+        type: "SET_ADDITIONAL_ROOTS",
+        roots: ["/shared"],
+      })
+      expect(deps.dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({ message: expect.stringContaining("only for this CLI session") })
+      )
+      expect(deps.agent.invalidate).toHaveBeenCalled()
+    } finally {
+      exists.mockRestore()
+      stat.mockRestore()
+    }
+  })
+
   describe("changeCwd", () => {
+    beforeEach(() => jest.spyOn(fs, "accessSync").mockImplementation(() => undefined))
     // config.cwd is "/work"; normalize it the way the handler does so the
     // assertions hold on every platform's path semantics.
     const base = nodePath.resolve(config.cwd)
 
-    it("switches to a valid directory and notices the new cwd", () => {
+    it("switches to a valid directory and notices the new cwd", async () => {
       jest.spyOn(fs, "statSync").mockReturnValue({ isDirectory: () => true } as never)
       const deps = buildDeps()
       const target = nodePath.resolve(config.cwd, "sub")
       run(deps)({ kind: "changeCwd", dir: "sub" })
+      await act(async () => {
+        await Promise.resolve()
+      })
       expect(deps.changeCwd).toHaveBeenCalledWith(target)
       expect(deps.dispatch).toHaveBeenCalledWith({
         type: "NOTICE",
-        message: `Working directory: ${target}`,
+        message: `Working directory: ${target}. Agent context will restart on the next message; the visible transcript is retained.`,
       })
+    })
+
+    it("reports a failed directory switch without a success notice", async () => {
+      jest.spyOn(fs, "statSync").mockReturnValue({ isDirectory: () => true } as never)
+      const deps = buildDeps()
+      jest.mocked(deps.changeCwd).mockRejectedValueOnce(new Error("close failed"))
+      run(deps)({ kind: "changeCwd", dir: "sub" })
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(deps.dispatch).toHaveBeenCalledWith({
+        type: "NOTICE",
+        message: "Could not switch directory: close failed",
+      })
+      expect(deps.dispatch).not.toHaveBeenCalledWith(
+        expect.objectContaining({ message: expect.stringContaining("Working directory:") })
+      )
+    })
+
+    it("rejects directory switching during an active response", () => {
+      const deps = buildDeps()
+      deps.state.turnStatus = "streaming"
+      run(deps)({ kind: "changeCwd", dir: "sub" })
+      expect(deps.changeCwd).not.toHaveBeenCalled()
+      expect(deps.dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({ message: expect.stringContaining("Finish or stop") })
+      )
     })
 
     it("rejects a non-directory path without switching", () => {
@@ -426,6 +496,16 @@ describe("useApplyEffect", () => {
           message: expect.stringContaining("Not a directory"),
         })
       )
+    })
+
+    it("rejects inaccessible directories", () => {
+      jest.spyOn(fs, "statSync").mockReturnValue({ isDirectory: () => true } as never)
+      jest.mocked(fs.accessSync).mockImplementation(() => {
+        throw new Error("EACCES")
+      })
+      const deps = buildDeps()
+      run(deps)({ kind: "changeCwd", dir: "sub" })
+      expect(deps.changeCwd).not.toHaveBeenCalled()
     })
 
     it("no-ops when the target resolves to the current cwd", () => {
@@ -551,6 +631,42 @@ describe("useApplyEffect", () => {
       run(deps)({ kind: "permissionMode", mode: "bypassPermissions", force: true })
       expect(deps.agent.switchMode).toHaveBeenCalledWith("bypassPermissions")
       expect(deps.dispatch).toHaveBeenCalledWith({ type: "BYPASS_ACK" })
+      expect(deps.persist).not.toHaveBeenCalledWith("bypassConfirmation", "never")
+      expect(deps.persist).not.toHaveBeenCalledWith("permissionMode", "bypassPermissions")
+    })
+
+    it("remembers only an explicitly confirmed preference", () => {
+      const deps = buildDeps()
+      run(deps)({ kind: "permissionMode", mode: "bypassPermissions", force: true, remember: true })
+      expect(deps.persist).toHaveBeenCalledWith("bypassConfirmation", "never")
+      expect(deps.dispatch).toHaveBeenCalledWith({
+        type: "SET_CONFIG_PATCH",
+        patch: { bypassConfirmation: "never" },
+      })
+    })
+
+    it("does not treat remember alone as confirmation", () => {
+      const deps = buildDeps()
+      run(deps)({ kind: "permissionMode", mode: "bypassPermissions", remember: true })
+      expect(deps.persist).not.toHaveBeenCalled()
+      expect(deps.agent.switchMode).not.toHaveBeenCalled()
+    })
+
+    it("honors a saved preference when switching modes", () => {
+      const state = createInitialState({ ...config, bypassConfirmation: "never" }, "s1", true, [])
+      const deps = buildDeps({ state })
+      run(deps)({ kind: "permissionMode", mode: "bypassPermissions" })
+      expect(deps.agent.switchMode).toHaveBeenCalledWith("bypassPermissions")
+    })
+
+    it("reports failure to remember without pretending it was saved", () => {
+      const deps = buildDeps({ persist: jest.fn(() => false) })
+      run(deps)({ kind: "permissionMode", mode: "bypassPermissions", force: true, remember: true })
+      expect(notices(deps).join(" ")).toContain("preference could not be saved")
+      expect(deps.dispatch).not.toHaveBeenCalledWith({
+        type: "SET_CONFIG_PATCH",
+        patch: { bypassConfirmation: "never" },
+      })
     })
 
     it("does not persist a launch-only bypass mode after confirmation", () => {
@@ -832,4 +948,157 @@ describe("foreground goal/loop controls", () => {
       expect.objectContaining({ summary: "Run failed: boom" })
     )
   })
+})
+
+describe("git diff effect wiring", () => {
+  const review = {
+    files: [{ path: "new.ts", staged: "", unstaged: "", untracked: "+new" }],
+    baseRef: "origin/main",
+  }
+
+  it("opens a loading review and forwards cwd and an explicit base ref", async () => {
+    const loadGitDiffFn = jest.fn(async () => review)
+    const deps = buildDeps({ loadGitDiffFn })
+    run(deps)({ kind: "gitDiff", baseRef: "origin/main" })
+    expect(deps.dispatch).toHaveBeenCalledWith({
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "gitDiff",
+        requestId: 1,
+        loading: true,
+        review: { files: [], baseRef: "origin/main" },
+      },
+    })
+    expect(loadGitDiffFn).toHaveBeenCalledWith("/work", "origin/main")
+    await flush()
+    expect(deps.dispatch).toHaveBeenCalledWith({ type: "GIT_DIFF_RESULT", requestId: 1, review })
+  })
+
+  it("keeps the previous review available during refresh", async () => {
+    const state = createInitialState(config, "s1", true, [])
+    state.overlay = { kind: "gitDiff", requestId: 0, review, loading: false }
+    const next = { ...review, files: [] }
+    const deps = buildDeps({ state, loadGitDiffFn: jest.fn(async () => next) })
+    run(deps)({ kind: "gitDiff", baseRef: "origin/main" })
+    expect(deps.dispatch).toHaveBeenCalledWith({
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "gitDiff", requestId: 1, loading: true, review },
+    })
+    await flush()
+    expect(deps.dispatch).toHaveBeenCalledWith({
+      type: "GIT_DIFF_RESULT",
+      requestId: 1,
+      review: next,
+    })
+  })
+
+  it.each([new Error("not a git repository"), "permission denied"])(
+    "reports asynchronous loader failure: %s",
+    async (error) => {
+      const deps = buildDeps({
+        loadGitDiffFn: jest.fn(async () => {
+          throw error
+        }),
+      })
+      run(deps)({ kind: "gitDiff" })
+      await flush()
+      expect(deps.dispatch).toHaveBeenCalledWith({
+        type: "GIT_DIFF_RESULT",
+        requestId: 1,
+        error: error instanceof Error ? error.message : error,
+      })
+    }
+  )
+
+  it("tags out-of-order results with distinct request ids for reducer ownership checks", async () => {
+    let finishFirst!: (result: typeof review) => void
+    const loadGitDiffFn = jest
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<typeof review>((resolve) => {
+            finishFirst = resolve
+          })
+      )
+      .mockResolvedValueOnce({ files: [] })
+    const deps = buildDeps({ loadGitDiffFn })
+    const apply = run(deps)
+    apply({ kind: "gitDiff" })
+    apply({ kind: "gitDiff", baseRef: "origin/main" })
+    await flush()
+    expect(deps.dispatch).toHaveBeenCalledWith({
+      type: "GIT_DIFF_RESULT",
+      requestId: 2,
+      review: { files: [] },
+    })
+    finishFirst(review)
+    await flush()
+    expect(deps.dispatch).toHaveBeenLastCalledWith({
+      type: "GIT_DIFF_RESULT",
+      requestId: 1,
+      review,
+    })
+  })
+})
+
+describe("hooks reload effect", () => {
+  it("reloads the session and refreshes the configuration inventory", async () => {
+    const deps = buildDeps()
+    deps.agent.reloadHooks = jest.fn(async () => {})
+    const { result } = renderHook(() => useApplyEffect(deps))
+    await act(async () => {
+      result.current({ kind: "reloadHooks" })
+      await flush()
+    })
+    expect(deps.agent.reloadHooks).toHaveBeenCalledTimes(1)
+    expect(deps.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "OVERLAY_OPEN",
+        overlay: expect.objectContaining({ kind: "hooks" }),
+      })
+    )
+    expect(deps.agent.invalidate).not.toHaveBeenCalled()
+  })
+
+  it("reports reload failure without reopening a stale inventory", async () => {
+    const deps = buildDeps()
+    deps.agent.reloadHooks = jest.fn(async () => {
+      throw new Error("teardown failed")
+    })
+    const { result } = renderHook(() => useApplyEffect(deps))
+    await act(async () => {
+      result.current({ kind: "reloadHooks" })
+      await flush()
+    })
+    expect(deps.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "NOTICE",
+        message: expect.stringContaining("teardown failed"),
+      })
+    )
+    expect(deps.dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "OVERLAY_OPEN" })
+    )
+  })
+})
+
+it("suspends the TUI and waits for a hooks source editor before prompting to reload", async () => {
+  const deps = buildDeps()
+  deps.state.overlay = { kind: "hooks", rows: [], diagnostics: [] }
+  deps.suspendTerminal = jest.fn(async (callback) => {
+    await callback()
+  })
+  const { result } = renderHook(() => useApplyEffect(deps))
+  await act(async () => {
+    result.current({ kind: "openFile", file: "/tmp/hooks.json" })
+    await flush()
+  })
+  expect(deps.suspendTerminal).toHaveBeenCalledTimes(1)
+  expect(deps.openInEditorFn).toHaveBeenCalledWith(
+    "/tmp/hooks.json",
+    expect.objectContaining({ wait: true })
+  )
+  expect(deps.dispatch).toHaveBeenCalledWith(
+    expect.objectContaining({ type: "NOTICE", message: expect.stringContaining("Ctrl+R") })
+  )
 })

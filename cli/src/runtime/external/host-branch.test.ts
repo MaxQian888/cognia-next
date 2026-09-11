@@ -95,3 +95,14 @@ describe("CLI external-agent host branch", () => {
     expect(fs.readFileSync(target, "utf8")).toBe("untouched")
   })
 })
+
+it("only exposes workspace selection to the local host, not agent RPC", async () => {
+  const { selectCliAgentWorkspace, agentInvoke } = await import("./host-branch")
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-selected-host-"))
+  try {
+    expect(() => selectCliAgentWorkspace(root)).not.toThrow()
+    await expect(agentInvoke("select_workspace", { cwd: root })).rejects.toThrow()
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})

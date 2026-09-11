@@ -207,6 +207,20 @@ export function resolveKeybindings(
   return out
 }
 
+/** Safe terminal fallback, offered only while the historic binding remains active
+ * and no explicit user binding claims the sequence. */
+export function workflowInspectionFallback(
+  bindings: Record<KeybindableAction, string>
+): string | undefined {
+  const fallback = "ctrl+x ctrl+g"
+  return formatKeySpec(bindings.workflowInspect) === "Ctrl+I" &&
+    !KEYBINDABLE_ACTIONS.some((action) =>
+      ["Ctrl+X", formatKeySpec(fallback)].includes(formatKeySpec(bindings[action]))
+    )
+    ? fallback
+    : undefined
+}
+
 /** What one key event resolves to under chord-aware matching. */
 export type ChordResolution =
   | { kind: "action"; action: KeybindableAction }
@@ -228,7 +242,11 @@ export function resolveChordEvent(
   key: KeyFlags,
   pendingPrefix: string | null
 ): ChordResolution {
+  const workflowFallback = workflowInspectionFallback(bindings)
   if (pendingPrefix) {
+    if (workflowFallback && pendingPrefix === "Ctrl+X" && matchKeySpec("ctrl+g", input, key)) {
+      return { kind: "action", action: "workflowInspect" }
+    }
     for (const action of KEYBINDABLE_ACTIONS) {
       const seq = parseKeySequence(bindings[action])
       if (
@@ -251,6 +269,8 @@ export function resolveChordEvent(
       return { kind: "prefix", prefix: formatParsed(seq[0]) }
     }
   }
+  if (workflowFallback && matchKeySpec("ctrl+x", input, key))
+    return { kind: "prefix", prefix: "Ctrl+X" }
   return { kind: "none" }
 }
 

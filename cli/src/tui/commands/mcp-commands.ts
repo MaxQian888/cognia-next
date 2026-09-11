@@ -32,7 +32,21 @@ export const MCP_COMMANDS: CommandDescriptor[] = [
     handler: rt("mcp", "panel"),
     subcommands: [
       { name: "panel", description: "open the interactive MCP panel", handler: rt("mcp", "panel") },
-      { name: "list", description: "browse MCP servers (text list)", handler: rt("mcp", "list") },
+      {
+        name: "refresh",
+        description: "refresh external agent MCP inventory",
+        handler: rt("mcp", "refresh"),
+      },
+      {
+        name: "apply",
+        description: "apply MCP configuration to the current agent",
+        handler: rt("mcp", "apply"),
+      },
+      {
+        name: "list",
+        description: "browse MCP configuration and runtime status",
+        handler: rt("mcp", "list"),
+      },
       {
         name: "logs",
         description: "view captured MCP server output logs",
@@ -40,7 +54,7 @@ export const MCP_COMMANDS: CommandDescriptor[] = [
       },
       {
         name: "reconnect",
-        description: "re-probe a failed server",
+        description: "test connectivity from Cognia (does not reconnect the agent)",
         argumentHint: "<name>",
         handler: rt("mcp", "reconnect"),
       },

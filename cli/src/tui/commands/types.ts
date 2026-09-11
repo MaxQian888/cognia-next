@@ -142,7 +142,7 @@ export type CommandEffect =
    * through `planPermissionModeSwitch`, so a danger-tier pick opens the
    * acknowledgement confirm instead of applying; `force` IS that acknowledgement
    * (the confirm overlay re-dispatches `/mode <name> --force`) and skips it. */
-  | { kind: "permissionMode"; mode: PermissionMode; force?: boolean }
+  | { kind: "permissionMode"; mode: PermissionMode; force?: boolean; remember?: boolean }
   /** Persist + live-apply an agent-mode change (`/agent-mode <id>`). The mode's
    * prompt / tools / model / permission flow through `resolveSendOptions`; the
    * App persists `config.agentMode` and recreates the session so it takes effect
@@ -186,6 +186,7 @@ export type CommandEffect =
    * it + dispatches `SET_CWD` + re-resolves SendOptions so the next turn (and the
    * respawned sidecar) operates there. */
   | { kind: "changeCwd"; dir: string }
+  | { kind: "reloadHooks" }
   /** Open the `/rewind` checkpoint picker (App reads the live capture). */
   | { kind: "rewindList" }
   /** Restore a checkpoint by seq — files and/or conversation. */
@@ -199,7 +200,7 @@ export type CommandEffect =
   | { kind: "setEditor"; command: string }
   /** Show the working-tree git diff (`/diff`) in the scrollable document pager.
    * App shells `git diff` (+ `--staged`) and renders the result. */
-  | { kind: "gitDiff" }
+  | { kind: "gitDiff"; baseRef?: string }
   | { kind: "exit" }
 
 /** What `openForm` carries — enough for the App to mount a {@link FormOverlay}. */

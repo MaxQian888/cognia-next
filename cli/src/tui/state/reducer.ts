@@ -1,3 +1,7 @@
+import { settingsSections } from "../runtime/settings-sections"
+import { agentStatusLimits } from "../runtime/limits-data"
+import { backendModelMetaTarget } from "../runtime/backend-identity"
+import { createImagePaste, atomicImageEdit } from "../input/image-attachments"
 /**
  * The TUI reducer — the single source of truth for the chat app's screen state.
  *
@@ -57,6 +61,7 @@ import type {
   UsageInfo,
 } from "./types"
 import {
+  bufferText,
   insertText,
   insertNewline,
   backspace,
@@ -788,7 +793,65 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
     case "SET_RATE_LIMITS":
       // Account-level live quota — persists across /clear (a fresh chat doesn't
       // reset the API key's per-window remaining), overwritten by each response.
-      return { ...state, rateLimits: action.snapshot }
+      return isBuiltinBackend(state.config.agentBackend)
+        ? { ...state, rateLimits: action.snapshot }
+        : state
+    case "SET_AGENT_RATE_LIMIT": {
+      const key = action.event.rateLimitType ?? "default"
+      const agentRateLimits = {
+        ...state.agentRateLimits,
+        [key]: {
+          ...action.event,
+          ...(Number.isFinite(action.receivedAt) ? { receivedAt: action.receivedAt } : {}),
+        },
+      }
+      const provider = backendModelMetaTarget(
+        state.config,
+        state.backendCapabilities?.presetId
+      ).provider
+      const snapshots = agentStatusLimits(
+        provider,
+        agentRateLimits,
+        state.overlay.kind === "limits" ? state.overlay.now : Date.now(),
+        state.config.locale
+      )
+      const toastId = `agent-quota:${key}`
+      return {
+        ...state,
+        agentRateLimits,
+        // Warn only on a status transition, and remove that warning when the
+        // provider reports recovery. Repeated pushes must not create a storm.
+        toasts:
+          action.event.status === "allowed"
+            ? state.toasts.filter((toast) => toast.id !== toastId)
+            : state.agentRateLimits?.[key]?.status === action.event.status
+              ? state.toasts
+              : pushToast(state.toasts, {
+                  id: toastId,
+                  severity: action.event.status === "rejected" ? "error" : "warn",
+                  message:
+                    snapshots[0].meters.find((meter) => meter.id === `native/${key}`)?.label ?? key,
+                }),
+        ...(state.overlay.kind === "limits"
+          ? {
+              overlay: {
+                ...state.overlay,
+                loading: false,
+                requestId: undefined,
+                snapshots,
+              },
+            }
+          : {}),
+      }
+    }
+    case "CLEAR_AGENT_RATE_LIMITS":
+      return {
+        ...state,
+        agentRateLimits: undefined,
+        toasts: state.toasts.filter((toast) => !toast.id.startsWith("agent-quota:")),
+        rateLimits: undefined,
+        overlay: state.overlay.kind === "limits" ? { kind: "none" } : state.overlay,
+      }
     case "SET_MODEL_META": {
       // A catalog lookup may have started before the live backend reported its
       // actual window. Keep the authoritative runtime value while still taking
@@ -1243,8 +1306,8 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
       }
       return placed
     }
-    case "TOAST_PUSH":
-      return {
+    case "TOAST_PUSH": {
+      const next = {
         ...state,
         toasts: pushToast(state.toasts, {
           id: makeId(state.seq),
@@ -1254,10 +1317,30 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         }),
         seq: state.seq + 1,
       }
+      // Errors must remain reviewable after the transient stack expires or overflows.
+      return action.severity === "error"
+        ? appendTranscriptCell(next, (id) => ({
+            id,
+            kind: "notice",
+            message: [action.message, action.hint].filter(Boolean).join("\n"),
+          }))
+        : next
+    }
     case "TOAST_DISMISS":
       return { ...state, toasts: state.toasts.filter((t) => t.id !== action.id) }
     case "SIDECAR_STATUS":
-      return { ...state, sidecarDown: action.down }
+      return {
+        ...state,
+        sidecarDown: action.down,
+        ...(action.down
+          ? {
+              agentRateLimits: undefined,
+              rateLimits: undefined,
+              overlay:
+                state.overlay.kind === "limits" ? ({ kind: "none" } as const) : state.overlay,
+            }
+          : {}),
+      }
     case "COMPACT_BOUNDARY":
       // Render the boundary inline as a notice cell (reuses the notice renderer).
       return appendTranscriptCell(state, (id) => ({
@@ -1389,6 +1472,8 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
       const nextConfig = { ...state.config, provider: action.provider }
       return {
         ...state,
+        rateLimits: undefined,
+        agentRateLimits: undefined,
         config: {
           ...nextConfig,
           model: resolveBackendModel(nextConfig, state.backendCapabilities?.presetId),
@@ -1519,6 +1604,18 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
             overlay: { ...state.overlay, snapshots: action.snapshots, loading: false },
           }
         : state
+    case "GIT_DIFF_RESULT":
+      if (state.overlay.kind !== "gitDiff" || state.overlay.requestId !== action.requestId)
+        return state
+      return {
+        ...state,
+        overlay: {
+          ...state.overlay,
+          loading: false,
+          ...(action.review ? { review: action.review } : {}),
+          error: action.error,
+        },
+      }
     case "OVERLAY_CLOSE": {
       const { savedCursor, ...restInput } = state.input
       const buffer = state.input.buffer
@@ -1615,17 +1712,35 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
       if (state.overlay.kind !== "form") return state
       return { ...state, overlay: { kind: "form", form: action.form } }
 
+    case "MCP_SERVERS_REPLACE": {
+      if (state.overlay.kind !== "mcp") return state
+      if (action.sessionId && action.sessionId !== state.sessionId) return state
+      if (
+        action.runtimeBackend &&
+        action.runtimeBackend !== (state.config.agentBackend ?? "builtin")
+      )
+        return state
+      return {
+        ...state,
+        overlay: {
+          ...state.overlay,
+          servers: action.servers,
+          runtimeBackend: action.runtimeBackend,
+        },
+      }
+    }
+
     case "MCP_STATUS_PATCH": {
       // Live status from the async probe — only applies while the MCP panel is
       // the active overlay (an interleaved close/other-open silently drops it).
       if (state.overlay.kind !== "mcp") return state
       const servers = state.overlay.servers.map((s) =>
-        s.name === action.name ? { ...s, ...action.patch } : s
+        (s.id ?? s.name) === action.name ? { ...s, ...action.patch } : s
       )
       return {
         ...state,
         overlay: {
-          kind: "mcp",
+          ...state.overlay,
           servers,
           probing: action.doneProbing ? false : state.overlay.probing,
         },
@@ -1703,7 +1818,8 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
       // render compose sequentially (a→ab→abc) instead of each recomputing from a
       // stale closure and the last one winning (which dropped all but one key).
       const prev = state.input.buffer
-      const next = applyInputEdit(prev, action.edit)
+      const next =
+        atomicImageEdit(prev, action.edit, state.input.pastes) ?? applyInputEdit(prev, action.edit)
       const textChanged = !sameBufferText(prev, next)
       return {
         ...state,
@@ -1743,6 +1859,22 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
     }
     case "INPUT_HISTORY":
       return { ...state, input: { ...state.input, history: action.history } }
+    case "INPUT_ADD_IMAGES": {
+      const prev = state.input.buffer
+      const images = createImagePaste(action.paths, state.input.pastes, bufferText(prev))
+      return {
+        ...state,
+        input: {
+          ...state.input,
+          buffer:
+            atomicImageEdit(prev, { op: "insert", text: images.text }, state.input.pastes) ??
+            insertText(prev, images.text),
+          pastes: { ...state.input.pastes, ...images.pastes },
+          undo: pushBounded(state.input.undo, prev),
+          redo: [],
+        },
+      }
+    }
     case "INPUT_ADD_PASTE":
       return {
         ...state,
@@ -1778,6 +1910,9 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
     case "BACKEND_CONNECT_STAGE":
       return {
         ...state,
+        agentRateLimits: undefined,
+        rateLimits: undefined,
+        overlay: state.overlay.kind === "limits" ? { kind: "none" } : state.overlay,
         phase: "connecting",
         backendConnect: { backend: action.backend, stage: action.stage },
       }
@@ -1890,6 +2025,9 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
       } = state
       return {
         ...rest,
+        rateLimits: undefined,
+        agentRateLimits: undefined,
+        overlay: state.overlay.kind === "limits" ? { kind: "none" } : state.overlay,
         config: { ...state.config, agentBackend: action.backend },
         ...(isBuiltinBackend(action.backend)
           ? { backendCapabilities: capabilitiesForBuiltin() }
@@ -1899,8 +2037,23 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
     case "SET_CWD":
       return { ...state, config: { ...state.config, cwd: action.cwd } }
 
-    case "SET_ADDITIONAL_ROOTS":
-      return { ...state, config: { ...state.config, additionalRoots: action.roots } }
+    case "SET_ADDITIONAL_ROOTS": {
+      const config = { ...state.config, additionalRoots: action.roots }
+      if (state.overlay.kind !== "settings") return { ...state, config }
+      const sections = settingsSections(config, state.backendCapabilities)
+      return {
+        ...state,
+        config,
+        overlay: {
+          ...state.overlay,
+          sections,
+          index: Math.min(
+            state.overlay.index,
+            Math.max(0, sections[state.overlay.section].rows.length - 1)
+          ),
+        },
+      }
+    }
 
     // ── Lifecycle ────────────────────────────────────────────────────────────────
     case "CTRL_C":

@@ -1,5 +1,7 @@
 /** @jest-environment node */
 import path from "node:path"
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs"
+import { buildSync } from "esbuild"
 import { spawnSync } from "node:child_process"
 
 import { stringWidth } from "./markdown/width"
@@ -38,7 +40,7 @@ describe("real Ink layout probe", () => {
       encoding: "utf8",
     })
     expect(result.status).toBe(0)
-    const frames = JSON.parse(result.stdout) as ProbeFrame[]
+    const frames = JSON.parse(String(result.stdout)) as ProbeFrame[]
     expect(frames).toHaveLength(4)
 
     for (const { columns, rows, frame } of frames) {
@@ -65,4 +67,177 @@ describe("real Ink layout probe", () => {
     expect(probe.invertedCaret).toBe(false)
     expect(probe.caretContext).toMatch(/\u001b\[[0-9;]*m$/)
   })
+})
+
+it("keeps MCP diagnostics and both action footers inside English and Chinese terminal budgets", () => {
+  const fixture = path.join(__dirname, "fixtures", "real-ink-mcp-probe.tsx")
+  // Match the production bundle: tsx's JSON named exports cannot load catalogs
+  // containing the reserved key `arguments` under Node's strict ESM mode.
+  const cache = path.join(process.cwd(), "node_modules", ".cache")
+  mkdirSync(cache, { recursive: true })
+  const dir = mkdtempSync(path.join(cache, "mcp-layout-"))
+  const outfile = path.join(dir, "probe.mjs")
+  let result: ReturnType<typeof spawnSync>
+  try {
+    buildSync({
+      entryPoints: [fixture],
+      outfile,
+      platform: "node",
+      format: "esm",
+      bundle: true,
+      packages: "external",
+      tsconfig: path.join(process.cwd(), "tsconfig.json"),
+    })
+    result = spawnSync(process.execPath, [outfile], { cwd: process.cwd(), encoding: "utf8" })
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+  expect(result.stderr).toBe("")
+  expect(result.status).toBe(0)
+  const frames = JSON.parse(String(result.stdout)) as ProbeFrame[]
+  expect(frames).toHaveLength(4)
+  for (const { columns, rows, frame } of frames) {
+    expect(frame.split("\n").length).toBeLessThanOrEqual(rows - 3)
+    expect(frame.split("\n").every((line) => stringWidth(line) <= columns)).toBe(true)
+    expect(frame).toContain("server-0")
+    expect(frame).toContain("^R")
+    expect(frame).toContain("^A")
+  }
+})
+
+it("keeps workspace directory trees within English and Chinese terminal budgets", () => {
+  const fixture = path.join(__dirname, "fixtures", "real-ink-workspace-probe.tsx")
+  // Match the production bundle: tsx's JSON named exports cannot load catalogs
+  // containing the reserved key `arguments` under Node's strict ESM mode.
+  const cache = path.join(process.cwd(), "node_modules", ".cache")
+  mkdirSync(cache, { recursive: true })
+  const dir = mkdtempSync(path.join(cache, "workspace-layout-"))
+  const outfile = path.join(dir, "probe.mjs")
+  let result: ReturnType<typeof spawnSync>
+  try {
+    buildSync({
+      entryPoints: [fixture],
+      outfile,
+      platform: "node",
+      format: "esm",
+      bundle: true,
+      packages: "external",
+      tsconfig: path.join(process.cwd(), "tsconfig.json"),
+    })
+    result = spawnSync(process.execPath, [outfile], { cwd: process.cwd(), encoding: "utf8" })
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+  expect(result.stderr).toBe("")
+  expect(result.status).toBe(0)
+  const frames = JSON.parse(String(result.stdout)) as ProbeFrame[]
+  expect(frames).toHaveLength(4)
+  for (const { columns, rows, frame } of frames) {
+    expect(frame.split("\n").length).toBeLessThanOrEqual(rows - 3)
+    expect(frame.split("\n").every((line) => stringWidth(line) <= columns)).toBe(true)
+    expect(frame).toContain("workspace")
+    expect(frame).toContain("project-")
+  }
+})
+
+it("keeps hook inventories within English and Chinese terminal budgets", () => {
+  const fixture = path.join(__dirname, "fixtures", "real-ink-hooks-probe.tsx")
+  // Match the production bundle: tsx's JSON named exports cannot load catalogs
+  // containing the reserved key `arguments` under Node's strict ESM mode.
+  const cache = path.join(process.cwd(), "node_modules", ".cache")
+  mkdirSync(cache, { recursive: true })
+  const dir = mkdtempSync(path.join(cache, "hooks-layout-"))
+  const outfile = path.join(dir, "probe.mjs")
+  let result: ReturnType<typeof spawnSync>
+  try {
+    buildSync({
+      entryPoints: [fixture],
+      outfile,
+      platform: "node",
+      format: "esm",
+      bundle: true,
+      packages: "external",
+      tsconfig: path.join(process.cwd(), "tsconfig.json"),
+    })
+    result = spawnSync(process.execPath, [outfile], { cwd: process.cwd(), encoding: "utf8" })
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+  expect(result.stderr).toBe("")
+  expect(result.status).toBe(0)
+  const frames = JSON.parse(String(result.stdout)) as ProbeFrame[]
+  expect(frames).toHaveLength(4)
+  for (const { columns, rows, frame } of frames) {
+    expect(frame.split("\n").length).toBeLessThanOrEqual(rows - 3)
+    expect(frame.split("\n").every((line) => stringWidth(line) <= columns)).toBe(true)
+    expect(frame).toContain("hook-")
+  }
+})
+
+it("keeps paginated tool catalogs within English and Chinese terminal budgets", () => {
+  const fixture = path.join(__dirname, "fixtures", "real-ink-tools-probe.tsx")
+  // Match the production bundle: tsx's JSON named exports cannot load catalogs
+  // containing the reserved key `arguments` under Node's strict ESM mode.
+  const cache = path.join(process.cwd(), "node_modules", ".cache")
+  mkdirSync(cache, { recursive: true })
+  const dir = mkdtempSync(path.join(cache, "tools-layout-"))
+  const outfile = path.join(dir, "probe.mjs")
+  let result: ReturnType<typeof spawnSync>
+  try {
+    buildSync({
+      entryPoints: [fixture],
+      outfile,
+      platform: "node",
+      format: "esm",
+      bundle: true,
+      packages: "external",
+      tsconfig: path.join(process.cwd(), "tsconfig.json"),
+    })
+    result = spawnSync(process.execPath, [outfile], { cwd: process.cwd(), encoding: "utf8" })
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+  expect(result.stderr).toBe("")
+  expect(result.status).toBe(0)
+  const frames = JSON.parse(String(result.stdout)) as ProbeFrame[]
+  expect(frames).toHaveLength(4)
+  for (const { columns, rows, frame } of frames) {
+    expect(frame.split("\n").length).toBeLessThanOrEqual(rows - 3)
+    expect(frame.split("\n").every((line) => stringWidth(line) <= columns)).toBe(true)
+    expect(frame).toContain("tool-")
+  }
+})
+
+it("keeps detailed context reports within English and Chinese terminal budgets", () => {
+  const fixture = path.join(__dirname, "fixtures", "real-ink-context-probe.tsx")
+  // Match the production bundle: tsx's JSON named exports cannot load catalogs
+  // containing the reserved key `arguments` under Node's strict ESM mode.
+  const cache = path.join(process.cwd(), "node_modules", ".cache")
+  mkdirSync(cache, { recursive: true })
+  const dir = mkdtempSync(path.join(cache, "context-layout-"))
+  const outfile = path.join(dir, "probe.mjs")
+  let result: ReturnType<typeof spawnSync>
+  try {
+    buildSync({
+      entryPoints: [fixture],
+      outfile,
+      platform: "node",
+      format: "esm",
+      bundle: true,
+      packages: "external",
+      tsconfig: path.join(process.cwd(), "tsconfig.json"),
+    })
+    result = spawnSync(process.execPath, [outfile], { cwd: process.cwd(), encoding: "utf8" })
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+  expect(result.stderr).toBe("")
+  expect(result.status).toBe(0)
+  const frames = JSON.parse(String(result.stdout)) as ProbeFrame[]
+  expect(frames).toHaveLength(4)
+  for (const { columns, rows, frame } of frames) {
+    expect(frame.split("\n").length).toBeLessThanOrEqual(rows - 3)
+    expect(frame.split("\n").every((line) => stringWidth(line) <= columns)).toBe(true)
+    expect(frame).toContain("Context details")
+  }
 })

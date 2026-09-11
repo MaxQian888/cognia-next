@@ -1,3 +1,4 @@
+import { CliI18nProvider } from "../i18n"
 import React from "react"
 import { render } from "@testing-library/react"
 import { __resetInk } from "ink"
@@ -89,4 +90,22 @@ describe("BackendInstall — install ownership", () => {
     const { container } = render(<BackendInstall install={base} maxRows={12} />)
     expect(container.textContent).not.toContain("your own package manager")
   })
+})
+
+it("renders Chinese startup copy and preserves technical content", () => {
+  __resetInk()
+  const { container } = render(
+    <CliI18nProvider locale="zh-CN">
+      <BackendInstall
+        install={{
+          name: "Codex",
+          display: "npm install",
+          output: "raw installer output",
+          status: "running",
+        }}
+      />
+    </CliI18nProvider>
+  )
+  expect(container.textContent).toContain("正在安装")
+  expect(container.textContent).toContain("raw installer output")
 })

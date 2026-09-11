@@ -8,6 +8,8 @@
 import React, { useEffect, useState } from "react"
 import { Text } from "ink"
 
+import { useScreenReader } from "../render/context"
+import { useCliTranslations } from "../i18n"
 import { spinnerVerb } from "../format/spinner-verbs"
 import type { TurnStatus } from "../state/types"
 
@@ -15,16 +17,22 @@ import type { TurnStatus } from "../state/types"
 const VERB_MS = 1800
 
 export function WorkingIndicator({ turnStatus }: { turnStatus: TurnStatus }) {
+  const screenReader = useScreenReader()
+  const t = useCliTranslations("cliUiCommon")
   const [tick, setTick] = useState(0)
   const streaming = turnStatus === "streaming"
 
   useEffect(() => {
     // Rotate only while actively streaming; aborting shows a static word and a
     // stale tick across that transition is harmless (the word is overridden).
-    if (!streaming) return
+    if (!streaming || screenReader) return
     const id = setInterval(() => setTick((t) => t + 1), VERB_MS)
     return () => clearInterval(id)
-  }, [streaming])
+  }, [streaming, screenReader])
 
-  return <Text>{turnStatus === "aborting" ? "stopping" : spinnerVerb(tick)}</Text>
+  return (
+    <Text>
+      {turnStatus === "aborting" ? t("stopping") : screenReader ? t("working") : spinnerVerb(tick)}
+    </Text>
+  )
 }

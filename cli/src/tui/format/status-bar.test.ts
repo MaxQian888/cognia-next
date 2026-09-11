@@ -264,7 +264,9 @@ describe("buildStatusBar", () => {
   })
 
   it("leaves a normal mode unstyled in mono theme", () => {
-    const segs = buildStatusBar({ config: withSB({ theme: "mono", segments: ["mode"] }) })
+    const segs = buildStatusBar({
+      config: { ...withSB({ theme: "mono", segments: ["mode"] }), permissionMode: "default" },
+    })
     expect(segs[0].text).toBe("default")
     expect(segs[0].color).toBeUndefined()
   })
@@ -476,4 +478,35 @@ describe("contextGauge", () => {
     expect(contextGauge(150)).toContain("100%")
     expect(contextGauge(-5)).toContain("0%")
   })
+})
+
+it("shows latest-turn output rate alongside cumulative tokens for external agents", () => {
+  const segments = buildStatusBar({
+    config: { ...base, agentBackend: "pi-rpc" },
+    usage: { inputTokens: 10000, outputTokens: 120, durationMs: 3000 },
+    totals: {
+      inputTokens: 20000,
+      outputTokens: 300,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      costUsd: 0,
+      durationMs: 12000,
+    },
+  })
+  expect(segments.find((s) => s.id === "tokens")?.text).toBe("20k tok · 40.0 tok/s avg")
+  expect(
+    fitStatusSegments(segments, 36).segments.reduce((n, s) => n + s.text.length, 0)
+  ).toBeLessThanOrEqual(36)
+})
+
+it("localizes Chinese footer labels without changing backend identifiers", () => {
+  const segments = buildStatusBar({
+    config: { ...base, locale: "zh-CN", permissionMode: "bypassPermissions" },
+    usage,
+  })
+  const byId = Object.fromEntries(segments.map((s) => [s.id, s.text]))
+  expect(byId.mode).toBe("⚠ 跳过权限确认")
+  expect(byId.ctx).toContain("上下文")
+  expect(byId.tokens).toContain("词元")
+  expect(byId.model).toBe("claude-x")
 })

@@ -33,6 +33,8 @@ import { parseMouseEvent } from "../input/mouse"
 import { absoluteTopLeft } from "../input/element-position"
 import {
   EFFORT_LEVEL_DESCRIPTIONS,
+  EFFORT_GAUGE_PREFIX,
+  effortScaleLabels,
   effortGaugeCells,
   effortGaugeWidth,
   effortKeyToIndex,
@@ -191,19 +193,16 @@ export function EffortSlider({
       </Box>
 
       {layout === "wide" ? (
-        // Use the same width as the gauge and distribute the tier labels across
-        // it. A free-running Text row made xhigh appear under a different track
-        // position than its marker, especially on wide terminals.
-        <Box marginLeft={9} width={gaugeWidth} justifyContent="space-between">
-          {LEVELS.map((lvl, i) => {
+        <Box marginLeft={EFFORT_GAUGE_PREFIX} width={gaugeWidth} flexShrink={0}>
+          {effortScaleLabels(gaugeWidth).map(({ level, start }, i, labels) => {
+            const previousEnd = i === 0 ? 0 : labels[i - 1].start + labels[i - 1].level.length
             const isActiveTier = !off && i === index
             return (
-              <Text key={lvl}>
+              <Box key={level} marginLeft={start - previousEnd} flexShrink={0}>
                 <Text color={isActiveTier ? theme.accent : theme.muted} bold={isActiveTier}>
-                  {isActiveTier ? "●" : "○"}
-                  {lvl}
+                  {level}
                 </Text>
-              </Text>
+              </Box>
             )
           })}
         </Box>

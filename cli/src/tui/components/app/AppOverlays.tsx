@@ -1,3 +1,8 @@
+import { bashOutputDocument } from "../../commands/bashes-command"
+import { ToolBrowser } from "../ToolBrowser"
+import path from "node:path"
+import { HooksOverlay } from "../overlays/HooksOverlay"
+import { FolderPicker } from "../FolderPicker"
 /**
  * Every modal overlay the TUI can show, switched on `state.overlay.kind`. Lifted
  * out of {@link App} (which still owns all the state + handlers) so the root
@@ -6,6 +11,10 @@
  * the behaviour is byte-for-byte the same as when it lived in App.
  */
 import React from "react"
+import { Box, Text } from "ink"
+import { useCliTranslations } from "../../i18n"
+import { SkillFilesOverlay } from "../overlays/SkillFilesOverlay"
+import { GitDiffOverlay } from "../overlays/GitDiffOverlay"
 import fs from "node:fs"
 import os from "node:os"
 import { spawn } from "node:child_process"
@@ -67,6 +76,8 @@ import {
 import {
   mcpPanel as runMcpPanel,
   mcpReconnect,
+  mcpRefreshSession,
+  mcpApplySession,
   mcpToggleServerInPanel,
   mcpToggleTool,
   openMcpToolsPanel,
@@ -132,6 +143,8 @@ export interface AppOverlaysProps {
 }
 
 export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
+  const t = useCliTranslations("cliUiCommon")
+  const commandText = useCliTranslations("cliUiCommands")
   const {
     state,
     dispatch,
@@ -237,6 +250,13 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
   // background registry over the journal-backed snapshot the panel opened with,
   // so statuses/tokens/tool counts move while it is on screen. Unconditional
   // hook (overlay kind varies render-to-render); a no-op unless the panel is up.
+  const sourceBashId = state.overlay.kind === "document" ? state.overlay.sourceBashId : undefined
+  const sourceBash = sourceBashId
+    ? state.cells.find((cell) => cell.kind === "bash" && cell.id === sourceBashId)
+    : undefined
+  const liveBashDocument =
+    sourceBash?.kind === "bash" ? bashOutputDocument(sourceBash, state.config.locale) : undefined
+
   const agentsOverlayRows = state.overlay.kind === "agents" ? state.overlay.rows : null
   const sessionId = state.sessionId
   const refreshAgents = React.useCallback(
@@ -259,6 +279,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
           onResolve={resolvePermission}
           maxRows={viewportRows}
+          columns={columns}
         />
       )}
       {state.overlay.kind === "model" &&
@@ -544,13 +565,59 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
             />
           )
         })()}
+      {state.overlay.kind === "workspaceFolder" &&
+        (() => {
+          const overlay = state.overlay
+          return (
+            <FolderPicker
+              initialDir={state.config.cwd}
+              width={columns}
+              maxRows={Math.max(1, itemRows - 2)}
+              onConfirm={(dir) => {
+                dispatch({ type: "OVERLAY_CLOSE" })
+                runCommandLine(`${overlay.mode === "cwd" ? "/cd" : "/add-dir"} ${dir}`)
+              }}
+              onCancel={() => {
+                dispatch({ type: "OVERLAY_CLOSE" })
+                openReturnedSettings(overlay.returnToSettings, state.config)
+              }}
+            />
+          )
+        })()}
+      {state.overlay.kind === "toolBrowser" && (
+        <ToolBrowser
+          title={t("toolsBrowser.catalogTitle")}
+          entries={state.overlay.entries}
+          width={columns}
+          maxRows={itemRows}
+          onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
+        />
+      )}
+      {state.overlay.kind === "hooks" && (
+        <HooksOverlay
+          rows={state.overlay.rows}
+          diagnostics={state.overlay.diagnostics}
+          width={columns}
+          maxRows={itemRows}
+          onToggle={(row) => {
+            if (row.builtinId) applySettings({ kind: "hook", id: row.builtinId }, !row.enabled)
+          }}
+          onEdit={(source) =>
+            runCommandLine(
+              `/open ${source === "cognia" ? path.join(home, "config.json") : path.join(os.homedir(), ".claude", "settings.json")}`
+            )
+          }
+          onRefresh={() => runCommandLine("/hooks refresh")}
+          onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
+        />
+      )}
       {state.overlay.kind === "settings" && (
         <SettingsOverlay
           sections={state.overlay.sections}
           section={state.overlay.section}
           index={state.overlay.index}
           width={columns}
-          maxRows={itemRows}
+          viewportRows={viewportRows}
           onMoveRow={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
           onSwitchSection={(delta) => {
             if (state.overlay.kind !== "settings") return
@@ -676,20 +743,15 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
                     type: "OVERLAY_OPEN",
                     overlay: {
                       kind: "document",
-                      title: `${cell.toolName} output`,
-                      body: formatToolResultBody(cell),
+                      title: commandText("expandTitle", { tool: cell.toolName }),
+                      body: formatToolResultBody(cell, state.config.locale),
                       format: "markdown",
                     },
                   })
                 } else if (cell?.kind === "bash") {
                   dispatch({
                     type: "OVERLAY_OPEN",
-                    overlay: {
-                      kind: "document",
-                      title: "bash output",
-                      body: "# bash\n\n```bash\n" + cell.output + "\n```",
-                      format: "markdown",
-                    },
+                    overlay: bashOutputDocument(cell, state.config.locale),
                   })
                 } else {
                   dispatch({ type: "OVERLAY_CLOSE" })
@@ -736,6 +798,9 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
         <McpPanel
           servers={state.overlay.servers}
           probing={state.overlay.probing}
+          runtimeBackend={state.overlay.runtimeBackend}
+          onRefresh={() => void mcpRefreshSession(mcpPanelDeps())}
+          onApply={() => void mcpApplySession(mcpPanelDeps())}
           width={columns}
           maxRows={itemRows}
           onTools={(name) => void openMcpToolsPanel(name, mcpPanelDeps())}
@@ -756,8 +821,8 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
               type: "OVERLAY_OPEN",
               overlay: {
                 kind: "confirm",
-                title: "Remove MCP server",
-                body: `Remove **${name}** from \`~/.cognia/mcp.json\`?\n\nRe-add it any time with \`/mcp add\`.`,
+                title: t("mcp.removeTitle"),
+                body: t("mcp.removeBody", { name }),
                 format: "markdown",
                 onConfirmCommand: `mcp remove ${name}`,
                 onCancelCommand: "mcp",
@@ -769,6 +834,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
       )}
       {state.overlay.kind === "mcpTools" && (
         <McpToolsPanel
+          key={state.overlay.server}
           server={state.overlay.server}
           tools={state.overlay.tools}
           width={columns}
@@ -1000,19 +1066,20 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           const filtered = filterQuickActions(state.overlay.rows, query)
           return (
             <SelectList
-              title="Command center"
-              items={filtered.map((r) => ({ label: r.label, hint: r.hint }))}
+              title={t("commandCenter")}
+              items={filtered.map((r) => ({ label: r.label, hint: r.disabledReason ?? r.hint }))}
               index={state.overlay.index}
               width={columns}
               maxRows={itemRows}
               query={query}
-              searchPlaceholder="type to filter commands"
-              emptyHint="no commands match"
-              footerHint="type to search · ↑/↓ navigate · Enter / click run · Esc close"
+              searchPlaceholder={t("filterCommands")}
+              emptyHint={t("noCommands")}
+              footerHint={t("commandHint")}
               onQueryChange={(q) => dispatch({ type: "OVERLAY_QUERY", query: q })}
               onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
               onSelect={(i) => {
                 const row = filtered[i]
+                if (row?.disabledReason) return
                 // Close the command center first, then run the picked command —
                 // most targets open their own overlay (which would replace this
                 // one anyway), but a notice/runtime target must not leave the
@@ -1097,7 +1164,11 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
         />
       )}
       {state.overlay.kind === "help" && (
-        <Help viewportRows={viewportRows} onClose={() => dispatch({ type: "OVERLAY_CLOSE" })} />
+        <Help
+          keybindings={state.config.keybindings}
+          viewportRows={viewportRows}
+          onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
+        />
       )}
       {state.overlay.kind === "historySearch" && (
         <HistorySearch
@@ -1167,11 +1238,57 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           }}
         />
       )}
+      {state.overlay.kind === "skillFiles" && (
+        <SkillFilesOverlay
+          key={state.overlay.root}
+          title={state.overlay.title}
+          root={state.overlay.root}
+          files={state.overlay.files}
+          columns={columns}
+          viewportRows={viewportRows}
+          onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
+        />
+      )}
+      {state.overlay.kind === "gitDiff" && (
+        <Box flexDirection="column">
+          {state.overlay.loading ? <Text>{t("working")}</Text> : null}
+          {state.overlay.error ? (
+            <Text color={theme.danger} wrap="truncate-end">
+              {t("diffFailed", { error: state.overlay.error })}
+            </Text>
+          ) : null}
+          <GitDiffOverlay
+            key={state.overlay.review.baseRef ?? "working"}
+            review={state.overlay.review}
+            status={state.overlay.loading ? "loading" : state.overlay.error ? "failed" : undefined}
+            columns={columns}
+            viewportRows={Math.max(
+              1,
+              viewportRows - (state.overlay.loading ? 1 : 0) - (state.overlay.error ? 1 : 0)
+            )}
+            onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            onRefresh={() => {
+              if (state.overlay.kind === "gitDiff" && !state.overlay.loading)
+                runCommandLine(
+                  `/diff${state.overlay.review.baseRef ? ` ${state.overlay.review.baseRef}` : ""}`
+                )
+            }}
+            onCopy={(text) => {
+              const copy =
+                props.copyClipboard ??
+                ((value: string) => copyToClipboard(value, state.config.clipboard))
+              void copy(text).then((result) =>
+                dispatch({ type: "NOTICE", message: result.ok ? t("copied") : t("copyFailed") })
+              )
+            }}
+          />
+        </Box>
+      )}
       {state.overlay.kind === "document" && (
         <DocumentViewer
           columns={columns}
-          title={state.overlay.title}
-          body={state.overlay.body}
+          title={liveBashDocument?.title ?? state.overlay.title}
+          body={liveBashDocument?.body ?? state.overlay.body}
           format={state.overlay.format}
           lang={state.overlay.lang}
           viewportRows={viewportRows}
@@ -1238,6 +1355,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
       )}
       {state.overlay.kind === "confirm" && (
         <ConfirmOverlay
+          columns={columns}
           title={state.overlay.title}
           body={state.overlay.body}
           format={state.overlay.format}
@@ -1247,6 +1365,15 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
             dispatch({ type: "OVERLAY_CLOSE" })
             runCommandLine(`/${cmd}`.trim())
           }}
+          onRemember={
+            state.overlay.onRememberCommand
+              ? () => {
+                  const cmd = (state.overlay as { onRememberCommand: string }).onRememberCommand
+                  dispatch({ type: "OVERLAY_CLOSE" })
+                  runCommandLine(`/${cmd}`.trim())
+                }
+              : undefined
+          }
           onCancel={() => {
             const cancel = (state.overlay as { onCancelCommand?: string }).onCancelCommand
             dispatch({ type: "OVERLAY_CLOSE" })

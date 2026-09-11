@@ -365,11 +365,11 @@ describe("settingsSections", () => {
     expect((overridden.control as { current: boolean }).current).toBe(true)
   })
 
-  it("renders the working dir read-only and additional roots as a delegate", () => {
+  it("renders working dir and additional roots as interactive delegates", () => {
     const ws = settingsSections(cfg({ additionalRoots: ["/a", "/b"] })).find(
       (s) => s.id === "workspace"
     )!
-    expect(ws.rows.find((r) => r.id === "cwd")!.control.type).toBe("readonly")
+    expect(ws.rows.find((r) => r.id === "cwd")!.control.type).toBe("delegate")
     const roots = ws.rows.find((r) => r.id === "additionalRoots")!
     expect(roots.value).toBe("2 roots")
     expect((roots.control as { command: string }).command).toBe("/add-dir")
@@ -625,5 +625,58 @@ describe("label column budget", () => {
     expect(labels.length).toBeGreaterThan(0)
     const tooWide = labels.filter((label) => label.length > LABEL_COLUMN)
     expect(tooWide).toEqual([])
+  })
+})
+
+describe("settings locale", () => {
+  it("localizes every section and row without altering controls or user values", () => {
+    const en = settingsSections(cfg())
+    const zh = settingsSections(cfg({ locale: "zh-CN" }))
+    expect(zh.map((section) => section.title)).toContain("模型与推理")
+    for (let index = 0; index < en.length; index++) {
+      expect(zh[index].id).toBe(en[index].id)
+      for (let rowIndex = 0; rowIndex < en[index].rows.length; rowIndex++) {
+        const row = zh[index].rows[rowIndex]
+        if (row.id !== "locale") expect(row.control).toEqual(en[index].rows[rowIndex].control)
+        expect(row.label).toMatch(/[\u3400-\u9fff]/)
+        expect(row.description).toMatch(/[\u3400-\u9fff]/)
+        expect(JSON.stringify(row)).not.toContain("cliUiSettings.")
+      }
+    }
+    const configured = settingsSections(
+      cfg({
+        locale: "zh-CN",
+        cwd: "/custom/path",
+        providers: { anthropic: { model: "user-model" } },
+      })
+    )
+    expect(configured[0].rows.find((row) => row.id === "model")?.value).toBe("user-model")
+    expect(configured.find((section) => section.id === "workspace")?.rows[0].value).toBe(
+      "/custom/path"
+    )
+  })
+
+  it("uses the configured expand shortcut in the localized description", () => {
+    const row = findRow(
+      cfg({ locale: "zh-CN", keybindings: { collapseAll: "ctrl+e" } }),
+      "display",
+      "collapseTools"
+    )
+    expect(row?.description).toContain("Ctrl+E")
+    expect(row?.description).not.toContain("Ctrl+T")
+  })
+})
+
+it("opens workspace browsing and exposes removal for every additional root", () => {
+  const config = cfg({ additionalRoots: ["/a", "/b"], locale: "zh-CN" })
+  expect(findRow(config, "workspace", "cwd")?.control).toEqual({ type: "delegate", command: "/cd" })
+  expect(findRow(config, "workspace", "additionalRoots")?.control).toEqual({
+    type: "delegate",
+    command: "/add-dir",
+  })
+  expect(findRow(config, "workspace", "root:2")).toMatchObject({
+    value: "/b",
+    label: "移除目录 2…",
+    control: { command: "/add-dir remove 2" },
   })
 })

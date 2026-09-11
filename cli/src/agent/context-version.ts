@@ -8,12 +8,14 @@
  * instructions after `/mode`, `/skill`, `/mcp`, `/add-dir` or a system-prompt
  * edit, while the TUI shows the new value as active.
  *
- * The hash deliberately covers only SEMANTIC fields. Credentials, per-turn
- * content and transport-local knobs are excluded: including them would recreate
- * the agent's conversation for changes that do not alter what the session means.
+ * Per-turn content and model-provider credentials are excluded. MCP connection
+ * configuration is fingerprinted in full: changed endpoints or authentication
+ * must be applied to the connection created by the external agent.
  */
 
 import type { McpServer, SendOptions } from "@cognia/agent-config-types"
+
+import { mcpConfigVersion } from "./tool-host/mcp-status"
 
 import { hashHex } from "../runtime/crypto-hasher"
 
@@ -46,6 +48,7 @@ function mcpFingerprint(server: McpServer): string {
     s.command ?? "",
     (s.args ?? []).join(" "),
     s.url ?? "",
+    mcpConfigVersion(server.config ?? {}),
   ].join(FIELD_SEP)
 }
 

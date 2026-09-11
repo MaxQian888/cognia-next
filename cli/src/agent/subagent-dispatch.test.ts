@@ -867,7 +867,7 @@ describe("handleCliDispatchAgent, cancel / multi-collect / model / width", () =>
   })
 
   it("overlays a per-call model onto the definition for that run only", async () => {
-    const run = jest.fn(async () => ({ text: "ok" }))
+    const run = jest.fn(async (_agent: AgentSummary["def"]) => ({ text: "ok" }))
     registerCliSubagentContext("s1", makeCtx({ run }))
     await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "x", model: "fast" }))
     expect(run.mock.calls[0][0]).toMatchObject({ id: "reviewer", model: "fast" })

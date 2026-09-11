@@ -1100,3 +1100,48 @@ describe("built-in plugin schema preparation", () => {
     }
   })
 })
+
+it("points recovery at the most recently preserved snapshot without changing files", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-recovery-latest-"))
+  const dir = path.join(home, "db.json.tables")
+  fs.mkdirSync(dir)
+  const old = path.join(dir, "manifest.json.incompatible-1")
+  const latest = path.join(dir, "manifest.json.incompatible-70")
+  fs.writeFileSync(old, "old")
+  fs.writeFileSync(latest, "new")
+  fs.utimesSync(old, 1, 1)
+  fs.utimesSync(latest, 2, 2)
+  try {
+    const { opts } = makeOpts({ home, readSnapshot: undefined, writeSnapshot: undefined })
+    await expect(ensureCliDb(opts)).rejects.toMatchObject({ preservedPath: latest })
+    expect(fs.readFileSync(old, "utf8")).toBe("old")
+    expect(fs.readFileSync(latest, "utf8")).toBe("new")
+    expect(fs.existsSync(path.join(dir, "manifest.json"))).toBe(false)
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true })
+  }
+})
+
+it("makes concurrent callers await restoration and receive its failure", async () => {
+  let rejectReady!: (error: Error) => void
+  const ready = new Promise<void>((_, reject) => {
+    rejectReady = reject
+  })
+  const { opts } = makeOpts({ whenReady: () => ready })
+  const first = ensureCliDb(opts)
+  const second = ensureCliDb(opts)
+  let resolved = false
+  void second.then(
+    () => {
+      resolved = true
+    },
+    () => {}
+  )
+  await Promise.resolve()
+  await Promise.resolve()
+  expect(resolved).toBe(false)
+  const failure = new Error("restore failed")
+  rejectReady(failure)
+  await expect(first).rejects.toBe(failure)
+  await expect(second).rejects.toBe(failure)
+})

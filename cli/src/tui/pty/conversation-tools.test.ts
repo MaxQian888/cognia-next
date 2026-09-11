@@ -250,6 +250,79 @@ maybe("conversation: tools and approvals", () => {
     expect(result.record.decisions).toEqual([{ toolName: "bash", decision: { decision: "allow" } }])
   })
 
+  it("reviews complete approval arguments and diffs on a small terminal without deciding", async () => {
+    const result = await runConversation(
+      {
+        geometry: { columns: 40, rows: 12 },
+        scenario: {
+          turns: [
+            {
+              steps: [
+                {
+                  kind: "ask-permission",
+                  toolName: "bash",
+                  input: {
+                    command: `chmod +x ${"long-directory/".repeat(20)}deploy.sh`,
+                    tail: "APPROVAL_ARGUMENT_TAIL",
+                  },
+                },
+                {
+                  kind: "ask-permission",
+                  toolName: "write",
+                  input: {
+                    file_path: "long.ts",
+                    content: Array.from({ length: 60 }, (_, i) => `const line${i} = ${i}`).join(
+                      "\n"
+                    ),
+                  },
+                },
+                { kind: "text", delta: "both approvals resolved" },
+              ],
+            },
+          ],
+        },
+      },
+      async (session) => {
+        await session.send("review changes")
+        await session.waitForText("Allow bash?")
+        await session.press("down")
+        await session.waitForText("❯ Allow always")
+        await session.raw("v")
+        await session.waitForText("Review bash")
+        await session.raw("G")
+        await session.waitForText("APPROVAL_ARGUMENT_TAIL")
+        await session.press("enter")
+        await session.waitForText("Allow bash?")
+        expect(session.flat()).toContain("❯ Allow always")
+        await session.raw("v")
+        await session.waitForText("Review bash")
+        await session.press("escape")
+        await session.waitForText("Allow bash?")
+        await session.press("enter")
+        await session.waitForText("Allow write?")
+        await session.raw("v")
+        await session.waitForText("Review write")
+        await session.raw("G")
+        await session.waitForText("const line59 = 59")
+        await session.resize(60, 16)
+        await session.waitForText("const line59 = 59")
+        await session.resize(40, 12)
+        await session.waitForText("Esc/Enter back")
+        expect(session.rows().length).toBeLessThanOrEqual(12)
+        for (const row of session.rows()) expect(row.length).toBeLessThanOrEqual(40)
+        await session.press("escape")
+        await session.waitForText("Allow write?")
+        expect(session.flat()).toContain("Allow once")
+        await session.press("enter")
+        await session.waitForText("both approvals resolved")
+      }
+    )
+    expect(result.record.decisions.map((entry) => entry.decision.decision)).toEqual([
+      "allow_always",
+      "allow",
+    ])
+  })
+
   it("runs a read-only command without asking anybody", async () => {
     const result = await runConversation(
       {

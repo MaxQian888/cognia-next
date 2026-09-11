@@ -44,6 +44,7 @@ describe("PARITY_COMMANDS", () => {
   it("/diff emits a gitDiff effect (App shells git diff)", () => {
     expect(find("diff").handler!(ctx())).toEqual({ kind: "gitDiff" })
     expect(find("diff").aliases).toContain("changes")
+    expect(find("diff").handler!(ctx(" main "))).toEqual({ kind: "gitDiff", baseRef: "main" })
   })
 
   it("/analyze emits an analyzeBash effect (App debugs the last failed !command)", () => {

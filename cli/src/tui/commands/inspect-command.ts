@@ -5,13 +5,17 @@
  * the keyboard route the screenshot's "click to expand" maps to (Ink can't catch
  * clicks on scrollback). Pure handler over `ctx.state.cells`.
  */
+import { createCliTranslator } from "../i18n"
 import { collectInspectables } from "../runtime/inspect"
 import type { CommandContext, CommandDescriptor, CommandEffect } from "./types"
 
 export function inspectHandler(ctx: CommandContext): CommandEffect {
   const items = collectInspectables(ctx.state.cells)
   if (items.length === 0) {
-    return { kind: "notice", message: "No tool output to inspect yet." }
+    return {
+      kind: "notice",
+      message: createCliTranslator(ctx.config.locale, "cliUiCommands")("inspectEmpty"),
+    }
   }
   return { kind: "openOverlay", overlay: { kind: "inspect", items, index: 0 } }
 }

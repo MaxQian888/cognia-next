@@ -8,11 +8,12 @@
  * the next turn rebuilds with the new dirs.
  */
 import path from "node:path"
+import { createCliTranslator, type CliLocale } from "../i18n"
 
 export type AddDirOp = "add" | "remove" | "list"
 
 export interface AddDirDeps {
-  config: { additionalRoots?: string[] }
+  config: { additionalRoots?: string[]; locale?: CliLocale }
   /** Resolve relative paths against the working dir. */
   cwd: string
   exists: (p: string) => boolean
@@ -28,19 +29,24 @@ export interface AddDirResult {
 
 export function computeAddDir(op: AddDirOp, arg: string, deps: AddDirDeps): AddDirResult {
   const roots = deps.config.additionalRoots ?? []
+  const t = createCliTranslator(deps.config.locale, "cliUiStartup")
 
   if (op === "list") {
     if (roots.length === 0) {
-      return { message: "No additional roots. Add one with /add-dir <path>." }
+      return { message: t("rootsEmpty", { command: "/add-dir <path>" }) }
     }
     return {
-      message: "Additional roots:\n" + roots.map((r, i) => `  ${i + 1}. ${r}`).join("\n"),
+      message: t("rootsTitle") + "\n" + roots.map((r, i) => `  ${i + 1}. ${r}`).join("\n"),
     }
   }
 
   const raw = arg.trim()
   if (!raw) {
-    return { message: `Usage: /add-dir ${op === "remove" ? "remove <path | index>" : "<path>"}` }
+    return {
+      message: t(op === "remove" ? "rootsRemoveUsage" : "rootsAddUsage", {
+        command: op === "remove" ? "/add-dir remove <path | index>" : "/add-dir <path>",
+      }),
+    }
   }
 
   if (op === "remove") {
@@ -52,20 +58,23 @@ export function computeAddDir(op: AddDirOp, arg: string, deps: AddDirDeps): AddD
       const abs = path.isAbsolute(raw) ? raw : path.resolve(deps.cwd, raw)
       target = roots.find((r) => r === raw || r === abs)
     }
-    if (!target) return { message: `Not an added root: ${raw}` }
-    return { roots: roots.filter((r) => r !== target), message: `Removed ${target}.` }
+    if (!target) return { message: t("rootsUnknown", { path: raw }) }
+    return {
+      roots: roots.filter((r) => r !== target),
+      message: t("rootsRemoved", { path: target }),
+    }
   }
 
   // add
   const abs = path.isAbsolute(raw) ? raw : path.resolve(deps.cwd, raw)
   if (!deps.exists(abs) || !deps.isDir(abs)) {
-    return { message: `Not a directory: ${abs}` }
+    return { message: t("rootsInvalid", { path: abs }) }
   }
   if (roots.includes(abs)) {
-    return { message: `Already added: ${abs}` }
+    return { message: t("rootsDuplicate", { path: abs }) }
   }
   return {
     roots: [...roots, abs],
-    message: `Added ${abs} — the agent can read it from the next turn.`,
+    message: t("rootsAdded", { path: abs }),
   }
 }

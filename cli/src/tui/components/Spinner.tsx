@@ -12,6 +12,8 @@ import { Text } from "ink"
 
 import { useAnimationTick } from "../render/use-animation-tick"
 import { useTheme } from "../theme/context"
+import { useScreenReader } from "../render/context"
+import { useCliTranslations } from "../i18n"
 
 /** Braille dots, the cadence every other terminal agent uses. */
 export const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const
@@ -44,11 +46,17 @@ export function hasSpinnerFrame(text: string): boolean {
 
 export function Spinner({ color }: { color?: string }) {
   const tick = useAnimationTick(SPINNER_MS)
+  const screenReader = useScreenReader()
+  const t = useCliTranslations("cliUiCommon")
+  if (screenReader) return <Text>{t("working")}</Text>
   return <Text color={color}>{frameAt(SPINNER_FRAMES, tick)}</Text>
 }
 
 export function ThinkingPulse({ color }: { color?: string }) {
   const theme = useTheme()
   const tick = useAnimationTick(PULSE_MS)
+  const screenReader = useScreenReader()
+  const t = useCliTranslations("cliUiCommon")
+  if (screenReader) return <Text>{t("thinking")}</Text>
   return <Text color={color ?? theme.thinking}>{frameAt(PULSE_FRAMES, tick)}</Text>
 }

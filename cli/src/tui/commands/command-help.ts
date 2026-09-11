@@ -1,51 +1,59 @@
-/**
- * Build a focused help document for a single slash command — the body shown by
- * `/help <command>`. Pure presenter: renders the command's description, aliases,
- * usage hint, structured arguments, and subcommands as markdown so the document
- * pager colourises it. Complements the category-grouped `/help` overlay (which
- * only lists names) with per-command detail the user would otherwise have to
- * guess.
- */
+/** Focused, localized help for a slash command. Contributed copy stays intact. */
+import commandMessages from "@/i18n/messages/en/cliUiCommands.json"
+import { createCliTranslator, type CliLocale } from "../i18n"
+import { localizedCommandDescription } from "./help-model"
 import type { CommandArgSpec, CommandDescriptor, SubcommandSpec } from "./types"
 
-function renderArg(a: CommandArgSpec): string {
-  const opt = a.required ? "" : " _(optional)_"
-  const choices = a.type === "enum" && a.options?.length ? ` — one of: ${a.options.join(", ")}` : ""
-  const label = a.label && a.label !== a.name ? ` — ${a.label}` : ""
+type Translator = ReturnType<typeof createCliTranslator>
+const subcommands: Record<string, Record<string, string>> = commandMessages.subcommands
+const argumentLabels: Record<
+  string,
+  Record<string, Record<string, string>>
+> = commandMessages.argumentsLabels
+
+function renderArg(a: CommandArgSpec, t: Translator, command: string, subcommand = ""): string {
+  const opt = a.required ? "" : ` _(${t("optional")})_`
+  const choices =
+    a.type === "enum" && a.options?.length
+      ? ` — ${t("oneOf", { choices: a.options.join(", ") })}`
+      : ""
+  const translatedLabel = argumentLabels[command]?.[subcommand]?.[a.name]
+    ? t(`argumentsLabels.${command}.${subcommand}.${a.name}`)
+    : a.label
+  const label = translatedLabel && translatedLabel !== a.name ? ` — ${translatedLabel}` : ""
   return `- \`${a.name}\`${opt}${label}${choices}`
 }
 
-function renderSub(cmd: string, s: SubcommandSpec): string {
+function renderSub(cmd: string, s: SubcommandSpec, t: Translator): string {
   const hint = s.argumentHint ? ` ${s.argumentHint}` : ""
-  return `- \`/${cmd} ${s.name}${hint}\` — ${s.description}`
+  const description = subcommands[cmd]?.[s.name] ? t(`subcommands.${cmd}.${s.name}`) : s.description
+  const lines = [`- \`/${cmd} ${s.name}${hint}\` — ${description}`]
+  for (const arg of s.args ?? []) lines.push(`  ${renderArg(arg, t, cmd, s.name)}`)
+  return lines.join("\n")
 }
 
-/** The title + markdown body for `/help <command>`. */
-export function buildCommandHelpDocument(desc: CommandDescriptor): {
+/** Identifiers, enum values and usage syntax remain executable in every locale. */
+export function buildCommandHelpDocument(
+  desc: CommandDescriptor,
+  locale?: CliLocale
+): {
   title: string
   body: string
 } {
-  const lines: string[] = []
-  lines.push(`# /${desc.name}`)
+  const t = createCliTranslator(locale, "cliUiCommands")
+  const lines: string[] = [`# /${desc.name}`]
   if (desc.aliases && desc.aliases.length > 0) {
-    lines.push("")
-    lines.push(`**Aliases:** ${desc.aliases.map((a) => `/${a}`).join(", ")}`)
+    lines.push("", `**${t("aliases")}** ${desc.aliases.map((a) => `/${a}`).join(", ")}`)
   }
-  lines.push("")
-  lines.push(desc.description)
-  if (desc.argumentHint) {
-    lines.push("")
-    lines.push(`**Usage:** \`/${desc.name} ${desc.argumentHint}\``)
-  }
+  lines.push("", localizedCommandDescription(desc, t))
+  if (desc.argumentHint) lines.push("", `**${t("usage")}** \`/${desc.name} ${desc.argumentHint}\``)
   if (desc.args && desc.args.length > 0) {
-    lines.push("")
-    lines.push("## Arguments")
-    for (const a of desc.args) lines.push(renderArg(a))
+    lines.push("", `## ${t("arguments")}`)
+    for (const a of desc.args) lines.push(renderArg(a, t, desc.name))
   }
   if (desc.subcommands && desc.subcommands.length > 0) {
-    lines.push("")
-    lines.push("## Subcommands")
-    for (const s of desc.subcommands) lines.push(renderSub(desc.name, s))
+    lines.push("", `## ${t("subcommandsTitle")}`)
+    for (const s of desc.subcommands) lines.push(renderSub(desc.name, s, t))
   }
-  return { title: `Help: /${desc.name}`, body: lines.join("\n") }
+  return { title: t("helpTitle", { command: desc.name }), body: lines.join("\n") }
 }

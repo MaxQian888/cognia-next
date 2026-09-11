@@ -6,6 +6,8 @@
  * one-line hint. Pure presenter — every value is a prop.
  */
 import React from "react"
+import { useCliTranslations } from "../i18n"
+import { PERMISSION_MODES } from "../../config/schema"
 import { Box, Text } from "ink"
 
 import { useTheme } from "../theme/context"
@@ -43,15 +45,21 @@ export function Banner({
   status?: BannerStatus
   density?: BannerDensity
 }) {
+  const t = useCliTranslations("cliUiCommon")
   const theme = useTheme()
   const bypass = status?.mode === "bypassPermissions"
   const statusSegments: string[] = []
-  if (status?.mode) statusSegments.push(bypass ? `⚠ ${status.mode}` : status.mode)
+  if (status?.mode) {
+    const mode = PERMISSION_MODES.some((value) => value === status.mode)
+      ? t(`permissionModes.${status.mode}`)
+      : status.mode
+    statusSegments.push(bypass ? `⚠ ${mode}` : mode)
+  }
   if (typeof status?.contextPct === "number") {
-    statusSegments.push(`${Math.round(status.contextPct)}% ctx`)
+    statusSegments.push(t("contextUsage", { percent: Math.round(status.contextPct) }))
   }
   if (typeof status?.sessionTokens === "number") {
-    statusSegments.push(`${formatTokens(status.sessionTokens)} tok`)
+    statusSegments.push(t("tokenUsage", { count: formatTokens(status.sessionTokens) }))
   }
   if (density === "compact") {
     return (
@@ -89,7 +97,7 @@ export function Banner({
       )}
       {density === "full" ? (
         <Text color={theme.muted} dimColor>
-          {"/settings to configure · /inspect to expand output · /help · @ files · ! shell"}
+          {t("welcomeHint")}
         </Text>
       ) : null}
     </Box>

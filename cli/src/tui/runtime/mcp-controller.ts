@@ -5,6 +5,16 @@
  * writes the `mcp-state.json` disabled overlay; adding writes `~/.cognia/mcp.json`.
  */
 import nodeFs from "node:fs"
+import {
+  readSessionMcpStatus,
+  refreshSessionMcpStatus,
+  applySessionMcpStatus,
+  mcpConfigVersion,
+} from "../../agent/tool-host/mcp-status"
+import type { ResolvedConfig } from "../../config/schema"
+import { createCliTranslator } from "../i18n"
+import { sessionMcpRows, runtimeMcpRowId } from "./mcp-session-view"
+import type { McpPanelServer } from "./mcp-panel-model"
 import path from "node:path"
 
 import { denormalizeMcpEntry } from "@/lib/claude/agents/shared"
@@ -43,6 +53,11 @@ import { buildPromptsDocument, buildResourcesDocument, buildToolsDocument } from
 import type { TuiAction } from "../state/types"
 
 export interface McpDeps {
+  config?: ResolvedConfig
+  sessionId?: string
+  readSession?: typeof readSessionMcpStatus
+  refreshSession?: typeof refreshSessionMcpStatus
+  applySession?: typeof applySessionMcpStatus
   /** Suppress late results and new work after the runtime request is cancelled. */
   signal?: AbortSignal
   dispatch: (action: TuiAction) => void
@@ -85,6 +100,132 @@ const RESERVED_ADD_FLAGS = new Set(["name", "preset", "transport", "command", "u
 function loadServers(deps: McpDeps): McpServer[] {
   if (deps.load) return deps.load()
   return applyDisabled(loadMcpServers(deps.roots), readDisabled(deps.home))
+}
+
+/** Keep the displayed desired configuration and agent inventory in one projection. */
+function panelRows(deps: McpDeps, servers = loadServers(deps)): McpPanelServer[] {
+  const rows: McpPanelServer[] = servers.map((server) => {
+    const cached = deps.probeCache?.get(server.name, server)
+    return {
+      name: server.name,
+      transport: server.transport,
+      enabled: server.enabled,
+      status: server.enabled ? (cached?.status ?? "unknown") : "disabled",
+      ...(cached
+        ? { toolCount: cached.toolCount, error: cached.error, probedAt: cached.probedAt }
+        : {}),
+    }
+  })
+  return deps.config
+    ? sessionMcpRows(
+        rows,
+        servers,
+        deps.config,
+        deps.sessionId ? (deps.readSession ?? readSessionMcpStatus)(deps.sessionId) : undefined
+      )
+    : rows
+}
+
+export function mcpSyncSessionPanel(deps: McpDeps): void {
+  if (deps.signal?.aborted) return
+  deps.dispatch({
+    type: "MCP_SERVERS_REPLACE",
+    servers: panelRows(deps),
+    runtimeBackend: deps.config?.agentBackend ?? "builtin",
+    sessionId: deps.sessionId,
+  })
+}
+
+export async function mcpRefreshSession(deps: McpDeps, quiet = false): Promise<void> {
+  const t = createCliTranslator(deps.config?.locale, "cliUiCommon")
+  if (deps.signal?.aborted) return
+  try {
+    const snapshot = deps.sessionId
+      ? await (deps.refreshSession ?? refreshSessionMcpStatus)(deps.sessionId)
+      : undefined
+    if (deps.signal?.aborted) return
+    if (!snapshot && !quiet) deps.dispatch({ type: "NOTICE", message: t("mcpSession.noSession") })
+    if (snapshot?.telemetry === "failed")
+      deps.dispatch({
+        type: "NOTICE",
+        message: t("mcpSession.refreshFailed", {
+          error: snapshot.error ?? t("mcpSession.unconfirmed"),
+        }),
+      })
+    else if (snapshot?.telemetry === "unsupported" && !quiet)
+      deps.dispatch({
+        type: "NOTICE",
+        message: t(
+          snapshot.servers.some((server) => server.reasonCode === "protocol_unsupported")
+            ? "mcpSession.unsupported"
+            : "mcpSession.unconfirmed"
+        ),
+      })
+  } catch (error) {
+    if (deps.signal?.aborted) return
+    deps.dispatch({
+      type: "NOTICE",
+      message: t("mcpSession.refreshFailed", {
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    })
+  }
+  mcpSyncSessionPanel(deps)
+}
+
+export async function mcpApplySession(deps: McpDeps, allowRestart = false): Promise<void> {
+  const t = createCliTranslator(deps.config?.locale, "cliUiCommon")
+  if (deps.signal?.aborted) return
+  if (!deps.sessionId || !(deps.readSession ?? readSessionMcpStatus)(deps.sessionId)) {
+    deps.dispatch({ type: "NOTICE", message: t("mcpSession.noSession") })
+    return
+  }
+  try {
+    const result = await (deps.applySession ?? applySessionMcpStatus)(deps.sessionId, allowRestart)
+    if (deps.signal?.aborted) return
+    if (result.requiresRestart) {
+      deps.dispatch({
+        type: "OVERLAY_OPEN",
+        overlay: {
+          kind: "confirm",
+          title: t("mcpSession.restartTitle"),
+          format: "markdown",
+          body: t("mcpSession.restartBody"),
+          onConfirmCommand: "mcp apply --restart",
+          onCancelCommand: "mcp",
+        },
+      })
+      return
+    }
+    const unsupported = result.snapshot?.servers.some(
+      (server) => server.reasonCode === "protocol_unsupported"
+    )
+    deps.dispatch({
+      type: "NOTICE",
+      message: t(unsupported ? "mcpSession.unsupported" : "mcpSession.applied"),
+    })
+    if (result.snapshot?.telemetry === "failed")
+      deps.dispatch({
+        type: "NOTICE",
+        message: t("mcpSession.refreshFailed", {
+          error: result.snapshot.error ?? t("mcpSession.unconfirmed"),
+        }),
+      })
+    mcpSyncSessionPanel(deps)
+  } catch (error) {
+    if (!deps.signal?.aborted)
+      deps.dispatch({
+        type: "NOTICE",
+        message: t("mcpSession.applyFailed", {
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      })
+  }
+}
+
+function isCurrentServer(server: McpServer, deps: McpDeps): boolean {
+  const current = loadServers(deps).find((candidate) => candidate.name === server.name)
+  return !!current && mcpConfigVersion(current) === mcpConfigVersion(server)
 }
 
 /** One-glance status glyph + label for the `/mcp list` overlay. */
@@ -169,7 +310,10 @@ export function parseFlags(args: string): Record<string, string> {
 export async function mcpPanel(deps: McpDeps): Promise<void> {
   if (deps.signal?.aborted) return
   const servers = loadServers(deps)
-  if (servers.length === 0) {
+  if (
+    servers.length === 0 &&
+    (!deps.config || !deps.config.agentBackend || deps.config.agentBackend === "builtin")
+  ) {
     deps.dispatch({
       type: "NOTICE",
       message:
@@ -185,7 +329,7 @@ export async function mcpPanel(deps: McpDeps): Promise<void> {
   // stick: re-probe it on open so a recovered server can flip to `connected`
   // instead of requiring a manual reconnect.
   const toProbe = enabledServers.filter((s) => {
-    const cached = cache?.get(s.name)
+    const cached = cache?.get(s.name, s)
     return !cached || cached.status === "failed"
   })
   const toProbeNames = new Set(toProbe.map((s) => s.name))
@@ -194,25 +338,44 @@ export async function mcpPanel(deps: McpDeps): Promise<void> {
     overlay: {
       kind: "mcp",
       probing: toProbe.length > 0,
-      servers: servers.map((s) => {
-        const cached = s.enabled ? cache?.get(s.name) : undefined
-        // A server being re-probed shows `pending` (not its stale `failed`).
-        const status: McpServerStatus | "pending" = !s.enabled
-          ? "disabled"
-          : toProbeNames.has(s.name)
-            ? "pending"
-            : (cached?.status ?? "pending")
-        return {
-          name: s.name,
-          transport: s.transport,
-          enabled: s.enabled,
-          status,
-          ...(cached ? { toolCount: cached.toolCount } : {}),
-        }
-      }),
+      ...(deps.config ? { runtimeBackend: deps.config.agentBackend ?? "builtin" } : {}),
+      servers: ((rows) =>
+        deps.config
+          ? sessionMcpRows(
+              rows,
+              servers,
+              deps.config,
+              deps.sessionId
+                ? (deps.readSession ?? readSessionMcpStatus)(deps.sessionId)
+                : undefined
+            )
+          : rows)(
+        servers.map((s) => {
+          const cached = s.enabled ? cache?.get(s.name, s) : undefined
+          // A server being re-probed shows `pending` (not its stale `failed`).
+          const status: McpServerStatus | "pending" = !s.enabled
+            ? "disabled"
+            : toProbeNames.has(s.name)
+              ? "pending"
+              : (cached?.status ?? "pending")
+          return {
+            name: s.name,
+            transport: s.transport,
+            enabled: s.enabled,
+            status,
+            ...(cached
+              ? { toolCount: cached.toolCount, error: cached.error, probedAt: cached.probedAt }
+              : {}),
+          }
+        })
+      ),
     },
   })
-  if (toProbe.length === 0) return
+  const runtimeRefresh = deps.config ? mcpRefreshSession(deps, true) : Promise.resolve()
+  if (toProbe.length === 0) {
+    await runtimeRefresh
+    return
+  }
   const probe = deps.probeServer ?? defaultProbeServer(deps.home, deps.signal)
   const now = deps.now ?? Date.now
   let remaining = toProbe.length
@@ -237,17 +400,33 @@ export async function mcpPanel(deps: McpDeps): Promise<void> {
         )
         .then((result) => {
           if (deps.signal?.aborted) return
-          cache?.set(s.name, toCacheEntry(result, now()))
           remaining -= 1
+          if (!isCurrentServer(s, deps)) {
+            if (remaining === 0)
+              deps.dispatch({
+                type: "MCP_STATUS_PATCH",
+                name: s.name,
+                patch: {},
+                doneProbing: true,
+              })
+            return
+          }
+          cache?.set(s.name, toCacheEntry(result, now()), s)
           deps.dispatch({
             type: "MCP_STATUS_PATCH",
             name: s.name,
-            patch: { status: result.status, error: result.error, toolCount: result.tools.length },
+            patch: {
+              status: result.status,
+              error: result.error,
+              toolCount: result.tools.length,
+              probedAt: now(),
+            },
             doneProbing: remaining === 0,
           })
         })
     )
   )
+  await runtimeRefresh
 }
 
 /**
@@ -314,8 +493,8 @@ export async function mcpAuthStartupNotices(deps: McpDeps): Promise<void> {
           })
         )
         .then((result) => {
-          if (deps.signal?.aborted) return
-          cache?.set(s.name, toCacheEntry(result, now()))
+          if (deps.signal?.aborted || !isCurrentServer(s, deps)) return
+          cache?.set(s.name, toCacheEntry(result, now()), s)
           if (result.status === "needs_auth" && s.transport !== "stdio") {
             deps.dispatch({
               type: "NOTICE",
@@ -366,14 +545,19 @@ export async function mcpReconnect(name: string, deps: McpDeps): Promise<void> {
       prompts: [],
     })
   )
-  if (deps.signal?.aborted) return
+  if (deps.signal?.aborted || !isCurrentServer(server, deps)) return
   // A reconnect is the one action that always re-probes — refresh the cache so
   // the panel reflects the fresh status and a later re-open stays instant.
-  deps.probeCache?.set(name, toCacheEntry(result, now()))
+  deps.probeCache?.set(name, toCacheEntry(result, now()), server)
   deps.dispatch({
     type: "MCP_STATUS_PATCH",
     name,
-    patch: { status: result.status, error: result.error, toolCount: result.tools.length },
+    patch: {
+      status: result.status,
+      error: result.error,
+      toolCount: result.tools.length,
+      probedAt: now(),
+    },
   })
 }
 
@@ -398,7 +582,11 @@ export async function mcpToggleServerInPanel(
   deps.dispatch({
     type: "MCP_STATUS_PATCH",
     name,
-    patch: { enabled: !disable, status: disable ? "disabled" : "pending" },
+    patch: {
+      enabled: !disable,
+      status: disable ? "disabled" : "pending",
+      ...(deps.config ? { sessionStatus: "pending" as const } : {}),
+    },
   })
   if (!disable) await mcpReconnect(name, deps)
   return disable ? "disabled" : "enabled"
@@ -411,6 +599,37 @@ export async function mcpToggleServerInPanel(
  */
 export async function openMcpToolsPanel(name: string, deps: McpDeps): Promise<void> {
   if (deps.signal?.aborted) return
+  const t = createCliTranslator(deps.config?.locale, "cliUiCommon")
+  const runtime = deps.sessionId
+    ? (deps.readSession ?? readSessionMcpStatus)(deps.sessionId)
+    : undefined
+  const runtimeRow = runtime?.servers.find((server) => runtimeMcpRowId(server) === name)
+  if (runtimeRow?.toolNames?.length) {
+    deps.dispatch({
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "toolBrowser",
+        entries: runtimeRow.toolNames.map((tool) => ({
+          id: tool,
+          name: tool,
+          source: runtimeRow.name,
+          description: t("toolsBrowser.noDescription"),
+          detail: t("toolsBrowser.schemaUnknown"),
+        })),
+      },
+    })
+    return
+  }
+  if (runtimeRow) {
+    openDocument(deps.dispatch, {
+      title: t("mcpSession.toolsTitle", { name: runtimeRow.name }),
+      body: runtimeRow.toolNames?.length
+        ? runtimeRow.toolNames.map((tool) => `- ${tool}`).join("\n")
+        : t("mcpSession.toolsUnknown"),
+      format: "markdown",
+    })
+    return
+  }
   const server = loadServers(deps).find((s) => s.name === name)
   if (!server) {
     deps.dispatch({ type: "NOTICE", message: `MCP server "${name}" not found.` })
@@ -419,7 +638,7 @@ export async function openMcpToolsPanel(name: string, deps: McpDeps): Promise<vo
   const cache = deps.probeCache
   // The panel/startup probe already captured this server's tools (a status-only
   // probe still lists tools) — reuse them so drilling in doesn't re-connect.
-  const cached = cache?.get(name)
+  const cached = cache?.get(name, server)
   let tools: McpToolInfo[]
   if (cached && cached.status === "connected") {
     tools = cached.tools
@@ -440,19 +659,39 @@ export async function openMcpToolsPanel(name: string, deps: McpDeps): Promise<vo
     // on every open (the connected fast-path above only hits on `connected`).
     if (cache) {
       const now = deps.now ?? Date.now
-      cache.set(name, {
-        status: "connected",
-        tools,
-        resources: cached?.resources ?? [],
-        prompts: cached?.prompts ?? [],
-        toolCount: tools.length,
-        probedAt: now(),
-      })
+      cache.set(
+        name,
+        {
+          status: "connected",
+          tools,
+          resources: cached?.resources ?? [],
+          prompts: cached?.prompts ?? [],
+          toolCount: tools.length,
+          probedAt: now(),
+        },
+        server
+      )
     }
   }
   if (deps.signal?.aborted) return
   if (tools.length === 0) {
     deps.dispatch({ type: "NOTICE", message: `"${name}" advertises no tools.` })
+    return
+  }
+  if (deps.config?.agentBackend && deps.config.agentBackend !== "builtin") {
+    deps.dispatch({
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "toolBrowser",
+        entries: tools.map((tool) => ({
+          id: tool.name,
+          name: tool.name,
+          source: name,
+          description: tool.description ?? "",
+          detail: `${t("mcpSession.probeOnly")}\n\n${tool.inputSchema ? `## ${t("toolsBrowser.schema")}\n\n\x60\x60\x60json\n${JSON.stringify(tool.inputSchema, null, 2)}\n\x60\x60\x60` : t("toolsBrowser.schemaUnknown")}`,
+        })),
+      },
+    })
     return
   }
   const disabled = (deps.readDisabledTools ?? (() => readDisabledTools(deps.home)))()
@@ -464,6 +703,7 @@ export async function openMcpToolsPanel(name: string, deps: McpDeps): Promise<vo
       tools: tools.map((t) => ({
         name: t.name,
         description: t.description,
+        inputSchema: t.inputSchema,
         enabled: !disabled.has(mcpToolGateName(name, t.name)),
       })),
     },
@@ -482,6 +722,7 @@ export function mcpToggleTool(server: string, tool: string, enabled: boolean, de
 }
 
 export async function mcpList(deps: McpDeps): Promise<void> {
+  if (deps.config) return mcpPanel(deps)
   if (deps.signal?.aborted) return
   const servers = loadServers(deps)
   if (servers.length === 0) {

@@ -3,7 +3,12 @@
  * `/about`). Kept out of the Ink component so the App router can produce notice
  * text deterministically and the logic is unit-tested without rendering.
  */
-import type { BuiltinToolsConfig } from "@cognia/agent-config-types"
+import { DEFAULT_BUILTIN_TOOLS, type BuiltinToolsConfig } from "@cognia/agent-config-types"
+import { BUILTIN_TOOL_CATEGORIES, namespaced } from "@/lib/settings/builtin-tools"
+import { createMessageResolver } from "@/lib/headless/i18n"
+import enToolSettings from "@/i18n/messages/en/toolSettings.json"
+import zhToolSettings from "@/i18n/messages/zh-CN/toolSettings.json"
+import { createCliTranslator, type CliLocale } from "../i18n"
 
 import { backendIdentity } from "../runtime/backend-identity"
 import type { ResolvedConfig } from "../../config/schema"
@@ -153,6 +158,69 @@ export const BUILTIN_TOOL_CATALOG: BuiltinToolCategory[] = [
     tools: ["web_clone", "web_clone_convert"],
   },
 ]
+
+/** Static catalog row: enabled describes configuration, not runtime availability. */
+export interface ToolCatalogEntry {
+  id: string
+  name: string
+  description: string
+  detail: string
+  source: "builtin"
+  enabled: boolean
+}
+
+/**
+ * Reuse the same metadata and localized descriptions as tool settings. Runtime
+ * schemas live inside sidecar tool factories, so the static browser must not
+ * invent parameter lists or instantiate tool runtimes just to render a menu.
+ */
+export function buildToolCatalogEntries(
+  builtin: BuiltinToolsConfig,
+  locale?: CliLocale
+): ToolCatalogEntry[] {
+  const t = createCliTranslator(locale, "cliUiCommon")
+  const metadata = createMessageResolver(locale === "zh-CN" ? zhToolSettings : enToolSettings)
+  const state = (enabled: boolean) => t(`toolsBrowser.data.${enabled ? "enabled" : "disabled"}`)
+  return BUILTIN_TOOL_CATEGORIES.flatMap((category) => {
+    const enabled = builtin[category.id] ?? DEFAULT_BUILTIN_TOOLS[category.id]
+    return category.tools.map((tool) => {
+      const description = metadata(tool.descriptionKey)
+      const risk = metadata(
+        `risk${tool.riskLevel.charAt(0).toUpperCase()}${tool.riskLevel.slice(1)}`
+      )
+      const details = [
+        t("toolsBrowser.data.category", { category: metadata(category.nameKey) }),
+        t("toolsBrowser.data.risk", { risk }),
+        t("toolsBrowser.data.approval", {
+          approval: t(
+            `toolsBrowser.data.${tool.requiresApproval ? "approvalRequired" : "approvalNotRequired"}`
+          ),
+        }),
+        ...(category.id === "coreFiles"
+          ? [
+              t("toolsBrowser.data.coreAnthropic", {
+                state: state(
+                  builtin.coreFilesOnAnthropic ?? DEFAULT_BUILTIN_TOOLS.coreFilesOnAnthropic
+                ),
+              }),
+            ]
+          : []),
+        "",
+        t("toolsBrowser.data.schemaUnavailable"),
+        "",
+        t("toolsBrowser.data.runtimeCaveat"),
+      ]
+      return {
+        id: namespaced(tool.name),
+        name: tool.name,
+        description,
+        detail: details.join("\n"),
+        source: "builtin" as const,
+        enabled,
+      }
+    })
+  })
+}
 
 /**
  * Build the `/tools` reference document: each built-in tool category with its

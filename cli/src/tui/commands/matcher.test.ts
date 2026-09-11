@@ -2,6 +2,7 @@
  * @jest-environment node
  */
 import { matchSlash, parseSlash, resolveCommand, slashQuery } from "./matcher"
+import { registerCommand, __resetForTesting, type SlashCommand } from "./registry"
 
 describe("parseSlash", () => {
   it("splits the command and args", () => {
@@ -92,4 +93,96 @@ describe("slashQuery", () => {
     expect(slashQuery("/model x")).toBeNull()
     expect(slashQuery("hello")).toBeNull()
   })
+})
+
+describe("nested command palette", () => {
+  const skill: SlashCommand = {
+    name: "skill",
+    aliases: ["skills"],
+    description: "manage skills",
+    category: "cognia",
+    subcommands: [
+      { name: "list", description: "browse available skills", handler: () => ({ kind: "exit" }) },
+      {
+        name: "enable",
+        description: "activate a skill",
+        args: [],
+        argumentHint: "<name>",
+        handler: () => ({ kind: "exit" }),
+      },
+      {
+        name: "enable-all",
+        description: "activate every skill",
+        handler: () => ({ kind: "exit" }),
+      },
+      { name: "disable", description: "deactivate a skill", handler: () => ({ kind: "exit" }) },
+    ],
+  }
+
+  beforeAll(() => {
+    registerCommand(skill)
+    registerCommand({ ...skill, name: "private-test", aliases: [], hidden: true })
+    registerCommand({
+      name: "empty-test",
+      category: "system",
+      description: "empty",
+      subcommands: [],
+    })
+  })
+  afterAll(() => __resetForTesting())
+
+  it("lists children in registry order without history reordering", () => {
+    expect(matchSlash("skill ", { history: ["/skill disable"] }).map((c) => c.name)).toEqual([
+      "skill list",
+      "skill enable",
+      "skill enable-all",
+      "skill disable",
+    ])
+  })
+
+  it("canonicalizes root aliases and preserves child dispatch metadata", () => {
+    const child = matchSlash("SKILLS EN")[0]
+    expect(child).toEqual({ ...skill.subcommands![1], name: "skill enable", category: "cognia" })
+    expect(child.subcommands).toBeUndefined()
+    expect(child.handler).toBe(skill.subcommands![1].handler)
+    expect(matchSlash("skills en").map((c) => c.name)).toEqual(["skill enable", "skill enable-all"])
+  })
+
+  it("falls back to child fuzzy matching, then descriptions", () => {
+    expect(matchSlash("skill dsbl").map((c) => c.name)).toEqual(["skill disable"])
+    expect(matchSlash("skill browse").map((c) => c.name)).toEqual(["skill list"])
+    expect(matchSlash("skill zzzzz")).toEqual([])
+  })
+
+  it.each([
+    "unknown ",
+    "model ",
+    "empty-test ",
+    "private-test ",
+    "skill enable ",
+    "skill enable name",
+    "skill\n",
+    "skill \nlist",
+  ])("does not produce candidates outside an available subcommand level: %s", (query) =>
+    expect(matchSlash(query)).toEqual([])
+  )
+
+  it.each(["/skill ", "/skills en", "/SKILLS EN", "/skill  list", "/skill\tli"])(
+    "keeps the palette open for %s",
+    (text) => expect(slashQuery(text)).toBe(text.slice(1))
+  )
+
+  it.each([
+    "/skill enable ",
+    "/skill enable name",
+    "/skill\n",
+    "/skill \nlist",
+    "/skill\r",
+    "/unknown ",
+    "/empty-test ",
+    "/private-test ",
+    " /skill ",
+  ])("leaves arguments and multiline input alone: %s", (text) =>
+    expect(slashQuery(text)).toBeNull()
+  )
 })

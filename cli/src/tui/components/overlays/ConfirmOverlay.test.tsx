@@ -1,4 +1,7 @@
 import React from "react"
+import { execFileSync } from "node:child_process"
+import { mkdtempSync, rmSync } from "node:fs"
+import { join } from "node:path"
 import { act, render } from "@testing-library/react"
 import { __fireInput, __resetInk } from "ink"
 
@@ -145,4 +148,101 @@ describe("ConfirmOverlay", () => {
     expect(text).toContain("Heading")
     expect(text).toContain("bold")
   })
+})
+
+describe("ConfirmOverlay remembered acknowledgement", () => {
+  beforeEach(() => __resetInk())
+
+  function setup() {
+    const callbacks = { onConfirm: jest.fn(), onRemember: jest.fn(), onCancel: jest.fn() }
+    const view = render(
+      <ConfirmOverlay
+        title="Bypass?"
+        body={longBody}
+        format="text"
+        viewportRows={16}
+        {...callbacks}
+      />
+    )
+    return { ...callbacks, ...view }
+  }
+
+  it("defaults to this session and never implicitly remembers", () => {
+    const view = setup()
+    expect(view.container.textContent).toContain("❯ Enable for this session only")
+    expect(view.container.textContent).toContain("Enable and don't ask again")
+    fire("", { return: true })
+    expect(view.onConfirm).toHaveBeenCalledTimes(1)
+    expect(view.onRemember).not.toHaveBeenCalled()
+    expect(view.onCancel).not.toHaveBeenCalled()
+  })
+
+  it("requires selecting the remember choice before dispatching it", () => {
+    const view = setup()
+    fire("", { downArrow: true })
+    expect(view.container.textContent).toContain("❯ Enable and don't ask again")
+    expect(view.container.textContent).toContain("1–7 / 100")
+    fire("", { return: true })
+    expect(view.onRemember).toHaveBeenCalledTimes(1)
+    expect(view.onConfirm).not.toHaveBeenCalled()
+  })
+
+  it("wraps to cancel with Up and cancels on Enter or Escape", () => {
+    const view = setup()
+    fire("", { upArrow: true })
+    expect(view.container.textContent).toContain("❯ Cancel")
+    fire("", { return: true })
+    fire("", { escape: true })
+    expect(view.onCancel).toHaveBeenCalledTimes(2)
+    expect(view.onRemember).not.toHaveBeenCalled()
+    expect(view.onConfirm).not.toHaveBeenCalled()
+  })
+
+  it("keeps paging and wheel scrolling independent from the selected choice", () => {
+    const view = setup()
+    fire("", { downArrow: true })
+    fire("", { pageDown: true })
+    expect(view.container.textContent).toContain("8–14 / 100")
+    fire("", { pageUp: true })
+    fire("[<65;1;1M")
+    expect(view.container.textContent).toContain("2–8 / 100")
+    fire("", { return: true })
+    expect(view.onRemember).toHaveBeenCalledTimes(1)
+  })
+})
+
+it("keeps bypass choices visible below wrapped warning text in real Ink", () => {
+  const dir = mkdtempSync(join(process.cwd(), "node_modules/.bypass-layout-"))
+  const outfile = join(dir, "overlay.mjs")
+  try {
+    const output = execFileSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+      import {build} from 'esbuild'; import {renderToString, Text} from 'ink';
+      import React from 'react'; import assert from 'node:assert/strict';
+      await build({stdin:{contents:"export {ConfirmOverlay} from './cli/src/tui/components/overlays/ConfirmOverlay'; export {TuiViewportFrame} from './cli/src/tui/components/app/TuiViewportFrame'; export {BYPASS_CONFIRM_BODY,BYPASS_CONFIRM_TITLE} from './cli/src/tui/runtime/permission-mode-switch';",resolveDir:process.cwd()},bundle:true,platform:'node',format:'esm',packages:'external',outfile:${JSON.stringify(outfile)},logLevel:'silent'});
+      const {ConfirmOverlay,TuiViewportFrame,BYPASS_CONFIRM_BODY,BYPASS_CONFIRM_TITLE}=await import(${JSON.stringify(outfile)});
+      for(const [columns,rows] of [[40,10],[80,12],[80,24]]) {
+        const panel=React.createElement(ConfirmOverlay,{columns,viewportRows:rows-1,title:BYPASS_CONFIRM_TITLE,body:BYPASS_CONFIRM_BODY,format:'markdown',onConfirm:()=>{},onRemember:()=>{},onCancel:()=>{}});
+        const frame=React.createElement(TuiViewportFrame,{columns,rows,fullscreen:true,overlayOpen:true,transcript:null,overlays:panel,bottom:React.createElement(Text,null,'FOOTER')});
+        const rendered=renderToString(frame,{columns}).split('\\n');
+        assert.equal(rendered.length,rows,rendered.join('\\n'));
+        const text=rendered.join('\\n');
+        assert.ok(text.includes('Enable for this session only'),text);
+        assert.ok(text.includes("Enable and don't ask again"),text);
+        assert.ok(text.includes('Cancel'),text);
+        assert.equal(rendered[rows-1].trim(),'FOOTER');
+      }
+      console.log('3 bypass layouts passed');
+    `,
+      ],
+      { encoding: "utf8", timeout: 30000 }
+    )
+    expect(output).toContain("3 bypass layouts passed")
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

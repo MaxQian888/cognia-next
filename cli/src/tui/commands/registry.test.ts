@@ -135,6 +135,15 @@ describe("command registry", () => {
       })
     })
 
+    it("carries the explicit remember choice", () => {
+      expect(runMode("bypassPermissions --force --remember")).toEqual({
+        kind: "permissionMode",
+        mode: "bypassPermissions",
+        force: true,
+        remember: true,
+      })
+    })
+
     it("refuses an unknown mode and lists the valid ones", () => {
       const effect = runMode("yolo") as { kind: string; message: string }
       expect(effect.kind).toBe("notice")
@@ -256,12 +265,15 @@ describe("command registry", () => {
     expect(effect).toEqual({ kind: "settingsSet", field: "systemPrompt", value: "be concise" })
   })
 
-  it("/cwd shows the directory bare and changes it with an arg (via the /cd alias)", () => {
+  it("/cwd browses directories bare and changes it with an arg (via the /cd alias)", () => {
     const cwd = getCommand("cwd")
     expect(getCommand("cd")?.name).toBe("cwd")
     const ctx = (args: string) =>
       ({ state: {}, config: { cwd: "/w" }, version: "0", args }) as never
-    expect(cwd?.handler?.(ctx(""))).toEqual({ kind: "notice", message: "/w" })
+    expect(cwd?.handler?.(ctx(""))).toEqual({
+      kind: "openOverlay",
+      overlay: { kind: "workspaceFolder", mode: "cwd" },
+    })
     expect(cwd?.handler?.(ctx("  ../other  "))).toEqual({ kind: "changeCwd", dir: "../other" })
   })
 

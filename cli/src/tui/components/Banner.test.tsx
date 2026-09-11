@@ -1,6 +1,8 @@
 import React from "react"
 import { render } from "@testing-library/react"
 
+import { CliI18nProvider } from "../i18n"
+
 import { Banner } from "./Banner"
 
 describe("Banner", () => {
@@ -80,4 +82,21 @@ describe("Banner", () => {
     expect(text).not.toContain("/settings")
     expect(text).not.toContain("/long/path")
   })
+})
+
+it("renders Chinese welcome hints and status labels", () => {
+  const { container } = render(
+    <CliI18nProvider locale="zh-CN">
+      <Banner
+        version="1"
+        provider="pi-rpc"
+        cwd="/work"
+        status={{ mode: "bypassPermissions", contextPct: 12, sessionTokens: 200 }}
+      />
+    </CliI18nProvider>
+  )
+  expect(container.textContent).toContain("/settings 配置")
+  expect(container.textContent).toContain("⚠ 跳过权限确认")
+  expect(container.textContent).toContain("12% 上下文")
+  expect(container.textContent).not.toContain("to configure")
 })

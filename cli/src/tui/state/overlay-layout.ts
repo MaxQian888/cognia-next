@@ -41,5 +41,6 @@ export function overlayIsInline(overlay: Overlay): boolean {
  * its choices. A full-screen overlay keeps the whole region as before.
  */
 export function inlineOverlayRows(viewportRows: number): number {
-  return Math.max(9, Math.min(viewportRows, Math.floor(viewportRows / 3)))
+  const available = Math.max(1, Math.floor(viewportRows))
+  return Math.min(available, Math.max(9, Math.floor(available / 3)))
 }

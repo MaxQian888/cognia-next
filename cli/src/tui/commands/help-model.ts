@@ -2,6 +2,7 @@
  * Group the command catalog into labelled sections for `/help` and the palette.
  * Pure presenter — fixed display order, empty categories omitted.
  */
+import commandMessages from "@/i18n/messages/en/cliUiCommands.json"
 import type { CommandCategory, CommandDescriptor } from "./types"
 
 export const CATEGORY_LABELS: Record<CommandCategory, string> = {
@@ -49,4 +50,14 @@ export function groupByCategory(commands: CommandDescriptor[]): CategoryGroup[] 
     }
   }
   return groups
+}
+
+/** Built-in descriptions share translations; contributed commands keep their own copy. */
+export function localizedCommandDescription(
+  command: Pick<CommandDescriptor, "name" | "description">,
+  translate: (key: string) => string
+): string {
+  return Object.hasOwn(commandMessages.commands, command.name)
+    ? translate(`commands.${command.name}`)
+    : command.description
 }

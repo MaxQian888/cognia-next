@@ -1,5 +1,5 @@
 /**
- * Cross-platform clipboard *image* read for the upcoming Ctrl+V paste flow.
+ * Cross-platform clipboard *image* read for the Ctrl+V paste flow.
  * Shells out to the native clipboard helper, captures the image as a PNG, and
  * reports the temp path back to the caller. Mirrors the write-only sibling
  * `clipboard.ts`: the spawner (and the disk-existence check) are injected so the
@@ -11,11 +11,11 @@
  * There are two distinct capture mechanisms depending on the helper:
  *
  * - **win32 / darwin — the helper writes the file itself.** PowerShell's
- *   `Clipboard.GetImage().Save(...)` and `osascript`'s write-to-POSIX-file both
+ *   `Clipboard.GetImage().Save(...)` and AppKit's PNG encoder both
  *   produce `outPath` directly. We only need to wait for the child to exit and
  *   then confirm the file is non-empty. `child.stdout` is ignored.
  *
- * - **linux — the helper streams the PNG to stdout.** `xclip -t image/png -o`
+ * - **linux — the helper streams the PNG to stdout.** `xclip -t image/png -o` or `wl-paste --type image/png`
  *   prints raw PNG bytes to stdout and does NOT create a file. Here we pipe the
  *   child's stdout into a write stream at `outPath` ourselves, then confirm the
  *   resulting file is non-empty.
@@ -38,7 +38,7 @@ export interface ClipboardImageCmd {
 
 /**
  * Whether the helper for `platform` emits the PNG on stdout (true) instead of
- * writing `outPath` itself (false). Only linux/xclip streams to stdout.
+ * writing `outPath` itself (false). Only Linux helpers stream to stdout.
  */
 export function imageWritesToStdout(platform: NodeJS.Platform): boolean {
   return platform === "linux"
@@ -52,7 +52,8 @@ export function imageWritesToStdout(platform: NodeJS.Platform): boolean {
  */
 export function clipboardImageCommand(
   platform: NodeJS.Platform,
-  outPath: string
+  outPath: string,
+  env: NodeJS.ProcessEnv = process.env
 ): ClipboardImageCmd | null {
   if (platform === "win32") {
     // Single -Command string: grab the bitmap and Save() it as PNG. No output
@@ -61,28 +62,32 @@ export function clipboardImageCommand(
       "Add-Type -AssemblyName System.Windows.Forms; " +
       "Add-Type -AssemblyName System.Drawing; " +
       "$img=[System.Windows.Forms.Clipboard]::GetImage(); " +
-      `if($img){ $img.Save('${outPath}', ` +
+      `if($img){ $img.Save('${outPath.replace(/'/g, "''")}', ` +
       "[System.Drawing.Imaging.ImageFormat]::Png) }"
     return {
       cmd: "powershell",
-      args: ["-NoProfile", "-NonInteractive", "-Command", script],
+      args: ["-NoProfile", "-NonInteractive", "-STA", "-Command", script],
     }
   }
   if (platform === "darwin") {
-    // Pull the PNG flavour off the clipboard and write the bytes to outPath.
-    // `the clipboard as «class PNGf»` throws when no image is present, so the
-    // try-block leaves outPath absent → `fileReady` stays false.
-    const script =
-      "try\n" +
-      "set pngData to (the clipboard as «class PNGf»)\n" +
-      `set f to (open for access POSIX file "${outPath}" with write permission)\n` +
-      "set eof f to 0\n" +
-      "write pngData to f\n" +
-      "close access f\n" +
-      "end try"
-    return { cmd: "osascript", args: ["-e", script] }
+    // AppKit accepts native TIFF/bitmap data as well as PNG. Pass paths as
+    // argv so spaces, quotes and backslashes cannot alter the helper script.
+    const script = `ObjC.import('AppKit');
+function run(argv) {
+  const board = argv[1] ? $.NSPasteboard.pasteboardWithName(argv[1]) : $.NSPasteboard.generalPasteboard;
+  const file = board.stringForType('public.file-url');
+  const url = file && !file.isNil() ? $.NSURL.URLWithString(file) : null;
+  const image = url && url.isFileURL ? $.NSImage.alloc.initWithContentsOfURL(url) : $.NSImage.alloc.initWithPasteboard(board);
+  if (!image || image.isNil()) return;
+  const bitmap = $.NSBitmapImageRep.imageRepWithData(image.TIFFRepresentation);
+  const png = bitmap.representationUsingTypeProperties($.NSPNGFileType, {});
+  if (!png || png.isNil() || !png.writeToFileAtomically(argv[0], true)) throw Error('Could not save clipboard image');
+}`
+    return { cmd: "osascript", args: ["-l", "JavaScript", "-e", script, outPath] }
   }
   if (platform === "linux") {
+    if (env.WAYLAND_DISPLAY)
+      return { cmd: "wl-paste", args: ["--no-newline", "--type", "image/png"] }
     // xclip prints the raw PNG to stdout; the caller redirects it to outPath.
     return {
       cmd: "xclip",
@@ -112,6 +117,7 @@ function defaultFileReady(path: string): boolean {
 export interface ReadClipboardImageOpts {
   /** Override the detected platform (default: `process.platform`). */
   platform?: NodeJS.Platform
+  env?: NodeJS.ProcessEnv
   /** Inject a fake `child_process.spawn` (default: node's spawn). */
   spawn?: Spawn
   /** Inject the temp output path (default: a random file in the temp dir). */
@@ -142,7 +148,7 @@ export function readClipboardImage(
     opts.createWriteStream ??
     ((p: string) => fsCreateWriteStream(p) as unknown as NodeJS.WritableStream)
 
-  const command = clipboardImageCommand(platform, outPath)
+  const command = clipboardImageCommand(platform, outPath, opts.env)
   if (!command) return Promise.resolve(null)
 
   const toStdout = imageWritesToStdout(platform)
@@ -157,15 +163,21 @@ export function readClipboardImage(
       let sink: NodeJS.WritableStream | null = null
       if (toStdout && child.stdout) {
         sink = createWriteStream(outPath)
+        sink.on("error", () => resolve(null))
         child.stdout.on("data", (chunk: Buffer) => sink?.write(chunk))
       }
 
       child.on("error", () => resolve(null))
       child.on("close", (code) => {
-        sink?.end()
-        if (code !== 0) return resolve(null)
-        // Both modes converge here: confirm the file actually has bytes.
-        resolve(fileReady(outPath) ? { path: outPath } : null)
+        if (code !== 0) {
+          sink?.end()
+          resolve(null)
+          return
+        }
+        // A stdout helper can exit before its PNG has finished flushing to disk.
+        const complete = () => resolve(fileReady(outPath) ? { path: outPath } : null)
+        if (sink) sink.end(complete)
+        else complete()
       })
     } catch {
       resolve(null)

@@ -20,6 +20,7 @@ import {
   sessionCacheSummary,
   shortenCwd,
   usagePanelRows,
+  outputTokensPerSecond,
 } from "./usage"
 import type { SessionTotals, UsageInfo } from "../state/types"
 
@@ -197,6 +198,7 @@ describe("usagePanelRows", () => {
       "Model",
       "Input",
       "Output",
+      "Output rate (turn avg)",
       "Total",
       "Cache read",
       "Cache write",
@@ -561,5 +563,32 @@ describe("modelUsageRows", () => {
       b: totals({ inputTokens: 500, costUsd: 0 }),
     })
     expect(rows.map((r) => r.model)).toEqual(["b", "a"])
+  })
+})
+
+describe("outputTokensPerSecond", () => {
+  it("uses only output tokens and the turn duration", () => {
+    expect(outputTokensPerSecond({ inputTokens: 10000, outputTokens: 120, durationMs: 3000 })).toBe(
+      40
+    )
+    expect(outputTokensPerSecond({ outputTokens: 0, durationMs: 1000 })).toBe(0)
+    expect(usagePanelRows({ outputTokens: 120, durationMs: 3000 }, "model")).toContainEqual({
+      label: "Output rate (turn avg)",
+      value: "40.0 tok/s",
+    })
+  })
+  it.each([
+    undefined,
+    {},
+    { outputTokens: 3 },
+    { durationMs: 1000 },
+    { outputTokens: 3, durationMs: 0 },
+    { outputTokens: -1, durationMs: 1 },
+    { outputTokens: Infinity, durationMs: 1 },
+    { outputTokens: 3, durationMs: NaN },
+    { outputTokens: 3, durationMs: -1 },
+    { outputTokens: Number.MAX_VALUE, durationMs: Number.MIN_VALUE },
+  ])("hides unknown or invalid telemetry %j", (usage) => {
+    expect(outputTokensPerSecond(usage)).toBeNull()
   })
 })

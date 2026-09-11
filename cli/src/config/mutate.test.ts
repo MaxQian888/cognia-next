@@ -80,9 +80,11 @@ describe("setConfigValue", () => {
   it("accepts every settable key", () => {
     const valueFor: Partial<Record<(typeof SETTABLE_KEYS)[number], string>> = {
       permissionMode: "default",
+      bypassConfirmation: "ask",
       thinkingLevel: "high",
       outputStyle: "concise",
       skillLoadMode: "name",
+      locale: "zh-CN",
     }
     for (const key of SETTABLE_KEYS) {
       const value = valueFor[key] ?? "v"
@@ -879,4 +881,13 @@ describe("setProviderExperimentalAgentSdk (ADR-0090 Phase 4)", () => {
       experimentalAgentSdk: true,
     })
   })
+})
+
+it("persists and resets bypass confirmation without enabling bypass", () => {
+  const m = memFs()
+  setConfigValue(HOME, "bypassConfirmation", "never", m.fsx)
+  expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({ bypassConfirmation: "never" })
+  setConfigValue(HOME, "bypassConfirmation", "ask", m.fsx)
+  expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({ bypassConfirmation: "ask" })
+  expect(() => setConfigValue(HOME, "bypassConfirmation", "yes", m.fsx)).toThrow()
 })

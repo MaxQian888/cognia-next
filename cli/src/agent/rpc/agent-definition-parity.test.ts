@@ -11,11 +11,11 @@ describe("composition selection parity", () => {
   it("accepts an internal selection wherever the SDK type is expected", () => {
     const internal: AgentCompositionSelectionV1 = {
       presetId: "coding",
-      authority: "propose",
+      authority: "plan",
       toolPresentation: "native",
-      orchestration: "single",
-      engagement: "interactive",
-      autonomy: "supervised",
+      orchestration: "direct",
+      engagement: "inline",
+      autonomy: "confirm",
       orchestrationRef: "team:alpha",
       runtimeBindingRef: "execution-policy:default",
       legacyModeId: "legacy-mode",
@@ -38,13 +38,16 @@ describe("composition selection parity", () => {
       runtimeBindingRef: true,
       legacyModeId: true,
     }
-    const internalKeys: Record<keyof AgentCompositionSelectionV1, true> = sdkKeys
+    const internalKeys: Record<
+      Extract<keyof AgentCompositionSelectionV1, keyof AgentCompositionSelection>,
+      true
+    > = sdkKeys
     expect(Object.keys(internalKeys).sort()).toEqual(Object.keys(sdkKeys).sort())
   })
 
   it("requires presetId on both sides", () => {
     // @ts-expect-error presetId is mandatory in the SDK type too.
-    const missing: AgentCompositionSelection = { authority: "propose" }
+    const missing: AgentCompositionSelection = { authority: "plan" }
     void missing
     expect(true).toBe(true)
   })

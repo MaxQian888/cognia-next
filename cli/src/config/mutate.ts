@@ -48,12 +48,14 @@ export const SETTABLE_KEYS = [
   "model",
   "systemPrompt",
   "permissionMode",
+  "bypassConfirmation",
   "cwd",
   "thinkingLevel",
   "outputStyle",
   "agentMode",
   "theme",
   "skillLoadMode",
+  "locale",
 ] as const
 export type SettableKey = (typeof SETTABLE_KEYS)[number]
 
@@ -408,6 +410,7 @@ export function setBuiltinTools(
 
 /** Top-level boolean flags editable from the settings panel. */
 export const BOOLEAN_FLAG_KEYS = [
+  "screenReader",
   "webTools",
   "autoRoute",
   "skillTool",

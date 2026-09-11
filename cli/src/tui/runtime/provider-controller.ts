@@ -34,6 +34,8 @@ import {
 import type { RateLimitSnapshot } from "../format/rate-limits"
 import { analyzeSession } from "../format/usage-analysis"
 import type { ToolStat, TuiAction } from "../state/types"
+import { isBuiltinBackend } from "./backend-capabilities"
+import { allocateLimitsRequestId, runLimits, type LimitsDeps } from "./limits-controller"
 
 export const PROVIDER_ACTIONS = [
   "models",
@@ -60,6 +62,10 @@ export interface ProviderControllerDeps {
   usageHistory?: number[]
   toolStats?: Record<string, ToolStat>
   rateLimits?: RateLimitSnapshot
+  presetId?: string
+  backendAgentId?: string
+  agentRateLimits?: LimitsDeps["agentRateLimits"]
+  loadCodexLimits?: LimitsDeps["loadCodexLimits"]
   /** Seams (tests). Production resolves the live planes and the real executor. */
   resolveTransport?: () => Promise<ProviderTransportResolution>
   createExecutor?: (config: ResolvedConfig) => CliProviderExecutor
@@ -108,6 +114,23 @@ export async function runProvider(deps: ProviderControllerDeps): Promise<void> {
     return
   }
   const now = deps.now ?? (() => Date.now())
+  if (
+    action === "balance" &&
+    (!isBuiltinBackend(config.agentBackend) || Object.keys(deps.agentRateLimits ?? {}).length > 0)
+  ) {
+    runLimits({
+      dispatch,
+      config,
+      now,
+      presetId: deps.presetId,
+      backendAgentId: deps.backendAgentId,
+      agentRateLimits: deps.agentRateLimits,
+      loadCodexLimits: deps.loadCodexLimits,
+      usageHistory: deps.usageHistory,
+      toolStats: deps.toolStats,
+    })
+    return
+  }
   const requestId = ++nextProviderRequestId
   const isCurrent = () => nextProviderRequestId === requestId
   const executor = (deps.createExecutor ?? ((c) => createCliProviderExecutor(c)))(config)
@@ -148,13 +171,14 @@ export async function runProvider(deps: ProviderControllerDeps): Promise<void> {
 
     case "balance": {
       const at = now()
+      const limitsRequestId = allocateLimitsRequestId()
       dispatch({
         type: "OVERLAY_OPEN",
         overlay: {
           kind: "limits",
           snapshots: [],
           loading: true,
-          requestId,
+          requestId: limitsRequestId,
           analysis: analyzeSession({ usageHistory: deps.usageHistory, toolStats: deps.toolStats }),
           now: at,
           rateLimits: deps.rateLimits,
@@ -168,7 +192,11 @@ export async function runProvider(deps: ProviderControllerDeps): Promise<void> {
         ...(deps.loadLimits ? { loadLimits: deps.loadLimits } : {}),
       })
         .then((report) => {
-          dispatch({ type: "LIMITS_LOADED", requestId, snapshots: report.snapshots })
+          dispatch({
+            type: "LIMITS_LOADED",
+            requestId: limitsRequestId,
+            snapshots: report.snapshots,
+          })
           if (!isCurrent()) return
           const summary = formatMeterSummary(report.snapshots, at)
           if (summary) dispatch({ type: "NOTICE", message: summary })
@@ -182,7 +210,7 @@ export async function runProvider(deps: ProviderControllerDeps): Promise<void> {
         .catch((error: unknown) => {
           dispatch({
             type: "LIMITS_LOADED",
-            requestId,
+            requestId: limitsRequestId,
             snapshots: [
               {
                 provider: config.provider,

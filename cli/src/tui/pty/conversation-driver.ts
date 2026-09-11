@@ -357,7 +357,7 @@ export async function runConversation(
   }
 
   const finalScreen = screen.text()
-  terminal.kill("SIGINT")
+  terminal.kill("SIGTERM")
   let quitTimer: ReturnType<typeof setTimeout> | undefined
   await Promise.race([
     exited,

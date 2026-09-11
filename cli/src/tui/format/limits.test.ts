@@ -81,7 +81,8 @@ describe("meterFill", () => {
 describe("meterRightLabel", () => {
   it("shows '% used' for window meters", () => {
     expect(meterRightLabel(meter({ usedPct: 21 }))).toBe("21% used")
-    expect(meterRightLabel(meter({ usedPct: null }))).toBe("0% used")
+    expect(meterRightLabel(meter({ usedPct: null }))).toBe("—")
+    expect(meterRightLabel(meter({ usedPct: Number.NaN }))).toBe("—")
   })
 
   it("shows currency-prefixed credit for balance meters", () => {

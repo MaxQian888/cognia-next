@@ -69,7 +69,7 @@ describe("preflight", () => {
     })
     expect(failure?.cause).toBe("unknown-command")
     expect(failure?.details?.join(" ")).toContain("execution and host-admin")
-    expect(failure?.fix.join(" ")).toContain("headless host")
+    expect(failure?.fix?.join(" ")).toContain("headless host")
   })
 
   it("refuses a device-only command on the headless wire", () => {
@@ -79,7 +79,7 @@ describe("preflight", () => {
       body: {},
     })
     expect(failure?.cause).toBe("unknown-command")
-    expect(failure?.fix.join(" ")).toContain("device host")
+    expect(failure?.fix?.join(" ")).toContain("device host")
   })
 
   it("ignores approvals on the headless wire, where a service principal is the authority", () => {
@@ -106,7 +106,7 @@ describe("preflight", () => {
       body: {},
     })
     expect(failure?.cause).toBe("refused")
-    expect(failure?.fix[0]).toContain("host lease demo_command")
+    expect(failure?.fix?.[0]).toContain("host lease demo_command")
   })
 
   it("accepts an interactive command once a lease is supplied, in either spelling", () => {
@@ -137,7 +137,7 @@ describe("preflight", () => {
       transport: transport("http", []),
       body: {},
     })
-    expect(failure?.fix.join(" ")).toContain("authored on the host")
+    expect(failure?.fix?.join(" ")).toContain("authored on the host")
   })
 
   it("accepts a signed-policy command once a policy id is supplied", () => {
@@ -306,7 +306,7 @@ describe("preflight against real commands", () => {
     const command = findCommand("agent_task_cancel")!
     expect(command.approval).toBe("interactive")
     const failure = preflight({ entry: command, transport: transport("http", []), body: {} })
-    expect(failure?.fix[0]).toContain("host lease agent_task_cancel")
+    expect(failure?.fix?.[0]).toContain("host lease agent_task_cancel")
   })
 
   it("lets the same command through on the headless wire", () => {

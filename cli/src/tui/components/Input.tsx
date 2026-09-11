@@ -1,3 +1,4 @@
+import { useCliTranslations } from "../i18n"
 /**
  * The composer: a multiline editor with command history, a `/` command palette,
  * `@` file-path completion, and large-paste collapsing. All editing/keymap logic
@@ -9,11 +10,22 @@
  */
 import fs from "node:fs"
 import path from "node:path"
+import { pathToFileURL } from "node:url"
+import { openBrowser } from "../../mcp/open-browser"
+import { stringWidth } from "../markdown/width"
+import { osc8Link, supportsHyperlinks } from "../markdown/hyperlink"
+import {
+  imagePlaceholderAt,
+  pastedImagePaths,
+  collapseImageRefs,
+  expandComposerPastes,
+} from "../input/image-attachments"
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Box, Text, type DOMElement } from "ink"
 
 import { SlashPalette } from "./SlashPalette"
 import { MentionPalette, orderByGroup } from "./MentionPalette"
+import { useScreenReader } from "../render/context"
 import { useTheme } from "../theme/context"
 import { moveIndex } from "./select-list-state"
 import { bufferFromText, bufferText, moveTo, onFirstLine, onLastLine } from "../input/buffer"
@@ -23,17 +35,12 @@ import { parseMouseEvent } from "../input/mouse"
 import { screenColToBufferCol } from "../input/mouse-cursor"
 import { composerPopupRowAtClick } from "../input/composer-popup-click"
 import { absoluteTopLeft } from "../input/element-position"
-import { useComposerInput } from "../input/input-router"
+import { useComposerInput, useTuiInput, TUI_INPUT_PRIORITY } from "../input/input-router"
 import { nextGraphemeBoundary } from "../text/graphemes"
 import { composerViewport } from "../input/composer-viewport"
 import { windowList } from "./list-window"
 import { buildMentionView } from "./mention-view"
-import {
-  collapsePaste,
-  expandPastes,
-  PASTE_CHAR_THRESHOLD,
-  type PasteResult,
-} from "@/lib/paste-collapse"
+import { collapsePaste, PASTE_CHAR_THRESHOLD, type PasteResult } from "@/lib/paste-collapse"
 import { useInlineSuggest } from "../input/inline-suggest"
 import type { InlineCompleteFn } from "@/lib/chat/completion/inline/ai-provider"
 import type { InlineCommandInfo } from "@/lib/chat/completion/inline/types"
@@ -50,7 +57,11 @@ import { type ListDir } from "../commands/file-completer"
 import { activeBashPathToken, completeBashPath } from "../commands/bash-completer"
 import { detectMention } from "../mention/detector"
 import { acceptMention } from "../mention/accept"
-import { highlightMentions, highlightMentionsWithCursor } from "../mention/highlight"
+import {
+  highlightMentions,
+  highlightMentionsWithCursor,
+  type CursorLineSegment,
+} from "../mention/highlight"
 import { createMentionProviders, type MentionProviders } from "../mention/providers"
 import { createMentionLoader } from "../mention/async-load"
 import type { MentionCandidate } from "../mention/types"
@@ -96,25 +107,52 @@ const LineView = React.memo(function LineView({
   line,
   cursorCol,
   disabled,
+  logicalLine,
+  start,
+  pastes,
 }: {
   line: string
   cursorCol: number
   disabled: boolean
+  logicalLine: string
+  start: number
+  pastes: Record<string, string>
 }) {
   const theme = useTheme()
+  const screenReader = useScreenReader()
   // The caret is split INTO the mention segments rather than replacing them.
   // Rendering the cursor row as plain text instead made an `@agent:` token
   // change colour as the cursor moved onto and off its line.
-  const segments = useMemo(
+  const segments = useMemo<CursorLineSegment[]>(
     () =>
-      cursorCol < 0 || disabled
+      cursorCol < 0 || disabled || screenReader
         ? highlightMentions(line)
         : highlightMentionsWithCursor(line, cursorCol, nextGraphemeBoundary(line, cursorCol)),
-    [line, cursorCol, disabled]
+    [line, cursorCol, disabled, screenReader]
   )
+  const styled = useMemo(() => {
+    let offset = start
+    const result: Array<CursorLineSegment & { image?: string }> = []
+    for (const segment of segments) {
+      if (segment.atEnd) {
+        result.push(segment)
+        continue
+      }
+      const parts: Array<CursorLineSegment & { image?: string }> = []
+      for (const char of segment.text) {
+        const image = imagePlaceholderAt(logicalLine, offset, pastes)?.path
+        const last = parts[parts.length - 1]
+        if (last && last.image === image) last.text += char
+        else parts.push({ ...segment, text: char, image })
+        offset += char.length
+      }
+      result.push(...parts)
+    }
+    return result
+  }, [segments, logicalLine, start, pastes])
   return (
     <Text>
-      {segments.map((seg, i) => {
+      {styled.map((seg, i) => {
         // Two different carets. Over a character, invert the cell. Past the last
         // character, paint the block glyph itself: inverting a FULL BLOCK draws
         // it in the background colour across the whole cell, which is the same
@@ -128,15 +166,18 @@ const LineView = React.memo(function LineView({
             color={
               atEndCaret
                 ? theme.caret
-                : seg.kind === "skill"
+                : ("image" in seg && seg.image) || seg.kind === "skill"
                   ? theme.accent
                   : seg.kind === "agent"
                     ? theme.info
                     : undefined
             }
             inverse={onCharCaret}
+            underline={"image" in seg && Boolean(seg.image)}
           >
-            {seg.text}
+            {seg.image && supportsHyperlinks()
+              ? osc8Link(pathToFileURL(seg.image).href, seg.text, true)
+              : seg.text}
           </Text>
         )
       })}
@@ -161,7 +202,7 @@ function InputImpl({
   enabledSkillIds,
   onToggleSkill,
   onPopupOpenChange,
-  placeholder = "Ask, run /commands, @ files, or ! shell",
+  placeholder,
   vimEnabled = false,
   localSuggestEnabled = true,
   aiComplete,
@@ -216,6 +257,7 @@ function InputImpl({
   /** Debounce before querying the model tier, ms. Clamped [200, 2000]. */
   suggestDebounceMs?: number
 }) {
+  const t = useCliTranslations("cliUiCommon")
   const theme = useTheme()
   const buffer = input.buffer
   const text = bufferText(buffer)
@@ -259,7 +301,10 @@ function InputImpl({
     [buffer, composerWidth, composerRows]
   )
   // Derive the active popup from the buffer.
-  const sQuery = slashQuery(text)
+  const cursorAtEnd =
+    buffer.cursorRow === buffer.lines.length - 1 &&
+    buffer.cursorCol === buffer.lines[buffer.cursorRow].length
+  const sQuery = cursorAtEnd ? slashQuery(text) : null
   const slashMatches = sQuery !== null ? matchSlash(sQuery, { history: input.history.entries }) : []
   const beforeCursor = buffer.lines[buffer.cursorRow].slice(0, buffer.cursorCol)
   // Bash shell-out mode (`!command …`): complete file-path ARGUMENTS, reusing the
@@ -406,9 +451,6 @@ function InputImpl({
   //
   // `→` (or Tab) at the end of the draft accepts it; Alt+]/Alt+[ walk the
   // alternatives, matching the desktop composer's bindings.
-  const cursorAtEnd =
-    buffer.cursorRow === buffer.lines.length - 1 &&
-    buffer.cursorCol === buffer.lines[buffer.cursorRow].length
   // A getter, not a snapshot: `registerCustomCommands` discovers project/user
   // commands from disk in a mount effect, and plugin commands register with
   // their plugin — both after this component's first render. A `useMemo([])`
@@ -479,9 +521,9 @@ function InputImpl({
   const doSubmit = () => {
     const raw = bufferText(buffer)
     if (raw.trim().length === 0) return
-    const expanded = expandPastes(raw, input.pastes).trim()
-    dispatch({ type: "INPUT_PUSH_HISTORY", entry: raw })
-    onHistoryPush?.(raw)
+    const expanded = expandComposerPastes(raw, input.pastes).trim()
+    dispatch({ type: "INPUT_PUSH_HISTORY", entry: expanded })
+    onHistoryPush?.(expanded)
     onSubmit(expanded)
   }
 
@@ -490,6 +532,11 @@ function InputImpl({
       const cmd = slashMatches[idx]
       if (!cmd) return
       const line = `/${cmd.name}`
+      if (cmd.subcommands?.length) {
+        setPopupIndex(0)
+        setBuffer(bufferFromText(`${line} `))
+        return
+      }
       dispatch({ type: "INPUT_PUSH_HISTORY", entry: line })
       onHistoryPush?.(line)
       dispatch({ type: "INPUT_CLEAR" })
@@ -518,7 +565,10 @@ function InputImpl({
   const completePopup = () => {
     if (popupKind === "slash") {
       const cmd = slashMatches[safeIndex]
-      if (cmd) setBuffer(bufferFromText(`/${cmd.name} `))
+      if (cmd) {
+        setPopupIndex(0)
+        setBuffer(bufferFromText(`/${cmd.name} `))
+      }
       return
     }
     if (popupKind === "mention" && detected) {
@@ -537,6 +587,11 @@ function InputImpl({
   // silently killing ALL keyboard input, which looked like the composer losing
   // focus. Ink owns paste coalescing now, so the shim is gone.)
   const applyInsert = (chunk: string) => {
+    const paths = !text.startsWith("!") && pastedImagePaths(chunk, cwd)
+    if (paths) {
+      dispatch({ type: "INPUT_ADD_IMAGES", paths })
+      return
+    }
     const r = routePasteInsert(chunk, pasteSeq.current)
     if (r.isLarge) {
       pasteSeq.current++
@@ -725,14 +780,18 @@ function InputImpl({
       case "history": {
         const r = intent.dir === "up" ? historyUp(input.history, text) : historyDown(input.history)
         dispatch({ type: "INPUT_HISTORY", history: r.history })
-        dispatch({ type: "INPUT_SET", buffer: bufferFromText(r.text) })
+        const recalled = collapseImageRefs(r.text, input.pastes)
+        for (const [id, text] of Object.entries(recalled.pastes)) {
+          dispatch({ type: "INPUT_ADD_PASTE", id, text })
+        }
+        dispatch({ type: "INPUT_SET", buffer: bufferFromText(recalled.text) })
         // Suppress the slash/mention palette for the recalled entry. A bare
         // `/cmd` or `@skill` history line would otherwise re-open the popup,
         // which unconditionally captures ↑/↓ (see keymap) and strands the user
         // mid-cycle — unable to keep stepping through history. Marking the
         // recalled text dismissed keeps `popupOpen` false until the user edits
         // it (setBuffer clears `dismissed`), at which point completion resumes.
-        setDismissed(r.text)
+        setDismissed(recalled.text)
         break
       }
       case "submit":
@@ -751,7 +810,10 @@ function InputImpl({
         togglePopupSkill()
         break
       case "popup-cancel":
-        setDismissed(text)
+        if (popupKind === "slash" && sQuery !== null && /\s/.test(sQuery)) {
+          setPopupIndex(0)
+          setBuffer(bufferFromText(`/${sQuery.split(/\s+/)[0]}`))
+        } else setDismissed(text)
         break
       default:
         break
@@ -770,6 +832,31 @@ function InputImpl({
   useEffect(() => {
     onKeyRef.current = handleKey
   })
+  // Only attachment hits outrank transcript mouse handling. Coordinates use the
+  // same wrapped rows and prompt gutter as the visible composer, not raw paths.
+  useTuiInput(
+    (chunk) => {
+      const mouse = parseMouseEvent(chunk)
+      if (mouse?.kind !== "click") return false
+      const pos = absoluteTopLeft(linesRef.current)
+      if (!pos) return false
+      const row = viewport.rows[mouse.row - 1 - pos.top]
+      const column = mouse.col - 1 - pos.left - PROMPT_WIDTH
+      if (!row || column < 0 || column >= composerWidth - PROMPT_WIDTH - 4) return false
+      const col = row.start + screenColToBufferCol(row.text, column)
+      const image = imagePlaceholderAt(buffer.lines[row.logicalRow], col, input.pastes)
+      if (!image) return false
+      const imageLeft = stringWidth(row.text.slice(0, Math.max(0, image.start - row.start)))
+      const imageRight = stringWidth(
+        row.text.slice(0, Math.min(row.text.length, image.end - row.start))
+      )
+      if (column < imageLeft || column >= imageRight) return false
+      void openBrowser(pathToFileURL(image.path).href)
+      return true
+    },
+    { priority: TUI_INPUT_PRIORITY.global + 1, isActive: !disabled }
+  )
+
   useComposerInput((inputCh, key) => onKeyRef.current(inputCh, key), {
     isActive: !disabled,
     popupOpen,
@@ -856,12 +943,15 @@ function InputImpl({
               </Text>
               <LineView
                 line={visualRow.text}
+                logicalLine={buffer.lines[visualRow.logicalRow]}
+                start={visualRow.start}
+                pastes={input.pastes}
                 cursorCol={visualRow.cursorCol ?? -1}
                 disabled={disabled}
               />
               {visualRow.logicalRow === 0 && !visualRow.continuation && showPlaceholder && (
                 <Text color={theme.muted} dimColor>
-                  {placeholder}
+                  {placeholder ?? t("composerPlaceholder")}
                 </Text>
               )}
               {visualRow.cursorCol !== null && cursorAtEnd && suggestion && (

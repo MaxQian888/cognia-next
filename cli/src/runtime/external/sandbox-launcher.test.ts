@@ -53,6 +53,23 @@ describe("external-agent sandbox launcher", () => {
     ])
   })
 
+  it("denies the ambient Qwen credentials while allowing its task state", () => {
+    const taskHome = "/home/user/.local/share/cognia-agent-tasks/qwen-task"
+    const args = buildSandboxLauncherArgs(
+      {
+        id: "task",
+        command: "npx",
+        args: ["-y", "@qwen-code/qwen-code", "--acp"],
+        cwd: "/work",
+        env: { COGNIA_GATEWAY_TASK_HOME: taskHome },
+      },
+      "/home/user"
+    )
+    expect(args).toEqual(
+      expect.arrayContaining(["--deny-readable", "/home/user/.qwen", "--writable", taskHome])
+    )
+  })
+
   it("binds the dedicated tool-host runtime directory instead of the whole temp root", () => {
     const args = buildSandboxLauncherArgs(
       { id: "a", command: "codex", cwd: "/work/repo" },

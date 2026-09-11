@@ -1,4 +1,5 @@
 import {
+  buildToolCatalogEntries,
   aboutLine,
   authMode,
   BUILTIN_TOOL_CATALOG,
@@ -7,8 +8,12 @@ import {
 } from "./builtins"
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
-import type { BuiltinToolsConfig } from "@cognia/agent-config-types"
-import { BUILTIN_TOOL_CONFIG_KEYS } from "@/lib/settings/builtin-tools"
+import { DEFAULT_BUILTIN_TOOLS, type BuiltinToolsConfig } from "@cognia/agent-config-types"
+import {
+  BUILTIN_TOOL_CATEGORIES,
+  namespaced,
+  BUILTIN_TOOL_CONFIG_KEYS,
+} from "@/lib/settings/builtin-tools"
 
 const base: ResolvedConfig = {
   ...DEFAULT_RESOLVED_CONFIG,
@@ -134,5 +139,81 @@ describe("the /tools catalog covers the whole builtin-tool surface", () => {
       return !line.includes(entry.label)
     }).map((entry) => entry.key)
     expect(unlabelled).toEqual([])
+  })
+})
+
+describe("buildToolCatalogEntries", () => {
+  it("lists every canonical tool once, preserving registered names and stable ids", () => {
+    const entries = buildToolCatalogEntries({} as BuiltinToolsConfig)
+    const names = BUILTIN_TOOL_CATEGORIES.flatMap((category) =>
+      category.tools.map((tool) => tool.name)
+    )
+    expect(entries.map((entry) => entry.name)).toEqual(names)
+    expect(new Set(entries.map((entry) => entry.id)).size).toBe(entries.length)
+    expect(entries.find((entry) => entry.name === "file_hash")?.id).toBe(namespaced("file_hash"))
+    expect(entries.some((entry) => entry.name === "hash")).toBe(false)
+    expect(entries.some((entry) => entry.name === "file_info")).toBe(true)
+    expect(entries.some((entry) => entry.name === "TaskCreate")).toBe(true)
+    expect(entries.some((entry) => entry.name === "TodoWrite")).toBe(true)
+  })
+
+  it("uses default category flags and honors explicit overrides", () => {
+    const defaults = buildToolCatalogEntries({} as BuiltinToolsConfig)
+    for (const category of BUILTIN_TOOL_CATEGORIES) {
+      for (const tool of category.tools) {
+        expect(defaults.find((entry) => entry.name === tool.name)?.enabled).toBe(
+          DEFAULT_BUILTIN_TOOLS[category.id]
+        )
+      }
+    }
+    const entries = buildToolCatalogEntries({ git: false, process: true } as BuiltinToolsConfig)
+    expect(entries.find((entry) => entry.name === "git_status")?.enabled).toBe(false)
+    expect(entries.find((entry) => entry.name === "start_process")?.enabled).toBe(true)
+  })
+
+  it("localizes tool descriptions and metadata without translating tool identifiers", () => {
+    const en = buildToolCatalogEntries(DEFAULT_BUILTIN_TOOLS, "en")
+    const zh = buildToolCatalogEntries(DEFAULT_BUILTIN_TOOLS, "zh-CN")
+    expect(zh.map((entry) => entry.id)).toEqual(en.map((entry) => entry.id))
+    const hash = zh.find((entry) => entry.name === "file_hash")!
+    expect(hash.description).toMatch(/[\u4e00-\u9fff]/)
+    expect(hash.detail).toContain("类别：")
+    expect(hash.detail).toContain("声明风险：低")
+    expect(hash.detail).toContain("工具策略不要求审批")
+    for (const entry of [...en, ...zh]) {
+      expect(entry.description).toBeTruthy()
+      expect(entry.description).not.toMatch(/^tools\./)
+      expect(entry.detail).not.toContain("cliUiCommon.")
+      expect(entry.source).toBe("builtin")
+    }
+  })
+
+  it("shows permission metadata and the static schema/runtime boundary", () => {
+    const entries = buildToolCatalogEntries(DEFAULT_BUILTIN_TOOLS)
+    const process = entries.find((entry) => entry.name === "start_process")!
+    expect(process.detail).toContain("Declared risk: High")
+    expect(process.detail).toContain("required by the tool policy")
+    expect(process.detail).toContain("not included in this static catalog")
+    expect(process.detail).toContain("do not guarantee that each tool is exposed")
+    expect(process.detail).not.toContain(process.description)
+  })
+
+  it("treats Anthropic core registration as a modifier, never a duplicate tool or standalone enablement", () => {
+    const off = buildToolCatalogEntries({
+      coreFiles: false,
+      coreFilesOnAnthropic: true,
+    } as BuiltinToolsConfig)
+    const read = off.find((entry) => entry.name === "read")!
+    expect(read.enabled).toBe(false)
+    expect(read.detail).toContain("Core-file registration on Anthropic: enabled")
+    expect(off.filter((entry) => entry.name === "read")).toHaveLength(1)
+    expect(off.find((entry) => entry.name === "git_status")?.detail).not.toContain(
+      "Core-file registration"
+    )
+    expect(
+      buildToolCatalogEntries({ coreFilesOnAnthropic: false } as BuiltinToolsConfig).find(
+        (entry) => entry.name === "read"
+      )?.detail
+    ).toContain("Core-file registration on Anthropic: disabled")
   })
 })

@@ -32,6 +32,8 @@ import {
   mcpPresets,
   mcpPrompts,
   mcpReconnect,
+  mcpRefreshSession,
+  mcpApplySession,
   mcpRemove,
   mcpResources,
   mcpSetEnabled,
@@ -125,12 +127,14 @@ export interface RuntimeDeps {
   contextWindow?: number
   /** What the active agent backend supports, for `/status`'s blocked-feature list. */
   capabilities?: import("./backend-capabilities").BackendCapabilities
+  backendAgentId?: string
   /** Per-turn token history (for the `/limits` session analysis). */
   usageHistory?: number[]
   /** Per-tool call/error tallies (for the `/limits` session analysis). */
   toolStats?: Record<string, import("../state/types").ToolStat>
   /** Live API rate-limit reading (for the `/limits` live block). */
   rateLimits?: import("../format/rate-limits").RateLimitSnapshot
+  agentRateLimits?: import("../state/types").NativeAgentRateLimits
   /** Pending `/init` staged draft (read by `/init apply`). */
   initDraft?: { target: string; content: string }
   /** Pending `/commit` staged message (read by `/commit apply`). */
@@ -146,6 +150,7 @@ export interface RuntimeDeps {
 
 /** The controller surface the router calls — swappable in tests. */
 export interface RuntimeImpl {
+  runStack: typeof runStack
   workflowList: typeof workflowList
   workflowRun: typeof workflowRun
   workflowInspect: typeof workflowInspect
@@ -193,6 +198,8 @@ export interface RuntimeImpl {
   mcpPanel: typeof mcpPanel
   mcpLogsPanel: typeof mcpLogsPanel
   logsPanel: typeof logsPanel
+  mcpRefreshSession: typeof mcpRefreshSession
+  mcpApplySession: typeof mcpApplySession
   mcpReconnect: typeof mcpReconnect
   mcpRemove: typeof mcpRemove
   skillList: typeof skillList
@@ -298,6 +305,8 @@ const REAL: RuntimeImpl = {
   mcpLogsPanel,
   logsPanel,
   mcpReconnect,
+  mcpRefreshSession,
+  mcpApplySession,
   mcpRemove,
   skillList,
   skillShow,
@@ -454,8 +463,12 @@ export async function runRuntimeRequest(
         signal,
         roots: deps.roots,
         home: deps.home,
+        config: deps.config,
+        sessionId: deps.sessionId,
         ...(deps.mcpProbeCache ? { probeCache: deps.mcpProbeCache } : {}),
       }
+      if (req.action === "refresh") return impl.mcpRefreshSession(mc)
+      if (req.action === "apply") return impl.mcpApplySession(mc, arg.trim() === "--restart")
       if (req.action === "add") return impl.mcpAdd(arg, mc)
       if (req.action === "enable") return impl.mcpSetEnabled(arg, true, mc)
       if (req.action === "disable") return impl.mcpSetEnabled(arg, false, mc)
@@ -599,14 +612,19 @@ export async function runRuntimeRequest(
       return impl.runLimits({
         dispatch,
         config,
+        presetId: deps.capabilities?.presetId,
+        backendAgentId: deps.backendAgentId,
         usageHistory: deps.usageHistory,
         toolStats: deps.toolStats,
         rateLimits: deps.rateLimits,
+        agentRateLimits: deps.agentRateLimits,
       })
     case "provider":
       return impl.runProvider({
         dispatch,
         config,
+        presetId: deps.capabilities?.presetId,
+        backendAgentId: deps.backendAgentId,
         home: deps.home,
         action: req.action,
         ...(arg ? { arg } : {}),
@@ -614,6 +632,7 @@ export async function runRuntimeRequest(
         usageHistory: deps.usageHistory,
         toolStats: deps.toolStats,
         rateLimits: deps.rateLimits,
+        agentRateLimits: deps.agentRateLimits,
       })
     case "agentStats":
       return impl.runAgentStats({
@@ -639,7 +658,7 @@ export async function runRuntimeRequest(
       return impl.tasksList(tk)
     }
     case "hooks":
-      return impl.hooksList({ dispatch, home: deps.home, osHome: deps.osHome })
+      return impl.hooksList({ dispatch, home: deps.home, osHome: deps.osHome, config })
     case "council":
       return impl.councilRun(arg, { dispatch, signal })
     case "orchestrate":
@@ -670,7 +689,7 @@ export async function runRuntimeRequest(
         ...(arg ? { arg } : {}),
       })
     case "view":
-      return impl.viewFile(arg, { dispatch, cwd })
+      return impl.viewFile(arg, { dispatch, cwd, locale: config.locale })
     case "plan": {
       const pd = { dispatch, home: deps.home }
       if (req.action === "show") return impl.planShow(arg, pd)

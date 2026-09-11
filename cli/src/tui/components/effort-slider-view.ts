@@ -28,7 +28,7 @@ export const EFFORT_WIDE_MIN_WIDTH = 90
 
 /** Pick the layout for a given overlay width. */
 export function effortLayout(width: number | undefined): EffortLayout {
-  if (typeof width !== "number" || !Number.isFinite(width)) return "wide"
+  if (typeof width !== "number" || !Number.isFinite(width)) return "compact"
   return width >= EFFORT_WIDE_MIN_WIDTH ? "wide" : "compact"
 }
 
@@ -42,6 +42,18 @@ export function effortGaugeWidth(width: number | undefined): number {
   // trailing label, so Ink wrapped it and the scale no longer lined up.
   const inner = typeof width === "number" && Number.isFinite(width) ? width - 21 : 32
   return Math.max(12, Math.min(72, Math.floor(inner)))
+}
+
+/** Label starts anchored to the same terminal cells as the gauge markers.
+ * Endpoint labels stay inside the track; interior labels are centered. */
+export function effortScaleLabels(cells: number) {
+  return EFFORT_SLIDER_LEVELS.map((level, index) => {
+    const marker = effortGaugeCells(index, EFFORT_SLIDER_LEVELS.length - 1, cells).indexOf("marker")
+    return {
+      level,
+      start: Math.max(0, Math.min(cells - level.length, marker - Math.floor(level.length / 2))),
+    }
+  })
 }
 
 /** Per-cell state of the gauge track — drives the component's glyph + colour. */

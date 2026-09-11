@@ -309,6 +309,16 @@ export function canonicalEnvelopeToActions(
   }
 
   switch (event.kind) {
+    case "rate-limit":
+      return [
+        {
+          type: "SET_AGENT_RATE_LIMIT",
+          event,
+          ...(Number.isFinite(Date.parse(envelope.timestamp))
+            ? { receivedAt: Date.parse(envelope.timestamp) }
+            : {}),
+        },
+      ]
     case "text-delta":
       return event.delta ? [{ type: "INFLIGHT_TEXT", delta: event.delta }] : []
     case "thinking-delta":
@@ -429,6 +439,7 @@ export function canonicalEnvelopeToActions(
     default: {
       const classification = CANONICAL_TUI_CLASSIFICATION[event.kind]
       return [
+        ...(event.kind === "auth" ? [{ type: "CLEAR_AGENT_RATE_LIMITS" } as const] : []),
         {
           type: "CANONICAL_EVENT_NOTICE",
           eventId: envelope.eventId,

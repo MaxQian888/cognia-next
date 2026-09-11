@@ -1,19 +1,12 @@
-/**
- * `/context` controller. The base report (estimated window + composition) is a
- * pure build; this controller additionally tries the SDK's live, authoritative
- * context breakdown via the renderer→sidecar control round-trip
- * (`getContextUsage`) and appends it when available.
- *
- * The SDK breakdown only exists on a live Anthropic session — any other path
- * (no session yet, ai-sdk provider) makes the control reject fast, so we fall
- * back to the estimate-only report. Never throws.
- */
+/** Open a detailed snapshot, with a bounded optional live SDK breakdown. */
 import { getSessionContextUsage } from "@/lib/claude/ipc"
 import type { SdkContextUsage } from "@cognia/agent-config-types"
 import type { UsageInfo } from "@/lib/claude/adapter"
 
 import { buildContextReport, formatSdkContextBreakdown } from "../commands/context-report"
 import type { ResolvedConfig } from "../../config/schema"
+import { createCliTranslator } from "../i18n"
+import { backendIdentity } from "./backend-identity"
 import type { TuiAction } from "../state/types"
 
 export interface ContextReportDeps {
@@ -28,26 +21,56 @@ export interface ContextReportDeps {
    * by, so the report names the model this backend actually runs. */
   presetId?: string
   /** SDK live-context fetch seam (tests); defaults to the IPC control round-trip. */
+  /** Bound the optional live read so a missing backend cannot hold the report open. */
+  timeoutMs?: number
   fetchSdkContext?: (sessionId: string) => Promise<SdkContextUsage>
 }
 
 export async function runContextReport(deps: ContextReportDeps): Promise<void> {
   if (deps.signal?.aborted) return
+  const t = createCliTranslator(deps.config.locale, "cliUiContext")
   const base = buildContextReport(deps.usage, deps.config, deps.contextWindow, deps.presetId)
-
+  const identity = backendIdentity(deps.config, deps.presetId)
   let sdk: SdkContextUsage | null = null
-  if (deps.sessionId) {
-    const fetchSdk = deps.fetchSdkContext ?? getSessionContextUsage
+  let status = !deps.sessionId ? "noSession" : "unsupported"
+  if (deps.sessionId && !identity.external && deps.config.provider === "anthropic") {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let onAbort: (() => void) | undefined
+    status = "unavailable"
     try {
-      sdk = await fetchSdk(deps.sessionId)
+      const fallback = new Promise<null>((resolve) => {
+        timer = setTimeout(() => {
+          status = "timeout"
+          resolve(null)
+        }, deps.timeoutMs ?? 2000)
+        onAbort = () => resolve(null)
+        deps.signal?.addEventListener("abort", onAbort, { once: true })
+      })
+      sdk = await Promise.race([
+        Promise.resolve().then(() =>
+          deps.signal?.aborted
+            ? null
+            : (deps.fetchSdkContext ?? getSessionContextUsage)(deps.sessionId)
+        ),
+        fallback,
+      ])
     } catch {
-      // No live Anthropic session (no_active_session / unsupported_provider /
-      // timeout) — fall back to the estimate-only report.
+      // Keep the local snapshot usable even when the live SDK read fails.
       sdk = null
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+      if (onAbort) deps.signal?.removeEventListener("abort", onAbort)
     }
   }
-
   if (deps.signal?.aborted) return
-  const message = sdk ? `${base}\n${formatSdkContextBreakdown(sdk)}` : base
-  deps.dispatch({ type: "NOTICE", message })
+  const body = [
+    t("controller.snapshot", { time: new Date().toISOString() }),
+    ...(sdk ? [formatSdkContextBreakdown(sdk, deps.config.locale)] : [t(`controller.${status}`)]),
+    base,
+    t("controller.help"),
+  ].join("\n\n")
+  deps.dispatch({
+    type: "OVERLAY_OPEN",
+    overlay: { kind: "document", title: t("controller.title"), body, format: "markdown" },
+  })
 }

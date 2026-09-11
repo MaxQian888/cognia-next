@@ -1,4 +1,5 @@
 import React from "react"
+import { CliI18nProvider } from "../../i18n"
 import { render } from "@testing-library/react"
 
 import { InspectOverlay } from "./InspectOverlay"
@@ -43,4 +44,41 @@ describe("InspectOverlay", () => {
   it("shows the full-output footer hint", () => {
     expect(renderOverlay()).toContain("view full output")
   })
+})
+
+it("localizes the inspector title, summaries and navigation", () => {
+  const { container } = render(
+    <CliI18nProvider locale="zh-CN">
+      <InspectOverlay
+        items={items}
+        index={0}
+        onMove={() => {}}
+        onSelect={() => {}}
+        onCancel={() => {}}
+      />
+    </CliI18nProvider>
+  )
+  expect(container.textContent).toContain("查看输出")
+  expect(container.textContent).toContain("12 行")
+  expect(container.textContent).toContain("终端命令")
+  expect(container.textContent).toContain("查看完整输出")
+})
+
+it("renders subagent and summary-free single-line results", () => {
+  const { container } = render(
+    <CliI18nProvider locale="zh-CN">
+      <InspectOverlay
+        items={[
+          { cellId: "a", label: "agent", summary: "subagent", lines: 1, isError: false },
+          { cellId: "b", label: "read", summary: "", lines: 1, isError: false },
+        ]}
+        index={0}
+        onMove={() => {}}
+        onSelect={() => {}}
+        onCancel={() => {}}
+      />
+    </CliI18nProvider>
+  )
+  expect(container.textContent).toContain("子 Agent")
+  expect(container.textContent).toContain("1 行")
 })

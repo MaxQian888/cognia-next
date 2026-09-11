@@ -4,9 +4,8 @@
  * `CapturePermissionDecision` handed back to the paused capture via `onResolve`.
  */
 import React from "react"
-import { Box, Text } from "ink"
+import { Box, Text, type DOMElement } from "ink"
 
-import { SelectList } from "../SelectList"
 import { DiffView } from "../DiffView"
 import { useTheme } from "../../theme/context"
 import { summarizeToolCall, isDiffTool } from "../../format/tools"
@@ -15,16 +14,22 @@ import { langFromPath } from "../../markdown/highlight"
 import { listBuiltinTools, type BuiltinToolRiskLevel } from "@/lib/settings/builtin-tools"
 import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import type { PermissionChoice, PermissionRequestEvent } from "../../state/types"
-import { classifyToolCommand } from "../../../agent/command-approval"
+import { classifyToolCommand, shellCommandOf } from "../../../agent/command-approval"
 import type { CommandVerdict } from "@/lib/claude/permissions/command-safety"
-import { contentRows } from "../../layout/terminal-layout"
+import { useCriticalInput, useModalInput } from "../../input/input-router"
+import { usePanelClick } from "../../input/use-panel-click"
+import { parseMouseEvent } from "../../input/mouse"
+import { wrapTerminalSpans, sanitizeTerminalText } from "../../render/terminal-block"
+import { clampScroll, maxScroll, positionLabel } from "../document-view"
+import { useCliTranslations } from "../../i18n"
 
 export function choiceToDecision(
   choice: PermissionChoice,
-  toolName: string
+  toolName: string,
+  deniedMessage = `Denied "${toolName}".`
 ): CapturePermissionDecision {
   if (choice.value === "deny") {
-    return { decision: "deny", message: `Denied "${toolName}".` }
+    return { decision: "deny", message: deniedMessage }
   }
   return { decision: choice.value }
 }
@@ -106,11 +111,15 @@ export function permissionReason(toolName: string, input: unknown): string | und
  * nothing to show, because a bare "Allow bash?" reads as a UI that lost the
  * command rather than as an agent that never sent one.
  */
-export function permissionDetail(req: PermissionRequestEvent, summary: string): string {
+export function permissionDetail(
+  req: PermissionRequestEvent,
+  summary: string,
+  fallback = "The agent sent no details with this request."
+): string {
   if (summary) return summary
   if (req.description) return req.description
   if (req.blockedPath) return req.blockedPath
-  return "The agent sent no details with this request."
+  return fallback
 }
 
 export function PermissionOverlay({
@@ -120,6 +129,7 @@ export function PermissionOverlay({
   onMove,
   onResolve,
   maxRows = 18,
+  columns = 80,
 }: {
   req: PermissionRequestEvent
   choices: PermissionChoice[]
@@ -127,84 +137,199 @@ export function PermissionOverlay({
   onMove: (delta: number) => void
   onResolve: (decision: CapturePermissionDecision) => void
   maxRows?: number
+  columns?: number
 }) {
   const theme = useTheme()
+  const t = useCliTranslations("cliUiApproval")
+  const boxRef = React.useRef<DOMElement | null>(null)
+  const [reading, setReading] = React.useState({ req, open: false, scroll: 0 })
+  if (reading.req !== req) setReading({ req, open: false, scroll: 0 })
   const input = (req.input as Record<string, unknown>) ?? {}
   const summary = summarizeToolCall(req.toolName, input)
-  const detail = permissionDetail(req, summary)
+  const detail = permissionDetail(req, summary, t("noDetails"))
   const name = prettyToolName(req.displayName ?? req.toolName)
   const risk = riskLevelFor(req.toolName, input)
   const reason = permissionReason(req.toolName, input)
-  // For an edit/write request, preview the proposed change inline (capped) so the
-  // user approves a concrete diff, not just a tool name + path.
   const bareName = prettyToolName(req.toolName)
-  const diff = isDiffTool(bareName) ? formatEditDiff(bareName, input) : []
-  const diffLang = diff.length > 0 ? langFromPath(diffFilePath(input) ?? "") : undefined
-  const showFrame = maxRows >= 9
-  const choiceRows = Math.max(
-    1,
-    Math.min(choices.length, contentRows(maxRows, (showFrame ? 2 : 0) + 4))
+  const diff = React.useMemo(
+    () =>
+      isDiffTool(bareName)
+        ? formatEditDiff(bareName, (req.input as Record<string, unknown>) ?? {})
+        : [],
+    [bareName, req.input]
   )
-  // The detail line is always rendered now, so it always costs a row.
-  const metadataRows =
-    1 + (req.description && req.description !== detail ? 1 : 0) + (reason ? 1 : 0)
-  const fixedRows = (showFrame ? 2 : 0) + 4 + metadataRows + choiceRows + (diff.length > 0 ? 1 : 0)
-  const diffRows = Math.min(12, contentRows(maxRows, fixedRows))
+  const diffLang = diff.length > 0 ? langFromPath(diffFilePath(input) ?? "") : undefined
+  const height = Math.max(1, Math.floor(maxRows))
+  const width = Math.max(1, Math.floor(columns) - 1)
+  const selected = Math.max(0, Math.min(index, choices.length - 1))
+  const label = (choice: PermissionChoice) => {
+    const standard = DEFAULT_PERMISSION_CHOICES.find((item) => item.value === choice.value)
+    return standard?.label === choice.label ? t(choice.value) : choice.label
+  }
+  const title = t("title", { name })
+  const command = shellCommandOf(req.toolName, req.input)
+  const body = [
+    title,
+    req.description,
+    req.blockedPath,
+    reason,
+    command ? `${t("command")}\n${command}` : undefined,
+    `${t("parameters")}\n${JSON.stringify(req.input ?? {}, null, 2)}`,
+    diff.length
+      ? `${t("diff")}\n${diff.map((line) => `${line.kind === "add" ? "+" : line.kind === "del" ? "-" : " "} ${line.text}`).join("\n")}`
+      : undefined,
+  ]
+    .filter(Boolean)
+    .join("\n\n")
+  const lines = React.useMemo(
+    () => wrapTerminalSpans([{ text: body, style: "plain" }], width),
+    [body, width]
+  )
+  const viewport = Math.max(1, height - (height >= 3 ? 2 : height >= 2 ? 1 : 0))
+  const start = clampScroll(reading.scroll, lines.length, viewport)
+  const move = (delta: number) =>
+    setReading((state) => ({
+      ...state,
+      scroll: clampScroll(start + delta, lines.length, viewport),
+    }))
+  const allChoices = height >= choices.length + 3
+  const actionRows = allChoices ? choices.length : 1
+  const headerRows = height >= 3 ? 1 : 0
+  const footerRows = height >= 2 ? 1 : 0
+  const bodyRows = Math.max(0, height - actionRows - headerRows - footerRows)
+  const showDescription = bodyRows >= 2 && req.description && req.description !== detail
+  const showReason = bodyRows >= (showDescription ? 3 : 2) && reason
+  const diffRows = Math.max(0, bodyRows - 1 - (showDescription ? 1 : 0) - (showReason ? 1 : 0))
+  const resolve = (target: number) => {
+    const choice = choices[target]
+    if (choice)
+      onResolve(choiceToDecision(choice, req.toolName, t("denied", { name: req.toolName })))
+  }
+  const mouse = usePanelClick({
+    boxRef,
+    headerRows: 0,
+    borderRows: 0,
+    hasAboveMore: false,
+    visibleCount: actionRows,
+    onPick: (offset) => resolve(allChoices ? offset : selected),
+    onWheel: (dir) => onMove(dir === "up" ? -1 : 1),
+  })
+  // The global interrupt route treats permission Escape as deny-and-stop.
+  // Reading is a nested surface: return to the unchanged pending decision first.
+  useCriticalInput(() => setReading((state) => ({ ...state, open: false })), {
+    isActive: reading.open,
+    shouldHandle: (_input, key) => key.escape,
+  })
+  useModalInput((input, key) => {
+    if (reading.open) {
+      if (key.escape || key.return || input === "q" || input === "v")
+        return setReading((state) => ({ ...state, open: false }))
+      if (key.upArrow) return move(-1)
+      if (key.downArrow) return move(1)
+      if (key.pageUp || input === "b") return move(-viewport)
+      if (key.pageDown || input === " ") return move(viewport)
+      if (input === "g") return move(-start)
+      if (input === "G") return move(maxScroll(lines.length, viewport) - start)
+      const event = parseMouseEvent(input)
+      if (event?.kind === "wheel") move(event.dir === "up" ? -3 : 3)
+      return
+    }
+    if (input === "v") return setReading((state) => ({ ...state, open: true }))
+    if (mouse(input)) return
+    if (key.upArrow) return onMove(-1)
+    if (key.downArrow) return onMove(1)
+    if (key.return) return resolve(selected)
+    if (key.escape)
+      onResolve(
+        choiceToDecision(
+          { label: "Deny", value: "deny" },
+          req.toolName,
+          t("denied", { name: req.toolName })
+        )
+      )
+  })
   return (
-    <Box
-      flexDirection="column"
-      borderStyle={showFrame ? "round" : undefined}
-      borderColor={theme.borderWarning}
-      paddingX={1}
-    >
-      <Text bold color={theme.warning}>
-        Allow {name}?
-        {risk ? (
-          <Text color={theme[RISK_TOKEN[risk]]} dimColor>
-            {" "}
-            [{risk} risk]
-          </Text>
-        ) : null}
-      </Text>
-      {/* What is being approved comes BEFORE the answers. The choice list used
-          to render first, which put the command, the description and (worst)
-          the proposed diff underneath the buttons: Enter landed on "allow"
-          without the change ever having been on screen above it. */}
-      <Text color={theme.muted} wrap="truncate-end">
-        {detail}
-      </Text>
-      {/* The tool's own description, only when it is not already the detail
-          line — an agent that sends both says two different things. */}
-      {req.description && req.description !== detail ? (
-        <Text color={theme.muted} wrap="truncate-end">
-          {req.description}
-        </Text>
-      ) : null}
-      {/* Why this one is being asked about. Without it the prompt states a fact
-          the user can already read (the command) and withholds the only thing
-          it knows that they do not: which part of it is the risky part. */}
-      {reason ? (
-        <Text color={risk ? theme[RISK_TOKEN[risk]] : theme.muted} wrap="truncate-end">
-          {reason}
-        </Text>
-      ) : null}
-      {diff.length > 0 && diffRows > 0 ? (
-        <Box marginBottom={1} flexDirection="column">
-          <DiffView diff={diff} lang={diffLang} maxLines={diffRows} />
-        </Box>
-      ) : null}
-      <SelectList
-        items={choices.map((c) => ({ label: c.label }))}
-        index={index}
-        maxRows={choiceRows}
-        onMove={onMove}
-        onSelect={(i) => onResolve(choiceToDecision(choices[i], req.toolName))}
-        onCancel={() => onResolve(choiceToDecision({ label: "Deny", value: "deny" }, req.toolName))}
-        // The shared hint says "Esc cancel", which is not what Esc does here:
-        // it denies this call AND stops the turn. Saying so is the difference
-        // between a key that looks like "go back" and one that ends the run.
-        footerHint="↑/↓ choose · Enter confirm · Esc deny and stop the turn"
-      />
+    <Box flexDirection="column" width={width} height={height} overflow="hidden">
+      {reading.open ? (
+        <>
+          {height >= 3 ? (
+            <Box height={1} flexShrink={0}>
+              <Text bold wrap="truncate-end">
+                {sanitizeTerminalText(t("review", { name }))}
+              </Text>
+            </Box>
+          ) : null}
+          <Box flexDirection="column" height={viewport} flexShrink={0}>
+            {lines.slice(start, start + viewport).map((line, i) => (
+              <Text key={start + i} wrap="truncate-end">
+                {line.plain || " "}
+              </Text>
+            ))}
+          </Box>
+          {height >= 2 ? (
+            <Box height={1} flexShrink={0}>
+              <Text color={theme.muted} wrap="truncate-end">
+                {t("back")} · {positionLabel(start, viewport, lines.length)} · {t("scroll")}
+              </Text>
+            </Box>
+          ) : null}
+        </>
+      ) : (
+        <>
+          {headerRows ? (
+            <Box height={1} flexShrink={0}>
+              <Text bold color={theme.warning} wrap="truncate-end">
+                {sanitizeTerminalText(title)}
+                {risk ? <Text color={theme[RISK_TOKEN[risk]]}> [{t(risk)}]</Text> : null}
+              </Text>
+            </Box>
+          ) : null}
+          {bodyRows > 0 ? (
+            <Box flexDirection="column" height={bodyRows} flexShrink={1} overflow="hidden">
+              <Box flexDirection="column" flexShrink={0}>
+                <Text color={theme.muted} wrap="truncate-end">
+                  {sanitizeTerminalText(detail)}
+                </Text>
+                {showDescription ? (
+                  <Text color={theme.muted} wrap="truncate-end">
+                    {sanitizeTerminalText(req.description!)}
+                  </Text>
+                ) : null}
+                {showReason ? (
+                  <Text color={risk ? theme[RISK_TOKEN[risk]] : theme.muted} wrap="truncate-end">
+                    {sanitizeTerminalText(reason!)}
+                  </Text>
+                ) : null}
+                {diff.length > 0 && diffRows > 0 ? (
+                  <DiffView diff={diff} lang={diffLang} maxLines={diffRows} />
+                ) : null}
+              </Box>
+            </Box>
+          ) : null}
+          <Box ref={boxRef} flexDirection="column" height={actionRows} flexShrink={0}>
+            {(allChoices ? choices : choices.slice(selected, selected + 1)).map(
+              (choice, offset) => (
+                <Text
+                  key={choice.value}
+                  color={(allChoices ? offset : selected) === selected ? theme.accent : undefined}
+                  bold={(allChoices ? offset : selected) === selected}
+                  wrap="truncate-end"
+                >
+                  {(allChoices ? offset : selected) === selected ? "❯ " : "  "}
+                  {sanitizeTerminalText(label(choice))}
+                </Text>
+              )
+            )}
+          </Box>
+          {footerRows ? (
+            <Box height={1} flexShrink={0}>
+              <Text color={theme.muted} wrap="truncate-end">
+                {width < 70 ? t("compactActions") : `${t("inspect")} · ${t("actions")}`}
+              </Text>
+            </Box>
+          ) : null}
+        </>
+      )}
     </Box>
   )
 }

@@ -1,3 +1,4 @@
+import { createCliTranslator } from "../i18n"
 /**
  * Owns the live `AgentSession` and drives turns from the React side. Thin: the
  * turn loop, event→action mapping, and the deferred permission gate are all in
@@ -75,7 +76,7 @@ export interface AgentSessionApi {
   /** Stream one turn into the transcript. Resolves the captured reply (text +
    * usage) on success, or `null` when the turn errored. Plain chat ignores the
    * return; `/goal` + `/loop` feed it to their turn-drivers. */
-  send(prompt: string): Promise<RunAndCaptureResult | null>
+  send(prompt: string, preparePrompt?: () => Promise<string>): Promise<RunAndCaptureResult | null>
   abort(): void
   resolvePermission(decision: CapturePermissionDecision): void
   /**
@@ -114,6 +115,7 @@ export interface AgentSessionApi {
   /** Re-resolve SendOptions on the next turn (after an MCP/skill/plugin toggle)
    * without respawning the sidecar. No-op when no session is live yet. */
   invalidate(): void
+  reloadHooks?(): Promise<void>
   /** Manually compact the live session's context (`/compact`), both dispatch
    * paths. No-op (with a notice) until a turn has spawned the sidecar. */
   compact(focus?: string): Promise<void>
@@ -190,6 +192,7 @@ export function useAgentSession({
       builtinHookOverrides: config.builtinHookOverrides,
     }),
   getCellCount = () => 0,
+  flushPendingInput,
   createCheckpoints = defaultCreateCheckpoints,
   resolveApprovedTools,
   appendMcpLog,
@@ -220,6 +223,8 @@ export function useAgentSession({
   createHooks?: () => HookRunner
   /** Current committed cell count, read at each prompt boundary for `/rewind`. */
   getCellCount?: () => number
+  /** Paint the accepted prompt before preprocessing or backend startup can block. */
+  flushPendingInput?: () => Promise<void>
   /** Build the `/rewind` checkpoint capture (injected for tests). */
   createCheckpoints?: (getSessionId: () => string) => CheckpointCapture
   /** Resolve the persisted "Allow always" tool names to seed the live
@@ -253,6 +258,7 @@ export function useAgentSession({
   const nativeCheckpointSeqRef = useRef(0)
   const checkpointCellCountRef = useRef(0)
   const abortRef = useRef<AbortController | null>(null)
+  const cwdChangeRef = useRef<Promise<void> | null>(null)
   // Session-only grants (for example when persistence fails). Persisted rules
   // are reread at each request so external revocations take effect live.
   const approvedToolsRef = useRef<Set<string>>(new Set())
@@ -260,8 +266,8 @@ export function useAgentSession({
   const seedApproved = useCallback(
     () =>
       resolveApprovedTools?.() ??
-      readToolApprovals(resolveHome(process.env, os.homedir()), undefined, cwd),
-    [resolveApprovedTools, cwd]
+      readToolApprovals(resolveHome(process.env, os.homedir()), undefined, configRef.current.cwd),
+    [resolveApprovedTools]
   )
   const seedApprovedRef = useRef(seedApproved)
   useEffect(() => {
@@ -371,25 +377,35 @@ export function useAgentSession({
     return off
   }, [subscribeSidecar, dispatch, writeMcpLogFile, onLog])
 
-  // The settings.json lifecycle-hook runner (loads the merged cognia + .claude
-  // hook config once). Fired for each capture event + at turn end + on submit.
-  //
-  // `createHooks` is a destructuring default recreated on EVERY render when the
-  // caller doesn't inject one. Memoizing the runner on that churning identity
-  // rebuilt it — re-reading the hooks config off disk — every render, and far
-  // worse gave `gate` below a fresh instance each render: a permission responder
-  // pushed its resolver into the OLD gate's queue, the `OVERLAY_OPEN` dispatch
-  // re-rendered and swapped in a NEW empty-queued gate, and the user's approval
-  // then resolved nothing — hanging every write/edit/exec turn while read-only
-  // tools (which never round-trip the gate) kept working. Pin the factory to its
-  // real input so the runner — and therefore the gate's pending-approval queue —
-  // survive re-renders.
-  const stableCreateHooks = useMemo(
-    () => createHooks,
+  // Keep the permission gate stable while replacing its hook implementation.
+  // A send already awaiting reload must use the same queue the UI resolves.
+  const configuredHooks = useMemo(
+    () => createHooks(),
+    // The default factory is recreated each render; only overrides change it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [config.builtinHookOverrides]
   )
-  const hookRunner = useMemo(() => stableCreateHooks(), [stableCreateHooks])
+  const hooksRef = useRef(configuredHooks)
+  const hooksFactoryRef = useRef(createHooks)
+  useEffect(() => {
+    hooksFactoryRef.current = createHooks
+  }, [createHooks])
+  useEffect(() => {
+    hooksRef.current = configuredHooks
+  }, [configuredHooks])
+  const hookRunner = useMemo<HookRunner>(
+    () => ({
+      onCapture: (...args) => hooksRef.current.onCapture(...args),
+      onStop: (...args) => hooksRef.current.onStop(...args),
+      onPrompt: (...args) => hooksRef.current.onPrompt(...args),
+      preToolUse: (...args) => hooksRef.current.preToolUse(...args),
+      onSessionStart: (...args) => hooksRef.current.onSessionStart(...args),
+      onSessionEnd: (...args) => hooksRef.current.onSessionEnd(...args),
+      onPermissionRequest: (...args) => hooksRef.current.onPermissionRequest(...args),
+      onPermissionDenied: (...args) => hooksRef.current.onPermissionDenied(...args),
+    }),
+    []
+  )
   // `/rewind` checkpoint capture — reads the live session id lazily so it tracks
   // /clear and /resume without being rebuilt.
   const getSessionId = useCallback(() => sessionRef.current?.sessionId ?? "", [])
@@ -404,6 +420,8 @@ export function useAgentSession({
   const gate = useMemo(
     () =>
       createGateController(
+        // Gate callbacks run only on a tool request, never during construction.
+        // eslint-disable-next-line react-hooks/refs
         (req) => {
           // Fire PermissionRequest + Notification so user hook scripts (and any
           // OS-level notifier they wire) know Claude is waiting on approval.
@@ -421,6 +439,7 @@ export function useAgentSession({
           })
         },
         // PreToolUse hooks: a deny blocks the tool before the overlay shows.
+        // eslint-disable-next-line react-hooks/refs
         (req) => hookRunner.preToolUse(req.toolName, req.input),
         // Silent auto-approve, from three sources. The tools the user chose
         // "Allow always" for, and the mode whose entire definition is "no
@@ -578,7 +597,11 @@ export function useAgentSession({
   }, [dropCopilotSession])
 
   const send = useCallback(
-    async (prompt: string) => {
+    async (prompt: string, preparePrompt?: () => Promise<string>) => {
+      const controller = new AbortController()
+      abortRef.current = controller
+      checkpointCellCountRef.current = getCellCount()
+      dispatch({ type: "TURN_START", prompt })
       // In copilot mode the turn runs on the dedicated workflow-editor session.
       const copilotTarget = copilotTargetRef.current
       // Creating the session can throw BEFORE the turn engine's own try/catch —
@@ -586,9 +609,19 @@ export function useAgentSession({
       // and leave the composer looking like nothing happened.
       let session: AgentSession
       try {
+        if (cwdChangeRef.current) await cwdChangeRef.current
+        if (flushPendingInput) await flushPendingInput()
+        controller.signal.throwIfAborted()
+        if (preparePrompt) prompt = await preparePrompt()
+        controller.signal.throwIfAborted()
         session = copilotTarget ? ensureCopilotSession(copilotTarget) : ensureSession()
       } catch (err) {
-        const message = (err as Error).message
+        if (abortRef.current === controller) abortRef.current = null
+        if (controller.signal.aborted) {
+          dispatch({ type: "TURN_ABORTED" })
+          return null
+        }
+        const message = err instanceof Error ? err.message : String(err)
         const classified = classifyError({ message })
         dispatch({
           type: "TURN_ERROR",
@@ -604,14 +637,12 @@ export function useAgentSession({
       onLog(turnLifecycleLog(Date.now(), "started", session.sessionId))
       hookRunner.onPrompt(prompt)
       // Open a rewind checkpoint for this turn (cellCount = state before it ran).
-      checkpointCellCountRef.current = getCellCount()
       if (checkpointAuthorityRef.current?.mode !== "native") {
         checkpoint.beginTurn(checkpointCellCountRef.current, prompt)
       }
-      const controller = new AbortController()
-      abortRef.current = controller
       const { ok, result, recoverable } = await runTurn({
         session,
+        turnStarted: true,
         prompt,
         dispatch,
         gate: gate.responder,
@@ -694,6 +725,7 @@ export function useAgentSession({
       hookRunner,
       checkpoint,
       getCellCount,
+      flushPendingInput,
       onLog,
     ]
   )
@@ -812,14 +844,26 @@ export function useAgentSession({
 
   const changeCwd = useCallback(
     async (dir: string) => {
-      dispatch({ type: "SET_CWD", cwd: dir })
-      // The cwd is baked into the captured SendOptions of a live session (and the
-      // sidecar spawned under it); only a fresh session picks up the new dir. Drop
-      // it so the next turn recreates from the updated config — same contract as
-      // switchModel. configRef is refreshed by the SET_CWD re-render before then.
-      await dropSession()
+      if (abortRef.current || cwdChangeRef.current) {
+        throw new Error(
+          createCliTranslator(configRef.current.locale, "cliUiSettings")("workspaceBusy")
+        )
+      }
+      const pending = (async () => {
+        await Promise.all([dropSession(), dropCopilotSession()])
+        // The next send may happen before React renders SET_CWD.
+        configRef.current = { ...configRef.current, cwd: dir }
+        approvedToolsRef.current = new Set()
+        dispatch({ type: "SET_CWD", cwd: dir })
+      })()
+      cwdChangeRef.current = pending
+      try {
+        await pending
+      } finally {
+        cwdChangeRef.current = null
+      }
     },
-    [dispatch, dropSession]
+    [dispatch, dropSession, dropCopilotSession]
   )
 
   const switchMode = useCallback(
@@ -911,6 +955,22 @@ export function useAgentSession({
     },
     [dispatch, dropSession]
   )
+
+  const reloadHooks = useCallback(async () => {
+    if (abortRef.current || cwdChangeRef.current)
+      throw new Error(createCliTranslator(configRef.current.locale, "cliUiHooks")("data.busy"))
+    const pending = Promise.allSettled([dropSession(), dropCopilotSession()]).then((results) => {
+      const failure = results.find((result) => result.status === "rejected")
+      if (failure?.status === "rejected") throw failure.reason
+      hooksRef.current = hooksFactoryRef.current()
+    })
+    cwdChangeRef.current = pending
+    try {
+      await pending
+    } finally {
+      cwdChangeRef.current = null
+    }
+  }, [dropSession, dropCopilotSession])
 
   const invalidate = useCallback(() => {
     sessionRef.current?.invalidateOptions?.()
@@ -1068,6 +1128,7 @@ export function useAgentSession({
     switchAgentMode,
     changeCwd,
     invalidate,
+    reloadHooks,
     compact,
     stopTask,
     listCheckpoints,

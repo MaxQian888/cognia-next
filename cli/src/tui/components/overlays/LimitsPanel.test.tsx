@@ -48,6 +48,19 @@ const kimi: ProviderLimits = {
 describe("LimitsPanel", () => {
   beforeEach(() => __resetInk())
 
+  it("labels a vault-account reading with its relay source", () => {
+    const { container } = render(
+      <LimitsPanel
+        snapshots={[{ ...kimi, provider: "codex", sourceId: "moonshot", accountLabel: "Work" }]}
+        analysis={analysis}
+        now={NOW}
+        onClose={() => {}}
+      />
+    )
+    expect(container.textContent).toContain("moonshot · Work")
+    expect(container.textContent).not.toContain("codex · Work")
+  })
+
   it("renders bars, percents, reset countdowns and credit for every account", () => {
     const { container } = render(
       <LimitsPanel snapshots={[anthropic, kimi]} analysis={analysis} now={NOW} onClose={() => {}} />
@@ -265,4 +278,50 @@ describe("LimitsPanel", () => {
     )
     expect(container.textContent).not.toContain("moonshot · moonshot")
   })
+})
+
+it("shows native availability notices without token onboarding or provider hints", () => {
+  const { container } = render(
+    <LimitsPanel
+      snapshots={[
+        { provider: "codex", fetchedAt: NOW, meters: [], notice: "Native quota unavailable" },
+      ]}
+      analysis={analysis}
+      now={NOW}
+      onClose={() => {}}
+    />
+  )
+  expect(container.textContent).toContain("Native quota unavailable")
+  expect(container.textContent).not.toContain("add a Claude/Codex subscription token")
+  expect(container.textContent).not.toContain("No limit data")
+})
+
+it("shows an informational notice alongside pushed meters with unknown percentages", () => {
+  const { container } = render(
+    <LimitsPanel
+      snapshots={[
+        {
+          provider: "anthropic",
+          fetchedAt: NOW,
+          notice: "Native quota status",
+          meters: [
+            {
+              id: "native/five_hour",
+              label: "five_hour · Usage blocked",
+              kind: "window",
+              usedPct: null,
+              status: "crit",
+            },
+          ],
+        },
+      ]}
+      analysis={analysis}
+      now={NOW}
+      onClose={() => {}}
+    />
+  )
+  expect(container.textContent).toContain("Native quota status")
+  expect(container.textContent).toContain("five_hour · Usage blocked")
+  expect(container.textContent).toContain("—")
+  expect(container.textContent).not.toContain("0% used")
 })

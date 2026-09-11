@@ -153,19 +153,29 @@ export function runInteractiveShell(
 ): Promise<ShellResult> {
   const spawn = opts.spawn ?? realInteractiveSpawn
   return new Promise<ShellResult>((resolve) => {
+    // In inherited-terminal mode both Cognia and the child belong to the
+    // foreground process group. Cooked-mode Ctrl+C signals both. Keep Cognia
+    // alive until the child closes; the terminal already delivered SIGINT to
+    // the child, so forwarding it here would interrupt the program twice.
+    let aborted = false
+    const onTerminalInterrupt = () => {
+      aborted = true
+    }
+    process.on("SIGINT", onTerminalInterrupt)
     let child: InteractiveShellChild
     try {
       child = spawn(command, { cwd: opts.cwd, shell: true, stdio: "inherit" })
     } catch (e) {
+      process.removeListener("SIGINT", onTerminalInterrupt)
       resolve({ stdout: "", stderr: e instanceof Error ? e.message : String(e), code: 1 })
       return
     }
 
     let settled = false
-    let aborted = false
     const finish = (result: ShellResult) => {
       if (settled) return
       settled = true
+      process.removeListener("SIGINT", onTerminalInterrupt)
       opts.signal?.removeEventListener("abort", onAbort)
       resolve(result)
     }
@@ -187,6 +197,7 @@ export function runInteractiveShell(
       })
     })
     child.on("close", (code, signal) => {
+      aborted ||= signal === "SIGINT" || code === 130
       finish({
         stdout: "",
         stderr: "",

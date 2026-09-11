@@ -1,3 +1,4 @@
+import { mouseEventPosition } from "./mouse"
 import { isMouseSequence, parseMouseEvent } from "./mouse"
 
 /** No modifier keys held — the common case for the button reports below. */
@@ -81,4 +82,10 @@ describe("isMouseSequence", () => {
     expect(isMouseSequence("a")).toBe(false)
     expect(isMouseSequence("[<64;10;5")).toBe(false)
   })
+})
+
+it("retains wheel coordinates for independent pane hit-testing", () => {
+  expect(mouseEventPosition("\x1b[<65;60;5M")).toEqual({ col: 60, row: 5 })
+  expect(mouseEventPosition("[<0;3;7M")).toEqual({ col: 3, row: 7 })
+  expect(mouseEventPosition("plain text")).toBeNull()
 })

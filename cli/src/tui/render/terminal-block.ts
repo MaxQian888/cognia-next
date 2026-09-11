@@ -11,6 +11,8 @@ export interface TerminalSpan {
   bold?: boolean
   italic?: boolean
   underline?: boolean
+  /** Local user attachment represented by this visible run. */
+  attachmentPath?: string
 }
 
 export interface TerminalLine {
@@ -146,6 +148,7 @@ function sameStyle(a: TerminalSpan, b: TerminalSpan): boolean {
   return (
     a.style === b.style &&
     a.color === b.color &&
+    a.attachmentPath === b.attachmentPath &&
     Boolean(a.bold) === Boolean(b.bold) &&
     Boolean(a.italic) === Boolean(b.italic) &&
     Boolean(a.underline) === Boolean(b.underline)

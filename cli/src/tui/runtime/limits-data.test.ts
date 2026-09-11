@@ -2,7 +2,15 @@
  * @jest-environment node
  */
 import { probeOnce } from "@/lib/subscription/anthropic/usage-probe"
-import { buildCliLimits, mapCliProvider, nodeAuthedGet } from "./limits-data"
+import {
+  agentStatusLimits,
+  buildCliLimits,
+  codexStatusLimits,
+  loadCodexLimits,
+  mapCliProvider,
+  nodeAuthedGet,
+} from "./limits-data"
+import { getExternalAgentManager } from "@/lib/ai/agent/external/manager"
 import {
   __resetLimitsSourcesForTesting,
   registerLimitsSource,
@@ -10,6 +18,7 @@ import {
 import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "../../config/schema"
 
 jest.mock("@/lib/subscription/anthropic/usage-probe", () => ({ probeOnce: jest.fn() }))
+jest.mock("@/lib/ai/agent/external/manager", () => ({ getExternalAgentManager: jest.fn() }))
 const mockProbe = probeOnce as jest.MockedFunction<typeof probeOnce>
 
 const NOW = 1_700_000_000_000
@@ -27,6 +36,153 @@ describe("mapCliProvider", () => {
     expect(mapCliProvider("openai")).toBe("codex")
     expect(mapCliProvider("chatgpt")).toBe("codex")
     expect(mapCliProvider("moonshot")).toBe("opencode")
+  })
+})
+
+describe("native Codex limits", () => {
+  it("localizes native quota labels for the selected CLI language", () => {
+    const [snapshot] = codexStatusLimits(
+      {
+        mcpServers: [],
+        skills: [],
+        ordinaryUsageAllowed: false,
+        rateLimits: {
+          primary: { usedPercent: 1, windowDurationMins: 300 },
+          credits: { hasCredits: true, unlimited: true, balance: null },
+        },
+      },
+      NOW,
+      "zh-CN"
+    )
+    expect(snapshot.meters.map((meter) => meter.label)).toEqual([
+      "codex · 5小时",
+      "codex · 额度余额（无限）",
+      "Codex · 常规模型使用已被阻止",
+    ])
+  })
+
+  it("maps used percentages and actual reset timestamps from the connected account", () => {
+    const [snapshot] = codexStatusLimits(
+      {
+        mcpServers: [],
+        skills: [],
+        account: { type: "chatgpt", email: "person@example.com", planType: "pro" },
+        accountFetchedAt: NOW - 1000,
+        rateLimits: {
+          primary: { usedPercent: 25, resetsAt: NOW / 1000 + 60 },
+          secondary: { usedPercent: 75 },
+        },
+      },
+      NOW
+    )
+    expect(snapshot).toMatchObject({ provider: "codex", accountId: "codex", fetchedAt: NOW - 1000 })
+    expect(snapshot.accountLabel).toContain("person@example.com")
+    expect(snapshot.meters).toEqual([
+      expect.objectContaining({ usedPct: 25, resetAt: NOW + 60_000, status: "ok" }),
+      expect.objectContaining({ usedPct: 75, resetAt: null }),
+    ])
+  })
+
+  it("prefers all named limit buckets without duplicating the legacy bucket", () => {
+    const [snapshot] = codexStatusLimits(
+      {
+        mcpServers: [],
+        skills: [],
+        rateLimits: { primary: { usedPercent: 100 } },
+        rateLimitsByLimitId: {
+          codex: { limitName: "Codex", primary: { usedPercent: 1 } },
+          spark: { limitName: "Spark", primary: { usedPercent: 2 } },
+        },
+      },
+      NOW
+    )
+    expect(snapshot.meters.map((meter) => [meter.id, meter.usedPct])).toEqual([
+      ["codex/session", 1],
+      ["spark/session", 2],
+    ])
+  })
+
+  it.each([
+    {},
+    { account: null, rateLimits: { primary: { usedPercent: 100 } } },
+    { account: { type: "apiKey" }, rateLimits: { primary: { usedPercent: 100 } } },
+    { rateLimitsError: "Temporarily unavailable", rateLimits: { primary: { usedPercent: 100 } } },
+    { accountError: "Signed out" },
+    { rateLimits: { primary: { usedPercent: Number.NaN } } },
+  ])("keeps missing, signed-out, failed and API-key quota unknown: %j", (status) => {
+    expect(codexStatusLimits({ mcpServers: [], skills: [], ...status }, NOW)[0].meters).toEqual([])
+  })
+
+  it("preserves real credits, unlimited credits and individual spending controls", () => {
+    const [snapshot] = codexStatusLimits(
+      {
+        mcpServers: [],
+        skills: [],
+        rateLimitsByLimitId: {
+          paid: {
+            limitName: "Paid",
+            credits: { hasCredits: true, unlimited: false, balance: "12.5" },
+            individualLimit: {
+              limit: "100",
+              used: "40",
+              remainingPercent: 60,
+              resetsAt: NOW / 1000 + 60,
+            },
+            spendControlReached: true,
+          },
+          unlimited: { credits: { hasCredits: true, unlimited: true, balance: "0" } },
+          unknown: { credits: { hasCredits: false, unlimited: false, balance: null } },
+        },
+      },
+      NOW
+    )
+    expect(snapshot.meters).toEqual([
+      expect.objectContaining({ id: "paid/credits", remaining: 12.5, status: "ok" }),
+      expect.objectContaining({ id: "paid/individual", usedPct: 40, resetAt: NOW + 60_000 }),
+      expect.objectContaining({
+        id: "paid/spending-control",
+        usedPct: null,
+        status: "crit",
+        label: "Paid · Spending limit reached",
+      }),
+      expect.objectContaining({
+        id: "unlimited/credits",
+        remaining: undefined,
+        status: "ok",
+        label: "unlimited · Credits (unlimited)",
+      }),
+      expect.objectContaining({ id: "unknown/credits", remaining: undefined, status: "unknown" }),
+    ])
+    expect(snapshot.error).toBeUndefined()
+  })
+
+  it("reads only the requested existing adapter, without creating a process or session", async () => {
+    const adapter = {
+      isConnected: () => true,
+      refreshAccount: jest.fn(async () => {}),
+      getStatus: () => ({ mcpServers: [], skills: [] }),
+    }
+    const getAdapter = jest.fn(() => adapter)
+    jest
+      .mocked(getExternalAgentManager)
+      .mockReturnValue({ getCodexAppServerAdapter: getAdapter } as never)
+    expect(await loadCodexLimits("live-agent", NOW)).toEqual([
+      expect.objectContaining({ provider: "codex", meters: [] }),
+    ])
+    expect(getAdapter).toHaveBeenCalledWith("live-agent")
+    expect(adapter.refreshAccount).toHaveBeenCalledTimes(1)
+    getAdapter.mockReturnValue(null as never)
+    await expect(loadCodexLimits("gone-agent", NOW)).rejects.toThrow("not connected")
+  })
+
+  it("flags an explicit ordinary-usage block even when windows have capacity", () => {
+    const base = { mcpServers: [], skills: [], rateLimits: { primary: { usedPercent: 1 } } }
+    expect(
+      codexStatusLimits({ ...base, ordinaryUsageAllowed: false }, NOW)[0].meters
+    ).toContainEqual(
+      expect.objectContaining({ id: "ordinary-usage", usedPct: null, status: "crit" })
+    )
+    expect(codexStatusLimits(base, NOW)[0].meters).toHaveLength(1)
   })
 })
 
@@ -259,4 +415,86 @@ describe("nodeAuthedGet", () => {
       globalThis.fetch = original
     }
   })
+})
+
+describe("native agent limits", () => {
+  it("maps native fractional utilization and seconds without synthesizing usage", () => {
+    const [snapshot] = agentStatusLimits(
+      "anthropic",
+      {
+        five_hour: {
+          kind: "rate-limit",
+          status: "allowed",
+          rateLimitType: "five_hour",
+          utilization: 0.25,
+          resetsAt: NOW / 1000 + 60,
+        },
+        seven_day: { kind: "rate-limit", status: "rejected", rateLimitType: "seven_day" },
+        unknown: {
+          kind: "rate-limit",
+          status: "allowed_warning",
+          utilization: NaN,
+          resetsAt: Infinity,
+        },
+      },
+      NOW
+    )
+    expect(snapshot.meters).toEqual([
+      expect.objectContaining({ usedPct: 25, resetAt: NOW + 60_000, status: "ok" }),
+      expect.objectContaining({ usedPct: null, status: "crit" }),
+      expect.objectContaining({ usedPct: null, resetAt: null, status: "warn" }),
+    ])
+    expect(snapshot.meters[1].label).toContain("seven_day")
+  })
+
+  it("preserves overage status, reset, explicit false and native reason", () => {
+    const [snapshot] = agentStatusLimits(
+      "anthropic",
+      {
+        five_hour: {
+          kind: "rate-limit",
+          status: "rejected",
+          overageStatus: "allowed",
+          overageResetsAt: NOW / 1000 + 120,
+          isUsingOverage: false,
+          overageDisabledReason: "spend_limit",
+        },
+        seven_day: { kind: "rate-limit", status: "allowed", overageInUse: true },
+      },
+      NOW,
+      "zh-CN"
+    )
+    expect(snapshot.meters[1]).toMatchObject({
+      usedPct: null,
+      resetAt: NOW + 120_000,
+      status: "ok",
+    })
+    expect(snapshot.meters[1].label).toContain("未使用")
+    expect(snapshot.meters[1].label).toContain("spend_limit")
+    expect(snapshot.meters[3].label).toContain("使用中")
+    expect(snapshot.meters[3].status).toBe("unknown")
+  })
+})
+
+it("retains the latest native quota report time when reopening the panel", () => {
+  const events = {
+    five_hour: {
+      kind: "rate-limit" as const,
+      status: "allowed" as const,
+      receivedAt: NOW - 60_000,
+    },
+    seven_day: {
+      kind: "rate-limit" as const,
+      status: "allowed" as const,
+      receivedAt: NOW - 120_000,
+    },
+    legacy: { kind: "rate-limit" as const, status: "allowed" as const },
+  }
+  const [initial] = agentStatusLimits("anthropic", events, NOW)
+  const [reopened] = agentStatusLimits("anthropic", events, NOW + 300_000, "zh-CN")
+  expect(initial.fetchedAt).toBe(NOW - 60_000)
+  expect(reopened.fetchedAt).toBe(initial.fetchedAt)
+  expect(initial.notice).toContain("Latest quota reported")
+  expect(reopened.notice).toContain("最近报告")
+  expect(agentStatusLimits("anthropic", { legacy: events.legacy }, NOW)[0].fetchedAt).toBe(NOW)
 })

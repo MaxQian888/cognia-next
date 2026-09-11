@@ -1,3 +1,4 @@
+import { CliI18nProvider } from "../i18n"
 import path from "node:path"
 import React from "react"
 import { act, render } from "@testing-library/react"
@@ -63,4 +64,15 @@ describe("StartupGate", () => {
     key({ escape: true }) // back to gate
     expect(container.textContent ?? "").toContain("Do you trust the files")
   })
+})
+
+it("renders Chinese startup copy and preserves technical content", () => {
+  __resetInk()
+  const { container } = render(
+    <CliI18nProvider locale="zh-CN">
+      <StartupGate cwd="/workspace" onTrust={() => {}} onChangeCwd={() => {}} />
+    </CliI18nProvider>
+  )
+  expect(container.textContent).toContain("信任此文件夹")
+  expect(container.textContent).toContain("/workspace")
 })

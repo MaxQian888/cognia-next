@@ -45,3 +45,22 @@ describe("runGit", () => {
     })
   })
 })
+
+it("distinguishes a truncated capture from a normal diff exit code 1", async () => {
+  const overflow = await runExec(process.execPath, [
+    "-e",
+    "process.stdout.write('x'.repeat(17 * 1024 * 1024))",
+  ])
+  expect(overflow.code).not.toBe(0)
+  expect(overflow.error).toMatch(/maxBuffer/i)
+  const difference = await runExec(process.execPath, ["-e", "process.exit(1)"])
+  expect(difference.error).toBeUndefined()
+})
+
+it("preserves timeout errors for callers that accept diff exit code 1", async () => {
+  const timeout = await runExec(process.execPath, ["-e", "setTimeout(() => {}, 10000)"], {
+    timeoutMs: 30,
+  })
+  expect(timeout.code).not.toBe(0)
+  expect(timeout.error).toBeTruthy()
+})

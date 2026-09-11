@@ -108,3 +108,28 @@ describe("EXPAND_COMMANDS", () => {
     expect(EXPAND_COMMANDS[0].name).toBe("expand")
   })
 })
+
+it("localizes invocation metadata, empty results, and range errors", () => {
+  const cell = tool("1", "Bash", null, true)
+  cell.input = {
+    command: "echo hi",
+    run_in_background: true,
+    detach: true,
+    workdir: "/repo",
+    timeout: 500,
+    description: "check",
+  }
+  const body = formatToolResultBody(cell, "zh-CN")
+  for (const text of ["调用详情", "状态: 失败", "后台运行（已分离）", "工作目录", "暂无结果"])
+    expect(body).toContain(text)
+  const context = ctx([cell], "99")
+  context.config.locale = "zh-CN"
+  expect(expandHandler(context)).toMatchObject({ message: expect.stringContaining("用法") })
+})
+
+it("renders non-detached background invocations without optional metadata", () => {
+  const cell = tool("1", "bash", "ok")
+  cell.input = { command: "echo ok", run_in_background: true, workdir: "   ", description: 42 }
+  expect(formatToolResultBody(cell)).toContain("Mode: background")
+  expect(formatToolResultBody(cell)).not.toContain("Workdir:")
+})

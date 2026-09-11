@@ -10,6 +10,23 @@ import { stringWidth } from "../markdown/width"
 import type { Cell, ToolCell } from "../state/types"
 
 describe("cellToTerminalBlock", () => {
+  it("renders image attachments inline with separate targets and retains original export text", () => {
+    const cell: Cell = { id: "images", kind: "user", text: '中文 @"/Screen Shot.png" then @/b.png' }
+    const block = cellToTerminalBlock(cell, { width: 12, verbose: false })
+    expect(block.plainText).toBe("› 中文 [Image 1] then [Image 2]\n")
+    const spans = block.lines.flatMap((line) => line.spans).filter((span) => span.attachmentPath)
+    expect(
+      spans
+        .filter((span) => span.attachmentPath === "/Screen Shot.png")
+        .map((span) => span.text)
+        .join("")
+    ).toBe("[Image 1]")
+    expect(spans.some((span) => span.attachmentPath === "/b.png")).toBe(true)
+    expect(
+      cellToTerminalBlock(cell, { width: 80, verbose: false, prefs: VERBATIM_RENDER_PREFS })
+        .plainText
+    ).toBe(`› ${cell.text}\n`)
+  })
   it("keeps markdown structure and copy text available at narrow widths", () => {
     const cell: Cell = {
       id: "a1",

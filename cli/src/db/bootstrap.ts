@@ -235,12 +235,21 @@ function preserveUnsafeSnapshot(
 function assertNoPendingSnapshotRecovery(file: string): void {
   if (fs.existsSync(file) || !fs.existsSync(path.dirname(file))) return
   const name = path.basename(file)
-  const preserved = fs.readdirSync(path.dirname(file)).find((entry) =>
-    ["corrupt", "incompatible"].some((label) => {
-      const prefix = `${name}.${label}-`
-      return entry.startsWith(prefix) && /^[1-9]\d*$/.test(entry.slice(prefix.length))
-    })
-  )
+  const directory = path.dirname(file)
+  const preserved = fs
+    .readdirSync(directory)
+    .filter((entry) =>
+      ["corrupt", "incompatible"].some((label) => {
+        const prefix = `${name}.${label}-`
+        return entry.startsWith(prefix) && /^[1-9]\d*$/.test(entry.slice(prefix.length))
+      })
+    )
+    .sort(
+      (a, b) =>
+        fs.statSync(path.join(directory, b)).mtimeMs -
+          fs.statSync(path.join(directory, a)).mtimeMs ||
+        b.localeCompare(a, undefined, { numeric: true })
+    )[0]
   if (!preserved) return
   const preservedPath = path.join(path.dirname(file), preserved)
   throw new CliDbSnapshotError(
@@ -624,7 +633,11 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
  * handle. `dispose()` clears the cache for a clean reopen.
  */
 export async function ensureCliDb(opts: EnsureCliDbOptions = {}): Promise<CliDbHandle> {
-  if (cached) return cached
+  if (cached) {
+    const pending = cached
+    await pending.ready
+    return pending
+  }
   const handle = create(opts)
   const wrapped: CliDbHandle = {
     ...handle,

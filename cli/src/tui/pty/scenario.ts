@@ -11,7 +11,8 @@
  * one driver replay a permission prompt, a tool failure and a mid-turn abort
  * without a bespoke fixture for each.
  */
-import type { CapturePermissionDecision, PermissionRequestEvent } from "@cognia/agent-config-types"
+import type { PermissionRequestEvent } from "@cognia/agent-config-types"
+import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import type { CreateSession } from "../hooks/useAgentSession"
 
 /** One thing the scripted agent does during a turn, in order. */

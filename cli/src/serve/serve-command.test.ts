@@ -51,6 +51,7 @@ describe("resolveServeCollabConfig", () => {
     expect(
       resolveServeCollabConfig(
         {
+          NODE_ENV: "test",
           COGNIA_COLLAB_URL: "https://collab.test",
           COGNIA_COLLAB_ORG_ID: "org_acme",
           COGNIA_COLLAB_TOKEN: "must-be-ignored",
@@ -62,7 +63,10 @@ describe("resolveServeCollabConfig", () => {
 
   it("refuses a half-configured endpoint", () => {
     expect(() =>
-      resolveServeCollabConfig({ COGNIA_COLLAB_URL: "https://collab.test" }, "/missing")
+      resolveServeCollabConfig(
+        { NODE_ENV: "test", COGNIA_COLLAB_URL: "https://collab.test" },
+        "/missing"
+      )
     ).toThrow()
   })
 })

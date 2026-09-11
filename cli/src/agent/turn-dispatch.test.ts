@@ -39,6 +39,7 @@ function session(overrides: Partial<ResolvedCliSessionContext> = {}): ResolvedCl
     agents: [subagent("explorer")],
     subagentToolEnabled: true,
     activeSkillIds: [],
+    contextualSkills: [],
     databaseError: null,
     contextVersion: "v1",
     ...overrides,

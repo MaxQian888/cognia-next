@@ -1,5 +1,7 @@
+import { RenderPrefsProvider } from "../render/context"
+import { RENDER_DEFAULTS } from "../../config/schema"
 import React from "react"
-import { render } from "@testing-library/react"
+import { act, render } from "@testing-library/react"
 
 import { WorkingIndicator } from "./WorkingIndicator"
 import { SPINNER_VERBS } from "../format/spinner-verbs"
@@ -19,4 +21,22 @@ describe("WorkingIndicator", () => {
     const { container } = render(<WorkingIndicator turnStatus="idle" />)
     expect(container.textContent).toContain(SPINNER_VERBS[0])
   })
+})
+
+it("keeps screen-reader work status stable without a timer", () => {
+  jest.useFakeTimers()
+  try {
+    const { container, unmount } = render(
+      <RenderPrefsProvider prefs={RENDER_DEFAULTS} screenReader>
+        <WorkingIndicator turnStatus="streaming" />
+      </RenderPrefsProvider>
+    )
+    expect(container.textContent).toBe("Working")
+    act(() => jest.advanceTimersByTime(9000))
+    expect(container.textContent).toBe("Working")
+    expect(jest.getTimerCount()).toBe(0)
+    unmount()
+  } finally {
+    jest.useRealTimers()
+  }
 })

@@ -40,6 +40,7 @@ import {
   type BackendFeature,
 } from "./backend-capabilities"
 import { backendIdentity } from "./backend-identity"
+import { createCliTranslator } from "../i18n"
 import type { BuiltinToolsConfig } from "@cognia/agent-config-types"
 import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 import { BUILTIN_HOOKS } from "@/lib/claude/hooks/builtin-hooks"
@@ -232,6 +233,7 @@ export function settingsSections(
   config: ResolvedConfig,
   capabilities?: BackendCapabilities
 ): SettingsSectionView[] {
+  const t = createCliTranslator(config.locale, "cliUiCommon")
   const identity = backendIdentity(config, capabilities?.presetId)
   const permissionMode = effectivePermissionMode(capabilities, config.permissionMode)
   const mascotEnabled = config.mascot?.enabled !== false
@@ -400,6 +402,29 @@ export function settingsSections(
     id: "display",
     title: "Display",
     rows: [
+      {
+        id: "locale",
+        label: t("language"),
+        value: config.locale ?? "en",
+        control: {
+          type: "enum",
+          options: ["en", "zh-CN"],
+          current: config.locale ?? "en",
+          apply: { kind: "configValue", key: "locale" },
+        },
+        description: t("languageHint"),
+      },
+      {
+        id: "screenReader",
+        label: t("screenReader"),
+        value: onOff(config.screenReader ?? false),
+        control: {
+          type: "boolean",
+          current: config.screenReader ?? false,
+          apply: { kind: "flag", key: "screenReader" },
+        },
+        description: t("screenReaderHint"),
+      },
       {
         id: "highlight",
         label: "Syntax-highlight output",
@@ -700,6 +725,13 @@ export function settingsSections(
     id: "behavior",
     title: "Behavior & Hooks",
     rows: [
+      {
+        id: "hooksPanel",
+        label: "Hooks…",
+        value: "",
+        control: { type: "delegate", command: "/hooks list" },
+        description: "Browse hook sources, inspect details, edit and reload configuration.",
+      },
       {
         id: "systemPrompt",
         label: "System prompt…",
@@ -1003,7 +1035,7 @@ export function settingsSections(
         id: "cwd",
         label: "Working dir",
         value: config.cwd,
-        control: { type: "readonly" },
+        control: { type: "delegate", command: "/cd" },
         description: "The working directory for this session.",
       },
       {
@@ -1015,6 +1047,13 @@ export function settingsSections(
         control: { type: "delegate", command: "/add-dir" },
         description: "Extra roots the agent may read without an approval prompt.",
       },
+      ...(config.additionalRoots ?? []).map((root, index): SettingsRow => ({
+        id: `root:${index + 1}`,
+        label: root,
+        value: root,
+        control: { type: "delegate", command: `/add-dir remove ${index + 1}` },
+        description: "",
+      })),
       {
         id: "customLimits",
         label: "Custom limits sources",
@@ -1027,7 +1066,7 @@ export function settingsSections(
     ],
   }
 
-  return [
+  const sections = [
     model,
     appearance,
     display,
@@ -1040,6 +1079,87 @@ export function settingsSections(
     keybindings,
     workspace,
   ]
+  const text = createCliTranslator(config.locale, "cliUiSettings")
+  const count = (key: string, amount: number, empty = "none") =>
+    text(`values.${amount ? key : empty}`, { count: amount })
+  // Only generated labels are translated; user IDs, paths and control values stay literal.
+  const values: Record<string, string | undefined> = {
+    credential: text(
+      config.providers[config.provider]?.apiKey
+        ? "values.apiKey"
+        : config.providers[config.provider]?.authToken
+          ? "values.token"
+          : "values.notConfigured"
+    ),
+    model: identity.model
+      ? undefined
+      : text(identity.external ? "values.agentDefault" : "values.default"),
+    mode:
+      permissionMode === config.permissionMode
+        ? undefined
+        : text("values.requested", { effective: permissionMode, requested: config.permissionMode }),
+    subagentModels: count("overridden", Object.keys(config.subagentModels ?? {}).length, "inherit"),
+    "custom-theme": (config.theme ?? "").startsWith("custom:")
+      ? undefined
+      : text("values.editColours"),
+    "status-segments": (config.statusBar?.segments ?? []).length
+      ? undefined
+      : text("values.default"),
+    skillLoadMode: text(
+      (config.skillLoadMode ?? "name") === "name" ? "values.nameOnly" : "values.fullBodies"
+    ),
+    skillDirs: count("dirs", config.skillDirs?.length ?? 0),
+    allowedTools: count("tools", config.allowedTools?.length ?? 0, "all"),
+    gitProtectedBranches: gitCfg.protectedBranches.length ? undefined : text("values.none"),
+    gitBaseBranch: gitCfg.baseBranch ? undefined : text("values.autoBranch"),
+    systemPrompt: text(config.systemPrompt ? "values.set" : "values.none"),
+    editor: config.editor?.command ? undefined : text("values.autoDetect"),
+    loggingCrashLogMaxKb: loggingCfg.crashLogMaxKb === 0 ? text("values.never") : undefined,
+    hooksPanel: text("values.openPanel"),
+    loggingViewMcpLogs: text("values.openPanel"),
+    rebind: text("values.openEditor"),
+    additionalRoots: count("roots", config.additionalRoots?.length ?? 0),
+    customLimits: count("customLimits", config.customLimitsSources?.length ?? 0),
+  }
+  return sections.map((entry) => ({
+    ...entry,
+    title: text(`sections.${entry.id}`),
+    rows: entry.rows.map((row) => {
+      const existing = row.id === "locale" || row.id === "screenReader"
+      if (row.id.startsWith("root:"))
+        return {
+          ...row,
+          label: text("removeRootLabel", { index: row.id.slice(5) }),
+          description: text("removeRootDescription"),
+        }
+      const isKey = row.id.startsWith("key:")
+      const isHook = row.id.startsWith("hook:")
+      const label = existing
+        ? row.label
+        : isKey
+          ? text(`keys.${row.id.slice(4)}`)
+          : isHook
+            ? text("hookLabel", { id: row.id.slice(5) })
+            : row.id === "provider" && identity.external
+              ? text("providerExternal")
+              : text(`rows.${row.id}.label`)
+      const description = existing
+        ? row.description
+        : isKey
+          ? text("keyDescription")
+          : row.id === "provider" || row.id === "credential"
+            ? text(`${row.id}Description${identity.external ? "External" : ""}`)
+            : text(`rows.${row.id}.description`, { key: formatKeySpec(bindings.collapseAll) })
+      return {
+        ...row,
+        label,
+        description,
+        value:
+          values[row.id] ??
+          (row.control.type === "boolean" ? text(`values.${row.value}`) : row.value),
+      }
+    }),
+  }))
 }
 
 /** Preset options for the inline result line cap (Display section enum). */
@@ -1077,6 +1197,7 @@ export const NUMERIC_RENDER_KEYS: ReadonlySet<keyof ResolvedRenderConfig> = new 
 /** Default value of every top-level boolean flag (absent-key semantics). Drives
  * both reset-to-default and any code that needs a flag's product default. */
 const FLAG_DEFAULTS: Record<BooleanFlagKey, boolean> = {
+  screenReader: false,
   webTools: true,
   autoRoute: false,
   skillTool: false,
@@ -1104,6 +1225,7 @@ const NUMBER_DEFAULTS: Record<NumberConfigKey, number> = {
 
 /** Default for the scalar `configValue` keys the panel edits (only skillLoadMode today). */
 const CONFIG_VALUE_DEFAULTS: Partial<Record<SettableKey, string>> = {
+  locale: "en",
   skillLoadMode: "name",
 }
 

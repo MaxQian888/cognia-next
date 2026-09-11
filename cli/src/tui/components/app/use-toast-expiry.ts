@@ -35,6 +35,8 @@ const realTimers: ToastTimers = {
 export interface ToastExpiryOptions {
   ttlFor?: (severity: ToastSeverity) => number
   timers?: ToastTimers
+  paused?: boolean
+  now?: () => number
 }
 
 /**
@@ -49,35 +51,60 @@ export function useToastExpiry(
 ): void {
   const ttlFor = options.ttlFor ?? defaultToastTtl
   const timers = options.timers ?? realTimers
-  // id → pending timer handle. Persist across renders so we schedule each toast once.
-  const scheduled = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  const now = options.now ?? Date.now
+  const paused = options.paused ?? false
+  const scheduled = useRef(
+    new Map<
+      string,
+      {
+        handle?: ReturnType<typeof setTimeout>
+        remaining: number
+        startedAt: number
+      }
+    >()
+  )
 
   useEffect(() => {
     const live = new Set(toasts.map((t) => t.id))
     // Schedule any newly-arrived toast.
     for (const toast of toasts) {
-      if (scheduled.current.has(toast.id)) continue
-      const handle = timers.set(() => {
+      let entry = scheduled.current.get(toast.id)
+      if (!entry) {
+        entry = { remaining: ttlFor(toast.severity), startedAt: 0 }
+        scheduled.current.set(toast.id, entry)
+      }
+      if (paused) {
+        if (entry.handle !== undefined) {
+          timers.clear(entry.handle)
+          entry.remaining = Math.max(0, entry.remaining - (now() - entry.startedAt))
+          entry.handle = undefined
+        }
+        continue
+      }
+      if (entry.handle !== undefined) continue
+      entry.startedAt = now()
+      entry.handle = timers.set(() => {
         scheduled.current.delete(toast.id)
         dispatch({ type: "TOAST_DISMISS", id: toast.id })
-      }, ttlFor(toast.severity))
-      scheduled.current.set(toast.id, handle)
+      }, entry.remaining)
     }
     // Clear timers for toasts that were dismissed out from under us (e.g. capped
     // out, or a manual dismiss) so we never fire a dangling dismiss.
-    for (const [id, handle] of scheduled.current) {
+    for (const [id, entry] of scheduled.current) {
       if (!live.has(id)) {
-        timers.clear(handle)
+        if (entry.handle !== undefined) timers.clear(entry.handle)
         scheduled.current.delete(id)
       }
     }
-  }, [toasts, dispatch, ttlFor, timers])
+  }, [toasts, dispatch, ttlFor, timers, paused, now])
 
   // Clear every pending timer on unmount.
   useEffect(() => {
     const map = scheduled.current
     return () => {
-      for (const handle of map.values()) timers.clear(handle)
+      for (const entry of map.values()) {
+        if (entry.handle !== undefined) timers.clear(entry.handle)
+      }
       map.clear()
     }
   }, [timers])

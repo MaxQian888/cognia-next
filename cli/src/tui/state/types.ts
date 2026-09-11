@@ -1,3 +1,5 @@
+import type { ToolBrowserEntry } from "../components/ToolBrowser"
+import type { HookPanelRow } from "../runtime/hooks-controller"
 /**
  * Shared type surface for the interactive TUI (the `cognia-agent chat` Ink app).
  *
@@ -7,12 +9,19 @@
  * co-located test.
  */
 import type { PermissionRequestEvent } from "@cognia/agent-config-types"
-import type { CanonicalContentPart } from "@cognia/agent-config-types/agent-execution"
+import type {
+  CanonicalContentPart,
+  CanonicalAgentEvent,
+} from "@cognia/agent-config-types/agent-execution"
 import type { AskUserRequest } from "@/lib/claude/ask-user-tool"
 import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import type { UsageInfo } from "@/lib/claude/adapter"
 import type { RunStepView, RunUsageTotals } from "../runtime/workflow-run-fold"
 import type { RateLimitSnapshot } from "../format/rate-limits"
+export type NativeAgentRateLimits = Record<
+  string,
+  Extract<CanonicalAgentEvent, { kind: "rate-limit" }> & { receivedAt?: number }
+>
 import type { SettingsSectionView } from "../runtime/settings-sections"
 import type { WorkflowRunEventRow } from "@/types/workflow/visual"
 import type { MarketplaceBrowseEntry } from "../runtime/marketplace-filter"
@@ -685,7 +694,27 @@ export type Overlay =
   // Markdown tokenizer; `text` bodies are shown verbatim (optionally syntax-
   // highlighted by `lang`). Used by skill/tool detail and the `/view` file
   // viewer. Scroll position lives in the component (view-only state).
-  | { kind: "document"; title: string; body: string; format: DocumentFormat; lang?: string }
+  | {
+      kind: "document"
+      title: string
+      body: string
+      format: DocumentFormat
+      lang?: string
+      sourceBashId?: string
+    }
+  | {
+      kind: "skillFiles"
+      title: string
+      root: string
+      files: { relPath: string; absPath: string }[]
+    }
+  | {
+      kind: "gitDiff"
+      review: import("../runtime/git-diff").GitDiffReview
+      requestId: number
+      loading?: boolean
+      error?: string
+    }
   | { kind: "a2ui"; surface: TuiA2UISurface }
   // Guided argument form. Navigation/edits go through FORM_UPDATE.
   | { kind: "form"; form: FormOverlayState }
@@ -706,6 +735,7 @@ export type Overlay =
       body: string
       format: DocumentFormat
       onConfirmCommand: string
+      onRememberCommand?: string
       onCancelCommand?: string
     }
   // Interactive plugin-marketplace browser: a search box + section tabs over the
@@ -719,6 +749,13 @@ export type Overlay =
   // `settingsSections(config)` at open time, `section` is the active section
   // index (Tab/←→ switch), `index` is the highlighted row within it (↑↓ move).
   // Enum/boolean rows apply inline; delegate/form rows open an existing overlay.
+  | {
+      kind: "workspaceFolder"
+      mode: "cwd" | "add"
+      returnToSettings?: { section: number; index: number }
+    }
+  | { kind: "toolBrowser"; entries: ToolBrowserEntry[] }
+  | { kind: "hooks"; rows: HookPanelRow[]; diagnostics: string[] }
   | { kind: "settings"; sections: SettingsSectionView[]; section: number; index: number }
   // Interactive MCP-server panel (`/mcp`). A live status board: each row carries
   // a coloured-bullet badge (connected / needs-auth / failed / disabled) that
@@ -726,7 +763,7 @@ export type Overlay =
   // live in the component; per-row actions (space toggle · a auth · r reconnect ·
   // enter → per-tool list · n new) route back through callbacks. `probing` flags
   // the in-flight initial probe so the header can show a spinner.
-  | { kind: "mcp"; servers: McpPanelServer[]; probing: boolean }
+  | { kind: "mcp"; servers: McpPanelServer[]; probing: boolean; runtimeBackend?: string }
   // A single MCP server's per-tool enable/disable list (drill-down from the MCP
   // panel). Space toggles a tool (writes the `disabledTools` overlay → the
   // model's `disallowedTools`); Esc returns to the server panel.
@@ -794,6 +831,7 @@ export type Overlay =
 
 /** One row of the `/menu` command center. Picking it runs {@link command}. */
 export interface QuickActionRow {
+  disabledReason?: string
   /** Stable id (also the row key). */
   id: string
   /** Display label, with a leading glyph. */
@@ -941,6 +979,8 @@ export interface TuiState {
    * `usage_headers` channel. Drives the `/limits` panel's live block + the
    * optional `ratelimit` footer segment. Absent until the first API response. */
   rateLimits?: RateLimitSnapshot
+  /** Native account quota pushes, separate from token/context usage. */
+  agentRateLimits?: NativeAgentRateLimits
   /** Whether a `usage` stream event already landed this turn (guards double-count). */
   usageSeenThisTurn: boolean
   turnStatus: TurnStatus
@@ -1104,6 +1144,12 @@ export type TuiAction =
   // billable per-turn totals and therefore must not accumulate session usage.
   | { type: "SET_CONTEXT_USAGE"; used: number; size: number }
   | { type: "SET_RATE_LIMITS"; snapshot: RateLimitSnapshot }
+  | {
+      type: "SET_AGENT_RATE_LIMIT"
+      event: Extract<CanonicalAgentEvent, { kind: "rate-limit" }>
+      receivedAt?: number
+    }
+  | { type: "CLEAR_AGENT_RATE_LIMITS" }
   // A context-compaction boundary crossed (auto threshold or a manual `/compact`),
   // surfaced from the capture stream / the manual-compact runner.
   | { type: "COMPACT_BOUNDARY"; trigger: "manual" | "auto"; preTokens: number; postTokens: number }
@@ -1239,6 +1285,12 @@ export type TuiAction =
   | { type: "OVERLAY_OPEN"; overlay: Overlay }
   | { type: "LIMITS_LOADED"; requestId: number; snapshots: ProviderLimits[] }
   | { type: "OVERLAY_CLOSE" }
+  | {
+      type: "GIT_DIFF_RESULT"
+      requestId: number
+      review?: import("../runtime/git-diff").GitDiffReview
+      error?: string
+    }
   | { type: "OVERLAY_MOVE"; delta: number }
   | { type: "OVERLAY_SET_INDEX"; index: number }
   // Live-refresh the option list of an open `model` overlay (no-op if a
@@ -1272,9 +1324,15 @@ export type TuiAction =
   | {
       type: "MCP_STATUS_PATCH"
       name: string
-      patch: Partial<Pick<McpPanelServer, "status" | "error" | "toolCount" | "enabled">>
+      patch: Partial<McpPanelServer>
       /** Clear the panel-level `probing` spinner (set on the last server). */
       doneProbing?: boolean
+    }
+  | {
+      type: "MCP_SERVERS_REPLACE"
+      servers: McpPanelServer[]
+      runtimeBackend?: string
+      sessionId?: string
     }
   // Append a captured MCP log line to the session ring buffer (`state.mcpLogs`).
   // `id`/`ts` are stamped by the reducer from `seq`/the event so the action stays
@@ -1308,6 +1366,7 @@ export type TuiAction =
   | { type: "INPUT_EDIT"; edit: InputEditOp }
   | { type: "INPUT_HISTORY"; history: HistoryState }
   | { type: "INPUT_ADD_PASTE"; id: string; text: string }
+  | { type: "INPUT_ADD_IMAGES"; paths: string[] }
   | { type: "INPUT_CLEAR" }
   | { type: "INPUT_PUSH_HISTORY"; entry: string }
   | { type: "INPUT_UNDO" }

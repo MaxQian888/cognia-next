@@ -121,29 +121,31 @@ function ProviderBlock({
   active?: boolean
 }) {
   const theme = useTheme()
+  const source = snapshot.sourceId ?? snapshot.provider
   const header =
-    snapshot.accountLabel && snapshot.accountLabel !== snapshot.provider
-      ? `${snapshot.provider} · ${snapshot.accountLabel}`
-      : snapshot.provider
+    snapshot.accountLabel && snapshot.accountLabel !== source
+      ? `${source} · ${snapshot.accountLabel}`
+      : source
   return (
     <Box flexDirection="column" marginTop={1}>
       <Text color={theme.accent} bold={active}>
         {header}
         {active ? <Text color={theme.success}>{"  ● active"}</Text> : null}
       </Text>
+      {snapshot.notice && <Text color={theme.muted}>{snapshot.notice}</Text>}
       {snapshot.error ? (
         <Text color={theme.danger}>{snapshot.error}</Text>
       ) : snapshot.meters.length > 0 ? (
         snapshot.meters.map((m) => <MeterRow key={m.id} meter={m} now={now} />)
-      ) : (
+      ) : !snapshot.notice ? (
         // The active provider is always rendered even with no usable source, so
         // the panel never collapses to "only the credit provider that happened
         // to return data" (e.g. DeepSeek) regardless of who's active. The hint
         // is provider-aware (OpenCode plans → point at the console).
         <Text color={theme.muted} dimColor>
-          {noDataHint(snapshot.provider)}
+          {noDataHint(source)}
         </Text>
-      )}
+      ) : null}
     </Box>
   )
 }
@@ -223,7 +225,7 @@ export function LimitsPanel({
         {/* Onboarding hint whenever NO account carries usable data — shown both
             when the list is empty and when the only block is a no-data active
             provider, so the "add a token" pointer is never lost. */}
-        {!loading && !snapshots.some((s) => s.meters.length > 0 || s.error) && (
+        {!loading && !snapshots.some((s) => s.meters.length > 0 || s.error || s.notice) && (
           <Text color={theme.muted}>
             No subscription limit data — add a Claude/Codex subscription token or a credit-provider
             key, then run /limits again.

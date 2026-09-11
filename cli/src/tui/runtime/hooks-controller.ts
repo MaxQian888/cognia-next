@@ -1,110 +1,139 @@
-/**
- * `/hooks` controller — lists the settings.json lifecycle hooks that are active
- * for this session. Reads the merged Cognia (`~/.cognia/config.json`) + Claude
- * Code (`~/.claude/settings.json`) hook config via the pure `loadHooks` core and
- * renders it into the scrollable document pager. Read-only: editing hooks is
- * done in the JSON files, mirroring Claude Code.
- *
- * The pure `buildHooksDocument` is unit-tested without disk; `runHooksList`
- * wires the injected fs read + dispatch.
- */
+/** Hooks inventory uses the same source merge and fleet filtering as execution. */
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-
+import { BUILTIN_HOOKS } from "@/lib/claude/hooks/builtin-hooks"
 import { loadHooks, type FileReader } from "../../hooks/load-hooks"
-import { HOOK_EVENTS, type HookEvent, type HookHandler, type HooksConfig } from "../../hooks/types"
-import { openDocument } from "./shared"
+import { HOOK_EVENTS, HooksConfigSchema, type HookEvent, type HooksConfig } from "../../hooks/types"
+import type { ResolvedConfig } from "../../config/schema"
 import type { TuiAction } from "../state/types"
+import { createCliTranslator, type CliLocale } from "../i18n"
 
+export interface HookPanelRow {
+  id: string
+  label: string
+  event: string
+  source: "builtin" | "cognia" | "claude"
+  detail: string
+  builtinId?: string
+  enabled?: boolean
+  sourcePath?: string
+}
 export interface HooksDeps {
   dispatch: (action: TuiAction) => void
-  /** Cognia config home (`~/.cognia`). */
   home: string
-  /** OS home (`~`) — `~/.claude/settings.json` hooks hang off this. */
   osHome?: string
-  /** Injected file reader (tests pass an in-memory double). */
+  config?: ResolvedConfig
   readFile?: FileReader
 }
-
-/** One-line description of a single hook handler for the listing. */
-function describeHandler(handler: HookHandler): string {
-  const h = handler as { type: string; command?: string; timeout?: number; url?: string }
-  if (h.type === "command") {
-    const timeout = h.timeout ? ` (timeout ${h.timeout}s)` : ""
-    return `\`${h.command}\`${timeout}`
+const defaultReadFile: FileReader = (file) => {
+  try {
+    return fs.readFileSync(file, "utf8")
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null
+    throw error
   }
-  if (h.type === "webhook") {
-    return `webhook → ${h.url} (inert — not run in the CLI)`
-  }
-  return `${h.type} handler (inert)`
 }
 
-/**
- * Render the merged hook config into a markdown document, grouped by lifecycle
- * event. Only events that have at least one group are shown; an empty config
- * yields a short "no hooks" body so the pager always has content.
- */
-export function buildHooksDocument(config: HooksConfig): string {
-  const lines: string[] = ["# Active hooks", ""]
-  const active = HOOK_EVENTS.filter((event) => (config[event]?.length ?? 0) > 0)
-  if (active.length === 0) {
-    lines.push(
-      "No hooks are configured.",
-      "",
-      "Add a `hooks` block to `~/.cognia/config.json` (or reuse your",
-      "`~/.claude/settings.json` hooks). Only `command` handlers run in the CLI;",
-      "a non-zero exit on `PreToolUse` / `UserPromptSubmit` blocks the action.",
-      "",
-      "Example:",
-      "",
-      "```json",
-      '{ "hooks": { "PreToolUse": [{ "matcher": "Edit|Write",',
-      '  "hooks": [{ "type": "command", "command": "./guard.sh" }] }] } }',
-      "```"
-    )
-    return lines.join("\n")
-  }
-  for (const event of active) {
-    const groups = config[event] ?? []
-    lines.push(`## ${event}`, "")
-    for (const group of groups) {
-      const matcher = group.matcher ? `matcher \`${group.matcher}\`` : "matches all"
-      lines.push(`- ${matcher}`)
+export function buildHooksDocument(config: HooksConfig, locale?: CliLocale): string {
+  const t = createCliTranslator(locale, "cliUiHooks")
+  const lines: string[] = []
+  for (const event of HOOK_EVENTS) {
+    for (const group of config[event] ?? []) {
+      lines.push(
+        `## ${event}`,
+        t("data.matcher", { value: group.matcher || "*" }),
+        t("data.agents", { value: group.agents || "*" })
+      )
       for (const handler of group.hooks) {
-        lines.push(`  - ${describeHandler(handler)}`)
+        // Do not expose authentication headers in the inventory.
+        const { headers: _headers, ...visible } = handler as Record<string, unknown>
+        lines.push("```json", JSON.stringify(visible, null, 2), "```", "")
       }
     }
-    lines.push("")
   }
-  return lines.join("\n").trimEnd()
+  return lines.join("\n") || t("data.empty")
 }
 
-/** Count the configured hook groups across every event (for the empty notice). */
-function totalGroups(config: HooksConfig): number {
-  return HOOK_EVENTS.reduce((sum, event) => sum + (config[event]?.length ?? 0), 0)
-}
-
-/** `/hooks` (and `/hooks list`) — open the active-hooks document. */
-export function hooksList(deps: HooksDeps): void {
+export function readHooksPanel(deps: Omit<HooksDeps, "dispatch">): {
+  rows: HookPanelRow[]
+  diagnostics: string[]
+} {
+  const t = createCliTranslator(deps.config?.locale, "cliUiHooks")
   const readFile = deps.readFile ?? defaultReadFile
-  const claudeHome = path.join(deps.osHome ?? os.homedir(), ".claude")
-  const config = loadHooks({ home: deps.home, claudeHome, readFile })
-  const count = totalGroups(config)
-  openDocument(deps.dispatch, {
-    title: count > 0 ? `Hooks (${count})` : "Hooks",
-    body: buildHooksDocument(config),
-    format: "markdown",
-  })
-}
-
-const defaultReadFile: FileReader = (absPath) => {
-  try {
-    return fs.readFileSync(absPath, "utf8")
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null
-    throw err
+  const sources = {
+    cognia: path.join(deps.home, "config.json"),
+    claude: path.join(deps.osHome ?? os.homedir(), ".claude", "settings.json"),
   }
+  const rows: HookPanelRow[] = []
+  const diagnostics = [
+    t(
+      deps.config?.agentBackend && deps.config.agentBackend !== "builtin"
+        ? "data.external"
+        : deps.config?.provider && deps.config.provider !== "anthropic"
+          ? "data.otherProvider"
+          : "data.configured"
+    ),
+  ]
+  for (const source of ["cognia", "claude"] as const) {
+    const file = sources[source]
+    try {
+      const raw = readFile(file)
+      if (raw == null) continue
+      const parsed: unknown = JSON.parse(raw)
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+        throw new Error(t("data.invalidObject"))
+      const block = (parsed as { hooks?: unknown }).hooks
+      if (block === undefined) continue
+      const result = HooksConfigSchema.safeParse(block)
+      if (!result.success)
+        throw new Error(
+          result.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")
+        )
+      // Reuse loadHooks so inherited fleet-managed groups stay excluded.
+      const effective = loadHooks({
+        home: deps.home,
+        claudeHome: path.dirname(sources.claude),
+        readFile: (candidate) => (candidate === file ? raw : null),
+      })
+      for (const event of HOOK_EVENTS) {
+        for (const [index, group] of (effective[event] ?? []).entries()) {
+          rows.push({
+            id: `${source}:${event}:${index}`,
+            source,
+            sourcePath: file,
+            event,
+            label: `${event} · ${group.matcher || "*"} · ${group.hooks.length}`,
+            detail: `${t("data.source", { path: file })}\n\n${buildHooksDocument({ [event]: [group] }, deps.config?.locale)}`,
+          })
+        }
+      }
+    } catch (error) {
+      diagnostics.push(
+        t("data.invalid", {
+          path: file,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      )
+    }
+  }
+  const settingsText = createCliTranslator(deps.config?.locale, "cliUiSettings")
+  for (const builtin of BUILTIN_HOOKS) {
+    const enabled = deps.config?.builtinHookOverrides?.[builtin.id] ?? builtin.defaultEnabled
+    rows.push({
+      id: `builtin:${builtin.id}`,
+      label: builtin.id,
+      event: builtin.event,
+      source: "builtin",
+      builtinId: builtin.id,
+      enabled,
+      detail: `${settingsText(`rows.hook:${builtin.id}.description`)}\n\n${t("data.event", { event: builtin.event })}\n${t("data.matcher", { value: builtin.matcher || "*" })}\n${t("data.script", { path: builtin.script })}\n\n${t("data.toggleHelp")}`,
+    })
+  }
+  return { rows, diagnostics }
 }
 
+export function hooksList(deps: HooksDeps): void {
+  deps.dispatch({ type: "OVERLAY_OPEN", overlay: { kind: "hooks", ...readHooksPanel(deps) } })
+}
 export type { HookEvent }

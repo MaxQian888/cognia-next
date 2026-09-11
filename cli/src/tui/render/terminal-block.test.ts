@@ -7,6 +7,18 @@ import {
 } from "./terminal-block"
 
 describe("TerminalBlock", () => {
+  it("preserves attachment targets across wrapping without merging adjacent different targets", () => {
+    const lines = wrapTerminalSpans(
+      [
+        { text: "[Image 1]", style: "accent", attachmentPath: "/a.png" },
+        { text: "[Image 2]", style: "accent", attachmentPath: "/b.png" },
+      ],
+      12
+    )
+    expect(lines[0].spans).toHaveLength(2)
+    expect(lines[0].spans[1].attachmentPath).toBe("/b.png")
+    expect(lines[1].spans[0]).toMatchObject({ text: "age 2]", attachmentPath: "/b.png" })
+  })
   it.each([20, 40, 80, 160])("reports exact wrapped rows at %i columns", (width) => {
     const text = "x".repeat(width * 2 + 1)
     const block = buildTerminalBlock({ id: "b", text, width })

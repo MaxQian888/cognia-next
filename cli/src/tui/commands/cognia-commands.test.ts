@@ -19,7 +19,10 @@ describe("COGNIA_COMMANDS", () => {
     "routes /models through the active %s picker",
     (agentBackend) => {
       expect(
-        cmd("models").handler!({ ...ctx(""), config: { ...DEFAULT_RESOLVED_CONFIG, agentBackend } })
+        cmd("models").handler!({
+          ...ctx(""),
+          config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/repo", agentBackend },
+        })
       ).toEqual({ kind: "modelPicker" })
     }
   )

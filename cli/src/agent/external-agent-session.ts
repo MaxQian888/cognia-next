@@ -1,3 +1,14 @@
+import {
+  clearSessionMcpStatus,
+  forwardedMcpServers,
+  markSessionMcpPending,
+  mcpConfigVersion,
+  mergeAgentMcpEvidence,
+  publishSessionMcpStatus,
+  readSessionMcpStatus,
+  registerSessionMcpStatus,
+  type AgentMcpEvidence,
+} from "./tool-host/mcp-status"
 import os from "node:os"
 
 import type { PermissionRequestEvent } from "@cognia/agent-config-types"
@@ -49,7 +60,11 @@ import { resolveHome } from "../config/load"
 import { piMetadataForPreset, resolveBackendModel } from "../config/active-model"
 import { loadMcpServers } from "../mcp/load-mcp-config"
 import { applyDisabled, readDisabled, readDisabledTools } from "../mcp/mcp-state"
-import { buildCodexOptions, toAcpMcpServers } from "../tui/runtime/backend-bridge"
+import {
+  buildCodexOptions,
+  toAcpMcpServers,
+  toCodexReasoningEffort,
+} from "../tui/runtime/backend-bridge"
 import type { ResolvedConfig } from "../config/schema"
 import {
   externalAgentEventToActions,
@@ -187,6 +202,16 @@ export function classifyExternalFailure(
 }
 
 export interface ExternalAgentSessionManager {
+  getCodexAppServerAdapter?: (agentId: string) => {
+    refreshMcpServers: (strict?: boolean, threadId?: string) => Promise<AgentMcpEvidence[]>
+    getModelCatalog?: () => Array<{
+      id: string
+      model?: string
+      isDefault?: boolean
+      defaultReasoningEffort?: string
+    }>
+    listModels?: () => Promise<Array<{ id: string; name?: string }>>
+  } | null
   addAgent(config: ExternalAgentConfig): Promise<unknown>
   execute(
     agentId: string,
@@ -527,6 +552,11 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
         : `Unknown external-agent backend: ${backend}`
     )
   }
+  const supportsMcp = ["acp", "codex-app-server"].includes(
+    getPresetConfig(params.connection?.presetId ?? backend)?.protocol ?? ""
+  )
+  let applyingMcp = false
+  let sendingTurn = false
   let turnSequence = 0
 
   const now = params.now ?? Date.now
@@ -588,6 +618,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
   // without tearing the agent down; `invalidateOptions` drops the cache.
   let mcpServers: AcpMcpServerConfig[] | undefined
   let initialized = params.connection !== undefined
+  let resolvedPresetId = params.connection?.presetId ?? backend
   let closed = false
   // Seeded from the recorded link so a `/resume` continues the agent's OWN
   // session instead of silently starting an empty one behind a full transcript.
@@ -622,6 +653,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
   const ensureAgent = async (): Promise<void> => {
     if (initialized) return
     const presetId = backend === "codex" ? await resolvePreferredCodexExecutablePresetId() : backend
+    resolvedPresetId = presetId
     requestedModel = resolveBackendModel(params.config, presetId)
     const config = createAgentFromPreset(presetId, {
       id: agentId,
@@ -779,7 +811,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       builtinToolCount: visibleBuiltinTools(session.sendOptions).length,
       hostToolCount: hostTools.length,
       subagentDispatch: hostTools.includes("dispatch_agent"),
-      userMcpCount: session.mcpServers.filter((server) => server.enabled !== false).length,
+      userMcpCount: supportsMcp ? toAcpMcpServers(session.mcpServers).length : 0,
       connections: broker?.connections() ?? 0,
     }
     publishToolHostStatus(sessionId, snapshot)
@@ -817,7 +849,17 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       // instruction sets and make resume non-deterministic, so start a new
       // protocol session instead — the TUI transcript is unaffected.
       await manager.cancel(agentId, externalSessionId).catch(() => undefined)
+      await manager.closeSession?.(agentId, externalSessionId)
       externalSessionId = undefined
+      const previousMcp = readSessionMcpStatus(sessionId)
+      if (previousMcp)
+        publishSessionMcpStatus(sessionId, {
+          ...previousMcp,
+          externalSessionId: undefined,
+          appliedConfigVersion: undefined,
+          pending: true,
+          servers: [],
+        })
       await stopToolHost()
       mcpServers = undefined
       restarted = true
@@ -827,339 +869,518 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
     return { session, restarted }
   }
 
+  const publishMcp = (
+    session: ResolvedCliSessionContext,
+    cogniaServers: AcpMcpServerConfig[]
+  ): void => {
+    const supplied = toAcpMcpServers(session.mcpServers)
+    publishSessionMcpStatus(sessionId, {
+      backend,
+      externalSessionId,
+      appliedConfigVersion: supportsMcp ? mcpConfigVersion(supplied) : undefined,
+      telemetry: "unsupported",
+      pending: false,
+      servers: forwardedMcpServers(
+        [...cogniaServers, ...supplied],
+        new Set(cogniaServers.map((server) => server.name)),
+        supportsMcp
+      ),
+    })
+  }
+  const refreshMcp = async () => {
+    const snapshot = readSessionMcpStatus(sessionId)
+    if (!snapshot || closed) return snapshot
+    const adapter = manager.getCodexAppServerAdapter?.(agentId)
+    if (!adapter) return snapshot
+    try {
+      const evidence = await adapter.refreshMcpServers(true, snapshot.externalSessionId)
+      // A concurrent restart/close makes this result belong to an obsolete session.
+      if (readSessionMcpStatus(sessionId) !== snapshot || closed)
+        return readSessionMcpStatus(sessionId)
+      const next = mergeAgentMcpEvidence(snapshot, evidence)
+      publishSessionMcpStatus(sessionId, next)
+      return next
+    } catch (error) {
+      if (readSessionMcpStatus(sessionId) !== snapshot || closed)
+        return readSessionMcpStatus(sessionId)
+      const next = {
+        ...snapshot,
+        telemetry: "failed" as const,
+        error: error instanceof Error ? error.message : String(error),
+        servers: snapshot.servers.map((server) =>
+          server.source === "agent"
+            ? {
+                ...server,
+                state: "unknown" as const,
+                error: error instanceof Error ? error.message : String(error),
+              }
+            : server
+        ),
+      }
+      publishSessionMcpStatus(sessionId, next)
+      return next
+    }
+  }
+  const createMcpSession = async (resolved: ResolvedCliSessionContext) => {
+    if (!manager.createSession)
+      throw new Error("The current agent cannot create a session explicitly")
+    const cogniaServers = await ensureToolHost(resolved)
+    const options: SessionCreateOptions = {
+      cwd: resolved.cwd,
+      permissionMode,
+      allowedTools: params.config.allowedTools,
+      metadata: {
+        selectedModel: requestedModel,
+        codexOptions: buildCodexOptions(params.config, params.connection?.presetId ?? backend),
+      },
+      mcpServers: [...cogniaServers, ...(mcpServers ??= toAcpMcpServers(resolved.mcpServers))],
+      additionalDirectories: resolved.additionalDirectories,
+      systemPrompt: resolved.sendOptions.systemPrompt,
+      instructionEnvelope: {
+        hash: resolved.contextVersion,
+        developerInstructions: resolved.sendOptions.systemPrompt ?? "",
+        sourceFlags: {
+          hasSkills: resolved.activeSkillIds.length > 0,
+          hasAdditionalRoots: resolved.additionalDirectories.length > 0,
+        },
+      },
+    }
+    if (
+      !hasNoLeakingPiiDeep({
+        systemPrompt: options.systemPrompt,
+        instructionEnvelope: options.instructionEnvelope,
+        context: {
+          custom: {
+            mcpServers: options.mcpServers,
+            additionalDirectories: options.additionalDirectories,
+          },
+        },
+      })
+    ) {
+      throw new RunAndCaptureError(
+        "External agent input blocked by the outbound PII gate",
+        "session_error"
+      )
+    }
+    const created = await manager.createSession(agentId, options)
+    externalSessionId = created.id
+    sessionContextVersion = resolved.contextVersion
+    publishMcp(resolved, cogniaServers)
+    writeExternalLink(
+      home,
+      sessionId,
+      { backend, externalSessionId: created.id, contextVersion: resolved.contextVersion },
+      params.transcriptFs
+    )
+    return created
+  }
+  registerSessionMcpStatus(sessionId, {
+    refresh: refreshMcp,
+    apply: async (allowRestart = false) => {
+      if (closed) throw new Error("Agent session is closed")
+      if (sendingTurn || activeTurnOptions || applyingMcp)
+        throw new Error("Wait for the active agent turn to finish")
+      if (!supportsMcp)
+        throw new Error("The current agent protocol does not consume supplied MCP configuration")
+      if (!manager.createSession)
+        throw new Error("The current agent cannot apply MCP configuration explicitly")
+      applyingMcp = true
+      try {
+        await ensureAgent()
+        assembler.invalidate()
+        const desired = await assembler.resolveSession()
+        if (
+          externalSessionId &&
+          (sessionContextVersion !== desired.contextVersion || permissionModeStale) &&
+          !allowRestart
+        ) {
+          markSessionMcpPending(sessionId)
+          return {
+            snapshot: readSessionMcpStatus(sessionId),
+            restarted: false,
+            requiresRestart: true,
+          }
+        }
+        const { session, restarted } = await reconcile()
+        if (!externalSessionId) await createMcpSession(session)
+        return { snapshot: await refreshMcp(), restarted }
+      } finally {
+        applyingMcp = false
+      }
+    },
+  })
+
   return {
     sessionId,
     async send(prompt: string, opts: SendTurnOptions) {
       if (closed) throw new Error("agent session is closed")
-      await ensureAgent()
-      const { session, restarted } = await reconcile()
-      const turnNumber = turnSequence++
-      const turnIdentity = {
-        runId: `${sessionId}:r${turnNumber}`,
-        turnId: `${sessionId}:t${turnNumber}`,
-        attemptId: `${sessionId}:t${turnNumber}:a0`,
-      }
-      const envelopeEmitter = opts.onEnvelope
-        ? createEnvelopeEmitter({
-            identity: {
-              sessionId,
-              ...turnIdentity,
-              hostRef: `external-agent:${backend}`,
-              runtime: backend,
-            },
-            onEnvelope: opts.onEnvelope,
-            now: () => new Date(now()),
-          })
-        : undefined
-      if (restarted) {
-        const action = { type: "NOTICE" as const, message: CONTEXT_RESTART_NOTICE }
-        if (envelopeEmitter) envelopeEmitter.emit(actionToCanonicalEvent(action))
-        else opts.onAction?.(action)
-      }
-      if (!skillsAnnounced && session.activeSkillIds.length > 0) {
-        skillsAnnounced = true
-        opts.onActiveSkills?.(session.activeSkillIds)
-      }
-      if (session.databaseError && !databaseErrorShown) {
-        databaseErrorShown = true
-        opts.onDatabaseError?.(session.databaseError)
-      }
-      const turn = await assembler.resolveTurn(prompt, session)
-      const releaseSkillScope = bindExternalTurnSkillScope({
-        sessionId,
-        activeSkillIds: session.activeSkillIds,
-        contextualSkillIds: turn.contextualSkillIds,
-        turnId: turnIdentity.turnId,
-        attemptId: turnIdentity.attemptId,
-      })
-      activeToolScope = {
-        turnId: turnIdentity.turnId,
-        attemptId: turnIdentity.attemptId,
-      }
-      if (turn.twinNotice) opts.onTwinNotice?.(turn.twinNotice)
-      if (turn.attachments) opts.onAttachments?.(turn.attachments)
-
-      // `session/new` already happened with the base prompt, so the twin persona
-      // rides this turn's content (once) alongside the per-turn recall.
-      let content = turn.content
-      if (turn.dynamicTwinContext) {
-        content = prependTextBlock(content, twinContextBlock(turn.dynamicTwinContext))
-      }
-      if (turn.stableTwinContext) {
-        content = prependTextBlock(content, twinContextBlock(turn.stableTwinContext))
-      }
-      const flattened: ExternalPromptResult = externalPromptText(content)
-      if (flattened.unsupported.length > 0) {
-        // Fail BEFORE sending: dropping the attachment and answering anyway
-        // would look like the agent read something it never received.
-        releaseSkillScope()
-        activeToolScope = undefined
-        throw new RunAndCaptureError(
-          unsupportedAttachmentMessage(backend, flattened.unsupported),
-          "session_error"
-        )
-      }
-      activeTurnOptions = opts
-      emitTurnAction = (action) => {
-        if (activeTurnOptions !== opts || opts.signal?.aborted) return
-        if (envelopeEmitter) envelopeEmitter.emit(actionToCanonicalEvent(action))
-        else if (opts.onAction) opts.onAction(action)
-        else {
-          const capture = actionToCaptureEvent(action)
-          if (capture) opts.onEvent?.(capture)
-        }
-      }
-      const cogniaServers = await ensureToolHost(session).catch((error) => {
-        releaseSkillScope()
-        activeToolScope = undefined
-        activeTurnOptions = undefined
-        emitTurnAction = undefined
-        throw error
-      })
-
-      appendTranscript(
-        home,
-        sessionId,
-        { role: "user", content: prompt },
-        params.transcriptFs,
-        now()
-      )
-      // Publish this turn's dispatch context so a `dispatch_agent` call arriving
-      // over the tool-host bridge runs with THIS turn's gate and signal.
-      const clearDispatch = registerTurnSubagentContext({
-        session,
-        config: params.config,
-        home,
-        gate: opts.gate,
-        ...(opts.signal ? { signal: opts.signal } : {}),
-        approvedTools: resolveApprovedTools(),
-        disabledMcpTools: resolveDisabledMcpTools(),
-      })
-
-      // Bound the turn by silence, not by wall clock. `watchdog` arms on the
-      // first streamed event and pauses while a permission prompt is on screen,
-      // so neither a slow cold start nor a long approval can trip it.
-      const watchdog = createIdleWatchdog({ timeoutMs: resolveIdleTimeoutMs(params.config) })
-      activeWatchdog = watchdog
-      // The event stream carries the external session id before the result does;
-      // capturing it here lets a mid-turn cancel target the right session on the
-      // very first turn (when `externalSessionId` is still unset).
-      let observedSessionId = externalSessionId
-      let result: ExternalAgentResult
+      if (applyingMcp) throw new Error("MCP configuration is being applied")
+      if (sendingTurn) throw new Error("An agent turn is already active")
+      sendingTurn = true
       try {
-        const executionOptions: ExternalAgentExecutionOptions = {
-          ...(externalSessionId ? { sessionId: externalSessionId } : {}),
-          // External model memory is keyed by backend/preset. The top-level
-          // `config.model` is a legacy built-in-provider pin and may name a
-          // completely different ecosystem model.
-          ...(requestedModel ? { model: requestedModel } : {}),
-          // The CANONICAL prompt, not `config.systemPrompt` — this is what makes
-          // project instructions, output style, the active mode and the skill
-          // catalog reach an external agent at all.
-          ...(session.sendOptions.systemPrompt
-            ? { systemPrompt: session.sendOptions.systemPrompt }
-            : {}),
-          permissionMode,
-          // The agent's OWN tool pre-approval list, so it stays in the agent's
-          // native tool vocabulary. Cognia's resolved tool policy is expressed in
-          // `mcp__cognia-*__` names the agent cannot act on; it governs Cognia's
-          // projected tools at the broker instead.
-          ...(params.config.allowedTools?.length
-            ? { allowedTools: params.config.allowedTools }
-            : {}),
-          instructionEnvelope: {
-            hash: session.contextVersion,
-            developerInstructions: session.sendOptions.systemPrompt ?? "",
-            sourceFlags: {
-              hasSkills: session.activeSkillIds.length > 0,
-              hasCogniaTools: cogniaServers.length > 0,
-              hasAdditionalRoots: session.additionalDirectories.length > 0,
-            },
-          },
-          context: {
-            custom: {
-              // Cognia's own tools first, then the user's — both additive, and
-              // both namespaced, so the agent's native tools stay untouched.
-              mcpServers: [
-                ...cogniaServers,
-                ...(mcpServers ??= toAcpMcpServers(session.mcpServers)),
-              ],
-              additionalDirectories: session.additionalDirectories,
-            },
-          },
-          workingDirectory: session.cwd,
-          ...(opts.signal ? { signal: opts.signal } : {}),
-          // Always explicit: an omitted budget makes the manager fall back to the
-          // agent config's `timeout`, which is the CONNECT budget and would cap
-          // every turn at a minute.
-          timeout:
-            opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : EXTERNAL_TURN_WALL_CLOCK_MS,
-          onPermissionRequest: async (request) => {
-            if (activeTurnOptions !== opts || opts.signal?.aborted) {
-              return captureDecisionToAcp(request, { decision: "deny", message: "No active turn" })
+        await ensureAgent()
+        let reasoningEffort: string | undefined
+        if (resolvedPresetId === "codex-app-server") {
+          reasoningEffort = toCodexReasoningEffort(params.config.thinkingLevel)
+          if (params.config.thinkingLevel === "off") {
+            // The controller keeps the agent alive across /effort changes. An
+            // omitted value would restore its stale connect-time default.
+            const adapter = manager.getCodexAppServerAdapter?.(agentId)
+            let models = adapter?.getModelCatalog?.() ?? []
+            if (models.length === 0) {
+              await adapter?.listModels?.()
+              models = adapter?.getModelCatalog?.() ?? []
             }
-            // A Cognia-projected tool is gated by the broker, which shows the
-            // real prompt and owns the persisted rules. Acknowledging the
-            // agent's generic ask here is what keeps ONE Cognia call from
-            // producing TWO user prompts. Native agent tools fall through to
-            // Cognia's overlay as before.
-            if (isCogniaProjectedTool(request.toolInfo?.name)) {
-              return captureDecisionToAcp(request, { decision: "allow" })
-            }
-            watchdog.pause()
-            try {
-              const decision = await opts.gate(acpPermissionRequestToCli(request, sessionId))
-              return captureDecisionToAcp(
-                request,
-                activeTurnOptions === opts && !opts.signal?.aborted
-                  ? decision
-                  : { decision: "deny", message: "The turn was interrupted" }
+            const model = requestedModel
+              ? models.find(
+                  (entry) => entry.id === requestedModel || entry.model === requestedModel
+                )
+              : models.find((entry) => entry.isDefault)
+            reasoningEffort = model?.defaultReasoningEffort
+            if (!reasoningEffort)
+              throw new Error(
+                "Codex model default reasoning effort is unavailable; refresh the model list and retry"
               )
-            } finally {
-              watchdog.resume()
-            }
-          },
-          /**
-           * A blocking question that is not a tool approval.
-           *
-           * Routed through the existing `ask_user` overlay rather than a second
-           * form widget — see `elicitation-ask-user.ts`. Supplying this callback
-           * is half of what makes elicitation work at all:
-           * `BaseProtocolAdapter.execute` gates the branch on
-           * `options?.onElicitationRequest && this.respondToElicitation`, so a
-           * missing callback silently skips the answer and the agent stays
-           * blocked with no error and no timeout.
-           */
-          onElicitationRequest: async (request) => {
-            watchdog.pause()
-            try {
-              return await answerElicitationThroughAskUser(request, (question) =>
-                useAskUserStore.getState().enqueue(question, sessionId)
-              )
-            } finally {
-              watchdog.resume()
-            }
-          },
-          onEvent: (event) => {
-            if (activeTurnOptions !== opts || opts.signal?.aborted) return
-            watchdog.bump()
-            if (event.sessionId) observedSessionId = event.sessionId
-            const actions = externalAgentEventToActions(event)
-            if (envelopeEmitter && actions.length === 0) {
-              envelopeEmitter.emit(
-                externalAgentEventToCanonicalFallback(event as ExternalAgentEvent)
-              )
-            }
-            for (const action of actions) {
-              if (envelopeEmitter) {
-                envelopeEmitter.emit(actionToCanonicalEvent(action))
-              } else if (opts.onAction) {
-                opts.onAction(action)
-              } else {
-                const capture = actionToCaptureEvent(action)
-                if (capture) opts.onEvent?.(capture)
-              }
-            }
-          },
-        }
-        if (
-          !hasNoLeakingPiiDeep({
-            prompt: flattened.text,
-            systemPrompt: executionOptions.systemPrompt,
-            instructionEnvelope: executionOptions.instructionEnvelope,
-            context: executionOptions.context,
-          })
-        ) {
-          throw new RunAndCaptureError(
-            "External agent input blocked by the outbound PII gate",
-            "session_error"
-          )
-        }
-        const execution = manager.execute(agentId, flattened.text, executionOptions)
-        // Fold rejection into the value so the losing race branch can never
-        // surface as an unhandled rejection.
-        const settled = execution.then(
-          (value) => ({ kind: "result" as const, value }),
-          (error: unknown) => ({ kind: "failed" as const, error })
-        )
-        const outcome = await Promise.race([
-          settled,
-          watchdog.whenIdle().then(() => ({ kind: "idle" as const })),
-        ])
-
-        if (outcome.kind === "idle") {
-          // The stream went silent. Cancel the in-flight turn but KEEP the
-          // session: the process is alive and its context is still intact, so
-          // the next message continues the conversation.
-          broker?.cancelInFlight("the turn was interrupted")
-          if (observedSessionId) {
-            await manager.cancel(agentId, observedSessionId).catch(() => undefined)
           }
+        }
+        const { session, restarted } = await reconcile()
+        const turnNumber = turnSequence++
+        const turnIdentity = {
+          runId: `${sessionId}:r${turnNumber}`,
+          turnId: `${sessionId}:t${turnNumber}`,
+          attemptId: `${sessionId}:t${turnNumber}:a0`,
+        }
+        const envelopeEmitter = opts.onEnvelope
+          ? createEnvelopeEmitter({
+              identity: {
+                sessionId,
+                ...turnIdentity,
+                hostRef: `external-agent:${backend}`,
+                runtime: backend,
+              },
+              onEnvelope: opts.onEnvelope,
+              now: () => new Date(now()),
+            })
+          : undefined
+        if (restarted) {
+          const action = { type: "NOTICE" as const, message: CONTEXT_RESTART_NOTICE }
+          if (envelopeEmitter) envelopeEmitter.emit(actionToCanonicalEvent(action))
+          else opts.onAction?.(action)
+        }
+        if (!skillsAnnounced && session.activeSkillIds.length > 0) {
+          skillsAnnounced = true
+          opts.onActiveSkills?.(session.activeSkillIds)
+        }
+        if (session.databaseError && !databaseErrorShown) {
+          databaseErrorShown = true
+          opts.onDatabaseError?.(session.databaseError)
+        }
+        const turn = await assembler.resolveTurn(prompt, session)
+        const releaseSkillScope = bindExternalTurnSkillScope({
+          sessionId,
+          activeSkillIds: session.activeSkillIds,
+          contextualSkillIds: turn.contextualSkillIds,
+          turnId: turnIdentity.turnId,
+          attemptId: turnIdentity.attemptId,
+        })
+        activeToolScope = {
+          turnId: turnIdentity.turnId,
+          attemptId: turnIdentity.attemptId,
+        }
+        if (turn.twinNotice) opts.onTwinNotice?.(turn.twinNotice)
+        if (turn.attachments) opts.onAttachments?.(turn.attachments)
+
+        // `session/new` already happened with the base prompt, so the twin persona
+        // rides this turn's content (once) alongside the per-turn recall.
+        let content = turn.content
+        if (turn.dynamicTwinContext) {
+          content = prependTextBlock(content, twinContextBlock(turn.dynamicTwinContext))
+        }
+        if (turn.stableTwinContext) {
+          content = prependTextBlock(content, twinContextBlock(turn.stableTwinContext))
+        }
+        const flattened: ExternalPromptResult = externalPromptText(content)
+        if (flattened.unsupported.length > 0) {
+          // Fail BEFORE sending: dropping the attachment and answering anyway
+          // would look like the agent read something it never received.
+          releaseSkillScope()
+          activeToolScope = undefined
           throw new RunAndCaptureError(
-            `External agent stream idle for ${resolveIdleTimeoutMs(params.config)}ms`,
+            unsupportedAttachmentMessage(backend, flattened.unsupported),
             "session_error"
           )
         }
-        if (outcome.kind === "failed") {
-          const error = outcome.error
-          if (error instanceof RunAndCaptureError) throw error
-          const message = error instanceof Error ? error.message : String(error)
-          throw new RunAndCaptureError(message, classifyExternalFailure(message))
+        activeTurnOptions = opts
+        emitTurnAction = (action) => {
+          if (activeTurnOptions !== opts || opts.signal?.aborted) return
+          if (envelopeEmitter) envelopeEmitter.emit(actionToCanonicalEvent(action))
+          else if (opts.onAction) opts.onAction(action)
+          else {
+            const capture = actionToCaptureEvent(action)
+            if (capture) opts.onEvent?.(capture)
+          }
         }
-        result = outcome.value
-      } finally {
-        releaseSkillScope()
-        activeToolScope = undefined
-        watchdog.stop()
-        activeWatchdog = undefined
-        clearDispatch()
-        activeTurnOptions = undefined
-        emitTurnAction = undefined
-      }
+        const cogniaServers = await ensureToolHost(session).catch((error) => {
+          releaseSkillScope()
+          activeToolScope = undefined
+          activeTurnOptions = undefined
+          emitTurnAction = undefined
+          throw error
+        })
 
-      if (result.sessionId && result.sessionId !== externalSessionId) {
-        externalSessionId = result.sessionId
-        // Record it as soon as the agent names it, so even a session that later
-        // fails can be resumed rather than lost. The context version rides along
-        // so a later `/resume` refuses a session created under other settings.
-        writeExternalLink(
+        appendTranscript(
+          home,
+          sessionId,
+          { role: "user", content: prompt },
+          params.transcriptFs,
+          now()
+        )
+        // Publish this turn's dispatch context so a `dispatch_agent` call arriving
+        // over the tool-host bridge runs with THIS turn's gate and signal.
+        const clearDispatch = registerTurnSubagentContext({
+          session,
+          config: params.config,
+          home,
+          gate: opts.gate,
+          ...(opts.signal ? { signal: opts.signal } : {}),
+          approvedTools: resolveApprovedTools(),
+          disabledMcpTools: resolveDisabledMcpTools(),
+        })
+
+        // Bound the turn by silence, not by wall clock. `watchdog` arms on the
+        // first streamed event and pauses while a permission prompt is on screen,
+        // so neither a slow cold start nor a long approval can trip it.
+        const watchdog = createIdleWatchdog({ timeoutMs: resolveIdleTimeoutMs(params.config) })
+        activeWatchdog = watchdog
+        // The event stream carries the external session id before the result does;
+        // capturing it here lets a mid-turn cancel target the right session on the
+        // very first turn (when `externalSessionId` is still unset).
+        let observedSessionId = externalSessionId
+        let result: ExternalAgentResult
+        try {
+          const executionOptions: ExternalAgentExecutionOptions = {
+            ...(externalSessionId ? { sessionId: externalSessionId } : {}),
+            // External model memory is keyed by backend/preset. The top-level
+            // `config.model` is a legacy built-in-provider pin and may name a
+            // completely different ecosystem model.
+            ...(requestedModel ? { model: requestedModel } : {}),
+            ...(reasoningEffort ? { reasoningEffort } : {}),
+            // The CANONICAL prompt, not `config.systemPrompt` — this is what makes
+            // project instructions, output style, the active mode and the skill
+            // catalog reach an external agent at all.
+            ...(session.sendOptions.systemPrompt
+              ? { systemPrompt: session.sendOptions.systemPrompt }
+              : {}),
+            permissionMode,
+            // The agent's OWN tool pre-approval list, so it stays in the agent's
+            // native tool vocabulary. Cognia's resolved tool policy is expressed in
+            // `mcp__cognia-*__` names the agent cannot act on; it governs Cognia's
+            // projected tools at the broker instead.
+            ...(params.config.allowedTools?.length
+              ? { allowedTools: params.config.allowedTools }
+              : {}),
+            instructionEnvelope: {
+              hash: session.contextVersion,
+              developerInstructions: session.sendOptions.systemPrompt ?? "",
+              sourceFlags: {
+                hasSkills: session.activeSkillIds.length > 0,
+                hasCogniaTools: cogniaServers.length > 0,
+                hasAdditionalRoots: session.additionalDirectories.length > 0,
+              },
+            },
+            context: {
+              custom: {
+                // Cognia's own tools first, then the user's — both additive, and
+                // both namespaced, so the agent's native tools stay untouched.
+                mcpServers: [
+                  ...cogniaServers,
+                  ...(mcpServers ??= toAcpMcpServers(session.mcpServers)),
+                ],
+                additionalDirectories: session.additionalDirectories,
+              },
+            },
+            workingDirectory: session.cwd,
+            ...(opts.signal ? { signal: opts.signal } : {}),
+            // Always explicit: an omitted budget makes the manager fall back to the
+            // agent config's `timeout`, which is the CONNECT budget and would cap
+            // every turn at a minute.
+            timeout:
+              opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : EXTERNAL_TURN_WALL_CLOCK_MS,
+            onPermissionRequest: async (request) => {
+              if (activeTurnOptions !== opts || opts.signal?.aborted) {
+                return captureDecisionToAcp(request, {
+                  decision: "deny",
+                  message: "No active turn",
+                })
+              }
+              // A Cognia-projected tool is gated by the broker, which shows the
+              // real prompt and owns the persisted rules. Acknowledging the
+              // agent's generic ask here is what keeps ONE Cognia call from
+              // producing TWO user prompts. Native agent tools fall through to
+              // Cognia's overlay as before.
+              if (isCogniaProjectedTool(request.toolInfo?.name)) {
+                return captureDecisionToAcp(request, { decision: "allow" })
+              }
+              watchdog.pause()
+              try {
+                const decision = await opts.gate(acpPermissionRequestToCli(request, sessionId))
+                return captureDecisionToAcp(
+                  request,
+                  activeTurnOptions === opts && !opts.signal?.aborted
+                    ? decision
+                    : { decision: "deny", message: "The turn was interrupted" }
+                )
+              } finally {
+                watchdog.resume()
+              }
+            },
+            /**
+             * A blocking question that is not a tool approval.
+             *
+             * Routed through the existing `ask_user` overlay rather than a second
+             * form widget — see `elicitation-ask-user.ts`. Supplying this callback
+             * is half of what makes elicitation work at all:
+             * `BaseProtocolAdapter.execute` gates the branch on
+             * `options?.onElicitationRequest && this.respondToElicitation`, so a
+             * missing callback silently skips the answer and the agent stays
+             * blocked with no error and no timeout.
+             */
+            onElicitationRequest: async (request) => {
+              watchdog.pause()
+              try {
+                return await answerElicitationThroughAskUser(request, (question) =>
+                  useAskUserStore.getState().enqueue(question, sessionId)
+                )
+              } finally {
+                watchdog.resume()
+              }
+            },
+            onEvent: (event) => {
+              if (activeTurnOptions !== opts || opts.signal?.aborted) return
+              watchdog.bump()
+              if (event.sessionId) observedSessionId = event.sessionId
+              const actions = externalAgentEventToActions(event)
+              if (envelopeEmitter && actions.length === 0) {
+                envelopeEmitter.emit(
+                  externalAgentEventToCanonicalFallback(event as ExternalAgentEvent)
+                )
+              }
+              for (const action of actions) {
+                if (envelopeEmitter) {
+                  envelopeEmitter.emit(actionToCanonicalEvent(action))
+                } else if (opts.onAction) {
+                  opts.onAction(action)
+                } else {
+                  const capture = actionToCaptureEvent(action)
+                  if (capture) opts.onEvent?.(capture)
+                }
+              }
+            },
+          }
+          if (
+            !hasNoLeakingPiiDeep({
+              prompt: flattened.text,
+              systemPrompt: executionOptions.systemPrompt,
+              instructionEnvelope: executionOptions.instructionEnvelope,
+              context: executionOptions.context,
+            })
+          ) {
+            throw new RunAndCaptureError(
+              "External agent input blocked by the outbound PII gate",
+              "session_error"
+            )
+          }
+          publishMcp(session, cogniaServers)
+          const execution = manager.execute(agentId, flattened.text, executionOptions)
+          // Fold rejection into the value so the losing race branch can never
+          // surface as an unhandled rejection.
+          const settled = execution.then(
+            (value) => ({ kind: "result" as const, value }),
+            (error: unknown) => ({ kind: "failed" as const, error })
+          )
+          const outcome = await Promise.race([
+            settled,
+            watchdog.whenIdle().then(() => ({ kind: "idle" as const })),
+          ])
+
+          if (outcome.kind === "idle") {
+            // The stream went silent. Cancel the in-flight turn but KEEP the
+            // session: the process is alive and its context is still intact, so
+            // the next message continues the conversation.
+            broker?.cancelInFlight("the turn was interrupted")
+            if (observedSessionId) {
+              await manager.cancel(agentId, observedSessionId).catch(() => undefined)
+            }
+            throw new RunAndCaptureError(
+              `External agent stream idle for ${resolveIdleTimeoutMs(params.config)}ms`,
+              "session_error"
+            )
+          }
+          if (outcome.kind === "failed") {
+            const error = outcome.error
+            if (error instanceof RunAndCaptureError) throw error
+            const message = error instanceof Error ? error.message : String(error)
+            throw new RunAndCaptureError(message, classifyExternalFailure(message))
+          }
+          result = outcome.value
+        } finally {
+          releaseSkillScope()
+          activeToolScope = undefined
+          watchdog.stop()
+          activeWatchdog = undefined
+          clearDispatch()
+          activeTurnOptions = undefined
+          emitTurnAction = undefined
+        }
+
+        if (result.sessionId && result.sessionId !== externalSessionId) {
+          externalSessionId = result.sessionId
+          // Record it as soon as the agent names it, so even a session that later
+          // fails can be resumed rather than lost. The context version rides along
+          // so a later `/resume` refuses a session created under other settings.
+          writeExternalLink(
+            home,
+            sessionId,
+            {
+              backend,
+              externalSessionId: result.sessionId,
+              contextVersion: session.contextVersion,
+            },
+            params.transcriptFs
+          )
+        }
+        const mcpSnapshot = readSessionMcpStatus(sessionId)
+        if (mcpSnapshot) publishSessionMcpStatus(sessionId, { ...mcpSnapshot, externalSessionId })
+        if (!result.success) {
+          const message = result.error || "External agent execution failed"
+          throw new RunAndCaptureError(message, classifyExternalFailure(message, result.errorCode))
+        }
+        const usage = usageFromResult(result)
+        appendTranscript(
           home,
           sessionId,
           {
-            backend,
-            externalSessionId: result.sessionId,
-            contextVersion: session.contextVersion,
+            role: "assistant",
+            content: result.finalResponse,
+            meta: {
+              backend,
+              ...(requestedModel ? { model: requestedModel } : {}),
+              ...(usage ? { usage } : {}),
+            },
           },
-          params.transcriptFs
+          params.transcriptFs,
+          now()
         )
-      }
-      if (!result.success) {
-        const message = result.error || "External agent execution failed"
-        throw new RunAndCaptureError(message, classifyExternalFailure(message, result.errorCode))
-      }
-      const usage = usageFromResult(result)
-      appendTranscript(
-        home,
-        sessionId,
-        {
-          role: "assistant",
-          content: result.finalResponse,
-          meta: {
-            backend,
-            ...(requestedModel ? { model: requestedModel } : {}),
-            ...(usage ? { usage } : {}),
-          },
-        },
-        params.transcriptFs,
-        now()
-      )
-      return {
-        text: result.finalResponse,
-        messageId: `external-${now()}`,
-        sessionId,
-        a2uiSurfaces: {},
-        a2uiSurfaceOrder: [],
-        ...(usage ? { usage } : {}),
+        return {
+          text: result.finalResponse,
+          messageId: `external-${now()}`,
+          sessionId,
+          a2uiSurfaces: {},
+          a2uiSurfaceOrder: [],
+          ...(usage ? { usage } : {}),
+        }
+      } finally {
+        sendingTurn = false
       }
     },
     invalidateOptions() {
@@ -1168,6 +1389,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       // the context version in `reconcile`, so `/mcp`, `/mode`, `/skill` and a
       // system-prompt edit all land in the right layer without special cases.
       assembler.invalidate()
+      markSessionMcpPending(sessionId)
       mcpServers = undefined
       skillsAnnounced = false
     },
@@ -1204,6 +1426,11 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
     async listModels() {
       if (closed) return []
       if (!initialized) await ensureAgent()
+      if (resolvedPresetId === "codex-app-server") {
+        // Native model/list is process-scoped. Opening the picker must not
+        // create a thread and start its MCP servers just to discover models.
+        return (await manager.getCodexAppServerAdapter?.(agentId)?.listModels?.()) ?? []
+      }
       if (externalSessionId) return readLiveModelOptions(manager, agentId, externalSessionId)
       if (!manager.createSession) return []
 
@@ -1211,29 +1438,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       // turn creates the real conversation session and retains it, so the picker
       // cannot mutate a disposable probe that is immediately discarded.
       const resolved = await assembler.resolveSession()
-      const cogniaServers = await ensureToolHost(resolved)
-      const created = await manager.createSession(agentId, {
-        cwd: resolved.cwd,
-        mcpServers: [...cogniaServers, ...(mcpServers ??= toAcpMcpServers(resolved.mcpServers))],
-        additionalDirectories: resolved.additionalDirectories,
-        systemPrompt: resolved.sendOptions.systemPrompt,
-        instructionEnvelope: {
-          hash: resolved.contextVersion,
-          developerInstructions: resolved.sendOptions.systemPrompt ?? "",
-          sourceFlags: {
-            hasSkills: resolved.activeSkillIds.length > 0,
-            hasAdditionalRoots: resolved.additionalDirectories.length > 0,
-          },
-        },
-      })
-      externalSessionId = created.id
-      sessionContextVersion = resolved.contextVersion
-      writeExternalLink(
-        home,
-        sessionId,
-        { backend, externalSessionId: created.id, contextVersion: resolved.contextVersion },
-        params.transcriptFs
-      )
+      const created = await createMcpSession(resolved)
       return readLiveModelOptions(manager, agentId, created.id)
     },
     /**
@@ -1283,6 +1488,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       // bridge executing against a session that is already gone.
       clearCliSubagentContext(sessionId)
       clearToolHostStatus(sessionId)
+      clearSessionMcpStatus(sessionId)
       releaseHostRuntime()
       await stopToolHost()
       if (!initialized) return

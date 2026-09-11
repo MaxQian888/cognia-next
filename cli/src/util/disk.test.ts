@@ -32,7 +32,9 @@ function tree(files: Record<string, number>): ReadOnlyDirFs {
 
 describe("freeBytesAt", () => {
   it("multiplies available blocks by block size, accepting bigint fields", async () => {
-    expect(await freeBytesAt("/x", async () => ({ bavail: 10n, bsize: 4096n }))).toBe(40_960)
+    expect(await freeBytesAt("/x", async () => ({ bavail: BigInt(10), bsize: BigInt(4096) }))).toBe(
+      40_960
+    )
     expect(await freeBytesAt("/x", async () => ({ bavail: 3, bsize: 512 }))).toBe(1536)
   })
 

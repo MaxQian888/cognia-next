@@ -11,6 +11,7 @@ import { Box, Text, type DOMElement } from "ink"
 import { BottomStatus, type AgentTreeHit } from "../BottomStatus"
 import { Toasts } from "../Toasts"
 import { useToastExpiry } from "./use-toast-expiry"
+import { useCliTranslations } from "../../i18n"
 import { FindBar } from "../FindBar"
 import { Input } from "../Input"
 import { Mascot } from "../Mascot"
@@ -74,6 +75,7 @@ export interface BottomRegionProps {
 }
 
 export function BottomRegion(props: BottomRegionProps): React.ReactElement {
+  const t = useCliTranslations("cliUiCommon")
   const {
     state,
     dispatch,
@@ -113,16 +115,16 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
 
   // Auto-expire transient toasts (severity-dependent TTL). The reducer stays
   // pure; the timing lives here with the render that shows them.
-  useToastExpiry(state.toasts, dispatch)
+  useToastExpiry(state.toasts, dispatch, { paused: overlayOpen })
 
   return (
     <Box flexDirection="column" flexShrink={0}>
       {/* Modal overlays own the available terminal rows. Keep transient status
-          queued (and expiring) while one is open, but never let it push a
+          queued with its timer paused while one is open, but never let it push a
           Doctor/MCP/document panel upward or occupy its lower-left corner. */}
       {!overlayOpen ? <Toasts toasts={state.toasts} /> : null}
       {state.overlay.kind === "permission" ? (
-        <Text color={warningColor}>Waiting for approval</Text>
+        <Text color={warningColor}>{t("waitingApproval")}</Text>
       ) : (
         <BottomStatus
           turnStatus={state.turnStatus}
@@ -161,9 +163,7 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
           const { pos, total } = userMessageStats(state.cells, state.backtrack.index)
           return (
             <Box flexShrink={0}>
-              <Text color={warningColor}>
-                {`✎ Editing message #${pos}/${total} — ↑/↓ choose · Enter to edit · Esc to cancel`}
-              </Text>
+              <Text color={warningColor}>{t("editingMessage", { position: pos, total })}</Text>
             </Box>
           )
         })()}
@@ -173,7 +173,7 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
           return (
             <Box flexShrink={0}>
               <Text color={warningColor}>
-                {`✎ Editing message #${pos}/${total} · ${later} later turn(s) will be discarded on send · Esc to cancel`}
+                {t("editingDiscard", { position: pos, total, later })}
               </Text>
             </Box>
           )

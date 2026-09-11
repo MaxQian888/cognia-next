@@ -104,3 +104,9 @@ export function parseMouseEvent(input: string): MouseEvent | null {
 export function isMouseSequence(input: string): boolean {
   return SGR_MOUSE.test(input)
 }
+
+/** Pointer position for pane hit-testing, including wheel reports. */
+export function mouseEventPosition(input: string): { col: number; row: number } | null {
+  const match = SGR_MOUSE.exec(input)
+  return match ? { col: Number(match[2]), row: Number(match[3]) } : null
+}

@@ -1,3 +1,5 @@
+import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
+import type { SessionMcpSnapshot } from "../../agent/tool-host/mcp-status"
 import { loadMcpServers } from "../../mcp/load-mcp-config"
 import * as toolProbe from "../../mcp/probe-mcp-tools"
 jest.mock("../../mcp/probe-mcp-tools", () => ({ probeMcpTools: jest.fn() }))
@@ -12,6 +14,8 @@ import {
   mcpLogout,
   mcpLogsPanel,
   mcpPanel,
+  mcpRefreshSession,
+  mcpApplySession,
   mcpPresets,
   mcpPrompts,
   mcpReconnect,
@@ -942,7 +946,8 @@ describe("mcpPanel", () => {
     const probeCache = createMcpProbeCache()
     probeCache.set(
       "fs",
-      toCacheEntry({ status: "connected", tools: [{ name: "t" }], resources: [], prompts: [] }, 0)
+      toCacheEntry({ status: "connected", tools: [{ name: "t" }], resources: [], prompts: [] }, 0),
+      server("fs")
     )
     let probes = 0
     await mcpPanel({
@@ -970,7 +975,8 @@ describe("mcpPanel", () => {
     const probeCache = createMcpProbeCache()
     probeCache.set(
       "warm",
-      toCacheEntry({ status: "connected", tools: [], resources: [], prompts: [] }, 0)
+      toCacheEntry({ status: "connected", tools: [], resources: [], prompts: [] }, 0),
+      server("warm")
     )
     const probed: string[] = []
     await mcpPanel({
@@ -1207,7 +1213,8 @@ describe("openMcpToolsPanel", () => {
           prompts: [],
         },
         0
-      )
+      ),
+      server("github")
     )
     let probes = 0
     await openMcpToolsPanel("github", {
@@ -1359,7 +1366,7 @@ it("discards a cancelled panel probe instead of repopulating its cache", async (
 it("reuses an empty connected tool cache without another probe", async () => {
   const { dispatch, actions } = recorder()
   const probeCache = createMcpProbeCache()
-  probeCache.set("fs", toCacheEntry(ok(), 0))
+  probeCache.set("fs", toCacheEntry(ok(), 0), server("fs"))
   const probe = jest.fn()
   await openMcpToolsPanel("fs", {
     ...base,
@@ -1433,5 +1440,169 @@ describe.each([mcpResources, mcpPrompts])("cancelled MCP catalog reads", (read) 
       type: "NOTICE",
       message: expect.stringContaining("Connecting"),
     })
+  })
+})
+
+describe("agent MCP status integration", () => {
+  const config = { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "codex" }
+  const snapshot: SessionMcpSnapshot = {
+    backend: "codex",
+    telemetry: "supported",
+    servers: [
+      { name: "native", source: "agent", state: "available", toolNames: ["read"], scope: "agent" },
+    ],
+  }
+  it("shows native-only agent inventory even with no Cognia configuration", async () => {
+    const { dispatch, actions } = recorder()
+    await mcpPanel({
+      ...base,
+      dispatch,
+      config,
+      sessionId: "s",
+      load: () => [],
+      readSession: () => snapshot,
+      refreshSession: async () => snapshot,
+    })
+    expect(actions[0]).toMatchObject({
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "mcp", servers: [{ name: "native", source: "agent", readOnly: true }] },
+    })
+    expect(actions.at(-1)).toMatchObject({ type: "MCP_SERVERS_REPLACE" })
+  })
+  it("refreshes agent evidence without running a Cognia probe", async () => {
+    const { dispatch, actions } = recorder()
+    const probeServer = jest.fn()
+    const refreshSession = jest.fn(async () => snapshot)
+    await mcpRefreshSession({
+      ...base,
+      dispatch,
+      config,
+      sessionId: "s",
+      load: () => [],
+      readSession: () => snapshot,
+      refreshSession,
+      probeServer,
+    })
+    expect(refreshSession).toHaveBeenCalledWith("s")
+    expect(probeServer).not.toHaveBeenCalled()
+    expect(actions.at(-1)).toMatchObject({ type: "MCP_SERVERS_REPLACE" })
+  })
+  it("requires explicit confirmation before applying a conversation reset", async () => {
+    const { dispatch, actions } = recorder()
+    const applySession = jest.fn(async () => ({
+      snapshot,
+      restarted: false,
+      requiresRestart: true,
+    }))
+    await mcpApplySession({
+      ...base,
+      dispatch,
+      config,
+      sessionId: "s",
+      readSession: () => snapshot,
+      applySession,
+    })
+    expect(applySession).toHaveBeenCalledWith("s", false)
+    expect(actions.at(-1)).toMatchObject({
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "confirm", onConfirmCommand: "mcp apply --restart" },
+    })
+  })
+  it("passes explicit restart consent and reports application separately from availability", async () => {
+    const { dispatch, actions } = recorder()
+    const applySession = jest.fn(async () => ({ snapshot, restarted: true }))
+    await mcpApplySession(
+      {
+        ...base,
+        dispatch,
+        config,
+        sessionId: "s",
+        load: () => [],
+        readSession: () => snapshot,
+        applySession,
+      },
+      true
+    )
+    expect(applySession).toHaveBeenCalledWith("s", true)
+    expect(
+      actions.some(
+        (action) => action.type === "NOTICE" && action.message.includes("still requires")
+      )
+    ).toBe(true)
+  })
+  it("does not apply when no runtime exists", async () => {
+    const { dispatch, actions } = recorder()
+    const applySession = jest.fn()
+    await mcpApplySession({
+      ...base,
+      dispatch,
+      config,
+      sessionId: "s",
+      readSession: () => undefined,
+      applySession,
+    })
+    expect(applySession).not.toHaveBeenCalled()
+    expect(actions[0]).toMatchObject({
+      type: "NOTICE",
+      message: expect.stringContaining("first message"),
+    })
+  })
+  it("discards a probe for an endpoint changed while connecting", async () => {
+    const { dispatch, actions } = recorder()
+    let current = { ...server("fs"), config: { command: "old" } }
+    const probeCache = createMcpProbeCache()
+    await mcpReconnect("fs", {
+      ...base,
+      dispatch,
+      load: () => [current],
+      probeCache,
+      probeServer: async () => {
+        current = { ...current, config: { command: "new" } }
+        return ok()
+      },
+    })
+    expect(actions.filter((action) => action.type === "MCP_STATUS_PATCH")).toHaveLength(1)
+    expect(probeCache.get("fs")).toBeUndefined()
+  })
+  it("opens agent tool inventory read-only without creating a local connection", async () => {
+    const { dispatch, actions } = recorder()
+    const probe = jest.fn()
+    await openMcpToolsPanel("runtime:agent:native", {
+      ...base,
+      dispatch,
+      config,
+      sessionId: "s",
+      load: () => [],
+      readSession: () => snapshot,
+      probe,
+    })
+    expect(probe).not.toHaveBeenCalled()
+    expect(actions[0]).toMatchObject({
+      type: "OVERLAY_OPEN",
+      overlay: { kind: "toolBrowser", entries: [expect.objectContaining({ name: "read" })] },
+    })
+  })
+})
+
+it("reports inventory telemetry failure even when the refresh returns a snapshot", async () => {
+  const { dispatch, actions } = recorder()
+  const snapshot: SessionMcpSnapshot = {
+    backend: "codex",
+    telemetry: "failed",
+    error: "network unavailable",
+    servers: [],
+  }
+  await mcpRefreshSession({
+    ...base,
+    dispatch,
+    config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "codex" },
+    sessionId: "s",
+    load: () => [],
+    readSession: () => snapshot,
+    refreshSession: async () => snapshot,
+  })
+  expect(actions[0]).toMatchObject({
+    type: "NOTICE",
+    message: expect.stringContaining("network unavailable"),
   })
 })

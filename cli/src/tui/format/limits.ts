@@ -66,7 +66,7 @@ function trimAmount(n: number): string {
 /** The right-aligned figure: "21% used" for windows, "¥88.50 left" for credit. */
 export function meterRightLabel(m: LimitsMeter): string {
   if (m.kind === "window") {
-    return `${m.usedPct ?? 0}% used`
+    return m.usedPct == null || !Number.isFinite(m.usedPct) ? "—" : `${m.usedPct}% used`
   }
   if (typeof m.remaining === "number") {
     // A non-positive credit balance is depleted — showing "¥-0.01 left" reads

@@ -1,4 +1,7 @@
-import { detectFormat, viewFile } from "./view-controller"
+import fs from "node:fs/promises"
+import os from "node:os"
+import path from "node:path"
+import { detectFormat, viewFile, readSkillFile } from "./view-controller"
 import type { TuiAction } from "../state/types"
 
 function collect() {
@@ -71,4 +74,86 @@ describe("viewFile", () => {
     expect(body).toContain("truncated at")
     expect(body.length).toBeLessThan(big.length)
   })
+})
+
+describe("readSkillFile", () => {
+  it("previews nested text and bounds large files, while rejecting binary and escaping symlinks", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "skill-preview-"))
+    const root = path.join(dir, "skill")
+    await fs.mkdir(path.join(root, "refs"), { recursive: true })
+    try {
+      const file = path.join(root, "refs", "guide.md")
+      await fs.writeFile(file, "# Nested guide")
+      expect(await readSkillFile(root, file)).toEqual({
+        format: "markdown",
+        body: "# Nested guide",
+      })
+      const large = path.join(root, "large.txt")
+      await fs.writeFile(large, "x".repeat(300000))
+      const preview = await readSkillFile(root, large)
+      expect(preview.body.length).toBeLessThan(263000)
+      expect(preview.body).toContain("truncated at 256 KB")
+      const binary = path.join(root, "binary.bin")
+      await fs.writeFile(binary, Buffer.from([1, 0, 2]))
+      await expect(readSkillFile(root, binary)).rejects.toThrow("Binary file")
+      const outside = path.join(dir, "outside.txt")
+      await fs.writeFile(outside, "outside")
+      const link = path.join(root, "link.txt")
+      await fs.symlink(outside, link)
+      await expect(readSkillFile(root, link)).rejects.toThrow("outside the skill directory")
+      await expect(readSkillFile(root, root)).rejects.toThrow("Not a regular file")
+      await expect(readSkillFile(root, path.join(root, "missing"))).rejects.toThrow()
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+it("bounds UTF-8 bytes without splitting Chinese characters", async () => {
+  const { dispatch, actions } = collect()
+  await viewFile("中文.txt", {
+    dispatch,
+    cwd: "/work",
+    readFile: async () => "你好世界",
+    maxBytes: 7,
+    locale: "zh-CN",
+  })
+  expect(actions[0]).toMatchObject({ overlay: { body: expect.stringContaining("你好\n") } })
+  const body = (actions[0] as { overlay: { body: string } }).overlay.body
+  expect(body).not.toContain("世")
+  expect(body).not.toContain("�")
+  expect(body).toContain("截断")
+})
+
+it("reads real files with a bounded handle and rejects directories and binary content", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "view-bounded-"))
+  const readSpy = jest.spyOn(fs, "readFile")
+  try {
+    await fs.writeFile(path.join(dir, "large.txt"), "中".repeat(100000))
+    await fs.writeFile(path.join(dir, "binary.dat"), Buffer.from([0, 1, 2]))
+    const result = collect()
+    await viewFile('"large.txt"', { ...result, cwd: dir, maxBytes: 8 })
+    expect(result.actions[0]).toMatchObject({
+      type: "OVERLAY_OPEN",
+      overlay: { body: expect.stringContaining("中中\n") },
+    })
+    expect(readSpy).not.toHaveBeenCalled()
+    for (const name of ["binary.dat", "."]) {
+      const rejected = collect()
+      await viewFile(name, { ...rejected, cwd: dir, locale: "zh-CN" })
+      expect(rejected.actions[0]).toMatchObject({ type: "NOTICE" })
+      expect(JSON.stringify(rejected.actions[0])).toContain(name === "." ? "普通文件" : "二进制")
+    }
+  } finally {
+    readSpy.mockRestore()
+    await fs.rm(dir, { recursive: true, force: true })
+  }
+})
+
+it("resolves quoted home paths without executing shell syntax", async () => {
+  const result = collect()
+  const readFile = jest.fn().mockResolvedValue("literal")
+  await viewFile("'~/a b.txt'", { ...result, cwd: "/work", readFile, maxBytes: -1 })
+  expect(readFile).toHaveBeenCalledWith(path.join(os.homedir(), "a b.txt"))
+  expect(result.actions[0]).toMatchObject({ overlay: { body: "literal" } })
 })

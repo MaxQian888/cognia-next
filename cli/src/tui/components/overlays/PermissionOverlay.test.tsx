@@ -1,5 +1,5 @@
 import React from "react"
-import { render } from "@testing-library/react"
+import { act, render } from "@testing-library/react"
 import { __fireInput, __resetInk } from "ink"
 
 import {
@@ -12,6 +12,8 @@ import {
   prettyToolName,
   riskLevelFor,
 } from "./PermissionOverlay"
+import { TuiInputProvider, useCriticalInput } from "../../input/input-router"
+import { CliI18nProvider } from "../../i18n"
 import type { PermissionRequestEvent } from "../../state/types"
 
 const req = {
@@ -338,3 +340,215 @@ describe("PermissionOverlay", () => {
     expect(text.indexOf("after")).toBeLessThan(text.indexOf("Allow once"))
   })
 })
+
+describe("approval detail inspection", () => {
+  beforeEach(() => __resetInk())
+
+  it("reads the complete arguments and returns without deciding", () => {
+    const onResolve = jest.fn()
+    const onMove = jest.fn()
+    const { container } = render(
+      <PermissionOverlay
+        req={{
+          ...req,
+          input: {
+            command: "echo begin",
+            extra: Array.from({ length: 40 }, (_, i) => `parameter-${i}`).join("\n"),
+          },
+        }}
+        choices={DEFAULT_PERMISSION_CHOICES}
+        index={1}
+        maxRows={7}
+        columns={40}
+        onMove={onMove}
+        onResolve={onResolve}
+      />
+    )
+    act(() => __fireInput("v", {}))
+    act(() => __fireInput("G", {}))
+    expect(container.textContent).toContain("parameter-39")
+    act(() => __fireInput("", { return: true }))
+    expect(onResolve).not.toHaveBeenCalled()
+    expect(container.textContent).toContain("Allow always")
+    act(() => __fireInput("v", {}))
+    act(() => __fireInput("", { escape: true }))
+    expect(onResolve).not.toHaveBeenCalled()
+    expect(onMove).not.toHaveBeenCalled()
+    act(() => __fireInput("", { return: true }))
+    expect(onResolve).toHaveBeenCalledWith({ decision: "allow_always" })
+  })
+
+  it("exposes the final proposed diff lines without resolving the request", () => {
+    const onResolve = jest.fn()
+    const { container } = render(
+      <PermissionOverlay
+        req={
+          {
+            toolName: "write",
+            input: {
+              file_path: "long.ts",
+              content: Array.from({ length: 50 }, (_, i) => `const line${i} = ${i}`).join("\n"),
+            },
+          } as never
+        }
+        choices={DEFAULT_PERMISSION_CHOICES}
+        index={0}
+        maxRows={7}
+        columns={50}
+        onMove={() => {}}
+        onResolve={onResolve}
+      />
+    )
+    act(() => __fireInput("v", {}))
+    act(() => __fireInput("G", {}))
+    expect(container.textContent).toContain("const line49 = 49")
+    expect(onResolve).not.toHaveBeenCalled()
+  })
+})
+
+describe("approval viewport navigation", () => {
+  beforeEach(() => __resetInk())
+
+  it("retains the selected action in one row and routes navigation", () => {
+    const onResolve = jest.fn()
+    const onMove = jest.fn()
+    const { container } = render(
+      <PermissionOverlay
+        req={req}
+        choices={DEFAULT_PERMISSION_CHOICES}
+        index={2}
+        maxRows={1}
+        onMove={onMove}
+        onResolve={onResolve}
+      />
+    )
+    expect(container.textContent).toBe("❯ Deny")
+    act(() => __fireInput("", { upArrow: true }))
+    act(() => __fireInput("", { downArrow: true }))
+    expect(onMove.mock.calls).toEqual([[-1], [1]])
+    act(() => __fireInput("", { return: true }))
+    expect(onResolve).toHaveBeenCalledWith({ decision: "deny", message: 'Denied "bash".' })
+  })
+
+  it("clamps scrolling at both ends and resets reading for a different request", () => {
+    const onResolve = jest.fn()
+    const props = {
+      choices: DEFAULT_PERMISSION_CHOICES,
+      index: 0,
+      maxRows: 5,
+      columns: 80,
+      onMove: jest.fn(),
+      onResolve,
+    }
+    const first = {
+      ...req,
+      description: "",
+      input: { command: Array.from({ length: 30 }, (_, i) => `echo line-${i}`).join("\n") },
+    }
+    const { container, rerender } = render(<PermissionOverlay {...props} req={first} />)
+    act(() => __fireInput("v", {}))
+    const top = container.textContent
+    act(() => __fireInput("", { upArrow: true }))
+    expect(container.textContent).toBe(top)
+    act(() => __fireInput("", { downArrow: true }))
+    expect(container.textContent).not.toBe(top)
+    act(() => __fireInput("", { pageDown: true }))
+    act(() => __fireInput("", { pageUp: true }))
+    act(() => __fireInput("g", {}))
+    expect(container.textContent).toBe(top)
+    act(() => __fireInput("\u001b[<65;1;1M", {}))
+    expect(container.textContent).not.toBe(top)
+    act(() => __fireInput("G", {}))
+    const bottom = container.textContent
+    act(() => __fireInput("", { downArrow: true }))
+    expect(container.textContent).toBe(bottom)
+    rerender(<PermissionOverlay {...props} req={req} />)
+    expect(container.textContent).toContain("v full details")
+    expect(onResolve).not.toHaveBeenCalled()
+  })
+})
+
+it("localizes approval decisions, controls and denial in Chinese", () => {
+  __resetInk()
+  const onResolve = jest.fn()
+  const { container } = render(
+    <CliI18nProvider locale="zh-CN">
+      <PermissionOverlay
+        req={req}
+        choices={DEFAULT_PERMISSION_CHOICES}
+        index={2}
+        onMove={() => {}}
+        onResolve={onResolve}
+      />
+    </CliI18nProvider>
+  )
+  expect(container.textContent).toContain("允许一次")
+  expect(container.textContent).toContain("始终允许")
+  expect(container.textContent).toContain("查看完整详情")
+  act(() => __fireInput("", { escape: true }))
+  expect(onResolve).toHaveBeenCalledWith({ decision: "deny", message: "已拒绝“bash”。" })
+})
+
+it("keeps Escape inside the detail reader ahead of the global interrupt route", () => {
+  __resetInk()
+  const interrupt = jest.fn()
+  const onResolve = jest.fn()
+  function AppRoutes() {
+    useCriticalInput(interrupt, { shouldHandle: (_input, key) => key.escape })
+    return (
+      <PermissionOverlay
+        req={req}
+        choices={DEFAULT_PERMISSION_CHOICES}
+        index={0}
+        onMove={() => {}}
+        onResolve={onResolve}
+      />
+    )
+  }
+  const { container } = render(
+    <TuiInputProvider>
+      <AppRoutes />
+    </TuiInputProvider>
+  )
+  act(() => __fireInput("v", {}))
+  expect(container.textContent).toContain("Review Run command")
+  act(() => __fireInput("", { escape: true }))
+  expect(container.textContent).toContain("Allow Run command?")
+  expect(interrupt).not.toHaveBeenCalled()
+  expect(onResolve).not.toHaveBeenCalled()
+  act(() => __fireInput("", { escape: true }))
+  expect(interrupt).toHaveBeenCalledTimes(1)
+})
+
+it.each([
+  { maxRows: 18, index: 0, offset: 1, decision: "allow_always" },
+  { maxRows: 1, index: 2, offset: 0, decision: "deny" },
+])(
+  "selects the clicked approval action at $maxRows rows",
+  ({ maxRows, index, offset, decision }) => {
+    __resetInk()
+    const onResolve = jest.fn()
+    const onMove = jest.fn()
+    const { getByText } = render(
+      <PermissionOverlay
+        req={req}
+        choices={DEFAULT_PERMISSION_CHOICES}
+        index={index}
+        maxRows={maxRows}
+        onMove={onMove}
+        onResolve={onResolve}
+      />
+    )
+    // Supply only the Yoga position jsdom cannot measure; mouse parsing and hit
+    // testing follow the production path, including the compact one-action row.
+    const actions = getByText(`❯ ${DEFAULT_PERMISSION_CHOICES[index].label}`).parentElement!
+    Object.assign(actions, { yogaNode: { getComputedTop: () => 4, getComputedLeft: () => 2 } })
+    act(() => __fireInput("\u001b[<64;3;5M", {}))
+    act(() => __fireInput("\u001b[<65;3;5M", {}))
+    expect(onMove.mock.calls).toEqual([[-1], [1]])
+    expect(onResolve).not.toHaveBeenCalled()
+    act(() => __fireInput(`\u001b[<0;3;${5 + offset}M`, {}))
+    expect(onResolve).toHaveBeenCalledTimes(1)
+    expect(onResolve).toHaveBeenCalledWith(expect.objectContaining({ decision }))
+  }
+)

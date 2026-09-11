@@ -8,6 +8,14 @@ import type { ResolvedConfig } from "../config/schema"
 const config: ResolvedConfig = { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work" }
 
 describe("renderTui", () => {
+  it("enables Ink screen-reader output when requested", async () => {
+    const render = jest.fn(() => ({ waitUntilExit: () => Promise.resolve() })) as never
+    await renderTui({ config: { ...config, screenReader: true }, render })
+    expect(render).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ isScreenReaderEnabled: true })
+    )
+  })
   it("mounts the app via the injected render and resolves on exit", async () => {
     const unmount = jest.fn()
     const waitUntilExit = jest.fn(() => Promise.resolve())

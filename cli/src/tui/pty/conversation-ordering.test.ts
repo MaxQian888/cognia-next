@@ -31,8 +31,7 @@ describe("transcript ordering", () => {
             },
           ],
         },
-        rows: 30,
-        cols: 100,
+        geometry: { rows: 30, columns: 100 },
       },
       async (session) => {
         await session.send("read a file")
@@ -73,8 +72,7 @@ describe("transcript ordering", () => {
             },
           ],
         },
-        rows: 30,
-        cols: 100,
+        geometry: { rows: 30, columns: 100 },
       },
       async (session) => {
         await session.send("read then think")

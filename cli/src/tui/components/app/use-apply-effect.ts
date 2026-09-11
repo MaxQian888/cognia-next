@@ -1,3 +1,4 @@
+import { hooksList } from "../../runtime/hooks-controller"
 import { useCallback, useEffect, useRef } from "react"
 import fs from "node:fs"
 import nodePath from "node:path"
@@ -8,7 +9,7 @@ import { createCliLifecycleFirer } from "../../runtime/lifecycle-firer"
 import { computeAddDir } from "../../runtime/add-dir"
 import { buildBashAnalysisPrompt } from "../../commands/bash-shellout"
 import { detectEditor, editorInfo, type openInEditor } from "../../runtime/editor"
-import { buildGitDiffDoc } from "../../runtime/git-diff"
+import { loadGitDiff } from "../../runtime/git-diff"
 import { applyMouseMode, type ScreenStream } from "../../screen"
 import { runRuntimeRequest } from "../../runtime"
 import { CliDbSnapshotError } from "../../../db/bootstrap"
@@ -35,6 +36,7 @@ import {
   supportsFeature,
   unsupportedFeatureMessage,
 } from "../../runtime/backend-capabilities"
+import { createCliTranslator } from "../../i18n"
 import { planPermissionModeSwitch } from "../../runtime/permission-mode-switch"
 import { requiresAcknowledgement } from "../../state/permission-mode-meta"
 import type { AgentSessionApi } from "../../hooks/useAgentSession"
@@ -71,6 +73,7 @@ const SELECTION_NOTICES: Record<SelectionMode, string> = {
 
 export interface ApplyEffectDeps {
   agent: AgentSessionApi
+  getBackendAgentId?: () => string | undefined
   dispatch: Dispatch<TuiAction>
   state: TuiState
   home: string
@@ -106,6 +109,7 @@ export interface ApplyEffectDeps {
   persistStatusBar: (home: string, patch: StatusBarConfig) => void
   persistMascot: (home: string, patch: MascotConfig) => void
   persistEditor: (home: string, patch: EditorConfig) => void
+  suspendTerminal?: (callback: () => Promise<void>) => Promise<void>
   openInEditorFn: typeof openInEditor
   runShell: (command: string, opts: RunShellOpts) => Promise<ShellResult>
   persist: (key: string, value: string) => boolean
@@ -124,7 +128,7 @@ export interface ApplyEffectDeps {
   /** Switch the session working directory (owned by App: trusts the folder,
    * dispatches `SET_CWD`, and re-resolves SendOptions). The effect handler
    * validates the path before calling this. */
-  changeCwd: (dir: string) => void
+  changeCwd: (dir: string) => void | Promise<void>
   /** Reclaim the live external-agent process (App-owned `connectionRef`). Called
    * on a `/backend` switch to the built-in agent, where nothing reconnects, so
    * the old external process would otherwise leak until exit. On an external →
@@ -141,6 +145,7 @@ export interface ApplyEffectDeps {
   mcpProbeCache: McpProbeCache
   /** Mode injected by a session-only CLI flag such as `--bypass`. */
   sessionOnlyPermissionMode?: ResolvedConfig["permissionMode"]
+  loadGitDiffFn?: typeof loadGitDiff
 }
 
 type DrivenEffect = Extract<CommandEffect, { kind: "goalRun" | "loop" }>
@@ -163,6 +168,7 @@ interface DrivenJob {
 export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) => void {
   const {
     agent,
+    getBackendAgentId,
     dispatch,
     state,
     home,
@@ -189,7 +195,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
     persistMascot,
     persistEditor,
     openInEditorFn,
-    runShell,
+    suspendTerminal,
     persist,
     persistDb,
     fullscreen,
@@ -207,8 +213,10 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
     getRuntimeAbort,
     mcpProbeCache,
     sessionOnlyPermissionMode,
+    loadGitDiffFn = loadGitDiff,
   } = deps
   const drivenJob = useRef<DrivenJob | null>(null)
+  const diffRequest = useRef(0)
   useEffect(
     () => () => {
       const job = drivenJob.current
@@ -626,7 +634,13 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
             try {
               setAdditionalRoots(home, r.roots)
             } catch {
-              // read-only home: in-memory only
+              dispatch({
+                type: "NOTICE",
+                message: createCliTranslator(
+                  state.config.locale,
+                  "cliUiSettings"
+                )("workspaceRootsMemory"),
+              })
             }
             dispatch({ type: "SET_ADDITIONAL_ROOTS", roots: r.roots })
             agent.invalidate()
@@ -646,30 +660,58 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
           dispatch({ type: "NOTICE", message: r.message })
           break
         }
+        case "reloadHooks": {
+          const t = createCliTranslator(state.config.locale, "cliUiHooks")
+          if (state.turnStatus !== "idle") {
+            notice(t("data.busy"))
+            break
+          }
+          void Promise.resolve()
+            .then(() => (agent.reloadHooks ? agent.reloadHooks() : agent.invalidate()))
+            .then(() => {
+              hooksList({ dispatch, config: state.config, home, osHome })
+              notice(t("data.reloaded"))
+            })
+            .catch((error) => notice(t("data.reloadFailed", { error: String(error) })))
+          break
+        }
         case "changeCwd": {
-          // Resolve `/cd <dir>` against the live cwd and validate it before
-          // switching — App.changeCwd trusts + re-resolves SendOptions but does
-          // no validation, so a bad path would silently strand the agent in a
-          // non-existent directory.
-          const target = nodePath.resolve(state.config.cwd, effect.dir)
-          let isDir = false
+          const t = createCliTranslator(state.config.locale, "cliUiSettings")
+          if (state.turnStatus !== "idle") {
+            dispatch({ type: "NOTICE", message: t("workspaceBusy") })
+            break
+          }
+          const raw =
+            effect.dir === "~"
+              ? osHome
+              : effect.dir.startsWith("~/")
+                ? nodePath.join(osHome, effect.dir.slice(2))
+                : effect.dir
+          const target = nodePath.resolve(state.config.cwd, raw)
           try {
-            isDir = fs.statSync(target).isDirectory()
+            if (!fs.statSync(target).isDirectory()) throw new Error("not-directory")
+            fs.accessSync(target, fs.constants.R_OK | fs.constants.X_OK)
           } catch {
-            isDir = false
-          }
-          if (!isDir) {
-            dispatch({ type: "NOTICE", message: `Not a directory: ${target}` })
+            dispatch({ type: "NOTICE", message: t("workspaceInvalid", { path: target }) })
             break
           }
-          // Compare against the NORMALIZED current cwd so `/cd .` (or the same
-          // path spelled differently) is recognised as a no-op on every platform.
           if (target === nodePath.resolve(state.config.cwd)) {
-            dispatch({ type: "NOTICE", message: `Already in ${target}` })
+            dispatch({ type: "NOTICE", message: t("workspaceSame", { path: target }) })
             break
           }
-          changeCwd(target)
-          dispatch({ type: "NOTICE", message: `Working directory: ${target}` })
+          void Promise.resolve()
+            .then(() => changeCwd(target))
+            .then(() => {
+              dispatch({ type: "NOTICE", message: t("workspaceChanged", { path: target }) })
+            })
+            .catch((error: unknown) => {
+              dispatch({
+                type: "NOTICE",
+                message: t("workspaceFailed", {
+                  error: error instanceof Error ? error.message : String(error),
+                }),
+              })
+            })
           break
         }
         case "runBash":
@@ -725,6 +767,14 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
           const abs = nodePath.isAbsolute(effect.file)
             ? effect.file
             : nodePath.resolve(state.config.cwd, effect.file)
+          if (state.overlay.kind === "hooks" && suspendTerminal) {
+            const t = createCliTranslator(state.config.locale, "cliUiHooks")
+            void suspendTerminal(async () => {
+              const ok = await openInEditorFn(abs, { editor, wait: true })
+              notice(t(ok ? "data.edited" : "data.editFailed", { path: abs }))
+            }).catch(() => notice(t("data.editFailed", { path: abs })))
+            break
+          }
           void openInEditorFn(abs, { line: effect.line, col: effect.col, editor }).then((ok) =>
             dispatch({
               type: "NOTICE",
@@ -755,37 +805,29 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
           }
           break
         case "gitDiff": {
-          // Shell `git diff` (+ staged) and render the result in the pager with
-          // diff syntax-highlighting. A non-repo / git-missing surfaces as stderr.
-          void Promise.all([
-            runShell("git --no-pager diff", { cwd: state.config.cwd }),
-            runShell("git --no-pager diff --staged", { cwd: state.config.cwd }),
-          ])
-            .then(([unstaged, staged]) => {
-              if (unstaged.code !== 0 && staged.code !== 0) {
-                const msg = (unstaged.stderr || staged.stderr).trim()
-                dispatch({
-                  type: "NOTICE",
-                  message: msg || "Couldn't run git diff (not a git repository?).",
-                })
-                return
-              }
-              const doc = buildGitDiffDoc(unstaged.stdout, staged.stdout)
-              if (!doc) {
-                dispatch({ type: "NOTICE", message: "Working tree clean — no changes to show." })
-                return
-              }
+          const requestId = ++diffRequest.current
+          const previous = state.overlay.kind === "gitDiff" ? state.overlay.review : undefined
+          dispatch({
+            type: "OVERLAY_OPEN",
+            overlay: {
+              kind: "gitDiff",
+              requestId,
+              loading: true,
+              review: previous ?? {
+                files: [],
+                ...(effect.baseRef ? { baseRef: effect.baseRef } : {}),
+              },
+            },
+          })
+          void loadGitDiffFn(state.config.cwd, effect.baseRef).then(
+            (review) => dispatch({ type: "GIT_DIFF_RESULT", requestId, review }),
+            (error: unknown) =>
               dispatch({
-                type: "OVERLAY_OPEN",
-                overlay: { kind: "document", title: doc.title, body: doc.body, format: "markdown" },
+                type: "GIT_DIFF_RESULT",
+                requestId,
+                error: error instanceof Error ? error.message : String(error),
               })
-            })
-            .catch((err: unknown) =>
-              dispatch({
-                type: "NOTICE",
-                message: `git diff failed: ${err instanceof Error ? err.message : String(err)}`,
-              })
-            )
+          )
           break
         }
         case "theme":
@@ -817,7 +859,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
           // acknowledgement cannot be skipped by picking a different entry point.
           const plan = planPermissionModeSwitch({
             next: effect.mode,
-            acknowledged: state.bypassAcknowledged,
+            acknowledged: state.bypassAcknowledged || state.config.bypassConfirmation === "never",
             ...(effect.force ? { force: true } : {}),
           })
           if (plan.kind === "confirm") {
@@ -828,7 +870,25 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
           // (now or earlier this session) — remember it so cycling back through
           // the mode doesn't re-ask.
           if (requiresAcknowledgement(plan.mode)) dispatch({ type: "BYPASS_ACK" })
-          if (!sessionOnlyPermissionMode && !persist("permissionMode", plan.mode)) {
+          if (effect.remember && requiresAcknowledgement(plan.mode)) {
+            if (persist("bypassConfirmation", "never")) {
+              dispatch({ type: "SET_CONFIG_PATCH", patch: { bypassConfirmation: "never" } })
+            } else {
+              dispatch({
+                type: "NOTICE",
+                message: createCliTranslator(
+                  state.config.locale,
+                  "cliUiApproval"
+                )("bypassRememberFailed"),
+              })
+            }
+          }
+
+          if (
+            !sessionOnlyPermissionMode &&
+            !(effect.force && requiresAcknowledgement(plan.mode)) &&
+            !persist("permissionMode", plan.mode)
+          ) {
             dispatch({
               type: "NOTICE",
               message: "Permission mode updated (couldn't save to config).",
@@ -1106,6 +1166,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
           const roots = [state.config.cwd, home]
           void runRuntimeRequest(effect.runtime, {
             dispatch,
+            backendAgentId: getBackendAgentId?.(),
             config: state.config,
             sessionId: state.sessionId,
             signal: controller.signal,
@@ -1119,6 +1180,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
             usageHistory: state.usageHistory,
             toolStats: state.toolStats,
             ...(state.rateLimits ? { rateLimits: state.rateLimits } : {}),
+            ...(state.agentRateLimits ? { agentRateLimits: state.agentRateLimits } : {}),
             ...(state.initDraft ? { initDraft: state.initDraft } : {}),
             ...(state.commitDraft ? { commitDraft: state.commitDraft } : {}),
             ...(state.prDraft ? { prDraft: state.prDraft } : {}),
@@ -1197,6 +1259,8 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
     [
       agent,
       state.lastPlan,
+      state.turnStatus,
+      state.overlay,
       clearScreen,
       copyClipboard,
       doExit,
@@ -1211,6 +1275,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
       persistMascot,
       persistEditor,
       openInEditorFn,
+      suspendTerminal,
       pushHandoff,
       attachHost,
       detachHost,
@@ -1221,7 +1286,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
       killBash,
       foregroundBash,
       takeLastFailedBash,
-      runShell,
+      loadGitDiffFn,
       startGoalRun,
       startLoopRun,
       startFixRun,
@@ -1241,6 +1306,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
       mcpProbeCache,
       sessionOnlyPermissionMode,
       state.config,
+      getBackendAgentId,
       state.backendCapabilities,
       state.bypassAcknowledged,
       state.sessionId,
@@ -1250,6 +1316,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
       state.usageHistory,
       state.toolStats,
       state.rateLimits,
+      state.agentRateLimits,
       state.initDraft,
       state.commitDraft,
       state.prDraft,

@@ -28,7 +28,7 @@ export const PARITY_COMMANDS: CommandDescriptor[] = [
   {
     name: "context",
     aliases: ["ctx"],
-    description: "show context-window usage and what's loaded",
+    description: "inspect context usage, cache, loaded items and configuration",
     category: "system",
     // Routes through the runtime so it can append the SDK's live, authoritative
     // context breakdown (getContextUsage) on top of the pure estimate.
@@ -44,9 +44,13 @@ export const PARITY_COMMANDS: CommandDescriptor[] = [
   {
     name: "diff",
     aliases: ["changes"],
-    description: "view uncommitted git changes in the scrollable pager",
+    description: "review changed files, or compare this branch against a git ref",
+    argumentHint: "[base-ref]",
     category: "system",
-    handler: () => ({ kind: "gitDiff" }),
+    handler: (ctx) => ({
+      kind: "gitDiff",
+      ...(ctx.args.trim() ? { baseRef: ctx.args.trim() } : {}),
+    }),
   },
   {
     name: "analyze",
@@ -89,10 +93,17 @@ export const PARITY_COMMANDS: CommandDescriptor[] = [
   },
   {
     name: "hooks",
-    description: "list active settings.json lifecycle hooks",
+    description: "browse lifecycle hooks, toggle built-ins, and inspect configuration",
     category: "system",
     handler: rt("hooks", "list"),
-    subcommands: [{ name: "list", description: "list active hooks", handler: rt("hooks", "list") }],
+    subcommands: [
+      { name: "list", description: "browse configured hooks", handler: rt("hooks", "list") },
+      {
+        name: "refresh",
+        description: "reload hook configuration for the next agent context",
+        handler: () => ({ kind: "reloadHooks" }),
+      },
+    ],
   },
   {
     name: "rewind",

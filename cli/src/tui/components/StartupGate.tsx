@@ -8,6 +8,7 @@
  * chosen folder is trusted implicitly). All side effects are props so the App
  * owns persistence + state.
  */
+import { useCliTranslations } from "../i18n"
 import React, { useState } from "react"
 import { Box, Text } from "ink"
 
@@ -17,7 +18,7 @@ import { moveIndex } from "./select-list-state"
 import { shortenCwd } from "../format/usage"
 import { useTheme } from "../theme/context"
 
-const CHOICES = [{ label: "Yes, proceed" }, { label: "Choose another folder…" }] as const
+const CHOICES = ["proceed", "chooseOther"] as const
 
 export function StartupGate({
   cwd,
@@ -39,6 +40,7 @@ export function StartupGate({
   maxRows?: number
 }) {
   const theme = useTheme()
+  const t = useCliTranslations("cliUiStartup")
   const [picking, setPicking] = useState(false)
   const [index, setIndex] = useState(0)
 
@@ -57,14 +59,13 @@ export function StartupGate({
 
   return (
     <Box flexDirection="column" width={width}>
-      <Text>
-        Do you trust the files in <Text color={theme.accent}>{shortenCwd(cwd, 60)}</Text>?
-      </Text>
+      <Text>{t("trust", { path: shortenCwd(cwd, 60) })}</Text>
       <Text color={theme.muted} dimColor>
-        Cognia Agent may read and edit files and run commands in this folder.
+        {t("trustInfo")}
       </Text>
       <SelectList
-        items={CHOICES.map((c) => ({ label: c.label }))}
+        footerHint={t("selectHint")}
+        items={CHOICES.map((key) => ({ label: t(key) }))}
         index={index}
         width={width}
         maxRows={maxRows}

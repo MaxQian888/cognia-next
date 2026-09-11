@@ -1,11 +1,17 @@
 import React from "react"
-import { Box, Text } from "ink"
+import { Box, Text, type DOMElement } from "ink"
+import path from "node:path"
+import { pathToFileURL } from "node:url"
+import { openBrowser } from "../../mcp/open-browser"
+import { absoluteTopLeft } from "../input/element-position"
+import { parseMouseEvent } from "../input/mouse"
+import { TUI_INPUT_PRIORITY, useTuiInput } from "../input/input-router"
 
 import type { Cell } from "../state/types"
-import { buildVirtualBlockIndex, virtualWindow } from "../state/virtual-block-index"
+import { anchorAtRow, buildVirtualBlockIndex, virtualWindow } from "../state/virtual-block-index"
 import type { VirtualBlockMetric } from "../state/virtual-block-index"
 import { cellToTerminalBlock, TerminalBlockCache } from "../render/cell-terminal-block"
-import { buildTerminalBlock } from "../render/terminal-block"
+import { buildTerminalBlock, terminalStringWidth } from "../render/terminal-block"
 import type { TerminalBlock, TerminalStyle } from "../render/terminal-block"
 import { groupContextRuns, contextGroupLines } from "../format/context-group"
 import { needsBlankAfter } from "../render/transcript-spacing"
@@ -81,6 +87,7 @@ function VirtualizedTranscriptBody({
 }) {
   const theme = useTheme()
   const prefs = useRenderPrefs()
+  const containerRef = React.useRef<DOMElement | null>(null)
   // Never paint a transcript line into the terminal's final column. A line
   // whose last grapheme lands there arms the terminal's deferred auto-wrap;
   // Ink then positions the following row and the terminal consumes/overwrites
@@ -152,12 +159,40 @@ function VirtualizedTranscriptBody({
   // initial transcript. Once measured, the bounded window takes over.
   const effectiveViewport = viewportRows > 0 ? viewportRows : Math.max(1, index.totalRows)
   const window = virtualWindow(index, top, effectiveViewport, 2)
+  useTuiInput(
+    (chunk) => {
+      const mouse = parseMouseEvent(chunk)
+      if (mouse?.kind !== "click") return false
+      const position = absoluteTopLeft(containerRef.current)
+      if (!position) return false
+      const row = mouse.row - 1 - position.top
+      const col = mouse.col - 1 - position.left
+      if (row < top || row >= top + effectiveViewport || col < 0 || col >= safeWidth) return false
+      if (row >= index.totalRows) return false
+      const anchor = anchorAtRow(index, row)
+      if (!anchor) return false
+      const block = blocks[index.positions.get(anchor.blockId)!]
+      const line = block?.lines[anchor.intraRow]
+      if (!line) return false
+      let left = 0
+      for (const span of line.spans) {
+        const right = left + terminalStringWidth(span.text)
+        if (col >= left && col < right && span.attachmentPath) {
+          void openBrowser(pathToFileURL(path.resolve(span.attachmentPath)).href)
+          return true
+        }
+        left = right
+      }
+      return false
+    },
+    { priority: TUI_INPUT_PRIORITY.global + 1 }
+  )
   React.useEffect(() => {
     recordBlockCacheStats(blockCache.stats(), window.end - window.start, blocks.length)
   }, [blocks.length, window.end, window.start])
 
   return (
-    <Box flexDirection="column" flexShrink={0}>
+    <Box ref={containerRef} flexDirection="column" flexShrink={0}>
       {window.padTop > 0 ? <Box height={window.padTop} flexShrink={0} /> : null}
       {blocks.slice(window.start, window.end).map((block) => (
         <BlockView key={block.id} block={block} />

@@ -15,6 +15,7 @@ jest.mock("../../clipboard", () => ({
 }))
 
 import { AppOverlays, type AppOverlaysProps } from "./AppOverlays"
+import { TuiInputProvider } from "../../input/input-router"
 import { ThemeProvider } from "../../theme/context"
 import { RenderPrefsProvider } from "../../render/context"
 import { BUILTIN_THEMES } from "../../theme/builtins"
@@ -25,7 +26,12 @@ import type { ResolvedConfig } from "../../../config/schema"
 import type { TuiState } from "../../state/types"
 import type { AgentSessionApi } from "../../hooks/useAgentSession"
 import type { AskUserOverlayApi } from "../../hooks/use-ask-user-overlay"
-import type { McpDeps } from "../../runtime/mcp-controller"
+import { mcpRefreshSession, mcpApplySession, type McpDeps } from "../../runtime/mcp-controller"
+jest.mock("../../runtime/mcp-controller", () => ({
+  ...jest.requireActual("../../runtime/mcp-controller"),
+  mcpRefreshSession: jest.fn(async () => {}),
+  mcpApplySession: jest.fn(async () => {}),
+}))
 
 const config: ResolvedConfig = { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work" }
 
@@ -81,6 +87,19 @@ const wrap = (el: React.ReactElement) =>
   )
 
 describe("AppOverlays", () => {
+  it("opens the skill file tree and closes it through the overlay state", () => {
+    const props = propsFor({
+      kind: "skillFiles",
+      title: "Nested skill",
+      root: "/skills/demo",
+      files: [],
+    })
+    const { container } = wrap(<AppOverlays {...props} />)
+    expect(container.textContent).toContain("Nested skill")
+    act(() => __fireInput("", { escape: true }))
+    expect(props.dispatch).toHaveBeenCalledWith({ type: "OVERLAY_CLOSE" })
+  })
+
   it("stops a background agent in the owning session from the agents panel", () => {
     const props = propsFor({
       kind: "agents",
@@ -289,6 +308,24 @@ describe("AppOverlays", () => {
     expect(text).not.toContain("Anthropic")
   })
 
+  it("returns from workspace browsing to the originating settings row", () => {
+    const props = propsFor({
+      kind: "workspaceFolder",
+      mode: "cwd",
+      returnToSettings: { section: 10, index: 0 },
+    })
+    wrap(<AppOverlays {...props} />)
+    act(() => {
+      __fireInput("", { escape: true })
+    })
+    expect(props.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "OVERLAY_OPEN",
+        overlay: expect.objectContaining({ kind: "settings", section: 10, index: 0 }),
+      })
+    )
+  })
+
   it("returns from the provider picker to the originating settings row", () => {
     const props = propsFor({
       kind: "provider",
@@ -467,6 +504,27 @@ describe("AppOverlays", () => {
     expect(text).toContain("Apple")
   })
 
+  it.each([
+    [0, "/mode bypassPermissions --force"],
+    [1, "/mode bypassPermissions --force --remember"],
+    [2, "/mode default"],
+  ])("routes bypass choice %s to its distinct command", (selection, expected) => {
+    const props = propsFor({
+      kind: "confirm",
+      title: "Bypass?",
+      body: "Review permission mode",
+      format: "text",
+      onConfirmCommand: "mode bypassPermissions --force",
+      onRememberCommand: "mode bypassPermissions --force --remember",
+      onCancelCommand: "mode default",
+    })
+    wrap(<AppOverlays {...props} />)
+    for (let i = 0; i < selection; i++) act(() => __fireInput("", { downArrow: true }))
+    act(() => __fireInput("", { return: true }))
+    expect(props.dispatch).toHaveBeenCalledWith({ type: "OVERLAY_CLOSE" })
+    expect(props.runCommandLine).toHaveBeenCalledWith(expected)
+  })
+
   it("renders a confirm overlay", () => {
     const { container } = wrap(
       <AppOverlays
@@ -541,4 +599,226 @@ describe("AppOverlays — unified log panel wiring", () => {
     expect(props.clearLogs).toHaveBeenCalledTimes(1)
     expect(props.dispatch).not.toHaveBeenCalledWith({ type: "LOG_CLEAR" })
   })
+})
+
+describe("AppOverlays git review and command availability", () => {
+  beforeEach(() => {
+    __resetInk()
+    jest.mocked(copyToClipboard).mockResolvedValue({ ok: true })
+  })
+  const review = {
+    files: [{ path: "new.ts", staged: "", unstaged: "", untracked: "+entire new file" }],
+  }
+  const renderReview = (props: AppOverlaysProps) =>
+    wrap(
+      <TuiInputProvider>
+        <AppOverlays {...props} />
+      </TuiInputProvider>
+    )
+
+  it("shows loading and refuses duplicate refresh while allowing close", () => {
+    const props = propsFor({ kind: "gitDiff", requestId: 1, loading: true, review })
+    const { container } = renderReview(props)
+    expect(container.textContent).toContain("Working")
+    expect(container.textContent).toContain("new.ts")
+    fireKey("r")
+    expect(props.runCommandLine).not.toHaveBeenCalled()
+    fireKey("", { escape: true })
+    expect(props.dispatch).toHaveBeenCalledWith({ type: "OVERLAY_CLOSE" })
+  })
+
+  it.each([undefined, "origin/main"])(
+    "refreshes the same comparison (%s) after a displayed error",
+    (baseRef) => {
+      const props = propsFor({
+        kind: "gitDiff",
+        requestId: 1,
+        loading: false,
+        error: "git access denied",
+        review: { ...review, ...(baseRef ? { baseRef } : {}) },
+      })
+      const { container } = renderReview(props)
+      expect(container.textContent).toContain("Could not load changes: git access denied")
+      expect(container.textContent).not.toContain("Working")
+      fireKey("r")
+      expect(props.runCommandLine).toHaveBeenCalledWith(baseRef ? "/diff origin/main" : "/diff")
+    }
+  )
+
+  it.each([true, false])(
+    "copies full selected patch and reports the clipboard outcome (%s)",
+    async (ok) => {
+      const copyClipboard = jest.fn(async () =>
+        ok ? { ok: true as const } : { ok: false as const, reason: "unavailable" as const }
+      )
+      const props = propsFor({ kind: "gitDiff", requestId: 1, review }, { copyClipboard })
+      renderReview(props)
+      fireKey("", { return: true })
+      await act(async () => __fireInput("y", {}))
+      expect(copyClipboard).toHaveBeenCalledWith("+entire new file")
+      expect(props.dispatch).toHaveBeenCalledWith({
+        type: "NOTICE",
+        message: ok
+          ? "Copied the complete document to the clipboard."
+          : "Couldn't copy the document to the clipboard.",
+      })
+    }
+  )
+
+  it("uses the configured clipboard helper when no injected copy callback exists", async () => {
+    const props = propsFor({ kind: "gitDiff", requestId: 1, review })
+    props.state.config = {
+      ...props.state.config,
+      clipboard: { osc52: "never", osc52MaxBytes: 1024 },
+    }
+    renderReview(props)
+    fireKey("", { return: true })
+    await act(async () => __fireInput("y", {}))
+    expect(copyToClipboard).toHaveBeenCalledWith("+entire new file", {
+      osc52: "never",
+      osc52MaxBytes: 1024,
+    })
+  })
+
+  it("keeps an unavailable contextual command visible and refuses its selection", () => {
+    const props = propsFor({
+      kind: "quickActions",
+      index: 0,
+      query: "",
+      rows: [
+        {
+          id: "model",
+          label: "Select model",
+          command: "/model",
+          disabledReason: "Backend does not support model selection",
+        },
+      ],
+    })
+    const { container } = renderReview(props)
+    expect(container.textContent).toContain("Backend does not support model selection")
+    fireKey("", { return: true })
+    expect(props.runCommandLine).not.toHaveBeenCalled()
+    expect(props.dispatch).not.toHaveBeenCalledWith({ type: "OVERLAY_CLOSE" })
+  })
+})
+
+it("gives settings the full measured viewport and grows the visible row window on taller terminals", () => {
+  const props = propsFor(
+    {
+      kind: "settings",
+      section: 0,
+      index: 0,
+      sections: [
+        {
+          id: "advanced",
+          title: "Advanced",
+          rows: Array.from({ length: 40 }, (_, index) => ({
+            id: `row-${index}`,
+            label: `setting-row-${String(index).padStart(2, "0")}`,
+            value: "value",
+            description: "Focused setting details",
+            control: { type: "readonly" as const },
+          })),
+        },
+      ],
+    },
+    { viewportRows: 14 }
+  )
+  const tree = (viewportRows: number) => <AppOverlays {...props} viewportRows={viewportRows} />
+  const { container, rerender } = render(tree(14))
+  const shortCount = (container.textContent?.match(/setting-row-\d+/g) ?? []).length
+  expect(shortCount).toBeGreaterThan(0)
+  expect(shortCount).toBeLessThan(10)
+  rerender(tree(34))
+  const tallCount = (container.textContent?.match(/setting-row-\d+/g) ?? []).length
+  expect(tallCount).toBeGreaterThan(shortCount + 10)
+  expect(tallCount).toBeLessThan(40)
+})
+
+describe("AppOverlays MCP runtime actions", () => {
+  beforeEach(() => {
+    __resetInk()
+    jest.clearAllMocks()
+  })
+  it("wires refresh and apply to the current session dependencies", () => {
+    const props = propsFor({ kind: "mcp", servers: [], probing: false, runtimeBackend: "pi-rpc" })
+    const { container } = wrap(<AppOverlays {...props} />)
+    expect(container.textContent).toContain("Session: pi-rpc")
+    act(() => __fireInput("r", { ctrl: true }))
+    expect(mcpRefreshSession).toHaveBeenCalledWith(
+      expect.objectContaining({ dispatch: props.dispatch })
+    )
+    act(() => __fireInput("a", { ctrl: true }))
+    expect(mcpApplySession).toHaveBeenCalledWith(
+      expect.objectContaining({ dispatch: props.dispatch })
+    )
+  })
+})
+
+it("wires the hooks inventory to settings, source editing and reload commands", () => {
+  const props = propsFor({
+    kind: "hooks",
+    diagnostics: [],
+    rows: [
+      {
+        id: "builtin:test",
+        builtinId: "test",
+        source: "builtin",
+        event: "PreToolUse",
+        label: "test",
+        enabled: true,
+        detail: "example",
+      },
+    ],
+  })
+  wrap(
+    <TuiInputProvider>
+      <AppOverlays {...props} />
+    </TuiInputProvider>
+  )
+  act(() => __fireInput(" ", {}))
+  expect(props.applySettings).toHaveBeenCalledWith({ kind: "hook", id: "test" }, false)
+  act(() => __fireInput("e", { ctrl: true }))
+  expect(props.runCommandLine).toHaveBeenCalledWith("/open /home/config.json")
+  act(() => __fireInput("r", { ctrl: true }))
+  expect(props.runCommandLine).toHaveBeenCalledWith("/hooks refresh")
+})
+
+it("updates a bash output document as its source emits output and exits", () => {
+  const props = propsFor({
+    kind: "document",
+    title: "old title",
+    body: "old snapshot",
+    format: "text",
+    sourceBashId: "job",
+  })
+  props.state.cells = [
+    {
+      id: "job",
+      kind: "bash",
+      command: "watch",
+      status: "running",
+      output: "first output",
+      background: true,
+    },
+  ]
+  const { container, rerender } = wrap(<AppOverlays {...props} />)
+  expect(container.textContent).toContain("first output")
+  expect(container.textContent).not.toContain("old snapshot")
+  props.state = {
+    ...props.state,
+    cells: [
+      {
+        id: "job",
+        kind: "bash",
+        command: "watch",
+        status: "done",
+        output: "first output\nlast output",
+        exitCode: 0,
+      },
+    ],
+  }
+  rerender(<AppOverlays {...props} />)
+  expect(container.textContent).toContain("last output")
+  expect(container.textContent).toContain("exit 0")
 })

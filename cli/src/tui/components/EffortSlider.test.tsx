@@ -65,7 +65,7 @@ describe("EffortSlider", () => {
   })
 
   it("renders the title, off row, slider labels and the focused-tier description", () => {
-    const { container } = wrap(<EffortSlider {...props()} />)
+    const { container } = wrap(<EffortSlider {...props()} width={100} />)
     const text = container.textContent ?? ""
     expect(text).toContain("Reasoning effort")
     expect(text).toContain("Use model default (off)")

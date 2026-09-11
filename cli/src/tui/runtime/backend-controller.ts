@@ -40,6 +40,8 @@ import {
   type BackendCapabilities,
 } from "./backend-capabilities"
 import { buildCodexOptions } from "./backend-bridge"
+import { selectCliAgentWorkspace } from "../../runtime/external/host-branch"
+import { createCliTranslator } from "../i18n"
 
 /**
  * The steps a connect walks through, in order. Doubles as the failure locator.
@@ -96,6 +98,8 @@ export type BackendConnectResult =
  * `getCapabilities` name matched no manager method and was hidden by a cast.
  */
 export interface BackendConnectHost {
+  /** Only the local, already-trusted UI may select a process workspace. */
+  selectWorkspace?: (cwd: string) => void
   addAgent(config: ExternalAgentConfig): Promise<unknown>
   connect(agentId: string): Promise<void>
   getAgentCapabilities(agentId: string): AcpCapabilities | undefined
@@ -239,6 +243,16 @@ export async function connectBackend(deps: BackendConnectDeps): Promise<BackendC
       })
     }
     if (agentConfig.process) {
+      try {
+        host.selectWorkspace?.(config.cwd)
+      } catch (error) {
+        return fail({
+          kind: "handshake",
+          stage: "launch",
+          message: error instanceof Error ? error.message : String(error),
+          hint: createCliTranslator(config.locale, "cliUiStartup")("workspaceBoundaryHint"),
+        })
+      }
       agentConfig.process = {
         ...agentConfig.process,
         cwd: config.cwd,
@@ -330,6 +344,7 @@ export function defaultBackendHost(managerOverride?: BackendConnectHost): Backen
   const manager: BackendConnectHost =
     managerOverride ?? getExternalAgentManager({ healthCheckInterval: 0 })
   return {
+    selectWorkspace: manager.selectWorkspace ?? selectCliAgentWorkspace,
     addAgent: (config) => manager.addAgent(config),
     connect: (agentId) => manager.connect(agentId),
     getAgentCapabilities: (agentId) => manager.getAgentCapabilities(agentId),

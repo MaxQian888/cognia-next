@@ -46,6 +46,8 @@ function harness() {
     goalStop: make("goalStop", false),
     goalList: make("goalList", false),
     mcpList: make("mcpList", false),
+    mcpRefreshSession: make("mcpRefreshSession", false),
+    mcpApplySession: make("mcpApplySession", false),
     mcpToggle: make("mcpToggle", true),
     mcpSetEnabled: make("mcpSetEnabled", true),
     mcpAdd: make("mcpAdd", true),
@@ -117,6 +119,29 @@ const run = (req: RuntimeRequest, h: ReturnType<typeof harness>) =>
   runRuntimeRequest(req, h.deps, h.impl)
 
 describe("runRuntimeRequest", () => {
+  it.each(["limits", "provider"] as const)(
+    "routes the live backend identity into %s quota reads",
+    async (feature) => {
+      const h = harness()
+      h.deps.backendAgentId = "live-codex"
+      h.deps.agentRateLimits = {
+        five_hour: { kind: "rate-limit", status: "allowed", utilization: 0.24 },
+      }
+      h.deps.capabilities = { presetId: "codex-app-server" } as never
+      const handler = jest.fn()
+      if (feature === "limits") h.impl.runLimits = handler
+      else h.impl.runProvider = handler
+      await run({ feature, action: feature === "limits" ? "show" : "balance" }, h)
+      expect(handler).toHaveBeenCalledWith(
+        expect.objectContaining({
+          backendAgentId: "live-codex",
+          presetId: "codex-app-server",
+          agentRateLimits: h.deps.agentRateLimits,
+        })
+      )
+    }
+  )
+
   it.each([
     ["mcp", "tools", "mcpTools"],
     ["skill", "show", "skillShow"],
@@ -165,6 +190,8 @@ describe("runRuntimeRequest", () => {
     [{ feature: "goal", action: "stop" }, "goalStop"],
     [{ feature: "goal", action: "list" }, "goalList"],
     [{ feature: "mcp", action: "list" }, "mcpList"],
+    [{ feature: "mcp", action: "refresh" }, "mcpRefreshSession"],
+    [{ feature: "mcp", action: "apply" }, "mcpApplySession"],
     [{ feature: "mcp", action: "toggle", arg: "fs" }, "mcpToggle"],
     [{ feature: "mcp", action: "enable", arg: "fs" }, "mcpSetEnabled"],
     [{ feature: "mcp", action: "disable", arg: "fs" }, "mcpSetEnabled"],
@@ -283,4 +310,15 @@ describe("runRuntimeRequest", () => {
     await run({ feature: "bogus" as never, action: "x" }, h)
     expect((h.actions[0] as { message: string }).message).toContain("Unknown runtime feature")
   })
+})
+
+it("routes MCP apply consent and current session configuration to the controller", async () => {
+  const { deps, impl } = harness()
+  const apply = jest.fn(async () => undefined)
+  impl.mcpApplySession = apply
+  await runRuntimeRequest({ feature: "mcp", action: "apply", arg: "--restart" }, deps, impl)
+  expect(apply).toHaveBeenCalledWith(
+    expect.objectContaining({ sessionId: deps.sessionId, config: deps.config }),
+    true
+  )
 })

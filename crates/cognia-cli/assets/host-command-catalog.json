@@ -10965,6 +10965,66 @@
             "type": "string",
             "description": "Client-minted id for the local `messages` row; the host reuses it so the optimistic mirror and the authoritative row converge."
           },
+          "messageMetadata": {
+            "type": "object",
+            "description": "Internal reply and template provenance for the mirrored user message; not part of the platform request.",
+            "properties": {
+              "replyTo": {
+                "type": "object",
+                "description": "The message this turn answers (ADR-0177 batch 2): the stored id of the target and a one-line preview, stamped on the user row by the host.",
+                "required": [
+                  "messageId",
+                  "preview"
+                ],
+                "properties": {
+                  "messageId": {
+                    "type": "string"
+                  },
+                  "preview": {
+                    "type": "string"
+                  },
+                  "platformMessageId": {
+                    "type": "string",
+                    "description": "The platform's id for the target when the reference came over an IM connector."
+                  }
+                },
+                "additionalProperties": false
+              },
+              "templateRun": {
+                "type": "object",
+                "description": "Template provenance for the persisted user turn; never an authority or sender identity.",
+                "required": [
+                  "templateId",
+                  "version",
+                  "text",
+                  "params"
+                ],
+                "properties": {
+                  "templateId": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "params": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "additionalProperties": {},
+                      "example": {}
+                    },
+                    "example": {}
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          },
           "request": {
             "type": "object",
             "required": [
@@ -14696,6 +14756,55 @@
         },
         "additionalProperties": false,
         "x-cognia-schema-owner": "external-agents"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "external_agent_delete_gateway_task",
+      "category": "agents",
+      "resource": "external-agents",
+      "target": "execution",
+      "operation": "write",
+      "capability": "process.spawn",
+      "risk": "critical",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "external_agent_delete_gateway_task (process.spawn)",
+      "description": "Loopback service-token command. Target: execution; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]{1,128}$"
+          },
+          "taskId": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]{1,128}$"
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "task_id"
+                ]
+              },
+              {
+                "required": [
+                  "taskId"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
       },
       "outputTyped": true
     },
@@ -33672,6 +33781,38 @@
               "type": "string",
               "minLength": 1
             }
+          },
+          "templateRun": {
+            "type": "object",
+            "description": "Template provenance for the persisted user turn; never an authority or sender identity.",
+            "required": [
+              "templateId",
+              "version",
+              "text",
+              "params"
+            ],
+            "properties": {
+              "templateId": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1
+              },
+              "params": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "example": {}
+                },
+                "example": {}
+              }
+            },
+            "additionalProperties": false
           }
         },
         "additionalProperties": false
@@ -59579,5 +59720,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "9b9d8a7b005c381646c48c3673fe7cabf05d9d171806c4cd44dbd905ec2680f0"
+  "catalogHash": "126a56cc0b14d25b3abdf53b8894b4b1fe1d1bc7bde5528f7e5fad3e506c23a2"
 }

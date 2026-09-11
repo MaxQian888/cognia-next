@@ -1,3 +1,8 @@
+import {
+  registerSessionMcpStatus,
+  publishSessionMcpStatus,
+  clearSessionMcpStatus,
+} from "../../agent/tool-host/mcp-status"
 import path from "node:path"
 import fs from "node:fs"
 import os from "node:os"
@@ -41,6 +46,7 @@ jest.mock("@/plugins/cognia-builtin-characters/src/index", () => ({
 // marked@18 is ESM-only; this suite exercises App orchestration rather than
 // markdown tokenization, which has its own focused tests.
 jest.mock("../render/cell-terminal-block", () => ({
+  ...jest.requireActual("../render/cell-terminal-block"),
   markdownSpans: jest.requireActual("../render/cell-terminal-block").markdownSpans,
   markdownLineSpans: jest.requireActual("../render/cell-terminal-block").markdownLineSpans,
   cellToTerminalBlock: (cell: { id?: string; text?: string; raw?: string; result?: string }) => {
@@ -81,6 +87,12 @@ jest.mock("../../handoff/host-state-client", () => ({
 }))
 
 import { App } from "./App"
+import * as limitsData from "../runtime/limits-data"
+jest.mock("../runtime/limits-data", () => ({
+  ...jest.requireActual("../runtime/limits-data"),
+  loadCodexLimits: jest.fn(),
+  buildCliLimits: jest.fn(),
+}))
 import { skillSetEnabled } from "../runtime/skill-controller"
 
 jest.mock("../runtime/skill-controller", () => ({
@@ -600,7 +612,7 @@ describe("App", () => {
     )
     const fake = fakeSession("enabled")
     try {
-      render(
+      const view = render(
         <App
           config={config}
           sessionId="s1"
@@ -622,6 +634,7 @@ describe("App", () => {
       })
       expect(enable).toHaveBeenCalledWith("skill_cite", true, expect.any(Object))
       expect(fake.prompts).toEqual([])
+      expect(view.container.textContent).toContain("@skill:skill_cite explain")
       await act(async () => {
         complete()
         await Promise.resolve()
@@ -1033,13 +1046,8 @@ describe("App", () => {
           releaseClose = resolve
         })
     )
-    const create: CreateSession = () => ({
-      sessionId: "ses-live",
-      async send() {
-        return result("ok")
-      },
-      close,
-    })
+    const send = jest.fn(async () => result("ok"))
+    const create: CreateSession = () => ({ sessionId: "ses-live", send, close })
     const onExit = jest.fn()
     let t = 1000
     render(
@@ -1047,7 +1055,11 @@ describe("App", () => {
     )
     type("start sidecar")
     submit()
-    await waitFor(() => expect(close).not.toHaveBeenCalled())
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1))
+    await act(async () => {
+      await send.mock.results[0].value
+    })
+    expect(close).not.toHaveBeenCalled()
 
     act(() => __fireInput("c", { ctrl: true }))
     t = 1500
@@ -1524,12 +1536,30 @@ describe("App", () => {
     await waitFor(() => expect(container.textContent).toContain("CLIP-OVERRIDE"))
   })
 
-  it("shows the working directory on /cwd", () => {
+  it("opens the directory browser on /cwd", () => {
     const { create } = fakeSession()
     const { container } = render(<App config={config} sessionId="s1" createSession={create} />)
     type("/cwd")
     submit()
     expect(container.textContent).toContain("/work")
+    expect(container.textContent).toContain("Choose a folder")
+  })
+
+  it("opens /context as a navigable details document", async () => {
+    const { create } = fakeSession()
+    const { container } = render(<App config={config} sessionId="s1" createSession={create} />)
+    type("/context")
+    submit()
+    await waitFor(() => expect(container.textContent).toContain("Context details"), {
+      timeout: 4000,
+    })
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    act(() => __fireInput("G"))
+    expect(container.textContent).toContain("/context")
+    act(() => __fireInput("", { escape: true }))
+    expect(container.textContent).not.toContain("Context details")
   })
 
   it("lists enabled built-in tools on /tools", () => {
@@ -1541,7 +1571,11 @@ describe("App", () => {
     const { container } = render(<App config={withTools} sessionId="s1" createSession={create} />)
     type("/tools")
     submit()
+    expect(container.textContent).toContain("Page 1/")
+    type("git")
     expect(container.textContent).toContain("git")
+    act(() => __fireInput("", { return: true }))
+    expect(container.textContent).toContain("Configured: enabled")
   })
 
   it("shows version + provider on /about", () => {
@@ -1595,6 +1629,31 @@ describe("App", () => {
     // Cost estimated from catalog pricing: 100k × $3/1M = $0.30 (not $0.00).
     expect(container.textContent).toContain("$0.30")
     expect(resolveMeta).toHaveBeenCalledWith("anthropic", "claude-x")
+  })
+
+  it("opens hooks, persists a built-in toggle, and stays in the hooks inventory", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "app-hooks-"))
+    try {
+      const { create } = fakeSession()
+      const view = render(
+        <App config={config} sessionId="s1" createSession={create} home={homeDir} />
+      )
+      type("/hooks list")
+      submit()
+      await waitFor(() => expect(view.container.textContent).toContain("Ctrl+R"))
+      // The first row is runtime diagnostics; the next one is a built-in hook.
+      act(() => __fireInput("", { downArrow: true }))
+      await act(async () => {
+        __fireInput(" ")
+      })
+      const persisted = JSON.parse(fs.readFileSync(path.join(homeDir, "config.json"), "utf8"))
+      expect(Object.values(persisted.builtinHookOverrides)).toHaveLength(1)
+      expect(view.container.textContent).toContain("Ctrl+R")
+      expect(view.container.textContent).not.toContain("System prompt…")
+      view.unmount()
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true })
+    }
   })
 
   it("opens the settings panel on /config", () => {
@@ -1845,6 +1904,20 @@ describe("App", () => {
     })
     expect(persistConfig).toHaveBeenCalledWith("thinkingLevel", "ultracode")
     expect(persistPluginTools).toHaveBeenCalledWith(expect.any(String), true)
+  })
+
+  it("opens the workspace directory tree from settings and returns on cancel", () => {
+    const { create } = fakeSession()
+    const { container } = render(<App config={config} sessionId="s1" createSession={create} />)
+    type("/config")
+    submit()
+    // Workspace is the final section; Shift+Tab wraps back from the first.
+    act(() => __fireInput("", { tab: true, shift: true }))
+    expect(container.textContent).toContain("Working directory…")
+    act(() => __fireInput("", { return: true }))
+    expect(container.textContent).toContain("Choose a folder")
+    act(() => __fireInput("", { escape: true }))
+    expect(container.textContent).toContain("Working directory…")
   })
 
   it("drills from the settings panel into the provider switcher", () => {
@@ -2107,6 +2180,42 @@ describe("App", () => {
     await waitFor(() => expect(container.textContent).toContain("Interactive terminal opened"))
   })
 
+  it.each([false, true])(
+    "restores terminal modes after an interactive command (failure=%s)",
+    async (failure) => {
+      const { create } = fakeSession()
+      const writes: string[] = []
+      const screen = { isTTY: true, write: (text: string) => writes.push(text) }
+      const runInteractiveShell = jest.fn(async () => {
+        expect(writes.join("")).toContain("\x1b[?1000l")
+        expect(writes.join("")).toContain("\x1b[?1049l")
+        writes.length = 0
+        if (failure) throw new Error("shell failed")
+        return { stdout: "", stderr: "", code: 130, aborted: true }
+      })
+      render(
+        <App
+          config={{ ...config, layout: "fullscreen", mouse: "scroll" }}
+          layoutCapability={{ stdinIsTTY: true, stdoutIsTTY: true, term: "xterm" }}
+          screenOut={screen}
+          sessionId="s1"
+          createSession={create}
+          runInteractiveShell={runInteractiveShell}
+        />
+      )
+      writes.length = 0
+      type("!top")
+      await act(async () => {
+        submit()
+        await Promise.resolve()
+      })
+      await waitFor(() => expect(runInteractiveShell).toHaveBeenCalledTimes(1))
+      expect(writes.join("")).toContain("\x1b[?1049h")
+      expect(writes.join("")).toContain("\x1b[?1000h")
+      expect(writes.join("")).toContain("\x1b[?1006h")
+    }
+  )
+
   it("/analyze sends the last failed !command to the agent", async () => {
     const { create, prompts } = fakeSession("looking into it")
     const runShell = jest.fn().mockResolvedValue({ stdout: "", stderr: "boom", code: 1 })
@@ -2142,37 +2251,36 @@ describe("App", () => {
     expect(prompts).toHaveLength(0)
   })
 
-  it("/diff shells git diff and opens the changes in the pager", async () => {
+  it("/diff opens file review including a newly created file", async () => {
     const { create } = fakeSession()
-    const runShell = jest.fn().mockResolvedValue({
-      stdout: "diff --git a/x.ts b/x.ts\n@@ -1 +1 @@\n-old\n+new",
-      stderr: "",
-      code: 0,
+    const loadGitDiffFn = jest.fn().mockResolvedValue({
+      files: [{ path: "new.ts", staged: "", unstaged: "", untracked: "+new" }],
     })
     const { container } = render(
-      <App config={config} sessionId="s1" createSession={create} runShell={runShell} />
+      <App config={config} sessionId="s1" createSession={create} loadGitDiffFn={loadGitDiffFn} />
     )
     type("/diff")
     await act(async () => {
       submit()
       await Promise.resolve()
     })
-    expect(runShell).toHaveBeenCalledWith("git --no-pager diff", { cwd: "/work" })
-    await waitFor(() => expect(container.textContent).toContain("Working tree changes"))
+    expect(loadGitDiffFn).toHaveBeenCalledWith("/work", undefined)
+    await waitFor(() => expect(container.textContent).toContain("new.ts"))
+    expect(container.textContent).not.toContain("Working tree clean")
   })
 
-  it("/diff reports a clean tree when there are no changes", async () => {
+  it("/diff keeps the empty review open so it can be refreshed", async () => {
     const { create } = fakeSession()
-    const runShell = jest.fn().mockResolvedValue({ stdout: "", stderr: "", code: 0 })
+    const loadGitDiffFn = jest.fn().mockResolvedValue({ files: [] })
     const { container } = render(
-      <App config={config} sessionId="s1" createSession={create} runShell={runShell} />
+      <App config={config} sessionId="s1" createSession={create} loadGitDiffFn={loadGitDiffFn} />
     )
     type("/diff")
     await act(async () => {
       submit()
       await Promise.resolve()
     })
-    await waitFor(() => expect(container.textContent).toContain("Working tree clean"))
+    await waitFor(() => expect(container.textContent).toContain("No changes in this scope"))
   })
 
   it("rings the terminal bell when a long turn finishes (notify on)", async () => {
@@ -2408,6 +2516,41 @@ describe("App", () => {
     expect(clearScreen).toHaveBeenCalled()
   })
 
+  it("switches settings language immediately and persists reader mode for next launch", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "app-settings-locale-"))
+    try {
+      const { create } = fakeSession()
+      const view = render(
+        <App config={config} sessionId="s1" createSession={create} home={homeDir} />
+      )
+      type("/settings")
+      submit()
+      act(() => __fireInput("", { tab: true }))
+      act(() => __fireInput("", { tab: true }))
+      expect(view.container.textContent).toContain("Language")
+      act(() => __fireInput("", { return: true }))
+      act(() => __fireInput("", { rightArrow: true }))
+      await act(async () => {
+        __fireInput("", { return: true })
+      })
+      expect(view.container.textContent).toContain("语言")
+      expect(JSON.parse(fs.readFileSync(path.join(homeDir, "config.json"), "utf8")).locale).toBe(
+        "zh-CN"
+      )
+      act(() => __fireInput("", { downArrow: true }))
+      await act(async () => {
+        __fireInput(" ")
+      })
+      expect(
+        JSON.parse(fs.readFileSync(path.join(homeDir, "config.json"), "utf8")).screenReader
+      ).toBe(true)
+      expect(view.container.textContent).toContain("重启 CLI 后")
+      view.unmount()
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true })
+    }
+  })
+
   it("repaints the scrollback when the theme is cycled from the settings panel", async () => {
     const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "app-settings-theme-"))
     try {
@@ -2427,12 +2570,13 @@ describe("App", () => {
       submit()
       expect(container.textContent).toContain("Settings")
       clearScreen.mockClear()
-      // Tab into "Appearance" (section 1, row 0 = Theme enum), then →/right to
-      // cycle it — which recolours the palette and must reprint the `<Static>`
-      // transcript, exactly like the `/theme` command path.
+      // Enter edit mode before changing the theme; only Enter save persists
+      // and repaints the committed transcript. Browsing must not mutate it.
       act(() => __fireInput("", { tab: true }))
+      act(() => __fireInput("", { return: true }))
+      act(() => __fireInput("", { rightArrow: true }))
       await act(async () => {
-        __fireInput("", { rightArrow: true })
+        __fireInput("", { return: true })
         await Promise.resolve()
       })
       expect(clearScreen).toHaveBeenCalled()
@@ -2787,7 +2931,7 @@ describe("App", () => {
       expect(container.textContent ?? "").not.toContain("Do you trust the files")
     })
 
-    it("switches the working directory from the startup folder picker", () => {
+    it("switches the working directory from the startup folder picker", async () => {
       const { create } = fakeSession()
       const trustFolderFn = jest.fn()
       const { container } = render(
@@ -2805,6 +2949,9 @@ describe("App", () => {
       act(() => __fireInput("", { downArrow: true }))
       act(() => __fireInput("", { return: true }))
       act(() => __fireInput("", { return: true }))
+      await act(async () => {
+        await Promise.resolve()
+      })
       expect(trustFolderFn).toHaveBeenCalledWith("/home/u/.cognia", path.resolve("/work"))
       const text = container.textContent ?? ""
       expect(text).not.toContain("Choose a folder")
@@ -2816,6 +2963,18 @@ describe("App", () => {
   describe("bypass acknowledgement", () => {
     const bypassConfig: ResolvedConfig = { ...config, permissionMode: "bypassPermissions" }
 
+    it("skips the startup warning after an explicit saved choice", () => {
+      const { create } = fakeSession()
+      const { container } = render(
+        <App
+          config={{ ...bypassConfig, bypassConfirmation: "never" }}
+          sessionId="s1"
+          createSession={create}
+        />
+      )
+      expect(container.textContent ?? "").not.toContain("Enable bypassPermissions")
+    })
+
     it("asks before the composer accepts anything when the session opens in bypass", () => {
       const { create } = fakeSession()
       const { container } = render(
@@ -2824,7 +2983,14 @@ describe("App", () => {
       const text = container.textContent ?? ""
       expect(text).toContain("Enable bypassPermissions for this session?")
       // The load-bearing half: the mode is forwarded, not a local UI preference.
-      expect(text).toMatch(/external agent/i)
+      for (
+        let page = 0;
+        page < 20 && !/external agent/i.test(container.textContent ?? "");
+        page++
+      ) {
+        act(() => __fireInput("", { pageDown: true }))
+      }
+      expect(container.textContent ?? "").toMatch(/external agent/i)
     })
 
     it("does not ask for a mode that keeps a real approval gate", () => {
@@ -2862,6 +3028,25 @@ describe("App", () => {
       expect(persistFn).toHaveBeenCalledWith("permissionMode", "default")
     })
 
+    it("saves the separate do-not-ask preference from the startup choice", () => {
+      const { create } = fakeSession()
+      const persistFn = jest.fn(() => true)
+      const { container } = render(
+        <App
+          config={bypassConfig}
+          sessionId="s1"
+          createSession={create}
+          home="/home/u/.cognia"
+          persistConfig={persistFn}
+        />
+      )
+      act(() => __fireInput("", { downArrow: true }))
+      act(() => __fireInput("", { return: true }))
+      expect(persistFn).toHaveBeenCalledWith("bypassConfirmation", "never")
+      expect(persistFn).not.toHaveBeenCalledWith("permissionMode", "bypassPermissions")
+      expect(container.textContent ?? "").not.toContain("Enable bypassPermissions")
+    })
+
     it("applies the mode and stops asking once acknowledged", () => {
       const { create } = fakeSession()
       const persistFn = jest.fn(() => true)
@@ -2875,7 +3060,8 @@ describe("App", () => {
         />
       )
       act(() => __fireInput("", { return: true }))
-      expect(persistFn).toHaveBeenCalledWith("permissionMode", "bypassPermissions")
+      expect(persistFn).not.toHaveBeenCalledWith("permissionMode", "bypassPermissions")
+      expect(persistFn).not.toHaveBeenCalledWith("bypassConfirmation", "never")
       // Cycling back around with Shift+Tab must not re-open the confirm.
       const text = container.textContent ?? ""
       expect(text).not.toContain("Enable bypassPermissions")
@@ -2923,7 +3109,7 @@ describe("App", () => {
   })
 
   describe("Ctrl+V clipboard image", () => {
-    it("appends an @<path> mention and notices on a successful read", async () => {
+    it("inserts a compact image attachment on a successful read", async () => {
       const { create } = fakeSession()
       const readClipboardImage = jest.fn(async () => ({ path: "/tmp/clip.png" }))
       const { container } = render(
@@ -2940,8 +3126,36 @@ describe("App", () => {
       })
       const text = container.textContent ?? ""
       expect(readClipboardImage).toHaveBeenCalled()
-      expect(text).toContain("@/tmp/clip.png")
-      expect(text).toContain("image from clipboard")
+      expect(text).toContain("[Image 1]")
+      expect(text).not.toContain("/tmp/clip.png")
+    })
+
+    it("keeps text typed while the clipboard image is being read", async () => {
+      const { create } = fakeSession()
+      let finish: (value: { path: string }) => void = () => {}
+      const readClipboardImage = () =>
+        new Promise<{ path: string }>((resolve) => {
+          finish = resolve
+        })
+      const { container } = render(
+        <App
+          config={config}
+          sessionId="s1"
+          createSession={create}
+          readClipboardImage={readClipboardImage}
+        />
+      )
+      type("before")
+      await act(async () => {
+        __fireInput("v", { ctrl: true })
+        await Promise.resolve()
+      })
+      type("after")
+      await act(async () => {
+        finish({ path: "/tmp/clip.png" })
+        await Promise.resolve()
+      })
+      expect(container.textContent).toContain("beforeafter[Image 1]")
     })
 
     it("notices when the clipboard holds no image", async () => {
@@ -3015,5 +3229,119 @@ it("shows approval waiting before a Bash side effect and resumes only after Ente
     unmount()
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+it.each(["/limits", "/balance"])(
+  "%s renders the connected Codex quota with a different saved provider",
+  async (command) => {
+    const loadNative = jest.mocked(limitsData.loadCodexLimits).mockResolvedValue(
+      limitsData.codexStatusLimits(
+        {
+          mcpServers: [],
+          skills: [],
+          account: { type: "chatgpt", planType: "pro" },
+          rateLimits: { primary: { usedPercent: 31, windowDurationMins: 300 } },
+        },
+        Date.now()
+      )
+    )
+    const loadProviders = jest.mocked(limitsData.buildCliLimits).mockResolvedValue([])
+    const view = render(
+      <App
+        config={{ ...config, provider: "deepseek", agentBackend: "codex" }}
+        sessionId="different-conversation-id"
+        home="/nonexistent-home"
+        persistDb={() => {}}
+        connectBackendFn={async () => ({
+          ok: true,
+          connection: {
+            backend: "codex",
+            presetId: "codex-app-server",
+            agentId: "actual-connected-agent",
+            command: "codex",
+            capabilities: externalCapabilities({ backend: "codex", presetId: "codex-app-server" }),
+          },
+        })}
+      />
+    )
+    try {
+      await act(async () => {
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      type(command)
+      if (command === "/limits") act(() => __fireInput("", { escape: true }))
+      await act(async () => {
+        submit()
+        await Promise.resolve()
+      })
+      await waitFor(() => expect(view.container.textContent).toContain("31% used"))
+      expect(view.container.textContent).toContain("codex · 5h")
+      expect(view.container.textContent).not.toContain("depleted")
+      expect(loadNative).toHaveBeenCalledWith(
+        "actual-connected-agent",
+        expect.any(Number),
+        config.locale
+      )
+      expect(loadProviders).not.toHaveBeenCalled()
+    } finally {
+      view.unmount()
+      loadNative.mockReset()
+      loadProviders.mockReset()
+    }
+  }
+)
+
+it("updates an open MCP panel from session evidence without another command", async () => {
+  registerSessionMcpStatus("mcp-live", { apply: async () => ({ restarted: false }) })
+  publishSessionMcpStatus("mcp-live", {
+    backend: "codex",
+    telemetry: "supported",
+    servers: [{ name: "native-example", source: "agent", state: "unknown" }],
+  })
+  try {
+    const view = render(
+      <App
+        config={{ ...config, agentBackend: "codex" }}
+        sessionId="mcp-live"
+        home="/nonexistent-home"
+        persistDb={() => {}}
+        connectBackendFn={async () => ({
+          ok: true,
+          connection: {
+            backend: "codex",
+            presetId: "codex-app-server",
+            agentId: "fake-agent",
+            command: "codex",
+            capabilities: externalCapabilities({ backend: "codex", presetId: "codex-app-server" }),
+          },
+        })}
+      />
+    )
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    type("/mcp panel")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(view.container.textContent).toContain("native-example"))
+    act(() =>
+      publishSessionMcpStatus("mcp-live", {
+        backend: "codex",
+        telemetry: "supported",
+        servers: [
+          { name: "second-native", source: "agent", state: "available", toolNames: ["read"] },
+        ],
+      })
+    )
+    await waitFor(() => expect(view.container.textContent).toContain("second-native"))
+    expect(view.container.textContent).not.toContain("native-example")
+    view.unmount()
+  } finally {
+    clearSessionMcpStatus("mcp-live")
   }
 })

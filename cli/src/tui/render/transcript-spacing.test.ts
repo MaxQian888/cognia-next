@@ -8,6 +8,7 @@ const notice: Cell = { id: "n", kind: "notice", message: "note" }
 const event: Cell = {
   id: "e",
   kind: "canonical-event",
+  eventId: "event-1",
   level: "info",
   title: "informational",
   summary: "External event",
@@ -19,6 +20,7 @@ const tool: Cell = {
   toolName: "read",
   input: {},
   status: "done",
+  collapsed: true,
 }
 const collapsedThinking: Cell = { id: "th", kind: "thinking", text: "...", collapsed: true }
 const openThinking: Cell = { id: "th2", kind: "thinking", text: "...", collapsed: false }

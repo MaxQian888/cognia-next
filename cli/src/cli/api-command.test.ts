@@ -1,5 +1,6 @@
 import { apiCommand, API_HELP, type ApiCommandDeps } from "./api-command"
 import { parseArgv } from "./args"
+import { API_COMMANDS } from "../api/generated/command-index"
 import { EXIT_OK, EXIT_FAILURE, EXIT_USAGE } from "./errors"
 import type { OutputSink } from "./output"
 import type { CommandOutcome, HostTransport, RequestOptions } from "../api/transport"
@@ -51,7 +52,7 @@ function transport(
 
 function deps(
   host: (HostTransport & { calls: Recorded[] }) | null,
-  extra: Partial<ApiCommandDeps> = {}
+  extra: Partial<Omit<ApiCommandDeps, "out">> = {}
 ): ApiCommandDeps & { out: ReturnType<typeof sink> } {
   const out = sink()
   return {
@@ -109,13 +110,15 @@ describe("api list and groups", () => {
   it("lists every command by default", async () => {
     const d = deps(null)
     expect(await run(["api", "list", "--format", "raw"], d)).toBe(EXIT_OK)
-    expect(JSON.parse(d.out.stdout)).toHaveLength(656)
+    expect(JSON.parse(d.out.stdout)).toHaveLength(API_COMMANDS.length)
   })
 
   it("filters to one wire", async () => {
     const d = deps(null)
     await run(["api", "list", "--wire", "http", "--format", "raw"], d)
-    expect(JSON.parse(d.out.stdout)).toHaveLength(527)
+    expect(JSON.parse(d.out.stdout)).toHaveLength(
+      API_COMMANDS.filter((entry) => entry.wires.includes("http")).length
+    )
   })
 
   it("filters by group and search together", async () => {
@@ -138,7 +141,9 @@ describe("api list and groups", () => {
     const d = deps(null)
     await run(["api", "groups", "--wire", "http", "--format", "raw"], d)
     const groups = JSON.parse(d.out.stdout) as Array<{ group: string; count: number }>
-    expect(groups.reduce((total, group) => total + group.count, 0)).toBe(527)
+    expect(groups.reduce((total, group) => total + group.count, 0)).toBe(
+      API_COMMANDS.filter((entry) => entry.wires.includes("http")).length
+    )
   })
 })
 

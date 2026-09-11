@@ -64,6 +64,7 @@ export function bypassConfirmOverlay(
     format: "markdown",
     // Re-enters the same switch path with the acknowledgement already given.
     onConfirmCommand: `mode ${mode} --force`,
+    onRememberCommand: `mode ${mode} --force --remember`,
     ...(opts?.cancelToMode ? { onCancelCommand: `mode ${opts.cancelToMode}` } : {}),
   }
 }

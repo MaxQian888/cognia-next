@@ -1,194 +1,270 @@
 import { buildContextReport, formatSdkContextBreakdown } from "./context-report"
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
-import type { BuiltinToolsConfig, SdkContextUsage } from "@cognia/agent-config-types"
-import type { UsageInfo } from "@/lib/claude/adapter"
+import type { SdkContextUsage } from "@cognia/agent-config-types"
 
 const config: ResolvedConfig = {
   ...DEFAULT_RESOLVED_CONFIG,
   cwd: "/work",
-  model: "claude-opus-4-8",
-  // Per-provider slot mirrors the resolved config — the report now reads the
-  // active model via `resolveActiveModel`, not the legacy top-level pin.
   providers: { anthropic: { model: "claude-opus-4-8" } },
 }
 
-/** A full BuiltinToolsConfig with only `coreFiles` enabled. */
-const onlyCoreFiles = (): BuiltinToolsConfig => {
-  const all = Object.fromEntries(
-    Object.keys(config.builtinTools).map((k) => [k, false])
-  ) as unknown as BuiltinToolsConfig
-  return { ...all, coreFiles: true }
-}
-
 describe("buildContextReport", () => {
-  it("reports zero occupancy when there is no usage yet", () => {
-    const report = buildContextReport(undefined, config)
-    expect(report).toContain("Context window — claude-opus-4-8")
-    expect(report).toContain("(0%)")
-    expect(report).toContain("Auto-compact at:")
-    // The visual gauge bar renders with the percentage and a compaction marker.
-    expect(report).toMatch(/\[▱+┊▱*\] 0%/)
-  })
-
-  it("computes occupancy from the latest turn's prompt-side tokens", () => {
-    const usage: UsageInfo = {
-      inputTokens: 100_000,
-      outputTokens: 5_000,
-      cacheReadInputTokens: 0,
-      cacheCreationInputTokens: 0,
+  it("reports unknown occupancy without prompt telemetry rather than a measured zero", () => {
+    for (const usage of [undefined, {}, { outputTokens: 50 }]) {
+      const report = buildContextReport(usage, config, 200000)
+      expect(report).toContain("Used: not reported / unknown")
+      expect(report).not.toContain("(0%)")
+      expect(report).not.toContain("Remaining:")
+      expect(report).not.toContain("▱")
+      expect(report).toContain("Window: 200k (200000 tokens)")
     }
-    const report = buildContextReport(usage, config)
-    // The window math comes from the shared lib; assert the report renders the
-    // used/total/percent + remaining rows for a non-empty turn.
-    expect(report).toMatch(/Used:\s+\d+k \/ 1\.0M \(\d+%\)/)
-    expect(report).toMatch(/Remaining:\s+\d/)
+    expect(buildContextReport({ inputTokens: 0 }, config, 200000)).toContain(
+      "Used: 0 (0 tokens) / 200k (200000 tokens) (0%)"
+    )
   })
 
-  it("surfaces the cache-hit rate and a composition bar once usage lands", () => {
-    const usage: UsageInfo = {
-      inputTokens: 40_000,
-      cacheReadInputTokens: 120_000,
-      cacheCreationInputTokens: 40_000,
-      outputTokens: 5_000,
-    }
-    const report = buildContextReport(usage, config)
-    // 120k reused of 200k prompt tokens = 60%.
-    expect(report).toContain("Cache hit:       60% · 120k reused")
-    expect(report).toContain("Cache write:     20% · 40k new")
-    expect(report).toContain("Fresh input:     20% · 40k uncached")
-    expect(report).toContain("Composition:")
-    expect(report).toContain("█ reused")
-    expect(report).toContain("░ fresh")
-  })
-
-  it("keeps multi-leg cache composition within the current context window", () => {
+  it("uses latest context prompt metrics with output, without multi-request billing input", () => {
     const report = buildContextReport(
       {
-        inputTokens: 423_000,
-        contextInputTokens: 96_000,
-        cacheReadInputTokens: 90_000,
+        inputTokens: 423000,
+        contextInputTokens: 96000,
+        cacheReadInputTokens: 90000,
         cacheCreationInputTokens: 0,
+        outputTokens: 7000,
       },
       config,
-      1_000_000
+      1000000
     )
-    expect(report).toContain("Used:            186k / 1.0M (19%)")
-    expect(report).toContain("Cache hit:       48% · 90k reused")
-    expect(report).toContain("░ fresh 96k")
-    expect(report).not.toContain("░ fresh 423k")
-  })
-
-  it("labels missing cache telemetry instead of presenting it as a zero hit rate", () => {
-    const report = buildContextReport({ inputTokens: 100_000 }, config)
-    expect(report).toContain("Cache telemetry: not reported by provider")
-    expect(report).not.toContain("Cache hit:")
-  })
-
-  it("omits the cache/composition lines when there is no usage", () => {
-    const report = buildContextReport(undefined, config)
-    expect(report).not.toContain("Cache hit:")
-    expect(report).not.toContain("Composition:")
-  })
-
-  it("sizes the window from the per-model override when given", () => {
-    // An unknown model would size to the 200k fallback, but a 500k catalog
-    // override pins the report's total — 100k used → 20%.
-    const usage: UsageInfo = { inputTokens: 100_000 }
-    const report = buildContextReport(
-      usage,
-      { ...config, providers: { anthropic: { model: "mystery-model" } } },
-      500_000
+    expect(report).toContain("Used: 193k (193000 tokens) / 1.0M (1000000 tokens) (19%)")
+    expect(report).toContain("Reported input (may aggregate turn requests): 423k (423000 tokens)")
+    expect(report).toContain("Latest prompt fresh input: 96k (96000 tokens)")
+    expect(report).toContain(
+      "Reported output (shown separately; do not add again): 7.0k (7000 tokens)"
     )
-    expect(report).toMatch(/Used:\s+\d+k \/ 500k \(20%\)/)
+    expect(report).toContain("not session totals")
+    expect(report).toContain("[█████▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱] 19%")
   })
 
-  it("ignores a non-positive override and uses the pattern table", () => {
-    const report = buildContextReport(undefined, config, 0)
-    expect(report).toContain("/ 1.0M")
-  })
-
-  it("never sizes the window from the built-in provider on an external agent", () => {
-    // The regression: `--backend codex` reported "claude-opus-4-8 (anthropic)"
-    // and a 1.0M gauge — the built-in provider's model and window — while Codex
-    // was answering with its own model from `~/.codex/config.toml`.
+  it("prioritizes agent-reported context occupancy and window over local catalog values", () => {
     const report = buildContextReport(
-      { inputTokens: 100_000 },
-      { ...config, agentBackend: "codex" }
+      { contextTokens: 12345, contextWindow: 50000, inputTokens: 99999 },
+      { ...config, agentBackend: "codex" },
+      200000
     )
-    expect(report).toContain("Context window — default (codex)")
-    expect(report).not.toContain("claude-opus-4-8")
-    expect(report).toContain("Window:          unknown for this agent")
-    expect(report).toContain("Used:            100k")
-    // No fabricated gauge, percentage or compaction threshold.
-    expect(report).not.toContain("Auto-compact at:")
-    expect(report).not.toMatch(/\[▱|▰/)
+    expect(report).toContain("Used: 12k (12345 tokens) / 50k (50000 tokens) (25%)")
+    expect(report).not.toContain("200000 tokens")
+    expect(report).toContain("external agent has not reported its compaction policy")
+    expect(report).not.toContain("Estimated configured threshold")
   })
 
-  it("names the external backend's own model and preset", () => {
+  it("does not borrow the builtin model or compaction threshold for external agents", () => {
     const report = buildContextReport(
-      { inputTokens: 100_000 },
+      { inputTokens: 1234 },
       {
         ...config,
         agentBackend: "codex",
-        agentBackends: { "codex-app-server": { model: "gpt-5.2-codex" } },
+        agentBackends: { "codex-app-server": { model: "native-model" } },
       },
-      400_000,
+      undefined,
       "codex-app-server"
     )
-    expect(report).toContain("Context window — gpt-5.2-codex (codex (codex-app-server))")
-    // A resolved window is a real fact, so the full gauge comes back.
-    expect(report).toMatch(/Used:\s+100k \/ 400k \(25%\)/)
-    expect(report).toContain("Auto-compact at:")
+    expect(report).toContain("native-model")
+    expect(report).toContain("codex")
+    expect(report).not.toContain("claude-opus")
+    expect(report).toContain("Window: not reported / unknown")
+    expect(report).not.toContain("Estimated configured threshold")
   })
 
-  it("falls back to 'default' when no model is set and lists enabled tools", () => {
-    // "default" is only reachable for an UNKNOWN provider (a known provider
-    // always resolves to its catalog default).
+  it("distinguishes missing, zero and partial cache telemetry and TTL/output subsets", () => {
+    const missing = buildContextReport({ inputTokens: 100 }, config)
+    expect(missing).toContain("Cache telemetry was not reported")
+    const zero = buildContextReport({ inputTokens: 100, cacheReadInputTokens: 0 }, config)
+    expect(zero).toContain("Reported cache read: 0 (0 tokens)")
+    expect(zero).toContain("Reported cache write: not reported / unknown")
+    const full = buildContextReport(
+      {
+        inputTokens: 100,
+        cacheReadInputTokens: 20,
+        cacheCreationInputTokens: 30,
+        cacheCreation5mInputTokens: 10,
+        cacheCreation1hInputTokens: 20,
+        outputTokens: 90,
+        reasoningTokens: 15,
+      },
+      config
+    )
+    expect(full).toContain("5-minute TTL: 10 (10 tokens)")
+    expect(full).toContain("1-hour TTL: 20 (20 tokens)")
+    expect(full).toContain("Reasoning (subset of output, not additional): 15 (15 tokens)")
+    expect(full).toContain("subdivisions of cache writes")
+  })
+
+  it("uses the configured local threshold only as an estimate and labels disabled behavior", () => {
+    const report = buildContextReport(
+      { inputTokens: 100 },
+      { ...config, autoCompact: false, autoCompactThreshold: 0.6 },
+      200000
+    )
+    expect(report).toContain("configured off")
+    expect(report).toContain("Estimated configured threshold: 60% · 120k (120000 tokens)")
+    expect(report).not.toContain("85%")
+  })
+
+  it("reports configured builtin categories without treating modifiers as tools or claiming loaded", () => {
+    const builtinTools = Object.fromEntries(
+      Object.keys(config.builtinTools).map((key) => [key, key === "coreFilesOnAnthropic"])
+    ) as ResolvedConfig["builtinTools"]
+    const report = buildContextReport(undefined, { ...config, builtinTools })
+    expect(report).toContain("0 enabled categories / 0 catalog tools")
+    expect(report).toContain("does not establish runtime availability or loading")
+    expect(report).toContain("/tools")
+  })
+
+  it("shows safe configuration counts and paths without system prompt or credentials", () => {
     const report = buildContextReport(undefined, {
       ...config,
-      provider: "custom-unknown",
-      model: undefined,
-      providers: {},
-      builtinTools: onlyCoreFiles(),
+      locale: "zh-CN",
+      systemPrompt: "secret prompt",
+      providers: { anthropic: { apiKey: "secret key" } },
+      additionalRoots: ["/more"],
+      skillDirs: ["/skills"],
+      skillLoadMode: "full",
     })
-    expect(report).toContain("Context window — default (custom-unknown)")
-    expect(report).toContain("Enabled tools: core file tools")
+    expect(report).toContain("# 上下文报告")
+    expect(report).toContain("工作目录：/work")
+    expect(report).toContain("已配置的额外目录：1")
+    expect(report).toContain("/more")
+    expect(report).toContain("13 个字符")
+    expect(report).toContain("已配置的额外 Skill 目录：1")
+    expect(report).toContain("不能证明 Skill 已加载")
+    expect(report).not.toContain("secret prompt")
+    expect(report).not.toContain("secret key")
+    expect(report).not.toContain("cliUiContext.")
   })
 })
 
 describe("formatSdkContextBreakdown", () => {
-  it("renders the model, the largest categories first, and the MCP roll-up", () => {
-    const out = formatSdkContextBreakdown({
-      totalTokens: 42_000,
-      maxTokens: 200_000,
-      percentage: 21,
-      model: "claude-x",
-      categories: [
-        { name: "System prompt", tokens: 5_000 },
-        { name: "Messages", tokens: 37_000 },
-        // Zero-token categories are noise and are filtered out entirely.
-        { name: "Free space", tokens: 0 },
-        { name: "Skills", tokens: 100, isDeferred: true },
-      ],
-      // A zero-token tool still counts toward the tool count.
-      mcpTools: [
-        { name: "search", serverName: "exa", tokens: 1_200 },
-        { name: "fetch", serverName: "exa", tokens: 0 },
-      ],
-    })
-    expect(out).toContain("Live context (SDK) — claude-x")
-    expect(out.indexOf("Messages")).toBeLessThan(out.indexOf("System prompt"))
-    expect(out).not.toContain("Free space")
-    expect(out).toContain("Skills (deferred): 100")
-    expect(out).toContain("MCP tools:       2 (1.2k)")
+  const many = Array.from({ length: 12 }, (_, index) => index)
+  const sdk: SdkContextUsage = {
+    model: "live-model",
+    totalTokens: 12345,
+    maxTokens: 200000,
+    rawMaxTokens: 250000,
+    percentage: 6.1725,
+    autoCompactThreshold: 0.73,
+    isAutoCompactEnabled: false,
+    categories: many.map((index) => ({
+      name: `category-${index}`,
+      tokens: index,
+      isDeferred: index === 2,
+      color: "blue",
+    })),
+    systemPromptSections: many.map((index) => ({ name: `section-${index}`, tokens: index })),
+    systemTools: many.map((index) => ({ name: `system-${index}`, tokens: index })),
+    mcpTools: many.map((index) => ({
+      name: `mcp-${index}`,
+      serverName: "server",
+      tokens: index,
+      ...(index === 0 ? { isLoaded: true } : index === 1 ? { isLoaded: false } : {}),
+    })),
+    memoryFiles: many.map((index) => ({
+      path: `/memory-${index}`,
+      type: "project",
+      tokens: index,
+    })),
+    agents: many.map((index) => ({
+      agentType: `agent-${index}`,
+      source: "project",
+      tokens: index,
+    })),
+    deferredBuiltinTools: many.map((index) => ({
+      name: `deferred-${index}`,
+      tokens: index,
+      isLoaded: false,
+    })),
+    skills: {
+      totalSkills: 50,
+      includedSkills: 12,
+      tokens: 1234,
+      skillFrontmatter: many.map((index) => ({
+        name: `skill-${index}`,
+        source: "user",
+        tokens: index,
+      })),
+    },
+    slashCommands: { totalCommands: 30, includedCommands: 2, tokens: 500 },
+  }
+
+  it("renders every detail row beyond eight, preserving zero rows and original order", () => {
+    const before = JSON.stringify(sdk)
+    const out = formatSdkContextBreakdown(sdk)
+    for (const prefix of [
+      "category",
+      "section",
+      "system",
+      "mcp",
+      "memory",
+      "agent",
+      "deferred",
+      "skill",
+    ])
+      expect(out).toContain(`${prefix}-11`)
+    expect(out).toContain("category-0: 0 (0 tokens)")
+    expect(out.indexOf("category-0")).toBeLessThan(out.indexOf("category-11"))
+    expect(out).not.toContain("display color")
+    expect(JSON.stringify(sdk)).toBe(before)
   })
 
-  it("omits the model and the MCP roll-up when the SDK reports neither", () => {
-    const minimal: SdkContextUsage = { totalTokens: 1_000, maxTokens: 200_000, percentage: 1 }
-    const out = formatSdkContextBreakdown(minimal)
-    expect(out).toContain("Live context (SDK)")
-    expect(out).not.toContain("—")
-    expect(out).not.toContain("MCP tools:")
+  it("preserves SDK raw maximum, exact usage, live disabled policy and explicit threshold", () => {
+    const out = formatSdkContextBreakdown(sdk)
+    expect(out).toContain("12345 tokens")
+    expect(out).toContain("▱] 6%")
+    expect(out).toContain("Raw maximum window: 250k (250000 tokens)")
+    expect(out).toContain("Live auto-compaction: disabled")
+    expect(out).toContain("Reported compaction threshold: 73% · 146k (146000 tokens)")
+    expect(out).toContain("Included: 12 / configured total: 50 · 1.2k (1234 tokens)")
+    expect(out).toContain("Included: 2 / configured total: 30 · 500 (500 tokens)")
+  })
+
+  it("distinguishes loaded, deferred and unknown MCP state without adding overlapping inventories", () => {
+    const out = formatSdkContextBreakdown(sdk)
+    expect(out).toContain("server / mcp-0: 0 (0 tokens) · loaded")
+    expect(out).toContain("server / mcp-1: 1 (1 tokens) · deferred / not occupying context")
+    expect(out).toContain("server / mcp-2: 2 (2 tokens) · loading state unknown")
+    expect(out).toContain("Do not add their subtotals together")
+    expect(out).toContain("deferred inventory; do not add to occupancy")
+  })
+
+  it("differentiates missing fields from SDK-reported empty lists and avoids guessed policy", () => {
+    const out = formatSdkContextBreakdown({
+      totalTokens: 0,
+      maxTokens: 200000,
+      percentage: 0,
+      categories: [],
+    })
+    expect(out).toContain("SDK reported an empty list")
+    expect(out).toContain("Not reported by SDK")
+    expect(out).toContain("Live auto-compaction: not reported / unknown")
+    expect(out).toContain("Live compaction threshold: not reported / unknown")
+    expect(out).not.toContain("85%")
+  })
+
+  it("localizes all document headings and retains technical paths and names", () => {
+    const out = formatSdkContextBreakdown(sdk, "zh-CN")
+    for (const label of [
+      "SDK 实时上下文",
+      "系统提示词分段",
+      "系统工具",
+      "MCP 工具",
+      "记忆文件",
+      "Skill 元信息",
+      "斜杠命令",
+      "加载状态未知",
+    ])
+      expect(out).toContain(label)
+    expect(out).toContain("/memory-11")
+    expect(out).toContain("live-model")
+    expect(out).not.toContain("cliUiContext.")
   })
 })

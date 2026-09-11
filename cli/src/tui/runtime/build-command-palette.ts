@@ -6,7 +6,10 @@
  * any command without remembering its exact name — the Claude-Code command
  * palette. Pure data transform: no Ink/IO, unit-tests without a render.
  */
-import { buildQuickActions } from "./build-quick-actions"
+import { buildQuickActions, type CommandPaletteState } from "./build-quick-actions"
+import { createCliTranslator } from "../i18n"
+import { supportsFeature, isBuiltinBackend, type BackendFeature } from "./backend-capabilities"
+import { localizedCommandDescription } from "../commands/help-model"
 import { listVisibleCommands } from "../commands/registry"
 import type { ResolvedConfig } from "../../config/schema"
 import type { QuickActionRow } from "../state/types"
@@ -18,8 +21,12 @@ import type { QuickActionRow } from "../state/types"
  * aren't duplicated. `command` is always `/<name>`; the hint is the command's
  * one-line description.
  */
-export function buildCommandPalette(config: ResolvedConfig): QuickActionRow[] {
-  const curated = buildQuickActions(config)
+export function buildCommandPalette(
+  config: ResolvedConfig,
+  state: CommandPaletteState = {}
+): QuickActionRow[] {
+  const t = createCliTranslator(config.locale, "cliUiCommands")
+  const curated = buildQuickActions(config, state)
   // The bare command each curated row runs (`/model effort` → `model`), so a
   // registry command already fronted by a curated row is not listed twice.
   const curatedCommands = new Set(
@@ -30,8 +37,58 @@ export function buildCommandPalette(config: ResolvedConfig): QuickActionRow[] {
     .map((c) => ({
       id: `cmd:${c.name}`,
       label: `/${c.name}`,
-      hint: c.description,
+      hint: localizedCommandDescription(c, t),
       command: `/${c.name}`,
     }))
-  return [...curated, ...rest]
+  const contextual: QuickActionRow[] = []
+  if (state.activity?.status === "running") {
+    const command =
+      state.activity.kind === "goal"
+        ? "/goal status"
+        : state.activity.kind === "loop"
+          ? "/status"
+          : "/agents"
+    contextual.push({
+      id: "currentActivity",
+      label: t("activity", { label: state.activity.label }),
+      command,
+    })
+  }
+  if (state.lastPlan)
+    contextual.push({ id: "currentPlan", label: t("reviewPlan"), command: "/plan" })
+  const features: Record<string, BackendFeature> = {
+    model: "modelPicker",
+    think: "thinking",
+    thinking: "thinking",
+    mcp: "mcp",
+    skills: "skills",
+    skill: "skills",
+    plugin: "plugins",
+    plugins: "plugins",
+    compact: "compact",
+    resume: "resume",
+    continue: "resume",
+    // /limits is also the read-only explanation of an unavailable native
+    // quota surface, so it remains reachable without that capability.
+    hooks: "hooks",
+  }
+  return [...contextual, ...curated, ...rest].map((row) => {
+    const name = row.command.slice(1).split(/\s+/)[0]
+    const feature = features[name]
+    let reason: string | undefined
+    if (feature && !supportsFeature(state.backendCapabilities, feature)) {
+      reason = t("unavailable", {
+        reason: state.backendCapabilities?.features[feature]?.reason ?? t("unsupported"),
+      })
+    } else if (name === "provider" && !isBuiltinBackend(config.agentBackend)) {
+      reason = t("unavailable", { reason: t("providerOwned") })
+    } else if (
+      state.turnStatus &&
+      state.turnStatus !== "idle" &&
+      ["model", "provider", "backend", "compact", "clear", "resume"].includes(name)
+    ) {
+      reason = t("busy")
+    }
+    return reason ? { ...row, disabledReason: reason } : row
+  })
 }

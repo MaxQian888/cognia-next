@@ -9,6 +9,7 @@ import type { SlashCommand } from "../commands/registry"
 import { useTheme } from "../theme/context"
 import { windowList } from "./list-window"
 import { formatArgHint } from "../commands/arg-hint"
+import { useCliTranslations } from "../i18n"
 
 const MAX_ROWS = 8
 
@@ -29,9 +30,16 @@ export function SlashPalette({
   width?: number | string
 }) {
   const theme = useTheme()
+  const t = useCliTranslations("cliUiCommands")
   if (matches.length === 0) return null
   const win = windowList(matches.length, index, maxRows)
   const visible = matches.slice(win.start, win.end)
+  const separator = query.search(/\s/)
+  const parent = separator < 0 ? "" : query.slice(0, separator)
+  const search = parent ? query.slice(separator).trimStart() : query
+  const selected = matches[index]
+  const action = parent ? "choose" : selected?.subcommands?.length ? "open" : "run"
+  const compact = typeof width === "number" && width < 70
   return (
     <Box
       flexDirection="column"
@@ -41,13 +49,19 @@ export function SlashPalette({
       width={width}
     >
       <Text color={theme.muted} wrap="truncate-end">
-        Search: <Text color={theme.accent}>{query || "all commands"}</Text>
-        {"  ·  ↑/↓ select · Tab complete · Enter run"}
+        {parent ? <Text color={theme.accent}>/{parent} › </Text> : t("palette.search")}
+        <Text color={theme.accent}>{search || t(parent ? "palette.actions" : "palette.all")}</Text>
+        {"  ·  "}
+        {t(`palette.${compact ? "compact" : "keys"}`, { action: t(`palette.${action}`) })}
       </Text>
-      {win.above > 0 ? <Text color={theme.muted} dimColor>{`  ↑ ${win.above} more`}</Text> : null}
+      {win.above > 0 ? (
+        <Text color={theme.muted} dimColor>{`  ↑ ${t("palette.more", { count: win.above })}`}</Text>
+      ) : null}
       {visible.map((cmd, i) => {
         const row = win.start + i
-        const hint = formatArgHint(cmd)
+        const children = cmd.subcommands?.length ?? 0
+        const hint = children ? t("palette.childCount", { count: children }) : formatArgHint(cmd)
+        const name = parent ? cmd.name.slice(cmd.name.indexOf(" ") + 1) : `/${cmd.name}`
         return (
           <Text
             key={cmd.name}
@@ -55,13 +69,22 @@ export function SlashPalette({
             bold={row === index}
             wrap="truncate-end"
           >
-            {row === index ? "❯ " : "  "}/{cmd.name}
-            {hint ? <Text color={theme.secondary}> {hint}</Text> : null}
+            {row === index ? "❯ " : "  "}
+            {name}
+            {hint ? (
+              <Text color={theme.secondary}>
+                {" "}
+                {hint}
+                {children ? " ›" : ""}
+              </Text>
+            ) : null}
             <Text color={theme.muted}> — {cmd.description}</Text>
           </Text>
         )
       })}
-      {win.below > 0 ? <Text color={theme.muted} dimColor>{`  ↓ ${win.below} more`}</Text> : null}
+      {win.below > 0 ? (
+        <Text color={theme.muted} dimColor>{`  ↓ ${t("palette.more", { count: win.below })}`}</Text>
+      ) : null}
     </Box>
   )
 }

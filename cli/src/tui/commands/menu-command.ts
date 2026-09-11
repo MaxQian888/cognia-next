@@ -15,7 +15,7 @@ import type { CommandContext, CommandDescriptor, CommandEffect } from "./types"
 function handle(ctx: CommandContext): CommandEffect {
   return {
     kind: "openOverlay",
-    overlay: { kind: "quickActions", rows: buildCommandPalette(ctx.config), index: 0 },
+    overlay: { kind: "quickActions", rows: buildCommandPalette(ctx.config, ctx.state), index: 0 },
   }
 }
 

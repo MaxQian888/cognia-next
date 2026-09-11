@@ -1,3 +1,6 @@
+import { readHooksPanel } from "../runtime/hooks-controller"
+import { subscribeSessionMcpStatus } from "../../agent/tool-host/mcp-status"
+import { mcpSyncSessionPanel } from "../runtime/mcp-controller"
 /**
  * Root of the interactive TUI. Owns the reducer + agent session, routes slash
  * commands, handles global keys (Ctrl+C exit, Esc interrupt/cancel), and lays
@@ -19,9 +22,17 @@ import { Banner } from "./Banner"
 import { useScroll } from "../hooks/useScroll"
 import { useTranscriptCursor } from "../hooks/useTranscriptCursor"
 import { resolveLayoutMode, readLayoutCapability, type LayoutCapability } from "../layout-mode"
-import { type ScreenStream } from "../screen"
+import {
+  type ScreenStream,
+  resetMouse,
+  exitAltScreen,
+  enterAltScreen,
+  applyMouseMode,
+} from "../screen"
 import { type TitleStream, type TitleEnv } from "../terminal-title"
 import { ThemeProvider } from "../theme/context"
+import { CliI18nProvider, createCliTranslator } from "../i18n"
+import { loadGitDiff } from "../runtime/git-diff"
 import { RenderPrefsProvider } from "../render/context"
 import { resolveTheme } from "../theme/resolve"
 import { StartupGate } from "./StartupGate"
@@ -118,7 +129,6 @@ import {
 import { copyToClipboard, clipboardFailureMessage, type CopyResult } from "../clipboard"
 import { readClipboardImage as defaultReadClipboardImage } from "../clipboard-image"
 import { searchHistory } from "../input/history-search"
-import { bufferText, insertText } from "../input/buffer"
 import { appendHistory } from "../input/history-store"
 import { useAgentSession, type AgentSessionApi, type CreateSession } from "../hooks/useAgentSession"
 import { useLogIngest } from "../hooks/use-log-ingest"
@@ -448,6 +458,7 @@ export interface AppProps {
   /** Env slice steering terminal-title adaptation (tmux / screen / dumb);
    * defaults to `process.env`. Injected by tests. */
   titleEnv?: TitleEnv
+  loadGitDiffFn?: typeof loadGitDiff
 }
 
 export function App({
@@ -523,8 +534,10 @@ export function App({
   altScreenPreEntered,
   titleOut,
   titleEnv,
+  loadGitDiffFn = loadGitDiff,
 }: AppProps) {
-  const { exit, suspendTerminal } = useApp()
+  const [screenReader] = useState(config.screenReader ?? false)
+  const { exit, suspendTerminal, waitUntilRenderFlush } = useApp()
   const externalModelRequestRef = useRef(0)
   const [state, reducerDispatch] = useReducer(tuiReducer, undefined, () =>
     createInitialState(config, sessionId, trusted, initialHistory)
@@ -645,6 +658,7 @@ export function App({
     // id `/export`/`/handoff`/`/resume` read (it tracks `/clear` + `/resume`).
     sessionId: state.sessionId,
     createSession: activeCreateSession,
+    flushPendingInput: waitUntilRenderFlush,
     ...(state.backendCapabilities ? { capabilities: state.backendCapabilities } : {}),
     getCellCount: () => state.cells.length,
     // Seed the live auto-approve set from THIS app's home (not the OS home) so
@@ -816,9 +830,9 @@ export function App({
   const agent = useMemo<AgentSessionApi>(
     () => ({
       ...standaloneAgent,
-      async send(prompt) {
+      async send(prompt, preparePrompt) {
         const connection = attachedHostConnectionRef.current
-        if (!connection) return standaloneAgent.send(prompt)
+        if (!connection) return standaloneAgent.send(prompt, preparePrompt)
         if (!connection.record.sessionId) {
           dispatch({
             type: "TURN_ERROR",
@@ -827,6 +841,7 @@ export function App({
           return null
         }
         try {
+          if (preparePrompt) prompt = await preparePrompt()
           const action = queueAttachedHostStateAction(
             connection.record,
             {
@@ -1046,7 +1061,19 @@ export function App({
   )
   // Resolved transcript render preferences (highlight/line-numbers/truncation),
   // re-derived only when the `render` config object changes.
-  const renderPrefs = useMemo(() => resolveRenderConfig(state.config.render), [state.config.render])
+  const t = useMemo(
+    () => createCliTranslator(state.config.locale, "cliUiCommon"),
+    [state.config.locale]
+  )
+  const renderPrefs = useMemo(
+    () =>
+      resolveRenderConfig(
+        screenReader
+          ? { ...state.config.render, streamReveal: false, syntaxHighlightInline: false }
+          : state.config.render
+      ),
+    [state.config.render, screenReader]
+  )
   // Resolved copy/clipboard notice strings (defaults ⊕ user overrides).
   const notices = useMemo(() => resolveNotices(state.config.notices), [state.config.notices])
   // Resolved keyboard bindings (defaults ⊕ user overrides), for both the global
@@ -1064,16 +1091,47 @@ export function App({
   }, [])
   const getRuntimeAbort = useCallback(() => runtimeAbort.current, [])
 
+  // Effective layout: the configured preference (default `fullscreen`) gated by
+  // terminal capability — a non-TTY / dumb terminal always falls back to the
+  // scrollback `<Static>` tree (which is also why every existing test, rendered
+  // under jsdom with no TTY, keeps the historic layout untouched).
+  const capability = layoutCapability ?? readLayoutCapability()
+  const fullscreen =
+    !screenReader && resolveLayoutMode(state.config.layout, capability) === "fullscreen"
+  // Fullscreen mouse model (default = native click-drag selection). Drives the
+  // alt-screen mouse escapes below and whether the wheel scrolls the transcript.
+  const mouseMode = state.config.mouse ?? DEFAULT_MOUSE_MODE
+  // In-app drag-to-select. Only engages in fullscreen (the layout that owns the
+  // mouse) and only once a frame buffer is available to select over.
+  const selectionMode = state.config.selection ?? DEFAULT_SELECTION_MODE
+
+  const { stdout } = useStdout()
+  // Sink for the alt-screen enter/exit + mouse escapes (also re-applied live by
+  // `applyEffect`'s `mouse` case, so it stays in App scope).
+  const screen: ScreenStream = screenOut ?? (stdout as unknown as ScreenStream)
+
   const runSuspendedInteractiveShell = useCallback(
     async (command: string, opts: RunInteractiveShellOpts) => {
       let result: ShellResult | undefined
       await suspendTerminal(async () => {
-        result = await runInteractiveShell(command, opts)
+        // Ink owns raw input, but Cognia owns these terminal modes. Release
+        // them too so clicks cannot become escape-sequence input in the child.
+        resetMouse(screen)
+        if (fullscreen) exitAltScreen(screen)
+        try {
+          result = await runInteractiveShell(command, opts)
+        } finally {
+          resetMouse(screen)
+          if (fullscreen) {
+            enterAltScreen(screen)
+            applyMouseMode(mouseMode, screen, { drag: selectionMode !== "off" })
+          }
+        }
       })
       if (!result) throw new Error("Interactive shell exited without a result")
       return result
     },
-    [runInteractiveShell, suspendTerminal]
+    [runInteractiveShell, suspendTerminal, screen, fullscreen, mouseMode, selectionMode]
   )
 
   // The `!command` shell-out cluster (live cells + foreground/background lifecycle
@@ -1126,7 +1184,13 @@ export function App({
   // list rows fit before scrolling. The live frame reflows the instant this
   // updates; only the heavy `<Static>` repaint below is debounced.
   const { columns, rows } = useTerminalSize()
-  const layoutBudget = terminalLayout(columns, rows)
+  const layoutBudget = {
+    ...terminalLayout(columns, rows),
+    ...(screenReader ? { showMascot: false } : {}),
+    ...(screenReader || state.cells.some((cell) => cell.kind === "user")
+      ? { showBanner: false }
+      : {}),
+  }
   // Row budget for inline popups, which sit above the composer so they stay
   // compact while the composer consumes its separate density-tier row budget.
   const popupRows = Math.max(3, Math.min(10, rows - 6))
@@ -1144,7 +1208,24 @@ export function App({
     roots: [state.config.cwd, home],
     home,
     probeCache: mcpProbeCache,
+    config: state.config,
+    sessionId: state.sessionId,
   })
+
+  useEffect(() => {
+    if (state.overlay.kind !== "mcp") return
+    const sync = () =>
+      mcpSyncSessionPanel({
+        dispatch,
+        roots: [state.config.cwd, home],
+        home,
+        config: state.config,
+        sessionId: state.sessionId,
+        probeCache: mcpProbeCache,
+      })
+    sync()
+    return subscribeSessionMcpStatus(state.sessionId, sync)
+  }, [state.overlay.kind, state.sessionId, state.config, home, dispatch, mcpProbeCache])
 
   // One-time boot warm: probe every enabled MCP server once and seed the shared
   // cache (so `/mcp` opens instantly), and warn (via a NOTICE cell) about any
@@ -1163,12 +1244,6 @@ export function App({
     })
   }, [state.phase, state.config.cwd, home, dispatch, mcpProbeCache])
 
-  // Effective layout: the configured preference (default `fullscreen`) gated by
-  // terminal capability — a non-TTY / dumb terminal always falls back to the
-  // scrollback `<Static>` tree (which is also why every existing test, rendered
-  // under jsdom with no TTY, keeps the historic layout untouched).
-  const capability = layoutCapability ?? readLayoutCapability()
-  const fullscreen = resolveLayoutMode(state.config.layout, capability) === "fullscreen"
   const overlayRegionRef = useRef<DOMElement | null>(null)
   const overlayMetrics = useBoxMetrics(overlayRegionRef)
   // The region is measured after Yoga allocates the fixed bottom chrome. Until
@@ -1180,20 +1255,11 @@ export function App({
   // A docked prompt shares the column with the transcript instead of replacing
   // it, and the measured region belongs to the full-screen branch — so it gets
   // its own bounded budget rather than the whole viewport it no longer owns.
-  const overlayViewportRows = overlayTakesScreen(state.overlay)
+  const takesOverlayScreen =
+    overlayTakesScreen(state.overlay) || (rows < 20 && state.overlay.kind === "permission")
+  const overlayViewportRows = takesOverlayScreen
     ? measuredOverlayRows
-    : inlineOverlayRows(measuredOverlayRows)
-  // Fullscreen mouse model (default = native click-drag selection). Drives the
-  // alt-screen mouse escapes below and whether the wheel scrolls the transcript.
-  const mouseMode = state.config.mouse ?? DEFAULT_MOUSE_MODE
-  // In-app drag-to-select. Only engages in fullscreen (the layout that owns the
-  // mouse) and only once a frame buffer is available to select over.
-  const selectionMode = state.config.selection ?? DEFAULT_SELECTION_MODE
-
-  const { stdout } = useStdout()
-  // Sink for the alt-screen enter/exit + mouse escapes (also re-applied live by
-  // `applyEffect`'s `mouse` case, so it stays in App scope).
-  const screen: ScreenStream = screenOut ?? (stdout as unknown as ScreenStream)
+    : inlineOverlayRows(Math.min(measuredOverlayRows, rows - 2 - (layoutBudget.showBanner ? 3 : 0)))
   // Title/bell inputs, derived once and fed to the terminal-chrome hook below.
   const titleEnabled = state.config.terminalTitle !== false
   const titleSink: TitleStream = titleOut ?? (stdout as unknown as TitleStream)
@@ -1541,13 +1607,13 @@ export function App({
   // it). A live mid-session `/cd` therefore actually relocates the agent, not
   // just the `/cwd` display.
   const changeCwd = useCallback(
-    (dir: string) => {
+    async (dir: string) => {
+      await agent.changeCwd(dir)
       try {
         trustFolderFn(home, dir)
       } catch {
         // best-effort persistence
       }
-      void agent.changeCwd(dir)
       dispatch({ type: "STARTUP_TRUST" })
     },
     [agent, dispatch, home, trustFolderFn]
@@ -1911,6 +1977,7 @@ export function App({
   // Interpret a pure CommandEffect produced by the dispatcher — see useApplyEffect.
   const applyEffect = useApplyEffect({
     agent,
+    getBackendAgentId: () => connectionRef.current?.agentId,
     dispatch,
     state,
     home,
@@ -1937,7 +2004,9 @@ export function App({
     persistMascot,
     persistEditor,
     openInEditorFn,
+    suspendTerminal,
     runShell,
+    loadGitDiffFn,
     persist,
     persistDb,
     fullscreen,
@@ -2087,14 +2156,25 @@ export function App({
   const bypassGateShownRef = useRef(false)
   useEffect(() => {
     if (bypassGateShownRef.current) return
-    if (state.phase !== "chat" || state.bypassAcknowledged) return
+    if (
+      state.phase !== "chat" ||
+      state.bypassAcknowledged ||
+      state.config.bypassConfirmation === "never"
+    )
+      return
     if (!requiresAcknowledgement(state.config.permissionMode)) return
     bypassGateShownRef.current = true
     dispatch({
       type: "OVERLAY_OPEN",
       overlay: startupBypassConfirmOverlay(state.config.permissionMode),
     })
-  }, [state.phase, state.bypassAcknowledged, state.config.permissionMode, dispatch])
+  }, [
+    state.phase,
+    state.bypassAcknowledged,
+    state.config.permissionMode,
+    state.config.bypassConfirmation,
+    dispatch,
+  ])
 
   // Resolve `@skill:` / `@agent:` mentions in a submitted line before it is sent:
   // enable + persist mentioned skills, synchronously dispatch mentioned agents and
@@ -2192,11 +2272,12 @@ export function App({
   const sendThenDrainSteer = useCallback(
     async (text: string) => {
       // Resolve @-mentions first: enable skills, run agents, rewrite the prompt.
-      const { prompt, enabledSkills } = await runMentionPreprocess(text)
-      // A newly-enabled skill must take effect next turn — drop the cached
-      // SendOptions so they re-resolve with the updated ephemeralSkillIds.
-      if (enabledSkills.length > 0) agent.invalidate()
-      await agent.send(prompt)
+      await agent.send(text, async () => {
+        const { prompt, enabledSkills } = await runMentionPreprocess(text)
+        // Apply newly enabled skills to the backend after displaying the input.
+        if (enabledSkills.length > 0) agent.invalidate()
+        return prompt
+      })
       await drainFollowUps()
     },
     [agent, drainFollowUps, runMentionPreprocess]
@@ -2308,7 +2389,7 @@ export function App({
     dispatch({ type: "OVERLAY_CLOSE" })
     const sub = form.subcommand ? ` ${form.subcommand}` : ""
     runCommandLine(`/${form.commandName}${sub} ${result.args}`.trim())
-  }, [state.overlay.kind, state.overlay.form, dispatch, runCommandLine])
+  }, [state.overlay, dispatch, runCommandLine])
 
   // Apply an inline settings-panel edit (enum cycle / boolean toggle): persist
   // via the matching mutate helper, live-merge the config, then RE-OPEN the panel
@@ -2319,6 +2400,11 @@ export function App({
   const applySettings = useCallback(
     (target: SettingsApplyTarget, value: string | boolean) => {
       const cfg = state.config
+      const hooksText = createCliTranslator(cfg.locale, "cliUiHooks")
+      if (target.kind === "hook" && state.turnStatus !== "idle") {
+        dispatch({ type: "NOTICE", message: hooksText("data.busy") })
+        return
+      }
       let patch: Partial<ResolvedConfig> = {}
       let invalidate = false
       try {
@@ -2347,12 +2433,14 @@ export function App({
           case "flag":
             patch = { [target.key]: Boolean(value) } as Partial<ResolvedConfig>
             setBooleanFlag(home, target.key, Boolean(value))
-            invalidate = true
+            invalidate = target.key !== "screenReader"
+            if (target.key === "screenReader")
+              dispatch({ type: "NOTICE", message: t("restartRequired") })
             break
           case "configValue":
             patch = { [target.key]: String(value) } as Partial<ResolvedConfig>
             setConfigValue(home, target.key, String(value))
-            invalidate = true
+            invalidate = target.key !== "locale"
             break
           case "numberValue": {
             // Arrives as a string from an enum row; the schema stores a number.
@@ -2416,21 +2504,42 @@ export function App({
           }
         }
       } catch {
+        if (target.kind === "hook") {
+          dispatch({ type: "NOTICE", message: hooksText("data.saveFailed") })
+          return
+        }
         dispatch({ type: "NOTICE", message: "Setting changed (couldn't save to config)." })
       }
       dispatch({ type: "SET_CONFIG_PATCH", patch })
-      if (invalidate) agent.invalidate()
+      if (invalidate) {
+        if (target.kind === "hook" && agent.reloadHooks) {
+          void agent
+            .reloadHooks()
+            .then(() => {
+              dispatch({ type: "NOTICE", message: hooksText("data.reloaded") })
+            })
+            .catch((error) => {
+              dispatch({
+                type: "NOTICE",
+                message: hooksText("data.reloadFailed", { error: String(error) }),
+              })
+            })
+        } else agent.invalidate()
+      }
       const ov = state.overlay
       const section = ov.kind === "settings" ? ov.section : 0
       const index = ov.kind === "settings" ? ov.index : 0
       dispatch({
         type: "OVERLAY_OPEN",
-        overlay: {
-          kind: "settings",
-          sections: settingsSections({ ...cfg, ...patch }, state.backendCapabilities),
-          section,
-          index,
-        },
+        overlay:
+          ov.kind === "hooks"
+            ? { kind: "hooks", ...readHooksPanel({ home, config: { ...cfg, ...patch } }) }
+            : {
+                kind: "settings",
+                sections: settingsSections({ ...cfg, ...patch }, state.backendCapabilities),
+                section,
+                index,
+              },
       })
       // A theme change from the settings panel recolours the palette, but in
       // scrollback mode the committed transcript + banner live inside `<Static>`,
@@ -2445,11 +2554,13 @@ export function App({
       state.config,
       state.overlay,
       state.backendCapabilities,
+      state.turnStatus,
       dispatch,
       agent,
       fullscreen,
       home,
       clearScreen,
+      t,
     ]
   )
 
@@ -2459,6 +2570,20 @@ export function App({
     (row: SettingsRow) => {
       const c = row.control
       if (c.type === "delegate") {
+        if (
+          (c.command === "/cd" || c.command === "/add-dir") &&
+          state.overlay.kind === "settings"
+        ) {
+          dispatch({
+            type: "OVERLAY_OPEN",
+            overlay: {
+              kind: "workspaceFolder",
+              mode: c.command === "/cd" ? "cwd" : "add",
+              returnToSettings: { section: state.overlay.section, index: state.overlay.index },
+            },
+          })
+          return
+        }
         if (c.command === "/provider" && state.overlay.kind === "settings") {
           dispatch({
             type: "OVERLAY_OPEN",
@@ -2536,15 +2661,7 @@ export function App({
         },
       })
     },
-    [
-      state.overlay.kind,
-      state.overlay.section,
-      state.overlay.index,
-      state.config,
-      applyEffect,
-      runCommandLine,
-      dispatch,
-    ]
+    [state.overlay, state.config, applyEffect, runCommandLine, dispatch]
   )
 
   // `/agents models` panel edit: persist one subagent's provider/model override
@@ -2602,21 +2719,16 @@ export function App({
     [dispatch, state.input.history.entries]
   )
 
-  // Ctrl+V: read an image off the OS clipboard and append it as an `@<path>`
-  // mention into the composer, so it flows through the existing attachment
-  // pipeline (the same `@file` mechanism a typed path uses). A missing image
-  // surfaces a notice rather than failing silently.
+  // Apply the completed clipboard read against the reducer's live draft so
+  // typing while the platform helper runs is never replaced by a stale buffer.
   const pasteClipboardImage = useCallback(async () => {
     const result = await readClipboardImage()
     if (!result) {
       dispatch({ type: "NOTICE", message: "No image in clipboard" })
       return
     }
-    const buffer = state.input.buffer
-    const sep = bufferText(buffer).length > 0 ? " " : ""
-    dispatch({ type: "INPUT_SET", buffer: insertText(buffer, `${sep}@${result.path}`) })
-    dispatch({ type: "NOTICE", message: "📎 image from clipboard" })
-  }, [dispatch, readClipboardImage, state.input.buffer])
+    dispatch({ type: "INPUT_ADD_IMAGES", paths: [result.path] })
+  }, [dispatch, readClipboardImage])
 
   const abortRuntime = useCallback(() => {
     if (runtimeAbort.current) {
@@ -2778,19 +2890,21 @@ export function App({
   // frame collapsed and repainted on every transition, and a long install log or
   // failure message could hide the very rows the user had to act on.
   const launchShell = (body: React.ReactNode, hint?: string) => (
-    <ThemeProvider palette={themePalette}>
-      <RenderPrefsProvider prefs={renderPrefs}>
-        <LaunchShell
-          banner={banner}
-          {...(hint ? { hint } : {})}
-          columns={columns}
-          rows={rows}
-          fullscreen={fullscreen}
-        >
-          {body}
-        </LaunchShell>
-      </RenderPrefsProvider>
-    </ThemeProvider>
+    <CliI18nProvider locale={state.config.locale}>
+      <ThemeProvider palette={themePalette}>
+        <RenderPrefsProvider prefs={renderPrefs} screenReader={screenReader}>
+          <LaunchShell
+            banner={screenReader ? null : banner}
+            {...(hint ? { hint } : {})}
+            columns={columns}
+            rows={rows}
+            fullscreen={fullscreen}
+          >
+            {body}
+          </LaunchShell>
+        </RenderPrefsProvider>
+      </ThemeProvider>
+    </CliI18nProvider>
   )
   const launchBodyRows = launchShellLayout(rows, true).bodyRows
 
@@ -2820,7 +2934,7 @@ export function App({
       />,
       // The shell owns the cancellation hint, so it stays visible even when the
       // progress line wraps on a narrow terminal.
-      "Esc to cancel"
+      t("cancel")
     )
   }
 
@@ -2833,7 +2947,7 @@ export function App({
         width={columns}
         maxRows={launchListRows(launchBodyRows, LAUNCH_LIST_CHROME_ROWS)}
       />,
-      "Esc to cancel"
+      t("cancel")
     )
   }
 
@@ -2884,71 +2998,73 @@ export function App({
   )
 
   return (
-    <ThemeProvider palette={themePalette}>
-      <RenderPrefsProvider prefs={renderPrefs}>
-        <TuiViewportFrame
-          columns={columns}
-          rows={rows}
-          fullscreen={fullscreen}
-          overlayOpen={overlayOpen}
-          overlayTakesScreen={overlayTakesScreen(state.overlay)}
-          overlayRegionRef={overlayRegionRef}
-          transcript={
-            <TranscriptRegion
-              state={state}
-              fullscreen={fullscreen}
-              banner={banner}
-              identity={identity}
-              activeModel={activeModel}
-              columns={columns}
-              scroll={scroll}
-              scrollContentRef={scrollContentRef}
-              cursor={cursor}
-              mutedColor={themePalette.muted}
-              layout={layoutBudget}
-            />
-          }
-          overlays={overlays}
-          bottom={
-            <BottomRegion
-              state={state}
-              dispatch={dispatch}
-              cursor={cursor}
-              overlayOpen={overlayOpen}
-              columns={columns}
-              popupRows={popupRows}
-              composerRows={layoutBudget.composerRows}
-              layout={layoutBudget}
-              warningColor={themePalette.warning}
-              streamStartedAt={streamStartedAt}
-              lastActivityAt={lastActivityAt}
-              footerSubagentRunning={footerSubagentRunning}
-              footerBackgroundSubagents={footerBackgroundSubagents}
-              interruptedBackgroundSubagents={interruptedBackgroundSubagents}
-              pendingBackgroundResults={pendingBackgroundResults}
-              footerCopilot={footerCopilot}
-              backtrackArmed={backtrackArmed}
-              subagentChipRef={subagentChipRef}
-              agentTreeRef={agentTreeRef}
-              handleSubmit={handleSubmit}
-              handleHistoryPush={handleHistoryPush}
-              listDir={listDir}
-              mentionProviders={mentionProviders}
-              keybindings={keybindings}
-              enabledSkillIds={enabledSkillIds}
-              toggleSkillEnabled={toggleSkillEnabled}
-              handlePopupOpenChange={handlePopupOpenChange}
-              localSuggestEnabled={localSuggestEnabled}
-              aiComplete={aiComplete}
-              agentComplete={agentComplete}
-              suggestDebounceMs={state.config.autosuggest?.debounceMs}
-              footerPlanTitle={footerPlanTitle}
-              footerRowRef={footerRowRef}
-              footerSegmentsRef={footerSegmentsRef}
-            />
-          }
-        />
-      </RenderPrefsProvider>
-    </ThemeProvider>
+    <CliI18nProvider locale={state.config.locale}>
+      <ThemeProvider palette={themePalette}>
+        <RenderPrefsProvider prefs={renderPrefs} screenReader={screenReader}>
+          <TuiViewportFrame
+            columns={columns}
+            rows={rows}
+            fullscreen={fullscreen}
+            overlayOpen={overlayOpen}
+            overlayTakesScreen={takesOverlayScreen}
+            overlayRegionRef={overlayRegionRef}
+            transcript={
+              <TranscriptRegion
+                state={state}
+                fullscreen={fullscreen}
+                banner={screenReader ? null : banner}
+                identity={identity}
+                activeModel={activeModel}
+                columns={columns}
+                scroll={scroll}
+                scrollContentRef={scrollContentRef}
+                cursor={cursor}
+                mutedColor={themePalette.muted}
+                layout={layoutBudget}
+              />
+            }
+            overlays={overlays}
+            bottom={
+              <BottomRegion
+                state={state}
+                dispatch={dispatch}
+                cursor={cursor}
+                overlayOpen={overlayOpen}
+                columns={columns}
+                popupRows={popupRows}
+                composerRows={layoutBudget.composerRows}
+                layout={layoutBudget}
+                warningColor={themePalette.warning}
+                streamStartedAt={streamStartedAt}
+                lastActivityAt={lastActivityAt}
+                footerSubagentRunning={footerSubagentRunning}
+                footerBackgroundSubagents={footerBackgroundSubagents}
+                interruptedBackgroundSubagents={interruptedBackgroundSubagents}
+                pendingBackgroundResults={pendingBackgroundResults}
+                footerCopilot={footerCopilot}
+                backtrackArmed={backtrackArmed}
+                subagentChipRef={subagentChipRef}
+                agentTreeRef={agentTreeRef}
+                handleSubmit={handleSubmit}
+                handleHistoryPush={handleHistoryPush}
+                listDir={listDir}
+                mentionProviders={mentionProviders}
+                keybindings={keybindings}
+                enabledSkillIds={enabledSkillIds}
+                toggleSkillEnabled={toggleSkillEnabled}
+                handlePopupOpenChange={handlePopupOpenChange}
+                localSuggestEnabled={localSuggestEnabled}
+                aiComplete={aiComplete}
+                agentComplete={agentComplete}
+                suggestDebounceMs={state.config.autosuggest?.debounceMs}
+                footerPlanTitle={footerPlanTitle}
+                footerRowRef={footerRowRef}
+                footerSegmentsRef={footerSegmentsRef}
+              />
+            }
+          />
+        </RenderPrefsProvider>
+      </ThemeProvider>
+    </CliI18nProvider>
   )
 }

@@ -41,6 +41,7 @@ describe("planPermissionModeSwitch", () => {
       // The confirm re-enters the SAME switch with the acknowledgement given —
       // that round-trip is what keeps one implementation for every entry point.
       onConfirmCommand: "mode bypassPermissions --force",
+      onRememberCommand: "mode bypassPermissions --force --remember",
     })
   })
 
@@ -81,6 +82,7 @@ describe("bypassConfirmOverlay", () => {
   it("de-escalates on decline at startup, where the mode is already armed", () => {
     expect(startupBypassConfirmOverlay("bypassPermissions")).toMatchObject({
       onConfirmCommand: "mode bypassPermissions --force",
+      onRememberCommand: "mode bypassPermissions --force --remember",
       onCancelCommand: `mode ${BYPASS_DECLINE_MODE}`,
     })
     expect(requiresAcknowledgement(BYPASS_DECLINE_MODE)).toBe(false)

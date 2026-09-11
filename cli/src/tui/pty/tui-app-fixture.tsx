@@ -82,6 +82,7 @@ const scripted = scenarioCreateSession(scenario, record)
 let turnsTaken = 0
 
 const createSession: CreateSession = (params) => {
+  marker("SESSION-CREATE")
   const session = scripted(params)
   return {
     ...session,
@@ -108,8 +109,11 @@ function GeometryProbe(): null {
   return null
 }
 
-enterAltScreen()
-applyMouseMode("scroll")
+const fullscreen = !config.screenReader
+if (fullscreen) {
+  enterAltScreen()
+  applyMouseMode("scroll")
+}
 const instance = render(
   <TuiInputProvider>
     <App
@@ -117,7 +121,7 @@ const instance = render(
       sessionId="pty-fixture"
       createSession={createSession}
       trusted
-      altScreenPreEntered
+      altScreenPreEntered={fullscreen}
       layoutCapability={{ stdoutIsTTY: true, stdinIsTTY: true, term: process.env.TERM }}
       home={home}
       // Real command history, against the driver's isolated home. A no-op here
@@ -140,7 +144,11 @@ const instance = render(
     />
     <GeometryProbe />
   </TuiInputProvider>,
-  { exitOnCtrlC: false, incrementalRendering: false }
+  {
+    exitOnCtrlC: false,
+    incrementalRendering: false,
+    isScreenReaderEnabled: config.screenReader ?? false,
+  }
 )
 
 let cleaning = false
@@ -165,7 +173,8 @@ const cleanup = () => {
   process.exit(0)
 }
 
-process.on("SIGINT", cleanup)
+// Match production: SIGINT is owned by Ink / the interactive shell runner.
+void instance.waitUntilExit().then(cleanup, cleanup)
 process.on("SIGTERM", cleanup)
 // No fallback auto-exit. A fixture that quit on a timer turned "the app hung"
 // into "the test passed and the process happened to be gone", and every driver

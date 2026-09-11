@@ -164,6 +164,66 @@ describe("helpers + descriptor", () => {
     const cmd = BASHES_COMMANDS[0]
     expect(cmd.name).toBe("bashes")
     expect(cmd.aliases).toContain("jobs")
-    expect(cmd.subcommands?.map((s) => s.name)).toEqual(["actions", "view", "kill", "fg"])
+    expect(cmd.subcommands?.map((s) => s.name)).toEqual([
+      "history",
+      "actions",
+      "view",
+      "kill",
+      "fg",
+    ])
   })
+})
+
+it("offers targets when view/kill/fg are invoked without an ID", () => {
+  const cells = [
+    bash("live", "dev"),
+    bash("bg", "watch", { background: true }),
+    bash("done", "ls", { status: "done" }),
+  ]
+  for (const [handler, ids, command] of [
+    [bashesViewHandler, ["live", "bg", "done"], "bashes view"],
+    [bashesKillHandler, ["live", "bg"], "bashes kill"],
+    [bashesForegroundHandler, ["bg"], "bashes fg"],
+  ] as const) {
+    const effect = handler(ctx(cells))
+    expect(effect).toMatchObject({
+      kind: "openOverlay",
+      overlay: { kind: "select", onSelectCommand: command },
+    })
+    if (effect.kind === "openOverlay" && effect.overlay.kind === "select")
+      expect(effect.overlay.items.map((i) => i.id)).toEqual(ids)
+  }
+})
+
+it("exposes finished command history and tracks output by cell ID", () => {
+  const cell = bash("done", "ls", { status: "done", exitCode: 0 })
+  const history = BASHES_COMMANDS[0].subcommands?.find((s) => s.name === "history")
+  expect(history?.handler?.(ctx([cell]))).toMatchObject({
+    kind: "openOverlay",
+    overlay: { onSelectCommand: "bashes view" },
+  })
+  expect(bashesViewHandler(ctx([cell], "done"))).toMatchObject({
+    overlay: { sourceBashId: "done" },
+  })
+})
+
+it("localizes job action menus", () => {
+  const context = ctx([bash("live", "dev", { background: true })], "live")
+  context.config.locale = "zh-CN"
+  const result = bashesActionsHandler(context)
+  expect(JSON.stringify(result)).toContain("查看输出")
+  expect(JSON.stringify(result)).toContain("终止")
+})
+
+it("routes job alias picker choices back to the intended action", async () => {
+  const { registerCommands } = await import("./registry")
+  const { dispatchCommand } = await import("./dispatch")
+  registerCommands(BASHES_COMMANDS)
+  const context = ctx([bash("bg", "dev", { background: true })])
+  const picker = dispatchCommand("/jobs fg", context)
+  if (picker.kind !== "openOverlay" || picker.overlay.kind !== "select")
+    throw new Error("expected target picker")
+  expect(
+    dispatchCommand(`/${picker.overlay.onSelectCommand} ${picker.overlay.items[0].id}`, context)
+  ).toEqual({ kind: "bashForeground", id: "bg" })
 })

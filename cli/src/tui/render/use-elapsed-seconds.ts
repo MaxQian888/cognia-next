@@ -5,15 +5,18 @@
  * never `running`, so the hook is inert there).
  */
 import { useEffect, useState } from "react"
+import { useScreenReader } from "./context"
 
 export function useElapsedSeconds(active: boolean): number {
+  const screenReader = useScreenReader()
+  const enabled = active && !screenReader
   const [secs, setSecs] = useState(0)
 
   useEffect(() => {
-    if (!active) return
+    if (!enabled) return
     const id = setInterval(() => setSecs((s) => s + 1), 1000)
     return () => clearInterval(id)
-  }, [active])
+  }, [enabled])
 
-  return active ? secs : 0
+  return enabled ? secs : 0
 }

@@ -46,6 +46,53 @@ function snap(provider: string): ProviderLimits {
 }
 
 describe("runLimits", () => {
+  it("reads native Codex quota instead of the saved built-in provider", async () => {
+    const loadLimits = jest.fn(async () => [snap("deepseek")])
+    const loadCodexLimits = jest.fn(async () => [snap("codex")])
+    const d = deps({
+      config: {
+        ...DEFAULT_RESOLVED_CONFIG,
+        provider: "deepseek",
+        agentBackend: "codex",
+        cwd: "/work",
+      },
+      presetId: "codex-app-server",
+      backendAgentId: "live-codex",
+      loadLimits,
+      loadCodexLimits,
+      rateLimits: { provider: "deepseek" } as never,
+    })
+    runLimits(d)
+    await Promise.resolve()
+    expect(openedLimits(d.actions)).toMatchObject({
+      activeProvider: "codex",
+      rateLimits: undefined,
+    })
+    expect(loadCodexLimits).toHaveBeenCalledWith("live-codex", NOW, d.config.locale)
+    expect(loadLimits).not.toHaveBeenCalled()
+    expect(loadedLimits(d.actions)?.snapshots).toEqual([snap("codex")])
+  })
+
+  it("keeps a disconnected external backend unknown without querying provider credentials", async () => {
+    const loadLimits = jest.fn(async () => [snap("deepseek")])
+    const d = deps({
+      config: {
+        ...DEFAULT_RESOLVED_CONFIG,
+        provider: "deepseek",
+        agentBackend: "codex-app-server",
+        cwd: "/work",
+      },
+      loadLimits,
+    })
+    runLimits(d)
+    await Promise.resolve()
+    expect(openedLimits(d.actions)?.activeProvider).toBe("codex")
+    expect(loadLimits).not.toHaveBeenCalled()
+    expect(loadedLimits(d.actions)?.snapshots).toEqual([
+      expect.objectContaining({ provider: "codex", meters: [] }),
+    ])
+  })
+
   it("opens a loading panel immediately and does not block while providers load", async () => {
     let resolveLimits!: (snapshots: ProviderLimits[]) => void
     const pending = new Promise<ProviderLimits[]>((resolve) => {
@@ -117,3 +164,84 @@ describe("runLimits", () => {
     expect(openedLimits(d.actions)?.activeProvider).toBe("anthropic")
   })
 })
+
+it.each(["codex-acp", "pi", "opencode-server"])(
+  "%s never queries Codex or configured credential providers",
+  async (backend) => {
+    const loadCodexLimits = jest.fn(async () => [])
+    const loadLimits = jest.fn(async () => [])
+    const d = deps({
+      config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: backend },
+      presetId: backend,
+      backendAgentId: "connected",
+      loadCodexLimits,
+      loadLimits,
+    })
+    runLimits(d)
+    await Promise.resolve()
+    expect(loadCodexLimits).not.toHaveBeenCalled()
+    expect(loadLimits).not.toHaveBeenCalled()
+    expect(loadedLimits(d.actions)?.snapshots[0]).toMatchObject({
+      meters: [],
+      notice: expect.any(String),
+    })
+  }
+)
+
+it("renders pushed native quotas for Claude and reports when none have arrived", async () => {
+  const d = deps({
+    config: {
+      ...DEFAULT_RESOLVED_CONFIG,
+      cwd: "/work",
+      agentBackend: "claude-code",
+      locale: "zh-CN",
+    },
+    agentRateLimits: { five_hour: { kind: "rate-limit", status: "allowed", utilization: 0.42 } },
+  })
+  runLimits(d)
+  await Promise.resolve()
+  expect(loadedLimits(d.actions)?.snapshots[0].meters[0].usedPct).toBe(42)
+  const empty = deps({ config: d.config })
+  runLimits(empty)
+  await Promise.resolve()
+  expect(loadedLimits(empty.actions)?.snapshots[0].notice).toContain("尚未")
+})
+
+it("prefers pushed native SDK quotas over the built-in billable probe", async () => {
+  const loadLimits = jest.fn(async () => [])
+  const d = deps({
+    agentRateLimits: { five_hour: { kind: "rate-limit", status: "allowed", utilization: 0 } },
+    loadLimits,
+  })
+  runLimits(d)
+  await Promise.resolve()
+  expect(loadLimits).not.toHaveBeenCalled()
+  expect(loadedLimits(d.actions)?.snapshots[0].meters[0]).toMatchObject({
+    usedPct: 0,
+    status: "ok",
+  })
+})
+
+it.each([new Error("Native quota read failed"), "Native quota read failed"])(
+  "shows native quota errors without falling back to credential providers",
+  async (error) => {
+    const loadLimits = jest.fn(async () => [])
+    const d = deps({
+      config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "codex-app-server" },
+      backendAgentId: "native",
+      loadCodexLimits: async () => {
+        throw error
+      },
+      loadLimits,
+    })
+    runLimits(d)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(loadedLimits(d.actions)?.snapshots[0]).toMatchObject({
+      provider: "codex",
+      meters: [],
+      error: "Native quota read failed",
+    })
+    expect(loadLimits).not.toHaveBeenCalled()
+  }
+)

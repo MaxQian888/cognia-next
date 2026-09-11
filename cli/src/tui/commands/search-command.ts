@@ -7,40 +7,66 @@
  * pager. Pure handler — no App/overlay-kind changes — so it unit-tests under the
  * `.ts` coverage gate.
  */
+import { createCliTranslator, type CliLocale } from "../i18n"
 import { searchCells } from "../format/scrollback-search"
 import type { CommandDescriptor, CommandEffect, CommandContext } from "./types"
 
-/** Render the search hits into a markdown document for the pager. */
-export function buildSearchDocument(query: string, hits: ReturnType<typeof searchCells>): string {
-  const lines: string[] = [
-    `# Search: ${query}`,
+/** Render literal excerpts and source locations for the pager. */
+export function buildSearchDocument(
+  query: string,
+  hits: ReturnType<typeof searchCells>,
+  locale?: CliLocale
+): string {
+  const t = createCliTranslator(locale, "cliUiCommands")
+  const lines = [
+    t("searchTitle", { query }),
     "",
-    `${hits.length} match${hits.length === 1 ? "" : "es"}`,
+    t(hits.length === 1 ? "searchMatch" : "searchMatches", { count: hits.length }),
     "",
   ]
   for (const hit of hits) {
-    lines.push(`- **${hit.kind}** · ${hit.excerpt}`)
+    lines.push(
+      `${t(`searchKind_${hit.kind}`)} · ${t("searchLocation", { id: hit.cellId, line: hit.lineIndex + 1 })}`,
+      hit.excerpt,
+      ""
+    )
   }
   return lines.join("\n")
 }
 
 /** Pure `/search` handler. */
 export function searchHandler(ctx: CommandContext): CommandEffect {
+  const t = createCliTranslator(ctx.config.locale, "cliUiCommands")
   const query = ctx.args.trim()
   if (!query) {
-    return { kind: "notice", message: "Usage: /search <text>" }
+    return {
+      kind: "openForm",
+      form: {
+        title: t("searchForm"),
+        commandName: "search",
+        specs: [
+          {
+            name: "query",
+            label: t("searchQuery"),
+            type: "string",
+            required: true,
+            style: "positional",
+          },
+        ],
+      },
+    }
   }
   const hits = searchCells(ctx.state.cells, query)
   if (hits.length === 0) {
-    return { kind: "notice", message: `No matches for "${query}".` }
+    return { kind: "notice", message: t("searchNoMatches", { query }) }
   }
   return {
     kind: "openOverlay",
     overlay: {
       kind: "document",
-      title: `Search: ${query} (${hits.length})`,
-      body: buildSearchDocument(query, hits),
-      format: "markdown",
+      title: `${t("searchTitle", { query })} (${hits.length})`,
+      body: buildSearchDocument(query, hits, ctx.config.locale),
+      format: "text",
     },
   }
 }

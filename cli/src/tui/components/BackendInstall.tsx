@@ -12,6 +12,7 @@
  * visible-output windowing is factored into {@link tailLines} so it is testable
  * without rendering.
  */
+import { useCliTranslations } from "../i18n"
 import React from "react"
 import { Box, Text } from "ink"
 import { Spinner } from "./Spinner"
@@ -43,6 +44,7 @@ export function BackendInstall({
   maxRows?: number
 }) {
   const theme = useTheme()
+  const t = useCliTranslations("cliUiStartup")
   // Leave a couple of rows for the header + command line.
   const budget = Math.max(1, (maxRows ?? 12) - 2)
   const visible = tailLines(install.output, budget)
@@ -52,16 +54,14 @@ export function BackendInstall({
         <Text color={theme.accent}>
           <Spinner />
         </Text>
-        <Text color={theme.muted}>{` Installing ${install.name} …`}</Text>
+        <Text color={theme.muted}>{t("installing", { name: install.name })}</Text>
       </Box>
       <Text color={theme.muted} dimColor>
         {`$ ${install.display}`}
       </Text>
       {install.ownership === "user-managed" ? (
         <Text color={theme.muted} dimColor>
-          {
-            "  This installs through your own package manager. Cognia does not manage, verify or remove it."
-          }
+          {t("ownership")}
         </Text>
       ) : null}
       {visible.map((line, i) => (

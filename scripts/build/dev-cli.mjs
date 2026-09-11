@@ -15,7 +15,7 @@
 // "does not provide an export named …". esbuild bundles the whole graph into one
 // scope, so the CJS/ESM split never arises — which is why the built binary works
 // and the from-source tsx path did not.
-import { spawnSync } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -26,9 +26,22 @@ const bundle = path.join(root, "cli/dist/cognia-agent.mjs")
 const build = spawnSync(process.execPath, [bundler], { stdio: "inherit" })
 if (build.status !== 0) process.exit(build.status ?? 1)
 
-const run = spawnSync(process.execPath, [bundle, ...process.argv.slice(2)], {
-  stdio: "inherit",
+// The CLI and its interactive !commands share our foreground process group.
+// Let the CLI decide what Ctrl+C means; exiting this wrapper early returns the
+// parent shell to a terminal that the still-running CLI continues to control.
+const onInterrupt = () => {}
+process.on("SIGINT", onInterrupt)
+const run = await new Promise((resolve) => {
+  const child = spawn(process.execPath, [bundle, ...process.argv.slice(2)], {
+    stdio: "inherit",
+  })
+  child.once("error", (error) => {
+    console.error(error.message)
+    resolve({ status: 1, signal: null })
+  })
+  child.once("close", (status, signal) => resolve({ status, signal }))
 })
-// Mirror the child's termination: a signal (e.g. Ctrl+C) has no exit code.
+process.removeListener("SIGINT", onInterrupt)
+// Mirror termination only after the CLI has actually finished.
 if (run.signal) process.kill(process.pid, run.signal)
 process.exit(run.status ?? 0)

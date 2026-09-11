@@ -37,6 +37,32 @@ describe("defaultToastTtl", () => {
 })
 
 describe("useToastExpiry", () => {
+  it("counts only visible time when a panel hides a notification", () => {
+    jest.useFakeTimers()
+    try {
+      const dispatch = jest.fn()
+      const toasts = [toast("hidden", "error")]
+      const { rerender, unmount } = renderHook(
+        ({ paused }) => useToastExpiry(toasts, dispatch, { paused }),
+        { initialProps: { paused: true } }
+      )
+      jest.advanceTimersByTime(20_000)
+      expect(dispatch).not.toHaveBeenCalled()
+      rerender({ paused: false })
+      jest.advanceTimersByTime(3_000)
+      rerender({ paused: true })
+      jest.advanceTimersByTime(20_000)
+      expect(dispatch).not.toHaveBeenCalled()
+      rerender({ paused: false })
+      jest.advanceTimersByTime(4_999)
+      expect(dispatch).not.toHaveBeenCalled()
+      jest.advanceTimersByTime(1)
+      expect(dispatch).toHaveBeenCalledWith({ type: "TOAST_DISMISS", id: "hidden" })
+      unmount()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
   it("schedules a dismiss for each toast using the severity TTL", () => {
     const { timers, pending } = fakeTimers()
     const dispatch = jest.fn()

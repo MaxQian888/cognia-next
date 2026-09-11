@@ -11,6 +11,7 @@
  * returning a {@link CommandEffect}; the App interprets the effect. See
  * `dispatch.ts`.
  */
+import { createCliTranslator } from "../i18n"
 import { PERMISSION_MODES, resolveNotices } from "../../config/schema"
 import { deriveEffortSliderState } from "../../config/thinking"
 import { supportsFeature, unsupportedFeatureMessage } from "../runtime/backend-capabilities"
@@ -20,7 +21,7 @@ import {
   lastUserText,
   nthAssistantText,
 } from "../state/selectors"
-import { aboutLine, buildToolsCatalogDocument } from "./builtins"
+import { aboutLine, buildToolCatalogEntries } from "./builtins"
 import { buildCommandHelpDocument } from "./command-help"
 import { settingsSections } from "../runtime/settings-sections"
 import { collectProviderOptions } from "./provider-options"
@@ -148,7 +149,12 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
           message: `Unknown permission mode "${name}" — pick one of: ${PERMISSION_MODES.join(", ")}.`,
         }
       }
-      return { kind: "permissionMode", mode, ...(rest.includes("--force") ? { force: true } : {}) }
+      return {
+        kind: "permissionMode",
+        mode,
+        ...(rest.includes("--force") ? { force: true } : {}),
+        ...(rest.includes("--remember") ? { remember: true } : {}),
+      }
     },
   },
   {
@@ -279,21 +285,21 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
     handler: (ctx) => ({
       kind: "openOverlay",
       overlay: {
-        kind: "document",
-        title: "Built-in tools",
-        body: buildToolsCatalogDocument(ctx.config.builtinTools),
-        format: "markdown",
+        kind: "toolBrowser",
+        entries: buildToolCatalogEntries(ctx.config.builtinTools, ctx.config.locale),
       },
     }),
   },
   {
     name: "cwd",
     aliases: ["cd"],
-    description: "show or change the working directory",
+    description: "browse or change the working directory",
     category: "system",
     handler: (ctx) => {
       const dir = ctx.args.trim()
-      return dir ? { kind: "changeCwd", dir } : { kind: "notice", message: ctx.config.cwd }
+      return dir
+        ? { kind: "changeCwd", dir }
+        : { kind: "openOverlay", overlay: { kind: "workspaceFolder", mode: "cwd" } }
     },
   },
   {
@@ -391,9 +397,14 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
       if (!name) return { kind: "openOverlay", overlay: { kind: "help" } }
       const target = getCommand(name)
       if (!target) {
-        return { kind: "notice", message: `Unknown command /${name} — /help for the list` }
+        return {
+          kind: "notice",
+          message: createCliTranslator(ctx.config.locale, "cliUiCommands")("unknownCommand", {
+            command: name,
+          }),
+        }
       }
-      const doc = buildCommandHelpDocument(target)
+      const doc = buildCommandHelpDocument(target, ctx.config.locale)
       return {
         kind: "openOverlay",
         overlay: { kind: "document", title: doc.title, body: doc.body, format: "markdown" },

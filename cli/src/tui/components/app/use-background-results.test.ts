@@ -43,7 +43,7 @@ function harness(opts: { idle?: boolean; pending?: BackgroundResultDeliveryEntry
   })
   const listPending = jest.fn(async () => opts.pending ?? [])
   const markDelivery = jest.fn(async () => undefined)
-  const deliver = jest.fn(async (_text: string) => undefined)
+  const deliver = jest.fn(async (_text: string): Promise<void> => undefined)
   const dispatch = jest.fn()
   const hook = renderHook(
     ({ idle }: { idle: boolean }) =>
@@ -154,7 +154,7 @@ describe("useBackgroundResults", () => {
     )
     expect(h.dispatch).toHaveBeenCalledWith(
       expect.objectContaining({
-        severity: "warning",
+        severity: "warn",
         message: expect.stringContaining("interrupted"),
       })
     )

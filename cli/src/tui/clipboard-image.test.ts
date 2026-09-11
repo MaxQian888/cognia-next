@@ -1,3 +1,8 @@
+/** @jest-environment node */
+import { execFileSync } from "node:child_process"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { EventEmitter } from "node:events"
 
 import {
@@ -147,7 +152,8 @@ describe("readClipboardImage", () => {
         written.push(chunk)
         return true
       },
-      end: () => {},
+      on: () => {},
+      end: (done?: () => void) => done?.(),
     }
     const { spawn } = fakeSpawn({
       code: 0,
@@ -165,7 +171,7 @@ describe("readClipboardImage", () => {
   })
 
   it("linux (stdout): returns null when stdout produced nothing", async () => {
-    const sink = { write: () => true, end: () => {} }
+    const sink = { write: () => true, on: () => {}, end: (done?: () => void) => done?.() }
     const { spawn } = fakeSpawn({ code: 0, stdoutChunks: [] })
     const result = await readClipboardImage({
       platform: "linux",
@@ -219,4 +225,82 @@ describe("readClipboardImage", () => {
     })
     expect(result).toBeNull()
   })
+})
+
+const nativeMac = process.platform === "darwin" ? describe : describe.skip
+nativeMac("native macOS clipboard image formats", () => {
+  it.each(["public.png", "public.tiff", "public.jpeg", "public.file-url"])(
+    "converts %s on an isolated pasteboard",
+    (type) => {
+      const dir = mkdtempSync(join(tmpdir(), "cognia-clipboard-native-"))
+      const output = join(dir, "output ' image.png")
+      const name = `cognia-test-${process.pid}-${Date.now()}-${type}`
+      const command = clipboardImageCommand("darwin", output)!
+      const fixture = `ObjC.import('AppKit');
+      const board=$.NSPasteboard.pasteboardWithName(${JSON.stringify(name)});
+      const data=$.NSData.alloc.initWithBase64EncodedStringOptions('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4z8AARAwQCgAf7gP9i18U1AAAAABJRU5ErkJggg==',0);
+      const image=$.NSImage.alloc.initWithData(data);
+      const kind=${JSON.stringify(type)};
+      board.clearContents;
+      if(kind==='public.file-url') {
+        data.writeToFileAtomically(${JSON.stringify(join(dir, "source.png"))},true);
+        board.writeObjects($.NSArray.arrayWithObject($.NSURL.fileURLWithPath(${JSON.stringify(join(dir, "source.png"))})));
+        const icon=$.NSWorkspace.sharedWorkspace.iconForFile(${JSON.stringify(join(dir, "source.png"))});
+        board.setDataForType(icon.TIFFRepresentation,'public.tiff');
+      } else {
+        const value=kind==='public.png'?data:kind==='public.tiff'?image.TIFFRepresentation:$.NSBitmapImageRep.imageRepWithData(image.TIFFRepresentation).representationUsingTypeProperties($.NSJPEGFileType,{});
+        board.setDataForType(value,kind);
+      }`
+      try {
+        execFileSync("osascript", ["-l", "JavaScript", "-e", fixture], { timeout: 10000 })
+        execFileSync(command.cmd, [...command.args, name], { timeout: 10000 })
+        const png = readFileSync(output)
+        expect(png.readUInt32BE(16)).toBe(2)
+        expect(png.readUInt32BE(20)).toBe(2)
+        expect(png.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+      } finally {
+        execFileSync(
+          "osascript",
+          [
+            "-l",
+            "JavaScript",
+            "-e",
+            `ObjC.import('AppKit');$.NSPasteboard.pasteboardWithName(${JSON.stringify(name)}).releaseGlobally;`,
+          ],
+          { timeout: 10000 }
+        )
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }
+  )
+})
+
+it("selects wl-paste for Wayland and xclip for X11", () => {
+  expect(
+    clipboardImageCommand("linux", "/tmp/out.png", { WAYLAND_DISPLAY: "wayland-0" })?.cmd
+  ).toBe("wl-paste")
+  expect(clipboardImageCommand("linux", "/tmp/out.png", {})?.cmd).toBe("xclip")
+})
+it("waits for the streamed PNG to finish before checking the file", async () => {
+  let finish: (() => void) | undefined
+  const fileReady = jest.fn(() => true)
+  const { spawn } = fakeSpawn({ code: 0, stdoutChunks: [Buffer.from("png")] })
+  const result = readClipboardImage({
+    platform: "linux",
+    spawn,
+    fileReady,
+    createWriteStream: () =>
+      ({
+        write: () => true,
+        on: () => {},
+        end: (done: () => void) => {
+          finish = done
+        },
+      }) as unknown as NodeJS.WritableStream,
+  })
+  await Promise.resolve()
+  expect(fileReady).not.toHaveBeenCalled()
+  finish?.()
+  expect(await result).not.toBeNull()
+  expect(fileReady).toHaveBeenCalledTimes(1)
 })

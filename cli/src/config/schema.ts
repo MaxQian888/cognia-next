@@ -870,6 +870,7 @@ export const cliConfigFileSchema = z
     protocol: z.enum(RESOLVER_PROTOCOLS).optional(),
     systemPrompt: z.string().optional(),
     permissionMode: z.enum(PERMISSION_MODES).optional(),
+    bypassConfirmation: z.enum(["ask", "never"]).optional(),
     allowedTools: z.array(z.string().min(1)).optional(),
     builtinTools: builtinToolsSchema.optional(),
     providers: z.record(z.string(), providerConfigSchema).optional(),
@@ -1014,6 +1015,8 @@ export const cliConfigFileSchema = z
      * the native-scrollback `<Static>` model. Forced to `"scrollback"` on a
      * non-TTY / dumb terminal by `resolveLayoutMode`. */
     layout: z.enum(LAYOUT_MODES).optional(),
+    locale: z.enum(["en", "zh-CN"]).optional(),
+    screenReader: z.boolean().optional(),
     /** Fullscreen mouse model. `"scroll"` (default) captures the wheel to scroll
      * the transcript; `"select"` keeps native click-drag text selection (losing
      * wheel-scroll). Only meaningful in the fullscreen layout on a TTY. */
@@ -1200,6 +1203,7 @@ export interface ResolvedConfig {
    * during resolution. See the config-file schema field. */
   protocol?: ResolverProtocol
   systemPrompt?: string
+  bypassConfirmation?: "ask" | "never"
   permissionMode: (typeof PERMISSION_MODES)[number]
   /** True when a file, flag, or live user selection supplies the mode. */
   permissionModeExplicit?: boolean
@@ -1281,6 +1285,10 @@ export interface ResolvedConfig {
   /** TUI layout model (`fullscreen` / `scrollback`). Absent ⇒ `fullscreen`,
    * resolved (and capability-gated) by `tui/layout-mode.resolveLayoutMode`. */
   layout?: LayoutMode
+  /** Terminal interface language; English when absent. */
+  locale?: "en" | "zh-CN"
+  /** Ink plain-text accessibility renderer. Applied at launch. */
+  screenReader?: boolean
   /** Fullscreen mouse model (`select` / `scroll`). Absent ⇒ `scroll` (wheel
    * scrolls the transcript). Only meaningful in the fullscreen layout on a TTY. */
   mouse?: MouseMode

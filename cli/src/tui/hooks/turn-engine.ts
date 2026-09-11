@@ -248,6 +248,8 @@ export interface TurnHookSink {
 }
 
 export interface RunTurnOptions {
+  /** The caller already displayed the accepted prompt before preparing the turn. */
+  turnStarted?: boolean
   session: TurnSession
   prompt: string
   dispatch: (action: TuiAction) => void
@@ -272,6 +274,10 @@ export interface RunTurnOptions {
   onCanonicalEnvelope?: (envelope: AgentEventEnvelope) => void
 }
 
+// Keep the first durable warning in the transcript without repeating it every turn.
+// Weak keys release the warning when the live session is discarded.
+const reportedDatabaseErrors = new WeakMap<TurnSession, string>()
+
 /**
  * Drive one turn: announce the start, stream capture events into reducer
  * actions, then commit the result. Aborts and errors map to the matching
@@ -290,7 +296,7 @@ export interface RunTurnOptions {
 export async function runTurn(
   opts: RunTurnOptions
 ): Promise<{ ok: boolean; result?: RunAndCaptureResult; recoverable?: boolean }> {
-  opts.dispatch({ type: "TURN_START", prompt: opts.prompt })
+  if (!opts.turnStarted) opts.dispatch({ type: "TURN_START", prompt: opts.prompt })
   // An unsafe-snapshot report arrives mid-turn, but ending the turn on it would
   // discard a response the user already earned — the db failure is orthogonal to
   // the reply. Hold it and append a permanent error cell once the turn commits.
@@ -301,6 +307,13 @@ export async function runTurn(
       gate: opts.gate,
       ...(opts.awaitApprovals ? { awaitApprovals: opts.awaitApprovals } : {}),
       onEnvelope: (envelope) => {
+        // A stopped turn can finish delivering buffered account events after
+        // the UI switched backend. Never repopulate that new account's quota.
+        if (
+          opts.signal?.aborted &&
+          (envelope.event.kind === "rate-limit" || envelope.event.kind === "auth")
+        )
+          return
         const order = envelopeOrder.observe(envelope)
         if (order.kind === "duplicate") return
         if (order.kind === "gap") {
@@ -367,11 +380,19 @@ export async function runTurn(
     // A NOTICE would scroll away; this one must persist — it is the only thing
     // telling the user their data was preserved rather than lost.
     if (databaseError) {
-      opts.dispatch({
-        type: "TURN_ERROR",
-        title: "Database restore failed",
-        message: (databaseError as CliDbSnapshotError).message,
-      })
+      const error = databaseError as CliDbSnapshotError
+      const fingerprint = JSON.stringify([error.snapshotPath, error.preservedPath, error.message])
+      if (reportedDatabaseErrors.get(opts.session) !== fingerprint) {
+        opts.dispatch({
+          type: "TURN_ERROR",
+          title: "Database restore failed",
+          message: error.message,
+        })
+        reportedDatabaseErrors.set(opts.session, fingerprint)
+      }
+    } else {
+      // A completed turn without the error permits a later recurrence to surface.
+      reportedDatabaseErrors.delete(opts.session)
     }
     opts.hooks?.onStop(true)
     return { ok: true, result }

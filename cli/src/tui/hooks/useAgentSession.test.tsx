@@ -71,10 +71,12 @@ function harness(
     isLive?: boolean
     sessionId?: string
     hooks?: HookRunner
+    createHooks?: () => HookRunner
     /** Custom `session.send` — receives the gate responder so a test can simulate
      * a mid-turn tool permission request. */
     sendImpl?: (prompt: string, options: SendTurnOptions) => Promise<unknown>
     /** Make session creation itself fail (e.g. an unknown `--backend` id). */
+    flushPendingInput?: () => Promise<void>
     createError?: Error
     resolvedSpec?: ResolvedAgentExecutionSpec
     canonicalEnvelopes?: AgentEventEnvelope[]
@@ -131,11 +133,13 @@ function harness(
       dispatch,
       ...(opts.sessionId !== undefined ? { sessionId: opts.sessionId } : {}),
       createSession: create,
+      flushPendingInput: opts.flushPendingInput,
       subscribeSidecar,
       requestCompact,
       createCheckpoints,
       appendMcpLog,
       ...(opts.hooks ? { createHooks: () => opts.hooks as HookRunner } : {}),
+      ...(opts.createHooks ? { createHooks: opts.createHooks } : {}),
     })
   )
   return {
@@ -204,6 +208,88 @@ describe("useAgentSession", () => {
     handleCancel.mockClear()
     handleRewindFiles.mockReset().mockResolvedValue({ status: "ready", paths: ["/a"] })
   })
+  it("echoes the prompt before render flush, preprocessing and external session creation", async () => {
+    let flush!: () => void
+    const flushed = new Promise<void>((resolve) => {
+      flush = resolve
+    })
+    const h = harness({ flushPendingInput: () => flushed })
+    const prepare = jest.fn(async () => "prepared prompt")
+    let pending!: ReturnType<ReturnType<typeof h.api>["send"]>
+    act(() => {
+      pending = h.api().send("original prompt", prepare)
+    })
+    expect(h.actions).toEqual([{ type: "TURN_START", prompt: "original prompt" }])
+    expect(h.create).not.toHaveBeenCalled()
+    expect(prepare).not.toHaveBeenCalled()
+    await act(async () => {
+      flush()
+      await pending
+    })
+    expect(h.send).toHaveBeenCalledWith("prepared prompt", expect.anything())
+    expect(h.actions.filter((a) => a.type === "TURN_START")).toHaveLength(1)
+    expect(h.capture.beginTurn).toHaveBeenCalledWith(0, "prepared prompt")
+  })
+
+  it("keeps the submitted prompt visible when preparation fails and can send again", async () => {
+    const h = harness()
+    await act(async () => {
+      await h.api().send("keep this input", async () => {
+        throw new Error("skill lookup failed")
+      })
+    })
+    expect(h.actions[0]).toEqual({ type: "TURN_START", prompt: "keep this input" })
+    expect(h.actions.at(-1)).toMatchObject({ type: "TURN_ERROR", message: "skill lookup failed" })
+    expect(h.create).not.toHaveBeenCalled()
+    await act(async () => {
+      await h.api().send("retry")
+    })
+    expect(h.send).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not start the backend after cancellation during prompt preparation", async () => {
+    let finish!: (value: string) => void
+    const h = harness()
+    let pending!: ReturnType<ReturnType<typeof h.api>["send"]>
+    act(() => {
+      pending = h.api().send(
+        "stop preparing",
+        () =>
+          new Promise((resolve) => {
+            finish = resolve
+          })
+      )
+    })
+    act(() => h.api().abort())
+    await act(async () => {
+      finish("prepared")
+      await pending
+    })
+    expect(h.create).not.toHaveBeenCalled()
+    expect(h.actions.at(-1)).toEqual({ type: "TURN_ABORTED" })
+  })
+
+  it("cancels while the submitted prompt is painting without starting the external agent", async () => {
+    let flush!: () => void
+    const h = harness({
+      flushPendingInput: () =>
+        new Promise<void>((resolve) => {
+          flush = resolve
+        }),
+    })
+    let pending!: ReturnType<ReturnType<typeof h.api>["send"]>
+    act(() => {
+      pending = h.api().send("cancel this")
+    })
+    act(() => h.api().abort())
+    await act(async () => {
+      flush()
+      await pending
+    })
+    expect(h.create).not.toHaveBeenCalled()
+    expect(h.actions).toContainEqual({ type: "TURN_ABORTED" })
+  })
+
   it("send drives a turn and lazily creates the session once", async () => {
     const h = harness()
     await act(async () => {
@@ -545,6 +631,171 @@ describe("useAgentSession", () => {
     })
     expect(h.actions).toContainEqual({ type: "SET_THINKING", level: "high" })
     expect(h.close).toHaveBeenCalled()
+  })
+
+  it("waits for teardown and creates the next session in the new directory", async () => {
+    const h = harness()
+    await act(async () => {
+      await h.api().send("first")
+    })
+    let release!: () => void
+    h.close.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        })
+    )
+    await act(async () => {
+      const switching = h.api().changeCwd("/new/dir")
+      const sending = h.api().send("second")
+      expect(h.create).toHaveBeenCalledTimes(1)
+      expect(h.actions).not.toContainEqual({ type: "SET_CWD", cwd: "/new/dir" })
+      release()
+      await switching
+      await sending
+    })
+    expect(h.create).toHaveBeenLastCalledWith(
+      expect.objectContaining({ config: expect.objectContaining({ cwd: "/new/dir" }) })
+    )
+  })
+
+  it("reports a send waiting on a failed workspace switch through the normal turn error path", async () => {
+    const h = harness()
+    await act(async () => {
+      await h.api().send("first")
+    })
+    let rejectClose!: (error: Error) => void
+    h.close.mockImplementationOnce(
+      () =>
+        new Promise<void>((_, reject) => {
+          rejectClose = reject
+        })
+    )
+    await act(async () => {
+      const switching = h.api().changeCwd("/new/dir")
+      const sending = h.api().send("second")
+      rejectClose(new Error("close failed"))
+      await expect(switching).rejects.toThrow("close failed")
+      await expect(sending).resolves.toBeNull()
+    })
+    expect(h.actions).toContainEqual(expect.objectContaining({ type: "TURN_ERROR" }))
+  })
+
+  it("does not change the displayed directory when teardown fails", async () => {
+    const h = harness()
+    await act(async () => {
+      await h.api().send("first")
+    })
+    h.close.mockRejectedValueOnce(new Error("close failed"))
+    await act(async () => {
+      await expect(h.api().changeCwd("/new/dir")).rejects.toThrow("close failed")
+    })
+    expect(h.actions).not.toContainEqual({ type: "SET_CWD", cwd: "/new/dir" })
+  })
+
+  it("reloads hook configuration and recreates the next session without clearing the transcript", async () => {
+    const createHooks = jest.fn(() => spyHookRunner())
+    const h = harness({ createHooks })
+    await act(async () => {
+      await h.api().send("first")
+    })
+    expect(createHooks).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      await h.api().reloadHooks!()
+    })
+    expect(h.close).toHaveBeenCalledTimes(1)
+    expect(createHooks).toHaveBeenCalledTimes(2)
+    await act(async () => {
+      await h.api().send("second")
+    })
+    expect(h.create).toHaveBeenCalledTimes(2)
+    expect(h.actions.some((action) => action.type === "RESET")).toBe(false)
+  })
+
+  it("uses reloaded hooks and the current approval queue for a send waiting on reload", async () => {
+    const runners: jest.Mocked<HookRunner>[] = []
+    const createHooks = jest.fn(() => {
+      const runner = spyHookRunner()
+      runners.push(runner)
+      return runner
+    })
+    let ask = false
+    const h = harness({
+      createHooks,
+      sendImpl: async (_prompt, options) => {
+        if (ask)
+          await options.gate({
+            type: "permission_request",
+            sessionId: "s",
+            requestId: "req",
+            toolUseID: "tool",
+            toolName: "Bash",
+            input: { command: "rm file" },
+          })
+        return result()
+      },
+    })
+    await act(async () => {
+      await h.api().send("first")
+    })
+    let release!: () => void
+    h.close.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        })
+    )
+    let sending!: Promise<unknown>
+    await act(async () => {
+      const reload = h.api().reloadHooks!()
+      ask = true
+      sending = h.api().send("second")
+      release()
+      await reload
+    })
+    await waitFor(() => expect(runners[1].onPermissionRequest).toHaveBeenCalled())
+    await act(async () => {
+      h.api().resolvePermission({ decision: "allow" })
+      await sending
+    })
+    expect(runners[1].onPrompt).toHaveBeenCalledWith("second")
+    expect(runners[0].onPrompt).not.toHaveBeenCalledWith("second")
+  })
+
+  it("refuses hook reload while a response is active", async () => {
+    let finish!: () => void
+    const h = harness({
+      sendImpl: () =>
+        new Promise((resolve) => {
+          finish = () => resolve(result())
+        }),
+    })
+    let sending!: Promise<unknown>
+    await act(async () => {
+      sending = h.api().send("first")
+    })
+    await act(async () => {
+      await expect(h.api().reloadHooks!()).rejects.toThrow()
+    })
+    expect(h.close).not.toHaveBeenCalled()
+    await act(async () => {
+      finish()
+      await sending
+    })
+  })
+
+  it("surfaces hook reload teardown errors and allows retry", async () => {
+    const h = harness()
+    await act(async () => {
+      await h.api().send("first")
+    })
+    h.close.mockRejectedValueOnce(new Error("close failed"))
+    await act(async () => {
+      await expect(h.api().reloadHooks!()).rejects.toThrow("close failed")
+    })
+    await act(async () => {
+      await expect(h.api().reloadHooks!()).resolves.toBeUndefined()
+    })
   })
 
   it("changeCwd dispatches SET_CWD and drops the session so the next turn relocates", async () => {
