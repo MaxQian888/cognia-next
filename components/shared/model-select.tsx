@@ -34,7 +34,7 @@
 // surface tier, so a style pack's elevation ceiling reaches it like it reaches
 // every other container. The list below is untouched cmdk either way.
 
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   BrainIcon,
@@ -45,6 +45,7 @@ import {
   WrenchIcon,
 } from "lucide-react"
 
+import { subscribeSubscriptionProviders } from "@/lib/subscription/core/provider-registry"
 import { useSettingsStore } from "@/stores/settings"
 import { collectModelOptions, type ModelOption } from "@/lib/ai/model-options"
 import { cn } from "@/lib/utils"
@@ -196,9 +197,16 @@ export function groupByProvider(options: ModelOption[]): ModelProviderGroup[] {
 export function useModelOptions(): { options: ModelOption[]; groups: ModelProviderGroup[] } {
   const providerSettings = useSettingsStore((s) => s.settings?.providerSettings)
   const customProviders = useSettingsStore((s) => s.settings?.customProviders)
+  const [registryRevision, setRegistryRevision] = useState(0)
+  useEffect(
+    () => subscribeSubscriptionProviders(() => setRegistryRevision((value) => value + 1)),
+    []
+  )
   const options = useMemo(
     () => collectModelOptions(providerSettings, customProviders),
-    [providerSettings, customProviders]
+    // The registry is external mutable state, independent of settings.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [providerSettings, customProviders, registryRevision]
   )
   const groups = useMemo(() => groupByProvider(options), [options])
   return { options, groups }

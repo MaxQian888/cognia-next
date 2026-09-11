@@ -186,9 +186,9 @@ export function parseChartPayload(
     }
     if (Array.isArray(parsed)) {
       rawRows = parsed
-    } else if (isRow(parsed) && Array.isArray((parsed as { data?: unknown }).data)) {
-      rawRows = (parsed as { data: unknown }).data
-      declaredType = (parsed as { type?: unknown }).type
+    } else if (isRow(parsed) && "data" in parsed && Array.isArray(parsed.data)) {
+      rawRows = parsed.data
+      declaredType = parsed.type
     } else {
       return fatal("unsupportedShape")
     }

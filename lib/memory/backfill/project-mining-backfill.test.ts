@@ -68,7 +68,9 @@ describe("one backfill step", () => {
   })
 
   it("hands every session in the page to the shared miner", async () => {
-    const enqueueForSession = jest.fn(async () => 2)
+    const enqueueForSession = jest.fn(
+      async (..._args: Parameters<ProjectMiningBackfillDeps["enqueueForSession"]>) => 2
+    )
     const outcome = await stepProjectMiningBackfill("r1", makeDeps({ enqueueForSession }))
     expect(enqueueForSession).toHaveBeenCalledTimes(2)
     expect(enqueueForSession.mock.calls[0][0]).toMatchObject({ runId: "r1" })
@@ -93,7 +95,9 @@ describe("one backfill step", () => {
   })
 
   it("moves the watermark to the OLDEST session in the page", async () => {
-    const advanceRun = jest.fn(async () => run())
+    const advanceRun = jest.fn(
+      async (..._args: Parameters<ProjectMiningBackfillDeps["advanceRun"]>) => run()
+    )
     await stepProjectMiningBackfill("r1", makeDeps({ advanceRun }))
     expect(advanceRun).toHaveBeenCalledWith("r1", {
       cursorCreatedAt: 200,
@@ -104,7 +108,9 @@ describe("one backfill step", () => {
   })
 
   it("advances on CHECKED, not on produced, so a barren stretch cannot loop", async () => {
-    const advanceRun = jest.fn(async () => run())
+    const advanceRun = jest.fn(
+      async (..._args: Parameters<ProjectMiningBackfillDeps["advanceRun"]>) => run()
+    )
     const outcome = await stepProjectMiningBackfill(
       "r1",
       makeDeps({ advanceRun, enqueueForSession: async () => 0 })
@@ -114,7 +120,9 @@ describe("one backfill step", () => {
   })
 
   it("counts an unreadable session as checked rather than revisiting it forever", async () => {
-    const advanceRun = jest.fn(async () => run())
+    const advanceRun = jest.fn(
+      async (..._args: Parameters<ProjectMiningBackfillDeps["advanceRun"]>) => run()
+    )
     await stepProjectMiningBackfill(
       "r1",
       makeDeps({
@@ -130,7 +138,9 @@ describe("one backfill step", () => {
   })
 
   it("skips an empty conversation without queueing anything for it", async () => {
-    const enqueueForSession = jest.fn(async () => 2)
+    const enqueueForSession = jest.fn(
+      async (..._args: Parameters<ProjectMiningBackfillDeps["enqueueForSession"]>) => 2
+    )
     await stepProjectMiningBackfill(
       "r1",
       makeDeps({ enqueueForSession, loadTranscript: async () => [] })

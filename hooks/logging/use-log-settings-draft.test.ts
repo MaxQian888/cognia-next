@@ -34,9 +34,13 @@ import {
 
 const applyLoggingSettings = jest.fn()
 const configureSampling = jest.fn()
-const getLangfuseCredentialsStatus = jest.fn(async () => {
-  throw new Error("Host unavailable")
-})
+const getLangfuseCredentialsStatus = jest.fn(
+  async (): ReturnType<
+    typeof import("@/lib/logging/langfuse-host").getLangfuseCredentialsStatus
+  > => {
+    throw new Error("Host unavailable")
+  }
+)
 const testLangfuseConnection = jest.fn(async () => ({ connected: true, status: 200 }))
 
 jest.mock("@/lib/logging/langfuse-host", () => ({

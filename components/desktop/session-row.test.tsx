@@ -711,3 +711,22 @@ test("Remove from folder detaches the session", async () => {
   fireEvent.click(await screen.findByText("removeFromFolder"))
   expect(onAssignToFolder).toHaveBeenCalledWith("s-1", null)
 })
+
+test("shows the source platform as an accessible corner badge on IM session avatars", () => {
+  setup({
+    session: {
+      ...baseSession,
+      platformBinding: {
+        platform: "slack",
+        adapterId: "a1",
+        conversationKey: "slack:a1:C1",
+        conversationRef: { platform: "slack", adapterId: "a1" },
+      },
+    },
+  })
+  expect(screen.getByRole("img", { name: "names.slack" })).toHaveClass(
+    "absolute",
+    "-bottom-1",
+    "-end-1"
+  )
+})

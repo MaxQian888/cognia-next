@@ -23,7 +23,7 @@ jest.mock("next/navigation", () => ({
   useRouter: () => ({ back: routerBack, push: jest.fn() }),
 }))
 
-const mockSpawnFromDock = jest.fn(async () => ({
+const mockSpawnFromDock = jest.fn(async (..._args: Parameters<typeof import("@/lib/terminal/spawn-orchestrator").spawnFromDock>) => ({
   kind: "spawned" as const,
   sessionId: "s-new",
   shell: "/bin/bash",
@@ -39,7 +39,7 @@ jest.mock("@/lib/terminal/rehydrate", () => ({
   rehydrateTerminals: () => mockRehydrateTerminals(),
 }))
 jest.mock("@/lib/terminal/spawn-orchestrator", () => ({
-  spawnFromDock: (...args: unknown[]) => mockSpawnFromDock(...(args as [])),
+  spawnFromDock: (...args: Parameters<typeof mockSpawnFromDock>) => mockSpawnFromDock(...args),
   detachFromDock: (...args: unknown[]) => mockDetachFromDock(...(args as [])),
 }))
 
@@ -341,7 +341,7 @@ it("offers saved launch profiles behind the shell picker", async () => {
   await waitFor(() => expect(mockSpawnFromDock).toHaveBeenCalled())
   // Only the id travels: the host resolves shell, cwd and env from its own
   // synchronized copy, the same contract a remote spawn frame has.
-  const req = mockSpawnFromDock.mock.calls.at(-1)?.[0] as { req: Record<string, unknown> }
-  expect(req.req.profileId).toBe("prof-1")
-  expect(req.req.shell).toBe("")
+  const req = mockSpawnFromDock.mock.calls.at(-1)?.[0]
+  expect(req?.req.profileId).toBe("prof-1")
+  expect(req?.req.shell).toBe("")
 })

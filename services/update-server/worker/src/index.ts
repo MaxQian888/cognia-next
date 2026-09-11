@@ -1,3 +1,15 @@
+import type {
+  D1Database,
+  ExportedHandler,
+  Request,
+  Response as WorkerResponse,
+  ResponseInit,
+} from "@cloudflare/workers-types"
+
+// These constructors are provided by the Worker runtime, whose Fetch types
+// differ from the DOM types used by the enclosing application.
+type Response = WorkerResponse
+declare const Response: typeof import("@cloudflare/workers-types").Response
 /**
  * Cognia update control plane.
  *

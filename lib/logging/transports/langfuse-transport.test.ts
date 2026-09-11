@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import type { AgentTraceSpan } from "@/types/agent-trace/span"
+import type { AgentTraceSpan } from "@cognia/agent-trace"
 import { spanToLogEntry } from "@cognia/agent-trace/span-to-log-entry"
 import type { StructuredLogEntry } from "@cognia/logging/types"
 
@@ -161,7 +161,13 @@ describe("LangfuseTransport", () => {
   })
 
   it("routes a versioned AgentTrace batch through the Cognia Host", async () => {
-    const hostIngest = jest.fn(async () => ({ status: 202 }))
+    const hostIngest = jest.fn(
+      async (
+        ..._args: Parameters<
+          NonNullable<Parameters<typeof createLangfuseTransport>[0]["hostIngest"]>
+        >
+      ) => ({ status: 202 })
+    )
     const transport = createLangfuseTransport({
       enabled: true,
       baseUrl: "https://langfuse.example",
@@ -189,7 +195,13 @@ describe("LangfuseTransport", () => {
   })
 
   it("stays degraded and sends nothing until both project keys are configured", async () => {
-    const hostIngest = jest.fn(async () => ({ status: 202 }))
+    const hostIngest = jest.fn(
+      async (
+        ..._args: Parameters<
+          NonNullable<Parameters<typeof createLangfuseTransport>[0]["hostIngest"]>
+        >
+      ) => ({ status: 202 })
+    )
     const transport = createLangfuseTransport({
       enabled: true,
       baseUrl: "https://langfuse.example",

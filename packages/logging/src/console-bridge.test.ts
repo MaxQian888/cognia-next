@@ -9,7 +9,12 @@ describe("console bridge", () => {
 
   it("routes warn and error calls through the unified logger", () => {
     const entries: StructuredLogEntry[] = []
-    addTransport({ name: "capture", log: (entry) => entries.push(entry) })
+    addTransport({
+      name: "capture",
+      log: (entry) => {
+        entries.push(entry)
+      },
+    })
     const originalWarn = jest.fn()
     const originalError = jest.fn()
     const consoleTarget = { warn: originalWarn, error: originalError }
@@ -76,7 +81,12 @@ describe("console bridge", () => {
 
   it("normalizes console-shaped edge cases and installs idempotently", () => {
     const entries: StructuredLogEntry[] = []
-    addTransport({ name: "capture-edge", log: (entry) => entries.push(entry) })
+    addTransport({
+      name: "capture-edge",
+      log: (entry) => {
+        entries.push(entry)
+      },
+    })
     const originalError = jest.fn()
     const consoleTarget = { warn: jest.fn(), error: originalError }
     const cleanup = installConsoleBridge({ console: consoleTarget })

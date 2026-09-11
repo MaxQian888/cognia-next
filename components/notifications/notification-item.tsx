@@ -7,6 +7,7 @@
 
 import { useFormatter, useNow, useTranslations } from "next-intl"
 import {
+  GlobeIcon,
   BellIcon,
   CalendarClockIcon,
   CheckIcon,
@@ -43,6 +44,7 @@ import type {
 } from "@/types/notifications"
 
 const SOURCE_ICON: Record<NotificationSource, LucideIcon> = {
+  site: GlobeIcon,
   scheduler: CalendarClockIcon,
   "agent-team": UsersIcon,
   plugin: PuzzleIcon,

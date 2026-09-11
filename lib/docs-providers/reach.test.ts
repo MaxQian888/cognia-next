@@ -12,7 +12,7 @@ import type { HostProfile } from "@/lib/platform/capabilities"
 /** Both built-ins declare exactly this. */
 const desktopOnly = { hosts: ["tauri"] } as const
 /** A hypothetical provider that works everywhere a webview does. */
-const anywhere = { hosts: ["tauri", "browser", "mobile"] } as const
+const anywhere = { hosts: ["tauri", "web", "mobile"] } as const
 
 describe("docsProviderReach", () => {
   it("lets the desktop through", () => {

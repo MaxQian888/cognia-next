@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 
 import { ModelSelect, groupByProvider, resolveOptionModelName } from "./model-select"
@@ -188,4 +188,38 @@ describe("ModelSelect shells", () => {
     // trigger's own label and the row inside the sheet.
     expect(screen.getAllByText(ANTHROPIC_NAME as string).length).toBeGreaterThan(1)
   })
+})
+
+it("updates an open picker when a subscription plugin registers and unloads", async () => {
+  const { registerPluginSubscriptionProvider, unregisterSubscriptionProvidersByPlugin } =
+    await import("@/lib/subscription/core/provider-registry")
+  seedSettings()
+  useSettingsStore.setState({
+    settings: {
+      ...useSettingsStore.getState().settings,
+      providerSettings: { "picker:api": { providerId: "picker:api", enabled: true } },
+    },
+  } as never)
+  renderSelect()
+  fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+  act(() => {
+    registerPluginSubscriptionProvider(
+      {
+        id: "api",
+        name: "Picker Plugin",
+        baseUrl: "https://example.test/v1",
+        protocol: "openai",
+        models: ["picker-model"],
+      },
+      "picker"
+    )
+  })
+  try {
+    expect(screen.getByText("picker-model")).toBeInTheDocument()
+  } finally {
+    act(() => {
+      unregisterSubscriptionProvidersByPlugin("picker")
+    })
+  }
+  expect(screen.queryByText("picker-model")).not.toBeInTheDocument()
 })

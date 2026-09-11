@@ -1,7 +1,9 @@
 /** @jest-environment jsdom */
 
 const invoke = jest.fn(async () => undefined)
-jest.mock("@tauri-apps/api/core", () => ({ invoke: (...args: unknown[]) => invoke(...args) }))
+jest.mock("@tauri-apps/api/core", () => ({
+  invoke: (...args: Parameters<typeof invoke>) => invoke(...args),
+}))
 
 const isTauri = jest.fn(() => false)
 jest.mock("@/lib/platform/detect", () => ({ isTauri: () => isTauri() }))

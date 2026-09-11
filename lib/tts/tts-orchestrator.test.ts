@@ -14,6 +14,10 @@ jest.mock("@cognia/tts/tts-orchestrator", () => ({
     speakStream: (tokens: AsyncIterable<string>, options: unknown) =>
       speakStreamMock(tokens, options),
     stop: () => stopMock(),
+    subscribe: jest.fn(() => () => {}),
+    pause: jest.fn(),
+    resume: jest.fn(),
+    setState: jest.fn(),
     getState: () => state,
   },
 }))

@@ -1,5 +1,7 @@
 import type { McpCapabilityCacheRow, McpServer } from "@cognia/agent-config-types"
 
+import type { ExternalCapability } from "@/types/external-service"
+
 import { matchesToolPattern } from "@/lib/mcp/tool-rules"
 import { getExternalService, registerExternalCapabilities } from "../catalog"
 import { syncManagedMcpChatSurfaces } from "./mcp-chat"
@@ -16,11 +18,11 @@ export function projectManagedMcpCapabilities(
   )
   if (!provider) return false
 
-  const capabilities = discovery.tools.flatMap((tool) => {
+  const capabilities = discovery.tools.flatMap<ExternalCapability>((tool) => {
     const rule = server.toolRiskRules?.find((candidate) =>
       matchesToolPattern(tool.name, candidate.pattern)
     )
-    const entries = [
+    const entries: ExternalCapability[] = [
       {
         pluginId: managed.pluginId,
         serviceId: managed.serviceId,

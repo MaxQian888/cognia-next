@@ -165,6 +165,7 @@ jest.mock("@/lib/db/schema", () => ({
 }))
 
 jest.mock("@/lib/db/session-state", () => ({
+  getSessionState: jest.fn().mockResolvedValue(undefined),
   markSessionRead: jest.fn().mockResolvedValue(undefined),
 }))
 
@@ -708,36 +709,14 @@ describe("<AppShellMobile />", () => {
     expect(screen.getByTestId("shared-mobile-controls")).toHaveTextContent("s-1")
   })
 
-  it("resumes the turn after plan approval on a direct session (P0 dock wiring)", async () => {
-    // Regression: the mobile shell never passed onResumeAfterPlanApproval to
-    // ChatPane, so a plan awaiting approval stranded the turn — the dock never
-    // rendered. Assert the callback is wired AND resumes correctly.
+  it("delegates plan continuation to the shared conversation surface", () => {
     sessionsRef.current = [
-      {
-        id: "s-1",
-        title: "Direct",
-        kind: "direct",
-        createdAt: 0,
-        updatedAt: 0,
-      } as unknown as ChatSession,
+      { id: "s-1", title: "Direct", kind: "direct", createdAt: 0, updatedAt: 0 } as ChatSession,
     ]
     activeSessionId = "s-1"
-    const user = userEvent.setup()
     render(<AppShellMobile />)
-
-    expect(screen.getByTestId("chat-pane")).toHaveAttribute("data-has-plan-resume", "true")
-    await user.click(screen.getByTestId("chat-plan-resume-stub"))
-
-    // Store mode set first, then the session row is persisted, then the resume
-    // turn is injected with no user bubble.
-    expect(setPermissionMode).toHaveBeenCalledWith("acceptEdits")
-    await waitFor(() =>
-      expect(updateSession).toHaveBeenCalledWith("s-1", { permissionMode: "acceptEdits" })
-    )
-    expect(directSend).toHaveBeenCalledWith("go", undefined, {
-      sessionId: "s-1",
-      skipUserAppend: true,
-    })
+    expect(screen.getByTestId("chat-pane")).toHaveAttribute("data-has-plan-resume", "false")
+    expect(directSend).not.toHaveBeenCalled()
   })
 
   it("does not wire plan approval for team sessions (plan mode is direct-only)", () => {
@@ -1086,4 +1065,65 @@ describe("<AppShellMobile />", () => {
     render(<AppShellMobile />)
     await waitFor(() => expect(select).toHaveBeenCalledWith("s-9"))
   })
+})
+
+it("leaves platform read capture to the shared pane and retains local session reads", async () => {
+  const { markSessionRead } = jest.requireMock("@/lib/db/session-state") as {
+    markSessionRead: jest.Mock
+  }
+  activeSessionId = "im"
+  sessionsRef.current = [
+    {
+      id: "im",
+      title: "Platform",
+      kind: "direct",
+      createdAt: 0,
+      updatedAt: 0,
+      platformBinding: {
+        platform: "slack",
+        adapterId: "a",
+        conversationKey: "slack:a:k",
+        conversationRef: { platform: "slack", adapterId: "a" },
+      },
+    } as ChatSession,
+  ]
+  const view = render(<AppShellMobile />)
+  await act(async () => {})
+  expect(markSessionRead).not.toHaveBeenCalled()
+  activeSessionId = "local"
+  sessionsRef.current = [
+    { id: "local", title: "Local", kind: "direct", createdAt: 0, updatedAt: 0 } as ChatSession,
+  ]
+  view.rerender(<AppShellMobile />)
+  await waitFor(() => expect(markSessionRead).toHaveBeenCalledWith("local"))
+})
+
+it("normalizes an explicitly absent template before the mobile team send", async () => {
+  activeSessionId = "team-session"
+  sessionsRef.current = [
+    {
+      id: "team-session",
+      title: "Team",
+      kind: "team",
+      teamId: "team-x",
+      createdAt: 0,
+      updatedAt: 0,
+    } as ChatSession,
+  ]
+  const user = userEvent.setup()
+  render(<AppShellMobile />)
+  await user.click(screen.getByTestId("chat-send-web-stub"))
+  await waitFor(() =>
+    expect(teamSend).toHaveBeenCalledWith(
+      "web",
+      expect.objectContaining({
+        templateRun: undefined,
+        webSearchContext: {
+          provider: "tavily",
+          results: [{ title: "A", url: "https://a.test", content: "a", score: 1 }],
+        },
+      })
+    )
+  )
+  expect(directSend).not.toHaveBeenCalled()
 })

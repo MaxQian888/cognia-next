@@ -171,7 +171,7 @@ describe("CloneRepositoryDialog", () => {
     // destination is a relative path on a host, not whether a picker exists.
     // Off Tauri the button rendered and did nothing.
     isTauriMock.mockReturnValue(false)
-    render(<CloneRepositoryDialog open onOpenChange={() => {}} />)
+    render(<CloneRepositoryDialog open onOpenChange={() => {}} onCloned={jest.fn()} />)
 
     expect(await screen.findByTestId("clone-destination")).toBeInTheDocument()
     expect(screen.queryByTestId("clone-browse")).not.toBeInTheDocument()

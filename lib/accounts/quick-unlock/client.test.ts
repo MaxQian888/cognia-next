@@ -11,23 +11,26 @@ const invoke = jest.fn()
 // directly, so that a non-Tauri host gets a rejected promise instead of a
 // throw on a missing global (ADR-0059, host-parity class A).
 jest.mock("@/lib/tauri/transport-instance", () => ({
-  transport: { call: (...args: unknown[]) => invoke(...args) },
+  transport: { call: (...args: Parameters<typeof invoke>) => invoke(...args) },
 }))
 
 const enrollBrowserVaultQuickUnlock = jest.fn(async () => ({ createdAt: 5 }))
 const unlockBrowserVaultWithQuickSecret = jest.fn(async () => {})
 const removeBrowserVaultQuickUnlock = jest.fn(async () => {})
 jest.mock("@/lib/runtime/browser-vault", () => ({
-  enrollBrowserVaultQuickUnlock: (...a: unknown[]) => enrollBrowserVaultQuickUnlock(...a),
-  unlockBrowserVaultWithQuickSecret: (...a: unknown[]) => unlockBrowserVaultWithQuickSecret(...a),
-  removeBrowserVaultQuickUnlock: (...a: unknown[]) => removeBrowserVaultQuickUnlock(...a),
+  enrollBrowserVaultQuickUnlock: (...a: Parameters<typeof enrollBrowserVaultQuickUnlock>) =>
+    enrollBrowserVaultQuickUnlock(...a),
+  unlockBrowserVaultWithQuickSecret: (...a: Parameters<typeof unlockBrowserVaultWithQuickSecret>) =>
+    unlockBrowserVaultWithQuickSecret(...a),
+  removeBrowserVaultQuickUnlock: (...a: Parameters<typeof removeBrowserVaultQuickUnlock>) =>
+    removeBrowserVaultQuickUnlock(...a),
 }))
 
 const deriveDevicePepper = jest.fn(async () => new Uint8Array(32).fill(1))
 const clearDeviceKey = jest.fn(async () => {})
 jest.mock("./device-pepper", () => ({
-  deriveDevicePepper: (...a: unknown[]) => deriveDevicePepper(...a),
-  clearDeviceKey: (...a: unknown[]) => clearDeviceKey(...a),
+  deriveDevicePepper: (...a: Parameters<typeof deriveDevicePepper>) => deriveDevicePepper(...a),
+  clearDeviceKey: (...a: Parameters<typeof clearDeviceKey>) => clearDeviceKey(...a),
 }))
 
 import {

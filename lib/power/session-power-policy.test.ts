@@ -133,7 +133,7 @@ describe("session power policy", () => {
     // The picker builds its keys as `policy.${option}` / `effect.${effect}`,
     // and lint:i18n cannot follow a template literal. Without this, adding a
     // mode or an effect ships a raw key into the UI and no gate notices.
-    for (const bundle of [en, zh] as Array<Record<string, Record<string, unknown>>>) {
+    for (const bundle of [en, zh]) {
       for (const policy of SESSION_POWER_POLICIES) {
         expect(bundle.policy?.[policy]).toEqual(
           expect.objectContaining({ label: expect.any(String), description: expect.any(String) })

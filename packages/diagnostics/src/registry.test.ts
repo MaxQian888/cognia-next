@@ -75,6 +75,37 @@ describe("DIAGNOSTIC_CODES", () => {
     expect(DIAGNOSTIC_CODES.desktopOnlyFeature.severity).toBe("info")
   })
 
+  /**
+   * `workspaceBusy` exists only because the card renders the code's hint above
+   * the message: reusing `workspaceUnavailable` for a contended lease told the
+   * reader to bind the workspace to a folder, which is the one move that cannot
+   * help a binding that is already correct. These assertions pin the two apart
+   * on the axes that produce that advice.
+   */
+  it("separates a busy working copy from one that cannot be resolved", () => {
+    const busy = DIAGNOSTIC_CODES.workspaceBusy
+    const unavailable = DIAGNOSTIC_CODES.workspaceUnavailable
+
+    // Waiting is the entire remedy, so retry is the only affordance. The two
+    // that `workspaceUnavailable` adds would both mislead here: settings has
+    // nothing to correct, and the host refused deliberately rather than logging
+    // a fault to read about.
+    expect(busy.actions).toEqual([{ kind: "retry" }])
+    expect(busy.retryable).toBe(true)
+    expect(busy.actions.some((a) => a.kind === "open-settings")).toBe(false)
+    expect(busy.actions.some((a) => a.kind === "view-logs")).toBe(false)
+    expect(unavailable.actions.some((a) => a.kind === "open-settings")).toBe(true)
+
+    // The holder ends on its own, so this is an event. `workspaceUnavailable`
+    // is a steady state and stays persistent.
+    expect(busy.persistent).toBe(false)
+    expect(unavailable.persistent).toBe(true)
+
+    // "Wait for the other turn", not "go fix your settings".
+    expect(busy.icon).toBe("clock")
+    expect(unavailable.icon).toBe("settings")
+  })
+
   it("keeps the 23 parser category ids so their translations still resolve", () => {
     const inherited: DiagnosticCode[] = [
       "connectionRefused",

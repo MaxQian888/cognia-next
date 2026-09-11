@@ -141,6 +141,7 @@ describe("createMcpConnection", () => {
           seen = info
         }
       } as never,
+      elicitRequestSchema: {},
       ctors: recordingCtors().ctors,
     })
     await createMcpConnection(srv("stdio", { command: "x" }), {}, { load })
@@ -254,6 +255,7 @@ describe("createMcpConnection stderr capture", () => {
   /** A loader whose stdio transport instance exposes `stderr` verbatim. */
   const loadWithStderr = (stderr: unknown) => async () => ({
     Client: class {} as never,
+    elicitRequestSchema: {},
     ctors: {
       Stdio: class {
         stderr = stderr
@@ -331,6 +333,7 @@ describe("openMcpClient", () => {
         return client as never
       }
     } as never,
+    elicitRequestSchema: {},
     ctors: recordingCtors().ctors,
   })
 

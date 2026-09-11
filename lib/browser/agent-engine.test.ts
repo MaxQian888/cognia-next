@@ -453,7 +453,7 @@ describe("embedded feature gaps", () => {
           ["handleDialog", () => engine.handleDialog({ accept: true })],
           ["setFiles", () => engine.setFiles("a", [])],
           ["downloads", () => engine.downloads()],
-          ["scopedScreenshot", () => engine.screenshot({ scope: "full" })],
+          ["scopedScreenshot", () => engine.screenshot({ scope: "fullPage" })],
         ] as const
       ).map(async ([feature, call]) => {
         const error = await call().then(

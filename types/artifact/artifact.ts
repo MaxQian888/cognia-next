@@ -725,6 +725,7 @@ export interface ArtifactDetectionConfig {
 }
 
 export interface DetectedArtifact {
+  chartType?: ArtifactChartType
   type: ArtifactType
   language?: ArtifactLanguage
   rendererProfile?: ArtifactRendererProfile

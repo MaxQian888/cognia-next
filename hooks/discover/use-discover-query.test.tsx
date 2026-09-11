@@ -916,12 +916,16 @@ describe("useDiscoverQuery — connection planes", () => {
       const all = renderHook(() => useDiscoverQuery("externalServices", ""))
       await flush()
       all.rerender()
-      expect(all.result.current.items.map((i) => i.data.label)).toEqual(["Acme", "Figma"])
+      expect(
+        all.result.current.items.map((i) => ("label" in i.data ? i.data.label : undefined))
+      ).toEqual(["Acme", "Figma"])
 
       const hit = renderHook(() => useDiscoverQuery("externalServices", "canvas"))
       await flush()
       hit.rerender()
-      expect(hit.result.current.items.map((i) => i.data.label)).toEqual(["Figma"])
+      expect(
+        hit.result.current.items.map((i) => ("label" in i.data ? i.data.label : undefined))
+      ).toEqual(["Figma"])
     })
   })
 

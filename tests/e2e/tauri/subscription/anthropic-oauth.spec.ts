@@ -2,7 +2,7 @@
  * Tauri E2E: Anthropic OAuth PKCE — paste-code exchange path.
  *
  * Flow under test:
- *   1. User opens Settings → Subscription → Anthropic and clicks "Add account".
+ *   1. User opens Settings → Subscription → Account Center and clicks "Add account".
  *   2. The PKCE dialog assembles `https://claude.ai/oauth/authorize?...` and
  *      hands it to `openUrl`. Under E2E the URL is captured into
  *      `window.__cogniaE2EOpenUrlCalls` instead of opening the system browser.
@@ -37,10 +37,11 @@ test.describe("tauri: Anthropic OAuth PKCE", () => {
   })
 
   test("happy path: paste code → exchange → account saved", async ({ page }) => {
-    await page.goto("/settings?section=subscription")
+    await page.goto("/settings?section=subscription&subTab=accounts")
 
     // Open the add-account dialog.
-    await page.getByRole("button", { name: "Add account" }).first().click()
+    await page.getByRole("button", { name: "Add account", exact: true }).click()
+    await page.getByRole("menuitem", { name: "Claude", exact: true }).click()
 
     // Step 1: choose mode — Subscription is the default. Click "Open authorization page".
     const dialog = page.getByRole("dialog", { name: /Sign in with Claude/i })
@@ -62,14 +63,15 @@ test.describe("tauri: Anthropic OAuth PKCE", () => {
     // Dialog auto-closes ~800ms after success.
     await expect(dialog).toBeHidden({ timeout: 10_000 })
 
-    // The account list under the Anthropic provider tab now has one entry.
+    // The Account Center now has one persisted Claude account.
     const accounts = await listAccountsForProvider(page, "anthropic")
     expect(accounts).toHaveLength(1)
   })
 
   test("state mismatch surfaces error and does not persist account", async ({ page }) => {
-    await page.goto("/settings?section=subscription")
-    await page.getByRole("button", { name: "Add account" }).first().click()
+    await page.goto("/settings?section=subscription&subTab=accounts")
+    await page.getByRole("button", { name: "Add account", exact: true }).click()
+    await page.getByRole("menuitem", { name: "Claude", exact: true }).click()
 
     const dialog = page.getByRole("dialog", { name: /Sign in with Claude/i })
     await expect(dialog).toBeVisible({ timeout: 10_000 })

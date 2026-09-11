@@ -92,7 +92,13 @@ describe("MCP Apps runtime wiring", () => {
 
   it("promotes only embedded quarantine contents through explicit save dependencies", async () => {
     const saveText = jest.fn(async () => true)
-    const saveBinary = jest.fn(async () => true)
+    const saveBinary = jest.fn(
+      async (
+        ..._args: Parameters<
+          NonNullable<NonNullable<Parameters<typeof promoteMcpAppDownload>[3]>["saveBinary"]>
+        >
+      ) => true
+    )
     await expect(
       promoteMcpAppDownload(
         server,

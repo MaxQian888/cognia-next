@@ -44,7 +44,7 @@ export async function resumeImportedSessionNative(
 ): Promise<NativeResumeResult> {
   const binding = session.importRuntimeBinding
   const nativeSessionId = binding?.nativeSessionId?.trim()
-  if (!nativeSessionId) return { ok: false, code: "binding-missing" }
+  if (!binding || !nativeSessionId) return { ok: false, code: "binding-missing" }
   const presetId = binding?.presetId?.trim()
   if (!presetId) return { ok: false, code: "preset-missing" }
 

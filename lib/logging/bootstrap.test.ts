@@ -14,11 +14,15 @@ const mockPostTauriTelemetryJson = jest.fn<Promise<{ ok: boolean }>, unknown[]>(
   ok: true,
 }))
 const mockConfigureTauriSidecarTelemetry = jest.fn<Promise<void>, unknown[]>(async () => undefined)
-const mockIngestLangfuseTraceBatch = jest.fn(async () => ({
-  acceptedSpans: 1,
-  duplicateSpans: 0,
-  status: 202,
-}))
+const mockIngestLangfuseTraceBatch = jest.fn(
+  async (
+    ..._args: Parameters<typeof import("@/lib/logging/langfuse-host").ingestLangfuseTraceBatch>
+  ) => ({
+    acceptedSpans: 1,
+    duplicateSpans: 0,
+    status: 202,
+  })
+)
 const mockSetLangfuseCredentials = jest.fn(async () => undefined)
 const mockCreateTauriOtlpFetch = jest.fn(
   (options: { credential: unknown }) =>
@@ -40,11 +44,14 @@ jest.mock("./transports/tauri-fetch-shim", () => ({
   configureTauriSidecarTelemetry: (...args: unknown[]) =>
     mockConfigureTauriSidecarTelemetry(...args),
   createTauriOtlpFetch: (...args: unknown[]) => mockCreateTauriOtlpFetch(...(args as [never])),
-  postTauriTelemetryJson: (...args: unknown[]) => mockPostTauriTelemetryJson(...args),
+  postTauriTelemetryJson: (...args: Parameters<typeof mockPostTauriTelemetryJson>) =>
+    mockPostTauriTelemetryJson(...args),
 }))
 jest.mock("@/lib/logging/langfuse-host", () => ({
-  ingestLangfuseTraceBatch: (...args: unknown[]) => mockIngestLangfuseTraceBatch(...args),
-  setLangfuseCredentials: (...args: unknown[]) => mockSetLangfuseCredentials(...args),
+  ingestLangfuseTraceBatch: (...args: Parameters<typeof mockIngestLangfuseTraceBatch>) =>
+    mockIngestLangfuseTraceBatch(...args),
+  setLangfuseCredentials: (...args: Parameters<typeof mockSetLangfuseCredentials>) =>
+    mockSetLangfuseCredentials(...args),
 }))
 
 // `bootstrap.ts` ships an IIFE-style `hasBootstrapped` flag at module scope.

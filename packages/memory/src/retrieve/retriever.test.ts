@@ -460,7 +460,7 @@ describe("claimFilter — corpus partition", () => {
 
 describe("retrieval telemetry", () => {
   const telemetryDeps = (
-    record: MemoryRetrieverDeps["telemetry"] extends infer T ? NonNullable<T>["record"] : never
+    record: NonNullable<MemoryRetrieverDeps["telemetry"]>["record"]
   ): MemoryRetrieverDeps => ({
     loadCandidates: async () => [mem("The user prefers pnpm over npm", { id: "hit" })],
     telemetry: {
@@ -474,7 +474,7 @@ describe("retrieval telemetry", () => {
   it("does not wait for the trace write before returning hits", async () => {
     // `record` is wired to an IndexedDB write in production. Awaiting it put a
     // control-plane round trip on the chat send path.
-    let settleRecord: (() => void) | null = null
+    let settleRecord!: () => void
     const recorded = new Promise<void>((resolve) => {
       settleRecord = resolve
     })
@@ -488,7 +488,7 @@ describe("retrieval telemetry", () => {
     // Resolved while the write is still outstanding.
     expect(record).toHaveBeenCalledTimes(1)
     expect(outcome.hits.map((hit) => hit.memory.id)).toEqual(["hit"])
-    settleRecord?.()
+    settleRecord()
     await recorded
   })
 

@@ -67,6 +67,19 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     ],
     icon: "settings",
   },
+  workspaceBusy: {
+    severity: "error",
+    retryable: true,
+    // The holder ends on its own — nothing here outlives the turn that caused
+    // it, so this is an event, not a steady state worth a persistent banner.
+    persistent: false,
+    // Deliberately just the retry. Waiting is the whole remedy, and the two
+    // affordances `workspaceUnavailable` adds would both mislead: settings has
+    // nothing to correct, and the log has nothing to explain — the host refused
+    // on purpose, and said so.
+    actions: [{ kind: "retry" }],
+    icon: "clock",
+  },
   workspaceBundleFailed: {
     severity: "error",
     retryable: true,
@@ -428,6 +441,13 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     actions: [{ kind: "open-settings", section: "external-bridge" }, { kind: "dismiss" }],
     icon: "key",
   },
+  managedPolicyRefused: {
+    severity: "error",
+    retryable: false,
+    persistent: false,
+    actions: [{ kind: "open-settings", section: "external-bridge" }, { kind: "dismiss" }],
+    icon: "key",
+  },
   executionFailed: {
     severity: "error",
     retryable: true,
@@ -632,7 +652,7 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     severity: "error",
     retryable: true,
     persistent: true,
-    actions: [{ kind: "retry" }, { kind: "open-settings", section: "remote-hosts" }],
+    actions: [{ kind: "retry" }, { kind: "open-settings", section: "connectivity" }],
     icon: "server",
   },
   frozenModelBinding: {
@@ -736,7 +756,7 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     severity: "warning",
     retryable: true,
     persistent: true,
-    actions: [{ kind: "retry" }, { kind: "open-settings", section: "companion" }],
+    actions: [{ kind: "retry" }, { kind: "open-settings", section: "connectivity" }],
     icon: "network",
   },
   desktopOnlyFeature: {

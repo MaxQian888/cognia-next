@@ -41,6 +41,7 @@ export interface DiagnosticActionSpec {
 const AVAILABILITY: Readonly<Record<DiagnosticActionKind, DiagnosticActionAvailability>> = {
   // Re-running needs the original request; nobody else can reconstruct it.
   retry: "host",
+  "interrupt-turn": "host",
   "wait-and-retry": "host",
   "retry-fallback-provider": "host",
   "retry-when-online": "host",

@@ -66,7 +66,7 @@ describe("initializer batch headless smoke", () => {
     // constructed. Import it only after the Node shim is installed; a static
     // import here makes the smoke test report a started scheduler even though
     // its database initialization failed with MissingAPIError.
-    const { schedulerDb } = await import("@/lib/scheduler/scheduler-db")
+    await import("@/lib/scheduler/scheduler-db")
     // Production starts durability (including the full seed pass) before the
     // runtime batch. Mirror that ordering so the first workflow write cannot
     // race the skill/resource seeder inside Dexie's opening transaction.
@@ -140,7 +140,7 @@ describe("initializer batch headless smoke", () => {
     expect(releasedRun?.lease).toBeUndefined()
     expect(releasedRun?.releasedForHandoffAt).toEqual(expect.any(Number))
     stopLeaseHeartbeat(leasedRunId)
-    schedulerDb.close()
+    getDb().close()
     __resetDbForTesting()
   }, 60_000)
 })

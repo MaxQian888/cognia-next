@@ -14,8 +14,8 @@ beforeAll(() => {
 })
 
 const turns: PetConversationRow[] = [
-  { id: 1, at: 1, userText: "hi", reply: "hello!" },
-  { id: 2, at: 2, userText: "how are you", reply: "great!" },
+  { id: "1", at: 1, userText: "hi", reply: "hello!" },
+  { id: "2", at: 2, userText: "how are you", reply: "great!" },
 ]
 
 describe("PetChatTranscript", () => {

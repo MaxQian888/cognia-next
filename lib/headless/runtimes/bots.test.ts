@@ -8,10 +8,15 @@ const startBotDeliveryRunner = jest.fn()
 const recoverStaleBotDeliveries = jest.fn(async () => 0)
 
 jest.mock("@/lib/bot/runtime/delivery-runner", () => ({
-  startBotDeliveryRunner: (...args: unknown[]) => startBotDeliveryRunner(...args),
+  startBotDeliveryRunner: (...args: Parameters<typeof startBotDeliveryRunner>) =>
+    startBotDeliveryRunner(...args),
+}))
+jest.mock("@/lib/bot/schedule/reconcile-timed-triggers", () => ({
+  reconcileAllBotSchedules: jest.fn(async () => undefined),
 }))
 jest.mock("@/lib/db/bot-event-deliveries", () => ({
-  recoverStaleBotDeliveries: (...args: unknown[]) => recoverStaleBotDeliveries(...args),
+  recoverStaleBotDeliveries: (...args: Parameters<typeof recoverStaleBotDeliveries>) =>
+    recoverStaleBotDeliveries(...args),
 }))
 
 function context(overrides: Partial<HeadlessRuntimeContext> = {}): HeadlessRuntimeContext {

@@ -1,6 +1,6 @@
 import { renderHook } from "@testing-library/react"
 
-const sync = jest.fn(async () => undefined)
+const sync = jest.fn(async (_ids: readonly string[]) => undefined)
 const releaseAll = jest.fn(async () => undefined)
 jest.mock("@/lib/power/screen-wake-lock", () => ({
   syncScreenWakeHolders: (ids: readonly string[]) => sync(ids),

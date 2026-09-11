@@ -25,6 +25,7 @@ describe("DIAGNOSTIC_ACTION_SPECS", () => {
     // can re-issue it; a persisted Retry button would be a lie.
     for (const kind of [
       "retry",
+      "interrupt-turn",
       "wait-and-retry",
       "retry-fallback-provider",
       "retry-when-online",

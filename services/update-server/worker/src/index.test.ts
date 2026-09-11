@@ -1,4 +1,7 @@
+/// <reference types="@cloudflare/vitest-pool-workers/types" />
 import { env } from "cloudflare:test"
+import type { RequestInit } from "@cloudflare/workers-types"
+declare const Request: typeof import("@cloudflare/workers-types").Request
 import { beforeEach, describe, expect, it } from "vitest"
 
 import worker, {

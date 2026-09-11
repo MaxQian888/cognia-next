@@ -31,6 +31,7 @@ import { useCharacters } from "@/lib/data-hooks/context"
 import { useSettingsStore } from "@/stores/settings"
 import { cn } from "@/lib/utils"
 import type { A2UIGenerationPreferences } from "@/lib/a2ui/generation-preferences"
+import { resolveAppDefaultModel } from "@/lib/ai/app-default-model"
 
 export interface A2UIGenerationOptionsProps {
   value: A2UIGenerationPreferences
@@ -60,8 +61,14 @@ export function A2UIGenerationOptions({
 
   // Same fallback chain the chat picker shows, so an untouched hub composer
   // displays the model the turn will actually run on rather than "unset".
-  const activeModel = value.model ?? defaultModel ?? ANTHROPIC_DEFAULT_MODEL
-  const activeProvider = value.provider ?? defaultProvider ?? "anthropic"
+  //
+  // Read on the provider lane: the app-wide pair doubles as the external
+  // agent's default and can hold that agent's own model id plus the reserved
+  // marker, neither of which a mini-app generation runs on. Showing them here
+  // promised a model the turn would never use. See `lib/ai/app-default-model.ts`.
+  const appDefault = resolveAppDefaultModel({ defaultModel, defaultProvider })
+  const activeModel = value.model ?? appDefault.model ?? ANTHROPIC_DEFAULT_MODEL
+  const activeProvider = value.provider ?? appDefault.provider ?? "anthropic"
 
   return (
     <div

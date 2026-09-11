@@ -290,7 +290,9 @@ export function MemoryConsole({ initialSelectedId }: MemoryConsoleProps = {}) {
   // its own button. This marks it stale so it ranks below fresher claims and
   // the re-check sweep looks at it sooner.
   const handleMarkOutdated = useCallback(
-    (id: string) => runManaged({ kind: "retrieval-feedback", id, verdict: "outdated" }),
+    async (id: string) => {
+      await runManaged({ kind: "retrieval-feedback", id, verdict: "outdated" })
+    },
     [runManaged]
   )
   const handleTagClick = useCallback((tag: string) => {

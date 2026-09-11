@@ -85,12 +85,12 @@ const facade = {
   setState: (
     coreOrchestrator as unknown as { setState(patch: Partial<TTSOrchestratorState>): void }
   ).setState.bind(coreOrchestrator),
-  async speak(text, options) {
+  async speak(...[text, options]: Parameters<TTSOrchestrator["speak"]>) {
     const result = await coreOrchestrator.speak(text, options)
     meterUtterance(text.length, coreOrchestrator.getState().currentProvider)
     return result
   },
-  async speakStream(tokens, options) {
+  async speakStream(...[tokens, options]: Parameters<TTSOrchestrator["speakStream"]>) {
     const counter = { characters: 0 }
     const result = await coreOrchestrator.speakStream(countingTokens(tokens, counter), options)
     meterUtterance(counter.characters, coreOrchestrator.getState().currentProvider)

@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { HoverScrollText } from "@/components/chat/ui/hover-scroll-text"
 import { JumpFlash } from "@/components/chat/jump-flash"
 import { ThreadHandoffSourceDialog } from "@/components/thread-handoff/thread-handoff-source-dialog"
+import { PlatformBadge } from "@/components/inbox/platform-badge"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import {
   AlertDialog,
@@ -537,7 +538,20 @@ function SessionRowImpl({
             rowPadding
           )}
         >
-          {iconSubject ? (
+          {session.platformBinding ? (
+            <span className="relative shrink-0">
+              <AvatarBadge
+                subject={{ name: session.title || session.platformBinding.conversationKey }}
+                size={24}
+                textClassName="text-[10px]"
+              />
+              <PlatformBadge
+                platform={session.platformBinding.platform}
+                iconOnly
+                className="absolute -bottom-1 -end-1 rounded-full bg-background p-0.5 [&_svg]:size-3"
+              />
+            </span>
+          ) : iconSubject ? (
             <AvatarBadge subject={iconSubject} size={18} textClassName="text-[10px]" />
           ) : accentColor ? (
             <span

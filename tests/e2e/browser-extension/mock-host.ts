@@ -459,7 +459,7 @@ export async function startMockHost(options: MockHostOptions): Promise<MockHost>
           // the conversation a submission just started, and the panel re-reads
           // it after submitting for exactly that reason.
           deliveryTargets: deliveryTargets(),
-        } satisfies BrowserCompanionCapabilityV1)
+        } satisfies Omit<BrowserCompanionCapabilityV1, "schemaVersion"> & { schemaVersion: number })
       case "browser_context_submit":
         return ok(acceptSubmission(body as unknown as BrowserContextSubmitRequestV1))
       case "browser_context_list":

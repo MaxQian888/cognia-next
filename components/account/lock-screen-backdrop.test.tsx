@@ -16,9 +16,13 @@ jest.mock("next-intl", () => ({
   }),
 }))
 
-const resolveSourceToCss = jest.fn(async () => "url(wallpaper.png)")
+const resolveSourceToCss = jest.fn(
+  async (
+    ..._args: Parameters<typeof import("@/lib/appearance/wallpaper-storage").resolveSourceToCss>
+  ) => "url(wallpaper.png)"
+)
 jest.mock("@/lib/appearance/wallpaper-storage", () => ({
-  resolveSourceToCss: (...a: unknown[]) => resolveSourceToCss(...a),
+  resolveSourceToCss: (...a: Parameters<typeof resolveSourceToCss>) => resolveSourceToCss(...a),
 }))
 
 jest.mock("@/lib/appearance/presets", () => ({

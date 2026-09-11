@@ -40,7 +40,8 @@ interface CatalogEntry {
   iconNode: IconNode
 }
 
-const generated = catalog as {
+// JSON inference loses the generated SVG node tuples; catalog parity tests validate them.
+const generated = catalog as unknown as {
   entries: Record<string, CatalogEntry>
   iconNames: string[]
   exportNames: Record<string, string>

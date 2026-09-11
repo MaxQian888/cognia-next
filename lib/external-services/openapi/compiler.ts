@@ -146,7 +146,15 @@ function resolveRefs(
       )
       if (!isRecord(resolved)) return resolved
       const siblings = Object.fromEntries(Object.entries(value).filter(([key]) => key !== "$ref"))
-      return { ...resolved, ...resolveRefs(siblings, root, options, externalRefs, stack, visited) }
+      return {
+        ...resolved,
+        ...Object.fromEntries(
+          Object.entries(siblings).map(([key, value]) => [
+            key,
+            resolveRefs(value, root, options, externalRefs, stack, visited),
+          ])
+        ),
+      }
     }
     const url = new URL(ref, options.sourceUrl)
     const approved = new Set(options.approvedExternalOrigins ?? [])

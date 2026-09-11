@@ -258,6 +258,7 @@ export type DiagnosticCode =
   | "extensionUnknown"
   | "sessionResolutionFailed"
   | "permissionDenied"
+  | "managedPolicyRefused"
   | "executionFailed"
   | "strictFailure"
   | "fallbackToBuiltin"
@@ -299,6 +300,15 @@ export type DiagnosticCode =
   // deprecated `InlineError` whose only affordance opens Providers, the one
   // settings page that could never fix any of them.
   | "workspaceUnavailable"
+  /**
+   * The working copy exists and resolves fine — it is simply held by a turn
+   * that has not finished. Split out of `workspaceUnavailable` because the two
+   * want opposite advice: `workspaceUnavailable` tells the reader to bind a
+   * folder, which is precisely the wrong move for a workspace whose binding is
+   * already correct and merely busy. Here the fix is to wait, or to send from
+   * whichever device is running the turn that holds it.
+   */
+  | "workspaceBusy"
   | "workspaceBundleFailed"
   | "environmentUnavailable"
   | "environmentSetupFailed"

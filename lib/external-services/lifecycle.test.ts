@@ -40,6 +40,7 @@ const manifest = {
       toolRiskRules: [{ pattern: "get_*", risk: "read" }],
     },
   ],
+  description: "External service test fixture",
 } satisfies PluginManifest
 
 function server(fingerprint: string): McpServer {

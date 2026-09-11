@@ -5,6 +5,9 @@ import { resolveMcpRuntimeCredential } from "./credential-resolver"
 
 const server = (transport: McpServer["transport"] = "http") =>
   ({
+    enabled: true,
+    createdAt: 0,
+    updatedAt: 0,
     id: "server-id",
     name: "Remote",
     transport,

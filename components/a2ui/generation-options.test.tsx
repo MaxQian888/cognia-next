@@ -11,6 +11,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { PROVIDERS } from "@cognia/provider-types/provider"
 import type { Character } from "@cognia/agent-config-types"
 import enMessages from "@/i18n/messages/en.json"
+import { externalAgentProviderId } from "@/lib/ai/agent/external/session-models"
 
 const CHARACTERS: Character[] = [
   { id: "char_1", name: "Builder", isBuiltIn: true } as Character,
@@ -69,6 +70,29 @@ describe("A2UIGenerationOptions", () => {
     expect(screen.getByTestId("a2ui-agent-chip")).toHaveTextContent(enMessages.a2ui.defaultAgent)
     // Nothing to clear when nothing is set.
     expect(screen.queryByTestId("a2ui-agent-clear")).not.toBeInTheDocument()
+  })
+
+  it("does not offer an app default that belongs to an external agent", () => {
+    // The app-wide pair doubles as the external lane's default. A mini-app
+    // generation runs on the provider lane, so the chip must show the anthropic
+    // fallback rather than promise a model the turn will never use.
+    useSettingsStore.setState({
+      settings: {
+        providerSettings: { anthropic: { enabled: true } },
+        customProviders: [],
+        defaultModel: "commandcode/meta/muse-spark-1.3-contributor",
+        defaultProvider: externalAgentProviderId("pi-rpc"),
+      },
+    } as never)
+    const { container } = renderOptions()
+    expect(container.textContent).not.toContain("commandcode/meta/muse-spark-1.3-contributor")
+    expect(container.textContent).not.toContain("cognia:external-agent")
+    // Fell all the way through to the anthropic fallback, which is what the
+    // generation actually runs on.
+    const fallback = PROVIDERS.anthropic.models.find(
+      (m) => m.id === PROVIDERS.anthropic.defaultModel
+    )
+    expect(container.textContent).toContain(fallback?.name ?? PROVIDERS.anthropic.defaultModel)
   })
 
   it("shows the chosen agent's name and reports the pick", () => {

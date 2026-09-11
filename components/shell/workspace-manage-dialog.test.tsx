@@ -84,6 +84,7 @@ jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
 
 import { WorkspaceManageDialog } from "./workspace-manage-dialog"
 import { useProjectStore } from "@/stores/project/project-store"
+const originalDeleteProject = useProjectStore.getState().deleteProject
 
 const isTauriMock = (jest.requireMock("@/lib/tauri") as { isTauri: jest.Mock }).isTauri
 const defaultExportDirMock = (
@@ -101,7 +102,12 @@ beforeEach(() => {
   toastSuccess.mockReset()
   toastError.mockReset()
   act(() => {
-    useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
+    useProjectStore.setState({
+      projects: [],
+      activeProjectId: null,
+      loaded: false,
+      deleteProject: originalDeleteProject,
+    })
   })
 })
 
@@ -258,13 +264,13 @@ describe("WorkspaceManageDialog", () => {
     expect(trustMock).toHaveBeenCalledWith("/trust/me")
   })
 
-  it("removes a workspace after a confirm click, keeping its conversations", () => {
+  it("removes a workspace after a confirm click, keeping its conversations", async () => {
     const removals: unknown[][] = []
     const original = useProjectStore.getState().deleteProject
     useProjectStore.setState({
       deleteProject: (...args: Parameters<typeof original>) => {
         removals.push(args)
-        original(...args)
+        return original(...args)
       },
     })
     renderDialog()
@@ -272,20 +278,20 @@ describe("WorkspaceManageDialog", () => {
     expect(useProjectStore.getState().projects).toHaveLength(1)
     // First click arms the confirm, second removes.
     fireEvent.click(screen.getByTestId("workspace-delete"))
-    fireEvent.click(screen.getByTestId("workspace-delete"))
+    await act(async () => fireEvent.click(screen.getByTestId("workspace-delete")))
     expect(useProjectStore.getState().projects).toHaveLength(0)
     // Removing a workspace is not the same decision as destroying what was in
     // it, so the plain confirm must not take the destructive reading.
     expect(removals.at(-1)?.[1]).toBe("detach")
   })
 
-  it("offers destroying the contents as a separate, explicit action", () => {
+  it("offers destroying the contents as a separate, explicit action", async () => {
     const removals: unknown[][] = []
     const original = useProjectStore.getState().deleteProject
     useProjectStore.setState({
       deleteProject: (...args: Parameters<typeof original>) => {
         removals.push(args)
-        original(...args)
+        return original(...args)
       },
     })
     renderDialog()
@@ -293,9 +299,32 @@ describe("WorkspaceManageDialog", () => {
     // The destructive option only appears once the confirm is armed.
     expect(screen.queryByTestId("workspace-delete-data")).not.toBeInTheDocument()
     fireEvent.click(screen.getByTestId("workspace-delete"))
-    fireEvent.click(screen.getByTestId("workspace-delete-data"))
+    await act(async () => fireEvent.click(screen.getByTestId("workspace-delete-data")))
     expect(useProjectStore.getState().projects).toHaveLength(0)
     expect(removals.at(-1)?.[1]).toBe("delete-data")
+  })
+
+  it("waits for cleanup and retains the editor for retry after a failure", async () => {
+    let fail!: (error: Error) => void
+    const remove = jest.fn(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          fail = reject
+        })
+    )
+    useProjectStore.setState({ deleteProject: remove })
+    renderDialog()
+    fireEvent.click(screen.getByTestId("workspace-new"))
+    fireEvent.click(screen.getByTestId("workspace-delete"))
+    fireEvent.click(screen.getByTestId("workspace-delete-data"))
+    expect(screen.getByTestId("workspace-delete")).toBeDisabled()
+    expect(screen.getByTestId("workspace-delete-data")).toBeDisabled()
+    expect(toastSuccess).not.toHaveBeenCalled()
+    await act(async () => fail(new Error("External task is still active")))
+    expect(toastError).toHaveBeenCalledWith("deleteFailed")
+    expect(useProjectStore.getState().projects).toHaveLength(1)
+    expect(screen.getByLabelText("nameLabel")).toBeInTheDocument()
+    expect(screen.getByTestId("workspace-delete-data")).toBeEnabled()
   })
 
   it("sets the active workspace from the editor", () => {

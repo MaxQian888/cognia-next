@@ -1,8 +1,11 @@
 "use client"
 
+import { useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   AlertTriangleIcon,
+  ChevronDown,
+  ChevronRight,
   CircleAlert,
   Clock,
   Database,
@@ -72,6 +75,8 @@ export function DiagnosticCard({
   className,
 }: DiagnosticCardProps) {
   const t = useTranslations("diagnostics")
+  const tDetail = useTranslations("diagnostics.detail")
+  const [showDetail, setShowDetail] = useState(false)
   const spec = specForCode(diagnostic.code)
   const Icon = ICONS[spec.icon]
   const destructive = DESTRUCTIVE.has(diagnostic.severity)
@@ -86,6 +91,17 @@ export function DiagnosticCard({
   const hints = (recoveryHintKeys ?? []).map((id) =>
     t.has(`recoveryHint.${id}`) ? t(`recoveryHint.${id}`) : id
   )
+
+  // A producer whose raw text says nothing to a reader puts the translated
+  // sentence in `message` and the host's own words in `detail` — so the two can
+  // coincide with the code's hint. Printing the same sentence twice reads as a
+  // rendering bug, so each is dropped when it only repeats what is already up.
+  const rawMessage = diagnostic.message.trim()
+  const message = rawMessage === hint.trim() ? "" : diagnostic.message
+  const detail = diagnostic.detail?.trim() ?? ""
+  // Collapsed by default: `detail` is a stack trace or a raw payload — evidence
+  // for whoever is diagnosing, never the headline.
+  const hasDetail = detail !== "" && detail !== rawMessage && detail !== hint.trim()
 
   const runnable = diagnostic.actions.filter((action) => handlers[action.kind])
   const hasFooter = runnable.length > 0 || Boolean(onDismiss)
@@ -128,9 +144,35 @@ export function DiagnosticCard({
             </ul>
           )}
           {/* The raw provider/transport text, with its stack frames still clickable. */}
-          {diagnostic.message && (
+          {message && (
             <div className="text-xs leading-relaxed text-muted-foreground">
-              <ErrorParsedView rawError={diagnostic.message} fallback={diagnostic.message} />
+              <ErrorParsedView rawError={message} fallback={message} />
+            </div>
+          )}
+          {hasDetail && (
+            <div className="space-y-1">
+              <button
+                type="button"
+                onClick={() => setShowDetail((v) => !v)}
+                className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+                data-testid="diagnostic-card-detail-toggle"
+                aria-expanded={showDetail}
+              >
+                {showDetail ? (
+                  <ChevronDown className="h-3 w-3" aria-hidden />
+                ) : (
+                  <ChevronRight className="h-3 w-3" aria-hidden />
+                )}
+                {showDetail ? tDetail("hideRaw") : tDetail("showRaw")}
+              </button>
+              {showDetail && (
+                <pre
+                  data-testid="diagnostic-card-detail"
+                  className="max-h-60 overflow-auto rounded bg-muted/40 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap"
+                >
+                  {diagnostic.detail}
+                </pre>
+              )}
             </div>
           )}
         </div>

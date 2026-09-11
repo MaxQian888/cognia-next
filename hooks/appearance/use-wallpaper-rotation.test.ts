@@ -6,7 +6,7 @@ import { DEFAULT_BACKGROUND_SETTINGS, type BackgroundSettings } from "@/types/ap
 import { DEFAULT_WALLPAPER_ROTATION } from "@/types/appearance/wallpaper-rotation"
 import type { Wallpaper } from "@/types/appearance"
 
-const setBackground = jest.fn(async () => {})
+const setBackground = jest.fn(async (_patch: Partial<BackgroundSettings>) => {})
 
 interface StoreState {
   background: BackgroundSettings

@@ -12,6 +12,7 @@
  */
 
 import {
+  BotIcon,
   BrainIcon,
   CalendarClockIcon,
   CircleDotIcon,
@@ -45,6 +46,7 @@ import type { GlobalSearchKind } from "@/lib/global-search/types"
 
 export const KIND_ICONS: Readonly<Record<GlobalSearchKind, LucideIcon>> = {
   action: CommandIcon,
+  bot: BotIcon,
   navigation: CompassIcon,
   settings: SettingsIcon,
   session: MessageSquareIcon,

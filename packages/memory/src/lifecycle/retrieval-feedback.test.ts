@@ -43,9 +43,9 @@ it("leaves staleness untouched for the other two verdicts", () => {
 
 it("never produces a review status — a mis-click must not remove a memory from recall", () => {
   for (const verdict of RETRIEVAL_FEEDBACK_VERDICTS) {
-    const patch = applyRetrievalFeedback(row(), verdict, 1) as Record<string, unknown>
-    expect(patch.reviewStatus).toBeUndefined()
-    expect(patch.status).toBeUndefined()
+    const patch = applyRetrievalFeedback(row(), verdict, 1)
+    expect(patch).not.toHaveProperty("reviewStatus")
+    expect(patch).not.toHaveProperty("status")
   }
 })
 

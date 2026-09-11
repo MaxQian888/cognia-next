@@ -7,9 +7,9 @@ import {
 import type { PetConversationRow } from "@/types/pet"
 
 function makeDeps(rows: PetConversationRow[] = []): PetHistoryDeps & {
-  appended: PetConversationRow[]
+  appended: Omit<PetConversationRow, "id">[]
 } {
-  const appended: PetConversationRow[] = []
+  const appended: Omit<PetConversationRow, "id">[] = []
   return {
     appended,
     append: async (row) => {
@@ -40,6 +40,7 @@ describe("recordTurn", () => {
 describe("loadHistoryForPrompt", () => {
   it("returns the most recent turns, newest last, default limit 12", async () => {
     const rows = Array.from({ length: 20 }, (_, i) => ({
+      id: `pc_${i}`,
       at: i,
       userText: `u${i}`,
       reply: `r${i}`,
@@ -51,7 +52,7 @@ describe("loadHistoryForPrompt", () => {
   })
 
   it("honors an explicit limit and returns [] on a throwing reader", async () => {
-    const deps = makeDeps([{ at: 1, userText: "a", reply: "b" }])
+    const deps = makeDeps([{ id: "pc_1", at: 1, userText: "a", reply: "b" }])
     expect(await loadHistoryForPrompt(deps, { limit: 1 })).toHaveLength(1)
 
     const broken: PetHistoryDeps = {
@@ -67,8 +68,8 @@ describe("loadHistoryForPrompt", () => {
 describe("formatHistoryLines", () => {
   it("renders alternating user/pet lines", () => {
     const text = formatHistoryLines([
-      { at: 1, userText: "hi", reply: "hey!" },
-      { at: 2, userText: "play?", reply: "sure" },
+      { id: "pc_1", at: 1, userText: "hi", reply: "hey!" },
+      { id: "pc_2", at: 2, userText: "play?", reply: "sure" },
     ])
     expect(text).toBe("User: hi\nYou: hey!\nUser: play?\nYou: sure")
   })

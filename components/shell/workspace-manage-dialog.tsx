@@ -91,6 +91,7 @@ export function WorkspaceManageDialog({ open, onOpenChange }: Props) {
   const [manualDir, setManualDir] = useState("")
   const [folderPickerOpen, setFolderPickerOpen] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   // path → trusted? Undefined while loading.
   const [trustMap, setTrustMap] = useState<Record<string, boolean>>({})
   const desktop = isTauri()
@@ -210,8 +211,24 @@ export function WorkspaceManageDialog({ open, onOpenChange }: Props) {
     toast.success(t("saved"))
   }
 
+  const removeWorkspace = async (mode: "detach" | "delete-data") => {
+    if (!editing || deleting) return
+    const id = editing.id
+    setDeleting(true)
+    try {
+      await deleteProject(id, mode)
+      setEditingId((current) => (current === id ? null : current))
+      setConfirmingDelete(false)
+      toast.success(t(mode === "detach" ? "detached" : "deleted"))
+    } catch {
+      toast.error(t("deleteFailed"))
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   const handleDelete = () => {
-    if (!editing) return
+    if (!editing || deleting) return
     if (!confirmingDelete) {
       setConfirmingDelete(true)
       return
@@ -219,18 +236,11 @@ export function WorkspaceManageDialog({ open, onOpenChange }: Props) {
     // Removing a workspace is not the same decision as destroying the
     // conversations that were in it, so the confirming state asks which one
     // this is instead of assuming the destructive reading.
-    deleteProject(editing.id, "detach")
-    setEditingId(null)
-    setConfirmingDelete(false)
-    toast.success(t("detached"))
+    void removeWorkspace("detach")
   }
 
   const handleDeleteWithData = () => {
-    if (!editing) return
-    deleteProject(editing.id, "delete-data")
-    setEditingId(null)
-    setConfirmingDelete(false)
-    toast.success(t("deleted"))
+    void removeWorkspace("delete-data")
   }
 
   return (
@@ -505,6 +515,7 @@ export function WorkspaceManageDialog({ open, onOpenChange }: Props) {
                       variant={confirmingDelete ? "destructive" : "ghost"}
                       size="sm"
                       onClick={handleDelete}
+                      disabled={deleting}
                       className="gap-1"
                       data-testid="workspace-delete"
                     >
@@ -518,6 +529,7 @@ export function WorkspaceManageDialog({ open, onOpenChange }: Props) {
                         size="sm"
                         className="gap-1"
                         onClick={handleDeleteWithData}
+                        disabled={deleting}
                         data-testid="workspace-delete-data"
                       >
                         {t("confirmDelete")}

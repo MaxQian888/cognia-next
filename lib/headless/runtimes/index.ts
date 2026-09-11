@@ -65,6 +65,10 @@
  *
  * ## Deliberately NOT registered (lifecycle owned elsewhere or UI-only)
  *
+ * - renderer `GatewayProvider` — desktop-only settings/vault projection and
+ *   account-generation event filtering. Rust owns gateway lock/switch/vault
+ *   invalidation even without a renderer; the headless gateway owns its own
+ *   host projection and never mounts this account-scoped UI bridge.
  * - `sandbox-session-runtime` — owns only immutable in-memory placement refs.
  *   Plugin deactivation drains existing E2B owners; the registered
  *   `plugin-runtime` teardown emits `APP_CLOSING` and force-disposes active and
@@ -102,6 +106,12 @@
  * - `sites-preview` / `sites-operation-recovery` — Sites uses a visible native terminal,
  *   the singleton embedded webview, and the host-local credential keyring. Provider
  *   reconciliation is deliberately initiated only by the owning desktop account.
+ * - `ClaudeChatRuntimeProvider` — owns renderer chat projections, mounted-pane
+ *   decisions and UI command dispatch. Headless run/capture and room runtimes
+ *   own their event streams independently.
+ * - `session-focus-initializer` — migrates legacy Inbox preferences into the
+ *   renderer account's canonical session list/read state and tracks UI focus.
+ *   Headless hosts do not own a renderer focus or conversation list lifecycle.
  * - `session-peer-runtime` — reachability is defined by renderer-open conversation panes
  *   and delivery appends into their live chat slices. Headless sessions are independently
  *   addressed through the brain transport and do not share this UI-local presence model.

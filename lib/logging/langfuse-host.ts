@@ -36,7 +36,7 @@ export interface LangfuseTraceIngestResult {
 
 /** Store account-scoped credentials without ever reading the secret back. */
 export function setLangfuseCredentials(input: LangfuseCredentialsInput): Promise<void> {
-  return transport.call<void>("langfuse_credentials_set", input)
+  return transport.call<void>("langfuse_credentials_set", { ...input })
 }
 
 export function getLangfuseCredentialsStatus(): Promise<LangfuseCredentialsStatus> {

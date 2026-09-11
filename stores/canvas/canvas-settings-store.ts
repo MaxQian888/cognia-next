@@ -3,6 +3,7 @@
  * Uses types from @/types/canvas/settings
  */
 
+import type { editor as MonacoEditor } from "monaco-editor"
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import { persistLocalStorage } from "@/stores/persist-storage"
@@ -25,7 +26,7 @@ interface CanvasSettingsState {
   updateSettings: (updates: Partial<CanvasSettings>) => string[]
   resetSettings: () => void
   resetSection: (section: keyof CanvasSettings) => void
-  getEditorOptions: () => Record<string, unknown>
+  getEditorOptions: () => MonacoEditor.IStandaloneEditorConstructionOptions
 }
 
 export const useCanvasSettingsStore = create<CanvasSettingsState>()(
@@ -84,7 +85,7 @@ export const useCanvasSettingsStore = create<CanvasSettingsState>()(
 
       getEditorOptions: () => {
         const { editor, accessibility } = get().settings
-        const options: Record<string, unknown> = {
+        const options: MonacoEditor.IStandaloneEditorConstructionOptions = {
           fontSize: editor.fontSize,
           fontFamily: editor.fontFamily,
           fontLigatures: editor.fontLigatures,

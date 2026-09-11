@@ -40,10 +40,11 @@ test.describe("tauri: Codex Reuse adopt", () => {
   })
 
   test("synthetic discovered credential is adoptable into the codex vault", async ({ page }) => {
+    await page.goto("/settings?section=subscription&subTab=accounts")
     await setCodexDiscoveryOverride(page, SYNTHETIC_DISCOVERED)
-    await page.goto("/settings?section=subscription&subTab=codex")
 
-    await page.getByRole("button", { name: "Add account" }).first().click()
+    await page.getByRole("button", { name: "Add account", exact: true }).click()
+    await page.getByRole("menuitem", { name: "Codex", exact: true }).click()
 
     const dialog = page.getByRole("dialog", { name: /Sign in with Codex/i })
     await expect(dialog).toBeVisible({ timeout: 10_000 })
@@ -62,10 +63,11 @@ test.describe("tauri: Codex Reuse adopt", () => {
   })
 
   test("null discovery disables the Reuse path", async ({ page }) => {
+    await page.goto("/settings?section=subscription&subTab=accounts")
     await setCodexDiscoveryOverride(page, null)
-    await page.goto("/settings?section=subscription&subTab=codex")
 
-    await page.getByRole("button", { name: "Add account" }).first().click()
+    await page.getByRole("button", { name: "Add account", exact: true }).click()
+    await page.getByRole("menuitem", { name: "Codex", exact: true }).click()
 
     const dialog = page.getByRole("dialog", { name: /Sign in with Codex/i })
     await expect(dialog).toBeVisible({ timeout: 10_000 })

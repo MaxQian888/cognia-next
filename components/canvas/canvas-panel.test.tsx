@@ -115,7 +115,7 @@ jest.mock("next-themes", () => ({
 // (keyboard event listeners, async action dispatching). Stub the surface used.
 // Mutable so a test can put the panel into a degraded tier (mock-prefixed to
 // satisfy jest's out-of-scope factory rule).
-const mockPerformanceProfile = {
+const mockPerformanceProfile: { current: import("@/lib/canvas/utils").CanvasPerformanceProfile } = {
   current: {
     mode: "standard" as "standard" | "large" | "very-large",
     lineCount: 10,

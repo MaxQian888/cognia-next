@@ -41,7 +41,7 @@ describe("diagnostic open-settings targets", () => {
       "squads",
       "plugins",
       "network",
-      "remote-hosts",
+      "connectivity",
       "subagents",
       "agent-modes",
     ]

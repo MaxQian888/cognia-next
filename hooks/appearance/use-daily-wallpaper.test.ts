@@ -9,7 +9,7 @@ import {
 } from "@/types/appearance/daily-wallpaper"
 import type { Wallpaper } from "@/types/appearance"
 
-const setBackground = jest.fn(async () => {})
+const setBackground = jest.fn(async (_patch: Partial<BackgroundSettings>) => {})
 const addWallpaper = jest.fn(async () => {})
 const deleteWallpaper = jest.fn(async () => {})
 
@@ -38,15 +38,26 @@ jest.mock("@/stores/settings", () => {
 jest.mock("next-intl", () => ({ useLocale: () => "en" }))
 
 const fetchDailyWallpaper = jest.fn()
-const selectExpiredDailyWallpapers = jest.fn(() => [] as Wallpaper[])
+const selectExpiredDailyWallpapers = jest.fn(
+  (
+    ..._args: Parameters<
+      typeof import("@/lib/appearance/daily-wallpaper/fetch-daily-wallpaper").selectExpiredDailyWallpapers
+    >
+  ) => [] as Wallpaper[]
+)
 jest.mock("@/lib/appearance/daily-wallpaper/fetch-daily-wallpaper", () => ({
   fetchDailyWallpaper: (...args: unknown[]) => fetchDailyWallpaper(...args),
-  selectExpiredDailyWallpapers: (...args: unknown[]) => selectExpiredDailyWallpapers(...args),
+  selectExpiredDailyWallpapers: (...args: Parameters<typeof selectExpiredDailyWallpapers>) =>
+    selectExpiredDailyWallpapers(...args),
 }))
 
-const deleteImage = jest.fn(async () => {})
+const deleteImage = jest.fn(
+  async (
+    ..._args: Parameters<typeof import("@/lib/appearance/wallpaper-storage").deleteImage>
+  ) => {}
+)
 jest.mock("@/lib/appearance/wallpaper-storage", () => ({
-  deleteImage: (...args: unknown[]) => deleteImage(...args),
+  deleteImage: (...args: Parameters<typeof deleteImage>) => deleteImage(...args),
 }))
 
 let metered = false

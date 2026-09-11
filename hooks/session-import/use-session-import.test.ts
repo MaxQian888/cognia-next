@@ -27,7 +27,12 @@ function deps(over: Parameters<typeof useSessionImport>[0] = {}) {
     resolveScanInput: jest.fn(async () => input),
     scanAllSources: jest.fn(async () => ({ summaries: [summary("a"), summary("b")], errors: [] })),
     listSessionsForSource: jest.fn(async () => [summary("a")]),
-    importSessions: jest.fn(async () => ({ lossBySource: {}, sessions: 2, messages: 6 })),
+    importSessions: jest.fn(async () => ({
+      lossBySource: {},
+      details: [],
+      sessions: 2,
+      messages: 6,
+    })),
     pick: jest.fn(async () => [{ name: "a.jsonl", path: "/p/a.jsonl", content: "{}" }]),
     detect: jest.fn(() => ["codex"]),
     ...over,
@@ -95,7 +100,7 @@ describe("useSessionImport", () => {
         captured = opts?.signal
         opts?.onProgress?.({ phase: "parsing", done: 1, total: 2 })
         await gate
-        return { lossBySource: {}, sessions: 1, messages: 3 }
+        return { lossBySource: {}, details: [], sessions: 1, messages: 3 }
       }),
     })
     const { result } = renderHook(() => useSessionImport(d))
@@ -140,7 +145,7 @@ describe("useSessionImport", () => {
       importSessions: jest.fn(async (_refs, _in, _pid, opts) => {
         captured = opts?.signal
         await gate
-        return { lossBySource: {}, sessions: 0, messages: 0 }
+        return { lossBySource: {}, details: [], sessions: 0, messages: 0 }
       }),
     })
     const { result } = renderHook(() => useSessionImport(d))

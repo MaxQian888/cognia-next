@@ -1,3 +1,4 @@
+/// <reference types="../../../browser-extension/node_modules/@types/chrome" />
 /**
  * Playwright fixtures for the Cognia Browser Companion.
  *

@@ -36,6 +36,7 @@ export const REASON_CODE_TO_DIAGNOSTIC: Readonly<
   extension_unsupported: "extensionUnsupported",
   session_resolution_failed: "sessionResolutionFailed",
   permission_denied: "permissionDenied",
+  managed_policy_refused: "managedPolicyRefused",
   execution_failed: "executionFailed",
   strict_failure: "strictFailure",
   fallback_to_builtin: "fallbackToBuiltin",

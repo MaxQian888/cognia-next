@@ -171,9 +171,9 @@ function makeTransport(opts: Partial<RemoteTransportOptions> = {}, store?: FakeQ
 
 describe("RemoteTransport happy path", () => {
   it("uses the injected platform sender instead of direct WebView fetch", async () => {
-    const platformFetch = jest.fn(async () => okResponse())
+    const platformFetch = jest.fn(async () => new Response("{}", { status: 200 }))
     const directFetch = withFetch(() => Promise.reject(new Error("direct fetch must not run")))
-    const transport = makeTransport({ fetchImpl: platformFetch as typeof fetch })
+    const transport = makeTransport({ fetchImpl: platformFetch })
 
     transport.log(makeEntry())
     await transport.flush()

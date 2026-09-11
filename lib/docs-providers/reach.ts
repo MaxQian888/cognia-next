@@ -62,15 +62,15 @@ function blocked(block: DocsProviderBlock): DocsProviderReach {
 /**
  * The shell each profile actually runs in.
  *
- * Both companion profiles resolve to `browser` because that is the webview
+ * Both companion profiles resolve to their web shell because that is the webview
  * their provider code would execute in. Their host runs something else
  * entirely, which is exactly what `runs-on-host` is there to say.
  */
 const PLATFORM_BY_PROFILE: Readonly<Record<HostProfile, Platform>> = Object.freeze({
   desktop: "tauri",
   "mobile-companion": "mobile",
-  "cloud-companion": "browser",
-  "web-standalone": "browser",
+  "cloud-companion": "web",
+  "web-standalone": "web",
   headless: "headless",
 })
 

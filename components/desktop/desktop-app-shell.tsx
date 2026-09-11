@@ -62,7 +62,6 @@ import { loggers } from "@cognia/logging"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { useUIStore } from "@/stores/ui/ui-store"
 import { DEFAULT_SIDEBAR_SIDE } from "@/types/shell/sidebar"
-import { AgentExecutionHandleProvider } from "@/components/providers/agent-execution-handle-provider"
 import { FinishSetupBar } from "@/components/onboarding/finish-setup-bar"
 import { isShellBypassRoute } from "@/lib/shell/bypass-routes"
 import { usesCompactShell } from "@/lib/shell/compact-shell"
@@ -234,7 +233,7 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
             {sidebarSide === "left" ? guildRail : null}
             <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
               <div data-find-scope className="flex min-h-0 flex-1 overflow-hidden">
-                <AgentExecutionHandleProvider>{children}</AgentExecutionHandleProvider>
+                {children}
               </div>
               <TerminalDockRegion slot="bottom" />
             </div>

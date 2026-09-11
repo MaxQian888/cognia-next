@@ -249,6 +249,7 @@ jest.mock("@/hooks/use-runtime-snapshot", () => ({
 }))
 
 jest.mock("@/lib/db/session-state", () => ({
+  getSessionState: jest.fn().mockResolvedValue(undefined),
   markSessionRead: jest.fn().mockResolvedValue(undefined),
 }))
 
@@ -790,6 +791,7 @@ test("pane callbacks dispatch by session kind (team → useTeamChat, direct → 
     props.editResend("m1", "edited", "t-1")
   })
   expect(teamChatMock.send).toHaveBeenCalledWith("hi", {
+    templateRun: undefined,
     sessionId: "t-1",
     attachmentManifest: manifest,
     webSearchContext: turnMetadata.webSearchContext,
@@ -818,15 +820,7 @@ test("pane callbacks dispatch by session kind (team → useTeamChat, direct → 
   expect(directChatMock.flushSteer).toHaveBeenCalledWith("d-1")
   expect(directChatMock.regenerate).toHaveBeenCalledWith("d-1")
   expect(directChatMock.editAndResend).toHaveBeenCalledWith("m2", "edited", "d-1")
-  // Approval routing: sub-session ids go to the team hook, plain ids direct.
-  const teamApproval = { sessionId: "t-1::char::alice::turn", requestId: "r1" }
-  const directApproval = { sessionId: "d-1", requestId: "r2" }
-  await act(async () => {
-    props.respondToApproval(teamApproval, "allow")
-    props.respondToApproval(directApproval, "deny")
-  })
-  expect(teamChatMock.respondToApproval).toHaveBeenCalledWith(teamApproval, "allow")
-  expect(directChatMock.respondToApproval).toHaveBeenCalledWith(directApproval, "deny")
+  expect(props.respondToApproval).toBeUndefined()
 })
 
 // The welcome page has no session yet, so a starter card must create one before
@@ -937,7 +931,7 @@ test("starter card routes to the team hook for an active team session", async ()
   expect(directChatMock.send).not.toHaveBeenCalled()
 })
 
-test("resumeAfterPlanApproval is a guarded no-op for team sessions", async () => {
+test("leaves plan approval capability to the shared pane", async () => {
   sessionsRef.current = [
     {
       id: "t-1",
@@ -958,9 +952,7 @@ test("resumeAfterPlanApproval is a guarded no-op for team sessions", async () =>
   const props = paneGroupPropsLog[paneGroupPropsLog.length - 1] as {
     onResumeAfterPlanApproval: (prompt: string, mode: string, sid: string) => Promise<void>
   }
-  await act(async () => {
-    await props.onResumeAfterPlanApproval("resume", "acceptEdits", "t-1")
-  })
+  expect(props.onResumeAfterPlanApproval).toBeUndefined()
   expect(directChatMock.send).not.toHaveBeenCalled()
 })
 
@@ -1096,3 +1088,72 @@ test("per-row onTogglePinned routes through bulkSetPinned with a single-id list"
   })
   expect(bulkSetPinned).toHaveBeenCalledWith(["s-1"], true)
 })
+
+it("leaves platform read capture to the shared pane and retains local session reads", async () => {
+  const { markSessionRead } = jest.requireMock("@/lib/db/session-state") as {
+    markSessionRead: jest.Mock
+  }
+  activeSessionId = "im"
+  sessionsRef.current = [
+    {
+      id: "im",
+      title: "Platform",
+      kind: "direct",
+      createdAt: 0,
+      updatedAt: 0,
+      platformBinding: {
+        platform: "slack",
+        adapterId: "a",
+        conversationKey: "slack:a:k",
+        conversationRef: { platform: "slack", adapterId: "a" },
+      },
+    } as ChatSession,
+  ]
+  const view = render(<DesktopChatWorkspace />)
+  await act(async () => {})
+  expect(markSessionRead).not.toHaveBeenCalled()
+  activeSessionId = "local"
+  sessionsRef.current = [
+    { id: "local", title: "Local", kind: "direct", createdAt: 0, updatedAt: 0 } as ChatSession,
+  ]
+  view.rerender(<DesktopChatWorkspace />)
+  await waitFor(() => expect(markSessionRead).toHaveBeenCalledWith("local"))
+})
+
+test.each([false, true])(
+  "hero team send normalizes an absent template for existing=%s",
+  async (existing) => {
+    selectedGuild = { kind: "team", teamId: "team-x" }
+    selectedGuildEpoch = 6
+    activeSessionId = existing ? "t-1" : null
+    sessionsRef.current = existing
+      ? [
+          {
+            id: "t-1",
+            title: "Team",
+            kind: "team",
+            teamId: "team-x",
+            createdAt: 0,
+            updatedAt: 0,
+          } as ChatSession,
+        ]
+      : []
+    create.mockResolvedValue({ id: "new-team" } as ChatSession)
+    await act(async () => {
+      render(<DesktopChatWorkspace />)
+    })
+    const props = paneGroupPropsLog.at(-1) as {
+      onHeroSend: (text: string, manifest: undefined, templateRun: null) => Promise<void>
+    }
+    await act(async () => {
+      await props.onHeroSend("hello", undefined, null)
+    })
+    expect(teamChatMock.send).toHaveBeenCalledWith(
+      "hello",
+      expect.objectContaining({
+        sessionId: existing ? "t-1" : "new-team",
+        templateRun: undefined,
+      })
+    )
+  }
+)

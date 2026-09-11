@@ -115,6 +115,64 @@ describe("DiagnosticCard", () => {
     expect(onDismiss).toHaveBeenCalledTimes(1)
   })
 
+  /**
+   * `detail` is documented as the "show raw" disclosure and had no renderer at
+   * all: five producers in `lib/diagnostics/to-diagnostic.ts` were attaching a
+   * stack trace that nothing could ever display.
+   */
+  it("discloses the raw detail, collapsed until asked for", () => {
+    render(
+      <DiagnosticCard
+        diagnostic={diag("workspaceBusy", {
+          message: "Another turn is still using it.",
+          detail: "pipeline workspace is already active",
+        })}
+      />
+    )
+    // Collapsed: the payload is evidence, not the headline.
+    expect(screen.queryByTestId("diagnostic-card-detail")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("diagnostic-card-detail-toggle"))
+    expect(screen.getByTestId("diagnostic-card-detail")).toHaveTextContent(
+      "pipeline workspace is already active"
+    )
+
+    fireEvent.click(screen.getByTestId("diagnostic-card-detail-toggle"))
+    expect(screen.queryByTestId("diagnostic-card-detail")).not.toBeInTheDocument()
+  })
+
+  it("offers no disclosure when the detail only repeats the message", () => {
+    render(<DiagnosticCard diagnostic={diag("serverError", { message: "boom", detail: "boom" })} />)
+    expect(screen.queryByTestId("diagnostic-card-detail-toggle")).not.toBeInTheDocument()
+  })
+
+  it("offers no disclosure when there is no detail at all", () => {
+    render(<DiagnosticCard diagnostic={diag("serverError", { message: "boom" })} />)
+    expect(screen.queryByTestId("diagnostic-card-detail-toggle")).not.toBeInTheDocument()
+  })
+
+  /**
+   * The busy refusal puts the translated sentence in `message` so the legacy
+   * `errorMessage` mirror still feeds the mobile toast and the OS notification.
+   * On the card that same sentence is already the code's hint, and printing it
+   * twice reads as a rendering bug.
+   */
+  it("does not print the message twice when it already is the hint", () => {
+    const hint =
+      "Another turn is still using this conversation's working copy. Wait for it to finish, or send from the device that is running it."
+    render(<DiagnosticCard diagnostic={diag("workspaceBusy", { message: hint })} />)
+    expect(screen.getAllByText(hint)).toHaveLength(1)
+  })
+
+  it("names the busy workspace without telling the reader to rebind it", () => {
+    // The whole point of the code: `workspaceUnavailable`'s hint sends the
+    // reader to bind a folder, which cannot help a lease that is merely held.
+    render(<DiagnosticCard diagnostic={diag("workspaceBusy")} />)
+    expect(screen.getByTestId("diagnostic-card")).toHaveAttribute("data-code", "workspaceBusy")
+    expect(screen.getByText("Working copy in use")).toBeInTheDocument()
+    expect(screen.queryByText(/bind it to a folder/i)).not.toBeInTheDocument()
+  })
+
   it("still parses the raw message so its stack stays navigable", () => {
     render(
       <DiagnosticCard

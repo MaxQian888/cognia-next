@@ -16,6 +16,10 @@ const meta = {
     filter: {},
     onFilterChange: fn(),
     facets: {
+      projectMemoryKinds: [],
+      projectIds: [],
+      branches: [],
+      freshness: [],
       types: [
         { value: "semantic", count: 24 },
         { value: "episodic", count: 12 },
@@ -68,6 +72,15 @@ export const Filtered: Story = {
 export const NoFacets: Story = {
   args: {
     view: "conflicts",
-    facets: { types: [], scopes: [], provenances: [], tags: [] },
+    facets: {
+      projectMemoryKinds: [],
+      projectIds: [],
+      branches: [],
+      freshness: [],
+      types: [],
+      scopes: [],
+      provenances: [],
+      tags: [],
+    },
   },
 }

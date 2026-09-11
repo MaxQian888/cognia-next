@@ -20,7 +20,9 @@ function entry(overrides: Partial<StructuredLogEntry> = {}): StructuredLogEntry 
 
 describe("OTLP Logs transport", () => {
   it("exports ordinary structured logs and excludes synthetic Agent Trace entries", async () => {
-    const fetchImpl = jest.fn(async () => new Response("", { status: 200 }))
+    const fetchImpl = jest.fn(
+      async (..._args: Parameters<typeof fetch>) => new Response("", { status: 200 })
+    )
     const transport = new OtlpLogTransport({
       endpoint: "https://collector.example/v1/logs",
       resource: { serviceName: "cognia-renderer" },
@@ -59,7 +61,9 @@ describe("OTLP Logs transport", () => {
   })
 
   it("rejects a leaking entry before it reaches the sender", async () => {
-    const fetchImpl = jest.fn(async () => new Response("", { status: 200 }))
+    const fetchImpl = jest.fn(
+      async (..._args: Parameters<typeof fetch>) => new Response("", { status: 200 })
+    )
     const transport = new OtlpLogTransport({
       endpoint: "https://collector.example/v1/logs",
       flushInterval: 0,
@@ -156,7 +160,9 @@ describe("OTLP Logs transport", () => {
       new TextEncoder().encode(JSON.stringify(structuredLogEntriesToOtlpLogs(entries, resource)))
         .byteLength
     const splitLimit = Math.floor((bytes([first]) + bytes([first, second])) / 2)
-    const fetchImpl = jest.fn(async () => new Response("", { status: 200 }))
+    const fetchImpl = jest.fn(
+      async (..._args: Parameters<typeof fetch>) => new Response("", { status: 200 })
+    )
     const splitTransport = new OtlpLogTransport({
       endpoint: "https://collector.example/v1/logs",
       resource,
@@ -274,7 +280,7 @@ describe("OTLP Logs transport", () => {
 describe("withdrawn consent", () => {
   it("abandons an in-flight batch when discardPending fires mid-retry", async () => {
     let releaseFirstAttempt: (() => void) | undefined
-    const fetchImpl = jest.fn(async () => {
+    const fetchImpl = jest.fn(async (..._args: Parameters<typeof fetch>) => {
       // Hold the transport inside its retry loop until the toggle goes off.
       await new Promise<void>((resolve) => {
         releaseFirstAttempt = resolve

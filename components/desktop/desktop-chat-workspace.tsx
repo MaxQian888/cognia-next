@@ -26,7 +26,6 @@ import { toast } from "sonner"
 
 import { ChatPaneGroup } from "@/components/chat/chat-pane-group"
 import { Button } from "@/components/ui/button"
-import type { PlanResumeMode } from "@/components/agent/plan/plan-approval-card"
 import { CharacterPicker } from "@/components/chat/character-picker"
 import { NewChatExecutionPicker } from "@/components/chat/new-chat-execution-picker"
 import { useNewChatExecution } from "@/hooks/chat/use-new-chat-execution"
@@ -38,15 +37,9 @@ import { WorkspaceTrustGate } from "@/components/chat/workspace-trust-gate"
 import type { ComposerHandle, ComposerTurnMetadata } from "@/components/chat/composer"
 import { turnMetadataSendOptions } from "@/lib/chat/turn-metadata"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
-import type {
-  ApprovalDecision,
-  Character,
-  PendingApproval,
-  SendContent,
-} from "@cognia/agent-config-types"
+import type { Character, SendContent } from "@cognia/agent-config-types"
 import { characterChatTitle } from "@/lib/chat/character-chat-title"
 import { onComposerMentionRequest } from "@/lib/chat/composer-mention-request"
-import { decodeSubSession } from "@/lib/claude/team-session-id"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
 import { useChatStore } from "@/stores/chat"
 import type { ChatTemplateRun } from "@/lib/chat/template/run"
@@ -54,7 +47,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_SIDEBAR_SIDE } from "@/types/shell/sidebar"
 import { useUIStore } from "@/stores/ui"
 import { openSessionForReading } from "@/lib/chat/unread-marker"
-import { updateSession, setSessionOrder } from "@/lib/db/sessions"
+import { setSessionOrder } from "@/lib/db/sessions"
 import { guildFromSession } from "@/lib/claude/guild"
 import { resolveConversationGroupBy } from "@/lib/chat/conversation-grouping"
 import {
@@ -182,15 +175,18 @@ export function DesktopChatWorkspace() {
     void loadSettings()
   }, [loadSettings])
 
+  // IM panes own read capture on every host, including embedded surfaces.
+  const shellReadSessionId =
+    activeSession && !activeSession.platformBinding ? activeSession.id : null
   useEffect(() => {
-    if (!activeSessionId) return
-    void openSessionForReading(activeSessionId).catch((err) => {
+    if (!shellReadSessionId) return
+    void openSessionForReading(shellReadSessionId).catch((err) => {
       log.warn("markSessionRead failed", {
-        sessionId: activeSessionId,
+        sessionId: shellReadSessionId,
         error: err instanceof Error ? err.message : String(err),
       })
     })
-  }, [activeSessionId])
+  }, [shellReadSessionId])
 
   // Keep the active chat session in lockstep with the selected guild. The two
   // live in separate stores (guild in useUIStore, session in useChatStore), so
@@ -381,11 +377,9 @@ export function DesktopChatWorkspace() {
       turnMetadata?: ComposerTurnMetadata
     ) => {
       setTrustPromptNonce((n) => n + 1)
-      // Team turns take no `templateRun`: `use-team-chat` writes its own user
-      // message and has no metadata channel for it. A team composer simply
-      // offers no re-run, rather than recording something nothing reads.
       return isTeamSessionId(sid)
         ? teamChat.send(content, {
+            templateRun: templateRun ?? undefined,
             sessionId: sid,
             attachmentManifest: manifest,
             ...turnMetadataSendOptions(turnMetadata),
@@ -429,18 +423,6 @@ export function DesktopChatWorkspace() {
   // then written authoritatively and AWAITED before `send` — `send` resolves the
   // mode from the session row, not the store, so a stale row would run the resume
   // turn in `plan` mode. `skipUserAppend` injects the turn with no user bubble.
-  const resumeAfterPlanApproval = useCallback(
-    async (prompt: string, mode: PlanResumeMode, sid: string) => {
-      // Plan mode is a direct-chat surface (principled exclusion for teams).
-      if (isTeamSessionId(sid)) return
-      if (useChatStore.getState().activeSessionId === sid) {
-        useChatStore.getState().setPermissionMode(mode)
-      }
-      await updateSession(sid, { permissionMode: mode })
-      await directChat.send(prompt, undefined, { sessionId: sid, skipUserAppend: true })
-    },
-    [directChat, isTeamSessionId]
-  )
 
   const handleChannelNewDirect = useCallback(() => {
     void handleNewDirect()
@@ -552,6 +534,7 @@ export function DesktopChatWorkspace() {
       if (active) {
         if (isTeamSessionId(active)) {
           await teamChat.send(content, {
+            templateRun: templateRun ?? undefined,
             sessionId: active,
             attachmentManifest: manifest,
             ...turnMetadataSendOptions(turnMetadata),
@@ -572,6 +555,7 @@ export function DesktopChatWorkspace() {
       if (selectedGuild.kind === "team") {
         const s = await handleNewTeamConversation(selectedGuild.teamId)
         await teamChat.send(content, {
+          templateRun: templateRun ?? undefined,
           sessionId: s.id,
           attachmentManifest: manifest,
           ...turnMetadataSendOptions(turnMetadata),
@@ -633,16 +617,6 @@ export function DesktopChatWorkspace() {
       setSelectedGuild({ kind: "dm" })
     },
     [create, newChatExecution, select, setSelectedGuild, tMembers]
-  )
-
-  // Inline pane gates carry approvals for both kinds; team approvals arrive
-  // tagged with the member sub-session id, so route them to useTeamChat.
-  const handleApprovalRespond = useCallback(
-    (approval: PendingApproval, decision: ApprovalDecision) =>
-      decodeSubSession(approval.sessionId) !== null
-        ? teamChat.respondToApproval(approval, decision)
-        : directChat.respondToApproval(approval, decision),
-    [teamChat, directChat]
   )
 
   // The conversation sidebar takes the same edge as the nav rail
@@ -721,7 +695,6 @@ export function DesktopChatWorkspace() {
                     compact={directChat.compact}
                     setModel={directChat.setModel}
                     resetRuntime={directChat.resetRuntime}
-                    respondToApproval={handleApprovalRespond}
                     onCreate={handleCreate}
                     onUseSample={handleUseSample}
                     onHeroSend={handleFirstTurn}
@@ -789,7 +762,6 @@ export function DesktopChatWorkspace() {
                       ) : null
                     }
                     composerDisabled={composerDisabled}
-                    onResumeAfterPlanApproval={resumeAfterPlanApproval}
                   />
                 </>
               )}

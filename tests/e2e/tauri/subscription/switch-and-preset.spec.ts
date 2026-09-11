@@ -2,7 +2,7 @@
  * Tauri E2E: multi-account lifecycle + provider preset CRUD on the Anthropic tab.
  *
  * Seeds two Anthropic accounts directly via `subscription_save_account`, then
- * drives AccountList switch/remove actions + the PresetPicker dialog to verify
+ * drives Account Center switch/remove actions + the PresetPicker dialog to verify
  * active-pointer changes, credential deletion, and preset persistence through
  * the keyring-backed vault.
  */
@@ -36,13 +36,13 @@ test.describe("tauri: Anthropic account lifecycle + preset", () => {
     })
     await setActiveAccountId(page, "anthropic", idFirst)
 
-    await page.goto("/settings?section=subscription&subTab=anthropic")
+    await page.goto("/settings?section=subscription&subTab=accounts")
 
-    // Both account rows render. Activate the second account through the
-    // accessible radio-style action owned by that row.
-    const secondRow = page.locator("li").filter({ hasText: "e2e-second@example.com" })
+    // Selecting a row opens its detail panel; activation is a separate action.
+    const secondRow = page.getByTestId(`account-center-row-anthropic-${idSecond}`)
     await expect(secondRow).toBeVisible({ timeout: 10_000 })
-    await secondRow.getByRole("button", { name: "Set active" }).click()
+    await secondRow.click()
+    await page.getByRole("button", { name: "Activate now", exact: true }).click()
 
     // The set-active call is async — wait for the IPC roundtrip to flip the
     // pointer. listAccountsForProvider is consistent with whatever Rust has.
@@ -60,12 +60,13 @@ test.describe("tauri: Anthropic account lifecycle + preset", () => {
     })
     await setActiveAccountId(page, "anthropic", id)
 
-    await page.goto("/settings?section=subscription&subTab=anthropic")
+    await page.goto("/settings?section=subscription&subTab=accounts")
 
-    const accountRow = page.locator("li").filter({ hasText: "e2e-remove@example.com" })
+    const accountRow = page.getByTestId(`account-center-row-anthropic-${id}`)
     await expect(accountRow).toBeVisible({ timeout: 10_000 })
-    await accountRow.locator('button[aria-haspopup="menu"]').click()
-    await page.getByRole("menuitem", { name: "Remove" }).click()
+    await accountRow.click()
+    await page.getByRole("button", { name: "More account actions" }).click()
+    await page.getByRole("menuitem", { name: "Remove from Cognia" }).click()
 
     const dialog = page.getByRole("dialog", { name: "Remove this account?" })
     await expect(dialog).toBeVisible()
@@ -78,9 +79,7 @@ test.describe("tauri: Anthropic account lifecycle + preset", () => {
     await expect
       .poll(async () => await getActiveAccountId(page, "anthropic"), { timeout: 10_000 })
       .toBeNull()
-    await expect(
-      page.getByText("No accounts yet. Add one to start using this provider.")
-    ).toBeVisible()
+    await expect(page.getByText("No accounts match this filter.")).toBeVisible()
   })
 
   test("preset CRUD round-trips through the keyring vault", async ({ page }) => {
@@ -90,7 +89,7 @@ test.describe("tauri: Anthropic account lifecycle + preset", () => {
     })
     await setActiveAccountId(page, "anthropic", id)
 
-    await page.goto("/settings?section=subscription&subTab=anthropic")
+    await page.goto("/settings?section=subscription&subTab=claude")
 
     // Add preset.
     await page.getByRole("button", { name: /Add preset/i }).click()
@@ -99,17 +98,23 @@ test.describe("tauri: Anthropic account lifecycle + preset", () => {
 
     await editor.getByLabel(/^Label$/i).fill("E2E Bedrock")
     await editor.getByLabel(/Base URL/i).fill("https://bedrock-runtime.e2e.example.com/v1")
-    await editor.getByRole("button", { name: /^Save$/i }).click()
+    await editor.getByRole("button", { name: /^Save preset$/i }).click()
     await expect(editor).toBeHidden({ timeout: 10_000 })
 
-    // Assert via transport that the preset landed.
-    const saved = await readProviderPreset(page, "anthropic")
-    expect(saved).not.toBeNull()
-    expect(saved!.label).toBe("E2E Bedrock")
-    expect(saved!.baseUrl).toBe("https://bedrock-runtime.e2e.example.com/v1")
+    // New library entries become effective only after the explicit default action.
+    await page.getByRole("button", { name: "Set default", exact: true }).click()
+    await expect
+      .poll(async () => await readProviderPreset(page, "anthropic"), { timeout: 10_000 })
+      .toMatchObject({
+        label: "E2E Bedrock",
+        baseUrl: "https://bedrock-runtime.e2e.example.com/v1",
+      })
 
     // Remove preset.
     await page.getByRole("button", { name: /Remove preset/i }).click()
+    const confirmation = page.getByRole("alertdialog", { name: "Remove this preset?" })
+    await confirmation.getByRole("button", { name: "Remove preset", exact: true }).click()
+    await expect(confirmation).toBeHidden()
     await expect
       .poll(async () => await readProviderPreset(page, "anthropic"), { timeout: 10_000 })
       .toBeNull()

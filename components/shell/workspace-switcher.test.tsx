@@ -23,7 +23,12 @@ jest.mock("@/lib/db/trusted-workspaces", () => ({
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 // The switcher asks per command whether the host can be browsed, so the test
 // has to say which shell it is. `target: null` is a native execution host.
-const gateMock = jest.fn(() => ({ available: true, reason: null }))
+const gateMock = jest.fn(
+  (): import("@/hooks/workspace/use-workspace-command-gate").WorkspaceCommandGate => ({
+    available: true,
+    reason: null,
+  })
+)
 jest.mock("@/hooks/workspace/use-workspace-command-gate", () => ({
   useWorkspaceCommandGate: () => gateMock,
 }))

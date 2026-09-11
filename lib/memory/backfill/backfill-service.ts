@@ -93,7 +93,7 @@ function backfillDeps(): ProjectMiningBackfillDeps {
                 id: message.id,
                 role: message.role,
                 text: extractPlainText(message.parts),
-                parts: message.parts,
+                parts: Array.isArray(message.parts) ? message.parts : undefined,
               },
             ]
           : []
@@ -103,7 +103,10 @@ function backfillDeps(): ProjectMiningBackfillDeps {
       const jobs = await enqueueProjectMiningJobs({
         sessionId: session.id,
         projectId: session.projectId ?? "",
-        transcript,
+        transcript: transcript.map((message) => ({
+          ...message,
+          parts: Array.isArray(message.parts) ? message.parts : undefined,
+        })),
         transcriptRevision: session.transcriptRevision,
         scope: "workspace",
         characterId: session.characterId,

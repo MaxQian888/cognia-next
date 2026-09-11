@@ -100,6 +100,8 @@ import { CursorEffectLayer } from "@/components/appearance/cursor-effect-layer"
 import { CustomThemeApplier } from "@/lib/appearance/custom-theme-applier"
 import { PluginThemeApplier } from "@/lib/appearance/plugin-theme-applier"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
+import { AgentExecutionHandleProvider } from "@/components/providers/agent-execution-handle-provider"
+import { ClaudeChatRuntimeProvider } from "@/hooks/chat/use-claude-chat"
 import { dexieAdapter } from "@/lib/data-hooks/dexie-adapter"
 import { ExposeTestGlobals } from "@/lib/dev/expose-test-globals"
 import { PerfHud } from "@/lib/perf"
@@ -341,17 +343,21 @@ export default async function RootLayout({
                                                         "app" (see lib/appearance/custom-css/apply).
                                                         display:contents keeps it box-less but
                                                         still a valid @scope (#app) root. */}
-                                                              <div
-                                                                id="app"
-                                                                data-bg-target="global"
-                                                                className="contents"
-                                                              >
-                                                                <PlatformShell>
-                                                                  <SurfaceAvailabilityBoundary>
-                                                                    {children}
-                                                                  </SurfaceAvailabilityBoundary>
-                                                                </PlatformShell>
-                                                              </div>
+                                                              <AgentExecutionHandleProvider>
+                                                                <ClaudeChatRuntimeProvider>
+                                                                  <div
+                                                                    id="app"
+                                                                    data-bg-target="global"
+                                                                    className="contents"
+                                                                  >
+                                                                    <PlatformShell>
+                                                                      <SurfaceAvailabilityBoundary>
+                                                                        {children}
+                                                                      </SurfaceAvailabilityBoundary>
+                                                                    </PlatformShell>
+                                                                  </div>
+                                                                </ClaudeChatRuntimeProvider>
+                                                              </AgentExecutionHandleProvider>
                                                             </PlatformDesktopSources>
                                                           </WebCompanionBootProvider>
                                                         </CompanionBootProvider>

@@ -51,7 +51,7 @@ describe("DocsProviderNotice", () => {
 })
 
 describe("useDocsProviderReach", () => {
-  function Probe({ hosts }: { hosts: readonly ("tauri" | "browser" | "mobile")[] }) {
+  function Probe({ hosts }: { hosts: readonly ("tauri" | "web" | "mobile")[] }) {
     const reach = useDocsProviderReach({ hosts })
     return <span data-testid="probe">{reach.block ?? "available"}</span>
   }
@@ -64,7 +64,7 @@ describe("useDocsProviderReach", () => {
 
   it("clears once the provider covers the current host", () => {
     hostProfileMock.mockReturnValue("cloud-companion")
-    render(<Probe hosts={["tauri", "browser"]} />)
+    render(<Probe hosts={["tauri", "web"]} />)
     expect(screen.getByTestId("probe")).toHaveTextContent("available")
   })
 })

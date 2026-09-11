@@ -11,9 +11,13 @@ import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { useProjectStore } from "@/stores/project/project-store"
 import type { Project } from "@/types"
 
-const createSquad = jest.fn(async () => ({ id: "new" }))
+const createSquad = jest.fn(
+  async (..._args: Parameters<typeof import("@/lib/agent-team/create-squad").createSquad>) => ({
+    id: "new",
+  })
+)
 jest.mock("@/lib/agent-team/create-squad", () => ({
-  createSquad: (...a: unknown[]) => createSquad(...(a as [])),
+  createSquad: (...a: Parameters<typeof createSquad>) => createSquad(...a),
 }))
 
 beforeEach(() => {

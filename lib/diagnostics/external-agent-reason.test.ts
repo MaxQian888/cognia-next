@@ -24,6 +24,7 @@ const ALL_REASON_CODES: ExternalAgentBranchReasonCode[] = [
   "extension_unsupported",
   "session_resolution_failed",
   "permission_denied",
+  "managed_policy_refused",
   "execution_failed",
   "strict_failure",
   "fallback_to_builtin",

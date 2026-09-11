@@ -51,12 +51,6 @@ import { ArtifactDockToggle } from "@/components/artifacts/artifact-dock-toggle"
 import { CharacterPicker } from "@/components/chat/character-picker"
 import { GuildRail } from "@/components/shell/guild-rail"
 import { TeamMembersPanel } from "@/components/context-workbench/panels/team-members-panel"
-import { ToolApprovalDialog } from "@/components/chat/tool-approval-dialog"
-import { ExternalAgentElicitationDialog } from "@/components/agent/external-agent/elicitation-dialog"
-import {
-  useExternalElicitationStore,
-  useSessionPendingElicitation,
-} from "@/stores/agent/external-elicitation-store"
 import { CharacterHeader } from "@/components/mobile/shell/character-header"
 import { BackgroundRunsChip } from "@/components/chat/background-runs-chip"
 import { MobileWorkspaceChip } from "@/components/mobile/shell/mobile-workspace-chip"
@@ -98,10 +92,8 @@ import { useUIStore } from "@/stores/ui"
 import { whenSeeded } from "@/lib/db/schema"
 import { loadMobileUnread } from "@/lib/inbox/unread-count"
 import { openSessionForReading } from "@/lib/chat/unread-marker"
-import { updateSession } from "@/lib/db/sessions"
 import { listCharacters } from "@/lib/db/characters"
 import { getTeam } from "@/lib/db/teams"
-import type { PlanResumeMode } from "@/components/agent/plan/plan-approval-card"
 import { guildFromSession } from "@/lib/claude/guild"
 import { resolveConversationGroupBy } from "@/lib/chat/conversation-grouping"
 import {
@@ -114,7 +106,6 @@ import { useNewChatExecution } from "@/hooks/chat/use-new-chat-execution"
 import { loggers } from "@cognia/logging"
 import type { Character, SendContent, Team } from "@cognia/agent-config-types"
 import { onComposerMentionRequest } from "@/lib/chat/composer-mention-request"
-import { decodeSubSession } from "@/lib/claude/team-session-id"
 import { impact, notify } from "@/lib/capacitor/haptics"
 import { PerfCaptureShellStatus } from "@/components/performance/perf-capture-shell-status"
 
@@ -155,8 +146,6 @@ export function AppShellMobile() {
 
   const errorMessage = useChatStore((s) => s.errorMessage)
   const chatStatus = useChatStore((s) => s.status)
-  const pendingApproval = useChatStore((s) => s.pendingApprovals[0] ?? null)
-  const pendingElicitation = useSessionPendingElicitation(activeSessionId)
 
   const loadSettings = useSettingsStore((s) => s.load)
   const selectedGuild = useUIStore((s) => s.selectedGuild)
@@ -216,15 +205,19 @@ export function AppShellMobile() {
     void loadSettings()
   }, [loadSettings])
 
+  // IM panes own read capture on every host, including embedded surfaces.
+  const shellReadSessionId = sessions.find(
+    (session) => session.id === activeSessionId && !session.platformBinding
+  )?.id
   useEffect(() => {
-    if (!activeSessionId) return
-    void openSessionForReading(activeSessionId).catch((err) => {
+    if (!shellReadSessionId) return
+    void openSessionForReading(shellReadSessionId).catch((err) => {
       log.warn("markSessionRead failed", {
-        sessionId: activeSessionId,
+        sessionId: shellReadSessionId,
         error: err instanceof Error ? err.message : String(err),
       })
     })
-  }, [activeSessionId])
+  }, [shellReadSessionId])
 
   // Auto-select most recent session matching the current guild.
   useEffect(() => {
@@ -336,6 +329,7 @@ export function AppShellMobile() {
       try {
         if (isTeamSession) {
           await teamChat.send(content, {
+            templateRun: templateRun ?? undefined,
             attachmentManifest: manifest,
             ...turnMetadataSendOptions(turnMetadata),
           })
@@ -399,34 +393,6 @@ export function AppShellMobile() {
     },
     [create, select, setSelectedGuild, directChat, handleSend, newChatExecution]
   )
-
-  // Resume the turn after a plan is approved in the mobile PlanApprovalDock.
-  // Mirrors `desktop-chat-workspace.resumeAfterPlanApproval`: set the store
-  // mode first (so the composer's persist effect can't clobber the row back
-  // to `plan`), write the session row authoritatively and AWAIT it before
-  // `send` (which resolves the mode from the row), and inject the resume turn
-  // with no user bubble. Plan mode is a direct-chat surface, so teams are
-  // excluded — the dock only renders here for the active bound session, so the
-  // active id IS the plan's session.
-  const resumeAfterPlanApproval = useCallback(
-    async (prompt: string, mode: PlanResumeMode) => {
-      const sid = activeSessionId
-      if (!sid || isTeamSession) return
-      useChatStore.getState().setPermissionMode(mode)
-      await updateSession(sid, { permissionMode: mode })
-      await directChat.send(prompt, undefined, { sessionId: sid, skipUserAppend: true })
-    },
-    [activeSessionId, isTeamSession, directChat]
-  )
-  const respondToApproval = (
-    approval: typeof pendingApproval,
-    decision: Parameters<typeof directChat.respondToApproval>[1]
-  ) => {
-    if (!approval) return Promise.resolve()
-    return decodeSubSession(approval.sessionId) !== null
-      ? teamChat.respondToApproval(approval, decision)
-      : directChat.respondToApproval(approval, decision)
-  }
 
   const openSettings = (tab?: string) => {
     log.info("open settings (mobile)", { tab: tab ?? "general" })
@@ -842,11 +808,6 @@ export function AppShellMobile() {
               onSteerFlush={isTeamSession ? teamChat.flushSteer : directChat.flushSteer}
               onRegenerate={isTeamSession ? teamChat.regenerate : directChat.regenerate}
               onEditResend={isTeamSession ? teamChat.editAndResend : directChat.editAndResend}
-              // Plan-mode approval dock — direct-chat only (teams never enter
-              // plan mode). Without this a plan awaiting approval stranded the
-              // turn on mobile: the composer can enter plan mode but the dock
-              // never rendered.
-              onResumeAfterPlanApproval={isTeamSession ? undefined : resumeAfterPlanApproval}
               onCreate={handleNewDirect}
               onUseSample={(text) => void handleFirstTurn(text)}
               onHeroSend={handleFirstTurn}
@@ -924,34 +885,6 @@ export function AppShellMobile() {
           })
           select(s.id)
           setSelectedGuild({ kind: "dm" })
-        }}
-      />
-
-      <ToolApprovalDialog
-        approval={pendingApproval}
-        onRespond={(decision) =>
-          pendingApproval ? respondToApproval(pendingApproval, decision) : Promise.resolve()
-        }
-      />
-
-      {/* The question half of the same gate. A permission request already
-          reaches this shell for free (it rides the chat store's approvals),
-          but an elicitation carries a schema and has its own store, so it
-          needs its own mount or an external agent's question would be
-          answerable on desktop and invisible here. */}
-      <ExternalAgentElicitationDialog
-        request={pendingElicitation?.request ?? null}
-        onRespond={(response) => {
-          if (!pendingElicitation) return
-          useExternalElicitationStore
-            .getState()
-            .remove(pendingElicitation.chatSessionId, pendingElicitation.request.id)
-          // Same delivery as the desktop pane: the bridge knows whether this
-          // agent is in-process or on a paired host.
-          void import("@/lib/ai/agent/external/chat-decision-bridge").then(
-            ({ deliverExternalElicitation }) =>
-              deliverExternalElicitation(pendingElicitation, response)
-          )
         }}
       />
 
