@@ -3,21 +3,64 @@
 # Offline cases (default, CI) verify the tool CONTRACT against the deterministic
 # `evals.harness.mjs`. Online cases (`--online`, run inside the app) verify that
 # the model SELECTS the right tool for a prompt.
+#
+# The promoted host built-ins `web_search` / `web_fetch` are intentionally not
+# covered here — they are host tools, not this plugin's contribution.
 evals:
-  - name: "web_fetch returns readable page text"
-    prompt: "Fetch https://example.com and give me the visible text"
+  - name: "web_download persists a URL"
+    prompt: "Download https://example.com/report.pdf to disk"
     args:
-      url: "https://example.com"
+      url: "https://example.com/report.pdf"
     expect:
-      callsTool: web_fetch
+      callsTool: web_download
       output:
-        includes: "Example Domain"
+        regex: '"ok":true.*"path":"[^"]*report\.pdf"'
 
-  - name: "web_fetch surfaces the page title"
-    prompt: "What is the title of https://example.com ?"
+  - name: "web_download honours a sandbox-relative directory"
+    prompt: "Download https://example.com/a.zip into the archives folder"
     args:
-      url: "https://example.com"
+      url: "https://example.com/a.zip"
+      directory: "archives"
     expect:
-      callsTool: web_fetch
+      callsTool: web_download
       output:
-        regex: "Example"
+        includes: "archives/a.zip"
+
+  - name: "web_download collapses traversal in the filename"
+    prompt: "Download https://evil.test/x saving it as ../evil.sh"
+    args:
+      url: "https://evil.test/x"
+      filename: "../evil.sh"
+    expect:
+      callsTool: web_download
+      output:
+        regex: '"path":"evil\.sh"'
+
+  - name: "web_download refuses an absolute directory"
+    prompt: "Download https://example.com/f.bin into /etc"
+    args:
+      url: "https://example.com/f.bin"
+      directory: "/etc"
+    expect:
+      callsTool: web_download
+      output:
+        includes: '"ok":false'
+
+  - name: "web_research returns a structured cited summary"
+    prompt: "Research what https://example.com says and cite the source"
+    args:
+      query: "What is example.com used for?"
+      urls: ["https://example.com"]
+    expect:
+      callsTool: web_research
+      output:
+        regex: '"ok":true.*"summary"'
+
+  - name: "web_research requires a query"
+    prompt: "Research these URLs"
+    args:
+      urls: ["https://example.com"]
+    expect:
+      callsTool: web_research
+      output:
+        includes: '"ok":false'

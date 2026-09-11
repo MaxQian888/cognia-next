@@ -2,9 +2,9 @@
   "id": "cognia-web-tools",
   "name": "Web Tools",
   "version": "0.1.0",
-  "description": "Built-in web tools for the agent: multi-provider web_search, web_fetch (with readable text extraction), web_download, and web_research.",
+  "description": "Agent tools on top of the promoted web built-ins: web_download saves a URL to disk, web_research distills and summarizes URLs into a cited answer. (web_search / web_fetch themselves are host built-ins.)",
   "type": "frontend",
-  "capabilities": ["tools"],
+  "capabilities": ["tools", "configuration"],
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",
@@ -15,12 +15,35 @@
   "permissions": ["network:fetch", "agent:control"],
   "networkAccess": {
     "allowedDomains": ["*"],
-    "reasoning": "web_search, web_fetch, web_download and web_research operate on URLs the user or agent supplies at runtime, so any host may be reached. The user's search-provider keys are only sent to their configured providers."
+    "reasoning": "web_download and web_research operate on URLs the user or agent supplies at runtime, so any host may be reached. Page reads go through the promoted host web_fetch, so the Settings kill switch, SSRF guard, rate limiter and PII gate still apply."
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "userAgent": {
+        "type": "string",
+        "title": "User-Agent override",
+        "description": "Optional User-Agent header sent with the page reads web_research makes through web_fetch."
+      },
+      "downloadDirectory": {
+        "type": "string",
+        "title": "Download subfolder",
+        "description": "Optional relative subfolder inside this plugin's data directory that web_download writes into on desktop (e.g. \"reports\"). Leave empty for the data root."
+      }
+    }
+  },
+  "defaultConfig": {
+    "userAgent": "",
+    "downloadDirectory": ""
   },
   "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
     "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
-    "mobile": { "availability": "supported", "entrypoint": "src/index.ts" }
+    "mobile": {
+      "availability": "degraded",
+      "entrypoint": "src/index.ts",
+      "reason": "web_download cannot persist files from the mobile WebView (no download manager); web_research still works."
+    }
   }
 }
