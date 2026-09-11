@@ -162,7 +162,13 @@
     "pickerLabel": "Provider",
     "pickerSearch": "搜索 provider…",
     "title": "选择登录方式",
-    "toastIncomplete": "先把这个 provider 需要的内容填完整。"
+    "toastIncomplete": "先把这个 provider 需要的内容填完整。",
+    "commandcode": {
+      "title": "CommandCode",
+      "description": "使用支持 Provider API 的 CommandCode 方案密钥（不含 Go）。",
+      "cta": "粘贴 CommandCode 密钥"
+    },
+    "addSubscription": "添加订阅账号"
   },
   "rail": {
     "label": "设置进度",

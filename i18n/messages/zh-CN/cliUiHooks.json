@@ -1,0 +1,36 @@
+{
+  "ui": {
+    "title": "已配置的 Hook（{count}）",
+    "diagnostics": "配置诊断（{count}）",
+    "sources": {
+      "builtin": "内置",
+      "cognia": "Cognia",
+      "claude": "Claude 配置"
+    },
+    "navigation": "↑/↓ 选择 · Enter 详情 · Esc 关闭",
+    "actions": "Space 切换内置项（搜索为空时）· Ctrl+R 刷新 · Ctrl+E 编辑 Cognia · Ctrl+L 编辑 Claude",
+    "search": "搜索名称、事件、来源或命令",
+    "empty": "尚未配置 Hook",
+    "noMatches": "没有匹配的 Hook"
+  },
+  "data": {
+    "matcher": "工具匹配：{value}",
+    "agents": "Agent 匹配：{value}",
+    "empty": "未配置用户 Hook。编辑配置文件以添加 Hook。",
+    "external": "此处展示配置。外部 Agent 不会接收 Cognia SDK 生命周期钩子；CLI 本地事件仍可能运行 command 钩子，外部 Agent 也可能有独立的钩子配置。",
+    "otherProvider": "这里只展示配置。当前非 Anthropic 内置提供方未运行 SDK 生命周期 Hook 链路。",
+    "configured": "这是配置清单，不是执行记录。编辑后请重新加载；下条消息将使用新的 Agent 上下文。",
+    "invalidObject": "配置必须是 JSON 对象。",
+    "invalid": "已忽略无效配置 {path}：{error}",
+    "source": "来源：{path}",
+    "event": "事件：{event}",
+    "script": "内置脚本：{path}",
+    "toggleHelp": "空格切换此内置 Hook。自定义 Hook 请编辑对应配置文件；本面板不会执行 Hook 命令。",
+    "busy": "请先等待当前回复完成或停止回复，再修改或重新加载 Hook。",
+    "reloadFailed": "重新加载 Hook 失败：{error}",
+    "reloaded": "Hook 已重新加载。下条消息将使用新的 Agent 上下文，已显示的对话记录保留。",
+    "saveFailed": "无法保存钩子配置，设置未更改。",
+    "edited": "编辑器已关闭：{path}。按 Ctrl+R 校验并重新加载钩子。",
+    "editFailed": "无法完成编辑：{path}。请检查 /editor 配置。"
+  }
+}

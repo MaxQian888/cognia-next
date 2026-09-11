@@ -35,7 +35,7 @@
       "default": "Default"
     },
     "defaultHelp": "Default is the fallback selected for newly resolved sessions; it does not activate the account immediately.",
-    "description": "Manage Claude, Codex, and OpenCode accounts in one place. External CLI credentials remain read-only.",
+    "description": "Manage subscription accounts for built-in, custom, and plugin providers. External CLI credentials remain read-only.",
     "empty": "No accounts match this filter.",
     "emptyDetail": "Select an account to inspect its status and supported actions.",
     "fields": {
@@ -66,12 +66,16 @@
     "providers": {
       "anthropic": "Claude",
       "codex": "Codex",
-      "opencode": "OpenCode"
+      "opencode": "OpenCode",
+      "commandcode": "CommandCode"
     },
     "reauthReason": "The saved credential cannot refresh ({reason}). Reauthenticate this exact account or add a different login as a new account.",
     "title": "Account Center",
     "webMode": "Account credentials are available only in the desktop app.",
-    "yes": "Yes"
+    "yes": "Yes",
+    "customSubscription": "Custom subscription",
+    "loadFailed": "Some accounts could not be loaded: {error}",
+    "retry": "Retry"
   },
   "balance": {
     "description": "Remaining credit / quota for this account's provider.",
@@ -251,7 +255,12 @@
     },
     "accountPreset": {
       "ariaLabel": "Endpoint preset for this account",
-      "useDefault": "Use default"
+      "useDefault": "Use default",
+      "loadFailed": "Could not load endpoint presets.",
+      "newAccountHint": "The selected preset overrides the account endpoint. Use provider default to follow the default configured in Subscription settings.",
+      "loading": "Loading endpoint presets…",
+      "saveFailed": "Could not save this endpoint preset. Try again.",
+      "retry": "Retry"
     },
     "cloudSync": {
       "cancel": "Cancel",
@@ -363,6 +372,12 @@
     }
   },
   "customSources": {
+    "addHeader": "Add header",
+    "removeHeader": "Remove header {index}",
+    "invalidHeaders": "Use distinct header names; configure Authorization with the authorization selector.",
+    "windowNumber": "Window {index}",
+    "removeWindow": "Remove window {index}",
+    "addWindow": "Add window",
     "add": "Add custom source",
     "cancel": "Cancel",
     "description": "Wire any coding-plan or relay provider into the limits panel by describing its balance/usage endpoint — no code needed.",
@@ -419,7 +434,7 @@
     "title": "Custom sources",
     "webModeHint": "Custom sources require the desktop build — queries run through the native HTTP bridge."
   },
-  "description": "Sign in with your Claude Pro/Max, Codex (ChatGPT), or OpenCode subscription to use OAuth authentication and monitor rate-limit windows and balances in real time.",
+  "description": "Manage subscription accounts, API keys, and custom services, and view usage or limits where the provider supports them.",
   "limits": {
     "amountLeft": "{amount} left",
     "description": "Subscription limits and usage for this account.",
@@ -501,7 +516,9 @@
       "sourceKeyring": "Claude Code OS keyring entry",
       "sourceLabel": "Source"
     },
-    "title": "Sign in with Claude"
+    "title": "Sign in with Claude",
+    "apiKeySetupHint": "Claude subscription and Console sign-in use OAuth. Configure third-party API keys and Coding Plan keys with their provider in Providers.",
+    "apiKeySetupAction": "Set up an API key or Coding Plan"
   },
   "migration": {
     "toastBody": "Migrated {count, plural, =1 {1 legacy account} other {# legacy accounts}} into the new vault.",
@@ -549,6 +566,10 @@
       "usage": {
         "description": "History and analytics across every provider",
         "label": "Usage"
+      },
+      "commandcode": {
+        "label": "CommandCode",
+        "description": "API keys and relay presets"
       }
     },
     "mobileTrigger": "Sections",
@@ -621,7 +642,8 @@
   "providers": {
     "anthropic": "Claude",
     "codex": "Codex",
-    "opencode": "OpenCode"
+    "opencode": "OpenCode",
+    "commandcode": "CommandCode"
   },
   "settings": {
     "actions": {
@@ -838,5 +860,79 @@
       }
     }
   },
-  "webModeBanner": "Subscription credentials are stored in your OS keychain — only available in the desktop app."
+  "webModeBanner": "Subscription credentials are stored in your OS keychain — only available in the desktop app.",
+  "commandcode": {
+    "title": "Add CommandCode account",
+    "updateTitle": "Update CommandCode credentials",
+    "description": "Connect to the Provider API with your CommandCode Studio API key.",
+    "goUnsupported": "GOAT, Pro, Max, Team, and Provider plans support API keys. The Go plan does not include third-party API access.",
+    "getKey": "Create an API key in CommandCode Studio",
+    "accessTokenField": "API key",
+    "accessTokenPlaceholder": "CommandCode API key",
+    "baseUrlField": "Base URL (optional)",
+    "baseUrlPlaceholder": "https://api.commandcode.ai/provider/v1",
+    "baseUrlReplaceHint": "Leave blank to restore the official endpoint. The existing preset binding is preserved.",
+    "labelField": "Label (optional)",
+    "labelPlaceholder": "CommandCode",
+    "cancel": "Cancel",
+    "save": "Save",
+    "saveFailed": "Could not save: {error}",
+    "invalidKey": "The API key cannot contain whitespace.",
+    "invalidBaseUrl": "Enter a valid HTTP(S) URL without credentials or a fragment.",
+    "quotaUnavailable": "No public subscription quota API is documented. Check usage in CommandCode Studio, or configure a custom quota source if your relay provides one.",
+    "docs": "Provider API documentation",
+    "webModeBanner": "Manage keyring-backed subscription accounts in the desktop app."
+  },
+  "managedKey": {
+    "title": "Add {provider} account",
+    "updateTitle": "Update {provider} credentials",
+    "customTitle": "custom subscription",
+    "description": "Your API key is stored in the system keyring. You can add multiple accounts for the same service.",
+    "name": "Service name",
+    "protocol": "API protocol",
+    "openaiProtocol": "OpenAI compatible",
+    "anthropicProtocol": "Anthropic compatible",
+    "models": "Model IDs (comma separated)",
+    "plan": "Plan",
+    "getKey": "Create an API key with the provider",
+    "accessTokenField": "API key",
+    "accessTokenPlaceholder": "API key",
+    "baseUrlField": "Base URL (optional)",
+    "baseUrlReplaceHint": "Leave blank to restore the provider default endpoint. The existing preset binding is preserved.",
+    "labelField": "Label (optional)",
+    "cancel": "Cancel",
+    "save": "Save",
+    "saveFailed": "Could not save: {error}",
+    "invalidKey": "The API key cannot contain whitespace.",
+    "invalidBaseUrl": "Enter a valid HTTP(S) URL without credentials or a fragment.",
+    "customRequired": "Enter a service name, base URL, and at least one model ID.",
+    "unavailableTitle": "Subscription source unavailable",
+    "unavailable": "This provider definition was removed or its plugin is disabled. Saved accounts remain available for removal; restore the source to update credentials.",
+    "customBaseUrlField": "Base URL",
+    "availableModels": "Available models and information",
+    "modelsDeclared": "Declared by the provider. Model access and limits depend on your account and plan.",
+    "modelsLive": "Live model information loaded. Fallback declarations may also appear; listing does not verify chat access.",
+    "modelId": "Model ID",
+    "modelContext": "Context tokens",
+    "modelOutput": "Maximum output tokens",
+    "supportsTools": "Tool calls",
+    "supportsVision": "Vision",
+    "supportsAudio": "Audio",
+    "supportsVideo": "Video",
+    "supportsStreaming": "Streaming",
+    "supportsReasoning": "Reasoning",
+    "supportsImageGeneration": "Image generation",
+    "supportsEmbedding": "Embeddings",
+    "supportsStructuredOutput": "Structured output",
+    "supported": "Supported",
+    "unsupported": "Not supported",
+    "fetchModels": "Fetch models",
+    "fetchModelInfo": "Fetch model information",
+    "modelLoadFailed": "Could not load model information. Check your key, endpoint and plan. You can still save the account and retry later.",
+    "modelCredentialsRequired": "Enter a valid API key or activate an account to fetch models.",
+    "modelNotFound": "The service did not return information for this model.",
+    "modelInputPrice": "Input / 1M tokens ({currency})",
+    "modelOutputPrice": "Output / 1M tokens ({currency})",
+    "modelInput": "Maximum input tokens"
+  }
 }

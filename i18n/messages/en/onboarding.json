@@ -162,7 +162,13 @@
     "pickerLabel": "Provider",
     "pickerSearch": "Search providers…",
     "title": "How do you want to sign in?",
-    "toastIncomplete": "Fill in what this provider needs before continuing."
+    "toastIncomplete": "Fill in what this provider needs before continuing.",
+    "commandcode": {
+      "title": "CommandCode",
+      "description": "Use a CommandCode plan key with Provider API access (excluding Go).",
+      "cta": "Paste CommandCode key"
+    },
+    "addSubscription": "Add subscription account"
   },
   "rail": {
     "label": "Setup progress",

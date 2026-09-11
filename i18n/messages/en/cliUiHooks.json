@@ -1,0 +1,36 @@
+{
+  "ui": {
+    "title": "Configured hooks ({count})",
+    "diagnostics": "Configuration diagnostics ({count})",
+    "sources": {
+      "builtin": "Built-in",
+      "cognia": "Cognia",
+      "claude": "Claude settings"
+    },
+    "navigation": "↑/↓ select · Enter details · Esc close",
+    "actions": "Space toggle built-in (empty search) · Ctrl+R refresh · Ctrl+E edit Cognia · Ctrl+L edit Claude",
+    "search": "Search name, event, source or command",
+    "empty": "No hooks configured",
+    "noMatches": "No matching hooks"
+  },
+  "data": {
+    "matcher": "Matcher: {value}",
+    "agents": "Agent selector: {value}",
+    "empty": "No user hooks configured. Edit a source file to add hooks.",
+    "external": "Configuration inventory. External agents do not receive Cognia SDK lifecycle hooks. Local CLI events can still run command hooks; the external agent may also have its own hook configuration.",
+    "otherProvider": "Configured hooks only. The current non-Anthropic built-in provider does not run the SDK lifecycle-hook pipeline.",
+    "configured": "Configuration inventory, not execution history. Reload after editing; changes apply to a fresh agent context on the next message.",
+    "invalidObject": "Expected a JSON object.",
+    "invalid": "Ignored invalid source {path}: {error}",
+    "source": "Source: {path}",
+    "event": "Event: {event}",
+    "script": "Bundled script: {path}",
+    "toggleHelp": "Space toggles this built-in hook. Custom hooks are edited in their source files; no commands are executed by this panel.",
+    "busy": "Finish or stop the current response before changing or reloading hooks.",
+    "reloadFailed": "Could not reload hooks: {error}",
+    "reloaded": "Hooks reloaded. The next message starts a fresh agent context; the visible transcript remains.",
+    "saveFailed": "Could not save hook configuration. The setting was not changed.",
+    "edited": "Editor closed: {path}. Press Ctrl+R to validate and reload hooks.",
+    "editFailed": "Could not finish editing {path}. Check your /editor configuration."
+  }
+}

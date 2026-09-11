@@ -26,6 +26,7 @@
     "label": "筛选",
     "options": {
       "branched": "分支会话",
+      "im": "IM 对话",
       "pinned": "已置顶",
       "unread": "未读"
     }

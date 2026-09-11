@@ -95,7 +95,8 @@
     "dismiss": "关闭",
     "punycodeWarning": "该网址包含可能伪装成其他域名的字符，请确认后再继续。",
     "submit": "提交",
-    "title": "代理需要你的回答"
+    "title": "代理需要你的回答",
+    "responseFailed": "回答发送失败，已保留填写的内容，请重试。"
   },
   "enableInSettings": "请在设置中启用外部代理",
   "errors": {
@@ -273,7 +274,8 @@
     "transportWebsocket": "WebSocket",
     "unsupportedProtocol": "目前可执行代理仅支持 ACP。",
     "websocketProtocolComingSoon": "WebSocket（即将支持）",
-    "connectingHint": "正在连接 Agent… 启动期间你可以继续使用 Cognia。"
+    "connectingHint": "正在连接 Agent… 启动期间你可以继续使用 Cognia。",
+    "devinSetupHint": "安装 Devin CLI 并运行一次 `devin auth login`。Cognia 通过 `devin acp` 启动并读取会话模型列表；使用 `acp --model swe2` 可在启动时选择 SWE-2。 如需修改文件，请选择“接受编辑（Code）”模式。 实测 Devin 3000.10.21 未加载 Cognia 传入的 MCP 服务；原生工具可用。"
   },
   "runCommand": "运行 /{name}",
   "runtimes": {
@@ -618,7 +620,8 @@
       "modelsSummary": "{providers} 个提供方，共 {count} 个模型",
       "evidenceListing": "已列出",
       "evidenceListingTitle": "Pi 的 auth check 不认识这个提供方（由扩展注册），但 Pi 列出了它的模型，而这只会在凭证可用时发生。"
-    }
+    },
+    "devinPresetDescription": "通过原生 ACP 服务运行 Devin，复用已有的 CLI 登录。连接后可选择 SWE-2 等模型。 如需修改文件，请选择“接受编辑（Code）”模式。 实测 Devin 3000.10.21 未加载 Cognia 传入的 MCP 服务；原生工具可用。"
   },
   "statusConnected": "已连接",
   "statusConnecting": "连接中",
@@ -659,5 +662,38 @@
     "skip": "跳过",
     "submit": "提交回答",
     "title": "智能体有问题需要确认"
+  },
+  "cogniaModel": {
+    "enable": "使用 Cognia 模型",
+    "description": "每个任务使用独立的 Agent 配置和临时网关凭据，供应商密钥保留在 Cognia。文件和网络访问遵循所选沙箱设置。 更换模型或账号需要新建任务。",
+    "unsupported": "此运行时不支持任务隔离的 Cognia 模型，请选择受支持的本地运行时。",
+    "model": "Cognia 模型",
+    "choose": "选择模型",
+    "search": "搜索已配置的模型…",
+    "empty": "没有兼容的已配置模型，请先在设置中添加 API 供应商或订阅。",
+    "account": "订阅账号",
+    "defaultAccount": "启动任务时使用供应商默认账号",
+    "missingAccount": "所选账号不可用",
+    "retryAccounts": "重新加载订阅账号",
+    "context": "上下文：{tokens, number}",
+    "input": "最大输入：{tokens, number}",
+    "output": "最大输出：{tokens, number}",
+    "invalid": "请选择模型和受支持的本地 Agent 运行时。",
+    "manualAccount": "服务商设置中的手动 API Key",
+    "capability": "{name}：{status}",
+    "supportsTools": "工具调用",
+    "supportsReasoning": "推理",
+    "supportsVision": "图片",
+    "supportsStructuredOutput": "结构化输出",
+    "supported": "支持",
+    "notSupported": "不支持",
+    "refreshModels": "刷新账号模型",
+    "modelDetails": "刷新模型详情",
+    "selectAccountToRefresh": "选择具体订阅账号后，可刷新该账号的模型和限制信息。",
+    "loadingModels": "正在读取账号模型信息…",
+    "modelsFailed": "未能读取模型信息，已保留现有模型，可重试。",
+    "modelsLoaded": "已更新账号模型信息。",
+    "unknown": "未知",
+    "outputUnknown": "最大输出：未知"
   }
 }

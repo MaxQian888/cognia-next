@@ -1,0 +1,417 @@
+{
+  "title": "设置",
+  "footer": "←/→ Tab 切分区 · ↑/↓ 选行 · Enter 编辑/打开 · Space 切换 · r 重置 · Esc 关闭",
+  "moreAbove": "  ↑ 还有 {count} 项",
+  "moreBelow": "  ↓ 还有 {count} 项",
+  "unavailable": "不可用",
+  "sections": {
+    "model": "模型与推理",
+    "appearance": "外观",
+    "display": "显示",
+    "tools": "工具与技能",
+    "git": "Git 与 PR",
+    "behavior": "行为与钩子",
+    "terminal": "终端与输入",
+    "logging": "日志",
+    "advanced": "高级",
+    "keybindings": "快捷键",
+    "workspace": "工作区"
+  },
+  "rows": {
+    "tool:fileExtras": {
+      "label": "文件扩展工具（哈希/差异/搜索）",
+      "description": "提供哈希计算、结构化差异和文件内搜索。"
+    },
+    "tool:coreFiles": {
+      "label": "基础文件工具",
+      "description": "读取、写入和编辑文件。"
+    },
+    "tool:coreFilesOnAnthropic": {
+      "label": "Anthropic 基础文件工具",
+      "description": "在 Anthropic 通道中也提供基础文件工具。"
+    },
+    "tool:git": {
+      "label": "Git 工具",
+      "description": "提供状态、差异、日志、暂存和提交工具。"
+    },
+    "tool:process": {
+      "label": "进程工具",
+      "description": "启动、检查和终止后台进程。"
+    },
+    "tool:environment": {
+      "label": "环境工具",
+      "description": "读取环境与系统信息。"
+    },
+    "tool:shellAdvanced": {
+      "label": "高级 Shell 工具",
+      "description": "提供单次 bash 调用之外的 Shell 操作。"
+    },
+    "tool:terminalRepl": {
+      "label": "终端 REPL",
+      "description": "提供持久化交互式 REPL 会话。"
+    },
+    "tool:lsp": {
+      "label": "LSP 代码分析",
+      "description": "通过语言服务器查询悬浮信息、定义和诊断。"
+    },
+    "tool:codeGraph": {
+      "label": "代码图谱",
+      "description": "查询符号定义、调用方、被调用方和影响范围。"
+    },
+    "tool:astGrep": {
+      "label": "AST 搜索与改写",
+      "description": "基于语法树进行结构化搜索和改写。"
+    },
+    "tool:dependencyResearch": {
+      "label": "依赖源码",
+      "description": "克隆依赖仓库，供智能体阅读库的内部实现。"
+    },
+    "tool:webclone": {
+      "label": "网页快照",
+      "description": "将实时页面及其资源保存为独立资源包。"
+    },
+    "credential": {
+      "label": "凭据"
+    },
+    "model": {
+      "label": "模型",
+      "description": "本次对话使用的模型 ID；打开模型选择器。"
+    },
+    "mode": {
+      "label": "权限模式",
+      "description": "工具调用的审批方式：default / acceptEdits / plan / bypass 等。"
+    },
+    "thinking": {
+      "label": "思考等级",
+      "description": "传递给模型的推理强度（off → max）；ultracode 还会启用工作流工具。"
+    },
+    "subagentModels": {
+      "label": "子智能体模型…",
+      "description": "为各个可调度子智能体指定服务商和模型。"
+    },
+    "theme": {
+      "label": "主题",
+      "description": "终端配色主题；可使用内置主题或 Claude Code / Codex 配色。"
+    },
+    "custom-theme": {
+      "label": "自定义主题颜色…",
+      "description": "在基础主题上创建自定义配色。"
+    },
+    "output-style": {
+      "label": "回复风格",
+      "description": "追加到系统提示词的回复风格：简洁、解释或学习。"
+    },
+    "status-theme": {
+      "label": "状态栏颜色",
+      "description": "状态栏配色：default / dim / vivid / mono。"
+    },
+    "status-segments": {
+      "label": "状态栏信息…",
+      "description": "设置底栏显示的信息及顺序。"
+    },
+    "mascot-enabled": {
+      "label": "吉祥物",
+      "description": "在底栏上方显示终端吉祥物。"
+    },
+    "mascot-style": {
+      "label": "吉祥物样式",
+      "description": "显示的吉祥物种类：clawd / cat / robot。"
+    },
+    "highlight": {
+      "label": "输出语法高亮",
+      "description": "对内联工具和文件输出进行语法高亮（Bash / PS / 文件读取）。"
+    },
+    "lineNumbers": {
+      "label": "文件行号",
+      "description": "在文件和代码结果中显示从 1 开始的行号。"
+    },
+    "collapseTools": {
+      "label": "默认折叠工具输出",
+      "description": "工具结果默认折叠；使用 {key} 展开。"
+    },
+    "verboseDefault": {
+      "label": "默认展开详情",
+      "description": "每次会话开始时展开所有内容单元。"
+    },
+    "streamReveal": {
+      "label": "逐字显示",
+      "description": "以逐字节奏显示流式文本，仅用于交互式终端。"
+    },
+    "clickToExpand": {
+      "label": "点击展开内容",
+      "description": "仅限全屏模式；点击切换当前内容的展开状态，并禁用批量折叠。"
+    },
+    "notify": {
+      "label": "完成时响铃",
+      "description": "长时间任务完成后触发终端响铃，方便切换到其他窗口。"
+    },
+    "desktopNotifications": {
+      "label": "桌面通知",
+      "description": "完成时同时发送系统桌面通知，仅在启用响铃时生效。"
+    },
+    "maxLines": {
+      "label": "内联结果行数上限",
+      "description": "展开的内联结果超过此行数时，将汇总剩余内容。"
+    },
+    "pagerThreshold": {
+      "label": "分页阈值（行）",
+      "description": "超过此行数时显示预览及分页提示。"
+    },
+    "webTools": {
+      "label": "网络工具（搜索/读取）",
+      "description": "向智能体提供 web_search 和 web_fetch。"
+    },
+    "skillTool": {
+      "label": "技能工具",
+      "description": "允许智能体通过 Skill 工具按需加载技能说明。"
+    },
+    "skillLoadMode": {
+      "label": "技能加载方式",
+      "description": "选择在提示词中加载技能名称目录还是完整内容。"
+    },
+    "slashCommandTool": {
+      "label": "SlashCommand 工具",
+      "description": "允许智能体通过 SlashCommand 工具运行斜杠命令。"
+    },
+    "externalSkills": {
+      "label": "复用外部技能目录",
+      "description": "同时发现 Claude Code / Codex / OpenCode 的技能目录。"
+    },
+    "pluginTools": {
+      "label": "插件工具（动态工作流）",
+      "description": "向智能体提供仓库内的官方插件工具，如网络工具和工作流。"
+    },
+    "autoRoute": {
+      "label": "自动分级路由（无界面运行）",
+      "description": "仅用于单次或无界面运行；将提示词路由至满足要求且费用最低的模型等级。"
+    },
+    "showActiveSkills": {
+      "label": "每轮显示已启用技能",
+      "description": "每轮加载技能时显示当前启用技能的通知。"
+    },
+    "skillDirs": {
+      "label": "额外技能目录…",
+      "description": "从额外目录中发现 SKILL.md 技能。"
+    },
+    "allowedTools": {
+      "label": "工具允许列表…",
+      "description": "将智能体限制为只使用列表内的工具；留空表示允许全部工具。"
+    },
+    "gitProtectedBranches": {
+      "label": "受保护分支…",
+      "description": "禁止 /commit 直接提交的分支，以空格分隔。"
+    },
+    "gitBaseBranch": {
+      "label": "PR 目标分支…",
+      "description": "/pr 的目标分支；留空时按 main → master 自动检测。"
+    },
+    "gitCoauthorTrailer": {
+      "label": "提交共同作者信息",
+      "description": "在 /commit 消息中追加 Co-Authored-By；可在 config.json 的 git.coauthorTrailer 中自定义。"
+    },
+    "gitPrFooter": {
+      "label": "PR 正文页脚",
+      "description": "在 /pr 正文中追加 Claude Code 页脚；可在 config.json 的 git.prFooter 中自定义。"
+    },
+    "systemPrompt": {
+      "label": "系统提示词…",
+      "description": "在每轮对话前追加的系统提示词。"
+    },
+    "layout": {
+      "label": "布局",
+      "description": "选择全屏模式（固定标题和输入框）或终端原生滚动历史。"
+    },
+    "mouse": {
+      "label": "鼠标模式",
+      "description": "在全屏模式下选择滚轮滚动对话或原生拖动文本选择。"
+    },
+    "selection": {
+      "label": "拖动选择",
+      "description": "在应用内选择已渲染文本；自动复制模式会在释放鼠标时复制选区。"
+    },
+    "vim": {
+      "label": "Vim 编辑模式",
+      "description": "在输入框中使用 NORMAL/INSERT 编辑模式，也可通过 /vim 切换。"
+    },
+    "terminalTitle": {
+      "label": "动态终端标题",
+      "description": "使用实时会话状态更新终端窗口或标签页标题。"
+    },
+    "clipboardMode": {
+      "label": "剪贴板 OSC 52 模式",
+      "description": "复制策略：auto（SSH 下使用 OSC 52）、always（强制使用）或 never。"
+    },
+    "clipboardMaxBytes": {
+      "label": "剪贴板 OSC 52 字节上限",
+      "description": "OSC 52 单次复制的最大字节数；0 表示不限，部分终端会忽略过大的复制内容。"
+    },
+    "editor": {
+      "label": "外部编辑器",
+      "description": "/open 和可点击文件路径使用的编辑器；留空时自动检测。"
+    },
+    "loggingFileLevel": {
+      "label": "文件日志级别",
+      "description": "写入 ~/.cognia/logs/mcp.log 的最低日志级别；/mcp logs 始终显示全部事件。"
+    },
+    "loggingMcpLogMaxKb": {
+      "label": "MCP 日志轮换大小（KiB）",
+      "description": "mcp.log 超过此大小时轮换至 mcp.log.1。"
+    },
+    "loggingCrashLogMaxKb": {
+      "label": "崩溃日志轮换大小（KiB）",
+      "description": "crash.log 超过此大小时轮换至 crash.log.1；0 表示不轮换。"
+    },
+    "loggingViewMcpLogs": {
+      "label": "查看 MCP / sidecar 日志…",
+      "description": "打开终端内的实时 MCP / sidecar 日志面板。"
+    },
+    "loggingLogDir": {
+      "label": "日志目录",
+      "description": "crash.log 和 mcp.log 在磁盘上的存储位置。"
+    },
+    "autoCompact": {
+      "label": "自动压缩上下文",
+      "description": "接近模型上下文窗口上限时自动压缩当前上下文。"
+    },
+    "autoCompactThreshold": {
+      "label": "自动压缩阈值",
+      "description": "触发自动压缩的上下文使用比例，范围为 0.5–0.98。"
+    },
+    "streamIdleTimeoutMs": {
+      "label": "流式空闲超时（ms）",
+      "description": "模型流在对话中停顿超过此时间时终止本轮；0 表示禁用。"
+    },
+    "aiSdkMaxSteps": {
+      "label": "智能体步数预算（非 Anthropic）",
+      "description": "OpenAI 兼容服务商每轮最多允许的工具调用步骤，防止失控执行。"
+    },
+    "toolExecutionTimeoutMs": {
+      "label": "只读工具超时（ms）",
+      "description": "非 Anthropic 服务商的单次只读工具执行时限；0 表示禁用。"
+    },
+    "subagentStreamIdleTimeoutMs": {
+      "label": "子智能体流式空闲超时（ms）",
+      "description": "子智能体任务的流式空闲超时，通常高于交互任务；0 表示禁用。"
+    },
+    "subagentMaxDepth": {
+      "label": "子智能体最大嵌套深度",
+      "description": "dispatch_agent 可嵌套的深度；1 表示子智能体不能继续创建子智能体。"
+    },
+    "subagentMaxConcurrent": {
+      "label": "子智能体最大并发数",
+      "description": "一次 dispatch_agent 调度中可并行运行的子智能体数量；1 表示依次执行。"
+    },
+    "rebind": {
+      "label": "重新绑定快捷键…",
+      "description": "打开交互式快捷键编辑器。"
+    },
+    "cwd": {
+      "label": "工作目录…",
+      "description": "选择目录。切换后会重新创建 Agent 上下文，已显示的对话记录保留。"
+    },
+    "additionalRoots": {
+      "label": "额外根目录…",
+      "description": "浏览并添加额外目录。实际访问能力取决于外部 Agent 及其权限设置。"
+    },
+    "customLimits": {
+      "label": "自定义额度来源",
+      "description": "/limits 中显示的自定义用量和额度来源，在 config.json 中编辑。"
+    },
+    "provider": {
+      "label": "模型服务商"
+    },
+    "hook:auto-context-loader": {
+      "description": "会话开始时注入 .cognia/agent-context.md 作为持续上下文。"
+    },
+    "hook:auto-context-loader-prompt": {
+      "description": "每次提示时注入 .cognia/agent-context.md 作为持续上下文。"
+    },
+    "hook:cost-quota-guard": {
+      "description": "会话 token 预算耗尽后拒绝新的对话轮次。"
+    },
+    "hook:pii-safety-guard": {
+      "description": "阻止包含明显个人敏感信息或凭据的提示词。"
+    },
+    "hook:pii-safety-guard-tool": {
+      "description": "阻止输入中包含明显个人敏感信息或凭据的工具调用。"
+    },
+    "hooksPanel": {
+      "label": "钩子管理…",
+      "description": "浏览钩子来源、查看详情、编辑并重新加载配置。"
+    }
+  },
+  "keys": {
+    "inspect": "检查工具输出",
+    "agentsPanel": "打开运行中智能体面板",
+    "verboseToggle": "切换详情模式",
+    "collapseAll": "展开或折叠全部",
+    "find": "搜索对话",
+    "historySearch": "搜索输入历史",
+    "pasteImage": "粘贴剪贴板图片",
+    "workflowInspect": "检查工作流步骤",
+    "lineHome": "移动到行首",
+    "lineEnd": "移动到行尾",
+    "deleteWord": "删除左侧单词",
+    "lineKillToStart": "删除至行首",
+    "lineKillToEnd": "删除至行尾",
+    "undo": "撤销编辑",
+    "redo": "重做编辑",
+    "copyLast": "复制上一条回复",
+    "copySelection": "复制选区",
+    "copyLastUser": "复制上一条用户消息",
+    "copyCodeBlock": "复制最后一个代码块",
+    "copyToolOutput": "复制最后一次工具输出",
+    "copyTranscript": "复制完整对话",
+    "mouseToggle": "切换鼠标模式",
+    "selectionCycle": "切换拖动选择模式",
+    "clearScreen": "清屏"
+  },
+  "values": {
+    "on": "开",
+    "off": "关",
+    "none": "无",
+    "all": "全部",
+    "default": "默认",
+    "agentDefault": "智能体默认值",
+    "apiKey": "已配置 API key",
+    "token": "已配置 token",
+    "notConfigured": "未配置",
+    "inherit": "继承",
+    "overridden": "已覆盖 {count} 项",
+    "dirs": "{count} 个目录",
+    "tools": "{count} 个工具",
+    "roots": "{count} 个根目录",
+    "customLimits": "{count} 项（在 config.json 中编辑）",
+    "nameOnly": "仅名称",
+    "fullBodies": "完整内容",
+    "editColours": "编辑基础颜色",
+    "autoBranch": "自动（main → master）",
+    "custom": "自定义",
+    "set": "已设置",
+    "autoDetect": "自动检测",
+    "never": "不轮换",
+    "openPanel": "打开面板",
+    "openEditor": "打开编辑器",
+    "requested": "{effective}（请求值 {requested}）"
+  },
+  "providerExternal": "内置模型服务商",
+  "providerDescription": "本次会话使用的 AI 服务商；打开服务商选择器。",
+  "providerDescriptionExternal": "内置后端保存的服务商；修改它不会改变当前外部智能体。",
+  "credentialDescription": "设置或替换当前服务商的 API key 或订阅 token。",
+  "credentialDescriptionExternal": "设置或替换已保存的内置服务商 API key 或订阅 token。",
+  "hookLabel": "钩子：{id}",
+  "keyDescription": "当前快捷键；可通过下方“重新绑定快捷键…”修改。",
+  "footerCompact": "←→ Tab 分区 · Enter 编辑 · Esc 关闭",
+  "editFooter": "编辑中 · ←/→ 改值 · Enter 保存 · Esc 取消 · Tab 切分区",
+  "editFooterCompact": "←→ 改值 · Enter 保存 · Esc 取消",
+  "footerTiny": "Tab ↑↓ Enter Esc",
+  "editFooterTiny": "←→ Enter Esc",
+  "workspaceBusy": "请先等待当前回复完成或停止回复，再切换目录。",
+  "workspaceInvalid": "目录不存在或无法访问：{path}",
+  "workspaceSame": "当前已在目录：{path}",
+  "workspaceChanged": "工作目录：{path}。下条消息将使用新的 Agent 上下文，已显示的对话记录保留。",
+  "workspaceFailed": "切换目录失败：{error}",
+  "removeRootLabel": "移除目录 {index}…",
+  "removeRootDescription": "从会话配置中移除此额外目录。",
+  "workspaceRootsMemory": "额外目录保存失败。本次更改仅在当前 CLI 会话中生效。"
+}

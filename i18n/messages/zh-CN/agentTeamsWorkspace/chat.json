@@ -43,6 +43,8 @@
     "claude": "Claude",
     "claudeCode": "Claude Code",
     "codex": "Codex",
+    "devin": "Devin CLI",
+    "codexAcp": "Codex ACP",
     "codexAppServer": "Codex（应用服务）",
     "copilotCli": "GitHub Copilot",
     "cursorCli": "Cursor",

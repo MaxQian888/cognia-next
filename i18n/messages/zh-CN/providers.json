@@ -267,7 +267,8 @@
     "testDisabledHint": "请先填写凭据，然后再测试连接。",
     "transportDescription": "决定请求发出时的形态。通常只有网关、Azure 或自建端点才需要调整。",
     "transportOverrides": "{count, plural, other {# 项覆盖}}",
-    "transportTitle": "协议与传输"
+    "transportTitle": "协议与传输",
+    "subscriptionCredentialDescription": "使用账号管理中选中的订阅账号。凭据保留在保险库中；在此填写 API Key 将覆盖继承的账号。"
   },
   "configuration": "配置",
   "configureApiKey": "配置 API 密钥",

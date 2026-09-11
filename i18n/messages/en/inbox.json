@@ -147,7 +147,10 @@
   },
   "conversation": {
     "jumpFailed": "The linked message could not be opened.",
-    "loading": "Loading…"
+    "loading": "Loading…",
+    "unavailableTitle": "Conversation unavailable",
+    "unavailableDescription": "This link is invalid, or the conversation has been deleted or has not synced to this device.",
+    "openConversations": "Open conversations"
   },
   "conversationHeader": {
     "backToList": "Back to conversation list",
@@ -247,7 +250,8 @@
       "placeholder": "Search conversations…"
     },
     "showArchived": "Show {count} archived",
-    "showResolved": "Show {count} resolved"
+    "showResolved": "Show {count} resolved",
+    "operationFailed": "Could not update the conversation. Please try again."
   },
   "conversationOverride": {
     "deleteOverride": "Remove override",
@@ -613,7 +617,20 @@
       "wechat-personal": "WX",
       "wecom": "WC"
     },
-    "planned": "Planned platform"
+    "planned": "Planned platform",
+    "names": {
+      "telegram": "Telegram",
+      "discord": "Discord",
+      "slack": "Slack",
+      "lark": "Lark",
+      "onebot": "OneBot",
+      "dingtalk": "DingTalk",
+      "wecom": "WeCom",
+      "wechat-oa": "WeChat Official Account",
+      "wechat-personal": "WeChat",
+      "qq-official": "QQ",
+      "matrix": "Matrix"
+    }
   },
   "policyInfo": {
     "aria": "Policy info",

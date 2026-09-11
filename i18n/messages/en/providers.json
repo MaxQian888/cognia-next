@@ -267,7 +267,8 @@
     "testDisabledHint": "Enter credentials before testing the connection.",
     "transportDescription": "How a request is shaped on the way out. Only needed for gateways, Azure, and self-hosted endpoints.",
     "transportOverrides": "{count, plural, one {# override} other {# overrides}}",
-    "transportTitle": "Protocol & transport"
+    "transportTitle": "Protocol & transport",
+    "subscriptionCredentialDescription": "Uses the selected subscription account from account management. Its secret stays in the vault; entering an API key here overrides the inherited account."
   },
   "configuration": "Configuration",
   "configureApiKey": "Configure API Key",

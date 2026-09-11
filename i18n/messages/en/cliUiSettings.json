@@ -1,0 +1,417 @@
+{
+  "title": "Settings",
+  "footer": "←/→ Tab section · ↑/↓ row · Enter edit/open · Space toggle · r reset · Esc close",
+  "moreAbove": "  ↑ {count} more",
+  "moreBelow": "  ↓ {count} more",
+  "unavailable": "unavailable",
+  "sections": {
+    "model": "Model & Reasoning",
+    "appearance": "Appearance",
+    "display": "Display",
+    "tools": "Tools & Skills",
+    "git": "Git & PRs",
+    "behavior": "Behavior & Hooks",
+    "terminal": "Terminal & Input",
+    "logging": "Logging",
+    "advanced": "Advanced",
+    "keybindings": "Keybindings",
+    "workspace": "Workspace"
+  },
+  "rows": {
+    "tool:fileExtras": {
+      "label": "File extras (hash/diff/search)",
+      "description": "Hashing, structured diff, and in-file search helpers."
+    },
+    "tool:coreFiles": {
+      "label": "Core file tools",
+      "description": "Read / write / edit files (the workhorse file tools)."
+    },
+    "tool:coreFilesOnAnthropic": {
+      "label": "Core files on Anthropic",
+      "description": "Also expose the core file tools on the Anthropic channel."
+    },
+    "tool:git": {
+      "label": "Git tools",
+      "description": "Status / diff / log / add / commit helpers."
+    },
+    "tool:process": {
+      "label": "Process tools",
+      "description": "Start, inspect, and kill background processes."
+    },
+    "tool:environment": {
+      "label": "Environment tools",
+      "description": "Read environment / system information."
+    },
+    "tool:shellAdvanced": {
+      "label": "Advanced shell",
+      "description": "Extra shell primitives beyond a single bash call."
+    },
+    "tool:terminalRepl": {
+      "label": "Terminal REPL",
+      "description": "Persistent interactive REPL sessions."
+    },
+    "tool:lsp": {
+      "label": "LSP code intelligence",
+      "description": "Language-server hover / definitions / diagnostics."
+    },
+    "tool:codeGraph": {
+      "label": "Code graph",
+      "description": "Symbol graph queries: definitions, callers, callees, blast radius."
+    },
+    "tool:astGrep": {
+      "label": "AST search & rewrite",
+      "description": "Structural search and rewrite over the syntax tree."
+    },
+    "tool:dependencyResearch": {
+      "label": "Dependency source",
+      "description": "Clone a dependency's repository so the agent can read library internals."
+    },
+    "tool:webclone": {
+      "label": "Web page snapshot",
+      "description": "Snapshot a live page with its assets into a self-contained bundle."
+    },
+    "credential": {
+      "label": "Credential"
+    },
+    "model": {
+      "label": "Model",
+      "description": "The model id used for your turns (opens the model picker)."
+    },
+    "mode": {
+      "label": "Permission mode",
+      "description": "How tool calls are approved (default / acceptEdits / plan / bypass / …)."
+    },
+    "thinking": {
+      "label": "Thinking level",
+      "description": "Reasoning effort forwarded to the model (off → max; ultracode also enables workflow tools)."
+    },
+    "subagentModels": {
+      "label": "Subagent models…",
+      "description": "Assign a provider/model to each dispatchable subagent."
+    },
+    "theme": {
+      "label": "Theme",
+      "description": "TUI colour theme (built-ins, or reuse your Claude Code / Codex palette)."
+    },
+    "custom-theme": {
+      "label": "Custom theme colours…",
+      "description": "Author a custom palette on top of a base theme."
+    },
+    "output-style": {
+      "label": "Output style",
+      "description": "Response style appended to the system prompt (concise / explanatory / learning)."
+    },
+    "status-theme": {
+      "label": "Status bar colours",
+      "description": "Status-bar colour palette (default / dim / vivid / mono)."
+    },
+    "status-segments": {
+      "label": "Status bar segments…",
+      "description": "Which segments the footer shows, and their order."
+    },
+    "mascot-enabled": {
+      "label": "Mascot",
+      "description": "Show the terminal mascot above the footer."
+    },
+    "mascot-style": {
+      "label": "Mascot style",
+      "description": "Which mascot creature is shown (clawd / cat / robot)."
+    },
+    "highlight": {
+      "label": "Syntax-highlight output",
+      "description": "Syntax-highlight inline tool/file output (Bash / PS / file reads)."
+    },
+    "lineNumbers": {
+      "label": "File line numbers",
+      "description": "Show 1-based line numbers in file/code result views."
+    },
+    "collapseTools": {
+      "label": "Collapse tool output by default",
+      "description": "Start tool-result cells collapsed ({key} expands)."
+    },
+    "verboseDefault": {
+      "label": "Start in detail (expand-all) mode",
+      "description": "Begin each session with every cell expanded."
+    },
+    "streamReveal": {
+      "label": "Typewriter reveal",
+      "description": "Reveal streamed text at a gentle typing cadence (interactive TTY only)."
+    },
+    "clickToExpand": {
+      "label": "Click a cell to expand it",
+      "description": "Fullscreen only: a mouse click toggles just that cell (disables burst-folding)."
+    },
+    "notify": {
+      "label": "Ring the bell when a turn finishes",
+      "description": "Ring the terminal bell after a long turn so you can tab away."
+    },
+    "desktopNotifications": {
+      "label": "Desktop notifications",
+      "description": "Also fire an OS desktop notification on completion (only when the bell is on)."
+    },
+    "maxLines": {
+      "label": "Inline result line cap",
+      "description": "Max lines of an expanded inline result before the tail is summarised."
+    },
+    "pagerThreshold": {
+      "label": "Pager threshold (lines)",
+      "description": "Above this many lines, show a preview + pager hint instead of the whole body."
+    },
+    "webTools": {
+      "label": "Web tools (search/fetch)",
+      "description": "Expose web_search / web_fetch to the agent."
+    },
+    "skillTool": {
+      "label": "Skill tool",
+      "description": "Let the agent load a skill's instructions on demand via the Skill tool."
+    },
+    "skillLoadMode": {
+      "label": "Skill loading",
+      "description": "How skills enter the prompt — a name-only catalog vs every full body."
+    },
+    "slashCommandTool": {
+      "label": "SlashCommand tool",
+      "description": "Let the agent run a slash command via the SlashCommand tool."
+    },
+    "externalSkills": {
+      "label": "Reuse external skill dirs",
+      "description": "Also discover Claude Code / Codex / OpenCode skill directories."
+    },
+    "pluginTools": {
+      "label": "Plugin tools (dynamic workflow)",
+      "description": "Expose the in-tree first-party plugin tools (web-tools, workflow, …) to the agent."
+    },
+    "autoRoute": {
+      "label": "Auto tier routing (headless run)",
+      "description": "One-shot/headless run only: route each prompt to the cheapest capable tier."
+    },
+    "showActiveSkills": {
+      "label": "Announce active skills each turn",
+      "description": "Print an 'Active skills (N): …' notice whenever a turn loads enabled skills."
+    },
+    "skillDirs": {
+      "label": "Extra skill dirs…",
+      "description": "Extra directories to discover SKILL.md skills from."
+    },
+    "allowedTools": {
+      "label": "Allowed tools allowlist…",
+      "description": "Restrict the agent to an allow-list of tools (empty = all tools allowed)."
+    },
+    "gitProtectedBranches": {
+      "label": "Protected branches…",
+      "description": "Branches /commit refuses to commit to directly (space-separated)."
+    },
+    "gitBaseBranch": {
+      "label": "PR base branch…",
+      "description": "Base branch /pr targets. Empty = auto-detect main → master."
+    },
+    "gitCoauthorTrailer": {
+      "label": "Commit co-author trailer",
+      "description": "Append the Co-Authored-By trailer to /commit messages (custom text: config.json git.coauthorTrailer)."
+    },
+    "gitPrFooter": {
+      "label": "PR body footer",
+      "description": "Append the Claude Code footer to /pr bodies (custom text: config.json git.prFooter)."
+    },
+    "systemPrompt": {
+      "label": "System prompt…",
+      "description": "Extra system-prompt text prepended to every turn."
+    },
+    "layout": {
+      "label": "Layout",
+      "description": "Fullscreen (pinned banner/composer) vs native terminal scrollback."
+    },
+    "mouse": {
+      "label": "Mouse model",
+      "description": "Wheel-scroll the transcript vs native click-drag text selection (fullscreen)."
+    },
+    "selection": {
+      "label": "Drag to select",
+      "description": "In-app text selection over the rendered frame; auto-copy puts it on the clipboard on release."
+    },
+    "vim": {
+      "label": "Vim editing mode",
+      "description": "Modal NORMAL/INSERT editing in the composer (also /vim)."
+    },
+    "terminalTitle": {
+      "label": "Dynamic terminal title",
+      "description": "Update the terminal window/tab title with live session state."
+    },
+    "clipboardMode": {
+      "label": "Clipboard OSC 52 mode",
+      "description": "Copy strategy: auto (OSC 52 over SSH) / always (force OSC 52) / never."
+    },
+    "clipboardMaxBytes": {
+      "label": "Clipboard OSC 52 byte cap",
+      "description": "Max bytes for an OSC 52 copy (0 = no cap; terminals silently drop huge ones)."
+    },
+    "editor": {
+      "label": "External editor",
+      "description": "Preferred editor for /open and clickable file paths (blank = auto-detect)."
+    },
+    "loggingFileLevel": {
+      "label": "File log level",
+      "description": "Minimum severity persisted to ~/.cognia/logs/mcp.log (the /mcp logs panel always shows everything)."
+    },
+    "loggingMcpLogMaxKb": {
+      "label": "MCP log rotation size (KiB)",
+      "description": "mcp.log rotates to mcp.log.1 once it exceeds this size."
+    },
+    "loggingCrashLogMaxKb": {
+      "label": "Crash log rotation size (KiB)",
+      "description": "crash.log rotates to crash.log.1 once it exceeds this size (0 = never)."
+    },
+    "loggingViewMcpLogs": {
+      "label": "View MCP / sidecar logs…",
+      "description": "Open the in-TUI log panel over the live MCP / sidecar event stream."
+    },
+    "loggingLogDir": {
+      "label": "Log directory",
+      "description": "Where crash.log and mcp.log live on disk."
+    },
+    "autoCompact": {
+      "label": "Auto-compact context",
+      "description": "Automatically compact the live context as it nears the model's window."
+    },
+    "autoCompactThreshold": {
+      "label": "Auto-compact threshold",
+      "description": "Fraction of the context window that triggers auto-compaction (clamped 0.5–0.98)."
+    },
+    "streamIdleTimeoutMs": {
+      "label": "Stream idle timeout (ms)",
+      "description": "Abort a turn if the model stream stalls this long mid-turn (0 = disabled)."
+    },
+    "aiSdkMaxSteps": {
+      "label": "Agent step budget (non-Anthropic)",
+      "description": "Max agentic tool-call legs per turn on OpenAI-compatible providers (runaway backstop)."
+    },
+    "toolExecutionTimeoutMs": {
+      "label": "Read-only tool timeout (ms)",
+      "description": "Per-tool deadline for read-only tools on non-Anthropic providers (0 = disabled)."
+    },
+    "subagentStreamIdleTimeoutMs": {
+      "label": "Subagent stream idle timeout (ms)",
+      "description": "Stream-idle timeout for a dispatched subagent turn — far higher than interactive (0 = off)."
+    },
+    "subagentMaxDepth": {
+      "label": "Subagent max nesting depth",
+      "description": "How deep dispatch_agent may nest (subagents spawning subagents). 1 = subagents are leaves."
+    },
+    "subagentMaxConcurrent": {
+      "label": "Subagent max concurrency",
+      "description": "How many subagents one dispatch_agent fan-out may run at once over the live sidecar. 1 = one after another."
+    },
+    "rebind": {
+      "label": "Rebind a key…",
+      "description": "Open the interactive keybinding editor."
+    },
+    "cwd": {
+      "label": "Working directory…",
+      "description": "Choose a directory. Switching recreates the agent context; the visible transcript remains."
+    },
+    "additionalRoots": {
+      "label": "Additional roots…",
+      "description": "Browse to add a root. Actual access depends on the external agent and its permissions."
+    },
+    "customLimits": {
+      "label": "Custom limits sources",
+      "description": "User-defined usage/limits sources surfaced in /limits (edit in config.json)."
+    },
+    "provider": {
+      "label": "Provider"
+    },
+    "hook:auto-context-loader": {
+      "description": "Inject .cognia/agent-context.md as standing context at session start."
+    },
+    "hook:auto-context-loader-prompt": {
+      "description": "Inject .cognia/agent-context.md as standing context on every prompt."
+    },
+    "hook:cost-quota-guard": {
+      "description": "Deny a turn once the session token budget is exceeded."
+    },
+    "hook:pii-safety-guard": {
+      "description": "Block a prompt that carries obvious PII / credentials."
+    },
+    "hook:pii-safety-guard-tool": {
+      "description": "Block a tool call whose input carries obvious PII / credentials."
+    },
+    "hooksPanel": {
+      "label": "Hooks…",
+      "description": "Browse hook sources, inspect details, edit and reload configuration."
+    }
+  },
+  "keys": {
+    "inspect": "Inspect tool output",
+    "agentsPanel": "Open running-agents panel",
+    "verboseToggle": "Toggle detail mode",
+    "collapseAll": "Expand / collapse all",
+    "find": "Find in transcript",
+    "historySearch": "Search composer history",
+    "pasteImage": "Paste image from clipboard",
+    "workflowInspect": "Inspect workflow step",
+    "lineHome": "Move to line start",
+    "lineEnd": "Move to line end",
+    "deleteWord": "Delete word left",
+    "lineKillToStart": "Delete to line start",
+    "lineKillToEnd": "Delete to line end",
+    "undo": "Undo edit",
+    "redo": "Redo edit",
+    "copyLast": "Copy last reply",
+    "copySelection": "Copy the selection",
+    "copyLastUser": "Copy your last message",
+    "copyCodeBlock": "Copy last code block",
+    "copyToolOutput": "Copy last tool output",
+    "copyTranscript": "Copy whole conversation",
+    "mouseToggle": "Toggle mouse model",
+    "selectionCycle": "Cycle drag-to-select mode",
+    "clearScreen": "Clear screen"
+  },
+  "values": {
+    "on": "on",
+    "off": "off",
+    "none": "none",
+    "all": "all",
+    "default": "default",
+    "agentDefault": "agent default",
+    "apiKey": "API key configured",
+    "token": "token configured",
+    "notConfigured": "not configured",
+    "inherit": "inherit",
+    "overridden": "{count} overridden",
+    "dirs": "{count} dirs",
+    "tools": "{count} tools",
+    "roots": "{count} roots",
+    "customLimits": "{count} (edit in config.json)",
+    "nameOnly": "name-only",
+    "fullBodies": "full bodies",
+    "editColours": "edit base colours",
+    "autoBranch": "auto (main → master)",
+    "custom": "custom",
+    "set": "set",
+    "autoDetect": "auto-detect",
+    "never": "never",
+    "openPanel": "open panel",
+    "openEditor": "open editor",
+    "requested": "{effective} (requested {requested})"
+  },
+  "providerExternal": "Built-in provider",
+  "providerDescription": "Which AI provider serves this session (opens the provider picker).",
+  "providerDescriptionExternal": "Saved provider for the built-in backend; changing it leaves the active external agent unchanged.",
+  "credentialDescription": "Set or replace the active provider's API key or subscription token.",
+  "credentialDescriptionExternal": "Set or replace the saved built-in provider's API key or subscription token.",
+  "hookLabel": "Hook: {id}",
+  "keyDescription": "Current binding — change it from Rebind a key… below.",
+  "footerCompact": "←→ Tab section · Enter edit · Esc close",
+  "editFooter": "Editing · ←/→ value · Enter save · Esc cancel · Tab section",
+  "editFooterCompact": "←→ value · Enter save · Esc cancel",
+  "footerTiny": "Tab ↑↓ Enter Esc",
+  "editFooterTiny": "←→ Enter Esc",
+  "workspaceBusy": "Finish or stop the current response before switching directories.",
+  "workspaceInvalid": "Not a directory: {path}",
+  "workspaceSame": "Already in {path}",
+  "workspaceChanged": "Working directory: {path}. Agent context will restart on the next message; the visible transcript is retained.",
+  "workspaceFailed": "Could not switch directory: {error}",
+  "removeRootLabel": "Remove root {index}…",
+  "removeRootDescription": "Remove this additional root from the session configuration.",
+  "workspaceRootsMemory": "Could not save additional directories. This change is active only for this CLI session."
+}

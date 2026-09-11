@@ -41,6 +41,7 @@
     "refineRepair": "修复",
     "refineSimplify": "简化",
     "refineUnavailable": "无法优化——未配置用于后台任务的模型。",
+    "resumeFailed": "已批准的计划未能开始执行。点击继续以重试同一步骤。",
     "sourceLabel": "来源：{source}",
     "title": "审阅计划"
   },

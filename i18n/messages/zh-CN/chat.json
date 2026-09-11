@@ -1031,7 +1031,8 @@
       "toastInherited": "正在使用继承的账号。",
       "unavailable": "账号切换当前不可用。",
       "unavailableWithId": "账号 {id} 当前不可用。",
-      "useInherited": "使用继承账号"
+      "useInherited": "使用继承账号",
+      "manualApiKey": "API 设置中的 Key"
     },
     "ariaSettings": "会话设置",
     "environment": {

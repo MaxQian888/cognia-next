@@ -225,6 +225,10 @@
       "hint": "The request exceeds the size limit — shorten the input.",
       "label": "Request too large"
     },
+    "managedPolicyRefused": {
+      "hint": "The managed policy disallows this sandbox or approval mode. Choose an allowed mode or contact your administrator.",
+      "label": "Managed policy refused"
+    },
     "permissionDenied": {
       "hint": "The agent refused an action it wasn't allowed to take — adjust its permission mode.",
       "label": "Permission denied"
@@ -381,6 +385,10 @@
       "label": "Couldn't open the workspace",
       "hint": "Preparing the working copy for this turn failed — retry; the log says what the provisioner refused."
     },
+    "workspaceBusy": {
+      "label": "Working copy in use",
+      "hint": "Another turn is still using this conversation's working copy. Wait for it to finish, or send from the device that is running it."
+    },
     "workspaceUnavailable": {
       "label": "Workspace unavailable",
       "hint": "This conversation's workspace can't be resolved on this device — retry, or bind it to a folder from the session's workspace panel."
@@ -395,7 +403,8 @@
     "copy": "Copy details",
     "member": "{name}: {message}",
     "showParsed": "Show summary",
-    "showRaw": "Show raw error"
+    "showRaw": "Show raw error",
+    "hideRaw": "Hide raw error"
   },
   "recommendedAction": {
     "codexWsl2": "For the best Windows experience, run the Codex ACP route inside a WSL2 workspace when possible.",

@@ -2858,9 +2858,11 @@
         "claude": "Claude",
         "claudeCode": "Claude Code",
         "codex": "Codex",
+        "codexAcp": "Codex ACP",
         "codexAppServer": "Codex (App Server)",
         "copilotCli": "GitHub Copilot",
         "cursorCli": "Cursor",
+        "devin": "Devin CLI",
         "droid": "Droid",
         "geminiCli": "Gemini",
         "kiro": "Kiro",
@@ -6830,6 +6832,7 @@
         "effective": "Effective account",
         "error": "Couldn't switch accounts.",
         "inheritedToast": "Using inherited account {label}",
+        "manualApiKey": "API key from settings",
         "noOverride": "Inherit",
         "switchFailed": "Couldn't switch accounts: {error}",
         "toast": "Next message will use account {label}",
@@ -8238,6 +8241,25 @@
     "userId": "User ID",
     "userIdPlaceholder": "usr_…"
   },
+  "chatPlatformComposer": {
+    "aiDraft": "AI draft reply",
+    "apply": "Use in input",
+    "attachmentsUnsupported": "{platform} cannot upload these attachments through this connection. Remove them to send text; your draft has been kept.",
+    "cancel": "Cancel",
+    "description": "Use the latest 30 messages of text and your instructions to draft a reply. Attachments are not sent to AI. Review and edit the result, then place it in the input. Nothing is sent to the platform until you press Send.",
+    "destination": "Send to {platform} · {destination}",
+    "emptyContext": "Add instructions or wait for a message before drafting a reply.",
+    "failed": "Could not generate the reply. Your input has been kept.",
+    "generate": "Generate draft",
+    "generating": "Generating…",
+    "instructions": "Instructions for the reply (optional)",
+    "noModel": "Configure a model or connect to a host to draft a reply.",
+    "noOutput": "AI did not return a usable reply. Try again.",
+    "pii": "Sensitive information was detected. Edit the instructions or conversation before using AI assistance.",
+    "preview": "Reply draft",
+    "reviewDrafts": "Review drafts ({count})",
+    "sendFailed": "Could not send the message. Your input and attachments have been kept."
+  },
   "chatRoom": {
     "andMore": "{count, plural, other {# more}}",
     "listLabel": "In this room",
@@ -8315,6 +8337,1236 @@
     "standalone": "Standalone (not attached).",
     "status": "Attached to {target}; generation {generation}; hostSeq {hostSeq}; local pending {pending}; local rejected/conflicted {terminal}; pending dispatch {pendingDispatch}; pending broadcast {pendingBroadcast}.",
     "transcriptBoundaryRequired": "Attached transcript edits require a canonical Host message boundary."
+  },
+  "cliUiApproval": {
+    "actions": "↑/↓ choose · Enter confirm · Esc deny and stop the turn",
+    "allow": "Allow once",
+    "allow_always": "Allow always",
+    "back": "Esc/Enter back",
+    "bypassActions": "↑/↓ choose · Enter confirm · Esc cancel · PgUp/PgDn scroll",
+    "bypassCancel": "Cancel",
+    "bypassOnce": "Enable for this session only",
+    "bypassRemember": "Enable and don't ask again",
+    "bypassRememberFailed": "Bypass enabled for this session; the confirmation preference could not be saved.",
+    "command": "Complete command",
+    "compactActions": "v details · ↑↓ · Enter · Esc deny/stop",
+    "confirmActions": "Enter confirm · Esc cancel · ↑/↓ scroll",
+    "denied": "Denied \"{name}\".",
+    "deny": "Deny",
+    "diff": "Complete proposed diff",
+    "high": "high risk",
+    "inspect": "v full details",
+    "low": "low risk",
+    "medium": "medium risk",
+    "noDetails": "The agent sent no details with this request.",
+    "parameters": "Complete parameters",
+    "review": "Review {name}",
+    "scroll": "↑/↓ scroll · PgUp/PgDn · g/G",
+    "title": "Allow {name}?"
+  },
+  "cliUiCommands": {
+    "activity": "Current task: {label}",
+    "agentsHint": "dispatch & watch",
+    "agentsLabel": "◆ Subagents",
+    "aliases": "Aliases:",
+    "arguments": "Arguments",
+    "argumentsLabels": {
+      "mcp": {
+        "add": {
+          "command": "Command (stdio)",
+          "name": "Name",
+          "preset": "Preset id (see /mcp presets)",
+          "transport": "Transport",
+          "url": "URL (sse/http)"
+        }
+      },
+      "skill": {
+        "create": {
+          "description": "Description",
+          "name": "Name"
+        }
+      }
+    },
+    "backendDefault": "chosen by backend",
+    "bashBackground": "background",
+    "bashEmpty": "No running !commands · start one with {command}, Ctrl+B backgrounds it · /bashes history shows previous output",
+    "bashExit": "exit {code}",
+    "bashFg": "Foreground",
+    "bashFgHint": "make it the Ctrl+C / Ctrl+B target",
+    "bashForeground": "foreground · Ctrl+C kills",
+    "bashKill": "Kill",
+    "bashKillHint": "abort the whole process tree",
+    "bashMissing": "Command {id} is no longer available. Use /bashes history to choose another.",
+    "bashNoOutput": "(no output yet)",
+    "bashNoTargets": "No commands available for this action.",
+    "bashRunning": "Running commands ({count})",
+    "bashStatus_done": "done",
+    "bashStatus_error": "error",
+    "bashView": "View output",
+    "bashViewHint": "full live output in the pager",
+    "busy": "Wait for the current turn to finish, or press Esc to interrupt.",
+    "categorychat": "Chat",
+    "categorycognia": "Cognia",
+    "categoryconfig": "Configuration",
+    "categorycustom": "Custom",
+    "categorymcp": "MCP",
+    "categoryplugin": "Plugins",
+    "categorysession": "Session",
+    "categorysystem": "System",
+    "commands": {
+      "about": "show version and provider info",
+      "add-dir": "configure additional working directories",
+      "agent-mode": "switch the agent mode (plan / build / code-gen / custom …)",
+      "agent-stats": "Analyze other agents' conversations (Claude Code / Codex / OpenCode): usage, cost, tools",
+      "agents": "view running subagents, list, dispatch, and author them",
+      "analyze": "ask the agent to diagnose the last failed !command",
+      "attach": "attach this TUI to a Host-authoritative target/session",
+      "backend": "switch the agent backend (builtin / codex / claude-code / …)",
+      "balance": "show credit balances across configured providers",
+      "bashes": "list and manage running !commands",
+      "clear": "start a fresh session",
+      "commit": "write a Conventional Commit message from the staged diff and commit",
+      "compact": "compact the conversation to free context",
+      "context": "inspect context usage, cache, loaded items and configuration",
+      "continue": "resume the most recent session directly",
+      "copy": "copy a reply, code block, tool result, or your last message",
+      "council": "ask several models the same question and synthesize a consensus",
+      "cwd": "browse or change the working directory",
+      "detach": "detach from the Host and keep standalone JSONL unchanged",
+      "diff": "review changed files, or compare this branch against a git ref",
+      "doctor": "diagnose config, credentials, and the local store",
+      "editor": "show the detected editor, or set it (/editor [command])",
+      "exit": "quit",
+      "expand": "open a tool result's full output in the pager",
+      "export": "export this session to a file",
+      "fix": "run tests and let the agent fix failures until they pass (bounded)",
+      "goal": "start or control a self-driving goal loop",
+      "handoff": "push this session to the desktop app",
+      "help": "show the command list, or detail on one command (/help [command])",
+      "hooks": "browse, configure and reload lifecycle hooks",
+      "init": "create or improve this project's AGENTS.md",
+      "inspect": "browse and expand any tool/file output",
+      "keybind": "view and customize keyboard shortcuts",
+      "layout": "switch the TUI layout (fullscreen / scrollback)",
+      "limits": "show subscription limits + usage across all configured providers",
+      "logs": "view captured logs across agents, MCP servers, and the backend",
+      "loop": "run a prompt as a self-paced or interval loop",
+      "mascot": "toggle / style the terminal mascot",
+      "mcp": "manage MCP servers (live status, tools, auth)",
+      "memory": "list, add, or remove stored memories",
+      "menu": "open the command center (searchable command palette)",
+      "mode": "switch the permission mode",
+      "model": "switch the model",
+      "models": "list this provider's models (catalog + live inventory) and switch",
+      "mouse": "switch the fullscreen mouse model (select / scroll)",
+      "open": "open a file in your editor (defaults to the last file referenced)",
+      "orchestrate": "analyze a task and run the best multi-model shape (council / ensemble / team)",
+      "output-style": "switch the agent's response mode (concise / explanatory / learning)",
+      "permissions": "view or clear remembered tool approvals",
+      "plan": "review the last plan, or browse saved plans",
+      "plugin": "list, inspect, install, reload, or remove plugins, and browse the marketplace",
+      "pr": "draft a pull request (title + body) from this branch's commits",
+      "provider": "switch the AI provider",
+      "remember": "save a fact to long-term memory",
+      "resume": "pick a past session to resume (or /resume [id])",
+      "retry": "re-send the last message",
+      "review": "get a structured code review of the working tree (or vs a base branch)",
+      "rewind": "restore files and/or conversation to an earlier checkpoint",
+      "route": "Inspect or toggle automatic model tier routing",
+      "search": "search the transcript and open matches in the pager",
+      "select": "in-app drag-to-select: off / manual / auto-copy on release",
+      "sessions": "browse and resume past sessions",
+      "settings": "open the unified settings panel",
+      "skill": "manage skills (browse, toggle, create)",
+      "stack": "show the stacked branch chains recorded in this repository",
+      "status": "show provider, credentials, git, and context health",
+      "statusbar": "customize status-bar layout, segments, theme and hints",
+      "sync": "inspect attached HostState synchronization",
+      "tasks": "browse and control scheduled tasks",
+      "team": "list and inspect agent teams",
+      "theme": "switch the TUI colour theme (reuse Claude Code / Codex themes)",
+      "think": "set the reasoning effort (thinking level)",
+      "tools": "browse the built-in tool catalog",
+      "transcript": "open the complete searchable transcript pager",
+      "usage": "show token and cost usage",
+      "view": "open a file in the scrollable viewer (markdown or highlighted text)",
+      "vim": "toggle vim editing mode in the composer",
+      "workflow": "create, run, or inspect visual workflows"
+    },
+    "contextHint": "breakdown & compact",
+    "contextLabel": "▣ Context",
+    "copyHint": "reply · code · tool · yours",
+    "copyLabel": "⧉ Copy…",
+    "diffHint": "working-tree changes",
+    "diffLabel": "± Git diff",
+    "expandCommand": "Command",
+    "expandDescription": "Description",
+    "expandDetached": "background (detached)",
+    "expandEmpty": "No tool output to expand yet.",
+    "expandForeground": "foreground",
+    "expandInvocation": "Invocation",
+    "expandMode": "Mode",
+    "expandNoResult": "(no result)",
+    "expandOutput": "Output",
+    "expandStatus": "Status",
+    "expandStatus_cancelled": "cancelled",
+    "expandStatus_done": "done",
+    "expandStatus_error": "error",
+    "expandStatus_pending": "pending",
+    "expandStatus_running": "running",
+    "expandTimeout": "Timeout",
+    "expandTitle": "{tool} output",
+    "expandUsage": "Usage: /expand [1-{count}] (newest = {count})",
+    "expandWorkdir": "Workdir",
+    "footer": "↑/↓ PgUp/PgDn scroll · Enter / esc close",
+    "helpHint": "all commands & keys",
+    "helpLabel": "? Help",
+    "helpTitle": "Help: /{command}",
+    "inspectEmpty": "No tool output to inspect yet.",
+    "inspectLine": "1 line",
+    "inspectLines": "{count} lines",
+    "inspectNavigation": "↑/↓ select · Enter view full output · Esc close",
+    "inspectNoMatches": "no output matches",
+    "inspectSearch": "type to filter output",
+    "inspectShell": "shell",
+    "inspectSubagent": "subagent",
+    "inspectTitle": "Inspect output",
+    "keys": "Enter submit · Shift+Enter newline · Tab complete · ↑/↓ history · @ files · Ctrl+C exit · Esc interrupt",
+    "mcpHint": "connect & inspect",
+    "mcpLabel": "🔌 MCP servers",
+    "modelLabel": "✦ Model",
+    "mouseLabel": "🖱 Mouse model",
+    "oneOf": "one of: {choices}",
+    "optional": "optional",
+    "palette": {
+      "actions": "actions",
+      "all": "all commands",
+      "childCount": "{count} actions",
+      "choose": "choose",
+      "compact": "↑↓ · Tab · Enter {action}",
+      "keys": "↑/↓ select · Tab complete · Enter {action}",
+      "more": "{count} more",
+      "open": "open",
+      "run": "run",
+      "search": "Search: "
+    },
+    "permissionLabel": "⚖ Permission mode",
+    "providerLabel": "☷ Provider",
+    "providerOwned": "Provider configuration belongs to the built-in agent.",
+    "reviewPlan": "Review the current plan",
+    "searchForm": "Search transcript",
+    "searchKind_assistant": "Assistant",
+    "searchKind_bash": "Command",
+    "searchKind_canonical-event": "Event",
+    "searchKind_commentary": "Progress",
+    "searchKind_content-part": "Content",
+    "searchKind_error": "Error",
+    "searchKind_notice": "Notice",
+    "searchKind_plan": "Plan",
+    "searchKind_thinking": "Thinking",
+    "searchKind_todo": "Tasks",
+    "searchKind_tool": "Tool",
+    "searchKind_user": "User",
+    "searchLocation": "message {id} · line {line}",
+    "searchMatch": "1 match",
+    "searchMatches": "{count} matches",
+    "searchNoMatches": "No matches for \"{query}\".",
+    "searchQuery": "Search text",
+    "searchTitle": "Search: {query}",
+    "selectionLabel": "⌖ Drag to select",
+    "settingsHint": "open the settings panel",
+    "settingsLabel": "⚙ Settings",
+    "shortcuts": "{history} history search · {collapse} expand/collapse tools · {workflow} inspect workflow · {paste} paste image",
+    "skillFiles": {
+      "empty": "No bundled files",
+      "files": "Files · {count}",
+      "loading": "Loading…",
+      "navigation": "↑↓ select · ←→ folders · Enter open · click/Tab preview · wheel scroll · Esc close",
+      "previewNavigation": "Tab files · / search · ↑↓ / wheel scroll · Esc files",
+      "readError": "Cannot read file: {error}"
+    },
+    "skillsHint": "enable / disable",
+    "skillsLabel": "🛠 Skills",
+    "steering": "Type while a /goal or /loop is working to steer it; the message is delivered at the next turn boundary.",
+    "subcommands": {
+      "add-dir": {
+        "list": "list the extra roots",
+        "remove": "remove an extra root by path or index"
+      },
+      "agents": {
+        "edit": "open an agent file in your editor",
+        "list": "list subagents (text list)",
+        "models": "assign a provider/model to each subagent",
+        "new": "scaffold a new agent file under .cognia/agents",
+        "panel": "open the interactive running-agents panel",
+        "rm": "remove a project agent file",
+        "run": "dispatch a subagent: run [--bg] [id] [prompt] (--bg detaches it)",
+        "stop": "stop a background subagent run by its runId"
+      },
+      "bashes": {
+        "actions": "pick an action (view / kill / foreground) for one run",
+        "fg": "bring a backgrounded command back to the foreground",
+        "kill": "abort a running command (foreground or background)",
+        "view": "open a run's full output in the pager"
+      },
+      "commit": {
+        "apply": "create the commit from the confirmed message",
+        "cancel": "discard the pending commit message",
+        "stage-all": "stage all changes, then commit"
+      },
+      "goal": {
+        "list": "list this session's goals",
+        "pause": "pause the active goal",
+        "resume": "resume the active goal",
+        "status": "show the active goal",
+        "stop": "stop the active goal"
+      },
+      "hooks": {
+        "list": "browse configured hooks",
+        "refresh": "reload hooks with fresh agent context on the next message"
+      },
+      "init": {
+        "apply": "apply the pending AGENTS.md change",
+        "create": "regenerate the AGENTS.md template (confirm before overwrite)",
+        "optimize": "alias for rewrite",
+        "preview": "preview the current AGENTS.md",
+        "regenerate": "alias for create",
+        "rewrite": "rewrite AGENTS.md with the current model (confirm before overwrite)",
+        "scaffold": "seed .cognia/instructions/*.md and an example subagent"
+      },
+      "limits": {
+        "presets": "show custom-source preset config snippets (New-API, Copilot, …)"
+      },
+      "loop": {
+        "pause": "pause the foreground loop",
+        "resume": "resume the foreground loop",
+        "stop": "stop the foreground loop"
+      },
+      "mcp": {
+        "add": "add an MCP server",
+        "apply": "apply MCP configuration to the current agent",
+        "auth": "authorize a remote server via OAuth",
+        "disable": "disable a server by name",
+        "enable": "enable a server by name",
+        "list": "browse MCP configuration and runtime status",
+        "logout": "clear a server's stored OAuth credentials",
+        "logs": "view captured MCP server output logs",
+        "panel": "open the interactive MCP panel",
+        "presets": "browse built-in + plugin MCP server presets",
+        "prompts": "connect and list a server's prompts",
+        "reconnect": "test connectivity from Cognia (does not reconnect the agent)",
+        "refresh": "refresh external agent MCP inventory",
+        "remove": "remove a server you added (~/.cognia/mcp.json)",
+        "resources": "connect and list a server's resources",
+        "show": "show a server's config detail",
+        "toggle": "toggle a server by name",
+        "tools": "connect and list a server's tools"
+      },
+      "memory": {
+        "add": "save a memory: add [text]",
+        "delete": "delete a memory by id",
+        "list": "list stored memories",
+        "show": "show a memory by id"
+      },
+      "permissions": {
+        "clear": "forget every always-allowed tool",
+        "list": "list approvals",
+        "remove": "forget one always-allowed tool by name"
+      },
+      "plan": {
+        "delete": "delete a saved plan by id",
+        "diff": "diff two saved plans (default: latest two)",
+        "explore": "research with Explore/Plan subagents, then propose a plan",
+        "list": "browse saved plans",
+        "refine": "re-enter plan mode to revise the last plan",
+        "show": "open a saved plan by id"
+      },
+      "plugin": {
+        "disable": "disable a plugin by id",
+        "enable": "enable a plugin by id",
+        "install": "install a plugin from a GitHub repo",
+        "list": "browse installed plugins",
+        "marketplace": "browse the marketplace, or manage sources (add|list|remove)",
+        "preview": "preview a marketplace plugin (README + permissions) before installing",
+        "reload": "hot-reload a plugin by id",
+        "show": "inspect a plugin by id",
+        "sources": "manage GitHub marketplace sources (add|remove|list)",
+        "tools": "show a plugin's declared tools by id",
+        "trust": "manage trusted GitHub publishers (add|remove|list)",
+        "uninstall": "remove an installed plugin by id",
+        "update": "update a GitHub-installed plugin (no id checks all for updates)"
+      },
+      "pr": {
+        "apply": "open the draft PR with gh",
+        "cancel": "discard the pending PR draft"
+      },
+      "provider": {
+        "capabilities": "operation profile per configured provider: capabilities [provider]",
+        "inspect": "one provider's models and operation profile: inspect [provider]",
+        "probe": "one real request per provider (billable): probe [model]",
+        "usage": "local spend per provider and model: usage [provider]"
+      },
+      "rewind": {
+        "apply": "restore both conversation and files",
+        "conversation": "restore only the conversation",
+        "files": "restore only the files"
+      },
+      "route": {
+        "auto": "Enable or disable automatic tier routing (on|off)"
+      },
+      "skill": {
+        "create": "scaffold a new custom skill",
+        "delete": "delete a custom skill by id",
+        "disable": "disable a skill by id",
+        "disable-all": "disable every discovered skill for the session",
+        "enable": "enable a skill by id",
+        "enable-all": "enable every discovered skill for the session",
+        "files": "browse a skill's bundled files by id",
+        "list": "browse skills (text list)",
+        "panel": "open the interactive skills panel",
+        "show": "show a skill's full detail by id",
+        "toggle": "toggle a skill by id"
+      },
+      "stack": {
+        "check": "verify every layer really contains its parent",
+        "off": "clear this branch's parent, making it a bottom layer",
+        "on": "record the branch this one is stacked on",
+        "push": "push every layer with a lease",
+        "restack": "replay each layer onto the one below it"
+      },
+      "sync": {
+        "status": "show Host generation, sequence, and recovery queues"
+      },
+      "tasks": {
+        "list": "list scheduled tasks",
+        "pause": "pause a task by id",
+        "resume": "resume a task by id",
+        "show": "show a task by id"
+      },
+      "team": {
+        "auto": "auto-compose a team from an objective",
+        "list": "browse teams",
+        "run": "run a desktop agent team and watch its progress",
+        "show": "inspect a team by id"
+      },
+      "workflow": {
+        "apply": "apply the open copilot proposal",
+        "create": "create a workflow with the copilot",
+        "discard": "discard the open copilot proposal",
+        "edit": "edit a workflow with the copilot",
+        "exit": "leave workflow copilot mode",
+        "inspect": "inspect a workflow",
+        "list": "browse workflows",
+        "replay": "replay a run by id",
+        "run": "run a workflow by id",
+        "runs": "browse run history and replay a run",
+        "save": "save the workflow draft"
+      }
+    },
+    "subcommandsTitle": "Subcommands",
+    "terminal": "Terminal compatibility: Ctrl+I may be indistinguishable from Tab; use {alternate} for workflow inspection. tmux may intercept Ctrl+B; /agents remains available. Change bindings with /keybind.",
+    "terminalCustom": "Terminal compatibility: Ctrl+I may be indistinguishable from Tab; use /keybind workflowInspect to configure a free shortcut. tmux may intercept Ctrl+B; /agents remains available.",
+    "themeHint": "recolour the UI",
+    "themeLabel": "🎨 Theme",
+    "thinkingLabel": "🧠 Thinking effort",
+    "title": "Commands",
+    "toolsHint": "browse the catalog",
+    "toolsLabel": "🧰 Tools",
+    "unavailable": "{reason} Use /backend to choose a compatible agent or /doctor to inspect setup.",
+    "unknownCommand": "Unknown command /{command} — /help for the list",
+    "unsupported": "This backend does not support this action.",
+    "usage": "Usage:",
+    "usageHint": "tokens · cost",
+    "usageLabel": "📊 Usage & cost",
+    "viewA2uiFailed": "Cannot open A2UI surface: {reason}",
+    "viewBinary": "Binary file cannot be previewed as text",
+    "viewContentTitle": "Content part · {target}",
+    "viewContentUnavailable": "Structured content is unavailable.",
+    "viewForm": "Open file",
+    "viewNotFile": "Not a regular file",
+    "viewOutsideSkill": "File is outside the skill directory",
+    "viewPath": "File path",
+    "viewReadFailed": "Cannot read {target}: {error}",
+    "viewTruncated": "truncated at {kb} KB",
+    "viewUsage": "Usage: {command}"
+  },
+  "cliUiCommon": {
+    "agentLimits": {
+      "allowed": "Available",
+      "allowed_warning": "Approaching limit",
+      "latestReport": "Latest quota reported by this agent; updates when the agent reports new data.",
+      "overage": "Extra usage",
+      "overageDisabledReason": "Unavailable: {reason}",
+      "overageInUse": "In use",
+      "overageNotInUse": "Not in use",
+      "rejected": "Usage blocked",
+      "unavailable": "The current agent has not reported subscription quota, and this connection does not support querying it."
+    },
+    "cacheReused": "{count} reused",
+    "cancel": "Esc to cancel",
+    "codexLimits": {
+      "creditUnit": "credits",
+      "credits": "Credits",
+      "days": "{count}d",
+      "hours": "{count}h",
+      "individualSpendingLimit": "Individual spending limit",
+      "minutes": "{count}m",
+      "notConnected": "Codex app server is not connected",
+      "ordinaryUsageBlocked": "Ordinary usage blocked",
+      "primaryWindow": "Primary window",
+      "secondaryWindow": "Secondary window",
+      "spendingLimitReached": "Spending limit reached",
+      "unlimitedCredits": "Credits (unlimited)"
+    },
+    "commandCenter": "Command center",
+    "commandHint": "type to search · ↑/↓ navigate · Enter / click run · Esc close",
+    "composerPlaceholder": "Ask, run /commands, @ files, or ! shell",
+    "contextUsage": "{percent}% ctx",
+    "copied": "Copied the complete document to the clipboard.",
+    "copyFailed": "Couldn't copy the document to the clipboard.",
+    "crashHint": "The error was logged. Press r to reset the session · q or Esc to quit.",
+    "crashTitle": "Something went wrong",
+    "defaultModel": "default",
+    "diffFailed": "Could not load changes: {error}",
+    "editingDiscard": "Editing message #{position}/{total} · {later} later turn(s) will be discarded on send · Esc to cancel",
+    "editingMessage": "Editing message #{position}/{total} — ↑/↓ choose · Enter to edit · Esc to cancel",
+    "filterCommands": "type to filter commands",
+    "language": "Interface language",
+    "languageHint": "Language for startup, approvals, errors, help and review panels.",
+    "mcp": {
+      "agentInventory": "Agent inventory: {status} (session not confirmed)",
+      "all": "(all)",
+      "auth": "enter authorizes Cognia",
+      "authDetail": "Cognia authentication required for {transport}. Press Enter to authorize.",
+      "conflict": "Name conflict: {detail}",
+      "detailsTitle": "Server details · {name}",
+      "enable": "space enables",
+      "failed": "Connection over {transport} failed.",
+      "filter": "filter: ",
+      "footer": "type filter · ↑/↓ / click · enter act · space toggle · ^N new · ^X remove · esc close",
+      "issue": "Connection issue · {name}",
+      "localScope": "Cognia probes test reachability; they do not keep a connection open.",
+      "noError": "No error detail was reported by the transport.",
+      "noMatches": "no matches",
+      "probe": "Cognia probe: {status}",
+      "probeStatus": {
+        "connected": "reachable",
+        "disabled": "disabled",
+        "failed": "failed",
+        "needs_auth": "needs login",
+        "pending": "probing",
+        "unknown": "not probed"
+      },
+      "probeTime": "Last Cognia probe: {time}",
+      "probing": "probing…",
+      "readonly": "read-only",
+      "reconnect": "enter probes Cognia",
+      "removeBody": "Remove **{name}** from `~/.cognia/mcp.json`?\n\nRe-add it any time with `/mcp add`.",
+      "removeTitle": "Remove MCP server",
+      "runtimeTools": "{count} Agent tools · enter",
+      "scope": "Session: {backend} · Cognia probes do not confirm Agent availability.",
+      "session": "Session: {status}",
+      "sessionError": "Agent: {error}",
+      "sessionFooter": "^R refresh Agent status · ^A apply to Agent",
+      "sessionStatus": {
+        "available": "available",
+        "disabled": "disabled",
+        "failed": "failed",
+        "needs_auth": "needs login",
+        "pending": "pending application",
+        "submitted": "submitted, unconfirmed",
+        "unknown": "unknown",
+        "unsupported": "unsupported by Agent"
+      },
+      "sessionTools": "Agent tools: {count}",
+      "sourceStatus": {
+        "agent": "Agent native",
+        "bridge": "Cognia bridge",
+        "cognia": "Cognia config"
+      },
+      "timeout": "Timeout while connecting over {transport}.",
+      "title": "MCP servers · {count}",
+      "tools": "{count} Cognia-probed tools · enter",
+      "toolsAction": "enter for tools"
+    },
+    "mcpSession": {
+      "applied": "MCP configuration applied. Availability still requires agent confirmation.",
+      "applyFailed": "Could not apply MCP configuration: {error}",
+      "namesake": "Same name in another source; effective configuration is unconfirmed.",
+      "noSession": "No active agent MCP session. Configuration will be considered on the first message.",
+      "probeOnly": "Cognia connectivity check only; session availability is unconfirmed.",
+      "refreshFailed": "Could not refresh agent MCP status: {error}",
+      "restartBody": "This agent requires a new protocol session. The visible transcript remains, but the agent may lose its previous conversation context. Continue?",
+      "restartTitle": "Apply MCP configuration?",
+      "scopeLocal": "{name} · Cognia diagnostic tools",
+      "toolsTitle": "{name} · agent inventory",
+      "toolsUnknown": "The agent has not reported a tool list for this server.",
+      "unconfirmed": "Configuration submitted; the agent has not confirmed availability.",
+      "unsupported": "This agent cannot consume this MCP configuration."
+    },
+    "moreAbove": "↑ {count} more",
+    "moreBelow": "↓ {count} more",
+    "noCommands": "no commands match",
+    "permissionModes": {
+      "acceptEdits": "acceptEdits",
+      "auto": "auto",
+      "bypassPermissions": "bypassPermissions",
+      "default": "default",
+      "dontAsk": "dontAsk",
+      "plan": "plan"
+    },
+    "restartRequired": "Saved. Restart the CLI to apply screen reader mode.",
+    "screenReader": "Screen reader mode",
+    "screenReaderHint": "Plain output without animation or mouse capture. Restart the CLI to apply.",
+    "settings": "Settings",
+    "settingsHint": "Tab section · ↑/↓ row · ←/→ change · Space toggle · Enter open · r reset · Esc close",
+    "stopping": "stopping",
+    "thinking": "Thinking",
+    "tokenRate": "{rate} tok/s avg",
+    "tokenUsage": "{count} tok",
+    "toolsBrowser": {
+      "catalogTitle": "Tool catalog",
+      "data": {
+        "approval": "Approval metadata: {approval}",
+        "approvalNotRequired": "not required by the tool policy",
+        "approvalRequired": "required by the tool policy",
+        "category": "Category: {category}",
+        "coreAnthropic": "Core-file registration on Anthropic: {state} (also requires the core-file category).",
+        "disabled": "disabled",
+        "enabled": "enabled",
+        "risk": "Declared risk: {risk}",
+        "runtimeCaveat": "This is the shared built-in tool catalog. Configured categories do not guarantee that each tool is exposed: the current agent, provider, permissions and installed runtime dependencies determine availability.",
+        "schemaUnavailable": "Parameter schemas are supplied by the running tool registration and are not included in this static catalog."
+      },
+      "disabled": "Configured: disabled",
+      "empty": "No matching tools",
+      "enabled": "Configured: enabled",
+      "mcpTitle": "{server} · tools ({enabled}/{total} enabled)",
+      "navigation": "↑/↓ select · ←/→ / PgUp/PgDn page · Enter details · Esc back",
+      "navigationToggle": "↑/↓ select · ←/→ page · Enter details · Space toggle (empty search) · Esc back",
+      "noDescription": "No description was provided.",
+      "page": "Page {page}/{pages} · {from}–{to} / {total}",
+      "schema": "Input parameters (JSON Schema)",
+      "schemaUnknown": "This source did not provide a parameter schema.",
+      "search": "Search tool name, purpose, source or parameters",
+      "source": "Source: {source}",
+      "title": "Built-in tools"
+    },
+    "trustChoose": "Choose another folder…",
+    "trustDescription": "Cognia Agent may read and edit files and run commands in this folder.",
+    "trustProceed": "Yes, proceed",
+    "trustQuestion": "Do you trust the files in {path}?",
+    "unavailable": "unavailable",
+    "unknownError": "Unknown error",
+    "waitingApproval": "Waiting for approval",
+    "welcomeHint": "/settings to configure · /inspect to expand output · /help · @ files · ! shell",
+    "working": "Working"
+  },
+  "cliUiContext": {
+    "controller": {
+      "help": "This is a point-in-time snapshot. ↑/↓ scroll, PgUp/PgDn page, / search, g/G first/last, Esc back. Run /context again to refresh; /compact requests conversation compaction.",
+      "noSession": "No live session. Below are local configuration and available telemetry; missing occupancy is not zero.",
+      "snapshot": "Snapshot captured: {time}",
+      "timeout": "The live breakdown request timed out. Latest usage and local configuration are shown below; run /context again to retry.",
+      "title": "Context details",
+      "unavailable": "Live breakdown unavailable. The latest usage and local configuration remain available below.",
+      "unsupported": "This backend does not expose an SDK category breakdown through this interface. Below are its reported usage and local configuration, which do not prove every configured item is loaded."
+    },
+    "report": {
+      "builtinTools": "Configured built-in tools: {categories} enabled categories / {tools} catalog tools. Configuration does not establish runtime availability or loading; see /tools for details.",
+      "cache": "## Cache telemetry",
+      "cache1h": "Cache write, 1-hour TTL: {tokens}",
+      "cache5m": "Cache write, 5-minute TTL: {tokens}",
+      "cacheMeaning": "Absent fields remain unknown; explicit zero is preserved. TTL writes are subdivisions of cache writes, not additional occupancy. These request counters are not independently additive to live context occupancy.",
+      "cacheMissing": "Cache telemetry was not reported; this is not a measured zero hit rate.",
+      "cacheRead": "Reported cache read: {tokens}",
+      "cacheWrite": "Reported cache write: {tokens}",
+      "compactDisabled": "Local auto-compaction is configured off. The threshold below is a configuration estimate, not an active trigger.",
+      "compactEstimate": "Local configuration is an estimate, not live SDK policy. SDK live policy, when reported, takes precedence.",
+      "compaction": "## Compaction",
+      "configuration": "## Session configuration",
+      "configuredNotLoaded": "Directories and loading mode are configuration only. They do not prove a skill is loaded or quantify its context cost; see SDK inventory when available.",
+      "cwd": "Working directory: {path}",
+      "defaultModel": "agent default",
+      "estimatedThreshold": "Estimated configured threshold: {percent}% · {tokens}",
+      "externalCompact": "The external agent has not reported its compaction policy here. A known window does not establish its threshold or enabled state.",
+      "fresh": "Latest prompt fresh input: {tokens}",
+      "identity": "Model: {model} · Backend: {provider}",
+      "input": "Reported input (may aggregate turn requests): {tokens}",
+      "latest": "## Latest reported usage",
+      "latestMeaning": "Occupancy uses the latest reported context measurement, not session totals. When no authoritative context total is reported, the estimate includes latest prompt input, cache tokens and reported output. Input billing may aggregate multiple requests in the latest turn. No session aggregate is available in this report.",
+      "occupancy": "Used: {used} / {max} ({percent}%)",
+      "output": "Reported output (shown separately; do not add again): {tokens}",
+      "promptLength": "Configured system prompt length: {count} characters (content omitted)",
+      "reasoning": "Reasoning (subset of output, not additional): {tokens}",
+      "remaining": "Remaining: {tokens}",
+      "roots": "Configured additional roots: {count}",
+      "skillDirs": "Configured extra skill directories: {count}",
+      "skillMode": "Configured skill loading mode: {mode}",
+      "title": "# Context report",
+      "tokens": "{short} ({raw} tokens)",
+      "unknown": "not reported / unknown",
+      "used": "Used: {tokens}",
+      "window": "Window: {tokens}"
+    },
+    "sdk": {
+      "agents": "### Agents",
+      "categories": "### Categories",
+      "commands": "### Slash commands",
+      "compactState": "Live auto-compaction: {state}",
+      "compactThreshold": "Reported compaction threshold: {percent}% · {tokens}",
+      "compactUnknown": "Live compaction threshold: not reported / unknown",
+      "deferred": "deferred / not occupying context",
+      "deferredInventory": "deferred inventory; do not add to occupancy",
+      "deferredTools": "### Deferred built-in tool inventory",
+      "disabled": "disabled",
+      "empty": "SDK reported an empty list.",
+      "enabled": "enabled",
+      "frontmatter": "### Skill frontmatter",
+      "included": "Included: {included} / configured total: {total} · {tokens}",
+      "loaded": "loaded",
+      "loadingUnknown": "loading state unknown",
+      "mcp": "### MCP tools",
+      "memory": "### Memory files",
+      "model": "SDK model: {model}",
+      "notReported": "Not reported by SDK.",
+      "overlap": "Categories and the detailed inventories below overlap. Do not add their subtotals together. Deferred entries are definitions not yet occupying context; unknown loading states are not assumed loaded.",
+      "rawMax": "Raw maximum window: {tokens}",
+      "skills": "### Skills",
+      "systemPrompt": "### System prompt sections",
+      "systemTools": "### System tools",
+      "title": "## Live context (SDK)"
+    }
+  },
+  "cliUiDiff": {
+    "all": "All working changes",
+    "allPaths": "all",
+    "allVisible": "all",
+    "binary": "Binary change",
+    "branch": "Branch vs {ref}",
+    "changed": "{count} files changed",
+    "changedOne": "1 file changed",
+    "close": "q/esc close",
+    "copy": "y copy all",
+    "detailNavigation": "Tab files · Ctrl+←/→ scope · Ctrl+R refresh · Esc back",
+    "directory": "Directory",
+    "directoryDetails": "Untracked directory (Git may report an embedded repository this way). Its contents belong to a separate review and are not expanded here. Switch the workspace to this directory and run /diff to inspect its changes.",
+    "empty": "No changes in this scope",
+    "failed": "Changes could not be loaded. Press r to retry.",
+    "file": "1 file",
+    "files": "{count} files",
+    "hunks": "{count} hunks",
+    "loading": "Loading changes…",
+    "matches": "{current}/{total} matches",
+    "navigation": "↑/↓ files · PgUp/PgDn page · / filter · Enter open · Tab focus · Ctrl+←/→ scope · Esc back",
+    "noMatches": "No matching files",
+    "pages": "Page {page}/{pages} · {shown}/{total} files",
+    "pathFilter": "Path: {query}",
+    "pathSearch": "Search paths: {query}▌ · Enter apply",
+    "refresh": "r refresh",
+    "searchDraft": "/{query}{cursor} · enter search · esc cancel",
+    "selectedFile": "Selected:",
+    "staged": "Staged changes",
+    "title": "Git diff",
+    "unstaged": "Unstaged changes",
+    "untracked": "New files",
+    "viewerNavigation": "↑/↓ scroll · PgUp/PgDn page · g/G top/bottom · / search · n/N next/prev",
+    "workingTitle": "Working tree changes"
+  },
+  "cliUiHooks": {
+    "data": {
+      "agents": "Agent selector: {value}",
+      "busy": "Finish or stop the current response before changing or reloading hooks.",
+      "configured": "Configuration inventory, not execution history. Reload after editing; changes apply to a fresh agent context on the next message.",
+      "editFailed": "Could not finish editing {path}. Check your /editor configuration.",
+      "edited": "Editor closed: {path}. Press Ctrl+R to validate and reload hooks.",
+      "empty": "No user hooks configured. Edit a source file to add hooks.",
+      "event": "Event: {event}",
+      "external": "Configuration inventory. External agents do not receive Cognia SDK lifecycle hooks. Local CLI events can still run command hooks; the external agent may also have its own hook configuration.",
+      "invalid": "Ignored invalid source {path}: {error}",
+      "invalidObject": "Expected a JSON object.",
+      "matcher": "Matcher: {value}",
+      "otherProvider": "Configured hooks only. The current non-Anthropic built-in provider does not run the SDK lifecycle-hook pipeline.",
+      "reloadFailed": "Could not reload hooks: {error}",
+      "reloaded": "Hooks reloaded. The next message starts a fresh agent context; the visible transcript remains.",
+      "saveFailed": "Could not save hook configuration. The setting was not changed.",
+      "script": "Bundled script: {path}",
+      "source": "Source: {path}",
+      "toggleHelp": "Space toggles this built-in hook. Custom hooks are edited in their source files; no commands are executed by this panel."
+    },
+    "ui": {
+      "actions": "Space toggle built-in (empty search) · Ctrl+R refresh · Ctrl+E edit Cognia · Ctrl+L edit Claude",
+      "diagnostics": "Configuration diagnostics ({count})",
+      "empty": "No hooks configured",
+      "navigation": "↑/↓ select · Enter details · Esc close",
+      "noMatches": "No matching hooks",
+      "search": "Search name, event, source or command",
+      "sources": {
+        "builtin": "Built-in",
+        "claude": "Claude settings",
+        "cognia": "Cognia"
+      },
+      "title": "Configured hooks ({count})"
+    }
+  },
+  "cliUiSettings": {
+    "credentialDescription": "Set or replace the active provider's API key or subscription token.",
+    "credentialDescriptionExternal": "Set or replace the saved built-in provider's API key or subscription token.",
+    "editFooter": "Editing · ←/→ value · Enter save · Esc cancel · Tab section",
+    "editFooterCompact": "←→ value · Enter save · Esc cancel",
+    "editFooterTiny": "←→ Enter Esc",
+    "footer": "←/→ Tab section · ↑/↓ row · Enter edit/open · Space toggle · r reset · Esc close",
+    "footerCompact": "←→ Tab section · Enter edit · Esc close",
+    "footerTiny": "Tab ↑↓ Enter Esc",
+    "hookLabel": "Hook: {id}",
+    "keyDescription": "Current binding — change it from Rebind a key… below.",
+    "keys": {
+      "agentsPanel": "Open running-agents panel",
+      "clearScreen": "Clear screen",
+      "collapseAll": "Expand / collapse all",
+      "copyCodeBlock": "Copy last code block",
+      "copyLast": "Copy last reply",
+      "copyLastUser": "Copy your last message",
+      "copySelection": "Copy the selection",
+      "copyToolOutput": "Copy last tool output",
+      "copyTranscript": "Copy whole conversation",
+      "deleteWord": "Delete word left",
+      "find": "Find in transcript",
+      "historySearch": "Search composer history",
+      "inspect": "Inspect tool output",
+      "lineEnd": "Move to line end",
+      "lineHome": "Move to line start",
+      "lineKillToEnd": "Delete to line end",
+      "lineKillToStart": "Delete to line start",
+      "mouseToggle": "Toggle mouse model",
+      "pasteImage": "Paste image from clipboard",
+      "redo": "Redo edit",
+      "selectionCycle": "Cycle drag-to-select mode",
+      "undo": "Undo edit",
+      "verboseToggle": "Toggle detail mode",
+      "workflowInspect": "Inspect workflow step"
+    },
+    "moreAbove": "  ↑ {count} more",
+    "moreBelow": "  ↓ {count} more",
+    "providerDescription": "Which AI provider serves this session (opens the provider picker).",
+    "providerDescriptionExternal": "Saved provider for the built-in backend; changing it leaves the active external agent unchanged.",
+    "providerExternal": "Built-in provider",
+    "removeRootDescription": "Remove this additional root from the session configuration.",
+    "removeRootLabel": "Remove root {index}…",
+    "rows": {
+      "additionalRoots": {
+        "description": "Browse to add a root. Actual access depends on the external agent and its permissions.",
+        "label": "Additional roots…"
+      },
+      "aiSdkMaxSteps": {
+        "description": "Max agentic tool-call legs per turn on OpenAI-compatible providers (runaway backstop).",
+        "label": "Agent step budget (non-Anthropic)"
+      },
+      "allowedTools": {
+        "description": "Restrict the agent to an allow-list of tools (empty = all tools allowed).",
+        "label": "Allowed tools allowlist…"
+      },
+      "autoCompact": {
+        "description": "Automatically compact the live context as it nears the model's window.",
+        "label": "Auto-compact context"
+      },
+      "autoCompactThreshold": {
+        "description": "Fraction of the context window that triggers auto-compaction (clamped 0.5–0.98).",
+        "label": "Auto-compact threshold"
+      },
+      "autoRoute": {
+        "description": "One-shot/headless run only: route each prompt to the cheapest capable tier.",
+        "label": "Auto tier routing (headless run)"
+      },
+      "clickToExpand": {
+        "description": "Fullscreen only: a mouse click toggles just that cell (disables burst-folding).",
+        "label": "Click a cell to expand it"
+      },
+      "clipboardMaxBytes": {
+        "description": "Max bytes for an OSC 52 copy (0 = no cap; terminals silently drop huge ones).",
+        "label": "Clipboard OSC 52 byte cap"
+      },
+      "clipboardMode": {
+        "description": "Copy strategy: auto (OSC 52 over SSH) / always (force OSC 52) / never.",
+        "label": "Clipboard OSC 52 mode"
+      },
+      "collapseTools": {
+        "description": "Start tool-result cells collapsed ({key} expands).",
+        "label": "Collapse tool output by default"
+      },
+      "credential": {
+        "label": "Credential"
+      },
+      "custom-theme": {
+        "description": "Author a custom palette on top of a base theme.",
+        "label": "Custom theme colours…"
+      },
+      "customLimits": {
+        "description": "User-defined usage/limits sources surfaced in /limits (edit in config.json).",
+        "label": "Custom limits sources"
+      },
+      "cwd": {
+        "description": "Choose a directory. Switching recreates the agent context; the visible transcript remains.",
+        "label": "Working directory…"
+      },
+      "desktopNotifications": {
+        "description": "Also fire an OS desktop notification on completion (only when the bell is on).",
+        "label": "Desktop notifications"
+      },
+      "editor": {
+        "description": "Preferred editor for /open and clickable file paths (blank = auto-detect).",
+        "label": "External editor"
+      },
+      "externalSkills": {
+        "description": "Also discover Claude Code / Codex / OpenCode skill directories.",
+        "label": "Reuse external skill dirs"
+      },
+      "gitBaseBranch": {
+        "description": "Base branch /pr targets. Empty = auto-detect main → master.",
+        "label": "PR base branch…"
+      },
+      "gitCoauthorTrailer": {
+        "description": "Append the Co-Authored-By trailer to /commit messages (custom text: config.json git.coauthorTrailer).",
+        "label": "Commit co-author trailer"
+      },
+      "gitPrFooter": {
+        "description": "Append the Claude Code footer to /pr bodies (custom text: config.json git.prFooter).",
+        "label": "PR body footer"
+      },
+      "gitProtectedBranches": {
+        "description": "Branches /commit refuses to commit to directly (space-separated).",
+        "label": "Protected branches…"
+      },
+      "highlight": {
+        "description": "Syntax-highlight inline tool/file output (Bash / PS / file reads).",
+        "label": "Syntax-highlight output"
+      },
+      "hook:auto-context-loader": {
+        "description": "Inject .cognia/agent-context.md as standing context at session start."
+      },
+      "hook:auto-context-loader-prompt": {
+        "description": "Inject .cognia/agent-context.md as standing context on every prompt."
+      },
+      "hook:cost-quota-guard": {
+        "description": "Deny a turn once the session token budget is exceeded."
+      },
+      "hook:pii-safety-guard": {
+        "description": "Block a prompt that carries obvious PII / credentials."
+      },
+      "hook:pii-safety-guard-tool": {
+        "description": "Block a tool call whose input carries obvious PII / credentials."
+      },
+      "hooksPanel": {
+        "description": "Browse hook sources, inspect details, edit and reload configuration.",
+        "label": "Hooks…"
+      },
+      "layout": {
+        "description": "Fullscreen (pinned banner/composer) vs native terminal scrollback.",
+        "label": "Layout"
+      },
+      "lineNumbers": {
+        "description": "Show 1-based line numbers in file/code result views.",
+        "label": "File line numbers"
+      },
+      "loggingCrashLogMaxKb": {
+        "description": "crash.log rotates to crash.log.1 once it exceeds this size (0 = never).",
+        "label": "Crash log rotation size (KiB)"
+      },
+      "loggingFileLevel": {
+        "description": "Minimum severity persisted to ~/.cognia/logs/mcp.log (the /mcp logs panel always shows everything).",
+        "label": "File log level"
+      },
+      "loggingLogDir": {
+        "description": "Where crash.log and mcp.log live on disk.",
+        "label": "Log directory"
+      },
+      "loggingMcpLogMaxKb": {
+        "description": "mcp.log rotates to mcp.log.1 once it exceeds this size.",
+        "label": "MCP log rotation size (KiB)"
+      },
+      "loggingViewMcpLogs": {
+        "description": "Open the in-TUI log panel over the live MCP / sidecar event stream.",
+        "label": "View MCP / sidecar logs…"
+      },
+      "mascot-enabled": {
+        "description": "Show the terminal mascot above the footer.",
+        "label": "Mascot"
+      },
+      "mascot-style": {
+        "description": "Which mascot creature is shown (clawd / cat / robot).",
+        "label": "Mascot style"
+      },
+      "maxLines": {
+        "description": "Max lines of an expanded inline result before the tail is summarised.",
+        "label": "Inline result line cap"
+      },
+      "mode": {
+        "description": "How tool calls are approved (default / acceptEdits / plan / bypass / …).",
+        "label": "Permission mode"
+      },
+      "model": {
+        "description": "The model id used for your turns (opens the model picker).",
+        "label": "Model"
+      },
+      "mouse": {
+        "description": "Wheel-scroll the transcript vs native click-drag text selection (fullscreen).",
+        "label": "Mouse model"
+      },
+      "notify": {
+        "description": "Ring the terminal bell after a long turn so you can tab away.",
+        "label": "Ring the bell when a turn finishes"
+      },
+      "output-style": {
+        "description": "Response style appended to the system prompt (concise / explanatory / learning).",
+        "label": "Output style"
+      },
+      "pagerThreshold": {
+        "description": "Above this many lines, show a preview + pager hint instead of the whole body.",
+        "label": "Pager threshold (lines)"
+      },
+      "pluginTools": {
+        "description": "Expose the in-tree first-party plugin tools (web-tools, workflow, …) to the agent.",
+        "label": "Plugin tools (dynamic workflow)"
+      },
+      "provider": {
+        "label": "Provider"
+      },
+      "rebind": {
+        "description": "Open the interactive keybinding editor.",
+        "label": "Rebind a key…"
+      },
+      "selection": {
+        "description": "In-app text selection over the rendered frame; auto-copy puts it on the clipboard on release.",
+        "label": "Drag to select"
+      },
+      "showActiveSkills": {
+        "description": "Print an 'Active skills (N): …' notice whenever a turn loads enabled skills.",
+        "label": "Announce active skills each turn"
+      },
+      "skillDirs": {
+        "description": "Extra directories to discover SKILL.md skills from.",
+        "label": "Extra skill dirs…"
+      },
+      "skillLoadMode": {
+        "description": "How skills enter the prompt — a name-only catalog vs every full body.",
+        "label": "Skill loading"
+      },
+      "skillTool": {
+        "description": "Let the agent load a skill's instructions on demand via the Skill tool.",
+        "label": "Skill tool"
+      },
+      "slashCommandTool": {
+        "description": "Let the agent run a slash command via the SlashCommand tool.",
+        "label": "SlashCommand tool"
+      },
+      "status-segments": {
+        "description": "Which segments the footer shows, and their order.",
+        "label": "Status bar segments…"
+      },
+      "status-theme": {
+        "description": "Status-bar colour palette (default / dim / vivid / mono).",
+        "label": "Status bar colours"
+      },
+      "streamIdleTimeoutMs": {
+        "description": "Abort a turn if the model stream stalls this long mid-turn (0 = disabled).",
+        "label": "Stream idle timeout (ms)"
+      },
+      "streamReveal": {
+        "description": "Reveal streamed text at a gentle typing cadence (interactive TTY only).",
+        "label": "Typewriter reveal"
+      },
+      "subagentMaxConcurrent": {
+        "description": "How many subagents one dispatch_agent fan-out may run at once over the live sidecar. 1 = one after another.",
+        "label": "Subagent max concurrency"
+      },
+      "subagentMaxDepth": {
+        "description": "How deep dispatch_agent may nest (subagents spawning subagents). 1 = subagents are leaves.",
+        "label": "Subagent max nesting depth"
+      },
+      "subagentModels": {
+        "description": "Assign a provider/model to each dispatchable subagent.",
+        "label": "Subagent models…"
+      },
+      "subagentStreamIdleTimeoutMs": {
+        "description": "Stream-idle timeout for a dispatched subagent turn — far higher than interactive (0 = off).",
+        "label": "Subagent stream idle timeout (ms)"
+      },
+      "systemPrompt": {
+        "description": "Extra system-prompt text prepended to every turn.",
+        "label": "System prompt…"
+      },
+      "terminalTitle": {
+        "description": "Update the terminal window/tab title with live session state.",
+        "label": "Dynamic terminal title"
+      },
+      "theme": {
+        "description": "TUI colour theme (built-ins, or reuse your Claude Code / Codex palette).",
+        "label": "Theme"
+      },
+      "thinking": {
+        "description": "Reasoning effort forwarded to the model (off → max; ultracode also enables workflow tools).",
+        "label": "Thinking level"
+      },
+      "tool:astGrep": {
+        "description": "Structural search and rewrite over the syntax tree.",
+        "label": "AST search & rewrite"
+      },
+      "tool:codeGraph": {
+        "description": "Symbol graph queries: definitions, callers, callees, blast radius.",
+        "label": "Code graph"
+      },
+      "tool:coreFiles": {
+        "description": "Read / write / edit files (the workhorse file tools).",
+        "label": "Core file tools"
+      },
+      "tool:coreFilesOnAnthropic": {
+        "description": "Also expose the core file tools on the Anthropic channel.",
+        "label": "Core files on Anthropic"
+      },
+      "tool:dependencyResearch": {
+        "description": "Clone a dependency's repository so the agent can read library internals.",
+        "label": "Dependency source"
+      },
+      "tool:environment": {
+        "description": "Read environment / system information.",
+        "label": "Environment tools"
+      },
+      "tool:fileExtras": {
+        "description": "Hashing, structured diff, and in-file search helpers.",
+        "label": "File extras (hash/diff/search)"
+      },
+      "tool:git": {
+        "description": "Status / diff / log / add / commit helpers.",
+        "label": "Git tools"
+      },
+      "tool:lsp": {
+        "description": "Language-server hover / definitions / diagnostics.",
+        "label": "LSP code intelligence"
+      },
+      "tool:process": {
+        "description": "Start, inspect, and kill background processes.",
+        "label": "Process tools"
+      },
+      "tool:shellAdvanced": {
+        "description": "Extra shell primitives beyond a single bash call.",
+        "label": "Advanced shell"
+      },
+      "tool:terminalRepl": {
+        "description": "Persistent interactive REPL sessions.",
+        "label": "Terminal REPL"
+      },
+      "tool:webclone": {
+        "description": "Snapshot a live page with its assets into a self-contained bundle.",
+        "label": "Web page snapshot"
+      },
+      "toolExecutionTimeoutMs": {
+        "description": "Per-tool deadline for read-only tools on non-Anthropic providers (0 = disabled).",
+        "label": "Read-only tool timeout (ms)"
+      },
+      "verboseDefault": {
+        "description": "Begin each session with every cell expanded.",
+        "label": "Start in detail (expand-all) mode"
+      },
+      "vim": {
+        "description": "Modal NORMAL/INSERT editing in the composer (also /vim).",
+        "label": "Vim editing mode"
+      },
+      "webTools": {
+        "description": "Expose web_search / web_fetch to the agent.",
+        "label": "Web tools (search/fetch)"
+      }
+    },
+    "sections": {
+      "advanced": "Advanced",
+      "appearance": "Appearance",
+      "behavior": "Behavior & Hooks",
+      "display": "Display",
+      "git": "Git & PRs",
+      "keybindings": "Keybindings",
+      "logging": "Logging",
+      "model": "Model & Reasoning",
+      "terminal": "Terminal & Input",
+      "tools": "Tools & Skills",
+      "workspace": "Workspace"
+    },
+    "title": "Settings",
+    "unavailable": "unavailable",
+    "values": {
+      "agentDefault": "agent default",
+      "all": "all",
+      "apiKey": "API key configured",
+      "autoBranch": "auto (main → master)",
+      "autoDetect": "auto-detect",
+      "custom": "custom",
+      "customLimits": "{count} (edit in config.json)",
+      "default": "default",
+      "dirs": "{count} dirs",
+      "editColours": "edit base colours",
+      "fullBodies": "full bodies",
+      "inherit": "inherit",
+      "nameOnly": "name-only",
+      "never": "never",
+      "none": "none",
+      "notConfigured": "not configured",
+      "off": "off",
+      "on": "on",
+      "openEditor": "open editor",
+      "openPanel": "open panel",
+      "overridden": "{count} overridden",
+      "requested": "{effective} (requested {requested})",
+      "roots": "{count} roots",
+      "set": "set",
+      "token": "token configured",
+      "tools": "{count} tools"
+    },
+    "workspaceBusy": "Finish or stop the current response before switching directories.",
+    "workspaceChanged": "Working directory: {path}. Agent context will restart on the next message; the visible transcript is retained.",
+    "workspaceFailed": "Could not switch directory: {error}",
+    "workspaceInvalid": "Not a directory: {path}",
+    "workspaceRootsMemory": "Could not save additional directories. This change is active only for this CLI session.",
+    "workspaceSame": "Already in {path}"
+  },
+  "cliUiStartup": {
+    "builtin": "Use the built-in agent instead",
+    "cancel": "Esc to cancel",
+    "chooseFolder": "Choose a folder",
+    "chooseOther": "Choose another folder…",
+    "command": "locating executable",
+    "crash": "✗ Something went wrong",
+    "crashHint": "The error was logged. Press r to reset the session · q or Esc to quit.",
+    "doctor": "Run /doctor",
+    "failure": "Couldn't start {backend} — failed while {stage}.",
+    "folderNotDirectory": "The selected path is no longer a directory.",
+    "folderReadError": "Cannot read directory: {error}",
+    "hiddenHidden": "show hidden",
+    "hiddenShown": "hide hidden",
+    "install": "Install {name} ({method})",
+    "installing": " Installing {name} …",
+    "launch": "starting agent",
+    "ownership": "  This installs through your own package manager. Cognia does not manage, verify or remove it.",
+    "preset": "resolving agent",
+    "proceed": "Yes, proceed",
+    "progress": "starting {backend} … {stage}",
+    "quit": "Quit",
+    "retry": "Retry",
+    "rootsAddUsage": "Usage: {command}",
+    "rootsAdded": "Added {path} to the configuration for the next turn. Access depends on the active agent and its permissions.",
+    "rootsDuplicate": "Already added: {path}",
+    "rootsEmpty": "No additional roots. Add one with {command}.",
+    "rootsInvalid": "Not a directory: {path}",
+    "rootsRemoveUsage": "Usage: {command}",
+    "rootsRemoved": "Removed {path}.",
+    "rootsTitle": "Additional roots:",
+    "rootsUnknown": "Not an added root: {path}",
+    "sandbox": "checking sandbox",
+    "selectHint": "↑/↓ navigate · Enter select · Esc cancel",
+    "treeHint": "↑/↓ select · ←/→ tree · Enter use · ⌫ parent · . {hidden} · r refresh · Esc cancel",
+    "trust": "Do you trust the files in {path}?",
+    "trustInfo": "Cognia Agent may read and edit files and run commands in this folder.",
+    "unknownError": "Unknown error",
+    "useFolder": "✓ Use this folder",
+    "workingDirectory": "Working directory: {path}",
+    "workspaceBoundaryHint": "Choose an accessible directory within the configured COGNIA_WORKSPACES_DIR boundary, or restart the CLI in the intended workspace."
   },
   "common": {
     "add": "Add",
@@ -8828,6 +10080,7 @@
       "label": "Filters",
       "options": {
         "branched": "Branched",
+        "im": "IM conversations",
         "pinned": "Pinned",
         "unread": "Unread"
       }
@@ -10618,6 +11871,10 @@
         "hint": "The request was malformed — check the parameters and model name.",
         "label": "Invalid request"
       },
+      "managedPolicyRefused": {
+        "hint": "The managed policy disallows this sandbox or approval mode. Choose an allowed mode or contact your administrator.",
+        "label": "Managed policy refused"
+      },
       "modelOverloaded": {
         "hint": "The provider is overloaded — retry in a moment.",
         "label": "Model overloaded"
@@ -10802,6 +12059,10 @@
         "hint": "Preparing the working copy for this turn failed — retry; the log says what the provisioner refused.",
         "label": "Couldn't open the workspace"
       },
+      "workspaceBusy": {
+        "hint": "Another turn is still using this conversation's working copy. Wait for it to finish, or send from the device that is running it.",
+        "label": "Working copy in use"
+      },
       "workspaceUnavailable": {
         "hint": "This conversation's workspace can't be resolved on this device — retry, or bind it to a folder from the session's workspace panel.",
         "label": "Workspace unavailable"
@@ -10810,6 +12071,7 @@
     "detail": {
       "copied": "Copied",
       "copy": "Copy details",
+      "hideRaw": "Hide raw error",
       "member": "{name}: {message}",
       "showParsed": "Show summary",
       "showRaw": "Show raw error"
@@ -12355,6 +13617,39 @@
         "userDeclared": "you declared this for this agent"
       }
     },
+    "cogniaModel": {
+      "account": "Subscription account",
+      "capability": "{name}: {status}",
+      "choose": "Choose a model",
+      "context": "Context: {tokens, number}",
+      "defaultAccount": "Use provider default when the task starts",
+      "description": "Each task uses isolated agent configuration and a temporary gateway credential. Provider keys stay in Cognia. Filesystem and network access follow the selected sandbox. Model and account changes require a new task.",
+      "empty": "No compatible configured models. Add an API provider or subscription in Settings.",
+      "enable": "Use Cognia models",
+      "input": "Maximum input: {tokens, number}",
+      "invalid": "Choose a model and a supported local agent runtime.",
+      "loadingModels": "Loading account model information…",
+      "manualAccount": "Manual API key in provider settings",
+      "missingAccount": "Selected account is unavailable",
+      "model": "Cognia model",
+      "modelDetails": "Refresh model details",
+      "modelsFailed": "Could not load model information. Existing models are retained; retry when ready.",
+      "modelsLoaded": "Account model information updated.",
+      "notSupported": "not supported",
+      "output": "Maximum output: {tokens, number}",
+      "outputUnknown": "Maximum output: unknown",
+      "refreshModels": "Refresh account models",
+      "retryAccounts": "Reload subscription accounts",
+      "search": "Search configured models…",
+      "selectAccountToRefresh": "Select a subscription account to refresh its models and limits.",
+      "supported": "supported",
+      "supportsReasoning": "Reasoning",
+      "supportsStructuredOutput": "Structured output",
+      "supportsTools": "Tools",
+      "supportsVision": "Images",
+      "unknown": "unknown",
+      "unsupported": "This runtime cannot use task-isolated Cognia models. Choose a supported local runtime."
+    },
     "commandDefaultArgs": "Arguments",
     "commands": "Commands",
     "commandsDescription": "Slash commands provided by this external agent",
@@ -12376,6 +13671,7 @@
       "decline": "Decline",
       "dismiss": "Dismiss",
       "punycodeWarning": "This address uses characters that can imitate another domain. Check it before continuing.",
+      "responseFailed": "Your answer could not be delivered. It has been kept here; try again.",
       "submit": "Submit",
       "title": "The agent needs an answer"
     },
@@ -12460,6 +13756,7 @@
         "notGranted": "This device may not ask the Host what it has installed.",
         "unsupported": "The paired Host does not list installed agents."
       },
+      "devinSetupHint": "Install Devin CLI and run `devin auth login` once. Cognia launches `devin acp` and discovers models from the session; use `acp --model swe2` to select SWE-2 at launch. Choose Accept Edits (Code) when you want Devin to modify files. Devin 3000.10.21 did not load Cognia-provided MCP servers in live tests; native tools work.",
       "diagnostics": {
         "adapter": "Adapter: {name}",
         "authMethods": "Auth methods: {methods}",
@@ -12789,6 +14086,7 @@
       "detailsRecommendedActions": "Recommended actions",
       "detailsSupportTier": "Support tier",
       "detailsSurface": "Surface",
+      "devinPresetDescription": "Run Devin through its native ACP server using your existing CLI login. Select models, including SWE-2, after connecting. Choose Accept Edits (Code) when you want Devin to modify files. Devin 3000.10.21 did not load Cognia-provided MCP servers in live tests; native tools work.",
       "disconnect": "Disconnect",
       "disconnectFailed": "Failed to disconnect",
       "disconnected": "Disconnected successfully",
@@ -13973,7 +15271,10 @@
     },
     "conversation": {
       "jumpFailed": "The linked message could not be opened.",
-      "loading": "Loading…"
+      "loading": "Loading…",
+      "openConversations": "Open conversations",
+      "unavailableDescription": "This link is invalid, or the conversation has been deleted or has not synced to this device.",
+      "unavailableTitle": "Conversation unavailable"
     },
     "conversationHeader": {
       "backToList": "Back to conversation list",
@@ -14067,6 +15368,7 @@
       "hideArchived": "Hide archived",
       "hideResolved": "Hide resolved",
       "openSidebar": "Open conversations list",
+      "operationFailed": "Could not update the conversation. Please try again.",
       "search": {
         "aria": "Search conversations",
         "clear": "Clear search",
@@ -14438,6 +15740,19 @@
         "wechat-oa": "WO",
         "wechat-personal": "WX",
         "wecom": "WC"
+      },
+      "names": {
+        "dingtalk": "DingTalk",
+        "discord": "Discord",
+        "lark": "Lark",
+        "matrix": "Matrix",
+        "onebot": "OneBot",
+        "qq-official": "QQ",
+        "slack": "Slack",
+        "telegram": "Telegram",
+        "wechat-oa": "WeChat Official Account",
+        "wechat-personal": "WeChat",
+        "wecom": "WeCom"
       },
       "planned": "Planned platform"
     },
@@ -20918,6 +22233,7 @@
       }
     },
     "provider": {
+      "addSubscription": "Add subscription account",
       "apiKey": {
         "cta": "Choose a provider",
         "description": "OpenAI, Google, DeepSeek, a model running on this machine, or any other provider in the catalog.",
@@ -20944,6 +22260,11 @@
         "cta": "Sign in with ChatGPT",
         "description": "Pair this app with your ChatGPT subscription via the device-code flow.",
         "title": "ChatGPT Plus / Pro (Codex)"
+      },
+      "commandcode": {
+        "cta": "Paste CommandCode key",
+        "description": "Use a CommandCode plan key with Provider API access (excluding Go).",
+        "title": "CommandCode"
       },
       "connected": {
         "description": "Cognia will reach a model through this. You can add or switch accounts any time in Settings → Subscription.",
@@ -22146,6 +23467,7 @@
       "refineRepair": "Repair",
       "refineSimplify": "Simplify",
       "refineUnavailable": "Can't refine — no model is configured for background tasks.",
+      "resumeFailed": "The approved plan could not start. Resume to retry the same step.",
       "sourceLabel": "Source: {source}",
       "title": "Review plan"
     },
@@ -24975,6 +26297,7 @@
       "strategyLeastUsed": "Least Used",
       "strategyRandom": "Random",
       "strategyRoundRobin": "Round Robin",
+      "subscriptionCredentialDescription": "Uses the selected subscription account from account management. Its secret stays in the vault; entering an API key here overrides the inherited account.",
       "testDisabledHint": "Enter credentials before testing the connection.",
       "transportDescription": "How a request is shaped on the way out. Only needed for gateways, Azure, and self-hosted endpoints.",
       "transportOverrides": "{count, plural, one {# override} other {# overrides}}",
@@ -28849,7 +30172,10 @@
         "browse": "Browse…",
         "cacheOptDesc": "Experimental. Re-layers the prompt so per-turn context (memory recall, twin chunks, goal/plan state) lands at the end, keeping the leading prefix stable across turns to maximize provider prompt-cache hits and cut input cost.",
         "cacheOptTitle": "Cache optimization (experimental)",
+        "modelAgentOwned": "The app-wide default is currently a model from the external agent {agent}. The built-in runtime cannot run it, so it falls back to the SDK default until you pick one here.",
+        "modelAgentOwnedUnnamed": "The app-wide default is currently a model from an external agent. The built-in runtime cannot run it, so it falls back to the SDK default until you pick one here.",
         "modelClear": "Clear default",
+        "modelClearAgentOwned": "Clear the external agent default",
         "modelDesc": "Used when neither the character nor the session pins a model.",
         "modelEmpty": "No providers configured. Add one in Settings → Providers.",
         "modelLabel": "Default model picker",
@@ -35391,11 +36717,16 @@
       "cooldownHelp": "How long a rate-limited or failing upstream account is skipped.",
       "cooldownsEmpty": "No upstream accounts are parked.",
       "cooldownsHeading": "Parked upstream accounts",
-      "cooldownsHelp": "Accounts cooling (rate-limited) or permanently disabled (quota / auth). Cleared automatically as cooldowns lift.",
+      "cooldownsHelp": "Rate-limited accounts recover automatically. After fixing quota or authentication issues, restore all accounts to allow requests again. Restoring does not test credentials or make a paid request.",
       "cooldownsPermanent": "Disabled",
       "cooldownsRecovered": "recovered",
       "cooldownsRecoversIn": "recovers in {seconds}s",
       "cooldownsRefresh": "Refresh",
+      "cooldownsRefreshFailed": "Unable to refresh parked accounts. Try refreshing again.",
+      "cooldownsReset": "Restore all accounts",
+      "cooldownsResetFailed": "Unable to restore accounts. Try again.",
+      "cooldownsResetSuccess": "Restored {count, plural, one {# account} other {# accounts}} for retry.",
+      "cooldownsResetting": "Restoring…",
       "copied": "Copied",
       "copy": "Copy",
       "copyFailed": "Could not copy to the clipboard",
@@ -35459,6 +36790,8 @@
       "keysHelp": "Issue one scoped key per external tool. Each can be limited to specific models, given an expiry and its own rate limit, and disabled or deleted independently.",
       "lanWarning": "LAN binding exposes the gateway to your local network. Keep the IP allowlist tight and every key scoped — only allow-listed IPs with a valid key get through.",
       "latencyMs": "{ms}ms",
+      "legacyKeysHeading": "Replace keys from an earlier version",
+      "legacyKeysHelp": "{count, plural, one {One older key is} other {# older keys are}} not bound to a local account and can no longer access this gateway. Create a new key below for the current account, then update the external tools that use it. Your provider credentials are unchanged.",
       "listenerHeading": "Listener",
       "listenerHelp": "Where the gateway binds and who may reach it.",
       "liveBadge": "Applies immediately",
@@ -35657,12 +36990,18 @@
       "useSdkDefault": "Use SDK default",
       "workingDirectory": "Working directory"
     },
-    "groupAi": "AI Core",
-    "groupData": "Data",
-    "groupExtensions": "Extensions",
-    "groupInterface": "Interface",
-    "groupObservability": "Observability",
+    "groupAccount": "Account & Billing",
+    "groupAgents": "Agents",
+    "groupAppearance": "Appearance",
+    "groupAuthoring": "Authoring",
+    "groupCapabilities": "Tools & Capabilities",
+    "groupChat": "Chat",
+    "groupIntegrations": "Integrations",
+    "groupModels": "Models & Providers",
+    "groupPrivacy": "Data & Security",
     "groupSystem": "System",
+    "groupTasks": "Tasks & Automation",
+    "groupWorkspace": "Workspace & Code",
     "hooks": {
       "addGroup": "Add group",
       "builtin": {
@@ -37824,7 +39163,8 @@
         "dangerDescription": "Conversations bound to it fall back to a single agent. Past runs are kept.",
         "dangerTitle": "Delete this Squad",
         "deleteAction": "Delete Squad",
-        "deleteBody": "This removes the Squad and its members. Runs it has already produced stay in the run history.",
+        "deleteBody": "This removes the Squad, its members, and retained external agent sessions. Runs it has already produced stay in the run history.",
+        "deleteFailed": "The Squad could not be deleted. It is still available; retry when its external agent sessions can be cleaned up.",
         "deleteTitle": "Delete {name}?",
         "descriptionLabel": "Description",
         "descriptionPlaceholder": "What is this Squad for?",
@@ -41331,8 +42671,9 @@
         "active": "Active now",
         "default": "Default"
       },
+      "customSubscription": "Custom subscription",
       "defaultHelp": "Default is the fallback selected for newly resolved sessions; it does not activate the account immediately.",
-      "description": "Manage Claude, Codex, and OpenCode accounts in one place. External CLI credentials remain read-only.",
+      "description": "Manage subscription accounts for built-in, custom, and plugin providers. External CLI credentials remain read-only.",
       "empty": "No accounts match this filter.",
       "emptyDetail": "Select an account to inspect its status and supported actions.",
       "fields": {
@@ -41357,15 +42698,18 @@
         "source_unavailable": "External source"
       },
       "listLabel": "Managed accounts",
+      "loadFailed": "Some accounts could not be loaded: {error}",
       "loading": "Loading accounts…",
       "loadingDetail": "Loading safe account details…",
       "no": "No",
       "providers": {
         "anthropic": "Claude",
         "codex": "Codex",
+        "commandcode": "CommandCode",
         "opencode": "OpenCode"
       },
       "reauthReason": "The saved credential cannot refresh ({reason}). Reauthenticate this exact account or add a different login as a new account.",
+      "retry": "Retry",
       "title": "Account Center",
       "webMode": "Account credentials are available only in the desktop app.",
       "yes": "Yes"
@@ -41498,6 +42842,28 @@
       "title": "Codex (OpenAI)",
       "webModeBanner": "Codex credentials are stored in your OS keychain — only available in the desktop app."
     },
+    "commandcode": {
+      "accessTokenField": "API key",
+      "accessTokenPlaceholder": "CommandCode API key",
+      "baseUrlField": "Base URL (optional)",
+      "baseUrlPlaceholder": "https://api.commandcode.ai/provider/v1",
+      "baseUrlReplaceHint": "Leave blank to restore the official endpoint. The existing preset binding is preserved.",
+      "cancel": "Cancel",
+      "description": "Connect to the Provider API with your CommandCode Studio API key.",
+      "docs": "Provider API documentation",
+      "getKey": "Create an API key in CommandCode Studio",
+      "goUnsupported": "GOAT, Pro, Max, Team, and Provider plans support API keys. The Go plan does not include third-party API access.",
+      "invalidBaseUrl": "Enter a valid HTTP(S) URL without credentials or a fragment.",
+      "invalidKey": "The API key cannot contain whitespace.",
+      "labelField": "Label (optional)",
+      "labelPlaceholder": "CommandCode",
+      "quotaUnavailable": "No public subscription quota API is documented. Check usage in CommandCode Studio, or configure a custom quota source if your relay provides one.",
+      "save": "Save",
+      "saveFailed": "Could not save: {error}",
+      "title": "Add CommandCode account",
+      "updateTitle": "Update CommandCode credentials",
+      "webModeBanner": "Manage keyring-backed subscription accounts in the desktop app."
+    },
     "common": {
       "accountList": {
         "accountAdded": "Account added.",
@@ -41548,6 +42914,11 @@
       },
       "accountPreset": {
         "ariaLabel": "Endpoint preset for this account",
+        "loadFailed": "Could not load endpoint presets.",
+        "loading": "Loading endpoint presets…",
+        "newAccountHint": "The selected preset overrides the account endpoint. Use provider default to follow the default configured in Subscription settings.",
+        "retry": "Retry",
+        "saveFailed": "Could not save this endpoint preset. Try again.",
         "useDefault": "Use default"
       },
       "cloudSync": {
@@ -41661,6 +43032,8 @@
     },
     "customSources": {
       "add": "Add custom source",
+      "addHeader": "Add header",
+      "addWindow": "Add window",
       "cancel": "Cancel",
       "description": "Wire any coding-plan or relay provider into the limits panel by describing its balance/usage endpoint — no code needed.",
       "disableSource": "Disable quota queries for {name}",
@@ -41693,6 +43066,7 @@
         "usedPctPath": "Used-percent path",
         "windowLabel": "Window label"
       },
+      "invalidHeaders": "Use distinct header names; configure Authorization with the authorization selector.",
       "presets": {
         "codingPlanCount": "Coding plan (count windows)",
         "custom": "Custom (blank)",
@@ -41706,6 +43080,8 @@
         "zenmux": "ZenMux coding plan"
       },
       "remove": "Remove",
+      "removeHeader": "Remove header {index}",
+      "removeWindow": "Remove window {index}",
       "save": "Save",
       "securityCaveat": "Tokens for custom sources are stored locally in app settings, not the OS keychain.",
       "test": "Test",
@@ -41714,9 +43090,10 @@
       "testOk": "Got: {summary}",
       "testing": "Testing…",
       "title": "Custom sources",
-      "webModeHint": "Custom sources require the desktop build — queries run through the native HTTP bridge."
+      "webModeHint": "Custom sources require the desktop build — queries run through the native HTTP bridge.",
+      "windowNumber": "Window {index}"
     },
-    "description": "Sign in with your Claude Pro/Max, Codex (ChatGPT), or OpenCode subscription to use OAuth authentication and monitor rate-limit windows and balances in real time.",
+    "description": "Manage subscription accounts, API keys, and custom services, and view usage or limits where the provider supports them.",
     "limits": {
       "amountLeft": "{amount} left",
       "description": "Subscription limits and usage for this account.",
@@ -41756,6 +43133,8 @@
         "openAuthorize": "Open authorization page",
         "signIn": "Sign in"
       },
+      "apiKeySetupAction": "Set up an API key or Coding Plan",
+      "apiKeySetupHint": "Claude subscription and Console sign-in use OAuth. Configure third-party API keys and Coding Plan keys with their provider in Providers.",
       "awaitingCode": "Authorize Cognia on the page that just opened, then paste the displayed code back here.",
       "chooseMode": "Choose which Claude account to authorize.",
       "codeFieldLabel": "Authorization code (or full callback URL)",
@@ -41800,6 +43179,58 @@
       },
       "title": "Sign in with Claude"
     },
+    "managedKey": {
+      "accessTokenField": "API key",
+      "accessTokenPlaceholder": "API key",
+      "anthropicProtocol": "Anthropic compatible",
+      "availableModels": "Available models and information",
+      "baseUrlField": "Base URL (optional)",
+      "baseUrlReplaceHint": "Leave blank to restore the provider default endpoint. The existing preset binding is preserved.",
+      "cancel": "Cancel",
+      "customBaseUrlField": "Base URL",
+      "customRequired": "Enter a service name, base URL, and at least one model ID.",
+      "customTitle": "custom subscription",
+      "description": "Your API key is stored in the system keyring. You can add multiple accounts for the same service.",
+      "fetchModelInfo": "Fetch model information",
+      "fetchModels": "Fetch models",
+      "getKey": "Create an API key with the provider",
+      "invalidBaseUrl": "Enter a valid HTTP(S) URL without credentials or a fragment.",
+      "invalidKey": "The API key cannot contain whitespace.",
+      "labelField": "Label (optional)",
+      "modelContext": "Context tokens",
+      "modelCredentialsRequired": "Enter a valid API key or activate an account to fetch models.",
+      "modelId": "Model ID",
+      "modelInput": "Maximum input tokens",
+      "modelInputPrice": "Input / 1M tokens ({currency})",
+      "modelLoadFailed": "Could not load model information. Check your key, endpoint and plan. You can still save the account and retry later.",
+      "modelNotFound": "The service did not return information for this model.",
+      "modelOutput": "Maximum output tokens",
+      "modelOutputPrice": "Output / 1M tokens ({currency})",
+      "models": "Model IDs (comma separated)",
+      "modelsDeclared": "Declared by the provider. Model access and limits depend on your account and plan.",
+      "modelsLive": "Live model information loaded. Fallback declarations may also appear; listing does not verify chat access.",
+      "name": "Service name",
+      "openaiProtocol": "OpenAI compatible",
+      "plan": "Plan",
+      "protocol": "API protocol",
+      "save": "Save",
+      "saveFailed": "Could not save: {error}",
+      "supported": "Supported",
+      "supportsAudio": "Audio",
+      "supportsEmbedding": "Embeddings",
+      "supportsImageGeneration": "Image generation",
+      "supportsReasoning": "Reasoning",
+      "supportsStreaming": "Streaming",
+      "supportsStructuredOutput": "Structured output",
+      "supportsTools": "Tool calls",
+      "supportsVideo": "Video",
+      "supportsVision": "Vision",
+      "title": "Add {provider} account",
+      "unavailable": "This provider definition was removed or its plugin is disabled. Saved accounts remain available for removal; restore the source to update credentials.",
+      "unavailableTitle": "Subscription source unavailable",
+      "unsupported": "Not supported",
+      "updateTitle": "Update {provider} credentials"
+    },
     "migration": {
       "toastBody": "Migrated {count, plural, =1 {1 legacy account} other {# legacy accounts}} into the new vault.",
       "toastTitle": "Subscription module upgraded"
@@ -41826,6 +43257,10 @@
         "codex": {
           "description": "ChatGPT or OpenAI API key for the codex agent",
           "label": "Codex"
+        },
+        "commandcode": {
+          "description": "API keys and relay presets",
+          "label": "CommandCode"
         },
         "opencode": {
           "description": "OpenCode Zen/Go keys and discovered credentials",
@@ -41918,6 +43353,7 @@
     "providers": {
       "anthropic": "Claude",
       "codex": "Codex",
+      "commandcode": "CommandCode",
       "opencode": "OpenCode"
     },
     "settings": {
@@ -50737,6 +52173,7 @@
       "confirmDetach": "Remove, keep conversations",
       "defaultName": "New Workspace",
       "delete": "Delete",
+      "deleteFailed": "The workspace could not be removed. It is still available; retry after its data and external agent sessions can be processed.",
       "deleted": "Workspace deleted",
       "description": "A workspace bundles a primary directory and extra mounted folders. The active workspace drives the working directory, the Source Control panel, and the terminal scope.",
       "detached": "Workspace removed — its conversations moved to Default",

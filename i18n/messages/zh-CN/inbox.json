@@ -147,7 +147,10 @@
   },
   "conversation": {
     "jumpFailed": "无法打开链接的消息。",
-    "loading": "加载中…"
+    "loading": "加载中…",
+    "unavailableTitle": "对话暂不可用",
+    "unavailableDescription": "链接无效，或该对话已被删除、尚未同步到此设备。",
+    "openConversations": "打开对话列表"
   },
   "conversationHeader": {
     "backToList": "返回会话列表",
@@ -247,7 +250,8 @@
       "placeholder": "搜索会话…"
     },
     "showArchived": "显示 {count} 条已归档",
-    "showResolved": "显示 {count} 条已解决"
+    "showResolved": "显示 {count} 条已解决",
+    "operationFailed": "无法更新对话，请重试。"
   },
   "conversationOverride": {
     "deleteOverride": "删除覆盖",
@@ -613,7 +617,20 @@
       "wechat-personal": "WX",
       "wecom": "WC"
     },
-    "planned": "计划中的平台"
+    "planned": "计划中的平台",
+    "names": {
+      "telegram": "Telegram",
+      "discord": "Discord",
+      "slack": "Slack",
+      "lark": "飞书",
+      "onebot": "OneBot",
+      "dingtalk": "钉钉",
+      "wecom": "企业微信",
+      "wechat-oa": "微信公众号",
+      "wechat-personal": "微信",
+      "qq-official": "QQ",
+      "matrix": "Matrix"
+    }
   },
   "policyInfo": {
     "aria": "策略信息",

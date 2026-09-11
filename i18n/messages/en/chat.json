@@ -1031,7 +1031,8 @@
       "toastInherited": "Using the inherited account.",
       "unavailable": "Account switching is unavailable.",
       "unavailableWithId": "Account {id} is unavailable.",
-      "useInherited": "Use inherited account"
+      "useInherited": "Use inherited account",
+      "manualApiKey": "API key from settings"
     },
     "ariaSettings": "Session settings",
     "environment": {

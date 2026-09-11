@@ -95,7 +95,8 @@
     "dismiss": "Dismiss",
     "punycodeWarning": "This address uses characters that can imitate another domain. Check it before continuing.",
     "submit": "Submit",
-    "title": "The agent needs an answer"
+    "title": "The agent needs an answer",
+    "responseFailed": "Your answer could not be delivered. It has been kept here; try again."
   },
   "enableInSettings": "Enable external agents in settings",
   "errors": {
@@ -273,7 +274,8 @@
     "transportWebsocket": "WebSocket",
     "unsupportedProtocol": "Only ACP is currently supported for executable agents.",
     "websocketProtocolComingSoon": "WebSocket (coming soon)",
-    "connectingHint": "Connecting to the agent… You can keep using Cognia while it starts."
+    "connectingHint": "Connecting to the agent… You can keep using Cognia while it starts.",
+    "devinSetupHint": "Install Devin CLI and run `devin auth login` once. Cognia launches `devin acp` and discovers models from the session; use `acp --model swe2` to select SWE-2 at launch. Choose Accept Edits (Code) when you want Devin to modify files. Devin 3000.10.21 did not load Cognia-provided MCP servers in live tests; native tools work."
   },
   "runCommand": "Run /{name}",
   "runtimes": {
@@ -618,7 +620,8 @@
       "modelsSummary": "{count} models across {providers} providers",
       "evidenceListing": "Listed",
       "evidenceListingTitle": "Pi's auth check does not know this provider (it is registered by an extension), but Pi lists its models, which it only does once credentials resolve."
-    }
+    },
+    "devinPresetDescription": "Run Devin through its native ACP server using your existing CLI login. Select models, including SWE-2, after connecting. Choose Accept Edits (Code) when you want Devin to modify files. Devin 3000.10.21 did not load Cognia-provided MCP servers in live tests; native tools work."
   },
   "statusConnected": "Connected",
   "statusConnecting": "Connecting",
@@ -659,5 +662,38 @@
     "skip": "Skip",
     "submit": "Submit answers",
     "title": "The agent has a question"
+  },
+  "cogniaModel": {
+    "enable": "Use Cognia models",
+    "description": "Each task uses isolated agent configuration and a temporary gateway credential. Provider keys stay in Cognia. Filesystem and network access follow the selected sandbox. Model and account changes require a new task.",
+    "unsupported": "This runtime cannot use task-isolated Cognia models. Choose a supported local runtime.",
+    "model": "Cognia model",
+    "choose": "Choose a model",
+    "search": "Search configured models…",
+    "empty": "No compatible configured models. Add an API provider or subscription in Settings.",
+    "account": "Subscription account",
+    "defaultAccount": "Use provider default when the task starts",
+    "missingAccount": "Selected account is unavailable",
+    "retryAccounts": "Reload subscription accounts",
+    "context": "Context: {tokens, number}",
+    "input": "Maximum input: {tokens, number}",
+    "output": "Maximum output: {tokens, number}",
+    "invalid": "Choose a model and a supported local agent runtime.",
+    "manualAccount": "Manual API key in provider settings",
+    "capability": "{name}: {status}",
+    "supportsTools": "Tools",
+    "supportsReasoning": "Reasoning",
+    "supportsVision": "Images",
+    "supportsStructuredOutput": "Structured output",
+    "supported": "supported",
+    "notSupported": "not supported",
+    "refreshModels": "Refresh account models",
+    "modelDetails": "Refresh model details",
+    "selectAccountToRefresh": "Select a subscription account to refresh its models and limits.",
+    "loadingModels": "Loading account model information…",
+    "modelsFailed": "Could not load model information. Existing models are retained; retry when ready.",
+    "modelsLoaded": "Account model information updated.",
+    "unknown": "unknown",
+    "outputUnknown": "Maximum output: unknown"
   }
 }

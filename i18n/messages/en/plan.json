@@ -41,6 +41,7 @@
     "refineRepair": "Repair",
     "refineSimplify": "Simplify",
     "refineUnavailable": "Can't refine — no model is configured for background tasks.",
+    "resumeFailed": "The approved plan could not start. Resume to retry the same step.",
     "sourceLabel": "Source: {source}",
     "title": "Review plan"
   },

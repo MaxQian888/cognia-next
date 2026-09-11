@@ -67,6 +67,7 @@ const RUN_REFUSALS = exhaustive<IssueRunRefusalReason>({
   "run-active": true,
   "issue-finished": true,
   "adapter-missing": true,
+  blocked: true,
 })
 
 /** Every `IssueEvent["kind"]`, which the activity trail renders one line for. */
@@ -89,6 +90,19 @@ const EVENT_KINDS = exhaustive<IssueEventKind>({
   artifact_linked: true,
   github_linked: true,
   github_write_back: true,
+  parent_changed: true,
+  blocker_added: true,
+  blocker_removed: true,
+  due_date_changed: true,
+  estimate_changed: true,
+  cycle_changed: true,
+  external_linked: true,
+  external_unlinked: true,
+  work_started: true,
+  work_settled: true,
+  synced_in: true,
+  sync_conflict: true,
+  sync_conflict_resolved: true,
 })
 
 /** Every `TaskMoveError` the Agent Team board localizes on a refused drop. */
@@ -123,6 +137,7 @@ const FILTER_FACET_KEYS = Object.values({
   assignees: "assignee",
   sources: "source",
   issueProjectIds: "project",
+  cycleIds: "cycle",
 } satisfies Record<IssueFilterFacet, string>)
 
 /** The three registered adapters, by the id `IssueRun.adapterId` carries. */
@@ -203,7 +218,7 @@ describe("issue tracker dynamic message keys", () => {
     })
 
     it("covers every event kind the activity trail can be handed", () => {
-      expect(EVENT_KINDS).toHaveLength(18)
+      expect(EVENT_KINDS).toHaveLength(31)
     })
   })
 })

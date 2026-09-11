@@ -35,7 +35,7 @@
       "default": "默认"
     },
     "defaultHelp": "“默认”是新会话解析账号时的回退选择，不会立即激活该账号。",
-    "description": "统一管理 Claude、Codex 与 OpenCode 账号；外部 CLI 凭据始终只读。",
+    "description": "统一管理内置、自定义和插件服务的订阅账号。外部 CLI 凭证保持只读。",
     "empty": "当前筛选条件下没有账号。",
     "emptyDetail": "选择账号后查看状态与可用操作。",
     "fields": {
@@ -66,12 +66,16 @@
     "providers": {
       "anthropic": "Claude",
       "codex": "Codex",
-      "opencode": "OpenCode"
+      "opencode": "OpenCode",
+      "commandcode": "CommandCode"
     },
     "reauthReason": "已保存凭据无法刷新（{reason}）。请重新认证同一账号，或把其他登录作为新账号添加。",
     "title": "账号中心",
     "webMode": "账号凭据仅可在桌面应用中使用。",
-    "yes": "是"
+    "yes": "是",
+    "customSubscription": "自定义订阅",
+    "loadFailed": "无法加载部分账号：{error}",
+    "retry": "重试"
   },
   "balance": {
     "description": "该账号所用提供商的剩余额度 / 配额。",
@@ -251,7 +255,12 @@
     },
     "accountPreset": {
       "ariaLabel": "该账户的端点预设",
-      "useDefault": "使用默认"
+      "useDefault": "使用默认",
+      "loadFailed": "无法加载端点预设。",
+      "newAccountHint": "所选预设会覆盖账号端点。选择“使用供应商默认值”可跟随订阅设置中的默认预设。",
+      "loading": "正在加载端点预设…",
+      "saveFailed": "无法保存端点预设，请重试。",
+      "retry": "重试"
     },
     "cloudSync": {
       "cancel": "取消",
@@ -363,6 +372,12 @@
     }
   },
   "customSources": {
+    "addHeader": "添加请求头",
+    "removeHeader": "删除请求头 {index}",
+    "invalidHeaders": "请求头名称不能重复；请通过授权选项配置 Authorization。",
+    "windowNumber": "额度窗口 {index}",
+    "removeWindow": "删除额度窗口 {index}",
+    "addWindow": "添加额度窗口",
     "add": "添加自定义源",
     "cancel": "取消",
     "description": "通过描述余额/用量接口，把任意 CodingPlan 或中转提供商接入限额面板——无需写代码。",
@@ -419,7 +434,7 @@
     "title": "自定义源",
     "webModeHint": "自定义源需要桌面版——查询通过原生 HTTP 桥执行。"
   },
-  "description": "用 Claude Pro/Max、Codex（ChatGPT）或 OpenCode 订阅登录，启用 OAuth 认证并实时查看速率限制窗口与余额。",
+  "description": "管理订阅账号、API 密钥和自定义服务，并查看服务商提供的额度与用量。",
   "limits": {
     "amountLeft": "剩余 {amount}",
     "description": "该账号的订阅限额与使用情况。",
@@ -501,7 +516,9 @@
       "sourceKeyring": "Claude Code 系统钥匙串条目",
       "sourceLabel": "来源"
     },
-    "title": "登录 Claude"
+    "title": "登录 Claude",
+    "apiKeySetupHint": "Claude 订阅和 Console 登录使用 OAuth。第三方 API Key 和 Coding Plan 密钥请在供应商设置中配置对应供应商。",
+    "apiKeySetupAction": "配置 API Key 或 Coding Plan"
   },
   "migration": {
     "toastBody": "已将 {count, plural, =1 {1 个旧账号} other {# 个旧账号}} 迁移到新版凭证仓。",
@@ -549,6 +566,10 @@
       "usage": {
         "description": "覆盖全部提供方的历史与分析",
         "label": "用量"
+      },
+      "commandcode": {
+        "label": "CommandCode",
+        "description": "API 密钥与中转预设"
       }
     },
     "mobileTrigger": "分组",
@@ -621,7 +642,8 @@
   "providers": {
     "anthropic": "Claude",
     "codex": "Codex",
-    "opencode": "OpenCode"
+    "opencode": "OpenCode",
+    "commandcode": "CommandCode"
   },
   "settings": {
     "actions": {
@@ -838,5 +860,79 @@
       }
     }
   },
-  "webModeBanner": "订阅凭据保存在系统钥匙串中——仅桌面应用支持。"
+  "webModeBanner": "订阅凭据保存在系统钥匙串中——仅桌面应用支持。",
+  "commandcode": {
+    "title": "添加 CommandCode 账号",
+    "updateTitle": "更新 CommandCode 凭证",
+    "description": "使用 CommandCode Studio API 密钥连接 Provider API。",
+    "goUnsupported": "GOAT、Pro、Max、Team 和 Provider 方案支持 API 密钥。Go 方案不提供第三方 API 访问。",
+    "getKey": "在 CommandCode Studio 创建 API 密钥",
+    "accessTokenField": "API 密钥",
+    "accessTokenPlaceholder": "CommandCode API key",
+    "baseUrlField": "基础 URL（可选）",
+    "baseUrlPlaceholder": "https://api.commandcode.ai/provider/v1",
+    "baseUrlReplaceHint": "留空将恢复官方地址；已绑定的预设仍然保留。",
+    "labelField": "名称（可选）",
+    "labelPlaceholder": "CommandCode",
+    "cancel": "取消",
+    "save": "保存",
+    "saveFailed": "保存失败：{error}",
+    "invalidKey": "API 密钥不能包含空白字符。",
+    "invalidBaseUrl": "请输入有效的 HTTP(S) URL，不能包含用户名、密码或片段。",
+    "quotaUnavailable": "官方未提供公开的订阅额度查询 API。请在 CommandCode Studio 查看用量；如果中转服务提供查询接口，可配置自定义额度来源。",
+    "docs": "Provider API 文档",
+    "webModeBanner": "请在桌面应用中管理系统钥匙串内的订阅账号。"
+  },
+  "managedKey": {
+    "title": "添加 {provider} 账号",
+    "updateTitle": "更新 {provider} 凭证",
+    "customTitle": "自定义订阅",
+    "description": "API 密钥保存在系统钥匙串中，可为同一服务添加多个账号。",
+    "name": "服务名称",
+    "protocol": "接口协议",
+    "openaiProtocol": "OpenAI 兼容",
+    "anthropicProtocol": "Anthropic 兼容",
+    "models": "模型 ID（逗号分隔）",
+    "plan": "方案",
+    "getKey": "在服务商网站创建 API 密钥",
+    "accessTokenField": "API 密钥",
+    "accessTokenPlaceholder": "API key",
+    "baseUrlField": "基础 URL（可选）",
+    "baseUrlReplaceHint": "留空将恢复服务商的默认地址；已绑定预设仍会保留。",
+    "labelField": "名称（可选）",
+    "cancel": "取消",
+    "save": "保存",
+    "saveFailed": "保存失败：{error}",
+    "invalidKey": "API 密钥不能包含空白字符。",
+    "invalidBaseUrl": "请输入有效的 HTTP(S) URL，不能包含用户名、密码或片段。",
+    "customRequired": "请输入服务名称、基础 URL 和至少一个模型 ID。",
+    "unavailableTitle": "订阅来源不可用",
+    "unavailable": "该服务的定义已移除或插件已停用。账号仍保留，可删除；恢复来源后可更新凭证。",
+    "customBaseUrlField": "基础 URL",
+    "availableModels": "可用模型与信息",
+    "modelsDeclared": "服务商声明的模型。可用权限和限制取决于账号与套餐。",
+    "modelsLive": "已获取实时模型信息，也可能包含声明的备用模型；列出模型不代表已验证对话权限。",
+    "modelId": "模型 ID",
+    "modelContext": "上下文 Token 数",
+    "modelOutput": "最大输出 Token 数",
+    "supportsTools": "工具调用",
+    "supportsVision": "视觉",
+    "supportsAudio": "音频",
+    "supportsVideo": "视频",
+    "supportsStreaming": "流式输出",
+    "supportsReasoning": "推理",
+    "supportsImageGeneration": "图像生成",
+    "supportsEmbedding": "嵌入",
+    "supportsStructuredOutput": "结构化输出",
+    "supported": "支持",
+    "unsupported": "不支持",
+    "fetchModels": "获取模型列表",
+    "fetchModelInfo": "获取模型信息",
+    "modelLoadFailed": "无法获取模型信息，请检查密钥、接口地址与套餐。仍可保存账号，稍后重试。",
+    "modelCredentialsRequired": "请输入有效 API Key 或启用账号以获取模型。",
+    "modelNotFound": "服务未返回该模型的信息。",
+    "modelInputPrice": "输入 / 百万 Token（{currency}）",
+    "modelOutputPrice": "输出 / 百万 Token（{currency}）",
+    "modelInput": "最大输入 Token 数"
+  }
 }

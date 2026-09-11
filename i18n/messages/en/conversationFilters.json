@@ -26,6 +26,7 @@
     "label": "Filters",
     "options": {
       "branched": "Branched",
+      "im": "IM conversations",
       "pinned": "Pinned",
       "unread": "Unread"
     }

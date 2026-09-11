@@ -225,6 +225,10 @@
       "hint": "请求超出大小限制——请缩减输入内容。",
       "label": "请求过大"
     },
+    "managedPolicyRefused": {
+      "hint": "受管策略不允许此沙箱或审批模式。请选择允许的模式，或联系管理员。",
+      "label": "受管策略拒绝"
+    },
     "permissionDenied": {
       "hint": "智能体拒绝了一项未获授权的操作——请调整其权限模式。",
       "label": "权限被拒绝"
@@ -381,6 +385,10 @@
       "label": "无法打开工作区",
       "hint": "为这一轮准备工作副本失败——可以重试；日志里写了供给器拒绝的原因。"
     },
+    "workspaceBusy": {
+      "label": "工作副本被占用",
+      "hint": "另一个回合仍在占用该会话的工作副本。请等它结束，或在正在运行它的设备上发送。"
+    },
     "workspaceUnavailable": {
       "label": "工作区不可用",
       "hint": "本设备上解析不到这个会话的工作区——可以重试，或在会话的工作区面板里绑定一个目录。"
@@ -395,7 +403,8 @@
     "copy": "复制详情",
     "member": "{name}：{message}",
     "showParsed": "显示摘要",
-    "showRaw": "显示原始错误"
+    "showRaw": "显示原始错误",
+    "hideRaw": "隐藏原始错误"
   },
   "recommendedAction": {
     "codexWsl2": "在 Windows 上，尽量把 Codex ACP 路由放在 WSL2 工作区中运行，体验最佳。",
