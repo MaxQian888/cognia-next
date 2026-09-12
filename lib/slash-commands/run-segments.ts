@@ -22,9 +22,9 @@ export interface RunSegmentsDeps {
    * Execute an ACTION command (one carrying a `handler`). The composer supplies
    * this so the context-rich `SlashContext` construction + error toast stay in
    * one place (`handleSlashCommand`). A throw is isolated into `errors` and does
-   * not abort the rest of the batch.
+   * not abort the rest of the batch. Returning false cancels the batch.
    */
-  runAction: (command: SlashCommand, args: string) => Promise<void> | void
+  runAction: (command: SlashCommand, args: string) => Promise<void | boolean> | void | boolean
   /** `applyTemplate` from `./builtin` (injected to keep this module pure). */
   applyTemplate: (template: string, args: string) => string
 }
@@ -45,6 +45,8 @@ export interface CommandError {
 }
 
 export interface RunSegmentsResult {
+  /** The caller cancelled; do not send remaining prose or run more commands. */
+  cancelled?: boolean
   /** Final prose to send (template expansions + free text, joined + trimmed). */
   outgoingText: string
   /** Accumulated overrides for the next send, or null when none apply. */
@@ -91,7 +93,9 @@ export async function runSegments(
     if (command.handler) {
       ranAction = true
       try {
-        await runAction(command, seg.args)
+        if ((await runAction(command, seg.args)) === false) {
+          return { outgoingText: "", overrides: null, errors, ranAction, cancelled: true }
+        }
       } catch (err) {
         errors.push({
           name: seg.name,

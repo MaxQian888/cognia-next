@@ -26,6 +26,11 @@ export interface SlashCommandHandler {
 }
 
 export interface SlashCommandContext {
+  /** Cooperative cancellation supplied by the invoking host, when supported. */
+  signal?: AbortSignal
+  /** Report progress from 0 to 1 with an optional status message. */
+  reportProgress?: (progress: number, message?: string) => void
+
   /** Current chat session id (if any). */
   sessionId?: string
   /** Current character id (if any). */

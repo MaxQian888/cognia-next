@@ -24,7 +24,14 @@ const mockedUsePluginStore = usePluginStore as jest.Mocked<typeof usePluginStore
 
 function makeTool(
   name: string,
-  opts?: { description?: string; schema?: Record<string, unknown> }
+  opts?: {
+    description?: string
+    schema?: Record<string, unknown>
+    timeoutMs?: number
+    access?: "read" | "write"
+    pathParams?: string[]
+    retryable?: boolean
+  }
 ): PluginTool {
   return {
     name,
@@ -37,6 +44,10 @@ function makeTool(
         properties: { foo: { type: "string" } },
         required: ["foo"],
       },
+      timeoutMs: opts?.timeoutMs,
+      access: opts?.access,
+      pathParams: opts?.pathParams,
+      retryable: opts?.retryable,
     },
     execute: jest.fn(),
   }
@@ -44,7 +55,11 @@ function makeTool(
 
 function makePlugin(
   id: string,
-  opts: { status?: Plugin["status"]; tools?: PluginTool[] } = {}
+  opts: {
+    status?: Plugin["status"]
+    tools?: PluginTool[]
+    manifestOverrides?: Record<string, unknown>
+  } = {}
 ): Plugin {
   return {
     manifest: {
@@ -56,6 +71,7 @@ function makePlugin(
       cogniaVersion: "*",
       main: "index.js",
       permissions: [],
+      ...opts.manifestOverrides,
     } as unknown as Plugin["manifest"],
     status: opts.status ?? "enabled",
     source: "local" as Plugin["source"],
@@ -200,6 +216,69 @@ describe("buildPluginToolsManifest", () => {
     expect(ask).toBeDefined()
     expect(ask?.pluginId).toBe("cognia-ask-user")
     expect(result[result.length - 1].name).toBe("ask_user")
+  })
+
+  it("forwards the access class so the sidecar confinement gates can classify", () => {
+    setStore({
+      p: makePlugin("p", {
+        tools: [
+          makeTool("reader", { access: "read" }),
+          makeTool("writer", { access: "write" }),
+          makeTool("opaque"),
+        ],
+      }),
+    })
+    const result = pluginsOnly(buildPluginToolsManifest())
+    expect(result.find((t) => t.name === "reader")?.access).toBe("read")
+    expect(result.find((t) => t.name === "writer")?.access).toBe("write")
+    // Undeclared stays off the wire — the key itself is absent, not undefined.
+    expect("access" in result.find((t) => t.name === "opaque")!).toBe(false)
+  })
+
+  it("forwards declared pathParams so the sidecar knows which args are paths", () => {
+    setStore({
+      p: makePlugin("p", {
+        tools: [
+          makeTool("confined", { access: "read", pathParams: ["path", "output_dir"] }),
+          makeTool("nokeys", { access: "read" }),
+        ],
+      }),
+    })
+    const result = pluginsOnly(buildPluginToolsManifest())
+    expect(result.find((t) => t.name === "confined")?.pathParams).toEqual(["path", "output_dir"])
+    // An empty/undefined list stays off the wire.
+    expect("pathParams" in result.find((t) => t.name === "nokeys")!).toBe(false)
+  })
+
+  it("sizes the relay timeout to the resolved resilience budget + slack", () => {
+    setStore({
+      p: makePlugin("p", {
+        tools: [
+          // cliTool-style declared budget: 60s child cap → 75s resilience
+          // backstop → 90s relay ceiling (one attempt, no retries).
+          makeTool("bounded", { timeoutMs: 60_000 }),
+          makeTool("unbounded"),
+        ],
+      }),
+    })
+    const result = pluginsOnly(buildPluginToolsManifest())
+    expect(result.find((t) => t.name === "bounded")?.timeoutMs).toBe(90_000)
+    expect("timeoutMs" in result.find((t) => t.name === "unbounded")!).toBe(false)
+  })
+
+  it("multiplies the relay timeout by the retry budget (maxRetries > 0)", () => {
+    setStore({
+      p: makePlugin("p", {
+        manifestOverrides: { resilience: { retryable: true, maxRetries: 2 } },
+        tools: [
+          // 60s declared → 75s per-attempt resilience budget; two retries →
+          // 75s * 3 + 15s slack = 240s relay ceiling.
+          makeTool("retrying", { timeoutMs: 60_000, retryable: true }),
+        ],
+      }),
+    })
+    const result = pluginsOnly(buildPluginToolsManifest())
+    expect(result.find((t) => t.name === "retrying")?.timeoutMs).toBe(240_000)
   })
 })
 

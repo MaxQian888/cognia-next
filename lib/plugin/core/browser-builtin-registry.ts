@@ -48,6 +48,7 @@ import contextInspectorManifest from "@/plugins/context-inspector/plugin.json"
 import uiSurfaceReferenceManifest from "@/plugins/ui-surface-reference/plugin.json"
 import sreAgentManifest from "@/plugins/sre-agent/plugin.json"
 import githubDeliveryManifest from "@/plugins/github-delivery/plugin.json"
+import githubDevinBotManifest from "@/plugins/github-devin-bot/plugin.json"
 import figmaExternalServiceManifest from "@/plugins/figma-external-service/plugin.json"
 import animeEffortManifest from "@/plugins/cognia-anime-effort/plugin.json"
 
@@ -97,6 +98,7 @@ import contextInspectorModule from "@/plugins/context-inspector/src/index"
 import * as uiSurfaceReferenceModule from "@/plugins/ui-surface-reference/src/index"
 import sreAgentModule from "@/plugins/sre-agent/src/index"
 import * as githubDeliveryModule from "@/plugins/github-delivery/src/index"
+import * as githubDevinBotModule from "@/plugins/github-devin-bot/src/index"
 import figmaExternalServiceModule from "@/plugins/figma-external-service/src/index"
 import * as animeEffortModule from "@/plugins/cognia-anime-effort/src/index"
 
@@ -495,6 +497,13 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(githubDeliveryModule),
     moduleExports: githubDeliveryModule as unknown as Record<string, unknown>,
+  },
+  {
+    manifest: builtinManifest(githubDevinBotManifest, githubDevinBotModule),
+    path: "builtin://github-devin-bot",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(githubDevinBotModule),
+    moduleExports: githubDevinBotModule as unknown as Record<string, unknown>,
   },
   {
     // Protocol-conformance reference: all Figma-specific endpoints, Skills,

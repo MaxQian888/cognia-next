@@ -1745,6 +1745,36 @@ export interface PluginToolDef {
    */
   retryable?: boolean
 
+  /**
+   * The tool's own declared per-attempt budget (ms) — for `cliTools` entries
+   * this mirrors `cliTools[].timeoutMs` (the child-process cap). The
+   * resilience layer treats it as a backstop floor (declared + slack) when
+   * the manifest doesn't override `resilience.timeoutMs`, and the sidecar
+   * manifest forwards a matching IPC-relay ceiling so a long declared
+   * timeout isn't severed by the 120s relay default.
+   */
+  timeoutMs?: number
+
+  /**
+   * Filesystem access class for workspace confinement (ADR-0028 lite):
+   * `read` classifies the call with the built-in read set (credential paths
+   * hard-denied), `write` adds the out-of-root approval escalation. Plugin
+   * tools without it stay unclassified — the confinement gate can't tell a
+   * reader from a mutator, so omission keeps historical behavior.
+   * Forwarded to the agent-side tool manifest.
+   */
+  access?: "read" | "write"
+
+  /**
+   * Parameter names whose values are filesystem paths — the sidecar
+   * confinement gate adds them to the built-in path-key set so a tool with
+   * `access` gets its path params classified even when the name isn't a
+   * conventional `path`/`file`/`dir`. For `cliTools` entries the manager
+   * mirrors `confinedPathParams` here; imperative `registerTool` tools can
+   * declare it directly. Forwarded to the agent-side tool manifest.
+   */
+  pathParams?: string[]
+
   /** JSON Schema for parameters */
   parametersSchema: Record<string, unknown>
 }
@@ -2014,6 +2044,11 @@ export interface PluginUpdateInfo {
  * and there are several during a team run).
  */
 export interface PluginCommandContext {
+  /** Cooperative cancellation supplied by the invoking host, when supported. */
+  signal?: AbortSignal
+  /** Report progress from 0 to 1 with an optional status message. */
+  reportProgress?: (progress: number, message?: string) => void
+
   /** Chat session the command was typed in, when there is one. */
   sessionId?: string
   /** Character bound to that session, when there is one. */
@@ -2547,6 +2582,7 @@ export interface PluginHostContextAPI {
   logs: import("@/lib/plugin/api/logs-api").PluginLogsAPI
   connectors: import("@/lib/plugin/api/connectors-api").PluginConnectorsAPI
   integrations: PluginIntegrationsAPI
+  bots: import("@/types/bot/api").PluginBotsAPI
   share: import("@/lib/plugin/api/share-api").PluginShareAPI
   backup: import("@/lib/plugin/api/backup-api").PluginBackupAPI
   automation: import("@/lib/plugin/api/automation-api").PluginAutomationAPI
@@ -2795,8 +2831,8 @@ export interface PluginAgentAPI {
   runExternalAgent: (
     presetOrAgentId: string,
     prompt: string,
-    options?: Record<string, unknown>
-  ) => Promise<unknown>
+    options?: import("@/lib/plugin/api/external-agent-api").PluginExternalAgentOptions
+  ) => Promise<import("@/lib/plugin/api/external-agent-api").PluginExternalAgentResult>
   /**
    * Plugin-first Computer Use plan (M1·T5). The four register*Preset / *Tool
    * / *Skill methods below are the imperative-style entry points that mirror

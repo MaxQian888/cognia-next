@@ -42,6 +42,8 @@ function makePluginHandler(def: SlashCommandDefinition): (ctx: SlashContext) => 
     const res = await dispatchSlashCommand(line, {
       sessionId: ctx.activeSessionId ?? undefined,
       ...(characterId ? { characterId } : {}),
+      ...(ctx?.signal ? { signal: ctx.signal } : {}),
+      ...(ctx?.reportProgress ? { reportProgress: ctx.reportProgress } : {}),
     })
     if (res?.message) ctx.pushSystemMessage(res.message)
   }

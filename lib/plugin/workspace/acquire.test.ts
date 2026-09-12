@@ -1,5 +1,16 @@
+import * as workspaceFs from "@/lib/files/workspace-fs"
+import * as platform from "@/lib/platform/detect"
+jest.mock("@/lib/platform/detect", () => ({
+  __esModule: true,
+  ...jest.requireActual("@/lib/platform/detect"),
+}))
+jest.mock("@/lib/files/workspace-fs", () => ({
+  __esModule: true,
+  ...jest.requireActual("@/lib/files/workspace-fs"),
+}))
 import {
   WorkspaceAcquireError,
+  defaultAcquireDeps,
   acquireWorkspace,
   cacheIsReusable,
   isInsideOpenRoot,
@@ -323,5 +334,57 @@ describe("releaseWorkspace", () => {
     await expect(releaseWorkspace(handle, { removeRepoCache: async () => false })).resolves.toBe(
       false
     )
+  })
+})
+
+describe("headless host cache provisioning", () => {
+  afterEach(() => jest.restoreAllMocks())
+
+  it("uses only the discovered host root and confines independent plugin and run directories", async () => {
+    jest.spyOn(platform, "isHeadlessHost").mockReturnValue(true)
+    const roots = jest
+      .spyOn(workspaceFs, "listWorkspaceRoots")
+      .mockResolvedValue([{ path: "/host/workspaces", source: "headless-workspaces-dir" }])
+    const mkdir = jest.spyOn(workspaceFs, "createWorkspaceDir").mockResolvedValue()
+    const stat = jest
+      .spyOn(workspaceFs, "statWorkspaceFile")
+      .mockResolvedValue({ exists: true, isDir: true, size: 0, mtimeMs: null })
+    const remove = jest.spyOn(workspaceFs, "deleteWorkspaceEntry").mockResolvedValue()
+    const one = defaultAcquireDeps("one", () => [])
+    const two = defaultAcquireDeps("two", () => [])
+    const first = await one.repoCacheDir(["bot-runs", "run-1"])
+    const second = await one.repoCacheDir(["bot-runs", "run-2"])
+    const other = await two.repoCacheDir(["bot-runs", "run-1"])
+    expect(first).toBe("/host/workspaces/.cognia-plugin-cache/p-6f6e65/repos/bot-runs/run-1")
+    expect(new Set([first, second, other]).size).toBe(3)
+    expect(roots).toHaveBeenCalledTimes(2)
+    expect(mkdir).toHaveBeenCalledWith(
+      "/host/workspaces",
+      ".cognia-plugin-cache/p-6f6e65/repos/bot-runs/run-1"
+    )
+    expect(await one.removeRepoCache(["bot-runs", "run-1"])).toBe(true)
+    expect(remove).toHaveBeenCalledWith(
+      "/host/workspaces",
+      ".cognia-plugin-cache/p-6f6e65/repos/bot-runs/run-1",
+      true
+    )
+    stat.mockResolvedValue({ exists: false, isDir: false, size: 0, mtimeMs: null })
+    expect(await one.removeRepoCache(["bot-runs", "missing"])).toBe(false)
+    expect(remove).toHaveBeenCalledTimes(1)
+    for (const segments of [[], [".."], ["a/../../b"], ["\\outside"], ["."]]) {
+      await expect(one.repoCacheDir(segments)).rejects.toThrow("Invalid repository cache")
+    }
+  })
+
+  it("fails closed when the service host has not supplied a physical workspace root", async () => {
+    jest.spyOn(platform, "isHeadlessHost").mockReturnValue(true)
+    jest
+      .spyOn(workspaceFs, "listWorkspaceRoots")
+      .mockResolvedValue([{ path: "/unrelated", source: "desktop-project" }])
+    const mkdir = jest.spyOn(workspaceFs, "createWorkspaceDir").mockResolvedValue()
+    await expect(defaultAcquireDeps("one", () => []).repoCacheDir(["run"])).rejects.toThrow(
+      "did not expose"
+    )
+    expect(mkdir).not.toHaveBeenCalled()
   })
 })

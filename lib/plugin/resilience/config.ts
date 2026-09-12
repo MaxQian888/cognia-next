@@ -3,9 +3,15 @@
  * global defaults with the manifest-level `resilience` block and the per-tool
  * `retryable` flag.
  *
- * Precedence (most specific wins): DEFAULT ← manifest.resilience ← toolDef.
- * Retry stays OFF unless explicitly opted in — when neither manifest nor tool
- * enables it, `maxRetries` is clamped to 0 (the non-idempotency guard).
+ * Precedence (most specific wins): DEFAULT ← manifest.resilience ← toolDef —
+ * except `timeoutMs`, where the manifest block stays the explicit backstop
+ * and `toolDef.timeoutMs` only raises the floor when the manifest doesn't
+ * set one. The tool's declared budget is its INTERNAL deadline (for a
+ * cliTool, the child-process kill); the resilience timer must fire AFTER it
+ * so the tool's own timeout error wins over the generic `TimeoutError`,
+ * hence the slack. Without this a `cliTools[].timeoutMs` above the 30s
+ * default was dead configuration — the resilience layer severed the call
+ * first and the declared timeout never took effect.
  */
 
 import { isRetryable as baseIsRetryable } from "@/lib/queue/retry-policy"
@@ -36,9 +42,27 @@ export const DEFAULT_PLUGIN_RESILIENCE: ResolvedResilienceConfig = {
  */
 export const SIDECAR_IPC_TIMEOUT_MS = 120_000
 
+/**
+ * Slack added to a tool's declared `timeoutMs` when it becomes the
+ * resilience backstop, so the tool's own timeout error (e.g. the
+ * `CliToolExecutionError` a cliTool throws when `plugin_cli_exec` kills the
+ * child) beats the generic resilience `TimeoutError` in the race. 15s
+ * comfortably covers permission/consent and IPC latency inside an attempt.
+ */
+export const TOOL_TIMEOUT_SLACK_MS = 15_000
+
+/**
+ * Ceiling for a tool's declared timeout feeding the resilience floor —
+ * matches the `plugin_cli_exec` 600s child-process ceiling. cliTool
+ * manifests are validated against it; an imperative `registerTool`
+ * definition that skips validation is clamped here instead so a huge
+ * declared value can't inflate the resilience/relay budgets unboundedly.
+ */
+export const MAX_TOOL_TIMEOUT_MS = 600_000
+
 export function resolveResilienceConfig(
   manifest: Pick<PluginManifest, "resilience">,
-  toolDef?: Pick<PluginToolDef, "retryable">
+  toolDef?: Pick<PluginToolDef, "retryable" | "timeoutMs">
 ): ResolvedResilienceConfig {
   const r = manifest.resilience ?? {}
   const breaker = r.breaker ?? {}
@@ -47,8 +71,19 @@ export function resolveResilienceConfig(
     ? Math.max(0, r.maxRetries ?? DEFAULT_PLUGIN_RESILIENCE.maxRetries)
     : 0
 
+  // `toolDef.timeoutMs` is the tool's internal deadline; the resilience
+  // backstop must outlive it (+ slack) or it races the tool's own error.
+  // Clamped at MAX_TOOL_TIMEOUT_MS — the `plugin_cli_exec` child ceiling —
+  // so an unvalidated imperative def can't inflate the budgets unboundedly.
+  const toolFloor =
+    typeof toolDef?.timeoutMs === "number" &&
+    Number.isFinite(toolDef.timeoutMs) &&
+    toolDef.timeoutMs > 0
+      ? Math.min(toolDef.timeoutMs, MAX_TOOL_TIMEOUT_MS) + TOOL_TIMEOUT_SLACK_MS
+      : undefined
+
   return {
-    timeoutMs: r.timeoutMs ?? DEFAULT_PLUGIN_RESILIENCE.timeoutMs,
+    timeoutMs: r.timeoutMs ?? toolFloor ?? DEFAULT_PLUGIN_RESILIENCE.timeoutMs,
     maxRetries,
     retryable,
     breakerScope: r.breakerScope ?? DEFAULT_PLUGIN_RESILIENCE.breakerScope,

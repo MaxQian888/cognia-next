@@ -5192,6 +5192,8 @@ export class PluginManager {
         const result = await this.hooksManager.dispatchOnCommand(manifestCommand.id, argv, {
           ...(ctx?.sessionId ? { sessionId: ctx.sessionId } : {}),
           ...(ctx?.characterId ? { characterId: ctx.characterId } : {}),
+          ...(ctx?.signal ? { signal: ctx.signal } : {}),
+          ...(ctx?.reportProgress ? { reportProgress: ctx.reportProgress } : {}),
         })
         if (!result) return { message: `Plugin command not handled: /${commandName}` }
         // A handler that returned its own message OWNS the response: the host's
@@ -5571,6 +5573,11 @@ export class PluginManager {
             name: def.name,
             description: def.description,
             parametersSchema: def.parameters,
+            // Declared budget → resilience backstop + sidecar relay ceiling;
+            // access class + path params → sidecar workspace confinement.
+            timeoutMs: def.timeoutMs,
+            access: def.access,
+            pathParams: def.confinedPathParams,
           },
           execute: async (toolArgs: Record<string, unknown>, _context: PluginToolContext) => {
             const { executeCliTool } = await import("@/lib/plugin/cli-tools/execute-cli-tool")

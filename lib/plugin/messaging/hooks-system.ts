@@ -929,6 +929,7 @@ export class PluginLifecycleHooks {
     args: string[],
     context?: PluginCommandContext
   ): Promise<PluginCommandResult | null> {
+    context?.signal?.throwIfAborted()
     for (const pluginId of this.commandDispatchOrder(command)) {
       const registered = this.registered(pluginId)
       const onCommand = registered?.hooks.onCommand
@@ -946,9 +947,11 @@ export class PluginLifecycleHooks {
                 context
               )
             : await onCommand(command, args, context)
+          context?.signal?.throwIfAborted()
           if (outcome === true) return { handled: true }
           if (outcome && typeof outcome === "object" && outcome.handled) return outcome
         } catch (error) {
+          context?.signal?.throwIfAborted()
           loggers.hooks.error(`Error in plugin ${pluginId} onCommand:`, error)
         }
       }

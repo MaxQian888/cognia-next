@@ -1319,6 +1319,15 @@ fn lint_cli_tools(obj: &serde_json::Map<String, Value>, out: &mut Vec<Diagnostic
                             });
                         }
                     }
+                    if tk.get("eachPrefixedBy").is_some_and(|v| !v.is_string()) {
+                        out.push(Diagnostic {
+                            severity: Severity::Error,
+                            field: format!("{token_field}.eachPrefixedBy"),
+                            code: "manifest.cliTools.argv.eachPrefixedBy.invalid".into(),
+                            message: format!("{token_field}.eachPrefixedBy must be a string"),
+                            hint: None,
+                        });
+                    }
                 }
             }
         }
@@ -1392,14 +1401,81 @@ fn lint_cli_tools(obj: &serde_json::Map<String, Value>, out: &mut Vec<Diagnostic
             }
         }
 
+        // access class for workspace confinement: "read" | "write" only
+        if let Some(access) = tool.get("access") {
+            if !matches!(access.as_str(), Some("read") | Some("write")) {
+                out.push(Diagnostic {
+                    severity: Severity::Error,
+                    field: format!("{field}.access"),
+                    code: "manifest.cliTools.access.invalid".into(),
+                    message: format!("{field}.access must be \"read\" or \"write\""),
+                    hint: None,
+                });
+            }
+        }
+
+        // confinedPathParams: declared param names, and a cwd base must exist
+        if let Some(confined) = tool.get("confinedPathParams") {
+            match confined.as_array() {
+                Some(names) if names.iter().all(Value::is_string) => {
+                    for name in names {
+                        let name = name.as_str().unwrap_or("");
+                        if !has_param(name) {
+                            out.push(Diagnostic {
+                                severity: Severity::Error,
+                                field: format!("{field}.confinedPathParams"),
+                                code: "manifest.cliTools.confinedPathParams.param.undeclared"
+                                    .into(),
+                                message: format!(
+                                    "{field}.confinedPathParams references undeclared parameter \"{name}\""
+                                ),
+                                hint: None,
+                            });
+                        }
+                    }
+                    let cwd_ok = tool
+                        .get("cwd")
+                        .and_then(|c| c.get("kind"))
+                        .and_then(Value::as_str)
+                        .map(|k| matches!(k, "workspace" | "param" | "plugin-dir"))
+                        .unwrap_or(false);
+                    if !cwd_ok {
+                        out.push(Diagnostic {
+                            severity: Severity::Error,
+                            field: format!("{field}.confinedPathParams"),
+                            code: "manifest.cliTools.confinedPathParams.noBase".into(),
+                            message: format!(
+                                "{field}.confinedPathParams needs a cwd policy (workspace, param, or plugin-dir) to confine against"
+                            ),
+                            hint: None,
+                        });
+                    }
+                }
+                _ => out.push(Diagnostic {
+                    severity: Severity::Error,
+                    field: format!("{field}.confinedPathParams"),
+                    code: "manifest.cliTools.confinedPathParams.invalid".into(),
+                    message: format!(
+                        "{field}.confinedPathParams must be an array of declared parameter names"
+                    ),
+                    hint: None,
+                }),
+            }
+        }
+
         // numeric knobs + outputParse + successExitCodes + versionArg
         if let Some(timeout) = tool.get("timeoutMs") {
-            if !timeout.as_f64().map(|t| t > 0.0).unwrap_or(false) {
+            // `plugin_cli_exec` kills the child at 600s — a larger declared
+            // value is dead config that only inflates the resilience/relay
+            // budgets.
+            if !timeout.as_f64().map(|t| t > 0.0 && t <= 600_000.0).unwrap_or(false) {
                 out.push(Diagnostic {
                     severity: Severity::Error,
                     field: format!("{field}.timeoutMs"),
                     code: "manifest.cliTools.timeoutMs.invalid".into(),
-                    message: format!("{field}.timeoutMs must be a positive number of milliseconds"),
+                    message: format!(
+                        "{field}.timeoutMs must be a positive number of milliseconds no larger than 600000"
+                    ),
                     hint: None,
                 });
             }

@@ -1,5 +1,6 @@
 import type {
   IntegrationAccount,
+  IntegrationAccountRef,
   IntegrationAccountInput,
   IntegrationActionJob,
   IntegrationEventEnvelope,
@@ -22,6 +23,7 @@ import {
   authenticatedIntegrationRequest,
   cancelIntegrationActionJob,
   executeIntegrationAction,
+  integrationApiBaseUrl,
 } from "@/lib/integrations/action-runner"
 import { publishIntegrationEvent } from "@/lib/integrations/events"
 import {
@@ -33,6 +35,8 @@ import {
   checkIntegrationAccountHealth,
   listIntegrationResources,
 } from "@/lib/integrations/providers"
+
+import { resolveBotIntegrationBinding } from "./bot-integration-binding"
 
 type IntegrationPermission =
   "integrations:read" | "integrations:events" | "integrations:execute" | "integrations:manage"
@@ -76,16 +80,43 @@ export function createIntegrationsAPI(
       const { deleteIntegrationAccount } = await import("@/lib/integrations/ingress-client")
       await deleteIntegrationAccount(pluginId, accountId)
     },
-    async listSubscriptions(accountId?: string): Promise<IntegrationSubscription[]> {
+    async listSubscriptions(accountId?: IntegrationAccountRef): Promise<IntegrationSubscription[]> {
       requirePermission(hasPermission, "integrations:read", "ctx.integrations.listSubscriptions")
+      if (accountId && typeof accountId !== "string") {
+        const binding = await resolveBotIntegrationBinding(pluginId, accountId)
+        return (
+          await listIntegrationSubscriptions(binding.account.pluginId, binding.account.id)
+        ).filter(
+          (subscription) =>
+            subscription.resourceKind === "repository" &&
+            subscription.resourceId?.toLowerCase() === binding.repository
+        )
+      }
       return listIntegrationSubscriptions(pluginId, accountId)
     },
     async listResources(query) {
       requirePermission(hasPermission, "integrations:read", "ctx.integrations.listResources")
-      return listIntegrationResources(pluginId, query)
+      if (typeof query.accountId !== "string") {
+        const binding = await resolveBotIntegrationBinding(pluginId, query.accountId)
+        if (query.kind !== "repository")
+          throw new Error("Bot binding only permits scoped repository discovery")
+        const page = await listIntegrationResources(binding.account.pluginId, {
+          ...query,
+          accountId: binding.account.id,
+        })
+        return {
+          ...page,
+          items: page.items.filter((item) => item.id.toLowerCase() === binding.repository),
+        }
+      }
+      return listIntegrationResources(pluginId, { ...query, accountId: query.accountId })
     },
     async checkAccountHealth(accountId) {
       requirePermission(hasPermission, "integrations:read", "ctx.integrations.checkAccountHealth")
+      if (typeof accountId !== "string") {
+        const binding = await resolveBotIntegrationBinding(pluginId, accountId)
+        return checkIntegrationAccountHealth(binding.account.pluginId, binding.account.id)
+      }
       return checkIntegrationAccountHealth(pluginId, accountId)
     },
     async createSubscription(
@@ -121,22 +152,63 @@ export function createIntegrationsAPI(
     async getActionJob(jobId) {
       requirePermission(hasPermission, "integrations:read", "ctx.integrations.getActionJob")
       const job = await getIntegrationActionJob(jobId)
-      return job?.pluginId === pluginId ? job : undefined
+      if (job?.pluginId === pluginId) return job
+      if (job?.botBinding?.pluginId === pluginId) return job
+      return undefined
     },
     async cancelAction(jobId) {
       requirePermission(hasPermission, "integrations:execute", "ctx.integrations.cancelAction")
       const job = await getIntegrationActionJob(jobId)
+      if (job?.botBinding?.pluginId === pluginId) {
+        const binding = await resolveBotIntegrationBinding(pluginId, job.botBinding)
+        if (binding.account.id === job.accountId) return cancelIntegrationActionJob(jobId)
+      }
       if (!job || job.pluginId !== pluginId) {
         throw new Error(`Integration action job "${jobId}" was not found`)
       }
       return cancelIntegrationActionJob(jobId)
     },
-    async authenticatedRequest<T>(accountId: string, input: string, init?: IntegrationRequestInit) {
+    async authenticatedRequest<T>(
+      accountId: IntegrationAccountRef,
+      input: string,
+      init?: IntegrationRequestInit
+    ) {
       requirePermission(
         hasPermission,
         "integrations:execute",
         "ctx.integrations.authenticatedRequest"
       )
+      if (typeof accountId !== "string") {
+        const binding = await resolveBotIntegrationBinding(pluginId, accountId)
+        if ((init?.method ?? "GET").toUpperCase() !== "GET" || init?.body !== undefined) {
+          throw new Error(
+            "Bot binding authenticated requests are read-only; use executeAction for writes"
+          )
+        }
+        const url = new URL(input)
+        const base = new URL(
+          (await integrationApiBaseUrl(binding.account)) ?? "https://api.github.com"
+        )
+        const prefix = `${base.pathname.replace(/\/$/, "")}/repos/${binding.repository}`
+        if (
+          url.origin !== base.origin ||
+          url.username ||
+          url.password ||
+          !(
+            url.pathname.toLowerCase() === prefix ||
+            url.pathname.toLowerCase().startsWith(`${prefix}/`)
+          ) ||
+          /%2f|%5c|%2e|\\/i.test(url.pathname)
+        ) {
+          throw new Error("Bot binding request is outside its repository scope")
+        }
+        return authenticatedIntegrationRequest<T>(
+          binding.account.pluginId,
+          binding.account.id,
+          input,
+          init
+        )
+      }
       const account = await getIntegrationAccount(pluginId, accountId)
       if (!account) throw new Error(`Integration account "${accountId}" was not found`)
       return authenticatedIntegrationRequest<T>(pluginId, accountId, input, init)

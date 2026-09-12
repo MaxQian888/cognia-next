@@ -30,6 +30,82 @@ describe("plugin-sdk api/cli-tool", () => {
     expect(def.argv).toHaveLength(2)
   })
 
+  it("assertConfinedPathParams accepts in-base paths and no-ops on absence", () => {
+    const names = ["path"]
+    expect(() => sdk.assertConfinedPathParams({ path: "a/b" }, names, "/ws")).not.toThrow()
+    expect(() => sdk.assertConfinedPathParams({ path: "/ws/a" }, names, "/ws")).not.toThrow()
+    // Omitted / empty / unlisted params pass; an empty names list no-ops.
+    expect(() => sdk.assertConfinedPathParams({}, names, "/ws")).not.toThrow()
+    expect(() => sdk.assertConfinedPathParams({ path: "x" }, names, "/ws")).not.toThrow()
+    expect(() => sdk.assertConfinedPathParams({ path: "/etc" }, [], "/ws")).not.toThrow()
+    expect(() => sdk.assertConfinedPathParams({ path: "/etc" }, undefined, "/ws")).not.toThrow()
+    // Array params are checked elementwise.
+    expect(() =>
+      sdk.assertConfinedPathParams({ paths: ["a", "/ws/b"] }, ["paths"], "/ws")
+    ).not.toThrow()
+  })
+
+  it("assertConfinedPathParams rejects escapes, non-strings, and missing base", () => {
+    const names = ["path"]
+    for (const path of ["/etc/passwd", "../up", "a/../..", "C:/Windows/System32"]) {
+      expect(() => sdk.assertConfinedPathParams({ path }, names, "/ws")).toThrow(
+        sdk.CliTemplateError
+      )
+    }
+    expect(() => sdk.assertConfinedPathParams({ path: 42 }, names, "/ws")).toThrow(
+      sdk.CliTemplateError
+    )
+    expect(() =>
+      sdk.assertConfinedPathParams({ paths: ["ok", "evil/../.."] }, ["paths"], "/ws")
+    ).toThrow(sdk.CliTemplateError)
+    // No base → fail closed.
+    expect(() => sdk.assertConfinedPathParams({ path: "x" }, names, undefined)).toThrow(
+      sdk.CliTemplateError
+    )
+  })
+
+  it("assertConfinedPathParams denies credential-shaped paths inside the base", () => {
+    const names = ["path"]
+    for (const path of [
+      ".ssh",
+      "sub/.aws/credentials",
+      ".ssh/id_ed25519",
+      "deep/dir/.git-credentials",
+      "x/.config/gh",
+      "known_hosts",
+      ".netrc",
+      "fixtures/.gnupg",
+      ".cognia/sessions.db",
+    ]) {
+      expect(() => sdk.assertConfinedPathParams({ path }, names, "/ws")).toThrow(
+        sdk.CliTemplateError
+      )
+    }
+    // Benign lookalikes pass — the deny is segment/basename exact.
+    expect(() =>
+      sdk.assertConfinedPathParams({ path: "src/.ssh-config-notes.txt" }, names, "/ws")
+    ).not.toThrow()
+    expect(() =>
+      sdk.assertConfinedPathParams({ path: "docs/credentials-guide.md" }, names, "/ws")
+    ).not.toThrow()
+  })
+
+  it("isProtectedCliPath mirrors the sidecar deny list", () => {
+    for (const p of [
+      "/home/u/.ssh",
+      "C:/Users/u/.aws/credentials",
+      "/w/repo/.docker/config.json",
+      "/w/.config/gcloud/application_default_credentials.json",
+      "/w/.config/gh/hosts.yml",
+      "/w/foo/known_hosts",
+    ]) {
+      expect(sdk.isProtectedCliPath(p)).toBe(true)
+    }
+    for (const p of ["/w/src/.ssh-notes.md", "/w/lib/credentials.ts", "/w/.config/gh-pages"]) {
+      expect(sdk.isProtectedCliPath(p)).toBe(false)
+    }
+  })
+
   it("re-exports CLI manifest and executor types", () => {
     const assertTypes = <
       _T extends

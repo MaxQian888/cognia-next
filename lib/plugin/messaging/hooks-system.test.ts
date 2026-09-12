@@ -1342,6 +1342,37 @@ describe("PluginLifecycleHooks.dispatchOnCommand", () => {
     })
   })
 
+  it("does not run handlers for an already cancelled command", async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const onCommand = jest.fn(() => true)
+    lifecycleHooks.registerHooks("p", { onCommand })
+    await expect(
+      lifecycleHooks.dispatchOnCommand("run", [], {
+        signal: controller.signal,
+      })
+    ).rejects.toMatchObject({ name: "AbortError" })
+    expect(onCommand).not.toHaveBeenCalled()
+  })
+
+  it("propagates cancellation without falling through to another plugin", async () => {
+    const controller = new AbortController()
+    const next = jest.fn(() => true)
+    lifecycleHooks.registerHooks("first", {
+      onCommand: () => {
+        controller.abort()
+        throw controller.signal.reason
+      },
+    })
+    lifecycleHooks.registerHooks("second", { onCommand: next })
+    await expect(
+      lifecycleHooks.dispatchOnCommand("run", [], {
+        signal: controller.signal,
+      })
+    ).rejects.toMatchObject({ name: "AbortError" })
+    expect(next).not.toHaveBeenCalled()
+  })
+
   it("hands the command, argv and invoking context to the handler", async () => {
     const onCommand = jest.fn(() => true)
     lifecycleHooks.registerHooks("p", { onCommand })

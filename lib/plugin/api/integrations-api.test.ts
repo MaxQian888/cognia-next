@@ -7,7 +7,14 @@ import {
   __resetIntegrationRegistryForTesting,
   registerIntegrationDefinitions,
 } from "@/lib/integrations/registry"
+import * as botBinding from "./bot-integration-binding"
+import { setIntegrationAuthenticatedRequestExecutorForTesting } from "@/lib/integrations/action-runner"
 import { createIntegrationsAPI } from "./integrations-api"
+
+jest.mock("./bot-integration-binding", () => ({
+  ...jest.requireActual("./bot-integration-binding"),
+  resolveBotIntegrationBinding: jest.fn(),
+}))
 
 describe("ctx.integrations", () => {
   beforeEach(async () => {
@@ -151,5 +158,98 @@ describe("ctx.integrations", () => {
     await expect(
       readOnly.requeueIngressDeadletter("account-1", "route-1", "delivery-1")
     ).rejects.toThrow('requires the "integrations:manage" permission')
+  })
+  afterEach(() => {
+    jest.restoreAllMocks()
+    setIntegrationAuthenticatedRequestExecutorForTesting()
+  })
+
+  it("allows repository-scoped paginated GET through the bound provider only", async () => {
+    const provider = createIntegrationsAPI("example-delivery", () => true)
+    const account = await provider.createAccount({
+      integrationId: "example",
+      providerId: "oauth",
+      authSessionId: "opaque",
+      remoteAccountId: "one",
+      label: "One",
+    })
+    jest
+      .spyOn(botBinding, "resolveBotIntegrationBinding")
+      .mockResolvedValue({ account, repository: "owner/repo" } as Awaited<
+        ReturnType<typeof botBinding.resolveBotIntegrationBinding>
+      >)
+    const request = jest
+      .fn()
+      .mockResolvedValue({ status: 200, headers: { link: "next" }, data: [] })
+    setIntegrationAuthenticatedRequestExecutorForTesting(request)
+    const api = createIntegrationsAPI("bot", () => true)
+    const ref = { runId: "run", slotId: "github" }
+    await expect(
+      api.authenticatedRequest(ref, "https://api.github.com/repos/owner/repo/issues?page=2", {
+        headers: { "if-none-match": "etag" },
+      })
+    ).resolves.toMatchObject({ headers: { link: "next" } })
+    expect(request).toHaveBeenCalledWith("example-delivery", account.id, expect.any(String), {
+      headers: { "if-none-match": "etag" },
+    })
+    for (const url of [
+      "https://api.github.com/repos/owner/other/issues",
+      "https://evil.test/repos/owner/repo/issues",
+      "https://api.github.com/repos/owner/repo/../other/issues",
+      "https://api.github.com/repos/owner/repo/%2e%2e%2fother",
+      "https://api.github.com/user/repos",
+    ]) {
+      await expect(api.authenticatedRequest(ref, url)).rejects.toThrow("scope")
+    }
+    await expect(
+      api.authenticatedRequest(ref, "https://api.github.com/repos/owner/repo/issues", {
+        method: "POST",
+        body: "{}",
+      })
+    ).rejects.toThrow("read-only")
+    await expect(
+      api.authenticatedRequest(account.id, "https://api.github.com/repos/owner/repo/issues")
+    ).rejects.toThrow("not found")
+    expect(request).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not expose unrelated subscriptions or resource discovery through a binding", async () => {
+    const api = createIntegrationsAPI("example-delivery", () => true)
+    const account = await api.createAccount({
+      integrationId: "example",
+      providerId: "oauth",
+      authSessionId: "opaque",
+      remoteAccountId: "one",
+      label: "One",
+    })
+    const own = await api.createSubscription({
+      integrationId: "example",
+      accountId: account.id,
+      resourceKind: "repository",
+      resourceId: "cognia/cognia-next",
+      eventTypes: [],
+    })
+    await api.createSubscription({
+      integrationId: "example",
+      accountId: account.id,
+      resourceKind: "repository",
+      resourceId: "private/other",
+      eventTypes: [],
+    })
+    jest
+      .spyOn(botBinding, "resolveBotIntegrationBinding")
+      .mockResolvedValue({ account, repository: "cognia/cognia-next" } as Awaited<
+        ReturnType<typeof botBinding.resolveBotIntegrationBinding>
+      >)
+    const bot = createIntegrationsAPI("bot", () => true)
+    const ref = { runId: "run", slotId: "github" }
+    await expect(bot.listSubscriptions(ref)).resolves.toEqual([own])
+    await expect(bot.listResources({ accountId: ref, kind: "repository" })).resolves.toMatchObject({
+      items: [{ id: "cognia/cognia-next" }],
+    })
+    await expect(bot.listResources({ accountId: ref, kind: "issue" })).rejects.toThrow(
+      "scoped repository"
+    )
+    await expect(bot.checkAccountHealth(ref)).resolves.toMatchObject({ health: "healthy" })
   })
 })

@@ -172,6 +172,7 @@ import { createPerfAPI } from "../api/perf-api"
 import { createLogsAPI } from "../api/logs-api"
 import { createConnectorsAPI } from "../api/connectors-api"
 import { createIntegrationsAPI } from "../api/integrations-api"
+import { createBotsAPI } from "../api/bots-api"
 import { createShareAPI } from "../api/share-api"
 import { createBackupAPI } from "../api/backup-api"
 import { createAutomationAPI } from "../api/automation-api"
@@ -443,6 +444,9 @@ export function createFullPluginContext(
     logs: createLogsAPI(pluginId),
     connectors: createConnectorsAPI(pluginId),
     integrations: createIntegrationsAPI(pluginId, (permission) =>
+      permissionsAPI.hasPermission(permission as never)
+    ),
+    bots: createBotsAPI(pluginId, (permission) =>
       permissionsAPI.hasPermission(permission as never)
     ),
     share: createShareAPI(pluginId),
@@ -999,51 +1003,9 @@ function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAP
       })
     },
 
-    runExternalAgent: async (
-      presetOrAgentId: string,
-      prompt: string,
-      options?: Record<string, unknown>
-    ) => {
-      const { pluginHasApiPermission } = await import("@/lib/plugin/api/permission-api")
-      if (!pluginHasApiPermission(pluginId, "agent:dispatch-external")) {
-        throw new Error(
-          'agent.runExternalAgent requires the "agent:dispatch-external" permission — declare it in the plugin manifest.'
-        )
-      }
-      if (typeof presetOrAgentId !== "string" || !presetOrAgentId) {
-        throw new Error("agent.runExternalAgent requires a preset or agent id")
-      }
-      if (typeof prompt !== "string" || !prompt) {
-        throw new Error("agent.runExternalAgent requires a non-empty prompt")
-      }
-
-      const [{ getExternalAgentManager }, { createAgentFromPreset }] = await Promise.all([
-        import("@/lib/ai/agent/external/manager"),
-        import("@/lib/ai/agent/external/presets"),
-      ])
-      const externalManager = getExternalAgentManager()
-
-      // If the id is a known live instance, execute against it directly.
-      // Otherwise treat it as a preset id (including plugin-contributed
-      // overlay presets, which `createAgentFromPreset` resolves) and add a
-      // fresh instance first.
-      let agentId = presetOrAgentId
-      if (!externalManager.getAgent(presetOrAgentId)) {
-        const config = createAgentFromPreset(presetOrAgentId)
-        if (!config) {
-          throw new Error(
-            `agent.runExternalAgent: no live agent or preset "${presetOrAgentId}" found`
-          )
-        }
-        const instance = await externalManager.addAgent(config)
-        agentId = instance.config.id
-      }
-
-      return externalManager.execute(
-        agentId,
-        prompt,
-        options as Parameters<typeof externalManager.execute>[2]
-      )
+    runExternalAgent: async (presetOrAgentId, prompt, options) => {
+      const { runPluginExternalAgent } = await import("@/lib/plugin/api/external-agent-api")
+      return runPluginExternalAgent(pluginId, presetOrAgentId, prompt, options)
     },
 
     cancelAgent: (agentId: string) => {

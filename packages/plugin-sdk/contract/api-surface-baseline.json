@@ -55,7 +55,7 @@
     {
       "id": "ai",
       "authorPath": "ctx.ai",
-      "runtimes": ["frontend", "hybrid"],
+      "runtimes": ["frontend", "hybrid", "python"],
       "platforms": ["desktop", "web", "mobile"],
       "methods": [
         "ai.chat",

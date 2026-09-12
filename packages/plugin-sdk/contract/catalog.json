@@ -1730,7 +1730,7 @@
           "consentTier": "policy",
           "risk": "medium",
           "idempotent": false,
-          "cancellable": false,
+          "cancellable": true,
           "resourceEffect": {
             "kind": "none"
           }
@@ -1815,7 +1815,7 @@
       "type": "PluginAIProviderAPI",
       "stability": "stable",
       "introducedIn": "0.1.0",
-      "runtimes": ["frontend", "hybrid"],
+      "runtimes": ["frontend", "hybrid", "python"],
       "platforms": ["desktop", "web", "mobile"],
       "transport": "direct",
       "factory": "context.ai",
@@ -2525,6 +2525,73 @@
           "requiredPermissions": ["backup:read"],
           "consentTier": "policy",
           "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        }
+      ]
+    },
+    {
+      "id": "bots",
+      "authorPath": "ctx.bots",
+      "type": "PluginBotsAPI",
+      "stability": "stable",
+      "introducedIn": "0.1.0",
+      "runtimes": ["frontend", "hybrid", "python"],
+      "platforms": ["desktop", "web", "mobile"],
+      "transport": "direct",
+      "factory": "context.bots",
+      "enforcement": "shadow",
+      "dataClassification": "sensitive",
+      "timeoutMs": null,
+      "retry": "never",
+      "errorPolicy": "preserve",
+      "lifecycle": "plugin",
+      "methods": [
+        {
+          "id": "bots.getInstallation",
+          "name": "getInstallation",
+          "requiredPermissions": ["agent:control"],
+          "consentTier": "policy",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "bots.enqueue",
+          "name": "enqueue",
+          "requiredPermissions": ["agent:control"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "bots.cancelResource",
+          "name": "cancelResource",
+          "requiredPermissions": ["agent:control"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "bots.recordMonitor",
+          "name": "recordMonitor",
+          "requiredPermissions": ["agent:control"],
+          "consentTier": "policy",
+          "risk": "low",
           "idempotent": true,
           "cancellable": false,
           "resourceEffect": {
@@ -6314,7 +6381,7 @@
       "type": "PluginIntegrationsAPI",
       "stability": "stable",
       "introducedIn": "0.1.0",
-      "runtimes": ["frontend", "hybrid"],
+      "runtimes": ["frontend", "hybrid", "python"],
       "platforms": ["desktop", "web", "mobile"],
       "transport": "direct",
       "factory": "context.integrations",
@@ -12077,6 +12144,18 @@
           }
         },
         {
+          "id": "workspace.publish",
+          "name": "publish",
+          "requiredPermissions": ["filesystem:write", "git:write", "integrations:execute"],
+          "consentTier": "policy",
+          "risk": "high",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
           "id": "workspace.read",
           "name": "read",
           "requiredPermissions": ["filesystem:read"],
@@ -12106,6 +12185,18 @@
           "name": "release",
           "requiredPermissions": ["filesystem:write"],
           "consentTier": "none",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "workspace.snapshot",
+          "name": "snapshot",
+          "requiredPermissions": ["filesystem:read", "git:read"],
+          "consentTier": "policy",
           "risk": "medium",
           "idempotent": true,
           "cancellable": false,

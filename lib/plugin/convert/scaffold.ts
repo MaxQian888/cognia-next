@@ -261,10 +261,13 @@ makes the wrapper injection-safe — never concatenate values into a string.
 {
   "name": "ripgrep_search",
   "description": "Search file contents. Exit code 1 (no matches) is success.",
+  "access": "read",
+  "confinedPathParams": ["path"],
   "parameters": {
     "type": "object",
     "properties": {
       "pattern": { "type": "string", "description": "Regular expression" },
+      "path": { "type": "string", "description": "Search root, inside the workspace" },
       "globs": { "type": "array", "items": { "type": "string" } },
       "ignoreCase": { "type": "boolean" }
     },
@@ -273,6 +276,7 @@ makes the wrapper injection-safe — never concatenate values into a string.
   "binary": { "kind": "requires", "name": "rg" },
   "argv": [
     { "literal": "--json" },
+    { "literal": "--no-config" },
     { "param": "ignoreCase", "eachPrefixedBy": "-i", "omitWhenEmpty": true },
     { "param": "globs", "eachPrefixedBy": "--glob", "omitWhenEmpty": true },
     { "param": "pattern", "eachPrefixedBy": "-e" },
@@ -286,6 +290,32 @@ makes the wrapper injection-safe — never concatenate values into a string.
   "maxOutputBytes": 500000
 }
 \`\`\`
+
+Field notes:
+
+- \`access: "read" | "write"\` classifies the tool for the host's
+  workspace-confinement gates: \`read\` hard-denies credential paths
+  (\`.ssh\`, \`.aws\`, \`id_rsa\`, …); \`write\` also escalates out-of-root
+  targets for approval. Omit it and the tool stays opaque to confinement.
+- \`confinedPathParams\` lists params whose values are filesystem paths.
+  Before the consent prompt, each value must resolve inside the workspace
+  root (or the plugin dir for \`cwd.kind: "plugin-dir"\`): \`..\` segments,
+  absolute paths outside the base, and credential-shaped paths are rejected.
+  It requires a non-\`none\` \`cwd\` kind — there must be a base to confine
+  against.
+- A \`{ "literal": "--no-config" }\` early in \`argv\` keeps user-level
+  config files (ripgrep: \`RIPGREP_CONFIG_PATH\`) from silently changing
+  behavior — or, on rg 13, re-arming the deprecated \`--pre\` hook.
+- \`timeoutMs\` is the child-process cap AND sizes the resilience backstop
+  and the agent-side IPC relay ceiling — a 60s tool is not severed by the
+  30s/120s defaults. Its ceiling is 600000 ms, matching the
+  \`plugin_cli_exec\` hard kill.
+- A \`stdin\` param (\`{ "param": "name" }\`) pipes a string argument into
+  the child without putting it on the command line. Secrets belong there —
+  the rendered argv appears in the consent prompt and the automation audit
+  log, so a token passed as an argument is persisted in plaintext.
+- The \`cli:execute\` consent prompt shows the rendered command line
+  (program + argv + cwd), so users approve what actually runs.
 
 \`plugins/ripgrep-tools/plugin.json\` in the cognia repository is the
 reference implementation. Until \`cliTools\` has at least one entry,

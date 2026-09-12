@@ -20,6 +20,10 @@ import { validateAgainstJsonSchema } from "@/lib/workflow/nodes/ai/schema-valida
 import { getIntegrationActionHandler, getRegisteredIntegration } from "@/lib/integrations/registry"
 import { runGithubIssueLoop } from "@/lib/integrations/github-issue-loop"
 import { isTauri } from "@/lib/tauri"
+import {
+  assertBotIntegrationAction,
+  canonicalIntegrationValue,
+} from "@/lib/plugin/api/bot-integration-binding"
 
 type AuthenticatedRequestExecutor = <T>(
   pluginId: string,
@@ -214,10 +218,51 @@ export async function authenticatedIntegrationRequest<T>(
   return authenticatedRequest<T>(pluginId, accountId, input, init)
 }
 
+async function assertApprovedPublicationHead(
+  binding: Awaited<ReturnType<typeof assertBotIntegrationAction>>
+): Promise<void> {
+  if (!binding.approvedPublication) return
+  const baseUrl = (await integrationApiBaseUrl(binding.account)) ?? "https://api.github.com"
+  const current = await authenticatedRequest<{ sha?: string }>(
+    binding.account.pluginId,
+    binding.account.id,
+    `${baseUrl}/repos/${binding.repository}/commits/${encodeURIComponent(binding.approvedPublication.branch)}`
+  )
+  if (current.status !== 200 || current.data.sha !== binding.approvedPublication.headSha) {
+    throw new Error("Approved pull request head SHA changed")
+  }
+}
+
 export async function executeIntegrationAction(
   pluginId: string,
   input: ExecuteIntegrationActionInput
 ): Promise<IntegrationActionJob> {
+  const callerPluginId = pluginId
+  let botBinding: IntegrationActionJob["botBinding"]
+  if (input.binding) {
+    const binding = await assertBotIntegrationAction(
+      pluginId,
+      input.binding,
+      input,
+      input.approval?.interruptId
+    )
+    await assertApprovedPublicationHead(binding)
+    if (input.accountId && input.accountId !== binding.account.id)
+      throw new Error("Bot action account does not match its binding")
+    pluginId = binding.account.pluginId
+    input = {
+      ...input,
+      accountId: binding.account.id,
+      idempotencyKey: input.idempotencyKey
+        ? `${callerPluginId}:${input.binding.runId}:${input.idempotencyKey}`
+        : undefined,
+    }
+    botBinding = {
+      ...input.binding!,
+      pluginId: callerPluginId,
+      approvalId: input.approval?.interruptId,
+    }
+  }
   const registered = getRegisteredIntegration(pluginId, input.integrationId)
   if (!registered) throw new Error(`Integration "${input.integrationId}" is not registered`)
   const action = registered.definition.actions.find((candidate) => candidate.id === input.actionId)
@@ -238,13 +283,22 @@ export async function executeIntegrationAction(
     accountId: input.accountId,
     actionId: input.actionId,
     input: input.input,
-    status: action.risk === "read" ? "queued" : "awaiting_approval",
+    status: action.risk === "read" || botBinding ? "queued" : "awaiting_approval",
+    ...(botBinding ? { botBinding } : {}),
     risk: action.risk,
     idempotencyKey: input.idempotencyKey,
     attempts: 0,
     maxAttempts: action.idempotency === "none" ? 1 : 5,
     source: input.source ?? "manual",
   })
+  if (
+    botBinding &&
+    (canonicalIntegrationValue(job.botBinding) !== canonicalIntegrationValue(botBinding) ||
+      canonicalIntegrationValue(job.input) !== canonicalIntegrationValue(input.input) ||
+      job.actionId !== input.actionId)
+  ) {
+    throw new Error("Bot integration idempotency key belongs to different approved content")
+  }
   if (job.status !== "queued") return job
   await appendIntegrationAudit({
     pluginId,
@@ -275,6 +329,27 @@ export async function runIntegrationActionJob(jobId: string): Promise<Integratio
   const job = await getIntegrationActionJob(jobId)
   if (!job) throw new Error(`Integration action job "${jobId}" was not found`)
   if (!["queued", "retry_wait"].includes(job.status)) return job
+  let approvedHeadSha: string | undefined
+  if (job.botBinding) {
+    try {
+      const binding = await assertBotIntegrationAction(
+        job.botBinding.pluginId,
+        job.botBinding,
+        job,
+        job.botBinding.approvalId
+      )
+      if (binding.account.id !== job.accountId || binding.account.pluginId !== job.pluginId) {
+        throw new Error("Bot integration binding changed before publication")
+      }
+      await assertApprovedPublicationHead(binding)
+      approvedHeadSha = binding.approvedPublication?.headSha
+    } catch (error) {
+      return updateIntegrationActionJob(job.id, {
+        status: "failed",
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
   const running = runningPerAccount.get(job.accountId) ?? 0
   if (running >= MAX_ACCOUNT_CONCURRENCY) return job
 
@@ -320,11 +395,29 @@ export async function runIntegrationActionJob(jobId: string): Promise<Integratio
       accountId: job.accountId,
       jobId,
       signal: controller.signal,
-      authenticatedRequest: (input, init) =>
-        authenticatedRequest(job.pluginId, job.accountId, input, init),
+      authenticatedRequest: async (input, init) => {
+        if (controller.signal.aborted) throw new Error("Action cancelled or timed out")
+        if (job.botBinding && !["GET", "HEAD"].includes((init?.method ?? "GET").toUpperCase())) {
+          const binding = await assertBotIntegrationAction(
+            job.botBinding.pluginId,
+            job.botBinding,
+            job,
+            job.botBinding.approvalId
+          )
+          if (binding.account.id !== job.accountId || binding.account.pluginId !== job.pluginId)
+            throw new Error("Bot integration binding changed before publication")
+          await assertApprovedPublicationHead(binding)
+          if (controller.signal.aborted) throw new Error("Action cancelled or timed out")
+        }
+        return authenticatedRequest(job.pluginId, job.accountId, input, init)
+      },
       ...(jobAccount ? { apiBaseUrl: await integrationApiBaseUrl(jobAccount) } : {}),
     }
-    const output = await handler(job.input, context)
+    // Keep persisted/approved input immutable. This value comes only from the host publication.
+    const output = await handler(
+      approvedHeadSha ? { ...job.input, expectedHeadSha: approvedHeadSha } : job.input,
+      context
+    )
     const outputValidation = action.outputSchema
       ? validateAgainstJsonSchema(action.outputSchema, output)
       : { ok: true as const }

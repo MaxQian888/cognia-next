@@ -9,11 +9,18 @@
  */
 
 export { defineBot, defineBotHandler } from "../define/define-bot"
+export type {
+  PluginBotsAPI,
+  BotEnqueueInput,
+  BotInstallationSnapshot,
+  BotMonitorState,
+} from "@/types/bot/api"
 
 export type {
   PluginBotDef,
   PluginBotExecutor,
   PluginBotTriggerDef,
+  PluginBotTriggerConditions,
   PluginBotTriggerKind,
   PluginBotEventSource,
   PluginBotInteractionTrigger,

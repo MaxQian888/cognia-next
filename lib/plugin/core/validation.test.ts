@@ -1551,6 +1551,35 @@ describe("Plugin Validation", () => {
         )
       })
 
+      it("rejects binary names that cannot be executable names", () => {
+        // `name` feeds PATH probing and the `COGNIA_<NAME>_PATH` env
+        // override — path separators, traversal, whitespace and control
+        // characters are never legitimate binary names.
+        for (const name of ["../x", "a/b", "..", "rg --pre=/bin/sh", "rg.exe;", ".hidden"]) {
+          const manifest = createValidManifest()
+          ;(manifest as unknown as Record<string, unknown>).requires = {
+            binaries: [{ name }],
+          }
+          const result = validatePluginManifest(manifest)
+          expect(result.valid).toBe(false)
+          expect(result.diagnostics).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ code: "manifest.requires.binaries.name.invalid" }),
+            ])
+          )
+        }
+        // Legit executable names pass: rg, zget, cargo-component, node-18.
+        const manifest = createValidManifest()
+        ;(manifest as unknown as Record<string, unknown>).requires = {
+          binaries: [{ name: "cargo-component" }, { name: "node-18" }, { name: "rg.exe" }],
+        }
+        expect(
+          (validatePluginManifest(manifest).diagnostics ?? []).filter((d) =>
+            d.code.startsWith("manifest.requires.binaries.name")
+          )
+        ).toHaveLength(0)
+      })
+
       it("rejects a non-semver minVersion", () => {
         const manifest = createValidManifest()
         ;(manifest as unknown as Record<string, unknown>).requires = {
@@ -3226,6 +3255,63 @@ describe("validatePluginManifest cliTools", () => {
     expect(codesOf(validatePluginManifest(badEntry))).toContain("manifest.cliTools.entry.invalid")
   })
 
+  it("validates access and confinedPathParams", () => {
+    // Valid: read class + a declared path param confined by a workspace cwd.
+    const ok = cliManifest()
+    ok.cliTools![0].access = "read"
+    ok.cliTools![0].confinedPathParams = ["path"]
+    ok.cliTools![0].cwd = { kind: "workspace" }
+    expect(validatePluginManifest(ok).errors).toHaveLength(0)
+
+    const badAccess = cliManifest()
+    badAccess.cliTools![0].access = "delete" as never
+    expect(codesOf(validatePluginManifest(badAccess))).toContain("manifest.cliTools.access.invalid")
+
+    const undeclared = cliManifest()
+    undeclared.cliTools![0].confinedPathParams = ["ghost"]
+    undeclared.cliTools![0].cwd = { kind: "workspace" }
+    expect(codesOf(validatePluginManifest(undeclared))).toContain(
+      "manifest.cliTools.confinedPathParams.param.undeclared"
+    )
+
+    // No cwd base (absent or "none") → nothing to confine against.
+    const noCwd = cliManifest()
+    noCwd.cliTools![0].confinedPathParams = ["path"]
+    expect(codesOf(validatePluginManifest(noCwd))).toContain(
+      "manifest.cliTools.confinedPathParams.noBase"
+    )
+    const noneCwd = cliManifest()
+    noneCwd.cliTools![0].confinedPathParams = ["path"]
+    noneCwd.cliTools![0].cwd = { kind: "none" }
+    expect(codesOf(validatePluginManifest(noneCwd))).toContain(
+      "manifest.cliTools.confinedPathParams.noBase"
+    )
+
+    const notArray = cliManifest()
+    notArray.cliTools![0].confinedPathParams = "path" as never
+    notArray.cliTools![0].cwd = { kind: "workspace" }
+    expect(codesOf(validatePluginManifest(notArray))).toContain(
+      "manifest.cliTools.confinedPathParams.invalid"
+    )
+  })
+
+  it("rejects a timeoutMs above the plugin_cli_exec 600s ceiling", () => {
+    const over = cliManifest()
+    over.cliTools![0].timeoutMs = 600_001
+    expect(codesOf(validatePluginManifest(over))).toContain("manifest.cliTools.timeoutMs.invalid")
+    const at = cliManifest()
+    at.cliTools![0].timeoutMs = 600_000
+    expect(validatePluginManifest(at).errors).toHaveLength(0)
+  })
+
+  it("rejects a non-string eachPrefixedBy", () => {
+    const bad = cliManifest()
+    bad.cliTools![0].argv.push({ param: "pattern", eachPrefixedBy: 7 } as never)
+    expect(codesOf(validatePluginManifest(bad))).toContain(
+      "manifest.cliTools.argv.eachPrefixedBy.invalid"
+    )
+  })
+
   it("warns (not errors) when capability is declared but cliTools is empty", () => {
     const manifest = cliManifest({ cliTools: [] })
     const result = validatePluginManifest(manifest)
@@ -3347,6 +3433,71 @@ describe("manifest.bots validation", () => {
 
   it("accepts a well-formed handler bot", () => {
     expect(validatePluginManifest(manifestWith([bot()])).valid).toBe(true)
+  })
+
+  it("requires a boolean concurrency-wait policy", () => {
+    expect(
+      codesFor([
+        bot({ triggers: [{ id: "run", kind: "manual", holdConcurrencyWhileWaiting: "false" }] }),
+      ])
+    ).toContain("manifest.bots.trigger.holdConcurrencyWhileWaiting.invalid")
+    expect(
+      validatePluginManifest(
+        manifestWith([
+          bot({ triggers: [{ id: "run", kind: "manual", holdConcurrencyWhileWaiting: false }] }),
+        ])
+      ).valid
+    ).toBe(true)
+  })
+
+  it("accepts structured repository rules and a manual backfill form", () => {
+    const triggers = [
+      {
+        id: "backfill",
+        kind: "manual",
+        inputSchema: { type: "object", properties: { issueNumber: { type: "integer" } } },
+        conditions: {
+          repositoryConfigKey: "repository",
+          repositories: ["owner/repo"],
+          branches: ["main"],
+          labels: ["bug"],
+          actors: ["maintainer"],
+          draft: false,
+          conclusions: ["failure"],
+        },
+      },
+    ]
+    expect(validatePluginManifest(manifestWith([bot({ triggers })])).valid).toBe(true)
+  })
+
+  it.each([
+    null,
+    [],
+    "rule",
+    { repositories: [] },
+    { branches: [""] },
+    { labels: [2] },
+    { actors: "bot" },
+    { draft: "false" },
+    { conclusions: [false] },
+    { repositoryConfigKey: "" },
+    { unknown: true },
+  ])("rejects invalid trigger conditions %p", (conditions) => {
+    expect(codesFor([bot({ triggers: [{ id: "run", kind: "manual", conditions }] })])).toContain(
+      "manifest.bots.trigger.conditions.invalid"
+    )
+  })
+
+  it.each([null, [], "form"])("rejects invalid backfill input schema %p", (inputSchema) => {
+    expect(codesFor([bot({ triggers: [{ id: "run", kind: "manual", inputSchema }] })])).toContain(
+      "manifest.bots.trigger.inputSchema.invalid"
+    )
+  })
+
+  it("rejects a manual form attached to an automatic trigger", () => {
+    expect(
+      codesFor([bot({ triggers: [{ id: "poll", kind: "poll", everyMs: 60000, inputSchema: {} }] })])
+    ).toContain("manifest.bots.trigger.inputSchema.invalid")
   })
 
   it("accepts every executor with its own target field", () => {

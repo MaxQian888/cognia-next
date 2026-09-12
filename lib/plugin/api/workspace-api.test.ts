@@ -91,9 +91,41 @@ describe("workspace consumer surface", () => {
     // what forced `release` to exist: the generator refuses a `returned-handle`
     // effect with no `disposeMethod`, and the first draft of this API had none.
     const api = createWorkspaceAPI("p")
-    for (const method of ["acquire", "walk", "read", "changedSince", "release"] as const) {
+    for (const method of [
+      "acquire",
+      "walk",
+      "read",
+      "changedSince",
+      "release",
+      "snapshot",
+      "publish",
+    ] as const) {
       expect(typeof api[method]).toBe("function")
     }
+  })
+
+  it("requires explicit API permissions before isolated acquisition or publication", () => {
+    const api = createWorkspaceAPI("unprivileged")
+    const handle = {
+      id: "h",
+      runId: "run",
+      root: "/isolated",
+      origin: "bot-run" as const,
+      ephemeral: true,
+    }
+    expect(() =>
+      api.acquire({
+        kind: "bot-run",
+        runId: "run",
+        repository: "org/repo",
+        ref: "master",
+        credentialSlot: "github",
+      })
+    ).toThrow("filesystem:write")
+    expect(() => api.snapshot(handle)).toThrow("filesystem:read")
+    expect(() =>
+      api.publish(handle, { approvalId: "a", snapshotId: "s", branch: "codex/fix", message: "fix" })
+    ).toThrow("filesystem:write")
   })
 
   it("refuses a local path when no workspace is open", async () => {

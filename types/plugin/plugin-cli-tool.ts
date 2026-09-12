@@ -66,13 +66,45 @@ export interface PluginCliToolDef {
   binary: PluginCliBinaryRef
   /** argv AFTER the program name; params resolve to discrete elements. */
   argv: PluginCliArgvToken[]
-  /** Pipe a named string param into the child's stdin. */
+  /**
+   * Pipe a named string param into the child's stdin.
+   *
+   * Secrets belong here, never in `argv`: the rendered argv is shown in the
+   * `cli:execute` consent prompt and persisted to the automation audit log —
+   * a token passed as an argument is stored in plaintext, while stdin content
+   * never is.
+   */
   stdin?: { param: string }
   /** Working directory policy (default `{ kind: "none" }`). */
   cwd?: PluginCliCwdPolicy
+  /**
+   * Filesystem access class advertised to the host's workspace-confinement
+   * layer (ADR-0028 lite). `read` tools are classified with the built-in
+   * read set — credential-shaped paths (`.ssh`, `.aws`, `id_rsa`, …) are
+   * hard-denied in confined sessions; `write` tools get the out-of-root
+   * approval escalation. Omitted means "unclassified" — the confinement
+   * gate then treats the tool as opaque, which is the historical default.
+   */
+  access?: "read" | "write"
+  /**
+   * Parameter names whose values are filesystem paths that must resolve
+   * inside the confinement base: the workspace root for `cwd` kinds
+   * `workspace`/`param`, the plugin install dir for `plugin-dir`. The
+   * executor rejects `..` segments, absolute paths outside the base, and
+   * credential-shaped segments (same deny list the built-in file tools
+   * enforce) BEFORE the permission round-trip. Requires a non-`none` cwd
+   * kind — there must be a base to confine against. Lexical check, no
+   * realpath: a symlink operand that escapes the base is not caught.
+   */
+  confinedPathParams?: string[]
   /** Static extra environment variables (allowlist map, never templated). */
   env?: Record<string, string>
-  /** Per-invocation timeout, clamped host-side to 600_000 ms. */
+  /**
+   * Per-invocation timeout, clamped host-side to 600_000 ms. Also copied
+   * onto the registered tool's `definition.timeoutMs` so the resilience
+   * budget and the sidecar IPC relay track the declared value instead of
+   * their own defaults.
+   */
   timeoutMs?: number
   /** How stdout becomes the tool result (default "text"). */
   outputParse?: PluginCliOutputParse

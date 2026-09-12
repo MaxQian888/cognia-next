@@ -123,6 +123,14 @@ export interface IntegrationResourceRef {
   parent?: { kind: string; id: string }
 }
 
+/** Run-scoped, host-resolved credential slot; never a provider identity. */
+export interface IntegrationBotBindingRef {
+  runId: string
+  slotId: string
+}
+
+export type IntegrationAccountRef = string | IntegrationBotBindingRef
+
 export interface IntegrationResourceQuery {
   accountId: string
   kind: string
@@ -378,12 +386,17 @@ export interface IntegrationActionJob {
   nextAttemptAt?: string
   output?: unknown
   error?: string
+  /** Host-stamped requester for cross-plugin Bot actions. */
+  botBinding?: IntegrationBotBindingRef & { pluginId: string; approvalId?: string }
   source: "manual" | "workflow" | "inbox" | "chat"
   createdAt: string
   updatedAt: string
 }
 
 export interface ExecuteIntegrationActionInput {
+  binding?: IntegrationBotBindingRef
+  /** Existing shared Bot approval containing the exact approved action input. */
+  approval?: { interruptId: string }
   integrationId: string
   accountId: string
   actionId: string
@@ -428,9 +441,11 @@ export interface PluginIntegrationsAPI {
     patch: Partial<Pick<IntegrationAccount, "label" | "enabled">>
   ): Promise<IntegrationAccount>
   removeAccount(accountId: string): Promise<void>
-  listSubscriptions(accountId?: string): Promise<IntegrationSubscription[]>
-  listResources(query: IntegrationResourceQuery): Promise<IntegrationResourcePage>
-  checkAccountHealth(accountId: string): Promise<IntegrationAccountStatus>
+  listSubscriptions(accountId?: IntegrationAccountRef): Promise<IntegrationSubscription[]>
+  listResources(
+    query: Omit<IntegrationResourceQuery, "accountId"> & { accountId: IntegrationAccountRef }
+  ): Promise<IntegrationResourcePage>
+  checkAccountHealth(accountId: IntegrationAccountRef): Promise<IntegrationAccountStatus>
   createSubscription(input: IntegrationSubscriptionInput): Promise<IntegrationSubscription>
   removeSubscription(subscriptionId: string): Promise<void>
   publishEvent(event: IntegrationEventEnvelope): Promise<{ inserted: boolean }>
@@ -438,7 +453,7 @@ export interface PluginIntegrationsAPI {
   getActionJob(jobId: string): Promise<IntegrationActionJob | undefined>
   cancelAction(jobId: string): Promise<IntegrationActionJob>
   authenticatedRequest<T = unknown>(
-    accountId: string,
+    accountId: IntegrationAccountRef,
     input: string,
     init?: IntegrationRequestInit
   ): Promise<{ status: number; headers: Record<string, string>; data: T }>

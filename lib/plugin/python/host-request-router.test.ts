@@ -165,4 +165,64 @@ describe("routePythonHostRequest", () => {
     expect(outcome.ok).toBe(false)
     if (!outcome.ok) expect(outcome.error).toContain("not JSON-serializable")
   })
+
+  it("drains an async-iterable chat result into text the wire can carry", async () => {
+    // `ctx.ai.chat` returns AsyncIterable<AIChatChunk>; a live generator would
+    // arrive in Python as `{}` — an empty answer that looks real.
+    async function* chat() {
+      yield { content: "Hel" }
+      yield { content: "lo" }
+      yield {
+        content: "!",
+        finishReason: "stop",
+        usage: { promptTokens: 3, completionTokens: 2, totalTokens: 5 },
+      }
+    }
+    const outcome = await routePythonHostRequest(
+      frame("ai.chat", { args: [[{ role: "user", content: "hi" }]] }),
+      { getContext: () => contextWith({ ai: { chat } }) }
+    )
+    expect(outcome).toEqual({
+      ok: true,
+      result: {
+        text: "Hello!",
+        finishReason: "stop",
+        usage: { promptTokens: 3, completionTokens: 2, totalTokens: 5 },
+      },
+    })
+  })
+
+  it("drains a bare string stream the same way", async () => {
+    async function* stream() {
+      yield "a"
+      yield "b"
+    }
+    const outcome = await routePythonHostRequest(frame("ai.chat"), {
+      getContext: () => contextWith({ ai: { chat: stream } }),
+    })
+    expect(outcome).toEqual({ ok: true, result: { text: "ab" } })
+  })
+
+  it("keeps non-text chunks verbatim instead of dropping them", async () => {
+    async function* stream() {
+      yield { content: "hi" }
+      yield { kind: "tool-call", id: "t1" }
+    }
+    const outcome = await routePythonHostRequest(frame("ai.chat"), {
+      getContext: () => contextWith({ ai: { chat: stream } }),
+    })
+    expect(outcome).toEqual({
+      ok: true,
+      result: { text: "hi", chunks: [{ kind: "tool-call", id: "t1" }] },
+    })
+  })
+
+  it("still ships an embed matrix untouched — plain values are not streams", async () => {
+    const embed = jest.fn().mockResolvedValue([[0.1, 0.2], [0.3]])
+    const outcome = await routePythonHostRequest(frame("ai.embed", { args: [["a", "b"]] }), {
+      getContext: () => contextWith({ ai: { embed } }),
+    })
+    expect(outcome).toEqual({ ok: true, result: [[0.1, 0.2], [0.3]] })
+    expect(embed).toHaveBeenCalledWith(["a", "b"])
+  })
 })

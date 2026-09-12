@@ -150,3 +150,17 @@ describe("runSegments", () => {
     expect(done).toBe(true)
   })
 })
+
+it("stops the remaining batch and discards outgoing prose on cancellation", async () => {
+  const runAction = jest.fn(async () => false)
+  const command = cmd({ name: "research", handler: () => {} })
+  const result = await runSegments(
+    parseSegments(
+      "do not send this\n/research first\n/research second",
+      (name) => name === "research"
+    ),
+    { commandMap: new Map([["research", command]]), runAction, applyTemplate }
+  )
+  expect(runAction).toHaveBeenCalledTimes(1)
+  expect(result).toMatchObject({ cancelled: true, outgoingText: "", overrides: null, errors: [] })
+})

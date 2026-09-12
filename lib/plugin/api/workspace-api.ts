@@ -33,6 +33,17 @@ import type { PluginWorkspaceBackendRegistration } from "@/types/plugin/plugin-w
 import type { WorkspaceWalkOptions, WorkspaceWalkResult } from "@/lib/files/workspace-fs"
 import { allRootPaths } from "@/lib/workspace/roots"
 import { getActiveWorkspaceRoot } from "./workspace-root"
+import { pluginHasApiPermission } from "./permission-api"
+import { getPermissionGuard } from "../security/permission-guard"
+import type { PluginPermission, PluginAPIPermission } from "@/types/plugin/plugin"
+import {
+  acquireBotWorkspace,
+  assertOwnedBotWorkspace,
+  captureBotWorkspace,
+  publishBotWorkspace,
+  type BotWorkspaceSnapshot,
+  type BotWorkspacePublishInput,
+} from "../workspace/bot-run"
 import {
   acquireWorkspace,
   changedSince,
@@ -86,6 +97,11 @@ export interface PluginWorkspaceAPI {
    * is built to prevent.
    */
   acquire(spec: WorkspaceAcquireSpec): Promise<PluginWorkspaceHandle>
+  snapshot(handle: PluginWorkspaceHandle): Promise<BotWorkspaceSnapshot>
+  publish(
+    handle: PluginWorkspaceHandle,
+    input: BotWorkspacePublishInput
+  ): Promise<{ branch: string; headSha: string }>
   /**
    * Enumerate the checkout's files, honouring `.gitignore`.
    *
@@ -111,6 +127,14 @@ export interface PluginWorkspaceAPI {
 
 export function createWorkspaceAPI(pluginId: string): PluginWorkspaceAPI {
   const logger = createPluginSystemLogger(pluginId)
+  const requirePermissions = (...permissions: PluginPermission[]) => {
+    for (const permission of permissions)
+      if (
+        !pluginHasApiPermission(pluginId, permission as PluginAPIPermission) &&
+        !getPermissionGuard().check(pluginId, permission, "workspace-api")
+      )
+        throw new Error(`workspace API requires ${permission}`)
+  }
   return {
     getActiveRoot: getActiveWorkspaceRoot,
     registerBackend({ id, label, description, backend }) {
@@ -150,18 +174,37 @@ export function createWorkspaceAPI(pluginId: string): PluginWorkspaceAPI {
     },
 
     acquire(spec) {
+      if (spec.kind === "bot-run") {
+        requirePermissions("filesystem:write", "git:write", "integrations:read")
+        return acquireBotWorkspace(pluginId, spec, defaultAcquireDeps(pluginId, openWorkspaceRoots))
+      }
       return acquireWorkspace(spec, defaultAcquireDeps(pluginId, openWorkspaceRoots))
     },
-    walk(handle, options) {
+    snapshot: (handle) => {
+      requirePermissions("filesystem:read", "git:read")
+      return captureBotWorkspace(pluginId, handle)
+    },
+    publish: (handle, input) => {
+      requirePermissions("filesystem:write", "git:write", "integrations:execute")
+      return publishBotWorkspace(pluginId, handle, input)
+    },
+    async walk(handle, options) {
+      if (handle.origin === "bot-run") await assertOwnedBotWorkspace(pluginId, handle)
       return walkHandle(handle, options)
     },
-    read(handle, relPath, options) {
+    async read(handle, relPath, options) {
+      if (handle.origin === "bot-run") await assertOwnedBotWorkspace(pluginId, handle)
       return readHandleFile(handle, relPath, options)
     },
-    changedSince(handle, ref) {
+    async changedSince(handle, ref) {
+      if (handle.origin === "bot-run") await assertOwnedBotWorkspace(pluginId, handle)
       return changedSince(handle, ref)
     },
-    release(handle) {
+    async release(handle) {
+      if (handle.origin === "bot-run") {
+        await assertOwnedBotWorkspace(pluginId, handle)
+        throw new Error("Bot workspaces are retained with their run for approval and recovery")
+      }
       return releaseWorkspace(handle, defaultAcquireDeps(pluginId, openWorkspaceRoots))
     },
   }

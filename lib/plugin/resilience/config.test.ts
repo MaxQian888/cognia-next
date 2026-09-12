@@ -3,8 +3,10 @@ import {
   DEFAULT_PLUGIN_RESILIENCE,
   isRetryableLoadError,
   LOAD_RESILIENCE,
+  MAX_TOOL_TIMEOUT_MS,
   resolveResilienceConfig,
   SIDECAR_IPC_TIMEOUT_MS,
+  TOOL_TIMEOUT_SLACK_MS,
 } from "@/lib/plugin/resilience/config"
 
 describe("resolveResilienceConfig", () => {
@@ -58,6 +60,31 @@ describe("resolveResilienceConfig", () => {
     expect(resolveResilienceConfig({ resilience: { breakerScope: "plugin" } }).breakerScope).toBe(
       "plugin"
     )
+  })
+
+  it("raises the timeout floor to a tool's declared budget plus slack", () => {
+    // A cliTool's timeoutMs is the child-process kill; the resilience timer
+    // must outlive it or the tool's own timeout error can never win.
+    const cfg = resolveResilienceConfig({}, { timeoutMs: 60_000 })
+    expect(cfg.timeoutMs).toBe(60_000 + 15_000)
+    // A manifest resilience.timeoutMs stays the explicit backstop override.
+    expect(
+      resolveResilienceConfig({ resilience: { timeoutMs: 90_000 } }, { timeoutMs: 60_000 })
+        .timeoutMs
+    ).toBe(90_000)
+    // Non-positive / absent tool budgets fall back to the default.
+    expect(resolveResilienceConfig({}, { timeoutMs: 0 }).timeoutMs).toBe(
+      DEFAULT_PLUGIN_RESILIENCE.timeoutMs
+    )
+    expect(resolveResilienceConfig({}, {}).timeoutMs).toBe(DEFAULT_PLUGIN_RESILIENCE.timeoutMs)
+  })
+
+  it("clamps an unvalidated imperative timeoutMs at the 600s child ceiling", () => {
+    // cliTools manifests reject timeoutMs > 600_000 at validation; an
+    // imperative registerTool def skips that path, so the floor clamps
+    // instead of letting a huge value inflate the resilience/relay budgets.
+    const cfg = resolveResilienceConfig({}, { timeoutMs: 3_600_000 })
+    expect(cfg.timeoutMs).toBe(MAX_TOOL_TIMEOUT_MS + TOOL_TIMEOUT_SLACK_MS)
   })
 })
 

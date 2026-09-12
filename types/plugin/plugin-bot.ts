@@ -52,8 +52,20 @@ export type PluginBotEventSource =
   /** Another Bot run. Ignored unless the installation opts in explicitly. */
   | "bot"
 
+export interface PluginBotTriggerConditions {
+  repositories?: string[]
+  /** Read the repository from an installation configuration field. */
+  repositoryConfigKey?: string
+  branches?: string[]
+  labels?: string[]
+  actors?: string[]
+  draft?: boolean
+  conclusions?: string[]
+}
+
 interface PluginBotTriggerBase {
   id: string
+  conditions?: PluginBotTriggerConditions
   /** Author-facing label. User-facing text is resolved from `labelKey`. */
   label?: string
   labelKey?: string
@@ -68,6 +80,8 @@ interface PluginBotTriggerBase {
    * which is what stops two pushes racing on one branch.
    */
   concurrencyKey?: string
+  /** Defaults to true. Isolated tasks may release their execution slot while parked. */
+  holdConcurrencyWhileWaiting?: boolean
   /** Hold a delivery this long, so a burst of edits becomes one run. */
   debounceMs?: number
   /**
@@ -150,6 +164,8 @@ export interface PluginBotDerivedStateTrigger extends PluginBotTriggerBase {
 /** A person pressed Run. Always available, declared so it can be labelled. */
 export interface PluginBotManualTrigger extends PluginBotTriggerBase {
   kind: "manual"
+  /** Optional form for a person starting this trigger. */
+  inputSchema?: Record<string, unknown>
 }
 
 export type PluginBotTriggerDef =

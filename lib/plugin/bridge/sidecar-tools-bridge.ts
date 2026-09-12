@@ -22,6 +22,7 @@
  * the user sees. The agent and the user share one shell.
  */
 import { usePluginStore } from "@/stores/plugin-runtime"
+import { resolveResilienceConfig } from "@/lib/plugin/resilience/config"
 
 import { buildAskUserManifestEntry } from "@/lib/claude/ask-user-tool"
 import {
@@ -36,11 +37,33 @@ import {
   TERMINAL_DOCK_WRITE_SCHEMA,
 } from "./terminal-dock-schemas"
 
+/**
+ * Slack added to a tool's resolved resilience budget when it becomes the
+ * sidecar IPC-relay ceiling. The relay exists to catch a wedged renderer —
+ * it must fire AFTER every legitimate completion path (resilience timeout
+ * included) so the tool's own error always wins the race.
+ */
+const PLUGIN_TOOL_RELAY_SLACK_MS = 15_000
+
 export interface PluginToolManifestEntry {
   name: string
   description: string
   jsonSchema: object
   pluginId: string
+  /**
+   * Filesystem access class for workspace confinement. `"read"` classifies
+   * the call with the built-in read set (credential paths hard-denied);
+   * `"write"` adds the out-of-root approval escalation. Omitted tools stay
+   * opaque to the confinement gate — the historical default.
+   */
+  access?: "read" | "write"
+  /**
+   * Parameter names whose values are filesystem paths — added to the
+   * sidecar's built-in path-key set so a tool with `access` gets them
+   * classified even when the name isn't a conventional `path`/`file`/`dir`.
+   * For cliTools entries this mirrors `confinedPathParams`.
+   */
+  pathParams?: string[]
   /**
    * Override the sidecar's round-trip timeout (ms) for this tool. Omit to use
    * the 120s default. `0` disables the timeout entirely — for tools that block
@@ -153,11 +176,29 @@ export function buildPluginToolsManifest(
     if (plugin.status !== "enabled") continue
     if (!plugin.tools?.length) continue
     for (const tool of plugin.tools) {
+      // A tool with a declared timeoutMs gets a relay ceiling sized to the
+      // resolved resilience budget (attempts + slack) instead of the 120s
+      // sidecar default — a 60s cliTool would otherwise be severed by the
+      // 30s resilience default before its own timeout could even matter,
+      // and a >120s declared budget would die at the relay either way.
+      const resilience = resolveResilienceConfig(plugin.manifest, tool.definition)
+      const declaredTimeout = tool.definition.timeoutMs
+      const timeoutMs =
+        typeof declaredTimeout === "number" &&
+        Number.isFinite(declaredTimeout) &&
+        declaredTimeout > 0
+          ? resilience.timeoutMs * (resilience.maxRetries + 1) + PLUGIN_TOOL_RELAY_SLACK_MS
+          : undefined
       result.push({
         name: tool.name,
         description: tool.definition.description,
         jsonSchema: tool.definition.parametersSchema ?? {},
         pluginId: plugin.manifest.id,
+        // Undefined fields stay off the wire — `Object.keys` parity with the
+        // historical shape matters (the IPC surface is tested on key lists).
+        ...(tool.definition.access ? { access: tool.definition.access } : {}),
+        ...(tool.definition.pathParams?.length ? { pathParams: tool.definition.pathParams } : {}),
+        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       })
     }
   }

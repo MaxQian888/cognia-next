@@ -130,10 +130,50 @@ export async function routePythonHostRequest(
       holder,
       unpackHostCallArgs(frame.params)
     )
-    return { ok: true, result: toWireValue(result) }
+    return { ok: true, result: toWireValue(await collapseAsyncIterable(result)) }
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) }
   }
+}
+
+/**
+ * Drain a method that returns an async iterable into one JSON value.
+ *
+ * The boundary cannot ship a live generator — `ctx.ai.chat` is the case in
+ * point: its `AsyncIterable<AIChatChunk>` would cross the wire as `{}`, a
+ * reply that reads like an empty answer. Draining turns the stream into the
+ * value a Python caller can actually use: concatenated `text`, plus the
+ * last-seen `finishReason` and `usage` when the chunks carry them. Chunks
+ * that are neither strings nor content-bearing objects are kept verbatim in
+ * `chunks` so nothing is silently dropped.
+ */
+async function collapseAsyncIterable(result: unknown): Promise<unknown> {
+  if (result === null || typeof result !== "object" || !(Symbol.asyncIterator in result)) {
+    return result
+  }
+  const parts: string[] = []
+  const rest: unknown[] = []
+  let finishReason: unknown
+  let usage: unknown
+  for await (const chunk of result as AsyncIterable<unknown>) {
+    if (typeof chunk === "string") {
+      parts.push(chunk)
+      continue
+    }
+    if (chunk && typeof chunk === "object" && "content" in chunk) {
+      const record = chunk as Record<string, unknown>
+      if (typeof record.content === "string") parts.push(record.content)
+      if (record.finishReason !== undefined) finishReason = record.finishReason
+      if (record.usage !== undefined) usage = record.usage
+      continue
+    }
+    rest.push(chunk)
+  }
+  const collapsed: Record<string, unknown> = { text: parts.join("") }
+  if (finishReason !== undefined) collapsed.finishReason = finishReason
+  if (usage !== undefined) collapsed.usage = usage
+  if (rest.length > 0) collapsed.chunks = rest
+  return collapsed
 }
 
 /**

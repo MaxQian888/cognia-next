@@ -98,7 +98,8 @@ export type {
 } from "@/types/plugin/plugin"
 export type * from "@/types/plugin/plugin-ide"
 
-export { definePlugin } from "../define/define-plugin"
+export { definePlugin, definePluginManifest } from "../define/define-plugin"
+export type { PluginManifestJson } from "../define/define-plugin"
 
 export type { PluginAgentTeamTemplateDef } from "@/types/plugin/plugin-agent-team-template"
 export type { PluginAiProviderDef } from "@/types/plugin/plugin-ai-provider"

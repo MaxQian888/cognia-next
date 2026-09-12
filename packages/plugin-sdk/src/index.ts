@@ -147,7 +147,8 @@ export {
 } from "./errors/adapter-error"
 export type { PluginAdapterErrorCode, PluginAdapterErrorPayload } from "./errors/adapter-error"
 
-export { definePlugin } from "./define/define-plugin"
+export { definePlugin, definePluginManifest } from "./define/define-plugin"
+export type { PluginManifestJson } from "./define/define-plugin"
 export { defineMcpServerPreset } from "./define/define-mcp-server-preset"
 export { defineNativeAnthropicTool } from "./define/define-native-anthropic-tool"
 export { defineSkill } from "./define/define-skill"
@@ -198,6 +199,7 @@ export type {
   PluginBotDef,
   PluginBotExecutor,
   PluginBotTriggerDef,
+  PluginBotTriggerConditions,
   PluginBotTriggerKind,
   PluginBotEventSource,
   PluginBotCredentialSlot,
@@ -210,6 +212,12 @@ export type {
   PluginHandlerBotDef,
 } from "@/types/plugin/plugin-bot"
 export { PLUGIN_BOT_EXECUTORS, PLUGIN_BOT_TRIGGER_KINDS } from "@/types/plugin/plugin-bot"
+export type {
+  PluginBotsAPI,
+  BotEnqueueInput,
+  BotInstallationSnapshot,
+  BotMonitorState,
+} from "@/types/bot/api"
 export type {
   BotEventEnvelopeV1,
   BotEventActor,
@@ -433,7 +441,14 @@ export type {
  * plugin can preview or dry-run the exact command the executor would spawn.
  * The executor itself (`executeCliTool`) stays on `./api/cli-tool`.
  */
-export { buildArgv, CliTemplateError, parseOutput, resolveCwd } from "./api/cli-tool"
+export {
+  assertConfinedPathParams,
+  buildArgv,
+  CliTemplateError,
+  isProtectedCliPath,
+  parseOutput,
+  resolveCwd,
+} from "./api/cli-tool"
 export type {
   CwdContext,
   PluginCliArgvToken,
@@ -515,3 +530,14 @@ export { combineAbortSignals } from "./runtime/abort"
  * the revoke, which is the part hand-rolled copies forget.
  */
 export { downloadBlob } from "./runtime/download"
+
+export type {
+  PluginExternalAgentOptions,
+  PluginExternalAgentResult,
+} from "@/lib/plugin/api/external-agent-api"
+export type {
+  BotRunWorkspaceSpec,
+  BotWorkspaceFile,
+  BotWorkspaceSnapshot,
+  BotWorkspacePublishInput,
+} from "@/lib/plugin/workspace/bot-run"

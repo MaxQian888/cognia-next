@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Screenshot plugin: `/screenshot` now drops the capture into the conversation as a rendered `screenshot-result` card instead of only a toast, answers with a real localized message, targets the session it was typed in, and accepts a `native` argument for prompt-free desktop capture. Clipboard copy goes through the permissioned `ctx.clipboard.writeImage` host bridge (native clipboard on desktop, `navigator.clipboard` stays the browser fallback); the agent tool only copies when a call passes `copyToClipboard: true`, so model-initiated captures no longer overwrite the user's clipboard. Both tools gain a `mode: "native"` option (plus `monitorId` / `region` / `format`) that captures through the host automation policy without the display picker, a new `list_screenshot_monitors` tool lets the model discover valid monitor ids, and `extract_screenshot_ocr` renders its recognized text in a chat card instead of a JSON blob and can return the captured frame alongside the text via `includeImage`.

@@ -48,6 +48,7 @@ def test_namespaces_are_exactly_the_contracts_python_entries():
     assert expected >= {
         "a2ui",
         "agent",
+        "ai",
         "chat",
         "contextPanels",
         "fs",
@@ -145,10 +146,11 @@ def test_unknown_namespace_and_method_fail_fast_with_alternatives():
 
 
 def test_namespaces_the_contract_withholds_are_not_reachable():
-    # `ai` and `db` exist on the TS context but have no python-routable surface.
-    # The catalog says so; this proves the SDK honours it rather than exposing
-    # them optimistically.
-    for withheld in ("ai", "db"):
+    # `db` exists on the TS context but has no python-routable surface — `ai`
+    # used to sit beside it until the catalog opened it, which is why this
+    # still names a namespace at all: the SDK must honour the withheld list
+    # rather than exposing namespaces optimistically.
+    for withheld in ("db",):
         assert withheld not in PYTHON_HOST_NAMESPACES
         with pytest.raises(AttributeError):
             getattr(cognia.ctx, withheld)
@@ -163,6 +165,25 @@ def test_pack_params_mirrors_the_host_packing():
     assert pack_params(({"prompt": "hi"},), {}) == {"prompt": "hi"}
     assert pack_params((), {}) == {}
     assert pack_params(("a",), {"b": 1}) == {"args": ["a"], "b": 1}
+
+
+def test_ai_embed_reaches_the_host_now_the_namespace_is_open(fresh_runtime):
+    # The catalog edit opened ctx.ai wholesale; `embed` is the method that
+    # motivated it, and the one with a plain JSON-shaped return.
+    seen = _record_calls(fresh_runtime, result=[[0.1, 0.2]])
+    assert asyncio.run(
+        cognia.ctx.ai.embed(["hello"], {"model": "m1"})
+    ) == [[0.1, 0.2]]
+    assert seen == [("ai.embed", {"args": [["hello"], {"model": "m1"}]})]
+
+
+def test_ai_registerProvider_is_named_but_refused_as_a_callback(fresh_runtime):
+    # Opening the namespace does not open a method whose return is a disposer:
+    # the SDK knows the name and says why the call cannot cross the wire.
+    assert "registerProvider" in CALLBACK_HOST_METHODS["ai"]
+    with pytest.raises(AttributeError) as excinfo:
+        cognia.ctx.ai.registerProvider
+    assert "host-side callback" in str(excinfo.value)
 
 
 def test_keyword_and_positional_calls_reach_the_handler(fresh_runtime):

@@ -3874,6 +3874,10 @@ describe("PluginManager", () => {
             parameters: { type: "object", properties: { pattern: { type: "string" } } },
             binary: { kind: "requires", name: "rg" },
             argv: [{ param: "pattern" }],
+            cwd: { kind: "workspace" },
+            confinedPathParams: ["path"],
+            timeoutMs: 60_000,
+            access: "read",
           },
         ],
       } as Plugin["manifest"],
@@ -3906,7 +3910,16 @@ describe("PluginManager", () => {
         expect.objectContaining({
           name: "ripgrep-tools:ripgrep_search",
           pluginId: "ripgrep-tools",
-          definition: expect.objectContaining({ name: "ripgrep_search" }),
+          // The declared budget + access class must reach the registered
+          // definition — resilience config and the sidecar manifest read them.
+          definition: expect.objectContaining({
+            name: "ripgrep_search",
+            timeoutMs: 60_000,
+            access: "read",
+            // confinedPathParams mirrors into pathParams so the sidecar
+            // confinement gate knows which args are paths.
+            pathParams: ["path"],
+          }),
         })
       )
 
@@ -3940,7 +3953,7 @@ describe("PluginManager", () => {
         })),
         invokeExec,
         appendAudit: jest.fn(async () => undefined),
-        getWorkspaceRoot: () => undefined,
+        getWorkspaceRoot: () => "C:/work/repo",
         now: () => 1,
       })
       try {
@@ -4215,13 +4228,19 @@ describe("PluginManager", () => {
         .find((def) => def.id === "cmd-plugin.cmd-plugin.run")
       expect(registration).toBeDefined()
 
+      const controller = new AbortController()
+      const reportProgress = jest.fn()
       const result = await registration!.handler("deep dive", {
         sessionId: "s-1",
         characterId: "c-1",
+        signal: controller.signal,
+        reportProgress,
       })
       expect(onCommand).toHaveBeenCalledWith("cmd-plugin.run", ["deep", "dive"], {
         sessionId: "s-1",
         characterId: "c-1",
+        signal: controller.signal,
+        reportProgress,
       })
       expect(result).toEqual({
         message: "## Findings\n\n1. [source](https://x)",

@@ -2,6 +2,8 @@ export { defineIntegration } from "../define/define-integration"
 export type {
   ExecuteIntegrationActionInput,
   IntegrationAccount,
+  IntegrationAccountRef,
+  IntegrationBotBindingRef,
   IntegrationAccountHealth,
   IntegrationAccountStatus,
   IntegrationAccountStatusProvider,

@@ -2,22 +2,27 @@
  * Execution pipeline for declarative CLI tools (`manifest.cliTools`).
  *
  * Security gates, in order:
- *   ① `cli:execute` permission via the guard + consent broker (defense in
+ *   ① injection-proof argv substitution (`buildArgv`) — params land as
+ *      discrete argv elements, never through a shell — plus cwd policy
+ *      resolution (workspace-bounded for `param` cwds), the
+ *      `confinedPathParams` containment check, and stdin validation. All
+ *      pure validation, run BEFORE consent so a malformed call fails fast
+ *      and the prompt can quote the exact rendered command.
+ *   ② `cli:execute` permission via the guard + consent broker (defense in
  *      depth — `invokePluginTool` gates the plugin's declared permission
  *      set too, but this executor must hold on every path it's reachable
- *      from)
- *   ② binary resolution + trust: `requires` binaries resolve through
+ *      from). The reason string carries the rendered `program argv` so the
+ *      user approves a command, not a tool name.
+ *   ③ binary resolution + trust: `requires` binaries resolve through
  *      `detect_binary` to an absolute path with a minVersion gate;
  *      `plugin-dir` binaries pass the `approvedBinaries` policy (no
  *      hash-matching user approval → consent prompt, which is also where
- *      the user can opt into a durable, hash-pinned approval)
- *   ③ injection-proof argv substitution (`buildArgv`) — params land as
- *      discrete argv elements, never through a shell
- *   ④ cwd policy resolution (workspace-bounded for `param` cwds)
- *   ⑤ static manifest env only — params can never set env vars
- *   ⑥ `plugin_cli_exec` (no shell, kill_on_drop, output caps)
- *   ⑦ exit-code policy + output parsing
- *   ⑧ an `automationAuditLog` row per invocation
+ *      the user can opt into a durable, hash-pinned approval). Probing the
+ *      filesystem stays post-consent.
+ *   ④ static manifest env only — params can never set env vars
+ *   ⑤ `plugin_cli_exec` (no shell, kill_on_drop, output caps)
+ *   ⑥ exit-code policy + output parsing
+ *   ⑦ an `automationAuditLog` row per invocation
  *
  * Deps are injectable (mirroring `invoke-plugin-tool.ts`) so tests run
  * without Tauri/Dexie.
@@ -29,7 +34,13 @@ import type { BinaryDetectionResult } from "@/lib/cli-bridge/detect-cli"
 import type { BinaryConsentOutcome } from "@/lib/plugin/security/binary-consent"
 import { toBinaryConsentOutcome } from "@/lib/plugin/security/binary-consent"
 import type { CliBinaryEvaluation } from "./cli-binary-policy"
-import { buildArgv, parseOutput, resolveCwd, CliTemplateError } from "./template"
+import {
+  assertConfinedPathParams,
+  buildArgv,
+  parseOutput,
+  resolveCwd,
+  CliTemplateError,
+} from "./template"
 import { getActiveWorkspaceRoot } from "@/lib/plugin/api/workspace-root"
 
 const CLI_EXECUTE: PluginPermission = "cli:execute"
@@ -224,6 +235,37 @@ function makeAuditId(now: number): string {
   return `cli_${now.toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 }
 
+/**
+ * The base `confinedPathParams` values resolve against: the plugin dir for
+ * `cwd: { kind: "plugin-dir" }`, the workspace root otherwise. Undefined when
+ * neither is available — `assertConfinedPathParams` fails closed on it.
+ */
+function confinementBase(
+  def: PluginCliToolDef,
+  ctx: ExecuteCliToolContext,
+  deps: CliToolDeps
+): string | undefined {
+  return def.cwd?.kind === "plugin-dir" ? ctx.pluginPath : deps.getWorkspaceRoot()
+}
+
+/**
+ * The command line the consent prompt shows: declared program (the
+ * `requires` name or plugin-relative path — the form the user recognises,
+ * not the post-detection absolute path) plus the rendered argv and cwd.
+ * Whitespace/quote-bearing elements are JSON-quoted so the string stays
+ * unambiguous; the whole reason is capped at 500 chars.
+ */
+function describeCliInvocation(
+  def: PluginCliToolDef,
+  argv: string[],
+  cwd: string | undefined
+): string {
+  const program = def.binary.kind === "requires" ? def.binary.name : def.binary.relPath
+  const rendered = argv.map((arg) => (/[\s"']/.test(arg) ? JSON.stringify(arg) : arg)).join(" ")
+  const suffix = cwd ? ` (cwd: ${cwd})` : ""
+  return `${program} ${rendered}${suffix}`.slice(0, 500)
+}
+
 /** Execute one declarative CLI tool invocation. */
 export async function executeCliTool(
   pluginId: string,
@@ -233,31 +275,29 @@ export async function executeCliTool(
 ): Promise<CliToolExecutionResult> {
   const deps = depsOverride ?? (await defaultDeps())
 
-  // ① permission gate (silent tier passes through; confirm prompts; forbid denies)
-  const allowed = await deps.checkPermission(pluginId, `Run CLI tool ${def.name}`)
-  if (!allowed) {
-    throw new CliToolExecutionError(
-      "permission-denied",
-      `cli:execute denied for plugin ${pluginId}`
-    )
-  }
-
   if (!args || typeof args !== "object" || Array.isArray(args)) {
     throw new CliToolExecutionError("template", "tool arguments must be an object")
   }
 
-  // ② binary resolution + trust
-  const program = await resolveBinary(deps, pluginId, def, ctx)
-
-  // ③④⑤ template substitution + cwd + static env
+  // ① template substitution + cwd + confinement + stdin — all pure
+  // validation, ahead of any prompting or filesystem probing.
   let argv: string[]
   let cwd: string | undefined
+  let stdinValue: string | undefined
   try {
     argv = buildArgv(def.argv, args)
     cwd = resolveCwd(def.cwd, args, {
       pluginPath: ctx.pluginPath,
       workspaceRoot: deps.getWorkspaceRoot(),
     })
+    assertConfinedPathParams(args, def.confinedPathParams, confinementBase(def, ctx, deps))
+    if (def.stdin) {
+      const value = args[def.stdin.param]
+      if (typeof value !== "string") {
+        throw new CliTemplateError(`stdin param "${def.stdin.param}" must be a string`)
+      }
+      stdinValue = value
+    }
   } catch (error) {
     if (error instanceof CliTemplateError) {
       throw new CliToolExecutionError("template", error.message)
@@ -265,19 +305,23 @@ export async function executeCliTool(
     throw error
   }
 
-  let stdinValue: string | undefined
-  if (def.stdin) {
-    const value = args[def.stdin.param]
-    if (typeof value !== "string") {
-      throw new CliToolExecutionError(
-        "template",
-        `stdin param "${def.stdin.param}" must be a string`
-      )
-    }
-    stdinValue = value
+  // ② permission gate (silent tier passes through; confirm prompts; forbid
+  // denies). The prompt quotes the exact command line.
+  const allowed = await deps.checkPermission(
+    pluginId,
+    `Run CLI tool ${def.name}: ${describeCliInvocation(def, argv, cwd)}`
+  )
+  if (!allowed) {
+    throw new CliToolExecutionError(
+      "permission-denied",
+      `cli:execute denied for plugin ${pluginId}`
+    )
   }
 
-  // ⑥ spawn
+  // ③ binary resolution + trust (filesystem probing stays post-consent)
+  const program = await resolveBinary(deps, pluginId, def, ctx)
+
+  // ⑤ spawn
   const started = deps.now()
   let wire: CliExecWireResult
   try {
@@ -297,10 +341,10 @@ export async function executeCliTool(
     throw new CliToolExecutionError("execution-failed", String(error))
   }
 
-  // ⑧ audit (best-effort)
+  // ⑦ audit (best-effort)
   await audit(deps, pluginId, program, argv, started, null)
 
-  // ⑦ exit-code policy + parsing
+  // ⑥ exit-code policy + parsing
   if (wire.timedOut) {
     throw new CliToolExecutionError(
       "timeout",

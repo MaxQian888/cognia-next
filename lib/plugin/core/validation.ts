@@ -1978,6 +1978,16 @@ export function validatePluginManifest(
                 "manifest.requires.binaries.name.missing",
                 `${field} requires a non-empty "name" string`
               )
+            } else if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(bin.name)) {
+              // Binary names feed PATH resolution AND the
+              // `COGNIA_<NAME>_PATH` env override — a name with `/`, `..`,
+              // whitespace or control characters is never a real executable
+              // name and can only alias or confuse the lookup.
+              pushError(
+                `${field}.name`,
+                "manifest.requires.binaries.name.invalid",
+                `${field}.name must look like an executable name (letters, digits, ".", "_", "-")`
+              )
             }
             if (bin.minVersion !== undefined) {
               if (typeof bin.minVersion !== "string" || !VERSION_PATTERN.test(bin.minVersion)) {
@@ -3552,6 +3562,59 @@ function validateBots(m: PluginManifest, pushError: PushDiagnostic): void {
         return
       }
 
+      if (
+        trigger.holdConcurrencyWhileWaiting !== undefined &&
+        typeof trigger.holdConcurrencyWhileWaiting !== "boolean"
+      ) {
+        pushError(
+          `${triggerField}.holdConcurrencyWhileWaiting`,
+          "manifest.bots.trigger.holdConcurrencyWhileWaiting.invalid",
+          `${triggerField}.holdConcurrencyWhileWaiting must be a boolean`
+        )
+      }
+      if (
+        trigger.inputSchema !== undefined &&
+        (kind !== "manual" ||
+          !trigger.inputSchema ||
+          typeof trigger.inputSchema !== "object" ||
+          Array.isArray(trigger.inputSchema))
+      ) {
+        pushError(
+          `${triggerField}.inputSchema`,
+          "manifest.bots.trigger.inputSchema.invalid",
+          `${triggerField}.inputSchema must be an object on a manual trigger`
+        )
+      }
+      if (trigger.conditions !== undefined) {
+        const conditions = trigger.conditions
+        if (!conditions || typeof conditions !== "object" || Array.isArray(conditions)) {
+          pushError(
+            `${triggerField}.conditions`,
+            "manifest.bots.trigger.conditions.invalid",
+            `${triggerField}.conditions must be an object`
+          )
+        } else {
+          const lists = new Set(["repositories", "branches", "labels", "actors", "conclusions"])
+          for (const [key, value] of Object.entries(conditions)) {
+            const valid = lists.has(key)
+              ? Array.isArray(value) &&
+                value.length > 0 &&
+                value.every((item) => typeof item === "string" && item.trim().length > 0)
+              : key === "draft"
+                ? typeof value === "boolean"
+                : key === "repositoryConfigKey"
+                  ? typeof value === "string" && value.trim().length > 0
+                  : false
+            if (!valid)
+              pushError(
+                `${triggerField}.conditions.${key}`,
+                "manifest.bots.trigger.conditions.invalid",
+                `${triggerField}.conditions.${key} is invalid`
+              )
+          }
+        }
+      }
+
       if (kind === "event") {
         if (
           typeof trigger.source !== "string" ||
@@ -3796,16 +3859,56 @@ function validateCliTools(m: PluginManifest, pushError: PushDiagnostic): void {
       }
     }
 
+    if (tool.access !== undefined && tool.access !== "read" && tool.access !== "write") {
+      pushError(
+        `${field}.access`,
+        "manifest.cliTools.access.invalid",
+        `${field}.access must be "read" or "write"`
+      )
+    }
+
+    if (tool.confinedPathParams !== undefined) {
+      const list = tool.confinedPathParams
+      if (!Array.isArray(list) || list.some((name) => typeof name !== "string")) {
+        pushError(
+          `${field}.confinedPathParams`,
+          "manifest.cliTools.confinedPathParams.invalid",
+          `${field}.confinedPathParams must be an array of declared parameter names`
+        )
+      } else {
+        for (const name of list as string[]) {
+          if (!hasParam(name)) {
+            pushError(
+              `${field}.confinedPathParams`,
+              "manifest.cliTools.confinedPathParams.param.undeclared",
+              `${field}.confinedPathParams references undeclared parameter "${name}"`
+            )
+          }
+        }
+        const cwdKind = (tool.cwd as { kind?: unknown } | undefined)?.kind
+        if (cwdKind !== "workspace" && cwdKind !== "param" && cwdKind !== "plugin-dir") {
+          pushError(
+            `${field}.confinedPathParams`,
+            "manifest.cliTools.confinedPathParams.noBase",
+            `${field}.confinedPathParams needs a cwd policy (workspace, param, or plugin-dir) to confine against`
+          )
+        }
+      }
+    }
+
     if (
       tool.timeoutMs !== undefined &&
       (typeof tool.timeoutMs !== "number" ||
         !Number.isFinite(tool.timeoutMs) ||
-        tool.timeoutMs <= 0)
+        tool.timeoutMs <= 0 ||
+        // `plugin_cli_exec` kills the child at 600s — a larger declared value
+        // is dead config that only inflates the resilience/relay budgets.
+        tool.timeoutMs > 600_000)
     ) {
       pushError(
         `${field}.timeoutMs`,
         "manifest.cliTools.timeoutMs.invalid",
-        `${field}.timeoutMs must be a positive number of milliseconds`
+        `${field}.timeoutMs must be a positive number of milliseconds no larger than 600000`
       )
     }
 

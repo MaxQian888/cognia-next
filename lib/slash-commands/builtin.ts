@@ -50,6 +50,11 @@ export type SettingsTab = SettingsSectionId
 
 /** What the dispatcher hands an Action command's handler. */
 export interface SlashContext {
+  /** Cooperative cancellation supplied by the invoking host, when supported. */
+  signal?: AbortSignal
+  /** Report progress from 0 to 1 with an optional status message. */
+  reportProgress?: (progress: number, message?: string) => void
+
   /** Argument substring after the command name, trimmed. */
   args: string
   /** Currently active session id, if any. */

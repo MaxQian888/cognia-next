@@ -3,6 +3,7 @@
 import "fake-indexeddb/auto"
 
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
+import * as botBinding from "@/lib/plugin/api/bot-integration-binding"
 import { createIntegrationAccount } from "@/lib/db/integrations"
 import { registerAuthenticationProvider } from "@/lib/plugin/auth/auth-provider-registry"
 import { __resetIntegrationRegistryForTesting, registerIntegrationDefinitions } from "./registry"
@@ -17,8 +18,14 @@ import {
   setIntegrationAuthenticatedRequestExecutorForTesting,
 } from "./action-runner"
 
+jest.mock("@/lib/plugin/api/bot-integration-binding", () => ({
+  ...jest.requireActual("@/lib/plugin/api/bot-integration-binding"),
+  assertBotIntegrationAction: jest.fn(),
+}))
+
 describe("Integration action runner", () => {
   beforeEach(async () => {
+    jest.mocked(botBinding.assertBotIntegrationAction).mockReset()
     await getDb().delete()
     __resetDbForTesting()
     __resetIntegrationRegistryForTesting()
@@ -30,6 +37,7 @@ describe("Integration action runner", () => {
   })
 
   afterEach(() => {
+    jest.restoreAllMocks()
     setIntegrationAuthenticatedRequestExecutorForTesting()
     setGithubIssueLoopExecutorForTesting()
     setGithubIssueLoopDesktopHostAvailableForTesting()
@@ -468,5 +476,123 @@ describe("Integration action runner", () => {
       global.fetch = originalFetch
       dispose()
     }
+  })
+  it("runs an exact approved Bot action through its bound provider and replays once", async () => {
+    const handler = jest.fn().mockResolvedValue({ updated: true })
+    const account = await setup(handler)
+    const authorize = jest
+      .spyOn(botBinding, "assertBotIntegrationAction")
+      .mockResolvedValue({ account } as Awaited<
+        ReturnType<typeof botBinding.assertBotIntegrationAction>
+      >)
+    const input = {
+      integrationId: "example",
+      accountId: "",
+      actionId: "issue.update",
+      input: { issueId: "1", repoFullName: "owner/repo" },
+      binding: { runId: "run", slotId: "github" },
+      approval: { interruptId: "approval" },
+      idempotencyKey: "once",
+    }
+    const first = await executeIntegrationAction("bot", input)
+    expect(first).toMatchObject({
+      status: "succeeded",
+      pluginId: "example-delivery",
+      botBinding: { pluginId: "bot", runId: "run", approvalId: "approval" },
+      idempotencyKey: "bot:run:once",
+    })
+    expect(authorize).toHaveBeenCalledTimes(2)
+    expect((await executeIntegrationAction("bot", input)).id).toBe(first.id)
+    expect(handler).toHaveBeenCalledTimes(1)
+    await expect(
+      executeIntegrationAction("bot", { ...input, input: { issueId: "2" } })
+    ).rejects.toThrow("different approved content")
+    await expect(
+      executeIntegrationAction("bot", { ...input, accountId: "someone-else" })
+    ).rejects.toThrow("does not match")
+  })
+
+  it("rechecks Bot approval at dispatch and refuses revoked authority before writes", async () => {
+    const handler = jest.fn().mockResolvedValue({ updated: true })
+    const account = await setup(handler)
+    jest
+      .spyOn(botBinding, "assertBotIntegrationAction")
+      .mockResolvedValueOnce({ account } as Awaited<
+        ReturnType<typeof botBinding.assertBotIntegrationAction>
+      >)
+      .mockRejectedValueOnce(new Error("Approval expired"))
+    const job = await executeIntegrationAction("bot", {
+      integrationId: "example",
+      accountId: "",
+      actionId: "issue.update",
+      input: { issueId: "1" },
+      binding: { runId: "run", slotId: "github" },
+      approval: { interruptId: "approval" },
+      idempotencyKey: "once",
+    })
+    expect(job).toMatchObject({ status: "failed", error: "Approval expired" })
+    expect(handler).not.toHaveBeenCalled()
+  })
+
+  it("injects only the host publication SHA and revalidates even a succeeded action replay", async () => {
+    const handler = jest.fn().mockResolvedValue({ updated: true })
+    const account = await setup(handler)
+    const sha = "a".repeat(40)
+    jest.mocked(botBinding.assertBotIntegrationAction).mockResolvedValue({
+      account,
+      repository: "owner/repo",
+      approvedPublication: { branch: "bot/fix", headSha: sha },
+    } as Awaited<ReturnType<typeof botBinding.assertBotIntegrationAction>>)
+    let remoteSha = sha
+    setIntegrationAuthenticatedRequestExecutorForTesting(async <T>() => ({
+      status: 200,
+      headers: {},
+      data: { sha: remoteSha } as T,
+    }))
+    const input = {
+      integrationId: "example",
+      accountId: "",
+      actionId: "issue.update",
+      input: { issueId: "1", expectedHeadSha: "caller-controlled" },
+      binding: { runId: "run", slotId: "github" },
+      approval: { interruptId: "approval" },
+      idempotencyKey: "head-check",
+    }
+    const result = await executeIntegrationAction("bot", input)
+    expect(result.status).toBe("succeeded")
+    expect(handler.mock.calls[0][0].expectedHeadSha).toBe(sha)
+    expect(result.input).toEqual(input.input)
+    remoteSha = "b".repeat(40)
+    await expect(executeIntegrationAction("bot", input)).rejects.toThrow("head SHA changed")
+    expect(handler).toHaveBeenCalledTimes(1)
+  })
+
+  it("refuses a publication when approval is revoked during provider preparation", async () => {
+    const handler = jest.fn().mockImplementation(async (_input, context) =>
+      context.authenticatedRequest("https://api.github.com/repos/owner/repo/pulls", {
+        method: "POST",
+        body: JSON.stringify({ title: "Fix" }),
+      })
+    )
+    const account = await setup(handler)
+    const binding = { account } as Awaited<ReturnType<typeof botBinding.assertBotIntegrationAction>>
+    jest
+      .mocked(botBinding.assertBotIntegrationAction)
+      .mockResolvedValueOnce(binding)
+      .mockResolvedValueOnce(binding)
+      .mockRejectedValueOnce(new Error("Approval expired during preparation"))
+    const request = jest.fn()
+    setIntegrationAuthenticatedRequestExecutorForTesting(request)
+    const result = await executeIntegrationAction("bot", {
+      integrationId: "example",
+      accountId: "",
+      actionId: "issue.update",
+      input: { issueId: "1" },
+      binding: { runId: "run", slotId: "github" },
+      approval: { interruptId: "approval" },
+      idempotencyKey: "late-revoke",
+    })
+    expect(result.error).toContain("Approval expired during preparation")
+    expect(request).not.toHaveBeenCalled()
   })
 })

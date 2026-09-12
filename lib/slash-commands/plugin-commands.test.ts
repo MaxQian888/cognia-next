@@ -1,3 +1,5 @@
+jest.mock("@/lib/db/sessions", () => ({ getSession: jest.fn(async () => undefined) }))
+import { getSession } from "@/lib/db/sessions"
 import { pluginSlashCommandsToSlashCommands, getPluginSlashCommands } from "./plugin-commands"
 import {
   registerSlashCommand,
@@ -131,6 +133,26 @@ describe("plugin command adapter handler", () => {
     expect(ctx.pushSystemMessage).toHaveBeenCalledWith("ran with: hello")
   })
 
+  it("forwards live cancellation and progress through the composer adapter", async () => {
+    const controller = new AbortController()
+    const reportProgress = jest.fn()
+    registerSlashCommand({
+      id: "research.run",
+      name: "research",
+      source: "plugin",
+      handler: (_args, context) => {
+        context?.reportProgress?.(0.25, "Searching")
+        controller.abort()
+        expect(context?.signal?.aborted).toBe(true)
+        return {}
+      },
+    })
+    await getPluginSlashCommands()[0].handler!(
+      makeCtx({ signal: controller.signal, reportProgress })
+    )
+    expect(reportProgress).toHaveBeenCalledWith(0.25, "Searching")
+  })
+
   it("does not push a system message when the handler returns no message", async () => {
     registerSlashCommand({
       id: "silent.cmd",
@@ -143,4 +165,20 @@ describe("plugin command adapter handler", () => {
     await cmd.handler!(ctx)
     expect(ctx.pushSystemMessage).not.toHaveBeenCalled()
   })
+})
+
+it("resolves the character for the invoking session", async () => {
+  jest.mocked(getSession).mockResolvedValueOnce({ characterId: "c1" } as never)
+  const handler = jest.fn(() => ({}))
+  registerSlashCommand({ id: "p.run", name: "run", source: "plugin", handler })
+  await getPluginSlashCommands()[0].handler!(makeCtx({ activeSessionId: "s1" }))
+  expect(handler).toHaveBeenCalledWith("", { sessionId: "s1", characterId: "c1" })
+})
+
+it("still dispatches when session lookup fails", async () => {
+  jest.mocked(getSession).mockRejectedValueOnce(new Error("unavailable"))
+  const handler = jest.fn(() => ({}))
+  registerSlashCommand({ id: "p.run", name: "run", source: "plugin", handler })
+  await getPluginSlashCommands()[0].handler!(makeCtx({ activeSessionId: "s1" }))
+  expect(handler).toHaveBeenCalledWith("", { sessionId: "s1" })
 })

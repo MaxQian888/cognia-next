@@ -22,8 +22,12 @@ import type { ApprovedBinaryRow, AutomationAuditLogRow } from "@/lib/db/schema"
 function makeDeps(overrides: Partial<CliToolDeps> = {}) {
   const audits: AutomationAuditLogRow[] = []
   const invocations: Array<Record<string, unknown>> = []
+  const permissionReasons: string[] = []
   const deps: CliToolDeps = {
-    checkPermission: jest.fn(async () => true),
+    checkPermission: jest.fn(async (_pluginId: string, reason: string) => {
+      permissionReasons.push(reason)
+      return true
+    }),
     requestBinaryConsent: jest.fn(async () => false),
     detect: jest.fn(async () => ({
       available: true,
@@ -54,7 +58,7 @@ function makeDeps(overrides: Partial<CliToolDeps> = {}) {
     now: () => 1000,
     ...overrides,
   }
-  return { deps, audits, invocations }
+  return { deps, audits, invocations, permissionReasons }
 }
 
 const TOOL: PluginCliToolDef = {
@@ -117,7 +121,132 @@ describe("executeCliTool", () => {
     await expect(executeCliTool("p", TOOL, { pattern: "x" }, CTX)).rejects.toMatchObject({
       code: "permission-denied",
     })
+    // Consent precedes binary resolution — a denied call must not even probe
+    // the filesystem for the binary, let alone spawn it.
+    expect(deps.detect).not.toHaveBeenCalled()
     expect(deps.invokeExec).not.toHaveBeenCalled()
+  })
+
+  it("validates stdin before asking for consent", async () => {
+    const withStdin: PluginCliToolDef = {
+      ...TOOL,
+      stdin: { param: "query" },
+      parameters: {
+        type: "object",
+        properties: { pattern: { type: "string" }, query: { type: "string" } },
+      },
+    }
+    const { deps, permissionReasons } = makeDeps()
+    __setCliToolDepsForTesting(deps)
+    await expect(
+      executeCliTool("p", withStdin, { pattern: "x", query: 42 }, CTX)
+    ).rejects.toMatchObject({ code: "template" })
+    expect(permissionReasons).toHaveLength(0)
+    expect(deps.detect).not.toHaveBeenCalled()
+    expect(deps.invokeExec).not.toHaveBeenCalled()
+  })
+
+  it("shows the rendered command line in the consent reason", async () => {
+    const { deps, permissionReasons } = makeDeps()
+    __setCliToolDepsForTesting(deps)
+    await executeCliTool("p", TOOL, { pattern: "needle", globs: ["*.ts"] }, CTX)
+    // The prompt quotes the actual command — program name + argv — not just
+    // the tool name, so "Run CLI tool ripgrep_search" alone never suffices.
+    expect(permissionReasons[0]).toContain("ripgrep_search")
+    expect(permissionReasons[0]).toContain("rg --json --glob *.ts needle")
+  })
+
+  it("quotes whitespace-bearing argv and caps the consent reason at 500 chars", async () => {
+    const { deps, permissionReasons } = makeDeps()
+    __setCliToolDepsForTesting(deps)
+    await executeCliTool("p", TOOL, { pattern: 'has "quotes" and spaces' }, CTX)
+    // The ambiguous element is JSON-quoted so the prompt stays unambiguous.
+    expect(permissionReasons[0]).toContain('"has \\"quotes\\" and spaces"')
+
+    await executeCliTool("p", TOOL, { pattern: "x".repeat(2000) }, CTX)
+    // The rendered command itself is capped at 500 chars (the tool-name
+    // prefix rides outside it), so a pathological arg can't flood the prompt.
+    const longReason = permissionReasons[1]
+    expect(longReason!.length).toBeLessThanOrEqual(500 + "Run CLI tool ripgrep_search: ".length)
+  })
+
+  it("includes the resolved cwd in the consent reason when present", async () => {
+    const { deps, permissionReasons } = makeDeps()
+    __setCliToolDepsForTesting(deps)
+    await executeCliTool("p", { ...TOOL, cwd: { kind: "workspace" } }, { pattern: "needle" }, CTX)
+    expect(permissionReasons[0]).toContain("(cwd: C:/work/repo)")
+  })
+
+  it("fails template validation before asking for consent", async () => {
+    const { deps, permissionReasons } = makeDeps()
+    __setCliToolDepsForTesting(deps)
+    await expect(executeCliTool("p", TOOL, {}, CTX)).rejects.toMatchObject({
+      code: "template",
+    })
+    expect(permissionReasons).toHaveLength(0)
+    expect(deps.detect).not.toHaveBeenCalled()
+  })
+
+  it("confines declared path params to the workspace root, pre-consent", async () => {
+    const confined: PluginCliToolDef = {
+      ...TOOL,
+      cwd: { kind: "workspace" },
+      confinedPathParams: ["path"],
+      parameters: {
+        type: "object",
+        properties: {
+          pattern: { type: "string" },
+          path: { type: "string" },
+        },
+      },
+      argv: [{ param: "pattern" }, { literal: "--" }, { param: "path", omitWhenEmpty: true }],
+    }
+    const { deps, permissionReasons, invocations } = makeDeps()
+    __setCliToolDepsForTesting(deps)
+
+    // Absolute escape, `..` traversal, and a credential path INSIDE the
+    // workspace all die before the consent prompt and before any spawn.
+    for (const path of ["C:/Windows", "..", ".ssh/id_rsa"]) {
+      await expect(
+        executeCliTool("p", confined, { pattern: "x", path }, CTX)
+      ).rejects.toMatchObject({ code: "template" })
+    }
+    expect(permissionReasons).toHaveLength(0)
+    expect(deps.invokeExec).not.toHaveBeenCalled()
+    expect(deps.detect).not.toHaveBeenCalled()
+
+    // An in-workspace path runs and lands as the argv operand.
+    await executeCliTool("p", confined, { pattern: "x", path: "src" }, CTX)
+    expect(invocations[0]?.args).toEqual(["x", "--", "src"])
+  })
+
+  it("confines against the plugin dir for cwd.kind=plugin-dir — including one under a credential-shaped parent", async () => {
+    const confined: PluginCliToolDef = {
+      ...TOOL,
+      cwd: { kind: "plugin-dir" },
+      confinedPathParams: ["path"],
+      parameters: {
+        type: "object",
+        properties: { pattern: { type: "string" }, path: { type: "string" } },
+      },
+      argv: [{ param: "pattern" }, { literal: "--" }, { param: "path", omitWhenEmpty: true }],
+    }
+    const { deps, invocations } = makeDeps()
+    __setCliToolDepsForTesting(deps)
+    // The plugin dir conventionally lives under `~/.cognia` — a protected
+    // segment. The base's own name must not deny every child inside it.
+    const pluginCtx = { ...CTX, pluginPath: "C:/Users/x/.cognia/plugins/p" }
+
+    await expect(
+      executeCliTool("p", confined, { pattern: "x", path: "C:/work/repo" }, pluginCtx)
+    ).rejects.toMatchObject({ code: "template" })
+    // …but a credential path nested INSIDE the plugin dir is still denied.
+    await expect(
+      executeCliTool("p", confined, { pattern: "x", path: ".ssh/id_rsa" }, pluginCtx)
+    ).rejects.toMatchObject({ code: "template" })
+
+    await executeCliTool("p", confined, { pattern: "x", path: "data/in.json" }, pluginCtx)
+    expect(invocations[0]?.args).toEqual(["x", "--", "data/in.json"])
   })
 
   it("surfaces missing binaries with the install hint, without spawning", async () => {

@@ -58,6 +58,7 @@ describe("browser-builtin-registry", () => {
       "cognia-zenless-zone-zero-theme",
       "figma-external-service",
       "github-delivery",
+      "github-devin-bot",
       "pet-daily-quests",
       "ripgrep-tools",
       "sre-agent",
@@ -113,6 +114,17 @@ describe("browser-builtin-registry", () => {
   it("getBrowserBuiltinRegistryEntry resolves by plugin id", () => {
     const entry = getBrowserBuiltinRegistryEntry("cognia-screenshot")
     expect(entry?.path).toBe("builtin://cognia-screenshot")
+  })
+
+  it("ships the Devin Bot handler through the same contributed-module loader", async () => {
+    const entry = getBrowserBuiltinRegistryEntry("github-devin-bot")
+    expect(entry?.manifest.dependencies).toEqual({ "github-delivery": ">=3.0.0" })
+    expect(entry?.manifest.bots?.[0]).toMatchObject({
+      executor: "handler",
+      export: "githubDevinBot",
+    })
+    expect(entry?.moduleExports?.githubDevinBot).toEqual(expect.any(Function))
+    expect((await entry?.load?.())?.activate).toEqual(expect.any(Function))
   })
 
   it("ships GitHub Delivery with its complete integration export namespace", () => {

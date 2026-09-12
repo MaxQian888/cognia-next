@@ -22,6 +22,10 @@
 
 import {
   readWorkspaceFile,
+  listWorkspaceRoots,
+  createWorkspaceDir,
+  deleteWorkspaceEntry,
+  statWorkspaceFile,
   walkWorkspace,
   type WorkspaceWalkOptions,
   type WorkspaceWalkResult,
@@ -39,11 +43,13 @@ import {
 import { transport } from "@/lib/tauri"
 import { gitTargetFromPluginCache } from "@/lib/git/target"
 import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
+import { isHeadlessHost } from "@/lib/platform/detect"
 
 import { parseRepoSpec, repoCacheSegments, type RepoSpec } from "./repo-spec"
 
 /** How the caller named the repository. */
 export type WorkspaceAcquireSpec =
+  | import("./bot-run").BotRunWorkspaceSpec
   | { kind: "current-project" }
   | { kind: "local-path"; path: string }
   | { kind: "git-url"; url: string; ref?: string; allowedHosts?: string[] }
@@ -53,7 +59,12 @@ export type WorkspaceAcquireSpec =
 export interface PluginWorkspaceHandle {
   /** Absolute filesystem root of the checkout. */
   root: string
-  origin: "current-project" | "local-path" | "clone"
+  origin: "current-project" | "local-path" | "clone" | "bot-run"
+  /** Host-issued ownership identity for isolated Bot workspaces. */
+  id?: string
+  runId?: string
+  /** Host-owned runtime state outside the repository, for isolated Bot sessions. */
+  runtimeStateRoot?: string
   /** Set when the checkout came from a remote. */
   remote?: { host: string; owner: string; repo: string; url: string; ref?: string }
   /** True when the checkout is ours to delete. */
@@ -94,6 +105,7 @@ export interface AcquireDeps {
   remotesOf?: (root: string) => Promise<readonly { name: string; url: string }[]>
   /** Refresh a cached checkout from its remote. */
   fetchAll?: (root: string) => Promise<void>
+  fetchRef?: (root: string, ref: string) => Promise<void>
   /** Move a cached checkout onto `ref`. */
   checkoutRef?: (root: string, ref: string) => Promise<void>
 }
@@ -136,6 +148,10 @@ type ResolvedSpec =
 
 function resolveSpec(spec: WorkspaceAcquireSpec, roots: readonly string[]): ResolvedSpec {
   switch (spec.kind) {
+    case "bot-run":
+      throw new WorkspaceAcquireError(
+        "Bot workspaces must be acquired through the run-owned host API"
+      )
     case "current-project": {
       const first = roots[0]
       if (!first) throw new WorkspaceAcquireError("no workspace is open")
@@ -326,14 +342,58 @@ export function defaultAcquireDeps(
   pluginId: string,
   openRoots: () => string[] | Promise<string[]>
 ): AcquireDeps {
+  // A headless brain is the execution host, using its service transport. The
+  // desktop-only plugin-data command cannot serve it. Reuse the host's own
+  // filesystem root discovery and confinement instead of returning a Git-only
+  // opaque reference that filesystem and process APIs cannot resolve.
+  let hostRoot: Promise<string> | undefined
+  const headlessLocation = async (segments: string[]) => {
+    if (
+      !segments.length ||
+      segments.some(
+        (segment) => !/^[a-zA-Z0-9._-]+$/.test(segment) || segment === "." || segment === ".."
+      )
+    )
+      throw new WorkspaceAcquireError("Invalid repository cache path segment")
+    hostRoot ??= listWorkspaceRoots().then((roots) => {
+      const root = roots.find((entry) => entry.source === "headless-workspaces-dir")
+      if (!root)
+        throw new WorkspaceAcquireError("The headless host did not expose its owned workspace root")
+      return root.path
+    })
+    const root = await hostRoot
+    const pluginKey = Array.from(new TextEncoder().encode(pluginId), (byte) =>
+      byte.toString(16).padStart(2, "0")
+    ).join("")
+    const relPath = [
+      ".cognia-plugin-cache",
+      `p-${pluginKey}`,
+      "repos",
+      ...segments.map((segment) => segment.toLowerCase()),
+    ].join("/")
+    return { root, relPath, path: `${root.replace(/[\\/]$/, "")}/${relPath}` }
+  }
   return {
     openRoots,
-    repoCacheDir: (segments) =>
-      isRemoteHostActive()
+    repoCacheDir: async (segments) => {
+      if (isHeadlessHost()) {
+        const location = await headlessLocation(segments)
+        await createWorkspaceDir(location.root, location.relPath)
+        return location.path
+      }
+      return isRemoteHostActive()
         ? Promise.resolve(gitTargetFromPluginCache(pluginId, segments))
-        : transport.call<string>("plugin_workspace_repo_dir", { pluginId, segments }),
-    removeRepoCache: (segments) =>
-      transport.call<boolean>("plugin_workspace_repo_remove", { pluginId, segments }),
+        : transport.call<string>("plugin_workspace_repo_dir", { pluginId, segments })
+    },
+    removeRepoCache: async (segments) => {
+      if (isHeadlessHost()) {
+        const location = await headlessLocation(segments)
+        if (!(await statWorkspaceFile(location.root, location.relPath)).exists) return false
+        await deleteWorkspaceEntry(location.root, location.relPath, true)
+        return true
+      }
+      return transport.call<boolean>("plugin_workspace_repo_remove", { pluginId, segments })
+    },
     clone: gitCloneGuarded,
     headOf: defaultHeadOf,
     // `cacheIsReusable` asks "was this cache dir cloned from the URL we are
@@ -342,6 +402,7 @@ export function defaultAcquireDeps(
     remotesOf: async (root) =>
       (await gitRemotes(root)).map(({ name, fetchUrl }) => ({ name, url: fetchUrl })),
     fetchAll: (root) => gitFetch(root),
+    fetchRef: (root, ref) => gitFetch(root, "origin", false, ref),
     checkoutRef: (root, ref) => gitCheckoutBranch(root, ref),
   }
 }

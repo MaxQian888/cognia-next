@@ -445,6 +445,42 @@ mod tests {
     }
 
     #[test]
+    fn cli_tools_validate_access_and_confined_path_params() {
+        // Happy path: a read-classified tool confining a declared param to a
+        // workspace cwd base.
+        let mut m = cli_manifest();
+        m["cliTools"][0]["access"] = json!("read");
+        m["cliTools"][0]["confinedPathParams"] = json!(["pattern"]);
+        m["cliTools"][0]["cwd"] = json!({ "kind": "workspace" });
+        assert_clean(m);
+
+        let mut m = cli_manifest();
+        m["cliTools"][0]["access"] = json!("delete");
+        assert_has_error_code(m, "manifest.cliTools.access.invalid");
+
+        // Non-array / non-string member.
+        let mut m = cli_manifest();
+        m["cliTools"][0]["confinedPathParams"] = json!("pattern");
+        assert_has_error_code(m, "manifest.cliTools.confinedPathParams.invalid");
+        let mut m = cli_manifest();
+        m["cliTools"][0]["confinedPathParams"] = json!([42]);
+        assert_has_error_code(m, "manifest.cliTools.confinedPathParams.invalid");
+
+        // Confining an undeclared parameter.
+        let mut m = cli_manifest();
+        m["cliTools"][0]["confinedPathParams"] = json!(["ghost"]);
+        m["cliTools"][0]["cwd"] = json!({ "kind": "workspace" });
+        assert_has_error_code(m, "manifest.cliTools.confinedPathParams.param.undeclared");
+
+        // No cwd base to confine against — absent and explicit `none`.
+        let mut m = cli_manifest();
+        m["cliTools"][0]["confinedPathParams"] = json!(["pattern"]);
+        assert_has_error_code(m.clone(), "manifest.cliTools.confinedPathParams.noBase");
+        m["cliTools"][0]["cwd"] = json!({ "kind": "none" });
+        assert_has_error_code(m, "manifest.cliTools.confinedPathParams.noBase");
+    }
+
+    #[test]
     fn cli_tools_reject_duplicates_bad_name_and_parameters_shape() {
         let mut m = cli_manifest();
         let dup = m["cliTools"][0].clone();
