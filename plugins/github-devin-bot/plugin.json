@@ -1,0 +1,169 @@
+{
+  "id": "github-devin-bot",
+  "name": "GitHub Devin Bot",
+  "version": "1.0.0",
+  "type": "frontend",
+  "description": "An approval-gated GitHub repository maintenance Bot powered by Devin SWE-2.",
+  "author": "Cognia Official",
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "main": "dist/index.js",
+  "activationEvents": ["startup"],
+  "dependencies": {
+    "github-delivery": ">=3.0.0"
+  },
+  "capabilities": ["bot"],
+  "permissions": [
+    "integrations:read",
+    "integrations:execute",
+    "agent:control",
+    "agent:dispatch-external",
+    "filesystem:read",
+    "filesystem:write",
+    "network:fetch",
+    "git:read",
+    "git:write",
+    "database:read",
+    "database:write"
+  ],
+  "runtimeCompatibility": {
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "dist/index.js"
+    },
+    "headless": {
+      "availability": "supported",
+      "entrypoint": "dist/index.js"
+    },
+    "browser": {
+      "availability": "degraded",
+      "reason": "Execution requires a paired Desktop or Headless host with Devin CLI and isolated-workspace support."
+    },
+    "mobile": {
+      "availability": "degraded",
+      "reason": "Execution requires a paired Desktop or Headless host with Devin CLI and isolated-workspace support."
+    }
+  },
+  "bots": [
+    {
+      "id": "repository-monitor",
+      "name": "GitHub Devin Bot",
+      "version": "1.0.0",
+      "description": "Monitor GitHub issues, pull requests, and CI; prepare Devin SWE-2 changes for approval.",
+      "executor": "handler",
+      "entry": "dist/index.js",
+      "export": "githubDevinBot",
+      "triggers": [
+        {
+          "id": "poll",
+          "kind": "poll",
+          "label": "Monitor repository",
+          "everyMs": 60000,
+          "cursor": "github",
+          "enabledByDefault": false,
+          "concurrencyKey": "github-monitor"
+        },
+        {
+          "id": "github",
+          "kind": "event",
+          "source": "integration",
+          "label": "GitHub events",
+          "enabledByDefault": false,
+          "types": [
+            "issues.opened",
+            "issues.closed",
+            "pull_request.opened",
+            "pull_request.synchronize",
+            "pull_request.ready_for_review",
+            "pull_request.closed",
+            "check_run.completed",
+            "workflow_run.completed"
+          ],
+          "concurrencyKey": "github-monitor",
+          "conditions": {
+            "repositoryConfigKey": "repository"
+          }
+        },
+        {
+          "id": "scan",
+          "kind": "manual",
+          "label": "Check repository now"
+        },
+        {
+          "id": "backfill",
+          "kind": "manual",
+          "label": "Process selected historical items",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "numbers": {
+                "type": "string",
+                "title": "Issue / PR numbers",
+                "description": "Comma-separated item numbers"
+              }
+            },
+            "required": ["numbers"]
+          }
+        },
+        {
+          "id": "work",
+          "kind": "manual",
+          "label": "Process queued repository work",
+          "concurrencyKey": "github-work:{{resource.scope}}",
+          "holdConcurrencyWhileWaiting": false
+        }
+      ],
+      "requires": {
+        "credentials": [
+          {
+            "id": "github",
+            "label": "GitHub account",
+            "integration": "github"
+          }
+        ],
+        "integrationActions": ["github.openPr", "github.reviewPr"]
+      },
+      "policy": {
+        "requireApprovalForWrites": true,
+        "maxConcurrentRuns": 1,
+        "maxRunDurationMs": 1800000,
+        "allowSelfTriggering": false
+      },
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repository": {
+            "type": "string",
+            "title": "Repository",
+            "default": "NJUPT-SAST/sast-approval-next",
+            "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+          },
+          "model": {
+            "type": "string",
+            "title": "Devin model",
+            "enum": ["swe-2-medium", "swe-2-high", "swe-2-max"],
+            "default": "swe-2-medium"
+          },
+          "timeoutMinutes": {
+            "type": "integer",
+            "title": "Execution timeout (minutes)",
+            "minimum": 1,
+            "maximum": 30,
+            "default": 30
+          },
+          "maxRepairAttempts": {
+            "type": "integer",
+            "title": "Maximum repair attempts",
+            "minimum": 1,
+            "maximum": 2,
+            "default": 2
+          }
+        }
+      }
+    }
+  ]
+}
