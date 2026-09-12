@@ -1,18 +1,62 @@
 {
   "id": "cognia-clipboard-tools",
   "name": "Clipboard Tools",
-  "version": "0.1.0",
-  "description": "Built-in clipboard read/write helpers for plugin authors.",
+  "version": "0.2.0",
+  "description": "Read, write, inspect and clear the clipboard from agent tools and workflow nodes, through the host's permission-guarded clipboard API.",
   "type": "frontend",
   "capabilities": ["tools", "workflow"],
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",
+  "keywords": ["clipboard", "pasteboard", "copy", "paste", "workflow"],
   "minAppVersion": "0.1.0",
   "engines": {
     "cognia": ">=0.1.0"
   },
   "permissions": ["clipboard:read", "clipboard:write"],
+  "permissionJustifications": {
+    "clipboard:read": "Lets the agent and workflow nodes read the current clipboard text and image (clipboard_status, clipboard_read_image, Read clipboard text).",
+    "clipboard:write": "Lets the agent and workflow nodes replace or empty the clipboard (clipboard_write_text, clipboard_clear, Write clipboard text, Clear clipboard)."
+  },
+  "tools": [
+    {
+      "name": "clipboard_status",
+      "description": "Report what the clipboard holds (text and/or image) and return the current clipboard text.",
+      "category": "clipboard",
+      "access": "read",
+      "retryable": true,
+      "parametersSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+    },
+    {
+      "name": "clipboard_read_image",
+      "description": "Read the image currently on the clipboard as base64 PNG. Desktop only; a browser shell has no image clipboard.",
+      "category": "clipboard",
+      "access": "read",
+      "retryable": true,
+      "parametersSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+    },
+    {
+      "name": "clipboard_write_text",
+      "description": "Replace the clipboard contents with the given text.",
+      "category": "clipboard",
+      "access": "write",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "The text to place on the clipboard." }
+        },
+        "required": ["text"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "clipboard_clear",
+      "description": "Empty the clipboard.",
+      "category": "clipboard",
+      "access": "write",
+      "parametersSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+    }
+  ],
   "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "tauri": {
@@ -20,13 +64,14 @@
       "entrypoint": "src/index.ts"
     },
     "browser": {
-      "availability": "supported",
-      "entrypoint": "src/index.ts"
+      "availability": "degraded",
+      "entrypoint": "src/index.ts",
+      "reason": "Text read/write works through the browser Clipboard API (a user gesture may be required); image read/write and image detection are desktop-only."
     },
     "mobile": {
       "availability": "degraded",
       "entrypoint": "src/index.ts",
-      "reason": "Clipboard read/write is restricted in the mobile WebView (no synchronous read; user-gesture required)."
+      "reason": "Clipboard read/write is restricted in the mobile WebView (no synchronous read; user-gesture required); image clipboard is unavailable."
     }
   }
 }

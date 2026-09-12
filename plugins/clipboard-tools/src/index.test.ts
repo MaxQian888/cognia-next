@@ -2,157 +2,243 @@
  * @jest-environment jsdom
  */
 
-import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
-import type { PluginNodeDef } from "@cognia/plugin-sdk"
-const isTauriMock = jest.fn(() => false)
-// Doubled at the SDK subpath the plugin imports, not the host module behind it.
-jest.mock("@cognia/plugin-sdk/api/host-environment", () => ({
-  readHostCapabilities: () => ({ tauri: isTauriMock() }),
-}))
+import type { PluginContext, PluginNodeDef, PluginToolRegistration } from "@cognia/plugin-sdk"
 
-const readTextMock = jest.fn<Promise<string>, []>()
-jest.mock("@tauri-apps/plugin-clipboard-manager", () => ({ readText: () => readTextMock() }), {
-  virtual: true,
-})
+import manifestJson from "../plugin.json"
+import definition, {
+  bytesToBase64,
+  clearClipboard,
+  createClipboardTools,
+  createClipboardWorkflowNodes,
+  readClipboardImage,
+  readClipboardStatus,
+  writeClipboardText,
+} from "./index"
 
-type ToolResult = { ok: boolean; content?: string; error?: string }
+type Clipboard = PluginContext["clipboard"]
 
-function makeCtx(capabilities?: { tauri?: boolean }) {
-  const tools: Record<string, (args: unknown) => Promise<unknown>> = {}
+function makeClipboard(overrides: Partial<Clipboard> = {}): jest.Mocked<Clipboard> {
+  return {
+    readText: jest.fn(async () => ""),
+    writeText: jest.fn(async () => undefined),
+    readImage: jest.fn(async () => null),
+    writeImage: jest.fn(async () => undefined),
+    hasText: jest.fn(async () => false),
+    hasImage: jest.fn(async () => false),
+    clear: jest.fn(async () => undefined),
+    ...overrides,
+  } as jest.Mocked<Clipboard>
+}
+
+function makeCtx(clipboard: Clipboard) {
+  const tools: Record<string, PluginToolRegistration> = {}
   const nodes: Record<string, PluginNodeDef> = {}
   const disposeNode = jest.fn()
-  const ctx: Partial<PluginContext> = {
+  const ctx = {
     pluginId: "cognia-clipboard-tools",
-    logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() } as never,
-    capabilities: capabilities as never,
+    logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+    clipboard,
     agent: {
-      registerTool: ({
-        name,
-        execute,
-      }: {
-        name: string
-        execute: (args: unknown) => Promise<unknown>
-      }) => {
-        tools[name] = execute
+      registerTool: (tool: PluginToolRegistration) => {
+        tools[tool.name] = tool
+        return () => {
+          delete tools[tool.name]
+        }
       },
-    } as never,
+    },
     workflow: {
       registerNode: (node: PluginNodeDef) => {
         nodes[node.kind] = node
         return disposeNode
       },
-    } as never,
-  }
-  return { ctx: ctx as PluginContext, tools, nodes, disposeNode }
+    },
+  } as unknown as PluginContext
+  return { ctx, tools, nodes, disposeNode }
 }
 
-/** Fresh module instance per test — the plugin caches a module-scoped flag. */
-async function loadPlugin(): Promise<PluginDefinition> {
-  let definition: PluginDefinition | undefined
-  await jest.isolateModulesAsync(async () => {
-    definition = (await import("./index")).default
-  })
-  return definition!
-}
-
-function setNavigatorClipboard(readText: (() => Promise<string>) | undefined) {
-  Object.defineProperty(navigator, "clipboard", {
-    value: readText ? { readText } : undefined,
-    configurable: true,
-  })
-}
-
-beforeEach(() => {
-  isTauriMock.mockReset().mockReturnValue(false)
-  readTextMock.mockReset()
-  setNavigatorClipboard(undefined)
-})
+const run = (tool: PluginToolRegistration, args: Record<string, unknown> = {}) =>
+  tool.execute(args, { config: {} })
 
 describe("clipboard-tools (built-in)", () => {
-  it("declares workflow capability for the clipboard node", async () => {
-    const plugin = await loadPlugin()
-    expect(plugin.manifest.capabilities).toEqual(["tools", "workflow"])
+  it("spreads plugin.json as its manifest so declared tools survive the builtin overlay", () => {
+    expect(definition.manifest).toBe(manifestJson)
+    expect(definition.manifest.capabilities).toEqual(["tools", "workflow"])
+    expect(definition.manifest.permissions).toEqual(["clipboard:read", "clipboard:write"])
   })
 
-  it("activate registers the clipboard_status tool", async () => {
-    const plugin = await loadPlugin()
-    const { ctx, tools } = makeCtx({ tauri: false })
-    await plugin.activate?.(ctx)
-    expect(Object.keys(tools)).toEqual(["clipboard_status"])
+  it("registers exactly the tools plugin.json declares, with matching access classes", async () => {
+    const { ctx, tools } = makeCtx(makeClipboard())
+    await definition.activate?.(ctx)
+    const declared = (manifestJson.tools ?? []).map((t) => t.name).sort()
+    expect(Object.keys(tools).sort()).toEqual(declared)
+    for (const declaredTool of manifestJson.tools ?? []) {
+      expect(tools[declaredTool.name].definition.access).toBe(declaredTool.access)
+      expect(tools[declaredTool.name].definition.parametersSchema).toEqual(
+        declaredTool.parametersSchema
+      )
+    }
   })
 
-  it("activate registers a workflow node for reading clipboard text", async () => {
-    const plugin = await loadPlugin()
-    const { ctx, nodes } = makeCtx({ tauri: false })
-    await plugin.activate?.(ctx)
-    expect(Object.keys(nodes)).toEqual(["action.readText"])
-    expect(nodes["action.readText"]).toMatchObject({
-      label: "Read clipboard text",
-      category: "plugin",
-      defaultParams: {},
-      paramsSchema: {
-        type: "object",
-        properties: {},
-        additionalProperties: false,
-      },
+  it("registers read, write and clear workflow nodes with the fields the editor reads", async () => {
+    const { ctx, nodes } = makeCtx(makeClipboard())
+    await definition.activate?.(ctx)
+    expect(Object.keys(nodes).sort()).toEqual([
+      "action.clear",
+      "action.readText",
+      "action.writeText",
+    ])
+    for (const node of Object.values(nodes)) {
+      expect(node).toMatchObject({
+        category: "plugin",
+        typeVersion: 1,
+        retryable: false,
+      })
+      expect(typeof node.label).toBe("string")
+      expect(typeof node.description).toBe("string")
+      expect(typeof node.iconName).toBe("string")
+      expect(node.paramsSchema).toMatchObject({ type: "object" })
+    }
+    expect(nodes["action.writeText"].paramsSchema).toMatchObject({ required: ["text"] })
+  })
+
+  it("deactivate disposes every workflow node and re-activation does not double-register", async () => {
+    const { ctx, disposeNode } = makeCtx(makeClipboard())
+    await definition.activate?.(ctx)
+    await definition.deactivate?.(ctx)
+    expect(disposeNode).toHaveBeenCalledTimes(3)
+    await definition.activate?.(ctx)
+    await definition.activate?.(ctx)
+    // Second activate disposes the first activation's three nodes before re-registering.
+    expect(disposeNode).toHaveBeenCalledTimes(6)
+    await definition.deactivate?.(ctx)
+  })
+
+  describe("clipboard_status", () => {
+    it("reads text only when the clipboard reports text", async () => {
+      const clipboard = makeClipboard({
+        hasText: jest.fn(async () => true),
+        hasImage: jest.fn(async () => true),
+        readText: jest.fn(async () => "hello"),
+      })
+      const status = await readClipboardStatus(clipboard)
+      expect(status).toEqual({ ok: true, hasText: true, hasImage: true, content: "hello" })
+    })
+
+    it("returns an empty content without reading when the clipboard holds no text", async () => {
+      const clipboard = makeClipboard()
+      const status = await readClipboardStatus(clipboard)
+      expect(status).toEqual({ ok: true, hasText: false, hasImage: false, content: "" })
+      expect(clipboard.readText).not.toHaveBeenCalled()
+    })
+
+    it("surfaces the host's permission / availability error as ok:false", async () => {
+      const clipboard = makeClipboard({
+        hasText: jest.fn(async () => {
+          throw new Error("Browser clipboard text read is unavailable in this environment.")
+        }),
+      })
+      const status = await readClipboardStatus(clipboard)
+      expect(status).toEqual({ ok: false, error: expect.stringMatching(/unavailable/) })
+    })
+
+    it("is wired to ctx.clipboard through the registered tool", async () => {
+      const clipboard = makeClipboard({
+        hasText: jest.fn(async () => true),
+        readText: jest.fn(async () => "via tool"),
+      })
+      const { ctx, tools } = makeCtx(clipboard)
+      await definition.activate?.(ctx)
+      await expect(run(tools.clipboard_status)).resolves.toMatchObject({ content: "via tool" })
     })
   })
 
-  it("reads via the browser Clipboard API when ctx.capabilities.tauri is false", async () => {
-    const plugin = await loadPlugin()
-    const { ctx, tools } = makeCtx({ tauri: false })
-    setNavigatorClipboard(async () => "browser text")
-    await plugin.activate?.(ctx)
-    const result = (await tools.clipboard_status({})) as ToolResult
-    expect(result).toEqual({ ok: true, content: "browser text" })
+  describe("clipboard_read_image", () => {
+    it("returns the bytes as base64 PNG", async () => {
+      const bytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47])
+      const clipboard = makeClipboard({ readImage: jest.fn(async () => bytes) })
+      await expect(readClipboardImage(clipboard)).resolves.toEqual({
+        ok: true,
+        base64: bytesToBase64(bytes),
+        mimeType: "image/png",
+        byteLength: 4,
+      })
+    })
+
+    it("answers ok:false when there is no image", async () => {
+      await expect(readClipboardImage(makeClipboard())).resolves.toEqual({
+        ok: false,
+        error: expect.stringMatching(/no image/i),
+      })
+    })
+
+    it("answers ok:false with the host error in a browser shell", async () => {
+      const clipboard = makeClipboard({
+        readImage: jest.fn(async () => {
+          throw new Error("Browser clipboard image read is unavailable in this environment.")
+        }),
+      })
+      await expect(readClipboardImage(clipboard)).resolves.toMatchObject({ ok: false })
+    })
   })
 
-  it("workflow node reads via the same clipboard implementation", async () => {
-    const plugin = await loadPlugin()
-    const { ctx, nodes } = makeCtx({ tauri: false })
-    setNavigatorClipboard(async () => "workflow clipboard")
-    await plugin.activate?.(ctx)
-    const result = await nodes["action.readText"].execute({ params: {} } as never)
-    expect(result.output).toEqual({ ok: true, content: "workflow clipboard" })
+  describe("clipboard_write_text / clipboard_clear", () => {
+    it("writes the text and reports its length", async () => {
+      const clipboard = makeClipboard()
+      await expect(writeClipboardText(clipboard, "abc")).resolves.toEqual({ ok: true, length: 3 })
+      expect(clipboard.writeText).toHaveBeenCalledWith("abc")
+    })
+
+    it("rejects a non-string payload without touching the clipboard", async () => {
+      const clipboard = makeClipboard()
+      await expect(writeClipboardText(clipboard, 42)).resolves.toMatchObject({ ok: false })
+      expect(clipboard.writeText).not.toHaveBeenCalled()
+    })
+
+    it("clears through the host API", async () => {
+      const clipboard = makeClipboard()
+      await expect(clearClipboard(clipboard)).resolves.toEqual({ ok: true })
+      expect(clipboard.clear).toHaveBeenCalledTimes(1)
+    })
+
+    it("tools forward the argument object to the host", async () => {
+      const clipboard = makeClipboard()
+      const [, , writeTool, clearTool] = createClipboardTools(clipboard)
+      await expect(run(writeTool, { text: "x" })).resolves.toEqual({ ok: true, length: 1 })
+      await expect(run(clearTool)).resolves.toEqual({ ok: true })
+    })
   })
 
-  it("prefers ctx.capabilities.tauri over the direct isTauri() probe", async () => {
-    const plugin = await loadPlugin()
-    const { ctx, tools } = makeCtx({ tauri: true })
-    // The direct probe says "browser" — the host capability must win.
-    isTauriMock.mockReturnValue(false)
-    readTextMock.mockResolvedValue("os clipboard")
-    await plugin.activate?.(ctx)
-    const result = (await tools.clipboard_status({})) as ToolResult
-    expect(result).toEqual({ ok: true, content: "os clipboard" })
-    expect(isTauriMock).not.toHaveBeenCalled()
+  describe("workflow nodes", () => {
+    const step = (params: Record<string, unknown>) =>
+      ({ runId: "r", workflowId: "w", stepId: "s", params, upstream: {} }) as never
+
+    it("read node returns the same status the tool does", async () => {
+      const clipboard = makeClipboard({
+        hasText: jest.fn(async () => true),
+        readText: jest.fn(async () => "workflow clipboard"),
+      })
+      const [readNode] = createClipboardWorkflowNodes(clipboard)
+      await expect(readNode.execute(step({}))).resolves.toEqual({
+        output: { ok: true, hasText: true, hasImage: false, content: "workflow clipboard" },
+      })
+    })
+
+    it("write node writes params.text and clear node empties the clipboard", async () => {
+      const clipboard = makeClipboard()
+      const [, writeNode, clearNode] = createClipboardWorkflowNodes(clipboard)
+      await expect(writeNode.execute(step({ text: "from node" }))).resolves.toEqual({
+        output: { ok: true, length: 9 },
+      })
+      expect(clipboard.writeText).toHaveBeenCalledWith("from node")
+      await expect(clearNode.execute(step({}))).resolves.toEqual({ output: { ok: true } })
+      expect(clipboard.clear).toHaveBeenCalledTimes(1)
+    })
   })
 
-  it("falls back to isTauri() when the host exposes no capabilities", async () => {
-    const plugin = await loadPlugin()
-    const { ctx, tools } = makeCtx(undefined)
-    isTauriMock.mockReturnValue(true)
-    readTextMock.mockResolvedValue("fallback os clipboard")
-    await plugin.activate?.(ctx)
-    const result = (await tools.clipboard_status({})) as ToolResult
-    expect(result).toEqual({ ok: true, content: "fallback os clipboard" })
-    expect(isTauriMock).toHaveBeenCalled()
-  })
-
-  it("returns ok:false when no clipboard backend is available", async () => {
-    const plugin = await loadPlugin()
-    const { ctx, tools } = makeCtx({ tauri: false })
-    await plugin.activate?.(ctx)
-    const result = (await tools.clipboard_status({})) as ToolResult
-    expect(result.ok).toBe(false)
-    expect(result.error).toMatch(/not available/i)
-  })
-
-  it("deactivate unregisters the workflow node", async () => {
-    const plugin = await loadPlugin()
-    const { ctx, disposeNode } = makeCtx({ tauri: false })
-    await plugin.activate?.(ctx)
-    await expect(plugin.deactivate?.(ctx)).resolves.toBeUndefined()
-    expect(disposeNode).toHaveBeenCalledTimes(1)
+  it("bytesToBase64 survives payloads larger than one chunk", () => {
+    const big = new Uint8Array(0x8000 * 2 + 7).fill(0x41)
+    const expected = btoa(String.fromCharCode(...big.subarray(0, 0x8000))).slice(0, 8)
+    expect(bytesToBase64(big).startsWith(expected)).toBe(true)
+    expect(bytesToBase64(big).length).toBe(Math.ceil(big.length / 3) * 4)
   })
 })
