@@ -8,15 +8,43 @@ import { makeArtifact } from "@/lib/storybook/fixtures/artifacts"
 
 const artifact = makeArtifact()
 
-function seedActiveArtifact() {
+/**
+ * A previewable artifact, for the surfaces that only exist once something is
+ * actually rendered — the preview tab, and the element picker on it.
+ */
+const pageArtifact = makeArtifact({
+  id: "art_page",
+  type: "html",
+  title: "pricing.html",
+  language: "html",
+  content: [
+    "<main>",
+    '  <section class="hero">',
+    "    <h1>Simple pricing</h1>",
+    "    <p>Start free. Upgrade when your team grows.</p>",
+    '    <button id="cta" class="primary">Get started</button>',
+    "  </section>",
+    '  <section class="tiers">',
+    '    <article class="tier"><h2>Free</h2><p>$0</p></article>',
+    '    <article class="tier"><h2>Team</h2><p>$20</p></article>',
+    "  </section>",
+    "</main>",
+  ].join("\n"),
+})
+
+function seed(active: typeof artifact) {
   resetStore(useArtifactStore)
-  seedStore(useChatStore, { activeSessionId: artifact.sessionId })
+  seedStore(useChatStore, { activeSessionId: active.sessionId })
   seedStore(useArtifactStore, {
-    artifacts: { [artifact.id]: artifact },
-    activeArtifactIdBySession: { [artifact.sessionId]: artifact.id },
+    artifacts: { [active.id]: active },
+    activeArtifactIdBySession: { [active.sessionId]: active.id },
     panelOpen: true,
     panelView: "artifact",
   })
+}
+
+function seedActiveArtifact() {
+  seed(artifact)
 }
 
 // The shared body of the artifacts surface (used by both the Sheet and the
@@ -47,4 +75,17 @@ export const EmptyRecentList: Story = {
   beforeEach: () => {
     resetStore(useArtifactStore)
   },
+}
+
+/**
+ * The element picker's surface. Switch to the Preview tab and press "Select
+ * element": hovering the rendered page highlights the node under the pointer
+ * and names it, and clicking stages it for the next message.
+ *
+ * Preview-only, like every story here — the behaviour is pinned by
+ * `artifact-panel-content.split.test.tsx` and
+ * `lib/artifacts/runtime/element-pick.test.ts`.
+ */
+export const PreviewableForElementPicking: Story = {
+  beforeEach: () => seed(pageArtifact),
 }
