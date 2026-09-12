@@ -1,7 +1,7 @@
 {
   "id": "ripgrep-tools",
   "name": "Ripgrep Tools",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "First-party reference plugin for declarative CLI wrapper tools: exposes ripgrep as an agent tool with zero plugin code.",
   "type": "frontend",
   "capabilities": ["cli-tools"],
@@ -26,30 +26,85 @@
   "cliTools": [
     {
       "name": "ripgrep_search",
-      "description": "Search file contents in a directory with ripgrep. Returns matching lines as ripgrep --json events. Exit code 1 (no matches) is a successful empty result.",
+      "description": "Search file contents in the workspace with ripgrep. Returns matching lines as ripgrep --json events (one JSON object per line). Exit code 1 (no matches) is a successful empty result. The search path is confined to the workspace root; credential paths (.ssh, .aws, id_rsa, …) are always refused. Prefer the built-in `grep` for most searches — it normalizes results; use this when you need raw --json or flags grep lacks.",
+      "access": "read",
+      "confinedPathParams": ["path"],
       "parameters": {
         "type": "object",
         "properties": {
           "pattern": {
             "type": "string",
-            "description": "Regular expression to search for"
+            "description": "Regular expression to search for (ripgrep syntax)"
           },
           "path": {
             "type": "string",
-            "description": "Directory or file to search, relative to the workspace root"
+            "description": "Directory or file to search, relative to the workspace root (or an absolute path inside it). Defaults to the whole workspace."
           },
           "globs": {
             "type": "array",
             "items": { "type": "string" },
-            "description": "Optional file glob filters, e.g. \"*.ts\""
+            "description": "File glob filters, e.g. \"*.ts\" or \"!fixtures/**\""
+          },
+          "types": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "ripgrep file types to include (see rg --type-list), e.g. [\"ts\", \"rust\"]"
+          },
+          "excludeTypes": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "ripgrep file types to exclude"
           },
           "ignoreCase": {
             "type": "boolean",
-            "description": "Case-insensitive search"
+            "description": "Case-insensitive search (-i)"
+          },
+          "fixedStrings": {
+            "type": "boolean",
+            "description": "Treat the pattern as a literal string, not a regex (-F)"
+          },
+          "wordRegexp": {
+            "type": "boolean",
+            "description": "Match whole words only (-w)"
+          },
+          "lineRegexp": {
+            "type": "boolean",
+            "description": "Match whole lines only (-x)"
+          },
+          "onlyMatching": {
+            "type": "boolean",
+            "description": "Print only the matched parts instead of whole lines (-o)"
+          },
+          "contextLines": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Show this many lines of context around each match (-C)"
+          },
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Maximum directory traversal depth (--max-depth)"
+          },
+          "maxFilesize": {
+            "type": "string",
+            "description": "Skip files larger than this, e.g. \"1M\" or \"512K\" (--max-filesize)"
+          },
+          "hidden": {
+            "type": "boolean",
+            "description": "Also search hidden files and directories (--hidden)"
+          },
+          "noIgnore": {
+            "type": "boolean",
+            "description": "Ignore .gitignore/.ignore exclude rules (--no-ignore)"
+          },
+          "multiline": {
+            "type": "boolean",
+            "description": "Enable multiline matching; '.' also matches newlines (-U --multiline-dotall)"
           },
           "maxCount": {
-            "type": "number",
-            "description": "Stop after this many matches per file"
+            "type": "integer",
+            "minimum": 1,
+            "description": "Stop after this many matches per file (--max-count)"
           }
         },
         "required": ["pattern"]
@@ -57,8 +112,22 @@
       "binary": { "kind": "requires", "name": "rg" },
       "argv": [
         { "literal": "--json" },
+        { "literal": "--no-config" },
+        { "param": "types", "eachPrefixedBy": "-t", "omitWhenEmpty": true },
+        { "param": "excludeTypes", "eachPrefixedBy": "-T", "omitWhenEmpty": true },
         { "param": "ignoreCase", "eachPrefixedBy": "-i", "omitWhenEmpty": true },
+        { "param": "fixedStrings", "eachPrefixedBy": "-F", "omitWhenEmpty": true },
+        { "param": "wordRegexp", "eachPrefixedBy": "-w", "omitWhenEmpty": true },
+        { "param": "lineRegexp", "eachPrefixedBy": "-x", "omitWhenEmpty": true },
+        { "param": "onlyMatching", "eachPrefixedBy": "-o", "omitWhenEmpty": true },
+        { "param": "contextLines", "eachPrefixedBy": "-C", "omitWhenEmpty": true },
+        { "param": "maxDepth", "eachPrefixedBy": "--max-depth", "omitWhenEmpty": true },
+        { "param": "maxFilesize", "eachPrefixedBy": "--max-filesize", "omitWhenEmpty": true },
         { "param": "maxCount", "eachPrefixedBy": "--max-count", "omitWhenEmpty": true },
+        { "param": "hidden", "eachPrefixedBy": "--hidden", "omitWhenEmpty": true },
+        { "param": "noIgnore", "eachPrefixedBy": "--no-ignore", "omitWhenEmpty": true },
+        { "param": "multiline", "eachPrefixedBy": "-U", "omitWhenEmpty": true },
+        { "param": "multiline", "eachPrefixedBy": "--multiline-dotall", "omitWhenEmpty": true },
         { "param": "globs", "eachPrefixedBy": "--glob", "omitWhenEmpty": true },
         { "param": "pattern", "eachPrefixedBy": "-e" },
         { "literal": "--" },
@@ -82,6 +151,10 @@
     "mobile": {
       "availability": "blocked",
       "reason": "CLI tools spawn host processes — unavailable on mobile."
+    },
+    "headless": {
+      "availability": "blocked",
+      "reason": "CLI tools run through the Tauri plugin_cli_exec command; unavailable in headless hosts."
     }
   }
 }
