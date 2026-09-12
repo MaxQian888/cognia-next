@@ -1,40 +1,184 @@
 /**
  * Screenshot — built-in plugin.
  *
- * Wires the host-provided `captureScreenshot()` helper into:
+ * Wires the host-provided capture helpers into:
  *   * an agent tool `take_screenshot` that returns the PNG as an MCP image
  *     content block (so vision models see it and the chat renders it)
+ *   * an agent tool `extract_screenshot_ocr` that captures and OCRs the image
  *   * a slash command `/screenshot` that triggers the same capture from chat
+ *     and drops the image into the conversation as a `screenshot-result` part
  *
- * Both paths share the same capture function; on success they also write the
- * PNG to the clipboard (when the runtime allows). Failures are returned as
- * `{ ok: false, error }` rather than thrown so the manager records them as
- * tool diagnostics rather than fatal exceptions.
+ * Both tools share `captureImage`, which supports two modes: "picker" (the
+ * getDisplayMedia display picker — consent is the picker itself) and "native"
+ * (the policy-gated `automation.screenshot` path — no prompt, desktop only,
+ * takes monitorId / region / format). The `/screenshot` command always copies
+ * the PNG to the clipboard; the agent tool only does so when the call passes
+ * `copyToClipboard: true`, so a model taking a frame to look at never
+ * overwrites what the user copied. The copy goes through the permissioned
+ * `ctx.clipboard.writeImage` host API, falling back to `navigator.clipboard`
+ * on the browser shell where the native bridge doesn't exist. Failures are
+ * returned as `{ ok: false, error }` rather than thrown so the manager records
+ * them as tool diagnostics rather than fatal exceptions.
  */
 
-import { ScreenshotResultCard } from "./screenshot-result-card"
-import type { PluginContext, PluginDefinition, PluginManifest } from "@cognia/plugin-sdk"
+import { ScreenshotOcrResultCard } from "./screenshot-ocr-result-card"
+import {
+  ScreenshotMessagePart,
+  ScreenshotResultCard,
+  SCREENSHOT_PART_TYPE,
+} from "./screenshot-result-card"
+import type {
+  PluginCommandContext,
+  PluginContext,
+  PluginDefinition,
+  PluginManifest,
+} from "@cognia/plugin-sdk"
 import { buildOcrSecurityEnvelope } from "@cognia/plugin-sdk/api/ocr-provider"
 import manifestJson from "../plugin.json"
-async function fileToBase64(file: File): Promise<string> {
-  const buffer = await file.arrayBuffer()
-  const bytes = new Uint8Array(buffer)
-  let binary = ""
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i] as number)
-  }
-  // btoa is safe here because we limit to PNG bytes.
-  return typeof btoa === "function"
-    ? btoa(binary)
-    : Buffer.from(binary, "binary").toString("base64")
+
+type CaptureMode = "picker" | "native"
+
+interface CapturedImage {
+  filename: string
+  /** Byte size of the encoded image. */
+  size: number
+  base64: string
+  mimeType: string
+  /** Raw bytes — the clipboard write needs them without a second decode. */
+  bytes: Uint8Array
 }
 
-async function copyToClipboard(file: File): Promise<boolean> {
+const BASE64_CHUNK = 0x8000
+
+function bytesToBase64(bytes: Uint8Array): string {
+  if (typeof btoa === "function") {
+    // Chunked: `String.fromCharCode` spreads are call-stack-bound, so one
+    // giant call overflows on multi-MB captures.
+    let binary = ""
+    for (let i = 0; i < bytes.byteLength; i += BASE64_CHUNK) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + BASE64_CHUNK))
+    }
+    return btoa(binary)
+  }
+  return Buffer.from(bytes).toString("base64")
+}
+
+function base64ToBytes(base64: string): Uint8Array {
+  if (typeof atob === "function") {
+    const binary = atob(base64)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+    return bytes
+  }
+  return new Uint8Array(Buffer.from(base64, "base64"))
+}
+
+function timestampedFilename(format: string): string {
+  const stamp = new Date().toISOString().replaceAll(/[:.]/g, "-").replace("T", "_").replace("Z", "")
+  return `screenshot-${stamp}.${format}`
+}
+
+/** Human-readable byte size for toast / chat copy ("1.2 MB"). */
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+type CaptureHost = Pick<PluginContext["automation"], "captureDisplay" | "screenshot">
+
+/** Options the native capture path understands (`automation.screenshot`). */
+interface NativeCaptureOpts {
+  monitorId?: string
+  region?: { x: number; y: number; width: number; height: number }
+  format?: "png" | "jpeg"
+}
+
+/**
+ * Pick the native-only knobs out of tool args. Unknown/invalid values are
+ * dropped rather than forwarded — a malformed `region` must not reach the
+ * desktop backend as a half-shape.
+ */
+function normalizeNativeOpts(args?: Record<string, unknown>): NativeCaptureOpts | undefined {
+  if (!args) return undefined
+  const opts: NativeCaptureOpts = {}
+  if (typeof args.monitorId === "string" && args.monitorId.length > 0) {
+    opts.monitorId = args.monitorId
+  }
+  const region = args.region
+  if (region && typeof region === "object") {
+    const { x, y, width, height } = region as Record<string, unknown>
+    if ([x, y, width, height].every((v) => typeof v === "number" && Number.isFinite(v))) {
+      opts.region = {
+        x: x as number,
+        y: y as number,
+        width: width as number,
+        height: height as number,
+      }
+    }
+  }
+  if (args.format === "png" || args.format === "jpeg") opts.format = args.format
+  return Object.keys(opts).length > 0 ? opts : undefined
+}
+
+/**
+ * Capture one frame. "picker" asks the WebView to share a display (the user
+ * picks the screen/window — that pick IS the consent gesture, and it works
+ * on every shell with getDisplayMedia). "native" goes through the desktop
+ * automation path: no prompt, still subject to the host's per-surface
+ * automation policy, and it takes `monitorId` / `region` / `format`.
+ */
+async function captureImage(
+  automation: CaptureHost,
+  mode: CaptureMode,
+  nativeOpts?: NativeCaptureOpts
+): Promise<CapturedImage | null> {
+  if (mode === "native") {
+    const shot = await automation.screenshot(nativeOpts)
+    const bytes = base64ToBytes(shot.bytes)
+    const format = shot.format === "jpeg" ? "jpeg" : "png"
+    return {
+      filename: timestampedFilename(format),
+      size: bytes.byteLength,
+      base64: shot.bytes,
+      mimeType: `image/${format}`,
+      bytes,
+    }
+  }
+  const file = await automation.captureDisplay()
+  if (!file) return null
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  return {
+    filename: file.name,
+    size: file.size,
+    base64: bytesToBase64(bytes),
+    mimeType: file.type || "image/png",
+    bytes,
+  }
+}
+
+async function copyImageToClipboard(
+  image: CapturedImage,
+  clipboard?: PluginContext["clipboard"]
+): Promise<boolean> {
+  // Prefer the permissioned host API: on Tauri it routes to the native
+  // clipboard, where the WebView's navigator.clipboard.write is unavailable.
+  if (clipboard?.writeImage) {
+    try {
+      await clipboard.writeImage(image.bytes, image.mimeType === "image/jpeg" ? "jpeg" : "png")
+      return true
+    } catch {
+      // The browser shell has no native clipboard bridge (NOT_SUPPORTED) —
+      // fall through to the WebView API, which does work there.
+    }
+  }
   if (typeof navigator === "undefined" || !navigator.clipboard?.write) {
     return false
   }
   try {
-    const item = new ClipboardItem({ [file.type]: file })
+    const item = new ClipboardItem({
+      [image.mimeType]: new Blob([image.bytes as BlobPart], { type: image.mimeType }),
+    })
     await navigator.clipboard.write([item])
     return true
   } catch {
@@ -52,22 +196,34 @@ interface CaptureResult {
   error?: string
 }
 
+interface PerformCaptureOpts {
+  /**
+   * Whether to copy the image onto the user's clipboard. Explicit per call:
+   * `/screenshot` always copies (that's what the user asked for), while the
+   * agent tool only copies on request — a model capturing frames to look at
+   * must not silently overwrite whatever the user had in the clipboard.
+   */
+  copyToClipboard: boolean
+  native?: NativeCaptureOpts
+}
+
 async function performCapture(
-  automation: Pick<PluginContext["automation"], "captureDisplay">
+  ctx: Pick<PluginContext, "automation" | "clipboard">,
+  mode: CaptureMode,
+  opts: PerformCaptureOpts
 ): Promise<CaptureResult> {
   try {
-    const file = await automation.captureDisplay()
-    if (!file) {
+    const image = await captureImage(ctx.automation, mode, opts.native)
+    if (!image) {
       return { ok: false, error: "user-cancelled-or-unsupported" }
     }
-    const base64 = await fileToBase64(file)
-    const copied = await copyToClipboard(file)
+    const copied = opts.copyToClipboard ? await copyImageToClipboard(image, ctx.clipboard) : false
     return {
       ok: true,
-      filename: file.name,
-      size: file.size,
-      base64,
-      mimeType: file.type || "image/png",
+      filename: image.filename,
+      size: image.size,
+      base64: image.base64,
+      mimeType: image.mimeType,
       copiedToClipboard: copied,
     }
   } catch (err) {
@@ -105,9 +261,9 @@ export function captureToToolResult(result: CaptureResult): unknown {
 }
 
 /**
- * Capture a screenshot and OCR it (ADR-0024). Reuses the same getDisplayMedia
- * capture as `take_screenshot`, then runs the PNG through the OCR pipeline so
- * the agent gets the screen's text instead of (or alongside) raw image bytes.
+ * Capture a screenshot and OCR it (ADR-0024). Shares `captureImage` with
+ * `take_screenshot`, then runs the image through the OCR pipeline so the agent
+ * gets the screen's text instead of (or alongside) raw image bytes.
  */
 /** Text block + image-relative bounding box (origin top-left, px). */
 interface OcrTextBlock {
@@ -117,9 +273,10 @@ interface OcrTextBlock {
 }
 
 async function performCaptureOcr(
-  automation: Pick<PluginContext["automation"], "captureDisplay">,
-  ocr: Pick<PluginContext["ocr"], "extract">,
-  languages?: string[]
+  ctx: Pick<PluginContext, "automation" | "ocr">,
+  mode: CaptureMode,
+  languages?: string[],
+  nativeOpts?: NativeCaptureOpts
 ): Promise<
   | {
       ok: true
@@ -127,16 +284,25 @@ async function performCaptureOcr(
       markdown: string
       providerId: string
       blocks: OcrTextBlock[]
+      /**
+       * The captured frame, held out of the JSON envelope on purpose: the
+       * tool only emits it as an MCP image block when `includeImage` asks —
+       * a base64 field inside the text payload is dead weight the model
+       * cannot decode.
+       */
+      image: { base64: string; mimeType: string; filename: string }
     }
   | { ok: false; error: string }
 > {
   try {
-    const file = await automation.captureDisplay()
-    if (!file) return { ok: false, error: "user-cancelled-or-unsupported" }
-    const base64 = await fileToBase64(file)
-    const mimeType = file.type || "image/png"
-    const result = await ocr.extract({
-      source: { kind: "data-url", dataUrl: `data:${mimeType};base64,${base64}`, mimeType },
+    const image = await captureImage(ctx.automation, mode, nativeOpts)
+    if (!image) return { ok: false, error: "user-cancelled-or-unsupported" }
+    const result = await ctx.ocr.extract({
+      source: {
+        kind: "data-url",
+        dataUrl: `data:${image.mimeType};base64,${image.base64}`,
+        mimeType: image.mimeType,
+      },
       languages,
     })
     // Surface per-block geometry (when the provider emits it) so callers can map
@@ -153,11 +319,50 @@ async function performCaptureOcr(
       markdown: result.combinedMarkdown,
       providerId: result.providerId,
       blocks,
+      image: { base64: image.base64, mimeType: image.mimeType, filename: image.filename },
       ...buildOcrSecurityEnvelope(result, "screen"),
     }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
+}
+
+const MODE_SCHEMA = {
+  type: "string",
+  enum: ["picker", "native"],
+  description:
+    '"picker" (default) opens the system display picker — the call blocks until the user picks a screen/window or cancels, which is also the consent gesture. "native" captures a monitor with no prompt through the host automation policy; desktop only.',
+} as const
+
+const NATIVE_ONLY = "native mode only — ignored under the picker"
+
+/** Schema shared by both tools for the `automation.screenshot` knobs. */
+const NATIVE_OPTION_SCHEMA = {
+  monitorId: {
+    type: "string",
+    description: `Capture a specific monitor (id from the host's capabilities().monitors list); falls back to the primary monitor. ${NATIVE_ONLY}.`,
+  },
+  region: {
+    type: "object",
+    properties: {
+      x: { type: "number" },
+      y: { type: "number" },
+      width: { type: "number" },
+      height: { type: "number" },
+    },
+    required: ["x", "y", "width", "height"],
+    additionalProperties: false,
+    description: `Crop rectangle in screen coordinates. ${NATIVE_ONLY}.`,
+  },
+  format: {
+    type: "string",
+    enum: ["png", "jpeg"],
+    description: `Image encoding — jpeg is far smaller and keeps context cost down. ${NATIVE_ONLY}.`,
+  },
+} as const
+
+function normalizeMode(mode: unknown): CaptureMode {
+  return mode === "native" ? "native" : "picker"
 }
 
 const definition: PluginDefinition = {
@@ -167,8 +372,28 @@ const definition: PluginDefinition = {
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("screenshot plugin activated")
 
-    // ADR-0127: rich chat card for `take_screenshot` (thumbnail + caption).
+    ctx.i18n?.registerTranslations("en", {
+      "toast.captured": "Captured {filename} ({size}).",
+      "toast.copied": "Copied to clipboard.",
+      "toast.failed": "Screenshot failed: {error}.",
+      "toast.notAttached": "The image could not be attached to a chat session.",
+    })
+    ctx.i18n?.registerTranslations("zh-CN", {
+      "toast.captured": "已截取 {filename}（{size}）。",
+      "toast.copied": "已复制到剪贴板。",
+      "toast.failed": "截图失败：{error}。",
+      "toast.notAttached": "无法将截图附加到会话中。",
+    })
+    const t = (key: string, params?: Record<string, string | number | boolean>) =>
+      ctx.i18n?.t(key, params) ?? key
+
+    // ADR-0127: rich chat cards — `take_screenshot` draws a thumbnail card,
+    // `extract_screenshot_ocr` draws its recognized text instead of a JSON wall.
     ctx.toolResult?.registerToolResultRenderer?.("take_screenshot", ScreenshotResultCard)
+    ctx.toolResult?.registerToolResultRenderer?.("extract_screenshot_ocr", ScreenshotOcrResultCard)
+    // The `/screenshot` command appends a `screenshot-result` part into the
+    // transcript; this is the renderer that draws it (same card).
+    ctx.messagePart?.registerPartRenderer?.(SCREENSHOT_PART_TYPE, ScreenshotMessagePart)
 
     ctx.agent?.registerTool?.({
       name: "take_screenshot",
@@ -176,14 +401,30 @@ const definition: PluginDefinition = {
       definition: {
         name: "take_screenshot",
         description:
-          "Capture a screen image via getDisplayMedia and return it as an image the model can see.",
+          "Capture a screen image and return it as an image the model can see. The default picker mode opens a display picker the user must confirm, so the call blocks on human input; pass mode='native' to capture a monitor without prompting (desktop only, still subject to the host automation policy). The image is NOT copied to the user's clipboard unless copyToClipboard=true — pass it only when the user asked for a copyable capture.",
         parametersSchema: {
           type: "object",
-          properties: {},
+          properties: {
+            mode: MODE_SCHEMA,
+            copyToClipboard: {
+              type: "boolean",
+              description:
+                "Also copy the image to the user's clipboard (default false — a capture the model takes for itself must not overwrite what the user copied).",
+            },
+            ...NATIVE_OPTION_SCHEMA,
+          },
           additionalProperties: false,
         },
       } as never,
-      execute: async () => captureToToolResult(await performCapture(ctx.automation)),
+      execute: async (
+        args?: { mode?: string; copyToClipboard?: boolean } & Record<string, unknown>
+      ) =>
+        captureToToolResult(
+          await performCapture(ctx, normalizeMode(args?.mode), {
+            copyToClipboard: args?.copyToClipboard === true,
+            native: normalizeNativeOpts(args),
+          })
+        ),
     })
 
     ctx.agent?.registerTool?.({
@@ -192,22 +433,73 @@ const definition: PluginDefinition = {
       definition: {
         name: "extract_screenshot_ocr",
         description:
-          "Capture a screen image and extract its text via OCR. Returns the recognized text + markdown, plus per-block geometry (`blocks` with image-relative bboxes) when the provider supports it. To click on-screen text, use the gated click_text/find_text tools instead.",
+          "Capture a screen image and extract its text via OCR. Returns the recognized text + markdown, plus per-block geometry (`blocks` with image-relative bboxes) when the provider supports it. The default picker mode opens a display picker the user must confirm; mode='native' captures the primary monitor without prompting (desktop only). To click on-screen text, use the gated click_text/find_text tools instead.",
         parametersSchema: {
           type: "object",
           properties: {
+            mode: MODE_SCHEMA,
             languages: {
               type: "array",
               items: { type: "string" },
               description:
                 "BCP-47 codes (e.g. en, zh). Defaults to the user's configured languages.",
             },
+            includeImage: {
+              type: "boolean",
+              description:
+                "Also return the captured frame as an image content block alongside the OCR text — one capture feeds both text and vision (default false).",
+            },
+            ...NATIVE_OPTION_SCHEMA,
           },
           additionalProperties: false,
         },
       } as never,
-      execute: (args?: { languages?: string[] }) =>
-        performCaptureOcr(ctx.automation, ctx.ocr, args?.languages),
+      execute: async (
+        args?: { mode?: string; languages?: string[]; includeImage?: boolean } & Record<
+          string,
+          unknown
+        >
+      ) => {
+        const result = await performCaptureOcr(
+          ctx,
+          normalizeMode(args?.mode),
+          args?.languages,
+          normalizeNativeOpts(args)
+        )
+        if (!result.ok) return result
+        const { image, ...envelope } = result
+        if (args?.includeImage === true) {
+          return {
+            content: [
+              { type: "text", text: JSON.stringify(envelope) },
+              { type: "image", data: image.base64, mimeType: image.mimeType },
+            ],
+          }
+        }
+        return envelope
+      },
+    })
+
+    // The monitorId knob on both capture tools is only usable if the model
+    // can discover valid ids — `ctx.automation.capabilities()` is not a
+    // tool, so this small read-only one is the discovery path.
+    ctx.agent?.registerTool?.({
+      name: "list_screenshot_monitors",
+      pluginId: ctx.pluginId,
+      definition: {
+        name: "list_screenshot_monitors",
+        description:
+          "List the monitors the native capture backend can see — id, name, bounds in the same screen-coordinate space `region` uses, primary flag, scale factor — plus whether prompt-free native capture is available on this shell. Pass a monitor `id` to take_screenshot / extract_screenshot_ocr as `monitorId` (native mode).",
+        parametersSchema: { type: "object", properties: {}, additionalProperties: false },
+      } as never,
+      execute: async () => {
+        try {
+          const caps = await ctx.automation.capabilities()
+          return { ok: true, nativeCapture: caps.hasScreenshot, monitors: caps.monitors }
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) }
+        }
+      },
     })
 
     // The slash command is DECLARED in plugin.json (`commands[]`) and handled
@@ -216,18 +508,49 @@ const definition: PluginDefinition = {
     // command-palette entry, idle-clock refresh) and teardown, so there is no
     // imperative registry call and nothing to unregister in `deactivate`.
     return {
-      onCommand: async (command: string) => {
+      onCommand: async (command: string, args?: string[], context?: PluginCommandContext) => {
         if (command !== "screenshot") return false
-        const result = await performCapture(ctx.automation)
-        ctx.ui?.showToast?.(
-          result.ok
-            ? `Captured ${result.filename ?? "screenshot.png"} (${result.size ?? 0} bytes).${
-                result.copiedToClipboard ? " Copied to clipboard." : ""
-              }`
-            : `Screenshot failed: ${result.error ?? "unknown"}`,
-          result.ok ? "success" : "error"
+        // `/screenshot native` skips the picker (desktop only); anything else
+        // — including a stray token — keeps the consent-by-picker default.
+        const mode: CaptureMode = args?.includes("native") ? "native" : "picker"
+        const result = await performCapture(ctx, mode, { copyToClipboard: true })
+        if (!result.ok) {
+          const message = t("toast.failed", { error: result.error ?? "unknown" })
+          ctx.ui?.showToast?.(message, "error")
+          return { handled: true, message }
+        }
+        const message = `${t("toast.captured", {
+          filename: result.filename ?? "screenshot.png",
+          size: formatSize(result.size ?? 0),
+        })}${result.copiedToClipboard ? ` ${t("toast.copied")}` : ""}`
+        ctx.ui?.showToast?.(message, "success")
+        // Hand the capture to the conversation: the same image block the tool
+        // emits, as a `screenshot-result` part the registered renderer draws.
+        // Target the session the command was typed in — the ambient
+        // activeSessionId can point elsewhere when the command ran from the
+        // palette, a shortcut, or the CLI.
+        const partId = ctx.chat?.appendMessagePart?.(
+          {
+            type: SCREENSHOT_PART_TYPE,
+            // The text block doubles as the card's caption — the localized
+            // message keeps filename/size visible right on the transcript
+            // card, same as the tool-result card shows it.
+            mcpContent: [
+              { type: "text", text: message },
+              {
+                type: "image",
+                data: result.base64,
+                mimeType: result.mimeType ?? "image/png",
+              },
+            ],
+          },
+          context?.sessionId ? { sessionId: context.sessionId } : undefined
         )
-        return true
+        if (partId == null) {
+          ctx.logger?.warn("screenshot: no chat session to attach the capture to")
+          return { handled: true, message: `${message} ${t("toast.notAttached")}` }
+        }
+        return { handled: true, message }
       },
     }
   },

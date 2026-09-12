@@ -6,11 +6,41 @@ import type { PluginContext } from "@cognia/plugin-sdk"
 
 const extractMock = jest.fn()
 const captureMock = jest.fn()
+const screenshotMock = jest.fn()
+const capabilitiesMock = jest.fn()
+const writeImageMock = jest.fn()
+const appendPartMock = jest.fn()
+const registerPartRendererMock = jest.fn()
 
 import screenshotPlugin, { captureToToolResult } from "./index"
+import { SCREENSHOT_PART_TYPE } from "./screenshot-result-card"
+
+/**
+ * Minimal working plugin-i18n stand-in: `registerTranslations` fills a
+ * per-locale table and `t` resolves `en` with `{param}` interpolation — the
+ * same contract as `lib/plugin/api/i18n-api.ts`, so tests assert on the real
+ * registered copy instead of a hard-coded echo.
+ */
+const makeI18n = () => {
+  const tables: Record<string, Record<string, string>> = {}
+  return {
+    tables,
+    registerTranslations: jest.fn((locale: string, msgs: Record<string, string>) => {
+      tables[locale] = { ...(tables[locale] ?? {}), ...msgs }
+    }),
+    t: jest.fn((key: string, params?: Record<string, string | number | boolean>) => {
+      const raw = tables["en"]?.[key] ?? key
+      return raw.replace(/\{(\w+)\}/g, (m, p) =>
+        params && params[p] !== undefined ? String(params[p]) : m
+      )
+    }),
+    getCurrentLocale: jest.fn(() => "en"),
+  }
+}
 
 const makeCtx = () => {
   const tools: Record<string, (args: unknown) => Promise<unknown>> = {}
+  const i18n = makeI18n()
   const ctx: Partial<PluginContext> = {
     pluginId: "cognia-screenshot",
     logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() } as never,
@@ -26,13 +56,67 @@ const makeCtx = () => {
       },
     } as never,
     ocr: { extract: extractMock } as never,
-    automation: { captureDisplay: captureMock } as never,
+    automation: {
+      captureDisplay: captureMock,
+      screenshot: screenshotMock,
+      capabilities: capabilitiesMock,
+    } as never,
+    clipboard: { writeImage: writeImageMock } as never,
+    chat: { appendMessagePart: appendPartMock } as never,
+    i18n: i18n as never,
+    messagePart: { registerPartRenderer: registerPartRendererMock } as never,
   }
-  return { ctx: ctx as PluginContext, tools }
+  return { ctx: ctx as PluginContext, tools, i18n }
 }
 
+const mockFile = {
+  name: "screenshot.png",
+  size: 9,
+  type: "image/png",
+  arrayBuffer: async () => new TextEncoder().encode("png-bytes").buffer,
+} as unknown as File
+
 beforeEach(() => {
-  captureMock.mockReset()
+  for (const mock of [
+    captureMock,
+    extractMock,
+    screenshotMock,
+    capabilitiesMock,
+    writeImageMock,
+    appendPartMock,
+    registerPartRendererMock,
+  ]) {
+    mock.mockReset()
+  }
+  capabilitiesMock.mockResolvedValue({
+    platform: "macos",
+    hasScreenshot: true,
+    monitors: [
+      {
+        id: "m1",
+        name: "Built-in",
+        x: 0,
+        y: 0,
+        width: 1,
+        height: 1,
+        isPrimary: true,
+        scaleFactor: 2,
+      },
+      {
+        id: "m2",
+        name: "External",
+        x: 1,
+        y: 0,
+        width: 1,
+        height: 1,
+        isPrimary: false,
+        scaleFactor: 1,
+      },
+    ],
+  })
+  writeImageMock.mockResolvedValue(undefined)
+  appendPartMock.mockReturnValue("plugin-cognia-screenshot-1")
+  registerPartRendererMock.mockReturnValue(() => {})
 })
 
 describe("screenshot (built-in)", () => {
@@ -49,14 +133,72 @@ describe("screenshot (built-in)", () => {
     expect(commands?.map((c) => c.id)).toEqual(["screenshot"])
   })
 
-  it("registers the take_screenshot result card when the host offers the API (ADR-0127)", async () => {
+  it("declares the permissions its ctx calls actually need — no more, no less", async () => {
+    const permissions = (screenshotPlugin.manifest as { permissions?: string[] }).permissions
+    // ctx.automation.captureDisplay + ctx.automation.screenshot.
+    expect(permissions).toContain("automation:screenshot")
+    // ctx.automation.capabilities (list_screenshot_monitors).
+    expect(permissions).toContain("automation:read")
+    // ctx.clipboard.writeImage.
+    expect(permissions).toContain("clipboard:write")
+    // ctx.ocr.extract.
+    expect(permissions).toContain("media:image:read")
+    expect(permissions).toContain("database:write")
+    // ctx.chat.appendMessagePart.
+    expect(permissions).toContain("session:write")
+    // ctx.toolResult.registerToolResultRenderer + ctx.messagePart.registerPartRenderer.
+    expect(permissions).toContain("extension:ui")
+    // Nothing the plugin calls consumes it — keep the declared surface honest.
+    expect(permissions).not.toContain("media:image:write")
+  })
+
+  it("registers result cards for both tools when the host offers the API (ADR-0127)", async () => {
     const { ctx } = makeCtx()
     const registerToolResultRenderer = jest.fn((_tool: string, _render: unknown) => () => {})
     ;(ctx as { toolResult?: unknown }).toolResult = { registerToolResultRenderer }
     await screenshotPlugin.activate?.(ctx)
-    expect(registerToolResultRenderer).toHaveBeenCalledTimes(1)
-    expect(registerToolResultRenderer.mock.calls[0][0]).toBe("take_screenshot")
-    expect(typeof registerToolResultRenderer.mock.calls[0][1]).toBe("function")
+    expect(registerToolResultRenderer).toHaveBeenCalledTimes(2)
+    expect(registerToolResultRenderer.mock.calls.map((c) => c[0])).toEqual([
+      "take_screenshot",
+      "extract_screenshot_ocr",
+    ])
+    for (const call of registerToolResultRenderer.mock.calls) {
+      expect(typeof call[1]).toBe("function")
+    }
+  })
+
+  it("registers a message-part renderer for the /screenshot transcript part", async () => {
+    const { ctx } = makeCtx()
+    await screenshotPlugin.activate?.(ctx)
+    expect(registerPartRendererMock).toHaveBeenCalledTimes(1)
+    expect(registerPartRendererMock.mock.calls[0][0]).toBe(SCREENSHOT_PART_TYPE)
+    expect(typeof registerPartRendererMock.mock.calls[0][1]).toBe("function")
+  })
+
+  it("registers matching en + zh-CN toast translations", async () => {
+    const { ctx, i18n } = makeCtx()
+    await screenshotPlugin.activate?.(ctx)
+    expect(i18n.registerTranslations).toHaveBeenCalledWith(
+      "en",
+      expect.objectContaining({
+        "toast.captured": expect.any(String),
+        "toast.copied": expect.any(String),
+        "toast.failed": expect.any(String),
+        "toast.notAttached": expect.any(String),
+      })
+    )
+    expect(i18n.registerTranslations).toHaveBeenCalledWith(
+      "zh-CN",
+      expect.objectContaining({
+        "toast.captured": expect.any(String),
+        "toast.copied": expect.any(String),
+        "toast.failed": expect.any(String),
+        "toast.notAttached": expect.any(String),
+      })
+    )
+    expect(Object.keys(i18n.tables["en"] ?? {}).sort()).toEqual(
+      Object.keys(i18n.tables["zh-CN"] ?? {}).sort()
+    )
   })
 
   it("handles its declared command and ignores everyone else's", async () => {
@@ -67,29 +209,93 @@ describe("screenshot (built-in)", () => {
     const hooks = await screenshotPlugin.activate?.(ctx)
     expect(await hooks?.onCommand?.("someone-elses-command", [])).toBe(false)
     expect(showToast).not.toHaveBeenCalled()
-    expect(await hooks?.onCommand?.("screenshot", [])).toBe(true)
+    expect(await hooks?.onCommand?.("screenshot", [])).toMatchObject({ handled: true })
     expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/failed/i), "error")
   })
 
-  it("toasts the filename and size on a successful slash-command capture", async () => {
-    // The slash command still consumes the raw capture shape (it needs the
-    // filename/size for the toast), so the tool's content-block wrapper must
-    // not have swallowed it.
-    captureMock.mockResolvedValue({
-      name: "screenshot.png",
-      size: 9,
-      type: "image/png",
-      arrayBuffer: async () => new TextEncoder().encode("png-bytes").buffer,
-    } as unknown as File)
+  it("toasts the capture, copies via the host clipboard API, and drops the image into chat", async () => {
+    captureMock.mockResolvedValue(mockFile)
     const { ctx } = makeCtx()
     const showToast = jest.fn()
     ;(ctx as { ui?: unknown }).ui = { showToast }
     const hooks = await screenshotPlugin.activate?.(ctx)
-    expect(await hooks?.onCommand?.("screenshot", [])).toBe(true)
+    const outcome = await hooks?.onCommand?.("screenshot", [])
+    // The host clipboard bridge is the permissioned path — the WebView
+    // navigator.clipboard.write is only the browser-shell fallback.
+    expect(writeImageMock).toHaveBeenCalledTimes(1)
+    expect(writeImageMock.mock.calls[0][0]).toBeInstanceOf(Uint8Array)
+    expect(writeImageMock.mock.calls[0][1]).toBe("png")
+    expect(outcome).toMatchObject({
+      handled: true,
+      message: expect.stringContaining("Captured screenshot.png (9 B)"),
+    })
     expect(showToast).toHaveBeenCalledWith(
-      expect.stringContaining("Captured screenshot.png (9 bytes)"),
+      expect.stringContaining("Copied to clipboard."),
       "success"
     )
+    // The capture lands in the transcript as a part the registered renderer draws.
+    expect(appendPartMock).toHaveBeenCalledTimes(1)
+    const part = appendPartMock.mock.calls[0][0] as {
+      type: string
+      mcpContent: Array<{ type: string; data?: string; text?: string }>
+    }
+    expect(part.type).toBe(SCREENSHOT_PART_TYPE)
+    // Text block first — the card draws it as the localized caption — then the image.
+    expect(part.mcpContent[0].type).toBe("text")
+    expect(part.mcpContent[0].text).toContain("screenshot.png")
+    expect(part.mcpContent[1].type).toBe("image")
+    expect(part.mcpContent[1].data?.length).toBeGreaterThan(0)
+  })
+
+  it("targets the session the command was typed in, not the ambient one", async () => {
+    captureMock.mockResolvedValue(mockFile)
+    const { ctx } = makeCtx()
+    const hooks = await screenshotPlugin.activate?.(ctx)
+    await hooks?.onCommand?.("screenshot", [], { sessionId: "session-42" })
+    expect(appendPartMock).toHaveBeenCalledWith(expect.anything(), { sessionId: "session-42" })
+  })
+
+  it("/screenshot native skips the picker and captures through the automation path", async () => {
+    screenshotMock.mockResolvedValue({
+      bytes: "QUJD",
+      width: 2,
+      height: 2,
+      capturedAt: 0,
+      format: "png",
+    })
+    const { ctx } = makeCtx()
+    const hooks = await screenshotPlugin.activate?.(ctx)
+    const outcome = await hooks?.onCommand?.("screenshot", ["native"])
+    expect(screenshotMock).toHaveBeenCalledTimes(1)
+    expect(captureMock).not.toHaveBeenCalled()
+    expect(outcome).toMatchObject({ handled: true })
+    expect(appendPartMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("notes it in the command response when there is no session to attach to", async () => {
+    captureMock.mockResolvedValue(mockFile)
+    appendPartMock.mockReturnValue(null)
+    const { ctx } = makeCtx()
+    const warn = ctx.logger?.warn as jest.Mock
+    const hooks = await screenshotPlugin.activate?.(ctx)
+    const outcome = (await hooks?.onCommand?.("screenshot", [])) as { message?: string }
+    // Still a successful capture + clipboard copy — only the attach failed.
+    expect(outcome.message).toContain("Captured screenshot.png")
+    expect(outcome.message).toContain("could not be attached")
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/no chat session/i))
+  })
+
+  it("still answers the command when the clipboard write is unavailable", async () => {
+    captureMock.mockResolvedValue(mockFile)
+    writeImageMock.mockRejectedValue(new Error("NOT_SUPPORTED"))
+    const { ctx } = makeCtx()
+    const showToast = jest.fn()
+    ;(ctx as { ui?: unknown }).ui = { showToast }
+    const hooks = await screenshotPlugin.activate?.(ctx)
+    const outcome = (await hooks?.onCommand?.("screenshot", [])) as { message?: string }
+    expect(outcome.message).toContain("Captured screenshot.png")
+    expect(outcome.message).not.toContain("Copied to clipboard")
+    expect(appendPartMock).toHaveBeenCalledTimes(1)
   })
 
   it("surfaces a thrown capture as an error envelope, not a crash", async () => {
@@ -103,8 +309,199 @@ describe("screenshot (built-in)", () => {
     })
   })
 
+  it("native mode captures through automation.screenshot without a picker", async () => {
+    screenshotMock.mockResolvedValue({
+      bytes: "QUJD", // "ABC"
+      width: 2,
+      height: 2,
+      capturedAt: 0,
+      format: "png",
+    })
+    const { ctx, tools } = makeCtx()
+    await screenshotPlugin.activate?.(ctx)
+    const result = (await tools.take_screenshot({ mode: "native" })) as {
+      content: Array<{ type: string; data?: string; text?: string }>
+    }
+    expect(screenshotMock).toHaveBeenCalledTimes(1)
+    expect(captureMock).not.toHaveBeenCalled()
+    expect(result.content[1]).toMatchObject({ type: "image", data: "QUJD", mimeType: "image/png" })
+    // Agent calls don't touch the clipboard unless they ask: a capture the
+    // model takes for itself must not overwrite what the user copied.
+    expect(writeImageMock).not.toHaveBeenCalled()
+    expect(result.content[0].text).not.toContain("copied to clipboard")
+  })
+
+  it("copies to the clipboard only when the tool call asks for it", async () => {
+    screenshotMock.mockResolvedValue({
+      bytes: "QUJD",
+      width: 2,
+      height: 2,
+      capturedAt: 0,
+      format: "png",
+    })
+    const { ctx, tools } = makeCtx()
+    await screenshotPlugin.activate?.(ctx)
+    const result = (await tools.take_screenshot({
+      mode: "native",
+      copyToClipboard: true,
+    })) as { content: Array<{ type: string; text?: string }> }
+    expect(writeImageMock).toHaveBeenCalledWith(Uint8Array.from([65, 66, 67]), "png")
+    expect(result.content[0].text).toContain("copied to clipboard")
+  })
+
+  it("forwards monitorId/region/format to automation.screenshot in native mode", async () => {
+    screenshotMock.mockResolvedValue({
+      bytes: "QUJD",
+      width: 2,
+      height: 2,
+      capturedAt: 0,
+      format: "jpeg",
+    })
+    const { ctx, tools } = makeCtx()
+    await screenshotPlugin.activate?.(ctx)
+    const result = (await tools.take_screenshot({
+      mode: "native",
+      monitorId: "monitor-2",
+      region: { x: 1, y: 2, width: 3, height: 4 },
+      format: "jpeg",
+    })) as { content: Array<{ type: string; mimeType?: string }> }
+    expect(screenshotMock).toHaveBeenCalledWith({
+      monitorId: "monitor-2",
+      region: { x: 1, y: 2, width: 3, height: 4 },
+      format: "jpeg",
+    })
+    expect(result.content[1].mimeType).toBe("image/jpeg")
+  })
+
+  it("drops malformed native options instead of forwarding them", async () => {
+    screenshotMock.mockResolvedValue({
+      bytes: "QUJD",
+      width: 2,
+      height: 2,
+      capturedAt: 0,
+      format: "png",
+    })
+    const { ctx, tools } = makeCtx()
+    await screenshotPlugin.activate?.(ctx)
+    await tools.take_screenshot({
+      mode: "native",
+      monitorId: 42,
+      region: { x: 1 },
+      format: "bmp",
+    })
+    expect(screenshotMock).toHaveBeenCalledWith(undefined)
+    // The same knobs ride the OCR tool too.
+    extractMock.mockResolvedValue({
+      providerId: "tesseract-wasm",
+      pages: [{ pageNumber: 1, markdown: "HI", text: "HI", blocks: [] }],
+      combinedMarkdown: "HI",
+      combinedText: "HI",
+      languages: ["en"],
+      durationMs: 1,
+      cached: false,
+    })
+    await tools.extract_screenshot_ocr({ mode: "native", monitorId: "monitor-1" })
+    expect(screenshotMock).toHaveBeenLastCalledWith({ monitorId: "monitor-1" })
+  })
+
+  it("list_screenshot_monitors reports the native backend's monitors", async () => {
+    const { ctx, tools } = makeCtx()
+    await screenshotPlugin.activate?.(ctx)
+    const result = (await tools.list_screenshot_monitors({})) as {
+      ok: boolean
+      nativeCapture?: boolean
+      monitors?: Array<{ id: string; isPrimary: boolean }>
+    }
+    expect(result).toMatchObject({ ok: true, nativeCapture: true })
+    expect(result.monitors).toHaveLength(2)
+    expect(result.monitors?.[1]).toMatchObject({ id: "m2", isPrimary: false })
+  })
+
+  it("list_screenshot_monitors degrades to an error envelope on unsupported shells", async () => {
+    capabilitiesMock.mockRejectedValue(new Error("NOT_SUPPORTED"))
+    const { ctx, tools } = makeCtx()
+    await screenshotPlugin.activate?.(ctx)
+    expect(await tools.list_screenshot_monitors({})).toEqual({
+      ok: false,
+      error: "NOT_SUPPORTED",
+    })
+  })
+
+  it("extract_screenshot_ocr emits the frame as an image block when includeImage is set", async () => {
+    screenshotMock.mockResolvedValue({
+      bytes: "QUJD",
+      width: 2,
+      height: 2,
+      capturedAt: 0,
+      format: "png",
+    })
+    extractMock.mockResolvedValue({
+      providerId: "tesseract-wasm",
+      pages: [{ pageNumber: 1, markdown: "HI", text: "HI", blocks: [] }],
+      combinedMarkdown: "HI",
+      combinedText: "HI",
+      languages: ["en"],
+      durationMs: 1,
+      cached: false,
+    })
+    const { ctx, tools } = makeCtx()
+    await screenshotPlugin.activate?.(ctx)
+    const result = (await tools.extract_screenshot_ocr({
+      mode: "native",
+      includeImage: true,
+    })) as { content: Array<{ type: string; text?: string; data?: string; mimeType?: string }> }
+    expect(result.content).toHaveLength(2)
+    // The text block carries the full JSON envelope — same fields as the
+    // plain-object shape, minus the in-memory `image` handle.
+    const envelope = JSON.parse(result.content[0].text ?? "{}") as {
+      ok: boolean
+      text?: string
+      image?: unknown
+    }
+    expect(envelope).toMatchObject({ ok: true, text: "HI" })
+    expect(envelope.image).toBeUndefined()
+    expect(result.content[1]).toMatchObject({
+      type: "image",
+      data: "QUJD",
+      mimeType: "image/png",
+    })
+  })
+
+  it("native mode feeds the OCR path too", async () => {
+    screenshotMock.mockResolvedValue({
+      bytes: "QUJD",
+      width: 2,
+      height: 2,
+      capturedAt: 0,
+      format: "png",
+    })
+    extractMock.mockResolvedValue({
+      providerId: "tesseract-wasm",
+      pages: [{ pageNumber: 1, markdown: "HI", text: "HI", blocks: [] }],
+      combinedMarkdown: "HI",
+      combinedText: "HI",
+      languages: ["en"],
+      durationMs: 1,
+      cached: false,
+    })
+    const { ctx, tools } = makeCtx()
+    await screenshotPlugin.activate?.(ctx)
+    const result = (await tools.extract_screenshot_ocr({ mode: "native" })) as { ok: boolean }
+    expect(result.ok).toBe(true)
+    expect(screenshotMock).toHaveBeenCalledTimes(1)
+    expect(captureMock).not.toHaveBeenCalled()
+    expect(extractMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: expect.objectContaining({
+          kind: "data-url",
+          dataUrl: "data:image/png;base64,QUJD",
+        }),
+      })
+    )
+  })
+
   it("registers extract_screenshot_ocr and OCRs the captured image", async () => {
-    extractMock.mockReset().mockResolvedValue({
+    extractMock.mockResolvedValue({
       providerId: "tesseract-wasm",
       pages: [
         {
@@ -120,12 +517,6 @@ describe("screenshot (built-in)", () => {
       durationMs: 1,
       cached: false,
     })
-    const mockFile = {
-      name: "screenshot.png",
-      size: 9,
-      type: "image/png",
-      arrayBuffer: async () => new TextEncoder().encode("png-bytes").buffer,
-    } as unknown as File
     captureMock.mockResolvedValue(mockFile)
     const { ctx, tools } = makeCtx()
     await screenshotPlugin.activate?.(ctx)
@@ -167,12 +558,6 @@ describe("screenshot (built-in)", () => {
   it("returns an MCP image content block on a successful capture", async () => {
     // jsdom's File.arrayBuffer is unreliable; provide a custom mock object
     // that quacks like a File enough for the plugin's encoding helper.
-    const mockFile = {
-      name: "screenshot.png",
-      size: 9,
-      type: "image/png",
-      arrayBuffer: async () => new TextEncoder().encode("png-bytes").buffer,
-    } as unknown as File
     captureMock.mockResolvedValue(mockFile)
     const { ctx, tools } = makeCtx()
     await screenshotPlugin.activate?.(ctx)

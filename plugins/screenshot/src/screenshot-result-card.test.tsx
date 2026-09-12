@@ -11,7 +11,12 @@ jest.mock("@cognia/plugin-ui", () => ({
   ),
 }))
 
-import { ScreenshotResultCard, screenshotBlocks } from "./screenshot-result-card"
+import {
+  SCREENSHOT_PART_TYPE,
+  ScreenshotMessagePart,
+  ScreenshotResultCard,
+  screenshotBlocks,
+} from "./screenshot-result-card"
 
 const PNG = "iVBORw0KGgo="
 
@@ -54,6 +59,25 @@ describe("ScreenshotResultCard", () => {
     )
     const withMcp = { ...part, output: undefined, mcpContent: [{ type: "image", data: PNG }] }
     expect(screenshotBlocks(withMcp)).toHaveLength(1)
+  })
+
+  it("renders the appended screenshot-result message part through the same card", () => {
+    // The `/screenshot` command appends `{ type: "screenshot-result",
+    // mcpContent: [...] }` via ctx.chat.appendMessagePart — the registered
+    // message-part renderer draws it with the tool card unchanged.
+    const part = {
+      type: SCREENSHOT_PART_TYPE,
+      mcpContent: [
+        { type: "text", text: "screenshot.png (9 bytes), copied to clipboard" },
+        { type: "image", data: PNG, mimeType: "image/png" },
+      ],
+    }
+    render(<ScreenshotMessagePart part={part as never} />)
+    expect(screen.getByTestId("screenshot-result-card")).toBeInTheDocument()
+    expect(screen.getByTestId("screenshot-image")).toHaveAttribute(
+      "src",
+      `data:image/png;base64,${PNG}`
+    )
   })
 
   it("declines when there is no image block (host falls back)", () => {

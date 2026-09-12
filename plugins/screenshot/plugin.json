@@ -1,8 +1,8 @@
 {
   "id": "cognia-screenshot",
   "name": "Screenshot",
-  "version": "0.1.0",
-  "description": "Capture a screen / window image and copy it to the clipboard or hand it back to the agent.",
+  "version": "0.2.0",
+  "description": "Capture a screen / window image — into the chat, onto the clipboard, or back to the agent as a visible image or OCR text.",
   "type": "frontend",
   "capabilities": ["tools", "commands"],
   "main": "src/index.ts",
@@ -14,17 +14,19 @@
   },
   "permissions": [
     "automation:screenshot",
+    "automation:read",
     "clipboard:write",
     "media:image:read",
-    "media:image:write",
-    "database:write"
+    "database:write",
+    "session:write",
+    "extension:ui"
   ],
   "activationEvents": ["startup", "onCommand:screenshot"],
   "runtimeCompatibility": {
     "browser": {
       "availability": "degraded",
       "entrypoint": "src/index.ts",
-      "reason": "Browser builds prompt for getDisplayMedia permission; some browsers gate this behind HTTPS."
+      "reason": "Browser builds prompt for getDisplayMedia permission; some browsers gate this behind HTTPS. The native capture mode and the host clipboard bridge are desktop-only."
     },
     "tauri": {
       "availability": "supported",
@@ -39,7 +41,7 @@
     {
       "id": "screenshot",
       "name": "/screenshot",
-      "description": "Capture a screen image and copy it to the clipboard.",
+      "description": "Capture a screen image into the chat and copy it to the clipboard. Pass `native` for a prompt-free desktop capture.",
       "icon": "Camera"
     }
   ]

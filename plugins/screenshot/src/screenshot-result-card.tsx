@@ -20,8 +20,17 @@ import {
   type McpResultBlock,
   type ToolResultRendererProps,
 } from "@cognia/plugin-sdk/api/tool-renderer"
+import type { MessagePartRendererProps } from "@cognia/plugin-sdk/api/message-renderer"
 import { parseToolOutput, PluginImage, ToolCard } from "@cognia/plugin-ui"
-interface ContentBlockLike {
+
+/**
+ * The custom `UIMessage` part type the `/screenshot` command appends via
+ * `ctx.chat.appendMessagePart`. Carries the same MCP content blocks the
+ * `take_screenshot` tool emits, so this card renders both.
+ */
+export const SCREENSHOT_PART_TYPE = "screenshot-result"
+/** Structural view of a content block — `McpResultBlock`'s catch-all member keeps union narrowing from helping, so cards read `type`/`text` this way. */
+export interface ContentBlockLike {
   type?: string
   text?: string
 }
@@ -66,4 +75,14 @@ export function ScreenshotResultCard({ part }: ToolResultRendererProps) {
       </div>
     </ToolCard>
   )
+}
+
+/**
+ * Renders the `screenshot-result` message part the `/screenshot` slash
+ * command appends to the transcript. The part carries `mcpContent` blocks,
+ * which is the first shape `screenshotBlocks` looks for, so the tool card
+ * draws it unchanged.
+ */
+export function ScreenshotMessagePart({ part }: MessagePartRendererProps) {
+  return <ScreenshotResultCard part={part as ToolResultRendererProps["part"]} />
 }
