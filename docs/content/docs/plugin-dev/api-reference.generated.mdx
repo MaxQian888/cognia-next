@@ -13,11 +13,12 @@ Contract `1.2.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | --- | ---: | --- | --- | --- |
 | `ctx.a2ui` | 8 | None | frontend, hybrid, python | internal |
 | `ctx.agent` | 28 | `agent:control`, `twin:read`, `agent:shared-memory:read`, `agent:dispatch`, `agent:dispatch-external` | frontend, hybrid, python | sensitive |
-| `ctx.ai` | 7 | `ai:chat`, `ai:embed` | frontend, hybrid | sensitive |
+| `ctx.ai` | 7 | `ai:chat`, `ai:embed` | frontend, hybrid, python | sensitive |
 | `ctx.artifact` | 10 | `artifact:write`, `artifact:read` | frontend, hybrid | internal |
 | `ctx.auth` | 5 | `auth:provide`, `auth:consume` | frontend, hybrid | secret |
 | `ctx.automation` | 24 | `automation:read`, `automation:screenshot`, `automation:click`, `automation:pointer`, `automation:type`, `automation:window` | frontend, hybrid | internal |
 | `ctx.backup` | 6 | `backup:read`, `backup:write` | frontend, hybrid | internal |
+| `ctx.bots` | 4 | `agent:control` | frontend, hybrid, python | sensitive |
 | `ctx.browser` | 4 | `agent:control`, `session:read` | frontend, hybrid | sensitive |
 | `ctx.canvas` | 32 | `canvas:write`, `canvas:read` | frontend, hybrid | internal |
 | `ctx.capabilities` | 0 | None | frontend, hybrid | internal |
@@ -43,7 +44,7 @@ Contract `1.2.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.issues` | 10 | `issue:write`, `issue:read` | frontend, hybrid | internal |
 | `ctx.i18n` | 10 | None | frontend, hybrid, python | internal |
 | `ctx.import` | 5 | None | frontend, hybrid | internal |
-| `ctx.integrations` | 16 | `integrations:execute`, `integrations:manage`, `integrations:read`, `integrations:events` | frontend, hybrid | sensitive |
+| `ctx.integrations` | 16 | `integrations:execute`, `integrations:manage`, `integrations:read`, `integrations:events` | frontend, hybrid, python | sensitive |
 | `ctx.lifecycle` | 1 | None | frontend, hybrid | internal |
 | `ctx.logger` | 8 | None | frontend, hybrid, python | internal |
 | `ctx.logs` | 14 | `logs:read`, `trace:read` | frontend, hybrid | sensitive |
@@ -88,7 +89,7 @@ Contract `1.2.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.webview` | 1 | None | frontend, hybrid | internal |
 | `ctx.window` | 4 | None | frontend, hybrid | internal |
 | `ctx.workflow` | 25 | `canvas:write`, `canvas:run`, `workflow:read`, `connectors:send`, `session:read` | frontend, hybrid | internal |
-| `ctx.workspace` | 9 | `filesystem:read`, `network:fetch`, `git:read`, `filesystem:write` | frontend, hybrid, python | internal |
+| `ctx.workspace` | 11 | `filesystem:read`, `network:fetch`, `git:read`, `filesystem:write`, `git:write`, `integrations:execute` | frontend, hybrid, python | internal |
 
 ## Adapter error codes
 
@@ -227,6 +228,15 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `backup.restore` | `backup:write` | high | No |
 | `backup.serialize` | `backup:read` | medium | No |
 | `backup.validate` | `backup:read` | medium | Yes |
+
+## `ctx.bots`
+
+| Method | Permissions | Risk | Idempotent |
+| --- | --- | --- | --- |
+| `bots.getInstallation` | `agent:control` | low | Yes |
+| `bots.enqueue` | `agent:control` | medium | Yes |
+| `bots.cancelResource` | `agent:control` | medium | Yes |
+| `bots.recordMonitor` | `agent:control` | low | Yes |
 
 ## `ctx.browser`
 
@@ -1259,7 +1269,9 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `workspace.getActiveRoot` | `filesystem:read` | medium | Yes |
 | `workspace.getBackend` | None | low | Yes |
 | `workspace.listRegistered` | None | low | Yes |
+| `workspace.publish` | `filesystem:write`, `git:write`, `integrations:execute` | high | Yes |
 | `workspace.read` | `filesystem:read` | medium | Yes |
 | `workspace.registerBackend` | None | low | No |
 | `workspace.release` | `filesystem:write` | medium | Yes |
+| `workspace.snapshot` | `filesystem:read`, `git:read` | medium | Yes |
 | `workspace.walk` | `filesystem:read` | medium | Yes |

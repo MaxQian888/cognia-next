@@ -1,4 +1,9 @@
 {
   "title": "插件",
-  "pages": ["desktop-handlers", "ocr", "plugin-signing"]
+  "pages": [
+    "desktop-handlers",
+    "ocr",
+    "plugin-signing",
+    "web-clone"
+  ]
 }

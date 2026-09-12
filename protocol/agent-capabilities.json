@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "External-agent capability manifest (ADR-0090 external SSOT). Source of truth for layer 1 (protocol) and layer 2 (preset refinement) of the capability merge. Only the seven REGISTERED built-in protocols appear here: plugin protocols declare their own rows in the plugin manifest, and http/websocket/custom have no adapter and are read-only legacy. Every protocol carries a COMPLETE row -- an id with no evidence is written out as level \"unknown\", evidence \"none\", never omitted, so a missing measurement can never be mistaken for a measured yes.",
+  "description": "External-agent capability manifest (ADR-0090 external SSOT). Source of truth for layer 1 (protocol) and layer 2 (preset refinement) of the capability merge. Only the six REGISTERED built-in protocols appear here: plugin protocols declare their own rows in the plugin manifest, and http/websocket/custom have no adapter and are read-only legacy. Every protocol carries a COMPLETE row -- an id with no evidence is written out as level \"unknown\", evidence \"none\", never omitted, so a missing measurement can never be mistaken for a measured yes.",
   "capabilityIds": [
     "streaming",
     "session.multi-turn",
@@ -505,9 +505,9 @@
           "evidence": "protocol-spec"
         },
         "mcp": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
+          "level": "equivalent",
+          "evidence": "adapter-code",
+          "reasonKey": "launchTimeAuthorityOnly"
         },
         "permissions.interrupt-resume": {
           "level": "unsupported",
@@ -525,9 +525,8 @@
           "reasonKey": "agentOwned"
         },
         "thinking": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
+          "level": "native",
+          "evidence": "protocol-spec"
         },
         "context-management": {
           "level": "unsupported",
@@ -685,7 +684,7 @@
     },
     "pi-rpc": {
       "label": "Pi native `pi --mode rpc` JSONL command/event protocol",
-      "note": "Rows follow `pi-rpc-client.ts` / `pi-rpc-events.ts` (ADR-0119). Verified against Pi 0.84.3 `docs/rpc.md` and `docs/extensions.md`: tools run in parallel by default (sibling tool calls execute concurrently), `toolcall_delta` streams argument fragments, `set_auto_retry` / `auto_retry_start` / `auto_retry_end` cover rate limits, subagents exist only as an example extension (no protocol slot), and lifecycle hooks are Pi's own extension events.",
+      "note": "Pi RPC with the bundled Cognia extension: the extension mounts per-session MCP servers as Pi custom tools, enforces native-tool permissions, and reports tool events. Native RPC owns session resume, model selection and cancellation.",
       "capabilities": {
         "streaming": {
           "level": "native",
@@ -720,283 +719,74 @@
           "evidence": "protocol-spec"
         },
         "mcp": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noPerSessionMcpServers"
-        },
-        "permissions.interrupt-resume": {
-          "level": "native",
-          "evidence": "protocol-spec"
-        },
-        "permissions.set-mode": {
-          "level": "unknown",
-          "evidence": "none"
-        },
-        "prompt-caching": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "agentOwned"
-        },
-        "thinking": {
-          "level": "native",
-          "evidence": "protocol-spec"
-        },
-        "context-management": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "agentOwned"
-        },
-        "images": {
-          "level": "native",
-          "evidence": "adapter-code"
-        },
-        "beta-features": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
-        },
-        "rate-limit-handling": {
-          "level": "native",
-          "evidence": "protocol-spec"
-        },
-        "upstream-errors": {
-          "level": "native",
-          "evidence": "protocol-spec"
-        },
-        "stream-interruption": {
-          "level": "native",
-          "evidence": "protocol-spec"
-        },
-        "subagents.native": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
-        },
-        "steer": {
-          "level": "native",
-          "evidence": "protocol-spec"
-        },
-        "set-model": {
-          "level": "native",
-          "evidence": "adapter-code"
-        },
-        "checkpoint": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
-        },
-        "compaction": {
-          "level": "native",
-          "evidence": "adapter-code"
-        },
-        "output.structured": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
-        },
-        "session.store": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "sidecarOnly"
-        },
-        "session.manage": {
-          "level": "unknown",
-          "evidence": "none"
-        },
-        "permissions.update-rules": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
-        },
-        "hooks.lifecycle": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "agentOwned"
-        },
-        "input.elicitation": {
-          "level": "native",
-          "evidence": "protocol-spec"
-        },
-        "input.dialog": {
-          "level": "native",
-          "evidence": "protocol-spec"
-        },
-        "plugins.native": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "agentOwned"
-        },
-        "skills.native": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
-        },
-        "mcp.dynamic": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
-        },
-        "subagents.manage": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
-        },
-        "tasks.background": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
-        },
-        "commands.dynamic": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
-        },
-        "sandbox.native": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
-        },
-        "observability.child": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "sidecarOnly"
-        },
-        "startup.prewarm": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "sidecarOnly"
-        },
-        "mcp.logs": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "agentOwned"
-        },
-        "rate-limit-reporting": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "sidecarOnly"
-        },
-        "subagents.model-selection": {
-          "level": "unknown",
-          "evidence": "none"
-        },
-        "models.list": {
-          "level": "native",
-          "evidence": "protocol-spec"
-        },
-        "web.search": {
-          "level": "unknown",
-          "evidence": "none"
-        }
-      }
-    },
-    "opencode": {
-      "label": "OpenCode server protocol (HTTP + SSE)",
-      "note": "Rows follow `opencode-client.ts` against the `@opencode-ai/sdk` server surface.",
-      "capabilities": {
-        "streaming": {
-          "level": "native",
-          "evidence": "protocol-spec"
-        },
-        "session.multi-turn": {
-          "level": "native",
-          "evidence": "protocol-spec"
-        },
-        "session.resume": {
-          "level": "native",
-          "evidence": "adapter-code"
-        },
-        "tools.ordinary": {
-          "level": "native",
-          "evidence": "protocol-spec"
-        },
-        "tools.parallel": {
-          "level": "unknown",
-          "evidence": "none"
-        },
-        "tools.fragmented-json": {
-          "level": "unknown",
-          "evidence": "none"
-        },
-        "tools.results": {
-          "level": "native",
-          "evidence": "protocol-spec"
-        },
-        "tools.errors": {
-          "level": "native",
-          "evidence": "protocol-spec"
-        },
-        "mcp": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noPerSessionMcpServers"
-        },
-        "permissions.interrupt-resume": {
-          "level": "native",
-          "evidence": "protocol-spec"
-        },
-        "permissions.set-mode": {
-          "level": "native",
-          "evidence": "adapter-code"
-        },
-        "prompt-caching": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "agentOwned"
-        },
-        "thinking": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
-        },
-        "context-management": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "agentOwned"
-        },
-        "images": {
-          "level": "native",
-          "evidence": "adapter-code"
-        },
-        "beta-features": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
-        },
-        "rate-limit-handling": {
-          "level": "unknown",
-          "evidence": "none"
-        },
-        "upstream-errors": {
-          "level": "native",
-          "evidence": "protocol-spec"
-        },
-        "stream-interruption": {
-          "level": "native",
-          "evidence": "protocol-spec"
-        },
-        "subagents.native": {
-          "level": "unknown",
-          "evidence": "none"
-        },
-        "steer": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
-        },
-        "set-model": {
-          "level": "native",
-          "evidence": "adapter-code"
-        },
-        "checkpoint": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
-        },
-        "compaction": {
           "level": "equivalent",
           "evidence": "adapter-code",
-          "reasonKey": "nativeSummarizeRoute"
+          "reasonKey": "cogniaExtensionBridge"
+        },
+        "permissions.interrupt-resume": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "permissions.set-mode": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "prompt-caching": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "thinking": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "context-management": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "images": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "beta-features": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "rate-limit-handling": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "upstream-errors": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "stream-interruption": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "subagents.native": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "steer": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "set-model": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "checkpoint": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "compaction": {
+          "level": "native",
+          "evidence": "adapter-code"
         },
         "output.structured": {
           "level": "unsupported",
@@ -1009,8 +799,8 @@
           "reasonKey": "sidecarOnly"
         },
         "session.manage": {
-          "level": "native",
-          "evidence": "adapter-code"
+          "level": "unknown",
+          "evidence": "none"
         },
         "permissions.update-rules": {
           "level": "unsupported",
@@ -1018,17 +808,17 @@
           "reasonKey": "noProtocolSlot"
         },
         "hooks.lifecycle": {
-          "level": "unknown",
-          "evidence": "none"
-        },
-        "input.elicitation": {
           "level": "unsupported",
           "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
+          "reasonKey": "agentOwned"
+        },
+        "input.elicitation": {
+          "level": "native",
+          "evidence": "protocol-spec"
         },
         "input.dialog": {
-          "level": "unknown",
-          "evidence": "none"
+          "level": "native",
+          "evidence": "protocol-spec"
         },
         "plugins.native": {
           "level": "unsupported",
@@ -1038,7 +828,7 @@
         "skills.native": {
           "level": "unsupported",
           "evidence": "protocol-spec",
-          "reasonKey": "agentOwned"
+          "reasonKey": "noProtocolSlot"
         },
         "mcp.dynamic": {
           "level": "unsupported",
@@ -1056,8 +846,9 @@
           "reasonKey": "noProtocolSlot"
         },
         "commands.dynamic": {
-          "level": "native",
-          "evidence": "adapter-code"
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
         },
         "sandbox.native": {
           "level": "unsupported",
@@ -1089,9 +880,8 @@
           "evidence": "none"
         },
         "models.list": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
+          "level": "native",
+          "evidence": "protocol-spec"
         },
         "web.search": {
           "level": "unknown",
@@ -1100,8 +890,8 @@
       }
     },
     "opencode-v2": {
-      "label": "OpenCode V2 legacy local-service preview protocol",
-      "note": "Capabilities describe Cognia's exact pinned 2.0.0-beta.1 preview contract, not the incompatible current V2 branch.",
+      "label": "OpenCode V2 native API",
+      "note": "Current stable @opencode/client 2.0.0 /api contract; no V1 or beta fallback. Native SDK operations are exposed separately from the canonical chat surface.",
       "capabilities": {
         "streaming": {
           "level": "native",
@@ -1136,17 +926,17 @@
           "evidence": "protocol-spec"
         },
         "mcp": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noPerSessionMcpServers"
+          "level": "equivalent",
+          "evidence": "adapter-code",
+          "reasonKey": "isolatedLocalService"
         },
         "permissions.interrupt-resume": {
           "level": "native",
           "evidence": "adapter-code"
         },
         "permissions.set-mode": {
-          "level": "unknown",
-          "evidence": "none"
+          "level": "native",
+          "evidence": "adapter-code"
         },
         "prompt-caching": {
           "level": "unsupported",
@@ -1159,9 +949,8 @@
           "reasonKey": "modelVariantOverlay"
         },
         "context-management": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "agentOwned"
+          "level": "native",
+          "evidence": "adapter-code"
         },
         "images": {
           "level": "native",
@@ -1189,9 +978,8 @@
           "evidence": "none"
         },
         "steer": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
+          "level": "native",
+          "evidence": "adapter-code"
         },
         "set-model": {
           "level": "native",
@@ -1530,7 +1318,7 @@
   "presetRefinements": {
     "deepseek-harness-acp": {
       "protocol": "acp",
-      "note": "Upstream calls this server automation-only: committed assistant text is all that reaches the wire.",
+      "note": "Current ACP publishes committed text, reasoning and tool updates, supports per-session MCP and persisted session list/resume/close.",
       "capabilities": {
         "streaming": {
           "level": "unsupported",
@@ -1538,48 +1326,34 @@
           "reasonKey": "committedRepliesOnly"
         },
         "thinking": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "committedRepliesOnly"
+          "level": "native",
+          "evidence": "protocol-spec"
         },
         "tools.errors": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "committedRepliesOnly"
+          "level": "native",
+          "evidence": "protocol-spec"
         },
         "tools.ordinary": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "committedRepliesOnly"
+          "level": "native",
+          "evidence": "protocol-spec"
         },
         "tools.results": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "committedRepliesOnly"
-        },
-        "images": {
-          "level": "unsupported",
-          "evidence": "adapter-code",
-          "reasonKey": "attachmentStoreUnavailable"
+          "level": "native",
+          "evidence": "protocol-spec"
         }
       }
     },
-    "opencode-remote": {
-      "protocol": "opencode",
-      "note": "Cognia never starts this server, so it cannot be sandboxed or torn down by us; capability-wise it is identical to the auto-spawn preset.",
-      "capabilities": {}
-    },
-    "opencode-v2-preview": {
+    "opencode-v2-service": {
       "protocol": "opencode-v2",
-      "note": "Preview service Cognia never starts or stops.",
+      "note": "Current local service discovery or explicit remote endpoint; Cognia does not stop a service it does not own.",
       "capabilities": {}
     }
   },
   "capabilityNotes": {
-    "thinking": "For an external agent this asks whether the HOST can set the thinking / reasoning level, which is the only question any surface acts on. An agent that merely streams thought chunks (every ACP agent) does not satisfy it -- there is nothing to configure. Codex takes it on its options channel and Pi has `set_thinking_level`, so those two are `native`. OpenCode expresses the same idea as variants -- named request overlays for one model, its docs' words -- so v2 is `equivalent`, not `native`: `opencode-v2-client.ts` sends the chosen id as the `variant` half of the `ModelRef` on `v2.session.switchModel`, which is the `provider/model#variant` reference OpenCode itself documents. v1 has no such field anywhere in its API, so effort there is only settable in the user's own opencode.json and the row stays `unsupported`.",
-    "mcp": "Whether Cognia can attach an MCP server for a session. ACP carries them on `session/new`; Codex has no per-session parameter and reaches the same outcome through a per-thread config override (`equivalent`); the rest have no channel.",
+    "thinking": "For an external agent this asks whether the HOST can set the thinking / reasoning level, which is the only question any surface acts on. An agent that merely streams thought chunks (every ACP agent) does not satisfy it -- there is nothing to configure. Codex takes it on its options channel and Pi has `set_thinking_level`, so those two are `native`. OpenCode expresses the same idea as variants -- named request overlays for one model, its docs' words -- so v2 is `equivalent`, not `native`: `opencode-v2-client.ts` sends the chosen id as the `variant` half of the `ModelRef` on `session.switchModel`, which is the `provider/model#variant` reference OpenCode itself documents.",
+    "mcp": "Whether Cognia can attach an MCP server to the running conversation. ACP carries per-session servers, Codex uses per-thread config, DeepSeek Harness mounts a session-owned composition, and Pi uses the bundled Cognia extension. Remote A2A has no reverse tool channel. OpenCode uses a private local service per conversation; shared remote endpoints cannot attach the local bridge.",
     "session.resume": "Reopening a prior session. On ACP this is gated on the agent advertising stable `sessionCapabilities.resume`, with legacy `loadSession` as a fallback, so the row is `unknown` and the handshake answers it.",
     "compaction": "ACP has no compaction method: the only route is a `/compact` or `/compress` the agent chose to advertise, which is a per-session live fact. Pi and Codex have native methods.",
-    "hooks.lifecycle": "No external protocol models Cognia's lifecycle hooks, so every row is `unknown`. Whether the hooks run is a HOST fact: the renderer wraps every external turn, the CLI does not."
+    "hooks.lifecycle": "Cognia hooks are a host facility, independent of the external protocol. Renderer and CLI dispatch prompt, stream, error and usage hooks around external turns and pre/post hooks around Cognia-projected tools. Native third-party tools remain under the external runtime; the scoped host fact reports whether the Cognia hook runtime is available."
   }
 }

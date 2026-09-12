@@ -1,7 +1,7 @@
 {
   "$schema": "./agent-sdk-surface.schema.json",
   "schemaVersion": 1,
-  "sdkVersion": "0.3.227",
+  "sdkVersion": "0.3.269",
   "generatedBy": "pnpm check:sdk-surface:write",
   "surface": {
     "options": {
@@ -153,11 +153,19 @@
         "status": "host-only",
         "note": "selects the binary to spawn"
       },
+      "perTaskStopAffordance": {
+        "status": "supported",
+        "capability": "tasks.background"
+      },
       "permissionMode": {
         "status": "supported",
         "capability": "permissions.set-mode"
       },
       "permissionPromptToolName": {
+        "status": "supported",
+        "capability": "permissions.interrupt-resume"
+      },
+      "permissionPrompts": {
         "status": "supported",
         "capability": "permissions.interrupt-resume"
       },
@@ -168,6 +176,10 @@
       "planModeInstructions": {
         "status": "supported",
         "capability": "context-management"
+      },
+      "pluginDelivery": {
+        "status": "supported",
+        "capability": "plugins.native"
       },
       "plugins": {
         "status": "supported",
@@ -210,7 +222,8 @@
         "capability": "skills.native"
       },
       "settings": {
-        "status": "planned"
+        "status": "host-only",
+        "note": "Arbitrary settings objects or paths may load executable project content; only reviewed serialized options and trusted host settings reach query()."
       },
       "skills": {
         "status": "supported",
@@ -263,13 +276,16 @@
     },
     "queryMethods": {
       "accountInfo": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "session.manage"
       },
       "applyFlagSettings": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "session.manage"
       },
       "backgroundTasks": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "tasks.background"
       },
       "close": {
         "status": "supported",
@@ -280,7 +296,8 @@
         "capability": "context-management"
       },
       "initializationResult": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "session.manage"
       },
       "interrupt": {
         "status": "supported",
@@ -291,35 +308,48 @@
         "capability": "mcp"
       },
       "readFile": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "checkpoint"
       },
       "reconnectMcpServer": {
         "status": "supported",
         "capability": "mcp"
       },
       "reinitialize": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "session.manage"
+      },
+      "reloadOutputStyles": {
+        "status": "supported",
+        "capability": "session.manage"
       },
       "reloadPlugins": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "plugins.native"
       },
       "reloadSkills": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "skills.native"
       },
       "rewindFiles": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "checkpoint"
       },
       "seedReadState": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "checkpoint"
       },
       "setMaxThinkingTokens": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "thinking"
       },
       "setMcpPermissionModeOverride": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "mcp.dynamic"
       },
       "setMcpServers": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "mcp.dynamic"
       },
       "setModel": {
         "status": "supported",
@@ -330,13 +360,17 @@
         "capability": "permissions.set-mode"
       },
       "stopTask": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "tasks.background"
       },
       "streamInput": {
-        "status": "planned"
+        "status": "not-applicable",
+        "capability": "session.multi-turn",
+        "note": "a control frame is JSON and this takes an AsyncIterable. Multi-turn input reaches the same place through `agent_send` -> pushUserMessage, which is the async iterable query() was handed."
       },
       "supportedAgents": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "subagents.manage"
       },
       "supportedCommands": {
         "status": "supported",
@@ -350,8 +384,14 @@
         "status": "supported",
         "capability": "mcp"
       },
+      "updateSettings": {
+        "status": "supported",
+        "capability": "session.manage"
+      },
       "usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET": {
-        "status": "planned"
+        "status": "not-applicable",
+        "capability": "observability.child",
+        "note": "the SDK marks it EXPERIMENTAL and says the method name itself will change when it stabilises. Exposing it would put that rename on our IPC surface, where it becomes a breaking change for every host."
       }
     },
     "messages": {
@@ -674,100 +714,169 @@
     },
     "hookEvents": {
       "ConfigChange": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "CwdChanged": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "DirectoryAdded": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "Elicitation": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "ElicitationResult": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "FileChanged": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "InstructionsLoaded": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "MessageDisplay": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "Notification": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "PermissionDenied": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "PermissionRequest": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "PostCompact": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
+      },
+      "PostModelSwitch": {
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "PostToolBatch": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "PostToolUse": {
         "status": "supported",
-        "capability": "hooks.lifecycle"
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "PostToolUseFailure": {
         "status": "supported",
-        "capability": "hooks.lifecycle"
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "PreCompact": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
+      },
+      "PreModelSwitch": {
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "PreToolUse": {
         "status": "supported",
-        "capability": "hooks.lifecycle"
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "SessionEnd": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "SessionStart": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "Setup": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "Stop": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "StopFailure": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "SubagentStart": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "SubagentStop": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "TaskCompleted": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "TaskCreated": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "TeammateIdle": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "UserPromptExpansion": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "UserPromptSubmit": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "WorktreeCreate": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       },
       "WorktreeRemove": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle",
+        "note": "Configured lifecycle handlers run through the SDK-native bridge; structured per-event outputs are preserved."
       }
     },
     "exports": [
@@ -858,6 +967,8 @@
       "PermissionUpdateDestination",
       "PolicySettingsOrigin",
       "PostCompactHookInput",
+      "PostModelSwitchHookInput",
+      "PostModelSwitchHookSpecificOutput",
       "PostToolBatchHookInput",
       "PostToolBatchHookSpecificOutput",
       "PostToolBatchToolCall",
@@ -866,6 +977,8 @@
       "PostToolUseHookInput",
       "PostToolUseHookSpecificOutput",
       "PreCompactHookInput",
+      "PreModelSwitchHookInput",
+      "PreModelSwitchHookSpecificOutput",
       "PreToolUseHookInput",
       "PreToolUseHookSpecificOutput",
       "ProvenanceEntry",
@@ -882,11 +995,16 @@
       "SDKBackgroundTasksChangedMessage",
       "SDKCommandsChangedMessage",
       "SDKCompactBoundaryMessage",
+      "SDKContextUsage",
+      "SDKContextUsageCategory",
       "SDKControlGetContextUsageResponse",
       "SDKControlGetUsageResponse",
       "SDKControlInitializeResponse",
       "SDKControlInterruptResponse",
+      "SDKControlListPermissionRulesResponse",
+      "SDKControlPermissionRulesState",
       "SDKControlReadFileResponse",
+      "SDKControlReloadOutputStylesResponse",
       "SDKControlReloadPluginsResponse",
       "SDKControlReloadSkillsResponse",
       "SDKControlRequest",
@@ -901,6 +1019,7 @@
       "SDKHookStartedMessage",
       "SDKInformationalMessage",
       "SDKLocalCommandOutputMessage",
+      "SDKMcpResourceLink",
       "SDKMemoryRecallMessage",
       "SDKMessage",
       "SDKMessageOrigin",
@@ -911,6 +1030,9 @@
       "SDKPartialAssistantMessage",
       "SDKPermissionDenial",
       "SDKPermissionDeniedMessage",
+      "SDKPermissionRuleDescription",
+      "SDKPermissionRuleEntry",
+      "SDKPermissionWorkspaceDirectory",
       "SDKPluginInstallMessage",
       "SDKPromptSuggestionMessage",
       "SDKRateLimitEvent",

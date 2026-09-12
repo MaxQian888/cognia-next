@@ -22,7 +22,12 @@ describe("host feature manifest", () => {
     })
     expect(manifest.features["session.state-sync"]).toEqual({
       version: 1,
-      operations: ["host_state_snapshot", "host_state_submit", "host_state_status"],
+      operations: [
+        "host_state_snapshot",
+        "host_state_submit",
+        "host_state_status",
+        "session_mark_read",
+      ],
     })
     expect(manifest.features["room.host-run"]).toEqual({
       version: 1,

@@ -890,6 +890,23 @@
       },
       "additionalProperties": false
     },
+    "bot_console_read": {
+      "type": "object",
+      "properties": {
+        "view": {
+          "type": "string",
+          "enum": [
+            "catalog",
+            "installations",
+            "credentials"
+          ]
+        }
+      },
+      "required": [
+        "view"
+      ],
+      "additionalProperties": false
+    },
     "bot_delivery_replay": {
       "type": "object",
       "description": "Requeue a dead-lettered Bot delivery. The host refuses a row that is no longer dead-lettered, so a replayed request is a no-op rather than a second run.",
@@ -902,6 +919,258 @@
         }
       },
       "additionalProperties": false
+    },
+    "bot_installation_mutate": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "operationId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "operation": {
+              "type": "string",
+              "const": "install"
+            },
+            "definitionId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "scope": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "account",
+                    "workspace",
+                    "project"
+                  ]
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false
+            },
+            "config": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "credentialBindings": {
+              "type": "object",
+              "additionalProperties": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "integrationAccountId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      }
+                    },
+                    "required": [
+                      "integrationAccountId"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "adapterId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      }
+                    },
+                    "required": [
+                      "adapterId"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            }
+          },
+          "required": [
+            "operationId",
+            "operation",
+            "definitionId",
+            "version",
+            "scope"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operationId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "operation": {
+              "type": "string",
+              "const": "config"
+            },
+            "installationId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "config": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "operationId",
+            "operation",
+            "installationId",
+            "config"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operationId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "operation": {
+              "type": "string",
+              "const": "bind"
+            },
+            "installationId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "slotId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "binding": {
+              "anyOf": [
+                {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "integrationAccountId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        }
+                      },
+                      "required": [
+                        "integrationAccountId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "adapterId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        }
+                      },
+                      "required": [
+                        "adapterId"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "operationId",
+            "operation",
+            "installationId",
+            "slotId",
+            "binding"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operationId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "operation": {
+              "type": "string",
+              "const": "set_enabled"
+            },
+            "installationId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "operationId",
+            "operation",
+            "installationId",
+            "enabled"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operationId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "operation": {
+              "type": "string",
+              "const": "uninstall"
+            },
+            "installationId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "required": [
+            "operationId",
+            "operation",
+            "installationId"
+          ],
+          "additionalProperties": false
+        }
+      ]
     },
     "bot_run_manual": {
       "type": "object",
@@ -3970,6 +4239,20 @@
       },
       "additionalProperties": false
     },
+    "execution_run_detail": {
+      "type": "object",
+      "required": [
+        "runId"
+      ],
+      "properties": {
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "additionalProperties": false
+    },
     "external_agent_admit_run": {
       "type": "object",
       "required": [
@@ -4191,6 +4474,17 @@
             }
           },
           "additionalProperties": false
+        },
+        "systemPrompt": {
+          "type": "string",
+          "description": "Canonical selected skills and task instructions from the caller, forwarded to the host agent."
+        },
+        "allowedTools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Per-turn native tool allowlist. The host retains its own workspace and policy boundaries."
         }
       },
       "additionalProperties": false
@@ -5424,6 +5718,10 @@
         },
         "prune": {
           "type": "boolean"
+        },
+        "refspec": {
+          "type": "string",
+          "pattern": "^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$"
         },
         "workspaceId": {
           "type": "string",
@@ -10299,6 +10597,24 @@
       },
       "additionalProperties": false
     },
+    "session_mark_read": {
+      "type": "object",
+      "required": [
+        "sessionId",
+        "readThrough"
+      ],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "readThrough": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
     "session_timeline": {
       "type": "object",
       "required": [
@@ -14068,10 +14384,15 @@
           "type": "string"
         },
         "remote": {
-          "type": "string"
+          "type": "string",
+          "nullable": true
         },
         "prune": {
           "type": "boolean"
+        },
+        "refspec": {
+          "type": "string",
+          "pattern": "^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$"
         }
       },
       "additionalProperties": false

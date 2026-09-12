@@ -404,6 +404,18 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.backup.validate": {
     kind: "none",
   },
+  "ctx.bots.getInstallation": {
+    kind: "none",
+  },
+  "ctx.bots.enqueue": {
+    kind: "none",
+  },
+  "ctx.bots.cancelResource": {
+    kind: "none",
+  },
+  "ctx.bots.recordMonitor": {
+    kind: "none",
+  },
   "ctx.browser.isDomainAuthorized": {
     kind: "none",
   },
@@ -2458,6 +2470,9 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.workspace.listRegistered": {
     kind: "none",
   },
+  "ctx.workspace.publish": {
+    kind: "none",
+  },
   "ctx.workspace.read": {
     kind: "none",
   },
@@ -2466,6 +2481,9 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
     disposeMethod: "unregister",
   },
   "ctx.workspace.release": {
+    kind: "none",
+  },
+  "ctx.workspace.snapshot": {
     kind: "none",
   },
   "ctx.workspace.walk": {

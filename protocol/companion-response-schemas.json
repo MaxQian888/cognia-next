@@ -9836,20 +9836,72 @@
       "$ref": "#/$defs/NullResult"
     },
     "git_clone": {
-      "type": "object",
-      "required": ["workspaceId", "relativePath"],
-      "properties": {
-        "workspaceId": {
-          "type": "string"
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
         },
-        "relativePath": {
-          "type": "string"
+        {
+          "type": "object",
+          "required": ["workspaceId", "relativePath"],
+          "properties": {
+            "workspaceId": {
+              "type": "string"
+            },
+            "relativePath": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "rootId", "relativePath"],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "authorized-root"
+            },
+            "rootId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "relativePath": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "pluginId", "segments"],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "plugin-cache"
+            },
+            "pluginId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "segments": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "additionalProperties": false
         }
-      },
-      "additionalProperties": false
+      ]
     },
     "git_clone_guarded": {
       "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
         {
           "type": "object",
           "required": ["kind", "rootId", "relativePath"],
@@ -10739,6 +10791,9 @@
     },
     "send_to_external_agent": {
       "$ref": "#/$defs/NullResult"
+    },
+    "session_mark_read": {
+      "type": "null"
     },
     "session_attach": {
       "$ref": "#/$defs/LegacyResult"
@@ -11642,6 +11697,72 @@
     },
     "agent_session_api": {
       "$ref": "#/$defs/NullResult"
+    },
+    "execution_run_detail": {
+      "type": "object",
+      "description": "Selected run summary, non-private journal, exact approval artifacts and optional completed Bot result. Read is scoped to the active account and agent.run capability.",
+      "required": ["events", "interrupts"],
+      "properties": {
+        "run": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "interrupts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "botResult": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "bot_installation_mutate": {
+      "type": "object",
+      "description": "Authoritative installation projection or idempotent removal receipt; no auth-session handles.",
+      "additionalProperties": true
+    },
+    "bot_console_read": {
+      "type": "object",
+      "description": "Host Bot console catalog, configuration rows or sanitized credential choices.",
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "groups": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

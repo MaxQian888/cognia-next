@@ -70,8 +70,7 @@
         "type": "frontend",
         "capabilities": [
           "tools",
-          "importers",
-          "exporters"
+          "importers"
         ],
         "main": "src/index.ts",
         "author": {
@@ -86,7 +85,9 @@
           "artifact:read",
           "artifact:write",
           "filesystem:read",
-          "filesystem:write"
+          "filesystem:write",
+          "media:image:read",
+          "database:write"
         ],
         "activationEvents": [
           "startup"
@@ -114,8 +115,8 @@
       "path": "builtin://cognia-pdf",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-pdf/095d459ea43500c7c52e8baaa21e3ba8c7ec7ce66e0ef131b2d72a01c3c37299.cjs",
-        "sha256": "095d459ea43500c7c52e8baaa21e3ba8c7ec7ce66e0ef131b2d72a01c3c37299",
+        "url": "/_cognia/builtin-plugins/cognia-pdf/01028a725ee62a921e7903ad68ad9be4c5a1392ddace1e26c8ff99e75d0e0c20.cjs",
+        "sha256": "01028a725ee62a921e7903ad68ad9be4c5a1392ddace1e26c8ff99e75d0e0c20",
         "sharedModules": []
       }
     },

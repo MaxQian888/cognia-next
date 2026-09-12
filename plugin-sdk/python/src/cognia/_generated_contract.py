@@ -4043,7 +4043,7 @@ API_NAMESPACE_CONTRACTS = [
                 "consentTier": "policy",
                 "risk": "medium",
                 "idempotent": False,
-                "cancellable": False,
+                "cancellable": True,
                 "resourceEffect": {
                     "kind": "none",
                 },
@@ -4139,6 +4139,7 @@ API_NAMESPACE_CONTRACTS = [
         "runtimes": [
             "frontend",
             "hybrid",
+            "python",
         ],
         "platforms": [
             "desktop",
@@ -4972,6 +4973,89 @@ API_NAMESPACE_CONTRACTS = [
                 ],
                 "consentTier": "policy",
                 "risk": "medium",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+        ],
+    },
+    {
+        "id": "bots",
+        "authorPath": "ctx.bots",
+        "type": "PluginBotsAPI",
+        "stability": "stable",
+        "introducedIn": "0.1.0",
+        "runtimes": [
+            "frontend",
+            "hybrid",
+            "python",
+        ],
+        "platforms": [
+            "desktop",
+            "web",
+            "mobile",
+        ],
+        "transport": "direct",
+        "factory": "context.bots",
+        "enforcement": "shadow",
+        "dataClassification": "sensitive",
+        "timeoutMs": None,
+        "retry": "never",
+        "errorPolicy": "preserve",
+        "lifecycle": "plugin",
+        "methods": [
+            {
+                "id": "bots.getInstallation",
+                "name": "getInstallation",
+                "requiredPermissions": [
+                    "agent:control",
+                ],
+                "consentTier": "policy",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "bots.enqueue",
+                "name": "enqueue",
+                "requiredPermissions": [
+                    "agent:control",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "bots.cancelResource",
+                "name": "cancelResource",
+                "requiredPermissions": [
+                    "agent:control",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "bots.recordMonitor",
+                "name": "recordMonitor",
+                "requiredPermissions": [
+                    "agent:control",
+                ],
+                "consentTier": "policy",
+                "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
                 "resourceEffect": {
@@ -9425,6 +9509,7 @@ API_NAMESPACE_CONTRACTS = [
         "runtimes": [
             "frontend",
             "hybrid",
+            "python",
         ],
         "platforms": [
             "desktop",
@@ -16081,6 +16166,22 @@ API_NAMESPACE_CONTRACTS = [
                 },
             },
             {
+                "id": "workspace.publish",
+                "name": "publish",
+                "requiredPermissions": [
+                    "filesystem:write",
+                    "git:write",
+                    "integrations:execute",
+                ],
+                "consentTier": "policy",
+                "risk": "high",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
                 "id": "workspace.read",
                 "name": "read",
                 "requiredPermissions": [
@@ -16114,6 +16215,21 @@ API_NAMESPACE_CONTRACTS = [
                     "filesystem:write",
                 ],
                 "consentTier": "none",
+                "risk": "medium",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "workspace.snapshot",
+                "name": "snapshot",
+                "requiredPermissions": [
+                    "filesystem:read",
+                    "git:read",
+                ],
+                "consentTier": "policy",
                 "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,

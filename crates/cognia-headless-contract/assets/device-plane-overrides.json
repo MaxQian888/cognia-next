@@ -2049,6 +2049,17 @@
             },
             "additionalProperties": false
           },
+          "systemPrompt": {
+            "type": "string",
+            "description": "Canonical selected skills and task instructions from the caller, forwarded to the host agent."
+          },
+          "allowedTools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Per-turn native tool allowlist. The host retains its own workspace and policy boundaries."
+          },
           "adminLease": {
             "type": "string",
             "minLength": 1
@@ -3377,6 +3388,10 @@
           },
           "prune": {
             "type": "boolean"
+          },
+          "refspec": {
+            "type": "string",
+            "pattern": "^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$"
           },
           "workspaceId": {
             "type": "string",

@@ -219,11 +219,13 @@ export const INBOX_RELAY_HOST_OPERATIONS = Object.freeze([
  *
  * A Host that runs a delivery runner advertises these as `bots.control`, and
  * `resolveBotWriteAvailability` answers from the manifest a host actually
- * sent rather than from this list. Installing, configuring and binding a
- * credential are deliberately absent: those carry a config blob and account
- * ids and stay Host-side actions.
+ * sent rather than from this list. Lifecycle mutations and console reads use
+ * the same host authority; configuration and credential handles are never
+ * accepted from a companion database mirror.
  */
 export const BOT_CONTROL_HOST_OPERATIONS = Object.freeze([
+  "bot_installation_mutate",
+  "bot_console_read",
   "bot_trigger_set_armed",
   "bot_run_manual",
   "bot_delivery_replay",
@@ -356,7 +358,12 @@ export function buildLocalHostFeatureManifest({
     }
     features["session.state-sync"] = {
       version: 1,
-      operations: ["host_state_snapshot", "host_state_submit", "host_state_status"],
+      operations: [
+        "host_state_snapshot",
+        "host_state_submit",
+        "host_state_status",
+        "session_mark_read",
+      ],
     }
     // Advertised on both hosts that can actually spawn a process. The
     // operations are named individually rather than implied by the feature id

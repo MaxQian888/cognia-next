@@ -2245,6 +2245,19 @@
       "expired": "Expired",
       "pending": "Pending"
     },
+    "botApproval": {
+      "agentReported": "Test results below are reported by the agent. Inspect the command evidence before approving.",
+      "baseSha": "Approved target SHA",
+      "detailUnavailable": "Approval details are unavailable. Refresh this run before approving.",
+      "fileMode": "File mode",
+      "headSha": "Workspace HEAD",
+      "model": "Model",
+      "publication": "Exact publication contents",
+      "report": "Test and review report",
+      "result": "Recorded result",
+      "session": "Agent session",
+      "title": "Review Bot publication"
+    },
     "changeKind": {
       "any": "Changed",
       "created": "Created",
@@ -4766,6 +4779,16 @@
       "searchAria": "Search Bots",
       "searchPlaceholder": "Search Bots"
     },
+    "monitor": {
+      "activated": "Monitoring started",
+      "awaitingSync": "Awaiting first sync",
+      "health": "Synchronization",
+      "healthy": "Up to date",
+      "lastSuccess": "Last successful sync",
+      "neverSynced": "No successful sync yet",
+      "notStarted": "Not armed yet",
+      "retryAt": "Next retry"
+    },
     "never": "Never",
     "notAvailable": "Not available",
     "orphan": {
@@ -4835,7 +4858,8 @@
     "run": {
       "blockedNoTrigger": "This Bot declares no manual trigger, so there is nothing to attribute a hand-started run to.",
       "blockedOrphan": "There is no definition left to run.",
-      "label": "Run now"
+      "label": "Run now",
+      "trigger": "Manual action"
     },
     "runs": {
       "description": "Every run this Bot has produced, from the same cockpit as /agent-runs.",
@@ -4877,6 +4901,7 @@
       "needs_setup": "Needs setup"
     },
     "summary": "{armed} of {total} armed",
+    "syncFailed": "Unable to read Bot setup from the host. Reconnect and try again.",
     "title": "Bots",
     "trigger": {
       "armAria": "Arm {name}",
@@ -6099,7 +6124,10 @@
       },
       "commands": {
         "batchFailed": "{count, plural, one {Command {names} failed} other {Commands {names} failed}}",
+        "cancel": "Cancel command",
         "failed": "Command failed",
+        "progress": "/{command} progress",
+        "running": "Running /{command}…",
         "unavailable": "/{name} is not available yet."
       },
       "context": {
@@ -13588,8 +13616,10 @@
         "cancelKillsRuntime": "cancelling ends the whole runtime, not just the turn",
         "codexOptionsChannel": "carried on the Codex options channel",
         "cogniaDispatchAgent": "served by Cognia's dispatch_agent tool",
+        "cogniaExtensionBridge": "provided by the bundled Cognia extension",
         "cogniaHookRuntime": "Cognia's hook runtime wraps the turn",
         "committedRepliesOnly": "this channel reports committed replies only",
+        "isolatedLocalService": "provided by a private local service for this conversation",
         "launchTimeAuthorityOnly": "authority is granted at launch and cannot change mid-run",
         "modelVariantOverlay": "carried as a named model variant",
         "nativeSummarizeRoute": "served by the provider's own summarize route",
@@ -13756,7 +13786,7 @@
         "notGranted": "This device may not ask the Host what it has installed.",
         "unsupported": "The paired Host does not list installed agents."
       },
-      "devinSetupHint": "Install Devin CLI and run `devin auth login` once. Cognia launches `devin acp` and discovers models from the session; use `acp --model swe2` to select SWE-2 at launch. Choose Accept Edits (Code) when you want Devin to modify files. Devin 3000.10.21 did not load Cognia-provided MCP servers in live tests; native tools work.",
+      "devinSetupHint": "Install Devin CLI and run `devin auth login` once. Cognia launches `devin acp` and discovers models from the session; use `acp --model swe2` to select SWE-2 at launch. Choose Accept Edits (Code) when you want Devin to modify files. Cognia tools are available in each conversation alongside Devin’s native tools.",
       "diagnostics": {
         "adapter": "Adapter: {name}",
         "authMethods": "Auth methods: {methods}",
@@ -13987,11 +14017,12 @@
       "declaredWebSearchNative": "Yes — it searches the web itself",
       "declaredWebSearchNone": "No — Cognia should supply search",
       "deepseekHarness": {
-        "approvalNotice": "This transport cannot ask for approval while a turn is running, so authority is fixed when the runtime starts.",
+        "approvalNotice": "Native SDK tools cannot request approval during a turn, so their authority is fixed at startup. Cognia tools follow the host permission policy.",
         "cancelNotice": "Cancelling a turn closes the runtime: this transport has no mid-turn cancel.",
         "capabilities": "Capabilities",
         "capabilityApproval": "Mid-turn approval",
         "capabilityCancel": "Cancel a single turn",
+        "capabilityMcp": "Cognia and MCP tools",
         "capabilityReasoning": "Reasoning",
         "capabilityStreaming": "Live streaming",
         "capabilitySubagents": "Subagent lineage",
@@ -14001,7 +14032,9 @@
         "capabilityUsage": "Token usage",
         "channel": "Channel",
         "checking": "Checking…",
-        "description": "A managed DeepSeek Harness runtime. Unlike other external agents, DeepSeek Harness publishes no executable, so Cognia installs and certifies its own runtime in an isolated home.",
+        "committedEventsNotice": "Both transports provide committed text, reasoning and tool events, and can use Cognia tools through MCP. Live token deltas are unavailable; SDK also reports usage and subagent lineage, while ACP supports per-tool approval and session resume.",
+        "credentialNotice": "The API key is stored in the local keyring. Leave this field blank when editing to keep the existing key.",
+        "description": "Cognia installs a pinned version of the official DeepSeek Harness runtime in an isolated directory and verifies its packages and launch profiles before use.",
         "doctor": "Check",
         "experimentalBadge": "Experimental",
         "experimentalNotice": "Upstream is a developer preview and warns of compatibility-breaking changes. Cognia pins an exact version and refuses to start on drift.",
@@ -14020,6 +14053,7 @@
         "installSucceeded": "DeepSeek Harness runtime installed.",
         "installed": "Installed",
         "installing": "Installing…",
+        "managedLaunchNotice": "Install the managed runtime, then save this profile. Cognia resolves its executable and composition at launch.",
         "notInstalled": "Not installed",
         "profile": "Profile",
         "profileReadonly": "Read-only",
@@ -14086,7 +14120,7 @@
       "detailsRecommendedActions": "Recommended actions",
       "detailsSupportTier": "Support tier",
       "detailsSurface": "Surface",
-      "devinPresetDescription": "Run Devin through its native ACP server using your existing CLI login. Select models, including SWE-2, after connecting. Choose Accept Edits (Code) when you want Devin to modify files. Devin 3000.10.21 did not load Cognia-provided MCP servers in live tests; native tools work.",
+      "devinPresetDescription": "Run Devin through its native ACP server using your existing CLI login. Select models, including SWE-2, after connecting. Choose Accept Edits (Code) when you want Devin to modify files. Cognia tools are available in each conversation alongside Devin’s native tools.",
       "disconnect": "Disconnect",
       "disconnectFailed": "Failed to disconnect",
       "disconnected": "Disconnected successfully",
@@ -14094,6 +14128,7 @@
       "enableExternalAgents": "Enable External Agents",
       "enableExternalAgentsDesc": "Allow using external agents like Claude Code via ACP protocol",
       "endpoint": "Endpoint URL",
+      "endpointInvalid": "Enter a valid HTTP or HTTPS endpoint URL.",
       "endpointRequired": "Endpoint URL is required for HTTP transport",
       "executionTimeoutMs": "Execution Timeout (ms)",
       "fromPreset": "From preset: {name}",
@@ -14119,10 +14154,12 @@
         "refresh": "Refresh status",
         "title": "OpenCode server"
       },
-      "opencodeV2PresetDescription": "Documents Cognia's pinned legacy preview contract. Current OpenCode V2 builds are incompatible.",
-      "opencodeV2PresetName": "OpenCode V2 legacy preview contract",
-      "opencodeV2PresetSetupHint": "Documentation only. Use stable OpenCode HTTP/SSE or ACP until the preview client is regenerated.",
-      "opencodeV2Protocol": "OpenCode V2 (legacy preview)",
+      "opencodeV2EndpointHint": "Local discovery uses ephemeral authentication. For an explicit native service endpoint, use its server password; the Basic Auth username defaults to opencode. The optional API key is for Bearer-authenticated proxy endpoints.",
+      "opencodeV2EndpointPlaceholder": "Leave blank to discover the local service",
+      "opencodeV2PresetDescription": "Connect to the current OpenCode service over HTTP and SSE.",
+      "opencodeV2PresetName": "OpenCode V2",
+      "opencodeV2PresetSetupHint": "Run the current OpenCode service, then connect through local discovery or its service endpoint.",
+      "opencodeV2Protocol": "OpenCode V2 (HTTP + SSE)",
       "passBareFlag": "Pass --bare",
       "passBareFlagHint": "Skip on-disk auto-discovery (CLAUDE.md, hooks, plugins, MCP). Appended to args at spawn time.",
       "passDebugFlag": "Pass --debug",
@@ -14291,6 +14328,7 @@
       },
       "announceActive": "{count, plural, =0 {No active tasks} one {# active task} other {# active tasks}}",
       "announceWaiting": "{count, plural, one {# task} other {# tasks}}, {waiting} waiting for you",
+      "collapse": "Collapse task list",
       "decideInMain": "Decide in the main window",
       "detail": {
         "hide": "Hide details",
@@ -14320,6 +14358,7 @@
       "openOwner": {
         "chat": "Open the chat that owns this",
         "external": "Open the owning session",
+        "gate": "Open approval",
         "run": "Open the run cockpit",
         "team": "Open the team workspace"
       },
@@ -14327,6 +14366,7 @@
       "source": {
         "chat": "Chat",
         "external": "Agent",
+        "gate": "Approval",
         "run": "Run",
         "team": "Team"
       },
@@ -14994,6 +15034,10 @@
         "desc": "Fires after the context window is compacted.",
         "label": "After compaction"
       },
+      "PostModelSwitch": {
+        "desc": "Fires after a model change and can add context for the next request.",
+        "label": "After model switch"
+      },
       "PostToolBatch": {
         "desc": "Fires once after a batch of parallel tool calls completes.",
         "label": "After tool batch"
@@ -15009,6 +15053,10 @@
       "PreCompact": {
         "desc": "Fires before the context window is compacted.",
         "label": "Before compaction"
+      },
+      "PreModelSwitch": {
+        "desc": "Fires before a model change and can allow, deny, or ask for confirmation.",
+        "label": "Before model switch"
       },
       "PreToolUse": {
         "desc": "Fires before a tool runs; a hook can block or rewrite the call.",
@@ -36601,6 +36649,12 @@
           "label": "Placement diagnostics",
           "unavailable": "Island diagnostics are only available in the desktop app."
         },
+        "errors": {
+          "close": "Could not close the island. Try again.",
+          "fullscreen": "Could not save the full-screen preference. Try again.",
+          "monitor": "Could not move the island to this display. Try again.",
+          "open": "Could not open the island. Try again."
+        },
         "hideOnFullscreen": {
           "desc": "Withdraw the island while a full-screen app owns its display, leaving the top strip to that app. A session that needs you still brings it back. macOS only.",
           "label": "Hide under full-screen apps"
@@ -36610,7 +36664,8 @@
           "label": "Show on display",
           "option": "{name} ({width}×{height})",
           "primary": "Primary display"
-        }
+        },
+        "retry": "Retry"
       },
       "liveness": {
         "dropping": "Events dropped",
@@ -50148,6 +50203,11 @@
           "hint": "Number of concurrent downloads (1–32).",
           "label": "Concurrency"
         },
+        "convertLocal": {
+          "hint": "Re-run component extraction + codegen on a saved snapshot (bundle directory or .html file) instead of fetching. Relative paths resolve under the workspace; leave URL empty when set.",
+          "label": "Convert local snapshot",
+          "placeholder": "./snapshots/site"
+        },
         "extractComponents": {
           "hint": "Also analyze the page into a component structure (template / style / logic).",
           "label": "Extract components"
@@ -51935,6 +51995,7 @@
       "switchCasesRequired": "Add at least one case",
       "twinIngestSourceRequired": "Provide content (paste mode) or a URL (fetch mode)",
       "variableName": "Use a valid identifier (letters, digits, underscores; not starting with a digit)",
+      "webCloneExclusive": "Provide either a URL or a local snapshot path — not both",
       "webhookPath": "Use letters, digits, dashes, underscores, and slashes only"
     },
     "variablePicker": {

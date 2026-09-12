@@ -1212,3 +1212,32 @@ test("gateway task deletion is granted as agent control and validates task ident
   const responses = JSON.parse(readFileSync(new URL("../../protocol/companion-response-schemas.json", import.meta.url), "utf8"))
   assert.equal(responses.commands[name].$ref, "#/$defs/NullResult")
 })
+
+
+test("Git clone output contracts admit service paths and sanitized device references", () => {
+  const catalog = JSON.parse(readFileSync(new URL("../../protocol/companion-response-schemas.json", import.meta.url), "utf8"))
+  for (const name of ["git_clone", "git_clone_guarded"]) {
+    const validate = new Ajv2020({ strict: false }).compile({ ...catalog.commands[name], $defs: catalog.$defs })
+    for (const value of ["/host/workspaces/owned-run", { kind: "authorized-root", rootId: "owned-root", relativePath: "checkout" }, { kind: "plugin-cache", pluginId: "github-devin-bot", segments: ["bot-runs", "run"] }]) {
+      assert.equal(validate(value), true, JSON.stringify(validate.errors))
+    }
+    for (const value of [null, "", {}, { kind: "plugin-cache", pluginId: "github-devin-bot" }, { kind: "authorized-root", rootId: "", relativePath: "checkout" }]) {
+      assert.equal(validate(value), false)
+    }
+  }
+})
+
+
+test("Git fetch admits exact SHA acquisition on the service and device contracts", () => {
+  const catalog = JSON.parse(readFileSync(new URL("../../protocol/companion-request-schemas.json", import.meta.url), "utf8"))
+  for (const [schema, base] of [[catalog.servicePlaneCommands.git_fetch, { repoPath: "/host/workspaces/run" }], [catalog.commands.git_fetch, { workspaceId: "workspace", adminLease: "approved-lease" }]]) {
+    const validate = new Ajv2020({ strict: false }).compile(schema)
+    assert.equal(validate({ ...base, remote: null }), true, JSON.stringify(validate.errors))
+    for (const refspec of [undefined, "a".repeat(40), "b".repeat(64)]) {
+      assert.equal(validate({ ...base, remote: "origin", ...(refspec ? { refspec } : {}) }), true, JSON.stringify(validate.errors))
+    }
+    for (const refspec of ["main", "HEAD:refs/heads/main", "--upload-pack=evil", "", null]) {
+      assert.equal(validate({ ...base, refspec }), false)
+    }
+  }
+})

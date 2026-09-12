@@ -3692,6 +3692,70 @@
       "outputTyped": true
     },
     {
+      "name": "bot_console_read",
+      "category": "automation",
+      "resource": "bot",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "bot_console_read (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "view": {
+            "type": "string",
+            "enum": [
+              "catalog",
+              "installations",
+              "credentials"
+            ]
+          }
+        },
+        "required": [
+          "view"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "Host Bot console catalog, configuration rows or sanitized credential choices.",
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "groups": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "bot_delivery_replay",
       "category": "automation",
       "resource": "bot",
@@ -3734,6 +3798,282 @@
           }
         },
         "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "bot_installation_mutate",
+      "category": "automation",
+      "resource": "bot",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "bot_installation_mutate (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "operationId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "operation": {
+                "type": "string",
+                "const": "install"
+              },
+              "definitionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "version": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "scope": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "account",
+                      "workspace",
+                      "project"
+                    ]
+                  },
+                  "workspaceId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "projectId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "additionalProperties": false
+              },
+              "config": {
+                "type": "object",
+                "additionalProperties": {},
+                "example": {}
+              },
+              "credentialBindings": {
+                "type": "object",
+                "additionalProperties": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "integrationAccountId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        }
+                      },
+                      "required": [
+                        "integrationAccountId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "adapterId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        }
+                      },
+                      "required": [
+                        "adapterId"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "example": {}
+              }
+            },
+            "required": [
+              "operationId",
+              "operation",
+              "definitionId",
+              "version",
+              "scope"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "operationId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "operation": {
+                "type": "string",
+                "const": "config"
+              },
+              "installationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "config": {
+                "type": "object",
+                "additionalProperties": {},
+                "example": {}
+              }
+            },
+            "required": [
+              "operationId",
+              "operation",
+              "installationId",
+              "config"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "operationId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "operation": {
+                "type": "string",
+                "const": "bind"
+              },
+              "installationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "slotId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "binding": {
+                "anyOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "integrationAccountId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          }
+                        },
+                        "required": [
+                          "integrationAccountId"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "adapterId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          }
+                        },
+                        "required": [
+                          "adapterId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "operationId",
+              "operation",
+              "installationId",
+              "slotId",
+              "binding"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "operationId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "operation": {
+                "type": "string",
+                "const": "set_enabled"
+              },
+              "installationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "enabled": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "operationId",
+              "operation",
+              "installationId",
+              "enabled"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "operationId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "operation": {
+                "type": "string",
+                "const": "uninstall"
+              },
+              "installationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "required": [
+              "operationId",
+              "operation",
+              "installationId"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "Authoritative installation projection or idempotent removal receipt; no auth-session handles.",
+        "additionalProperties": true
       },
       "outputTyped": true
     },
@@ -14022,6 +14362,69 @@
       "outputTyped": true
     },
     {
+      "name": "execution_run_detail",
+      "category": "tasks",
+      "resource": "execution",
+      "target": "execution",
+      "operation": "read",
+      "capability": "agent.run",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "execution_run_detail (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "runId"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "Selected run summary, non-private journal, exact approval artifacts and optional completed Bot result. Read is scoped to the active account and agent.run capability.",
+        "required": [
+          "events",
+          "interrupts"
+        ],
+        "properties": {
+          "run": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "interrupts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "botResult": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "external_agent_admit_run",
       "category": "agents",
       "resource": "external-agents",
@@ -15117,6 +15520,17 @@
               }
             },
             "additionalProperties": false
+          },
+          "systemPrompt": {
+            "type": "string",
+            "description": "Canonical selected skills and task instructions from the caller, forwarded to the host agent."
+          },
+          "allowedTools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Per-turn native tool allowlist. The host retains its own workspace and policy boundaries."
           }
         },
         "additionalProperties": false
@@ -17742,20 +18156,76 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": "object",
-        "required": [
-          "workspaceId",
-          "relativePath"
-        ],
-        "properties": {
-          "workspaceId": {
-            "type": "string"
+        "oneOf": [
+          {
+            "type": "string",
+            "minLength": 1
           },
-          "relativePath": {
-            "type": "string"
+          {
+            "type": "object",
+            "required": [
+              "workspaceId",
+              "relativePath"
+            ],
+            "properties": {
+              "workspaceId": {
+                "type": "string"
+              },
+              "relativePath": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind",
+              "rootId",
+              "relativePath"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "authorized-root"
+              },
+              "rootId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "relativePath": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind",
+              "pluginId",
+              "segments"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "plugin-cache"
+              },
+              "pluginId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "segments": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "additionalProperties": false
           }
-        },
-        "additionalProperties": false
+        ]
       },
       "outputTyped": true
     },
@@ -17796,6 +18266,10 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "oneOf": [
+          {
+            "type": "string",
+            "minLength": 1
+          },
           {
             "type": "object",
             "required": [
@@ -18877,10 +19351,17 @@
             "type": "string"
           },
           "remote": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "prune": {
             "type": "boolean"
+          },
+          "refspec": {
+            "type": "string",
+            "pattern": "^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$"
           }
         },
         "additionalProperties": false
@@ -38975,6 +39456,43 @@
             "description": "Whole-table count. The direct store carries it; the indexed bridge omits it rather than paying for a full count."
           }
         }
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "session_mark_read",
+      "category": "sessions",
+      "resource": "session",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "session_mark_read (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "sessionId",
+          "readThrough"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "readThrough": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
       },
       "outputTyped": true
     },
@@ -59720,5 +60238,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "126a56cc0b14d25b3abdf53b8894b4b1fe1d1bc7bde5528f7e5fad3e506c23a2"
+  "catalogHash": "afc0862b4063d378c1a6d98f8341b0bdf322d1f075246a6bfa7e292fb8c5f402"
 }

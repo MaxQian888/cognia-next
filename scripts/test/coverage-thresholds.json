@@ -167,6 +167,18 @@
     "lines": 90,
     "statements": 90
   },
+  "./plugins/web-clone/src/**/*.{ts,tsx}": {
+    "branches": 90,
+    "functions": 90,
+    "lines": 90,
+    "statements": 90
+  },
+  "./plugins/cognia-pdf/src/**/*.{ts,tsx}": {
+    "branches": 90,
+    "functions": 90,
+    "lines": 90,
+    "statements": 90
+  },
   "./hooks/**/*.{ts,tsx}": {
     "branches": 50,
     "functions": 30,

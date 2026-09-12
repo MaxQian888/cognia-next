@@ -446,6 +446,22 @@ const globalConfig: Config = {
     // co-located coverage contract as host modules.
     "plugins/sre-agent/src/**/*.{ts,tsx}",
     "!plugins/sre-agent/src/**/*.test.{ts,tsx}",
+    // Web Clone: the /web-clone plugin's parse/resolve/job-builder logic is
+    // pure and fully unit-tested — same co-located ≥90% contract.
+    "plugins/web-clone/src/**/*.{ts,tsx}",
+    "!plugins/web-clone/src/**/*.test.{ts,tsx}",
+    // Deep Research: the /research plugin's engine is pure dependency-injected
+    // TypeScript — same co-located ≥90% contract.
+    "plugins/deep-research/src/**/*.{ts,tsx}",
+    "!plugins/deep-research/src/**/*.test.{ts,tsx}",
+    // Impeccable: the installable design-skill plugin's lifecycle entry is
+    // covered by its co-located manifest/bundle-integrity suite.
+    "plugins/impeccable/src/**/*.{ts,tsx}",
+    "!plugins/impeccable/src/**/*.test.{ts,tsx}",
+    // Cognia PDF: the browser-bundled PDF plugin's engine/runtime/tools are
+    // pure TypeScript behind a mocked pdf.js seam — same co-located ≥90% contract.
+    "plugins/cognia-pdf/src/**/*.{ts,tsx}",
+    "!plugins/cognia-pdf/src/**/*.test.{ts,tsx}",
     // The overlay is shipped as a string and loaded by its suites via
     // readFileSync + eval, so V8 cannot attribute any coverage to it and all
     // ~1.8k lines report 0% — diluting the `global` bucket (the

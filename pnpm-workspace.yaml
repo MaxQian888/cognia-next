@@ -106,6 +106,8 @@ allowBuilds:
   spawn-sync: false
   tesseract.js: true
   unrs-resolver: true
+  # Optional msgpackr acceleration; the portable JavaScript decoder is sufficient.
+  msgpackr-extract: false
 
 minimumReleaseAgeExclude:
   - "@ai-sdk/fireworks@3.0.22"
@@ -117,6 +119,9 @@ minimumReleaseAgeExclude:
   - ai@7.0.48
   - get-tsconfig@4.14.1
   - tsx@4.23.3
+  - "@opencode/client@2.0.0"
+  - "@opencode/protocol@2.0.0"
+  - "@opencode/schema@2.0.0"
 
 # `pnpm audit` is a BLOCKING gate (CI_CD.md, supply-chain group), so every entry
 # here has to name the advisory and say why no safe upgrade exists. The

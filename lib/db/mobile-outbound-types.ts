@@ -31,6 +31,7 @@
 // the chat-send path. Re-add an entry here ONLY together with its UI
 // trigger, RPC dispatch arm, and handler.
 export const MOBILE_OUTBOUND_COMMANDS = [
+  "session_mark_read",
   // Connector subsystem (share-target + draft approval panel).
   "connector_send",
   "connector_approve_draft",

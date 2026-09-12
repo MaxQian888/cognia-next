@@ -120,7 +120,7 @@ host loads such plugins, but the contribution is dead weight or silently ignored
 | --- | --- | --- |
 | `permissions` | `manifest.permissions.unknown` — **warning** | unknown permission strings don't block; the host's grant flow simply never offers them |
 | `tools[]` | `name` / `description` required per entry | |
-| `cliTools[]` | 24 `manifest.cliTools.*` codes (`lint_cli_tools`) | requires `cli:execute`, validates binary provenance, argv tokens, parameter references, cwd/stdin/env policies, numeric knobs, output parsing, success codes, and version args |
+| `cliTools[]` | 29 `manifest.cliTools.*` codes (`lint_cli_tools`) | requires `cli:execute`, validates binary provenance, argv tokens, parameter references, cwd/stdin/env policies, numeric knobs (`timeoutMs` capped at the `plugin_cli_exec` 600s ceiling), output parsing, success codes, and version args — plus `access` (`"read"`/`"write"`) and `confinedPathParams` (declared params only, and a cwd base must exist to confine against) |
 | `commands[]` | `id` / `name` required | |
 | `modes[]` | `id` / `name` / `icon` required | |
 | `activationEvents` / `activateOnStartup` | array of strings / boolean | |

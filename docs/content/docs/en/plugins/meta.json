@@ -1,4 +1,9 @@
 {
   "title": "Plugins",
-  "pages": ["desktop-handlers", "ocr", "plugin-signing"]
+  "pages": [
+    "desktop-handlers",
+    "ocr",
+    "plugin-signing",
+    "web-clone"
+  ]
 }

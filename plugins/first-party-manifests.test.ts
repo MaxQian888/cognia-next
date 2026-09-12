@@ -89,7 +89,9 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
   "anthropic-skills": ["field_missing:skills"],
   "browser-tools": ["field_missing:tools"],
   "clipboard-history": ["field_missing:tools"],
-  "clipboard-tools": ["field_missing:tools", "field_missing:workflow"],
+  // `tools[]` is declared in plugin.json now (discoverable before activation);
+  // the workflow nodes stay imperative (`ctx.workflow.registerNode`).
+  "clipboard-tools": ["field_missing:workflow"],
   "cognia-appearance-demo": [],
   "cognia-anime-effort": [],
   "cognia-backend-refactor": [
@@ -183,8 +185,10 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
   "web-tools": ["field_missing:tools"],
   "workflow-ai": ["field_missing:tools", "field_missing:commands"],
   "workspace-tools": ["field_missing:tools", "field_missing:workflow"],
+  // `tools[]` is declared in plugin.json now (discoverable before activation);
+  // the rest stay on the module-manifest overlay (pack/skills/presets/
+  // templates live in src/index.ts — a builtin has no fetchable JSON path).
   "zhihu-content-pipeline": [
-    "field_missing:tools",
     "field_missing:skills",
     "field_missing:mcp-server-preset",
     "field_missing:character-pack",

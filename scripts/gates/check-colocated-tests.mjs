@@ -58,6 +58,13 @@ export const TS_ROOTS = [
   "browser-extension/src/components/",
   "browser-extension/src/hooks/",
   "browser-extension/src/lib/",
+  // The Deep Research plugin ships the same co-located-test discipline its
+  // jest collectCoverageFrom entry already assumes; without a root here the
+  // gate cannot see an untested engine file.
+  "plugins/deep-research/src/",
+  // The Impeccable plugin keeps its lifecycle entry and bundle-integrity
+  // suite co-located; same contract as the other first-party plugin roots.
+  "plugins/impeccable/src/",
 ]
 /**
  * Carve-outs the rule names explicitly.

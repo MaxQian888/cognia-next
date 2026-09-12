@@ -2245,6 +2245,19 @@
       "expired": "已过期",
       "pending": "待处理"
     },
+    "botApproval": {
+      "agentReported": "以下测试结果由 Agent 报告，请审批前检查实际命令证据。",
+      "baseSha": "审批目标 SHA",
+      "detailUnavailable": "审批详情不可用，请刷新此运行后再审批。",
+      "fileMode": "文件权限模式",
+      "headSha": "工作区 HEAD",
+      "model": "模型",
+      "publication": "完整发布内容",
+      "report": "测试与审查报告",
+      "result": "已保存的结果",
+      "session": "Agent 会话",
+      "title": "审核 Bot 发布内容"
+    },
     "changeKind": {
       "any": "已变更",
       "created": "新建",
@@ -4766,6 +4779,16 @@
       "searchAria": "搜索 Bot",
       "searchPlaceholder": "搜索 Bot"
     },
+    "monitor": {
+      "activated": "监控开始时间",
+      "awaitingSync": "等待首次同步",
+      "health": "同步状态",
+      "healthy": "已同步",
+      "lastSuccess": "最近成功同步",
+      "neverSynced": "尚未成功同步",
+      "notStarted": "尚未启用触发器",
+      "retryAt": "下次重试"
+    },
     "never": "从未",
     "notAvailable": "不适用",
     "orphan": {
@@ -4835,7 +4858,8 @@
     "run": {
       "blockedNoTrigger": "这个 Bot 没有声明手动触发器，手动运行无处归属。",
       "blockedOrphan": "已经没有定义可以运行了。",
-      "label": "立即运行"
+      "label": "立即运行",
+      "trigger": "手动操作"
     },
     "runs": {
       "description": "这个 Bot 产生的全部运行，与 /agent-runs 用的是同一个面板。",
@@ -4877,6 +4901,7 @@
       "needs_setup": "待配置"
     },
     "summary": "{total} 个中有 {armed} 个已武装",
+    "syncFailed": "无法从主机读取 Bot 配置，请重新连接后重试。",
     "title": "Bot",
     "trigger": {
       "armAria": "武装「{name}」",
@@ -6099,7 +6124,10 @@
       },
       "commands": {
         "batchFailed": "命令 {names} 执行失败",
+        "cancel": "取消命令",
         "failed": "命令执行失败",
+        "progress": "/{command} 进度",
+        "running": "正在运行 /{command}…",
         "unavailable": "/{name} 暂不可用。"
       },
       "context": {
@@ -13588,8 +13616,10 @@
         "cancelKillsRuntime": "取消会结束整个运行时，而不只是当前回合",
         "codexOptionsChannel": "通过 Codex options 通道传递",
         "cogniaDispatchAgent": "由 Cognia 的 dispatch_agent 工具提供",
+        "cogniaExtensionBridge": "由随附的 Cognia 扩展提供",
         "cogniaHookRuntime": "由 Cognia Hook 运行时包裹该回合",
         "committedRepliesOnly": "该通道只上报已提交的回复",
+        "isolatedLocalService": "由此对话专用的本地服务提供",
         "launchTimeAuthorityOnly": "权限只在启动时授予，运行中无法更改",
         "modelVariantOverlay": "以模型变体（variant）的形式下发",
         "nativeSummarizeRoute": "由服务方自带的 summarize 路径提供",
@@ -13756,7 +13786,7 @@
         "notGranted": "这台设备无权向该 Host 询问它安装了什么。",
         "unsupported": "已配对的 Host 不提供已安装 agent 的列表。"
       },
-      "devinSetupHint": "安装 Devin CLI 并运行一次 `devin auth login`。Cognia 通过 `devin acp` 启动并读取会话模型列表；使用 `acp --model swe2` 可在启动时选择 SWE-2。 如需修改文件，请选择“接受编辑（Code）”模式。 实测 Devin 3000.10.21 未加载 Cognia 传入的 MCP 服务；原生工具可用。",
+      "devinSetupHint": "安装 Devin CLI 并运行一次 `devin auth login`。Cognia 通过 `devin acp` 启动并读取会话模型列表；使用 `acp --model swe2` 可在启动时选择 SWE-2。 如需修改文件，请选择“接受编辑（Code）”模式。 每个会话均可使用 Cognia 工具和 Devin 原生工具。",
       "diagnostics": {
         "adapter": "适配器：{name}",
         "authMethods": "认证方式：{methods}",
@@ -13987,11 +14017,12 @@
       "declaredWebSearchNative": "是——它自己会搜",
       "declaredWebSearchNone": "否——由 Cognia 提供搜索",
       "deepseekHarness": {
-        "approvalNotice": "该传输层无法在对话进行中申请授权，因此权限在运行时启动时就已确定。",
+        "approvalNotice": "SDK 原生工具无法在执行中请求审批，其权限在启动时确定。Cognia 工具遵循宿主权限策略。",
         "cancelNotice": "取消对话会关闭整个运行时：该传输层没有单次对话取消能力。",
         "capabilities": "能力",
         "capabilityApproval": "对话中授权",
         "capabilityCancel": "取消单次对话",
+        "capabilityMcp": "Cognia 与 MCP 工具",
         "capabilityReasoning": "推理过程",
         "capabilityStreaming": "实时流式输出",
         "capabilitySubagents": "子 Agent 谱系",
@@ -14001,7 +14032,9 @@
         "capabilityUsage": "Token 用量",
         "channel": "通道",
         "checking": "检查中…",
-        "description": "由 Cognia 托管的 DeepSeek Harness 运行时。与其他外部 Agent 不同，DeepSeek Harness 未发布可执行文件，因此 Cognia 在隔离目录中安装并认证自己的运行时。",
+        "committedEventsNotice": "两种传输均提供已提交的文本、推理和工具事件，并可通过 MCP 使用 Cognia 工具。不支持实时 token 增量；SDK 额外提供用量和子代理关系，ACP 支持逐工具审批和会话恢复。",
+        "credentialNotice": "API Key 将保存到本地密钥库。编辑时留空可保留已有密钥。",
+        "description": "Cognia 在隔离目录中安装固定版本的 DeepSeek Harness 官方运行时，并在使用前校验依赖包和启动配置。",
         "doctor": "检查",
         "experimentalBadge": "实验性",
         "experimentalNotice": "上游仍处于开发者预览阶段，并明确提示会有破坏性变更。Cognia 锁定确切版本，一旦漂移则拒绝启动。",
@@ -14020,6 +14053,7 @@
         "installSucceeded": "DeepSeek Harness 运行时安装完成。",
         "installed": "已安装",
         "installing": "安装中…",
+        "managedLaunchNotice": "先安装托管运行时，再保存此配置。Cognia 会在启动时解析可执行文件和运行配置。",
         "notInstalled": "未安装",
         "profile": "配置档案",
         "profileReadonly": "只读",
@@ -14086,7 +14120,7 @@
       "detailsRecommendedActions": "建议操作",
       "detailsSupportTier": "支持级别",
       "detailsSurface": "接入面",
-      "devinPresetDescription": "通过原生 ACP 服务运行 Devin，复用已有的 CLI 登录。连接后可选择 SWE-2 等模型。 如需修改文件，请选择“接受编辑（Code）”模式。 实测 Devin 3000.10.21 未加载 Cognia 传入的 MCP 服务；原生工具可用。",
+      "devinPresetDescription": "通过原生 ACP 服务运行 Devin，复用已有的 CLI 登录。连接后可选择 SWE-2 等模型。 如需修改文件，请选择“接受编辑（Code）”模式。 每个会话均可使用 Cognia 工具和 Devin 原生工具。",
       "disconnect": "断开",
       "disconnectFailed": "断开失败",
       "disconnected": "断开成功",
@@ -14094,6 +14128,7 @@
       "enableExternalAgents": "启用外部代理",
       "enableExternalAgentsDesc": "允许通过 ACP 协议使用外部代理（如 Claude Code）",
       "endpoint": "Endpoint URL",
+      "endpointInvalid": "请输入有效的 HTTP 或 HTTPS 服务地址。",
       "endpointRequired": "HTTP 传输需要填写 Endpoint URL",
       "executionTimeoutMs": "执行超时（毫秒）",
       "fromPreset": "来自预设：{name}",
@@ -14119,10 +14154,12 @@
         "refresh": "刷新状态",
         "title": "OpenCode 服务器"
       },
-      "opencodeV2PresetDescription": "记录 Cognia 固定的旧版预览协议；当前 OpenCode V2 构建与其不兼容。",
-      "opencodeV2PresetName": "OpenCode V2 旧版预览协议",
-      "opencodeV2PresetSetupHint": "仅供文档参考。在重新生成预览客户端前，请使用稳定版 OpenCode HTTP/SSE 或 ACP。",
-      "opencodeV2Protocol": "OpenCode V2（旧版预览）",
+      "opencodeV2EndpointHint": "本地发现使用临时认证。填写原生服务地址时，请使用服务密码；Basic Auth 用户名默认为 opencode。可选 API 密钥用于采用 Bearer 认证的代理服务。",
+      "opencodeV2EndpointPlaceholder": "留空以发现本地服务",
+      "opencodeV2PresetDescription": "通过 HTTP 和 SSE 连接当前版本的 OpenCode 服务。",
+      "opencodeV2PresetName": "OpenCode V2",
+      "opencodeV2PresetSetupHint": "先运行当前版本的 OpenCode 服务，然后通过本地发现或服务地址连接。",
+      "opencodeV2Protocol": "OpenCode V2（HTTP + SSE）",
       "passBareFlag": "附加 --bare",
       "passBareFlagHint": "跳过磁盘自动发现（CLAUDE.md、hooks、插件、MCP）。会在启动时追加到 args 末尾。",
       "passDebugFlag": "附加 --debug",
@@ -14291,6 +14328,7 @@
       },
       "announceActive": "{count, plural, =0 {暂无进行中的任务} other {# 个进行中的任务}}",
       "announceWaiting": "{count} 个任务，{waiting} 个等待你处理",
+      "collapse": "收起任务列表",
       "decideInMain": "请在主窗口处理",
       "detail": {
         "hide": "隐藏详情",
@@ -14320,6 +14358,7 @@
       "openOwner": {
         "chat": "打开所属对话",
         "external": "打开所属会话",
+        "gate": "打开审批",
         "run": "打开运行控制台",
         "team": "打开团队工作区"
       },
@@ -14327,6 +14366,7 @@
       "source": {
         "chat": "对话",
         "external": "外部代理",
+        "gate": "审批",
         "run": "运行",
         "team": "团队"
       },
@@ -14994,6 +15034,10 @@
         "desc": "上下文窗口压缩后触发。",
         "label": "压缩后"
       },
+      "PostModelSwitch": {
+        "desc": "在切换模型后触发，可为下一次请求补充上下文。",
+        "label": "模型切换后"
+      },
       "PostToolBatch": {
         "desc": "一批并行工具调用全部完成后触发一次。",
         "label": "工具批处理后"
@@ -15009,6 +15053,10 @@
       "PreCompact": {
         "desc": "上下文窗口压缩前触发。",
         "label": "压缩前"
+      },
+      "PreModelSwitch": {
+        "desc": "在切换模型前触发，可允许、拒绝或要求确认。",
+        "label": "模型切换前"
       },
       "PreToolUse": {
         "desc": "工具运行前触发；hook 可拦截或改写该调用。",
@@ -36601,6 +36649,12 @@
           "label": "定位诊断",
           "unavailable": "灵动岛诊断信息仅在桌面端可用。"
         },
+        "errors": {
+          "close": "无法关闭灵动岛，请重试。",
+          "fullscreen": "无法保存全屏显示偏好，请重试。",
+          "monitor": "无法将灵动岛移至此显示器，请重试。",
+          "open": "无法打开灵动岛，请重试。"
+        },
         "hideOnFullscreen": {
           "desc": "当某个应用全屏占据灵动岛所在的显示器时，收起灵动岛，把顶部让给它。有会话需要你处理时仍会自动出现。仅 macOS 生效。",
           "label": "全屏应用时隐藏"
@@ -36610,7 +36664,8 @@
           "label": "显示在哪个屏幕",
           "option": "{name}（{width}×{height}）",
           "primary": "主显示器"
-        }
+        },
+        "retry": "重试"
       },
       "liveness": {
         "dropping": "事件被丢弃",
@@ -50148,6 +50203,11 @@
           "hint": "并发下载数（1–32）。",
           "label": "并发数"
         },
+        "convertLocal": {
+          "hint": "对已保存的快照（bundle 目录或 .html 文件）重跑组件提取 + codegen，不发起抓取。相对路径解析到工作区下；填写后 URL 留空。",
+          "label": "转换本地快照",
+          "placeholder": "./snapshots/site"
+        },
         "extractComponents": {
           "hint": "同时把页面分析成组件结构（模板 / 样式 / 逻辑）。",
           "label": "提取组件"
@@ -51935,6 +51995,7 @@
       "switchCasesRequired": "至少添加一个 case",
       "twinIngestSourceRequired": "请提供内容（粘贴模式）或 URL（拉取模式）",
       "variableName": "请使用合法标识符（字母 / 数字 / 下划线，且不能以数字开头）",
+      "webCloneExclusive": "URL 与本地快照路径二选一，不能同时填写",
       "webhookPath": "仅支持字母、数字、短划线、下划线和斜杠"
     },
     "variablePicker": {

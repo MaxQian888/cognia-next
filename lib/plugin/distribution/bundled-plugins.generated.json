@@ -11,18 +11,18 @@
         },
         {
           "path": "README.md",
-          "bytes": 7293,
-          "sha256": "5854022d722d9e32f3e1b309cc7c01cb89f5a4953c1a76c6651ca440f69a7def"
+          "bytes": 9085,
+          "sha256": "2f685a14bd498f3b88448c5c479cfd7582e1255d3cf3f233a22fb8f85dde30ed"
         },
         {
           "path": "main.py",
-          "bytes": 20707,
-          "sha256": "3a764d9f140689061d1cd2a2e0ed8011f7787e384d42790d16a30530e78c640d"
+          "bytes": 43055,
+          "sha256": "1c5ae43ab6cb0934350b9726ef6811a1534d7ea7f79d2a62efd7d5a9b21dd750"
         },
         {
           "path": "plugin.json",
-          "bytes": 5463,
-          "sha256": "4610a510459a8196db5ac156b03a934c289fdf7a3cbf6742477ac2b6ba569460"
+          "bytes": 5948,
+          "sha256": "acf26790b8b33713f09e46fafc4016686c77de4db34c5e13223dace74b10403f"
         },
         {
           "path": "pyproject.toml",
@@ -36,8 +36,8 @@
         },
         {
           "path": "repowiki/config.py",
-          "bytes": 6226,
-          "sha256": "09e43178c5d5a675cca56573d46547ceae0287ef6f31c4a8f046b56785bccdd9"
+          "bytes": 6527,
+          "sha256": "1f62b214c3b47e74c4cd2f5eb20665bf0f2d637abbee586d67cd292e8c0589d1"
         },
         {
           "path": "repowiki/core/__init__.py",
@@ -71,13 +71,13 @@
         },
         {
           "path": "repowiki/core/rag.py",
-          "bytes": 23234,
-          "sha256": "0ec7234d2472fb2c5357d9e47f79fa1a9c7c520232b97d0b8394d7808b1c3ae8"
+          "bytes": 27262,
+          "sha256": "ddbb42f51acd28d84e17cd262ff95fb48bda93b70c637079afe5bb31faaf766a"
         },
         {
           "path": "repowiki/core/rag_store.py",
-          "bytes": 11155,
-          "sha256": "b0b30e81e5e44e7a03d5fa748ad81497c92f264f449b4b5f0892a07f36c3a0e8"
+          "bytes": 12085,
+          "sha256": "19db76ae3100be9ea583d0713dc230408ae3184c1626e1e815c454e42b3d44a3"
         },
         {
           "path": "repowiki/core/scanner.py",
@@ -88,6 +88,11 @@
           "path": "repowiki/core/wiki_builder.py",
           "bytes": 12872,
           "sha256": "6014dd0737d664fc0791cee24bca9d0338f5fe12c6898c93a97b15a6593bbc9b"
+        },
+        {
+          "path": "repowiki/core/wiki_store.py",
+          "bytes": 7663,
+          "sha256": "8c445cdad7982a636515c41dd07b0679b96e77d51b6e9314e18b18a36523b5d0"
         },
         {
           "path": "repowiki/export/__init__.py",
@@ -111,13 +116,18 @@
         },
         {
           "path": "repowiki/host.py",
-          "bytes": 13657,
-          "sha256": "60ee9f0d158bef12ec78dae7973725c7f05e98a43505037b22a5f40c38f2d3ce"
+          "bytes": 14191,
+          "sha256": "cdf70ddf7fa3e7ae442e93d109222d7799eeab4ffde8c37da7cefff825ac8fdc"
         },
         {
           "path": "repowiki/ingest/__init__.py",
           "bytes": 0,
           "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "repowiki/ingest/filters.py",
+          "bytes": 3149,
+          "sha256": "e9e4cb7d8a1a263254cddca3c5ad70e199f30583c4908b183217f7ef10dc8b01"
         },
         {
           "path": "repowiki/ingest/git_diff.py",
@@ -146,18 +156,18 @@
         },
         {
           "path": "repowiki/llm/prompts.py",
-          "bytes": 11998,
-          "sha256": "2a8e14149711acd897a7ca0d1dc5efb3bcd69de6d13c4f721b603c0d594005b0"
+          "bytes": 19674,
+          "sha256": "3ed0dcc4b12ffd3414d06f665e7a51e30b63c8ad3125ce1c4927750a064e4e43"
         },
         {
           "path": "repowiki/panel.py",
-          "bytes": 9223,
-          "sha256": "864e8fc484aac50af517f3e4863dc2816c1c0ba52c8c154c4fb6140f1fec9468"
+          "bytes": 10078,
+          "sha256": "dd9b544eca22522731438deed387ae037658747cb97a67578e10557deb3786fe"
         },
         {
           "path": "repowiki/pipeline.py",
-          "bytes": 9185,
-          "sha256": "d139b4106909aa580d6f92cdfa8c07b098e720066c41e1e2032c189bb4d0b3e8"
+          "bytes": 14021,
+          "sha256": "540c3f3020996ea9aa31b68d2808299a6e316980698fd38154aa83fdd7ae587d"
         },
         {
           "path": "repowiki/project.py",

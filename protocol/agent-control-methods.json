@@ -35,7 +35,7 @@
       "kind": "sdk",
       "exposure": "control",
       "capability": "context-management",
-      "args": []
+      "args": ["options"]
     },
     {
       "name": "initializationResult",
@@ -80,11 +80,18 @@
       "args": []
     },
     {
+      "name": "reloadOutputStyles",
+      "kind": "sdk",
+      "exposure": "control",
+      "capability": "session.manage",
+      "args": []
+    },
+    {
       "name": "reloadPlugins",
       "kind": "sdk",
       "exposure": "control",
       "capability": "plugins.native",
-      "args": []
+      "args": ["options"]
     },
     {
       "name": "reloadSkills",
@@ -192,6 +199,13 @@
       "exposure": "control",
       "capability": "mcp",
       "args": ["serverName", "enabled"]
+    },
+    {
+      "name": "updateSettings",
+      "kind": "sdk",
+      "exposure": "control",
+      "capability": "session.manage",
+      "args": ["source", "settings"]
     },
     {
       "name": "usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET",

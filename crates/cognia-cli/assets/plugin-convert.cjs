@@ -5728,10 +5728,13 @@ makes the wrapper injection-safe \u2014 never concatenate values into a string.
 {
   "name": "ripgrep_search",
   "description": "Search file contents. Exit code 1 (no matches) is success.",
+  "access": "read",
+  "confinedPathParams": ["path"],
   "parameters": {
     "type": "object",
     "properties": {
       "pattern": { "type": "string", "description": "Regular expression" },
+      "path": { "type": "string", "description": "Search root, inside the workspace" },
       "globs": { "type": "array", "items": { "type": "string" } },
       "ignoreCase": { "type": "boolean" }
     },
@@ -5740,6 +5743,7 @@ makes the wrapper injection-safe \u2014 never concatenate values into a string.
   "binary": { "kind": "requires", "name": "rg" },
   "argv": [
     { "literal": "--json" },
+    { "literal": "--no-config" },
     { "param": "ignoreCase", "eachPrefixedBy": "-i", "omitWhenEmpty": true },
     { "param": "globs", "eachPrefixedBy": "--glob", "omitWhenEmpty": true },
     { "param": "pattern", "eachPrefixedBy": "-e" },
@@ -5753,6 +5757,32 @@ makes the wrapper injection-safe \u2014 never concatenate values into a string.
   "maxOutputBytes": 500000
 }
 \`\`\`
+
+Field notes:
+
+- \`access: "read" | "write"\` classifies the tool for the host's
+  workspace-confinement gates: \`read\` hard-denies credential paths
+  (\`.ssh\`, \`.aws\`, \`id_rsa\`, \u2026); \`write\` also escalates out-of-root
+  targets for approval. Omit it and the tool stays opaque to confinement.
+- \`confinedPathParams\` lists params whose values are filesystem paths.
+  Before the consent prompt, each value must resolve inside the workspace
+  root (or the plugin dir for \`cwd.kind: "plugin-dir"\`): \`..\` segments,
+  absolute paths outside the base, and credential-shaped paths are rejected.
+  It requires a non-\`none\` \`cwd\` kind \u2014 there must be a base to confine
+  against.
+- A \`{ "literal": "--no-config" }\` early in \`argv\` keeps user-level
+  config files (ripgrep: \`RIPGREP_CONFIG_PATH\`) from silently changing
+  behavior \u2014 or, on rg 13, re-arming the deprecated \`--pre\` hook.
+- \`timeoutMs\` is the child-process cap AND sizes the resilience backstop
+  and the agent-side IPC relay ceiling \u2014 a 60s tool is not severed by the
+  30s/120s defaults. Its ceiling is 600000 ms, matching the
+  \`plugin_cli_exec\` hard kill.
+- A \`stdin\` param (\`{ "param": "name" }\`) pipes a string argument into
+  the child without putting it on the command line. Secrets belong there \u2014
+  the rendered argv appears in the consent prompt and the automation audit
+  log, so a token passed as an argument is persisted in plaintext.
+- The \`cli:execute\` consent prompt shows the rendered command line
+  (program + argv + cwd), so users approve what actually runs.
 
 \`plugins/ripgrep-tools/plugin.json\` in the cognia repository is the
 reference implementation. Until \`cliTools\` has at least one entry,
@@ -6211,6 +6241,46 @@ function convert(input, options2 = {}) {
 
 // lib/claude/agents/markdown-agents.ts
 var import_gray_matter2 = __toESM(require_gray_matter());
+
+// lib/claude/agents/agent-color.ts
+var AGENT_COLOR_NAMES = [
+  "red",
+  "orange",
+  "yellow",
+  "green",
+  "cyan",
+  "blue",
+  "purple",
+  "pink",
+  "gray"
+];
+var ALIASES = {
+  magenta: "purple",
+  violet: "purple",
+  grey: "gray",
+  teal: "cyan",
+  amber: "orange"
+};
+var HEX6 = /^#([0-9a-f]{6})$/i;
+var HEX3 = /^#([0-9a-f]{3})$/i;
+function normalizeAgentColor(raw) {
+  if (typeof raw !== "string") return void 0;
+  const value = raw.trim().toLowerCase();
+  if (!value) return void 0;
+  if (AGENT_COLOR_NAMES.includes(value)) return value;
+  const alias = ALIASES[value];
+  if (alias) return alias;
+  const six = HEX6.exec(value);
+  if (six) return `#${six[1]}`;
+  const three = HEX3.exec(value);
+  if (three) {
+    const [r, g, b] = three[1];
+    return `#${r}${r}${g}${g}${b}${b}`;
+  }
+  return void 0;
+}
+
+// lib/claude/agents/markdown-agents.ts
 function serializeMarkdownAgent(id, def) {
   const data = {
     name: id,
@@ -6221,6 +6291,7 @@ function serializeMarkdownAgent(id, def) {
   if (def.maxTurns) data.maxTurns = def.maxTurns;
   if (def.tools?.length) data.tools = [...def.tools];
   if (def.disallowedTools?.length) data.disallowedTools = [...def.disallowedTools];
+  if (def.color) data.color = def.color;
   const body = def.prompt.endsWith("\n") ? def.prompt : `${def.prompt}
 `;
   return import_gray_matter2.default.stringify(body, data);
@@ -6290,6 +6361,8 @@ function parseMarkdownAgent(id, content) {
   if (hidden === true || hidden === "true") def.hidden = true;
   const disabled = data.disabled ?? data.disable;
   if (disabled === true || disabled === "true") def.disabled = true;
+  const color = normalizeAgentColor(data.color);
+  if (color) def.color = color;
   const unsupportedFields = [
     "skills",
     "memory",
@@ -6297,7 +6370,10 @@ function parseMarkdownAgent(id, content) {
     "isolation",
     "hooks",
     "mcpServers",
-    "permissionMode"
+    "permissionMode",
+    "temperature",
+    "mode",
+    "permission"
   ].filter((key) => {
     const value = data[key];
     if (value === void 0 || value === null || value === false) return false;

@@ -118,7 +118,7 @@ for (cap, fields) in CAPABILITY_FIELDS {
 | --- | --- | --- |
 | `permissions` | `manifest.permissions.unknown` —— **warning** | 未知权限字符串不阻断；host 的授权流程只是从不提供它们 |
 | `tools[]` | 每条目须有 `name` / `description` | |
-| `cliTools[]` | 24 个 `manifest.cliTools.*` 诊断码（`lint_cli_tools`） | 要求 `cli:execute`，校验二进制来源、argv token、参数引用、cwd/stdin/env 策略、数字开关、输出解析、成功退出码与 version arg |
+| `cliTools[]` | 29 个 `manifest.cliTools.*` 诊断码（`lint_cli_tools`） | 要求 `cli:execute`，校验二进制来源、argv token、参数引用、cwd/stdin/env 策略、数字开关（`timeoutMs` 上限为 `plugin_cli_exec` 的 600 秒硬上限）、输出解析、成功退出码与 version arg —— 以及 `access`（`"read"`/`"write"`）与 `confinedPathParams`（只能引用已声明参数，且必须有可作为边界的 cwd 基址） |
 | `commands[]` | 须有 `id` / `name` | |
 | `modes[]` | 须有 `id` / `name` / `icon` | |
 | `activationEvents` / `activateOnStartup` | 字符串数组 / 布尔值 | |
