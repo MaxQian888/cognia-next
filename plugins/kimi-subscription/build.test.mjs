@@ -1,8 +1,11 @@
+/** @jest-environment node */
+// `.test.mjs` files are discovered by the jsdom project, but esbuild's
+// TextEncoder realm invariant cannot hold there — pin this suite to node.
 import assert from "node:assert/strict"
 import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { test } from "node:test"
+import { test } from "@jest/globals"
 import { runInNewContext } from "node:vm"
 import JSZip from "jszip"
 import { buildPlugin } from "./build.mjs"
