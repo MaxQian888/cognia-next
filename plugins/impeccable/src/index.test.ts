@@ -65,6 +65,42 @@ describe("cognia-impeccable plugin", () => {
     expect(existsSync(join(skillRoot, "reference", "hooks.md"))).toBe(false)
   })
 
+  it("carries no upstream install paths or instructions for unshipped features", () => {
+    // The reference docs are what the agent reads verbatim: an upstream
+    // `.agents/skills/...` invocation or a link to a deliberately unshipped
+    // file (live server, hooks, pin/unpin, the live-only manual-edit
+    // applier) fails at runtime in the user's project. Scripts that *detect*
+    // upstream installs left behind in a project are exempt — scanning user
+    // config for those paths is their job.
+    const detectionAllowlist = new Set([
+      "skills/impeccable/scripts/context.mjs",
+      "skills/impeccable/scripts/lib/staleness-deep.mjs",
+    ])
+    const forbidden = [
+      /\.agents\/skills\/impeccable/,
+      /\.claude\/skills\/impeccable/,
+      /live-server\.mjs/,
+      /live-poll\.mjs/,
+      /live-commit-manual-edits\.mjs/,
+      /scripts\/hook(-before-edit)?\.mjs/,
+      /scripts\/pin\.mjs/,
+      /\blive\.md\b/,
+      /\bhooks\.md\b/,
+      /manual.edit.applier/i,
+      /\$impeccable live\b/,
+    ]
+
+    const offenders = listFiles(skillRoot)
+      .map((path) => relative(pluginRoot, path).split(sep).join("/"))
+      .filter((path) => !detectionAllowlist.has(path))
+      .filter((path) => {
+        const body = readFileSync(join(pluginRoot, path), "utf8")
+        return forbidden.some((pattern) => pattern.test(body))
+      })
+
+    expect(offenders).toEqual([])
+  })
+
   it("logs activation and deactivation without registering privileged runtime behavior", async () => {
     const info = jest.fn()
     const context = { logger: { info } }

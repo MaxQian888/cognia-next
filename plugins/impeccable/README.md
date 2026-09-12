@@ -16,18 +16,27 @@ The ordinary design workflows remain available, including `shape`, `critique`, `
 
 ## Build and install
 
-From this directory:
+From the repository root (the build reuses the root install's `esbuild` and
+`jszip`; `dist/` is gitignored build output):
 
 ```bash
-cognia plugin lint --json
-cognia plugin build --json
-cognia plugin info target/cognia/cognia-impeccable-0.1.0.zip --json
-cognia plugin install target/cognia/cognia-impeccable-0.1.0.zip --json
+pnpm exec node plugins/impeccable/build.mjs
 ```
 
-Installation requires a running Cognia desktop instance. After enabling the plugin, attach the `impeccable` skill to a character or team in Cognia's skill picker, then ask for a design task such as `audit the settings screen` or `polish the onboarding form`.
+That writes `plugins/impeccable/dist/index.js` and the installable
+`plugins/impeccable/dist/cognia-impeccable-0.1.0.zip`. Install the zip into a
+running Cognia desktop instance, e.g.:
+
+```bash
+cognia plugin install plugins/impeccable/dist/cognia-impeccable-0.1.0.zip --json
+```
+
+After enabling the plugin, attach the `impeccable` skill to a character or team in Cognia's skill picker, then ask for a design task such as `audit the settings screen` or `polish the onboarding form`.
 
 The local-bundle skill is desktop-only because Cognia reads its supporting files through the desktop filesystem bridge.
+
+Tests run under the repository's root Jest (`pnpm test -- plugins/impeccable`);
+there is no separate per-plugin toolchain.
 
 ## Layout
 
@@ -35,7 +44,9 @@ The local-bundle skill is desktop-only because Cognia reads its supporting files
 plugin.json                 Cognia manifest and packaged-file allowlist
 src/index.ts                activation lifecycle
 src/index.test.ts           manifest, lifecycle, and bundle-integrity tests
-dist/index.js               prebuilt runtime for build-free installation
+build.mjs                   esbuild + zip packaging driven by bundle_include
+build.test.mjs              install-zip contract test
+dist/                       gitignored build output (entry + install zip)
 skills/impeccable/          adapted upstream skill, references, scripts, and agents
 LICENSE                     upstream Apache-2.0 license
 NOTICE.md                   upstream attribution notice

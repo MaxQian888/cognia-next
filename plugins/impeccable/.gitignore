@@ -1,6 +1,3 @@
-node_modules/
-coverage/
 .cognia/
-dist/src/
 target/
 *.log

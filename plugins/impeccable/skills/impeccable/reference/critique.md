@@ -21,7 +21,7 @@ Resolve one stable target, run two independent assessments, synthesize a design 
    - "this page" -> the current URL or source file
 2. **Confirm the target slugs cleanly**:
    ```bash
-   node .agents/skills/impeccable/scripts/critique-storage.mjs slug "<resolved-path-or-url>"
+   node ${COGNIA_PLUGIN_ROOT}/skills/impeccable/scripts/critique-storage.mjs slug "<resolved-path-or-url>"
    ```
    Every later command also accepts the resolved target directly and derives the same slug internally; never hand-write a slug. If this exits non-zero, skip persistence and trend for this run, but continue the critique.
 3. **Read `.impeccable/critique/ignore.md`** if it exists. Drop matching findings silently; it is the only prior-run input critique consumes.
@@ -70,7 +70,7 @@ Run the bundled detector and browser visualization evidence. Assessment B is man
 CLI scan:
 
 ```bash
-node .agents/skills/impeccable/scripts/detect.mjs --json [target]
+node ${COGNIA_PLUGIN_ROOT}/skills/impeccable/scripts/detect.mjs --json [target]
 ```
 
 - Pass markup files/directories as `[target]`; do not pass CSS-only files.
@@ -83,9 +83,8 @@ Browser visualization is required for a viewable target when browser automation 
 
 1. Create a fresh tab and navigate. Prefer the harness's native/browser-canvas screenshot path before hand-rolling a Playwright/Puppeteer script; only fall back to a custom script when no native browser tool is exposed.
 2. Preflight mutable injection by setting `document.title` and appending a `<script>` tag. Read-only evaluate APIs do not count.
-3. If mutation is unavailable, skip live server, browser presentation, and injection; report fallback signal.
-4. If mutation is available, start `node .agents/skills/impeccable/scripts/live-server.mjs --background`, present the browser if supported, label `[Human]`, scroll top, inject `http://localhost:PORT/detect.js`, wait 2-3 seconds, read `impeccable` console messages, then stop the live server.
-5. For multi-view targets, inject on 3-5 representative pages.
+3. If mutation is unavailable — always the case in this adapter, which ships no live server or overlay injection path — skip browser presentation and injection; report the fallback signal.
+4. When injection did run under a harness that supports it, cover 3-5 representative pages for multi-view targets.
 
 Codex Browser note: Use the Browser skill. Do not spend a Browser attempt on `file://`. Only call `visibility.set(true)` after mutable script injection is confirmed for the `[Human]` overlay path; verify with `get()`. Use `tab.dev.logs({ filter: "impeccable" })` for console results. Its Playwright `evaluate(...)` surface is read-only; do not rely on it for mutation.
 
@@ -93,7 +92,7 @@ Return: CLI findings JSON/counts, browser console findings if applicable, false 
 
 After Assessment B returns usable CLI findings, reuse them. Do not rerun `detect.mjs` in the parent unless Assessment B failed, was truncated, or omitted count, rule names, or file locations.
 
-Codex failure accounting: final Run Notes must include target slug, ignore list, assessment independence, CLI detector, browser visibility, overlay injection, live-server cleanup, temp-file cleanup, and any fallback signal used. Do not run repo status checks, late API spelunking, or unrelated verification after the report is assembled.
+Codex failure accounting: final Run Notes must include target slug, ignore list, assessment independence, CLI detector, browser visibility, overlay injection, temp-file cleanup, and any fallback signal used. Do not run repo status checks, late API spelunking, or unrelated verification after the report is assembled.
 
 ### Generate Combined Critique Report
 
@@ -195,7 +194,7 @@ Provocative questions that might unlock better solutions:
 
 #### Run Notes
 
-Keep this compact. Include status for target slug, ignore list, assessment independence, CLI detector, browser visibility, overlay injection, live server cleanup, and temp-file cleanup. For failed or skipped steps, give the concrete observed reason and the fallback signal used. In the final chat response, also include snapshot write and trend read status after persistence has run.
+Keep this compact. Include status for target slug, ignore list, assessment independence, CLI detector, browser visibility, overlay injection, and temp-file cleanup. For failed or skipped steps, give the concrete observed reason and the fallback signal used. In the final chat response, also include snapshot write and trend read status after persistence has run.
 
 Codex Run Notes are final-chat only. Do not include this section in the persisted snapshot body, because persistence, trend read, and temp cleanup happen after the snapshot write and would otherwise archive stale status such as "pending after persistence."
 
@@ -222,7 +221,7 @@ Skip this step if the Setup slug was null (vague or root-level target).
 
    ```bash
    IMPECCABLE_CRITIQUE_META='{"target":"<user phrasing>","total_score":<n>,"max_score":<n>,"na_heuristics":"<comma-separated numbers, or empty>","p0_count":<n>,"p1_count":<n>}' \
-     node .agents/skills/impeccable/scripts/critique-storage.mjs write "<resolved target>" <body-file>
+     node ${COGNIA_PLUGIN_ROOT}/skills/impeccable/scripts/critique-storage.mjs write "<resolved target>" <body-file>
    ```
 
    `max_score` is the applicable maximum from the heuristic table (40 when every heuristic applied), so a later run can tell a renormalized total from a full one. The helper prints the absolute path it wrote.
@@ -232,7 +231,7 @@ Skip this step if the Setup slug was null (vague or root-level target).
 4. **Read the trend** for context:
 
    ```bash
-   node .agents/skills/impeccable/scripts/critique-storage.mjs trend "<resolved target>" 5
+   node ${COGNIA_PLUGIN_ROOT}/skills/impeccable/scripts/critique-storage.mjs trend "<resolved target>" 5
    ```
 
    This returns a JSON array of the last 5 frontmatter entries (including the one you just wrote).

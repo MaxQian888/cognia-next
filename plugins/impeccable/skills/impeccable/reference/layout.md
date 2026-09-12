@@ -25,7 +25,7 @@ When a sub-agent tool is available and permitted, run these independently; other
 2. **Mechanical scan:** run:
 
 ```bash
-node .agents/skills/impeccable/scripts/detect.mjs --json --scope layout [target files or dirs]
+node ${COGNIA_PLUGIN_ROOT}/skills/impeccable/scripts/detect.mjs --json --scope layout [target files or dirs]
 ```
 
 Also inspect arbitrary spacing, overflow, stacking, and container behavior the detector cannot resolve. Keep mechanical evidence out of the first assessment, then synthesize both passes before editing. A clean scan cannot prove hierarchy or rhythm.
@@ -72,21 +72,3 @@ Variation is not a goal by itself. Repetition should support recognition; break 
 Answer each item with rendered or source evidence, then rerun the scan. Do not substitute a bare “yes” for verification.
 
 When the structure holds, hand off to `$impeccable polish`.
-
-## Live-mode signature params
-
-Every variant declares a coarse `density` parameter and authors spacing against `var(--p-density, 1)`.
-
-```json
-{
-  "id": "density",
-  "kind": "range",
-  "min": 0.6,
-  "max": 1.4,
-  "step": 0.05,
-  "default": 1,
-  "label": "Density"
-}
-```
-
-Add one structural parameter only when the topology genuinely branches. Follow [live.md](live.md)'s parameter contract.
