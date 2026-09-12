@@ -424,6 +424,16 @@ export interface BuildElementSelectionOptions {
   /**
    * How many elements this pick is part of. Drives the `outerHTML` budget, so
    * a five-element pick cannot bury the prompt in markup.
+   *
+   * **Inert in the artifact picker today, on purpose.** `installElementPicker`
+   * commits exactly one element per click — there is no marquee or
+   * shift-to-extend gesture — so nothing passes this and the reduction tiers in
+   * {@link outerHtmlLimit} never fire here. It is kept because the browser's
+   * own picker DOES batch (`lib/browser/overlay.injected.js`), and both
+   * surfaces must budget a payload the same way or the same element would
+   * arrive at the model truncated differently depending on where it was
+   * picked. `element-pick.test.ts` pins the tiers so the contract cannot rot
+   * while it waits for a caller.
    */
   selectionCount?: number
   /** What the prompt heading calls this element's origin. */

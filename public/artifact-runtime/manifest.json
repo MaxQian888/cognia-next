@@ -4,7 +4,7 @@
   "babelVersion": "8.0.4",
   "shellSources": {
     "lib/artifacts/runtime/artifact-shell-entry.ts": "b15648d6da60c48396b38c3ffff8e821014c378c5835f03a11f8cbbfcaceab94",
-    "lib/artifacts/runtime/element-pick.ts": "c553166db8d6231112e21a681fdca0eab97e3c8ffd648b283d14157921e1adc3"
+    "lib/artifacts/runtime/element-pick.ts": "f7442e19c10515355a2498d5498bcc08e353b05192e707b9720e5e32187d58b4"
   },
   "files": {
     "react-runtime.js": {

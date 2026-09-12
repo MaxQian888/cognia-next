@@ -83,3 +83,6 @@ artifact 标注和浏览器标注住在**同一张表**里，用同一批组件�
 - 打包新鲜度哨兵改为记录 esbuild 真实的 `metafile.inputs`，而不是一个写死的路径。它的前身已经放过一次静默回归（"capture-snapshot 处理器写好了、测过了，然后悄悄没被发布"），并且保留了那个 bug 的形状：第一个出现的第二个模块就会让它重演。
 - `capture-snapshot` 现在序列化的是一份剥掉取点器自身装饰的克隆。否则在武装状态下导出，高亮框会被烤进 PNG 里。
 - 19 条标注文案离开了 `browser` 命名空间——后者还留着 "Browser Adjust" 这类字符串。动态 key 对 `lint:i18n` 不可见，因此有一个目录覆盖测试在两种语言里钉住每一个意图、严重程度和状态。
+
+- **仅桌面与平板。** 两个控件都在 `renderActionZone()` 里，而 `ArtifactPanelContent` 只在 `panelMode !== "mobile"` 时渲染它。Capacitor 外壳拿得到预览，但拿不到取点器；取点器本身没有任何对手机不友好的地方，所以这是界面缺口而非决定。
+- **取点位是被显式认领的，不是推断出来的。** 注册表按 artifact id 建键，但同一个 artifact 会被多个挂载同时预览——最要紧的是消息流里的内联预览，它在消息滚入视野时就会打开。`ArtifactPreview` 接受 `pickable`（默认 false），只有同时渲染开关的那个界面才认领它。

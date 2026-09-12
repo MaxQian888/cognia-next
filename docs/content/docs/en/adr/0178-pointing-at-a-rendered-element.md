@@ -173,3 +173,14 @@ field set is byte-identical.
   keeps strings like "Browser Adjust". Dynamic keys are invisible to
   `lint:i18n`, so a catalogue-coverage test pins every intent, severity and
   status in both locales.
+
+- **Desktop and tablet only.** Both controls live in `renderActionZone()`,
+  which `ArtifactPanelContent` renders only when `panelMode !== "mobile"`. The
+  Capacitor shell gets the preview but not the picker; nothing about the
+  picker itself is phone-hostile, so this is a surface gap rather than a
+  decision.
+- **The pick slot is claimed, not inferred.** The registry is keyed by artifact
+  id, but the same artifact is previewed by several mounts at once — most
+  importantly the inline preview in the message stream, which opens as soon as
+  the message scrolls into view. `ArtifactPreview` takes `pickable` (default
+  false) and only the surface that also renders the toggle claims it.
