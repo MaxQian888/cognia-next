@@ -1,21 +1,21 @@
 "use client"
 
 /**
- * Per-category storage breakdown + health for the mobile `/me/storage` page.
- * Desktop surfaces this through `components/data/storage/storage-breakdown.tsx`
- * (a Dialog-driven panel); mobile gets a native card so users can see *what*
- * is using space and clear a single category without leaving the page.
+ * Per-category rows for `/me/storage`: what is using space, how much of the
+ * used total that is, and a one-tap clear per category.
  *
- * Reuses the existing data layer: `useStorageBreakdown` (stats + health from
- * `StorageManager`) and `useStorageCleanup` (`clearCategory`). All health copy
- * is derived locally from `health.status` / `usagePercent` — the lib's
- * `health.issues[].message` strings are hard-coded English and must NOT be
- * rendered. Category labels reuse `settings.data.breakdown.categories.*`.
+ * Rows use the `Item` primitives with the category's icon tile from
+ * `storage-category-visuals.ts`, so a segment in the hero bar and a row
+ * here share a colour. Data comes in through props from
+ * `useStorageOverview`; the confirm dialog stays here because it is the
+ * only place a destructive per-category action is taken. All health copy
+ * is derived from `health.status` — the lib's `health.issues[].message`
+ * strings are hard-coded English and must NOT be rendered.
  */
 
-import { useState } from "react"
+import { Fragment, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { RefreshCwIcon, Trash2Icon } from "lucide-react"
+import { Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
 
 import {
@@ -28,35 +28,61 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { MeSection } from "@/components/mobile/me/me-section"
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemSeparator,
+  ItemTitle,
+} from "@/components/ui/item"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useStorageBreakdown } from "@/hooks/storage/use-storage-breakdown"
-import { useStorageCleanup } from "@/hooks/storage/use-storage-cleanup"
-import type { StorageCategory, StorageHealthStatus } from "@/lib/storage"
+import { MeSection } from "@/components/mobile/me/me-section"
+import { categoryColor, categoryIcon } from "@/components/data/storage/storage-category-visuals"
+import type { StorageCategory, StorageHealth, StorageStats } from "@/lib/storage"
 import { cn } from "@/lib/utils"
 
-const STATUS_BADGE: Record<StorageHealthStatus, string> = {
-  healthy: "border-transparent bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-  warning: "border-transparent bg-amber-500/15 text-amber-600 dark:text-amber-400",
-  critical: "border-transparent bg-destructive/15 text-destructive",
+export interface StorageBreakdownCardProps {
+  stats: StorageStats | null
+  health: StorageHealth | null
+  isLoading: boolean
+  /** Disables the clear buttons (a cleanup or refresh is running). */
+  disabled?: boolean
+  formatBytes: (bytes: number) => string
+  /** Clears one category and resolves with the number of rows removed. */
+  onClearCategory: (category: StorageCategory) => Promise<number>
 }
 
-export function StorageBreakdownCard() {
+export function StorageBreakdownCard({
+  stats,
+  health,
+  isLoading,
+  disabled = false,
+  formatBytes,
+  onClearCategory,
+}: StorageBreakdownCardProps) {
   const t = useTranslations("mobile.me.storage")
   const tCat = useTranslations("settings.data.breakdown.categories")
-  const { stats, health, isLoading, refresh, formatBytes } = useStorageBreakdown()
-  const { clearCategory, isRunning } = useStorageCleanup()
   const [pending, setPending] = useState<StorageCategory | null>(null)
+
+  const rows = useMemo(
+    () =>
+      (stats?.byCategory ?? [])
+        .filter((c) => c.totalSize > 0)
+        .slice()
+        .sort((a, b) => b.totalSize - a.totalSize),
+    [stats]
+  )
+  const used = rows.reduce((sum, c) => sum + c.totalSize, 0)
 
   const confirmClear = async () => {
     if (!pending) return
     const category = pending
     setPending(null)
     try {
-      const cleared = await clearCategory(category)
-      await refresh()
+      const cleared = await onClearCategory(category)
       toast.success(t("clearedToast", { count: cleared }))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
@@ -67,14 +93,12 @@ export function StorageBreakdownCard() {
     return (
       <div className="px-1 py-2" data-testid="storage-breakdown-card" aria-busy="true">
         <Skeleton className="h-4 w-1/3" />
-        <Skeleton className="mt-3 h-2 w-full" />
-        <Skeleton className="mt-2 h-2 w-5/6" />
+        <Skeleton className="mt-3 h-10 w-full" />
+        <Skeleton className="mt-2 h-10 w-full" />
       </div>
     )
   }
 
-  const used = stats?.total.used ?? 0
-  const rows = (stats?.byCategory ?? []).filter((c) => c.totalSize > 0)
   const status = health?.status ?? "healthy"
 
   return (
@@ -82,79 +106,65 @@ export function StorageBreakdownCard() {
       testid="storage-breakdown-card"
       title={t("breakdownTitle")}
       description={
-        health
-          ? t(`health.${status}Hint`, { percent: Math.round(health.usagePercent) })
-          : t("breakdownDescription")
-      }
-      action={
-        <>
-          {health ? (
-            <Badge
-              className={cn("text-[10px]", STATUS_BADGE[status])}
-              data-testid="storage-health-badge"
-            >
-              {t(`health.${status}`)}
-            </Badge>
-          ) : null}
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            className="size-8 text-muted-foreground"
-            disabled={isRunning}
-            aria-label={t("refresh")}
-            onClick={() => void refresh()}
-            data-testid="storage-breakdown-refresh"
-          >
-            <RefreshCwIcon className="size-4" aria-hidden="true" />
-          </Button>
-        </>
+        rows.length > 0
+          ? t("breakdownSummary", { count: rows.length, total: formatBytes(used) })
+          : health
+            ? t(`health.${status}Hint`, { percent: Math.round(health.usagePercent) })
+            : t("breakdownDescription")
       }
     >
-      <div className="flex flex-col gap-3 px-3 py-3">
-        {rows.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{t("breakdownEmpty")}</p>
-        ) : (
-          rows.map((cat) => {
-            const share = used > 0 ? Math.min(100, Math.round((cat.totalSize / used) * 100)) : 0
-            return (
-              <div
-                key={cat.category}
-                className="flex items-center gap-3"
+      {rows.length === 0 ? (
+        <p className="px-4 py-4 text-xs text-muted-foreground">{t("breakdownEmpty")}</p>
+      ) : (
+        rows.map((cat, idx) => {
+          const Icon = categoryIcon(cat.category)
+          const share = used > 0 ? Math.round((cat.totalSize / used) * 100) : 0
+          const label = tCat(cat.category)
+          return (
+            <Fragment key={cat.category}>
+              {idx > 0 ? <ItemSeparator /> : null}
+              <Item
+                size="sm"
+                className="flex-nowrap px-3 py-2"
                 data-testid={`storage-category-${cat.category}`}
               >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-2 text-xs">
-                    <span className="truncate font-medium">{tCat(cat.category)}</span>
-                    <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-                      {formatBytes(cat.totalSize)}
-                    </span>
-                  </div>
-                  <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full rounded-full bg-primary"
-                      style={{ width: `${share}%` }}
-                      aria-hidden="true"
-                    />
-                  </div>
-                </div>
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  className="touch-target size-8 shrink-0 text-muted-foreground"
-                  disabled={isRunning}
-                  aria-label={t("clearCategory", { category: tCat(cat.category) })}
-                  data-testid={`storage-clear-${cat.category}`}
-                  onClick={() => setPending(cat.category)}
+                <ItemMedia
+                  variant="icon"
+                  className={cn("border-transparent text-white", categoryColor(cat.category))}
                 >
-                  <Trash2Icon className="size-4" aria-hidden="true" />
-                </Button>
-              </div>
-            )
-          })
-        )}
-      </div>
+                  <Icon aria-hidden="true" />
+                </ItemMedia>
+                <ItemContent className="min-w-0">
+                  <ItemTitle className="text-sm">{label}</ItemTitle>
+                  <ItemDescription className="text-xs tabular-nums">
+                    {t("breakdownItems", { count: cat.itemCount })} · {formatBytes(cat.totalSize)}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions className="shrink-0 gap-1">
+                  <span
+                    className="w-9 text-right text-xs font-medium tabular-nums text-muted-foreground"
+                    data-testid={`storage-share-${cat.category}`}
+                  >
+                    {t("breakdownShare", { percent: share })}
+                  </span>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="touch-target size-8 shrink-0 text-muted-foreground"
+                    disabled={disabled}
+                    aria-label={t("clearCategory", { category: label })}
+                    data-testid={`storage-clear-${cat.category}`}
+                    onClick={() => setPending(cat.category)}
+                  >
+                    <Trash2Icon className="size-4" aria-hidden="true" />
+                  </Button>
+                </ItemActions>
+              </Item>
+            </Fragment>
+          )
+        })
+      )}
 
       <AlertDialog open={pending !== null} onOpenChange={(open) => !open && setPending(null)}>
         <AlertDialogContent>

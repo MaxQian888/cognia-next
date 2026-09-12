@@ -49,6 +49,17 @@ export const Healthy: Story = {
   },
 }
 
+export const FreshDevice: Story = {
+  args: {
+    reader: () =>
+      makeSnapshot({
+        sessions: { lastSyncAt: null, lastError: null },
+        messages: { lastSyncAt: null, lastError: null },
+        characters: { lastSyncAt: null, lastError: null },
+      }),
+  },
+}
+
 export const WithErrorsAndNever: Story = {
   args: {
     reader: () =>

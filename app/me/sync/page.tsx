@@ -8,7 +8,12 @@ import { SyncStatusPanel } from "@/components/mobile/me/sync-status-panel"
 export default function MobileSyncPage() {
   const t = useTranslations("mobile.me")
   return (
-    <SubPageShell title={t("syncRow")} backAria={t("appearanceBackAria")} testid="mobile-sync-page">
+    <SubPageShell
+      title={t("syncRow")}
+      backAria={t("appearanceBackAria")}
+      testid="mobile-sync-page"
+      width="wide"
+    >
       <SyncStatusPanel />
     </SubPageShell>
   )

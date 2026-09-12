@@ -2,77 +2,20 @@
 
 // Visual storage breakdown — a stacked bar with per-category colors plus a
 // collapsible detail list with optional clear-button. Adapted from
-// D:\Project\Cognia\components\settings\data\storage-breakdown.tsx; the
-// CATEGORY_ICONS / CATEGORY_COLORS are pruned to the categories cognia-next
-// actually populates.
+// D:\Project\Cognia\components\settings\data\storage-breakdown.tsx. The
+// per-category icon + colour tables live in `storage-category-visuals.ts` so
+// the mobile `/me/storage` page draws the same segments.
 
 import { useMemo } from "react"
 import { useTranslations } from "next-intl"
-import {
-  BotIcon,
-  CogIcon,
-  DatabaseIcon,
-  FileCodeIcon,
-  FileTextIcon,
-  HistoryIcon,
-  KeyRoundIcon,
-  Layers3Icon,
-  type LucideIcon,
-  MessageCircleIcon,
-  MessageSquareIcon,
-  MoreHorizontalIcon,
-  PuzzleIcon,
-  SettingsIcon,
-  ShieldIcon,
-  Trash2Icon,
-} from "lucide-react"
+import { ChevronDownIcon, Trash2Icon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { ChevronDownIcon, PawPrintIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { StorageCategory, StorageCategoryInfo } from "@/lib/storage"
-
-const CATEGORY_ICONS: Record<StorageCategory, LucideIcon> = {
-  settings: SettingsIcon,
-  session: MessageSquareIcon,
-  chat: MessageCircleIcon,
-  character: BotIcon,
-  skill: PuzzleIcon,
-  team: Layers3Icon,
-  mcp: PuzzleIcon,
-  preset: FileTextIcon,
-  canvas: FileCodeIcon,
-  trustedWorkspace: ShieldIcon,
-  ttsKey: KeyRoundIcon,
-  backupHistory: HistoryIcon,
-  vector: DatabaseIcon,
-  artifact: FileTextIcon,
-  pet: PawPrintIcon,
-  system: CogIcon,
-  other: MoreHorizontalIcon,
-}
-
-const CATEGORY_COLORS: Record<StorageCategory, string> = {
-  settings: "bg-blue-500",
-  session: "bg-green-500",
-  chat: "bg-emerald-500",
-  character: "bg-orange-500",
-  skill: "bg-yellow-500",
-  team: "bg-cyan-500",
-  mcp: "bg-purple-500",
-  preset: "bg-indigo-500",
-  canvas: "bg-amber-500",
-  trustedWorkspace: "bg-rose-500",
-  ttsKey: "bg-pink-500",
-  backupHistory: "bg-teal-500",
-  vector: "bg-violet-500",
-  artifact: "bg-violet-500",
-  pet: "bg-pink-500",
-  system: "bg-slate-500",
-  other: "bg-zinc-500",
-}
+import { CATEGORY_COLORS, CATEGORY_ICONS, OTHER_SEGMENT_COLOR } from "./storage-category-visuals"
 
 interface StorageBreakdownProps {
   categories: StorageCategoryInfo[]
@@ -138,7 +81,7 @@ export function StorageBreakdown({
           <Tooltip>
             <TooltipTrigger asChild>
               <div
-                className="h-full bg-zinc-400 transition-all"
+                className={cn(OTHER_SEGMENT_COLOR, "h-full transition-all")}
                 style={{ width: `${(otherTotal / denominator) * 100}%` }}
               />
             </TooltipTrigger>
@@ -165,7 +108,7 @@ export function StorageBreakdown({
         })}
         {otherTotal > 0 && (
           <div className="flex min-w-0 items-center gap-1">
-            <div className="size-2 shrink-0 rounded-full bg-zinc-400" />
+            <div className={cn("size-2 shrink-0 rounded-full", OTHER_SEGMENT_COLOR)} />
             <span className="truncate">{t("other")}</span>
           </div>
         )}

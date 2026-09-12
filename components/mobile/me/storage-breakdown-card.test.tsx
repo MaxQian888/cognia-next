@@ -4,28 +4,11 @@
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-import { StorageBreakdownCard } from "./storage-breakdown-card"
+import { StorageBreakdownCard, type StorageBreakdownCardProps } from "./storage-breakdown-card"
 import type { StorageHealth, StorageStats } from "@/lib/storage"
 
 // next-intl is mocked globally in jest.setup (loads real en messages), so
 // category labels resolve through settings.data.breakdown.categories.*.
-
-const breakdown = {
-  stats: null as StorageStats | null,
-  health: null as StorageHealth | null,
-  isLoading: true,
-  refresh: jest.fn(async () => {}),
-  formatBytes: (b: number) => `${b}B`,
-}
-jest.mock("@/hooks/storage/use-storage-breakdown", () => ({
-  useStorageBreakdown: () => breakdown,
-}))
-
-const clearCategory = jest.fn(async () => 5)
-const cleanup = { clearCategory, isRunning: false }
-jest.mock("@/hooks/storage/use-storage-cleanup", () => ({
-  useStorageCleanup: () => cleanup,
-}))
 
 const toastSuccess = jest.fn()
 const toastError = jest.fn()
@@ -37,8 +20,8 @@ function makeStats(overrides: Partial<StorageStats> = {}): StorageStats {
   return {
     total: { used: 1000, quota: 10000, usagePercent: 10 },
     byCategory: [
-      { category: "chat", displayName: "Messages", itemCount: 5, totalSize: 600, sources: [] },
       { category: "skill", displayName: "Skills", itemCount: 2, totalSize: 400, sources: [] },
+      { category: "chat", displayName: "Messages", itemCount: 5, totalSize: 600, sources: [] },
       { category: "vector", displayName: "Vector store", itemCount: 0, totalSize: 0, sources: [] },
     ],
     localStorage: { used: 0 },
@@ -50,116 +33,87 @@ function makeStats(overrides: Partial<StorageStats> = {}): StorageStats {
 
 const healthy: StorageHealth = { status: "healthy", usagePercent: 10, issues: [], recommendations: [] }
 
+function renderCard(over: Partial<StorageBreakdownCardProps> = {}) {
+  const props: StorageBreakdownCardProps = {
+    stats: makeStats(),
+    health: healthy,
+    isLoading: false,
+    formatBytes: (b: number) => `${b}B`,
+    onClearCategory: jest.fn(async () => 5),
+    ...over,
+  }
+  return { ...render(<StorageBreakdownCard {...props} />), props }
+}
+
 beforeEach(() => {
-  breakdown.stats = null
-  breakdown.health = null
-  breakdown.isLoading = true
-  breakdown.refresh.mockClear()
-  clearCategory.mockClear().mockResolvedValue(5)
-  cleanup.isRunning = false
   toastSuccess.mockClear()
   toastError.mockClear()
 })
 
 describe("<StorageBreakdownCard />", () => {
   it("shows a skeleton while the initial fetch is in flight", () => {
-    render(<StorageBreakdownCard />)
-    expect(screen.getByTestId("storage-breakdown-card")).toBeInTheDocument()
+    renderCard({ isLoading: true, stats: null })
+    expect(screen.getByTestId("storage-breakdown-card")).toHaveAttribute("aria-busy", "true")
     expect(screen.queryByTestId("storage-category-chat")).toBeNull()
   })
 
-  it("renders only non-empty categories with a healthy badge", () => {
-    breakdown.stats = makeStats()
-    breakdown.health = healthy
-    breakdown.isLoading = false
-    render(<StorageBreakdownCard />)
-    expect(screen.getByText("Messages")).toBeInTheDocument()
-    expect(screen.getByText("Skills")).toBeInTheDocument()
+  it("renders non-empty categories largest first, with count, size and share", () => {
+    renderCard()
+    const rows = screen.getAllByTestId(/^storage-category-/)
+    expect(rows.map((r) => r.getAttribute("data-testid"))).toEqual([
+      "storage-category-chat",
+      "storage-category-skill",
+    ])
     expect(screen.queryByTestId("storage-category-vector")).toBeNull()
-    expect(screen.getByTestId("storage-health-badge")).toHaveTextContent("Healthy")
+    const chat = screen.getByTestId("storage-category-chat")
+    expect(chat).toHaveTextContent("Messages")
+    expect(chat).toHaveTextContent("5 items · 600B")
+    expect(screen.getByTestId("storage-share-chat")).toHaveTextContent("60%")
+    expect(screen.getByTestId("storage-share-skill")).toHaveTextContent("40%")
   })
 
-  it("renders an empty hint when every category is zero", () => {
-    breakdown.stats = makeStats({
-      byCategory: [
-        { category: "chat", displayName: "Messages", itemCount: 0, totalSize: 0, sources: [] },
-      ],
-    })
-    breakdown.health = healthy
-    breakdown.isLoading = false
-    render(<StorageBreakdownCard />)
-    expect(screen.getByText(/Nothing stored yet/i)).toBeInTheDocument()
+  it("summarises the category count and used total in the heading", () => {
+    renderCard()
+    expect(screen.getByText("2 categories · 1000B")).toBeInTheDocument()
   })
 
-  it.each([
-    ["warning", "Filling up"],
-    ["critical", "Almost full"],
-  ] as const)("shows the %s health badge", (status, label) => {
-    breakdown.stats = makeStats()
-    breakdown.health = { status, usagePercent: 92, issues: [], recommendations: [] }
-    breakdown.isLoading = false
-    render(<StorageBreakdownCard />)
-    expect(screen.getByTestId("storage-health-badge")).toHaveTextContent(label)
+  it("renders the empty copy with the health hint when nothing is stored", () => {
+    renderCard({ stats: makeStats({ byCategory: [] }) })
+    expect(screen.getByText(/Nothing stored yet/)).toBeInTheDocument()
+    expect(screen.getByText(/10% of your quota used/)).toBeInTheDocument()
   })
 
-  it("clears a category after confirming and toasts the freed rows", async () => {
-    breakdown.stats = makeStats()
-    breakdown.health = healthy
-    breakdown.isLoading = false
+  it("confirms before clearing, then reports the cleared count", async () => {
+    const onClearCategory = jest.fn(async () => 5)
+    renderCard({ onClearCategory })
     const user = userEvent.setup()
-    render(<StorageBreakdownCard />)
     await user.click(screen.getByTestId("storage-clear-chat"))
-    await user.click(screen.getByTestId("storage-clear-confirm"))
-    await waitFor(() => expect(clearCategory).toHaveBeenCalledWith("chat"))
-    expect(breakdown.refresh).toHaveBeenCalled()
-    await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
+    expect(onClearCategory).not.toHaveBeenCalled()
+    await user.click(await screen.findByTestId("storage-clear-confirm"))
+    await waitFor(() => expect(onClearCategory).toHaveBeenCalledWith("chat"))
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("5 rows cleared."))
   })
 
-  it("hides the badge and uses the default description when health is unknown", () => {
-    // total.used = 0 exercises the zero-share path; health = null hides the badge.
-    breakdown.stats = makeStats({ total: { used: 0, quota: 10000, usagePercent: 0 } })
-    breakdown.health = null
-    breakdown.isLoading = false
-    render(<StorageBreakdownCard />)
-    expect(screen.queryByTestId("storage-health-badge")).toBeNull()
-    expect(screen.getByText("Messages")).toBeInTheDocument()
-  })
-
-  it("cancelling the confirm dialog does not clear the category", async () => {
-    breakdown.stats = makeStats()
-    breakdown.health = healthy
-    breakdown.isLoading = false
+  it("cancelling the dialog clears nothing", async () => {
+    const onClearCategory = jest.fn(async () => 0)
+    renderCard({ onClearCategory })
     const user = userEvent.setup()
-    render(<StorageBreakdownCard />)
     await user.click(screen.getByTestId("storage-clear-skill"))
-    await user.click(screen.getByText("Cancel"))
-    await waitFor(() => expect(screen.queryByTestId("storage-clear-confirm")).toBeNull())
-    expect(clearCategory).not.toHaveBeenCalled()
+    await user.click(await screen.findByRole("button", { name: "Cancel" }))
+    expect(onClearCategory).not.toHaveBeenCalled()
   })
 
-  it("puts the health badge and reload on the heading line, not in the list", () => {
-    // Both this block and the usage block owned a full-width "Refresh" button
-    // inside their own card, so the page showed the same word twice in the
-    // reading flow with no way to tell which reload it drove.
-    breakdown.stats = makeStats()
-    breakdown.health = healthy
-    breakdown.isLoading = false
-    const { container } = render(<StorageBreakdownCard />)
-    expect(container.querySelector('[data-slot="card"]')).toBeNull()
-    const group = container.querySelector('[data-slot="item-group"]')
-    expect(group).not.toBeNull()
-    expect(group?.contains(screen.getByTestId("storage-breakdown-refresh"))).toBe(false)
-    expect(group?.contains(screen.getByTestId("storage-health-badge"))).toBe(false)
-    expect(screen.getByTestId("storage-breakdown-refresh")).toHaveAttribute("aria-label")
-  })
-
-  it("refreshes on demand", async () => {
-    breakdown.stats = makeStats()
-    breakdown.health = healthy
-    breakdown.isLoading = false
+  it("surfaces a clear failure as an error toast", async () => {
+    renderCard({ onClearCategory: async () => { throw new Error("locked") } })
     const user = userEvent.setup()
-    render(<StorageBreakdownCard />)
-    await user.click(screen.getByTestId("storage-breakdown-refresh"))
-    expect(breakdown.refresh).toHaveBeenCalled()
+    await user.click(screen.getByTestId("storage-clear-chat"))
+    await user.click(await screen.findByTestId("storage-clear-confirm"))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("locked"))
+  })
+
+  it("disables the clear buttons while the owner is busy", () => {
+    renderCard({ disabled: true })
+    expect(screen.getByTestId("storage-clear-chat")).toBeDisabled()
+    expect(screen.getByTestId("storage-clear-skill")).toBeDisabled()
   })
 })

@@ -1,41 +1,54 @@
 import type { Meta, StoryObj } from "@storybook/nextjs"
+import { fn } from "storybook/test"
 
 import { StorageUsageCard, type StorageUsageCardProps } from "./storage-usage-card"
+import type { StorageHealth, StorageStats } from "@/lib/storage"
 import type { StorageUsage } from "@/lib/storage/usage"
-import type { BackupHistoryRow } from "@/lib/db/backup-history"
 
-// `StorageUsageCard` resolves usage + persistence via injectable seams
-// (`navigator.storage.estimate()` is unavailable in the Storybook browser).
-// The stories feed fixtures to render the supported / unsupported / not-yet-
-// persisted branches.
-function backup(over: Partial<BackupHistoryRow>): BackupHistoryRow {
-  return {
-    id: "bk-1",
-    completedAt: Date.now() - 2 * 60 * 60 * 1000,
-    type: "manual",
-    success: true,
-    encryption: "auto-key",
-    sizeBytes: 4 * 1024 * 1024,
-    filename: "cognia-backup.json",
-    schemaVersion: 3,
-    ...over,
-  }
+// `StorageUsageCard` is props-driven (its data comes from `useStorageOverview`
+// on the page), so the stories feed fixtures for the supported / unsupported /
+// not-yet-persisted / near-full branches.
+const MB = 1024 * 1024
+
+const usage: StorageUsage = {
+  totalBytes: 180 * MB,
+  quotaBytes: 2048 * MB,
+  backupBytes: 12 * MB,
+  backups: [],
 }
 
-const supportedUsage: StorageUsage = {
-  totalBytes: 180 * 1024 * 1024,
-  quotaBytes: 2 * 1024 * 1024 * 1024,
-  backupBytes: 12 * 1024 * 1024,
-  backups: [
-    backup({ id: "bk-1", filename: "cognia-2026-06-29.json" }),
-    backup({ id: "bk-2", filename: "cognia-2026-06-22.json", encryption: "passphrase", completedAt: Date.now() - 7 * 86_400_000 }),
+const stats: StorageStats = {
+  total: { used: 150 * MB, quota: 2048 * MB, usagePercent: 7.3 },
+  byCategory: [
+    { category: "chat", displayName: "Messages", itemCount: 4210, totalSize: 96 * MB, sources: [] },
+    { category: "artifact", displayName: "Artifacts", itemCount: 38, totalSize: 22 * MB, sources: [] },
+    { category: "session", displayName: "Sessions", itemCount: 120, totalSize: 14 * MB, sources: [] },
+    { category: "vector", displayName: "Vectors", itemCount: 900, totalSize: 9 * MB, sources: [] },
+    { category: "skill", displayName: "Skills", itemCount: 12, totalSize: 5 * MB, sources: [] },
+    { category: "settings", displayName: "Settings", itemCount: 1, totalSize: 2 * MB, sources: [] },
+    { category: "backupHistory", displayName: "Backups", itemCount: 3, totalSize: 2 * MB, sources: [] },
   ],
+  localStorage: { used: 0 },
+  indexedDB: { used: 150 * MB },
+  generatedAt: Date.now(),
 }
+
+const healthy: StorageHealth = { status: "healthy", usagePercent: 8.8, issues: [], recommendations: [] }
 
 const meta = {
   title: "Mobile/Me/StorageUsageCard",
   component: StorageUsageCard,
   parameters: { layout: "fullscreen" },
+  args: {
+    usage,
+    stats,
+    health: healthy,
+    persisted: true,
+    isLoading: false,
+    refreshing: false,
+    onRefresh: fn(),
+    onRequestPersistence: fn(async () => "persisted" as const),
+  },
   decorators: [
     (Story) => (
       <div className="mx-auto h-[760px] w-[390px] overflow-y-auto border p-4">
@@ -48,23 +61,26 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Persisted: Story = {
-  args: {
-    fetcher: async () => supportedUsage,
-    persistedChecker: async () => true,
-  },
-}
+export const Persisted: Story = {}
 
 export const NotPersisted: Story = {
+  args: { persisted: false },
+}
+
+export const NearlyFull: Story = {
   args: {
-    fetcher: async () => supportedUsage,
-    persistedChecker: async () => false,
+    usage: { ...usage, totalBytes: 1900 * MB },
+    health: { status: "critical", usagePercent: 92.8, issues: [], recommendations: [] },
   },
 }
 
 export const Unsupported: Story = {
   args: {
-    fetcher: async () => ({ totalBytes: null, quotaBytes: null, backupBytes: null, backups: [] }),
-    persistedChecker: async () => false,
+    usage: { totalBytes: null, quotaBytes: null, backupBytes: null, backups: [] },
+    persisted: false,
   },
+}
+
+export const Loading: Story = {
+  args: { usage: null, stats: null, health: null, persisted: null, isLoading: true },
 }
