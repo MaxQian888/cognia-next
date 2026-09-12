@@ -12,12 +12,12 @@
  * or dynamic skill discovery), so it re-fetches on each completed turn.
  *
  * Returns `null` lists when unavailable (a standalone browser with no host,
- * non-Anthropic, no open session). The host question is the host profile, not
+ * unsupported runtime, no open session). The host question is the host profile, not
  * the webview kind: a paired phone or browser drives `claude_session_control`
  * on the host's sidecar over the companion transport.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 
 import {
   agentHostAvailable,
@@ -44,27 +44,64 @@ export function useSdkSessionCapabilities(
   refresh: () => void
 } {
   const status = useChatStore((s) => s.status)
+  const runtimeScope = useChatStore((s) => {
+    const execution = sessionId ? s.lastSendBySession?.[sessionId]?.options.execution : undefined
+    return execution ? `${execution.hostRef}:${execution.runtimeAdapter}` : ""
+  })
   const [models, setModels] = useState<SdkModelInfo[] | null>(null)
   const [commands, setCommands] = useState<SdkSlashCommand[] | null>(null)
 
-  const enabled =
-    agentHostAvailable(resolveAgentExecutionEnvironment()) &&
-    !!sessionId &&
-    (providerId ?? "anthropic") === "anthropic"
+  const enabled = agentHostAvailable(resolveAgentExecutionEnvironment()) && !!sessionId
+
+  // The live host owns runtime selection; a custom provider may also run the
+  // Claude SDK. Unsupported runtimes are probed once per scope, not each turn.
+  const scope = enabled ? `${sessionId}:${providerId ?? ""}:${runtimeScope}` : null
+  const requestState = useRef({ scope, generation: 0, unsupported: new Set<string>() })
+  useLayoutEffect(() => {
+    requestState.current = {
+      scope,
+      generation: requestState.current.generation + 1,
+      unsupported: new Set(),
+    }
+    return () => {
+      requestState.current.generation += 1
+    }
+  }, [scope])
 
   const refresh = useCallback(() => {
     if (!enabled || !sessionId) return
-    getSessionSupportedModels(sessionId)
-      .then((m) => setModels(m))
-      .catch(() => setModels(null))
-    getSessionSupportedCommands(sessionId)
-      .then((c) => setCommands(c))
-      .catch(() => setCommands(null))
-  }, [enabled, sessionId])
+    const generation = ++requestState.current.generation
+    const current = () =>
+      requestState.current.scope === scope && requestState.current.generation === generation
+    if (!requestState.current.unsupported.has("getSessionSupportedModels")) {
+      getSessionSupportedModels(sessionId)
+        .then((value) => {
+          if (current()) setModels(value)
+        })
+        .catch((error: unknown) => {
+          if (!current()) return
+          if (String(error).includes("unsupported"))
+            requestState.current.unsupported.add("getSessionSupportedModels")
+          setModels(null)
+        })
+    }
+    if (!requestState.current.unsupported.has("getSessionSupportedCommands")) {
+      getSessionSupportedCommands(sessionId)
+        .then((value) => {
+          if (current()) setCommands(value)
+        })
+        .catch((error: unknown) => {
+          if (!current()) return
+          if (String(error).includes("unsupported"))
+            requestState.current.unsupported.add("getSessionSupportedCommands")
+          setCommands(null)
+        })
+    }
+  }, [enabled, sessionId, scope])
 
   // Clear stale lists on session / eligibility change during render (avoids a
   // synchronous setState in an effect).
-  const resetKey = enabled ? sessionId : null
+  const resetKey = scope
   const [prevKey, setPrevKey] = useState(resetKey)
   if (prevKey !== resetKey) {
     setPrevKey(resetKey)

@@ -810,6 +810,7 @@ pub fn is_allowed_control_method(method: &str) -> bool {
             | "readFile"
             | "reconnectMcpServer"
             | "reinitialize"
+            | "reloadOutputStyles"
             | "reloadPlugins"
             | "reloadSkills"
             | "rewindFiles"
@@ -825,6 +826,7 @@ pub fn is_allowed_control_method(method: &str) -> bool {
             | "supportedCommands"
             | "supportedModels"
             | "toggleMcpServer"
+            | "updateSettings"
     )
 }
 
@@ -1005,6 +1007,9 @@ fn build_feature_call_payload(mut request: Value) -> Result<Value, String> {
             | "bedrock-discover"
             | "opencode-v2-discover"
             | "mcp-discover"
+            | "tool-host-start"
+            | "tool-host-stop"
+            | "tool-host-reply"
     ) {
         return Err(format!("unsupported feature call operation: {operation}"));
     }
@@ -1692,6 +1697,7 @@ mod tests {
             "readFile",
             "reconnectMcpServer",
             "reinitialize",
+            "reloadOutputStyles",
             "reloadPlugins",
             "reloadSkills",
             "rewindFiles",
@@ -1707,6 +1713,7 @@ mod tests {
             "supportedCommands",
             "supportedModels",
             "toggleMcpServer",
+            "updateSettings",
         ] {
             assert!(is_allowed_control_method(m), "{m} should be allowed");
         }
@@ -2124,6 +2131,14 @@ mod tests {
 
     #[test]
     fn feature_call_payload_is_correlated_and_allowlisted() {
+        for operation in ["tool-host-start", "tool-host-stop", "tool-host-reply"] {
+            let payload = build_feature_call_payload(json!({
+                "requestId": "tools-1", "operation": operation,
+                "toolHost": { "leaseId": "lease-1", "ownerSessionId": "session-1" }
+            }))
+            .expect("tool host uses the existing feature transport");
+            assert_eq!(payload["toolHost"]["ownerSessionId"], "session-1");
+        }
         let payload = build_feature_call_payload(json!({
             "requestId": "request-1",
             "operation": "language-stream",

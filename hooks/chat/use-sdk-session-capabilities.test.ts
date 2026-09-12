@@ -3,8 +3,15 @@
  */
 
 let mockStatus = "idle"
+let mockRuntime = "claude-agent-sdk"
 jest.mock("@/stores/chat", () => ({
-  useChatStore: (sel: (s: { status: string }) => unknown) => sel({ status: mockStatus }),
+  useChatStore: (sel: (s: unknown) => unknown) =>
+    sel({
+      status: mockStatus,
+      lastSendBySession: {
+        s1: { options: { execution: { hostRef: "desktop-sidecar", runtimeAdapter: mockRuntime } } },
+      },
+    }),
 }))
 
 // The host gate reads the host PROFILE (this shell's own sidecar, or a paired
@@ -33,11 +40,27 @@ const COMMANDS = [{ name: "compact", description: "c" }]
 beforeEach(() => {
   jest.clearAllMocks()
   mockStatus = "idle"
+  mockRuntime = "claude-agent-sdk"
   mockHostProfile.mockReturnValue("desktop")
   subscribeAgentEvents.mockResolvedValue(jest.fn())
 })
 
 describe("useSdkSessionCapabilities", () => {
+  it("re-probes when the same provider switches its live runtime", async () => {
+    mockRuntime = "ai-sdk"
+    getSessionSupportedModels.mockRejectedValue(new Error("unsupported"))
+    getSessionSupportedCommands.mockResolvedValue([])
+    const { result, rerender } = renderHook(() => useSdkSessionCapabilities("s1", "custom"))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(result.current.models).toBeNull()
+    getSessionSupportedModels.mockResolvedValue(MODELS)
+    mockRuntime = "claude-agent-sdk"
+    rerender()
+    await waitFor(() => expect(result.current.models).toEqual(MODELS))
+  })
+
   it("fetches models + commands on mount", async () => {
     getSessionSupportedModels.mockResolvedValue(MODELS)
     getSessionSupportedCommands.mockResolvedValue(COMMANDS)
@@ -57,9 +80,8 @@ describe("useSdkSessionCapabilities", () => {
     expect(result.current.commands).toBeNull()
   })
 
-  it("stays disabled for non-Anthropic providers and in a standalone browser", async () => {
+  it("stays disabled in a standalone browser", async () => {
     getSessionSupportedModels.mockResolvedValue(MODELS)
-    renderHook(() => useSdkSessionCapabilities("s1", "openai"))
     mockHostProfile.mockReturnValue("web-standalone")
     renderHook(() => useSdkSessionCapabilities("s1", "anthropic"))
     await act(async () => {
@@ -111,5 +133,39 @@ describe("useSdkSessionCapabilities", () => {
 
     await waitFor(() => expect(getSessionSupportedModels).toHaveBeenCalledWith("s1"))
     expect(getSessionSupportedCommands).toHaveBeenCalledWith("s1")
+  })
+  it("ignores stale responses across session switches including A to B to A", async () => {
+    const pending: Array<(value: typeof MODELS) => void> = []
+    getSessionSupportedModels.mockImplementation(
+      () => new Promise((resolve) => pending.push(resolve))
+    )
+    getSessionSupportedCommands.mockResolvedValue(COMMANDS)
+    const { result, rerender } = renderHook(({ id }) => useSdkSessionCapabilities(id), {
+      initialProps: { id: "a" },
+    })
+    await waitFor(() => expect(pending).toHaveLength(1))
+    rerender({ id: "b" })
+    await waitFor(() => expect(pending).toHaveLength(2))
+    rerender({ id: "a" })
+    await waitFor(() => expect(pending).toHaveLength(3))
+    const fresh = [{ ...MODELS[0], value: "fresh" }]
+    await act(async () => pending[2](fresh))
+    await act(async () => pending[0](MODELS))
+    await act(async () => pending[1](MODELS))
+    expect(result.current.models).toEqual(fresh)
+  })
+
+  it("does not repeatedly probe an unsupported runtime", async () => {
+    getSessionSupportedModels.mockRejectedValue(new Error("unsupported_provider"))
+    getSessionSupportedCommands.mockRejectedValue(new Error("unsupported_provider"))
+    const { result } = renderHook(() => useSdkSessionCapabilities("s1", "other-provider"))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    act(() => result.current.refresh())
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(getSessionSupportedModels).toHaveBeenCalledTimes(1)
   })
 })

@@ -14,6 +14,7 @@ import {
   type FeatureCallEvent,
   type FeatureCallRequest,
   type McpServer,
+  type ToolHostControl,
 } from "@cognia/agent-config-types"
 
 import { appendMcpAuditLog } from "@/lib/db/mcp-audit-log"
@@ -223,6 +224,15 @@ const defaultClient = createSidecarFeatureCallClient({
   randomUUID: () => crypto.randomUUID(),
 })
 
+/** Reuse the existing trusted feature IPC for session-owned external tool hosts. */
+export function callSidecarToolHost(
+  operation: "tool-host-start" | "tool-host-stop" | "tool-host-reply",
+  toolHost: ToolHostControl,
+  requestResult = defaultClient.requestResult
+): Promise<unknown> {
+  return requestResult({ operation, credentials: {}, toolHost })
+}
+
 export function createBedrockSidecarLanguageModel(
   config: SidecarLanguageModelConfig
 ): LanguageModelV3 {
@@ -280,6 +290,9 @@ export function validateOpenCodeV2Discovery(result: unknown): OpenCodeV2Discover
   const version = typeof descriptor.version === "string" ? descriptor.version : ""
   if (!endpoint || !version) {
     throw new Error("OpenCode V2 discovery returned an invalid service descriptor")
+  }
+  if (!/^2\.\d+\.\d+(?:[-+][\w.+-]+)?$/.test(version)) {
+    throw new Error("OpenCode V2 discovery returned an incompatible service version")
   }
   const url = new URL(endpoint)
   if (url.protocol !== "http:" && url.protocol !== "https:") {

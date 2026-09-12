@@ -293,7 +293,10 @@
     "commands": {
       "batchFailed": "命令 {names} 执行失败",
       "failed": "命令执行失败",
-      "unavailable": "/{name} 暂不可用。"
+      "unavailable": "/{name} 暂不可用。",
+      "running": "正在运行 /{command}…",
+      "progress": "/{command} 进度",
+      "cancel": "取消命令"
     },
     "context": {
       "ariaLabel": "已附加的文件、链接与引用",

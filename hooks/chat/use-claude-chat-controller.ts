@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { hasCaptureResponder } from "@/lib/connectors/hitl/approval-registry"
 import { useTranslations } from "next-intl"
+import { isCapabilityUsable } from "@cognia/agent-config-types/external-agent-capability"
+import { isCogniaProjectedTool } from "@/lib/ai/agent/external/tool-preapproval"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 import { makeUserMessage } from "@/lib/claude/adapter"
 import { clearProjectHistoryEvidence } from "@/lib/claude/project-history-evidence-registry"
@@ -210,7 +212,7 @@ import {
 import { applyInstantTitle, clearPendingLoopContinuation } from "./claude-chat-turn-tasks"
 import type { SendFn } from "./claude-chat-turn-tasks"
 import { buildSendOptions } from "./claude-chat-send-options"
-import { drainSteerVia, handleEvent } from "./claude-chat-events"
+import { drainSteerVia, handleEvent, tryAutoModeDecision } from "./claude-chat-events"
 
 export function resolveChatTurnAttemptIdentity(input: {
   sessionId: string
@@ -382,6 +384,34 @@ export function useClaudeChat() {
   // `interruptSession` instead).
   const standaloneAbortRef = useRef<Map<string, AbortController>>(new Map())
   const externalGatewayAbortRef = useRef<Map<string, AbortController>>(new Map())
+  const externalToolHostsRef = useRef(
+    new Map<
+      string,
+      {
+        host: ReturnType<
+          typeof import("@/lib/ai/agent/external/renderer-tool-host").createRendererToolHost
+        >
+        agentId: string
+        nativeSessionId?: string
+        launchContextSignature?: string
+      }
+    >()
+  )
+  const releaseExternalToolHost = useCallback(async (sessionId: string) => {
+    const entry = externalToolHostsRef.current.get(sessionId)
+    if (!entry) return
+    externalToolHostsRef.current.delete(sessionId)
+    try {
+      const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
+      if (getExternalAgentManager().getAgent(entry.agentId))
+        getExternalAgentManager().setSessionHostFacts(entry.agentId, sessionId, null)
+      if (entry.nativeSessionId) {
+        await getExternalAgentManager().closeSession(entry.agentId, entry.nativeSessionId)
+      }
+    } finally {
+      await entry.host.close()
+    }
+  }, [])
   // Session-owned handles live beside the existing coalescing resources. The
   // resolver callback supplies the exact spec used for the outgoing send, so
   // this hook never resolves execution a second time.
@@ -428,7 +458,13 @@ export function useClaudeChat() {
     const executionHandles = executionHandlesRef.current
     const squadWatchers = squadWatchersRef.current
     const gatewayControllers = externalGatewayAbortRef.current
+    const toolHosts = externalToolHostsRef.current
     return () => {
+      for (const sessionId of toolHosts.keys()) {
+        void releaseExternalToolHost(sessionId).catch((error) =>
+          console.error("external tool host close failed", error)
+        )
+      }
       for (const controller of gatewayControllers.values()) controller.abort()
       gatewayControllers.clear()
       registry.flushAllPersist()
@@ -440,7 +476,7 @@ export function useClaudeChat() {
       for (const stop of squadWatchers.values()) stop()
       squadWatchers.clear()
     }
-  }, [registry])
+  }, [registry, releaseExternalToolHost])
 
   /**
    * Turn-silence watchdog (see `lib/chat/silence-watchdog`).
@@ -2316,8 +2352,7 @@ export function useClaudeChat() {
           if (error) dispatchPluginChatError(sessionId, error)
         }
 
-        const gatewayController =
-          managedGatewayTask && !hostSelection ? new AbortController() : undefined
+        const gatewayController = !hostSelection ? new AbortController() : undefined
         if (gatewayController) externalGatewayAbortRef.current.set(sessionId, gatewayController)
         try {
           await persistMessages(sessionId, next)
@@ -2336,7 +2371,7 @@ export function useClaudeChat() {
             : null
           const { applyExternalAgentEventToParts } =
             await import("@/lib/ai/agent/external/event-to-parts")
-          const { registerExternalApproval, registerExternalElicitation } =
+          const { registerExternalApproval, registerExternalElicitation, toPermissionResponse } =
             await import("@/lib/ai/agent/external/chat-decision-bridge")
           const { useExternalElicitationStore } =
             await import("@/stores/agent/external-elicitation-store")
@@ -2415,6 +2450,8 @@ export function useClaudeChat() {
           let externalSessionWrite = Promise.resolve()
           let externalSessionWriteError: unknown
           const persistExternalSession = (nativeId?: string) => {
+            const hosted = externalToolHostsRef.current.get(sessionId)
+            if (hosted && nativeId) hosted.nativeSessionId = nativeId
             if (!nativeId?.startsWith("cognia-gateway:") || nativeId === persistedExternalSessionId)
               return
             persistedExternalSessionId = nativeId
@@ -2428,6 +2465,7 @@ export function useClaudeChat() {
                 externalSessionWriteError = error
               })
           }
+          let hostedServerNames: string[] = []
           const handleExternalEvent = (
             event: import("@/types/agent/external-agent").ExternalAgentEvent
           ) => {
@@ -2447,6 +2485,33 @@ export function useClaudeChat() {
             if (capture) void projectDirectChatCaptureEvent(sessionId, capture)
             if (event.type === "permission_request") {
               const responseRequestId = event.request?.requestId || event.request?.id
+              const nativePermissionSessionId = event.sessionId ?? event.request.sessionId
+              if (
+                !hostSelection &&
+                nativePermissionSessionId &&
+                isCogniaProjectedTool(event.request.toolInfo?.name, hostedServerNames)
+              ) {
+                void import("@/lib/ai/agent/external/manager")
+                  .then(({ getExternalAgentManager }) =>
+                    getExternalAgentManager().respondToPermission(
+                      extAgentId,
+                      nativePermissionSessionId,
+                      toPermissionResponse("allow", {
+                        agentId: extAgentId,
+                        chatSessionId: sessionId,
+                        externalSessionId: nativePermissionSessionId,
+                        responseRequestId: responseRequestId ?? event.request.id,
+                        options: event.request.options,
+                      })
+                    )
+                  )
+                  .catch((error) => {
+                    void handleExternalFailure(
+                      error instanceof Error ? error.message : String(error)
+                    )
+                  })
+                return
+              }
               const approval = registerExternalApproval({
                 agentId: extAgentId,
                 chatSessionId: sessionId,
@@ -2542,6 +2607,124 @@ export function useClaudeChat() {
               : {}),
           }
 
+          const { resolvedMcpServerMapToAcpConfigs } =
+            await import("@/lib/ai/agent/external/resolve-acp-mcp-servers")
+          const externalMcpServers = resolvedMcpServerMapToAcpConfigs(sendOptions.mcpServers)
+          let externalContinuationContext: string | undefined
+          let resetExternalSession = false
+          if (!hostSelection) {
+            const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
+            const manager = getExternalAgentManager()
+            const agentConfig = manager.getAgent(extAgentId)?.config
+            const { buildDeclaredCapabilityProfile } =
+              await import("@/lib/ai/agent/external/capability-profile")
+            const profile =
+              manager.getAgentCapabilityProfile(extAgentId, sessionId) ??
+              (agentConfig
+                ? buildDeclaredCapabilityProfile({ protocol: agentConfig.protocol })
+                : undefined)
+            if (
+              agentConfig?.protocol === "dsh-sdk" &&
+              managedGatewayTask &&
+              session?.externalAgentSession
+            ) {
+              const { renderTranscript } = await import("@/lib/chat/branch-session")
+              externalContinuationContext = renderTranscript(
+                (await listMessages(sessionId)).filter((message) => message.id !== userMsg.id)
+              )
+            }
+            const mcpLevel = profile?.effective.mcp.level
+            if (mcpLevel === "native" || mcpLevel === "equivalent") {
+              const { createRendererToolHost } =
+                await import("@/lib/ai/agent/external/renderer-tool-host")
+              let entry = externalToolHostsRef.current.get(sessionId)
+              if (entry && entry.agentId !== extAgentId) {
+                await releaseExternalToolHost(sessionId)
+                entry = undefined
+              }
+              if (!entry) {
+                entry = { host: createRendererToolHost(sessionId), agentId: extAgentId }
+                externalToolHostsRef.current.set(sessionId, entry)
+              }
+              const hosted = await entry.host.start({
+                sendOptions,
+                signal: gatewayController?.signal,
+                // DSH publishes its own broker tool calls; duplicating them here
+                // would render two calls for one execution.
+                onToolEvent:
+                  isCapabilityUsable(profile?.effective["tools.ordinary"]?.level ?? "unknown") &&
+                  isCapabilityUsable(profile?.effective["tools.results"]?.level ?? "unknown")
+                    ? undefined
+                    : handleExternalEvent,
+                onPermissionRequest: async (request, signal) => {
+                  const { awaitApproval, hasSessionBypass } =
+                    await import("@/lib/connectors/hitl/approval-registry")
+                  if (hasSessionBypass(sessionId, request.toolName)) return { decision: "allow" }
+                  if (sendOptions.permissionMode === "auto") {
+                    let automatic: { decision: "allow" | "deny"; message?: string } | undefined
+                    await tryAutoModeDecision(
+                      { ...request, sessionId },
+                      async (decision, message) => {
+                        automatic = { decision, message }
+                      }
+                    )
+                    if (signal.aborted)
+                      return { decision: "deny", message: "Tool turn was cancelled" }
+                    if (automatic) return automatic
+                  }
+                  const pending = awaitApproval(sessionId, request.requestId, { signal })
+                  store.getState().pushApproval({ ...request, sessionId, status: "pending" })
+                  try {
+                    return await pending
+                  } finally {
+                    store.getState().clearApproval(request.requestId, sessionId)
+                  }
+                },
+              })
+              const launchContextSignature = JSON.stringify({
+                catalog: hosted.catalogFingerprint,
+                servers: [...hosted.mcpServers, ...externalMcpServers],
+                cwd: sendOptions.cwd,
+                additionalDirectories: sendOptions.additionalDirectories ?? [],
+                systemPrompt: sendOptions.systemPrompt,
+                appendSystemPrompt: sendOptions.appendSystemPrompt,
+                permissionMode: sendOptions.permissionMode,
+                allowedTools: sendOptions.allowedTools,
+              })
+              if (
+                entry.launchContextSignature &&
+                entry.launchContextSignature !== launchContextSignature &&
+                entry.nativeSessionId
+              ) {
+                await manager.closeSession(extAgentId, entry.nativeSessionId)
+                if (!isCapabilityUsable(profile?.effective["session.resume"]?.level ?? "unknown")) {
+                  // A protocol without resume starts a fresh native session.
+                  // Preserve Cognia's transcript explicitly as task context.
+                  const { renderTranscript } = await import("@/lib/chat/branch-session")
+                  externalContinuationContext = renderTranscript(
+                    (await listMessages(sessionId)).filter((message) => message.id !== userMsg.id)
+                  )
+                  resetExternalSession = true
+                  entry.nativeSessionId = undefined
+                }
+              }
+              entry.launchContextSignature = launchContextSignature
+              manager.setSessionHostFacts(extAgentId, sessionId, {
+                toolHostRunning: true,
+                subagentDispatchProjected:
+                  sendOptions.pluginTools?.some((tool) => tool.name === "dispatch_agent") ?? false,
+                hookRuntimeAvailable: true,
+              })
+              hostedServerNames = hosted.mcpServers.map((server) => server.name)
+              externalMcpServers.unshift(...hosted.mcpServers)
+            }
+          }
+          // Reuse the completed instruction pipeline, including selected skills,
+          // project context and per-turn additions, on the external lane too.
+          const externalSystemPrompt = [sendOptions.systemPrompt, sendOptions.appendSystemPrompt]
+            .filter((section): section is string => typeof section === "string" && !!section.trim())
+            .join("\n\n")
+
           // Two executors, one contract. `executeOnRemoteHostAgent` presents
           // the same `(prompt, { onEvent }) => ExternalAgentResult | null`
           // shape over the companion plane, so everything downstream of this
@@ -2558,29 +2741,43 @@ export function useClaudeChat() {
                   chatSessionId: sessionId,
                   newRunId: () => remoteRunId,
                   ...externalModelAxes,
+                  systemPrompt: externalSystemPrompt || undefined,
+                  allowedTools: sendOptions.allowedTools,
+                  mcpServers: externalMcpServers,
                   onEvent: handleExternalEvent,
                 })
               : await executeOnExternalAgent(externalSendText, {
                   agentId: extAgentId,
                   ...(gatewayController ? { signal: gatewayController.signal } : {}),
-                  ...(session?.externalAgentSession?.agentId === extAgentId
+                  ...(!resetExternalSession && session?.externalAgentSession?.agentId === extAgentId
                     ? { sessionId: session.externalAgentSession.sessionId }
+                    : {}),
+                  ...(!resetExternalSession &&
+                  externalToolHostsRef.current.get(sessionId)?.nativeSessionId
+                    ? { sessionId: externalToolHostsRef.current.get(sessionId)!.nativeSessionId }
                     : {}),
                   // Resume the agent's own native session, but only for an
                   // import whose binding has been verified. The id comes from
                   // the session row, which is where it has always lived. The
                   // composition carries the verification decision, nothing more.
-                  ...(sessionId.startsWith("import:") &&
+                  ...(!resetExternalSession &&
+                  sessionId.startsWith("import:") &&
                   compositionForSession(sessionId).verifiedNativeResume &&
                   session?.importRuntimeBinding?.nativeSessionId
                     ? { sessionId: session.importRuntimeBinding.nativeSessionId }
                     : {}),
                   workingDirectory: sendOptions.cwd,
+                  systemPrompt: externalSystemPrompt || undefined,
+                  allowedTools: sendOptions.allowedTools,
                   ...externalModelAxes,
                   context: {
                     custom: {
                       additionalDirectories: sendOptions.additionalDirectories ?? [],
                       chatSessionId: sessionId,
+                      mcpServers: externalMcpServers,
+                      ...(externalContinuationContext
+                        ? { conversationHistory: externalContinuationContext }
+                        : {}),
                     },
                   },
                   onEvent: handleExternalEvent,
@@ -2701,6 +2898,15 @@ export function useClaudeChat() {
           const error = err instanceof Error ? err : new Error(String(err))
           await handleExternalFailure(error.message, error)
         } finally {
+          const hosted = externalToolHostsRef.current.get(sessionId)
+          if (hosted) {
+            const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
+            if (getExternalAgentManager().getAgent(extAgentId))
+              getExternalAgentManager().setSessionHostFacts(extAgentId, sessionId, null)
+          }
+          await hosted?.host.pause().catch((error) => {
+            console.error("external tool host pause failed", error)
+          })
           if (externalGatewayAbortRef.current.get(sessionId) === gatewayController) {
             externalGatewayAbortRef.current.delete(sessionId)
           }
@@ -2875,6 +3081,17 @@ export function useClaudeChat() {
             }
           })
         } else {
+          if (
+            (sendOptions.execution?.runtimeAdapter ??
+              (sendOptions.provider === "anthropic" || !sendOptions.provider
+                ? "claude-agent-sdk"
+                : "ai-sdk")) === "claude-agent-sdk"
+          ) {
+            const { sdkSessionStorageFromOptions } = await import("@/lib/claude/claude-sdk-rollout")
+            await updateSession(sessionId, {
+              sdkSessionStorage: sdkSessionStorageFromOptions(sendOptions),
+            })
+          }
           chatTurnPerformance.markDispatched(sessionId)
           if (dispatchClaim === "claimed") {
             await sendPrompt(sessionId, effectiveContent, sendOptions, {
@@ -2960,6 +3177,7 @@ export function useClaudeChat() {
       tRouting,
       tInlineErr,
       registry,
+      releaseExternalToolHost,
       enqueueClaudeEvent,
       getExecutionHandle,
       executionHandleDirectory,
@@ -3301,9 +3519,24 @@ export function useClaudeChat() {
 
   const respondToApproval = useCallback(
     async (approval: PendingApproval, decision: ApprovalDecision): Promise<void> => {
+      if (approval.suppressAlwaysAllowRule && decision === "allow_always") decision = "allow"
       const authorized = await authorizeSharedSessionApproval(approval, decision)
       if (authorized === null) return
-      decision = authorized
+      decision =
+        approval.suppressAlwaysAllowRule && authorized === "allow_always" ? "allow" : authorized
+      {
+        const { RENDERER_TOOL_HOST_APPROVAL_PREFIX } =
+          await import("@/lib/ai/agent/external/renderer-tool-host")
+        if (approval.requestId.startsWith(RENDERER_TOOL_HOST_APPROVAL_PREFIX)) {
+          const { resolveApproval, grantSessionBypass } =
+            await import("@/lib/connectors/hitl/approval-registry")
+          if (decision === "allow_always") grantSessionBypass(approval.sessionId, approval.toolName)
+          resolveApproval(approval.sessionId, approval.requestId, { decision })
+          await recordChatToolApprovalDecision(approval, decision)
+          store.getState().clearApproval(approval.requestId, approval.sessionId)
+          return
+        }
+      }
       // Built-in-skill desktop consent (W2 dual-channel HITL): synthetic
       // approvals are resolved IN-RENDERER via the approval registry — there
       // is no sidecar-side permission waiting, so `approveTool` must never
@@ -3468,7 +3701,7 @@ export function useClaudeChat() {
       // (`applyComputerUseTools`) consults `chatConsentMode` before
       // honouring a grant.
       if (decision === "allow" || decision === "allow_always") {
-        if (isComputerUsePluginToolName(approval.toolName)) {
+        if (!approval.suppressAlwaysAllowRule && isComputerUsePluginToolName(approval.toolName)) {
           const { recordSessionGrant } = await import("@/lib/claude/computer-use-session-grants")
           recordSessionGrant(approval.sessionId, approval.toolName)
         }
@@ -3545,8 +3778,13 @@ export function useClaudeChat() {
         messagesMirrorRef.current.delete(sessionId)
         executionHandlesRef.current.delete(sessionId)
         executionHandleDirectory.unregister(sessionId, handle)
+        await releaseExternalToolHost(sessionId).catch((error) => {
+          console.error("external tool host close failed", error)
+        })
         useChatStore.getState().closeSession(sessionId)
         clearSessionGrants(sessionId)
+        const { clearSessionBypass } = await import("@/lib/connectors/hitl/approval-registry")
+        clearSessionBypass(sessionId)
         releaseSkillLoadContext(sessionId)
         // Drop this session's nested-dispatch state (budget guard + resolved
         // permission ceiling) so neither leaks for the renderer's lifetime. Both
@@ -3557,7 +3795,7 @@ export function useClaudeChat() {
         releaseDispatchStateForSession(sessionId)
       }
     },
-    [registry, getExecutionHandle, executionHandleDirectory]
+    [registry, getExecutionHandle, executionHandleDirectory, releaseExternalToolHost]
   )
 
   const compact = useCallback(

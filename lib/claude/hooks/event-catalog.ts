@@ -49,6 +49,8 @@ const EVENT_META: Record<HookEvent, { category: HookEventCategory; dormant?: boo
   StopFailure: { category: "session" },
   Notification: { category: "session" },
   MessageDisplay: { category: "session" },
+  PreModelSwitch: { category: "session" },
+  PostModelSwitch: { category: "session" },
   // permissions
   PermissionRequest: { category: "permissions" },
   PermissionDenied: { category: "permissions" },

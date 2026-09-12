@@ -22,6 +22,7 @@ export const CONTROL_METHODS = new Set([
   "readFile",
   "reconnectMcpServer",
   "reinitialize",
+  "reloadOutputStyles",
   "reloadPlugins",
   "reloadSkills",
   "rewindFiles",
@@ -37,6 +38,7 @@ export const CONTROL_METHODS = new Set([
   "supportedCommands",
   "supportedModels",
   "toggleMcpServer",
+  "updateSettings",
 ])
 
 /**
@@ -60,6 +62,7 @@ export const CONTROL_METHOD_CAPABILITIES = {
   readFile: "checkpoint",
   reconnectMcpServer: "mcp",
   reinitialize: "session.manage",
+  reloadOutputStyles: "session.manage",
   reloadPlugins: "plugins.native",
   reloadSkills: "skills.native",
   rewindFiles: "checkpoint",
@@ -75,6 +78,7 @@ export const CONTROL_METHOD_CAPABILITIES = {
   supportedCommands: "commands.dynamic",
   supportedModels: "set-model",
   toggleMcpServer: "mcp",
+  updateSettings: "session.manage",
 }
 
 /** True when `method` is an allowlisted control method. */
@@ -132,6 +136,12 @@ export function controlArgs(method, params) {
       return [p.toolUseId]
     case "applyFlagSettings":
       return [p.settings]
+    case "updateSettings":
+      return [p.source, p.settings]
+    case "getContextUsage":
+      return [p.options]
+    case "reloadPlugins":
+      return [p.options]
     default:
       return []
   }
@@ -221,6 +231,36 @@ export function controlParamError(method, params) {
       return p.settings && typeof p.settings === "object" && !Array.isArray(p.settings)
         ? null
         : "invalid_settings"
+    case "updateSettings":
+      if (p.source !== "localSettings") return "invalid_settings_source"
+      return p.settings &&
+        typeof p.settings === "object" &&
+        !Array.isArray(p.settings) &&
+        Object.entries(p.settings).every(
+          ([key, value]) => key === "outputStyle" && typeof value === "string"
+        )
+        ? null
+        : "invalid_settings"
+    case "getContextUsage":
+      if (p.options === undefined) return null
+      return p.options &&
+        typeof p.options === "object" &&
+        !Array.isArray(p.options) &&
+        Object.entries(p.options).every(
+          ([key, value]) => key === "detail" && ["summary", "full"].includes(value)
+        )
+        ? null
+        : "invalid_context_options"
+    case "reloadPlugins":
+      if (p.options === undefined) return null
+      return p.options &&
+        typeof p.options === "object" &&
+        !Array.isArray(p.options) &&
+        Object.entries(p.options).every(
+          ([key, value]) => key === "holdOnCacheImpact" && typeof value === "boolean"
+        )
+        ? null
+        : "invalid_reload_options"
     default:
       return null
   }

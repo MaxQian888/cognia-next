@@ -3,8 +3,15 @@
  */
 
 let mockStatus = "idle"
+let mockRuntime = "claude-agent-sdk"
 jest.mock("@/stores/chat", () => ({
-  useChatStore: (sel: (s: { status: string }) => unknown) => sel({ status: mockStatus }),
+  useChatStore: (sel: (s: unknown) => unknown) =>
+    sel({
+      status: mockStatus,
+      lastSendBySession: {
+        s1: { options: { execution: { hostRef: "desktop-sidecar", runtimeAdapter: mockRuntime } } },
+      },
+    }),
 }))
 
 // The host gate reads the host PROFILE (this shell's own sidecar, or a paired
@@ -28,10 +35,25 @@ const SNAP = { totalTokens: 10, maxTokens: 100, percentage: 0.1 }
 beforeEach(() => {
   jest.clearAllMocks()
   mockStatus = "idle"
+  mockRuntime = "claude-agent-sdk"
   mockHostProfile.mockReturnValue("desktop")
 })
 
 describe("useSdkContextUsage", () => {
+  it("re-probes when the same provider switches its live runtime", async () => {
+    mockRuntime = "ai-sdk"
+    getSessionContextUsage.mockRejectedValue(new Error("unsupported"))
+    const { result, rerender } = renderHook(() => useSdkContextUsage("s1", "custom"))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(result.current.snapshot).toBeNull()
+    getSessionContextUsage.mockResolvedValue(SNAP)
+    mockRuntime = "claude-agent-sdk"
+    rerender()
+    await waitFor(() => expect(result.current.snapshot).toEqual(SNAP))
+  })
+
   it("fetches SDK usage on mount for an Anthropic session", async () => {
     getSessionContextUsage.mockResolvedValue(SNAP)
     const { result } = renderHook(() => useSdkContextUsage("s1", "anthropic"))
@@ -39,14 +61,14 @@ describe("useSdkContextUsage", () => {
     expect(getSessionContextUsage).toHaveBeenCalledWith("s1")
   })
 
-  it("stays disabled for non-Anthropic providers", async () => {
+  it("probes the live runtime for a custom provider", async () => {
     getSessionContextUsage.mockResolvedValue(SNAP)
-    const { result } = renderHook(() => useSdkContextUsage("s1", "openai"))
+    const { result } = renderHook(() => useSdkContextUsage("s1", "custom-anthropic"))
     await act(async () => {
       await Promise.resolve()
     })
-    expect(getSessionContextUsage).not.toHaveBeenCalled()
-    expect(result.current.snapshot).toBeNull()
+    expect(getSessionContextUsage).toHaveBeenCalledWith("s1")
+    expect(result.current.snapshot).toEqual(SNAP)
   })
 
   it("is disabled in a standalone browser, which has no host to ask", async () => {
@@ -102,5 +124,36 @@ describe("useSdkContextUsage", () => {
       await Promise.resolve()
     })
     expect(getSessionContextUsage).not.toHaveBeenCalled()
+  })
+  it("ignores stale responses across session switches including A to B to A", async () => {
+    const pending: Array<(value: typeof SNAP) => void> = []
+    getSessionContextUsage.mockImplementation(() => new Promise((resolve) => pending.push(resolve)))
+    const { result, rerender } = renderHook(({ id }) => useSdkContextUsage(id), {
+      initialProps: { id: "a" },
+    })
+    await waitFor(() => expect(pending).toHaveLength(1))
+    rerender({ id: "b" })
+    await waitFor(() => expect(pending).toHaveLength(2))
+    rerender({ id: "a" })
+    await waitFor(() => expect(pending).toHaveLength(3))
+    const fresh = { ...SNAP, totalTokens: 30 }
+    await act(async () => pending[2](fresh))
+    await act(async () => pending[0](SNAP))
+    await act(async () => pending[1](SNAP))
+    expect(result.current.snapshot).toEqual(fresh)
+  })
+
+  it("does not repeatedly probe an unsupported runtime", async () => {
+    getSessionContextUsage.mockRejectedValue(new Error("unsupported_provider"))
+
+    const { result } = renderHook(() => useSdkContextUsage("s1", "other-provider"))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    act(() => result.current.refresh())
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(getSessionContextUsage).toHaveBeenCalledTimes(1)
   })
 })

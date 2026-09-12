@@ -1,4 +1,8 @@
 /** @jest-environment jsdom */
+jest.mock("@/lib/claude/permissions/auto-mode-runner", () => ({ runAutoModeForTool: jest.fn() }))
+jest.mock("@/lib/ai/generation/utility-client", () => ({
+  buildUtilityLlmClient: jest.fn(() => null),
+}))
 const applySdkEventMock = jest.fn()
 const mergeWebSearchSourcesMock = jest.fn((messages: unknown, _context?: unknown) => messages)
 const mergeProjectHistorySourcesMock = jest.fn((messages: unknown, _evidence?: unknown) => messages)
@@ -261,4 +265,30 @@ describe("project-history evidence folding", () => {
     expect(mergeProjectHistorySourcesMock).toHaveBeenCalledTimes(1)
     expect(drainProjectHistoryEvidence("s4")).toEqual([])
   })
+})
+
+describe("renderer broker Auto-mode responder", () => {
+  it.each(["allow", "deny", "ask"] as const)(
+    "routes %s without requiring the native SDK approval transport",
+    async (decision) => {
+      const { runAutoModeForTool } = await import("@/lib/claude/permissions/auto-mode-runner")
+      const { tryAutoModeDecision } = await import("./claude-chat-events")
+      jest
+        .mocked(runAutoModeForTool)
+        .mockResolvedValueOnce({ decision, source: "rules", reason: "fixture" } as never)
+      const respond = jest.fn(async (_decision: "allow" | "deny", _message?: string) => {})
+      const handled = await tryAutoModeDecision(
+        {
+          sessionId: "chat",
+          requestId: "external-tool-host:test",
+          toolName: "Bash",
+          input: { command: "pwd" },
+        },
+        respond
+      )
+      expect(handled).toBe(decision !== "ask")
+      if (decision === "ask") expect(respond).not.toHaveBeenCalled()
+      else expect(respond.mock.calls[0][0]).toBe(decision)
+    }
+  )
 })

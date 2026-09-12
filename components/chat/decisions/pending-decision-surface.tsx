@@ -191,18 +191,21 @@ function ApprovalDecisionBody({
                 variant="ghost"
                 disabled={responding}
                 onClick={() => void respond("deny")}
+                autoFocus={approval.defaultToNo === true}
                 data-testid="decision-deny"
               >
                 {t("deny")}
               </ConfirmationAction>
-              <ConfirmationAction
-                variant="secondary"
-                disabled={responding}
-                onClick={() => void respond("allow_always")}
-                data-testid="decision-allow-always"
-              >
-                {t("allowAlways")}
-              </ConfirmationAction>
+              {!approval.suppressAlwaysAllowRule && (
+                <ConfirmationAction
+                  variant="secondary"
+                  disabled={responding}
+                  onClick={() => void respond("allow_always")}
+                  data-testid="decision-allow-always"
+                >
+                  {t("allowAlways")}
+                </ConfirmationAction>
+              )}
               <ConfirmationAction
                 disabled={responding}
                 onClick={() => void respond("allow")}

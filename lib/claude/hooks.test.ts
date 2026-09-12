@@ -66,6 +66,8 @@ describe("hooks types module", () => {
       "UserPromptSubmit",
       "Stop",
       "SessionStart",
+      "PreModelSwitch",
+      "PostModelSwitch",
     ]
     const config: HooksConfig = {
       PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "echo" }] }],

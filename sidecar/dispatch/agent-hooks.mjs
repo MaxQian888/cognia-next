@@ -79,6 +79,10 @@ export const HOOK_EVENTS_WITHOUT_MATCHERS = new Set([
   "WorktreeRemove",
   "MessageDisplay",
   "CwdChanged",
+  // These two are filtered by the SDK at registration, because only it knows
+  // canonical provider/model aliases and the unknown-model fallback rule.
+  "PreModelSwitch",
+  "PostModelSwitch",
 ])
 
 /**
@@ -194,6 +198,29 @@ export function extractDecision(json) {
   }
 
   const out = {}
+  // Retain the SDK's structured contract independently of Cognia's aggregate
+  // decision vocabulary. Plugin/native handlers and JSON command stdout share
+  // this path, so event-specific outputs must not disappear during translation.
+  const sdkOutput = {}
+  for (const key of [
+    "continue",
+    "suppressOutput",
+    "stopReason",
+    "systemMessage",
+    "terminalSequence",
+  ]) {
+    if (json?.[key] !== undefined) sdkOutput[key] = json[key]
+  }
+  if (json?.decision === "approve") sdkOutput.decision = "approve"
+  if (json?.decision === "approve" && json.reason !== undefined) sdkOutput.reason = json.reason
+  if (hso && typeof hso === "object" && typeof hso.hookEventName === "string") {
+    sdkOutput.hookSpecificOutput = { ...hso }
+  }
+  if (Object.keys(sdkOutput).length) out.sdkOutput = sdkOutput
+  if (hso?.decision?.behavior === "deny") {
+    out.block = hso.decision.message ?? "hook denied permission"
+    return out
+  }
 
   const pd = strField("permissionDecision")
   if (pd) {
@@ -219,7 +246,8 @@ export function extractDecision(json) {
   const ui = anyField("updatedInput")
   if (ui && typeof ui === "object") out.updatedInput = ui
 
-  const uo = anyField("updatedToolOutput") ?? anyField("updatedMCPToolOutput")
+  const currentOutput = anyField("updatedToolOutput")
+  const uo = currentOutput !== undefined ? currentOutput : anyField("updatedMCPToolOutput")
   if (uo !== undefined) out.updatedToolOutput = uo
 
   const ctx = strField("additionalContext")
@@ -256,6 +284,29 @@ function emptyDecision() {
 export function mergeOutcome(dec, outcome) {
   if (!outcome) return dec
   if (outcome.warning) dec.warnings.push(outcome.warning)
+  if (outcome.sdkOutput) {
+    const previous = dec.sdkOutput ?? {}
+    dec.sdkOutput = { ...previous, ...outcome.sdkOutput }
+    if (previous.hookSpecificOutput || outcome.sdkOutput.hookSpecificOutput)
+      dec.sdkOutput.hookSpecificOutput = {
+        ...previous.hookSpecificOutput,
+        ...outcome.sdkOutput.hookSpecificOutput,
+      }
+    // An assertion describing an earlier rewrite must not be attached to a
+    // later handler's replacement. The SDK applies the same pairing rule.
+    const nextSpecific = outcome.sdkOutput.hookSpecificOutput
+    const replacesOutput =
+      nextSpecific?.updatedToolOutput !== undefined ||
+      nextSpecific?.updatedMCPToolOutput !== undefined
+    if (
+      replacesOutput &&
+      dec.classifierContextBound &&
+      nextSpecific.classifierContext === undefined
+    )
+      delete dec.sdkOutput.hookSpecificOutput.classifierContext
+    if (nextSpecific?.classifierContext !== undefined) dec.classifierContextBound = replacesOutput
+    if (previous.continue === false) dec.sdkOutput.continue = false
+  }
   if (outcome.block !== undefined && dec.block === undefined) dec.block = outcome.block
   if (outcome.additionalContext !== undefined) {
     dec.additionalContext =
@@ -264,6 +315,9 @@ export function mergeOutcome(dec, outcome) {
         : `${dec.additionalContext}\n\n${outcome.additionalContext}`
   }
   // Mutations: last non-empty wins (matches Claude Code's "last to finish wins").
+  if (outcome.updatedToolOutput !== undefined && !outcome.sdkOutput && dec.classifierContextBound) {
+    delete dec.sdkOutput.hookSpecificOutput.classifierContext
+  }
   if (outcome.updatedInput !== undefined) dec.updatedInput = outcome.updatedInput
   if (outcome.updatedToolOutput !== undefined) dec.updatedToolOutput = outcome.updatedToolOutput
   // Permission escalation: ask is more restrictive than allow.
@@ -436,7 +490,12 @@ export async function runWebhookHandler(url, headers, configuredTimeout, payload
     }
     return parseZeroExitOutput(body)
   } catch (e) {
-    return { warning: `hook webhook failed: ${e?.message ?? e}` }
+    return {
+      warning:
+        controller.signal.aborted && !signal?.aborted
+          ? "hook webhook timed out"
+          : `hook webhook failed: ${e?.message ?? e}`,
+    }
   } finally {
     clearTimeout(timer)
     if (signal && typeof signal.removeEventListener === "function") {
@@ -558,11 +617,21 @@ export async function runGroups(groups, target, payloadJson, signal, cwd, deps =
     // Applies to EVERY event, including the matcher-less ones.
     if (!agentsMatch(group.agents, deps.agentIdentity)) continue
     for (const handler of Array.isArray(group.hooks) ? group.hooks : []) {
+      const effectiveHandler =
+        deps.eventName === "PreModelSwitch" && handler?.timeout === undefined
+          ? { ...handler, timeout: 30 }
+          : handler
       const index = handlerIndex++
       const startedAt = Date.now()
       pending.push(
-        runHandler(handler, payloadJson, signal, cwd, deps).then((rawOutcome) => {
-          const outcome = applyFailurePolicy(handler, rawOutcome)
+        runHandler(effectiveHandler, payloadJson, signal, cwd, deps).then((rawOutcome) => {
+          const normalized = rawOutcome?.pluginResult ?? rawOutcome
+          const outcome = applyFailurePolicy(handler, {
+            ...rawOutcome,
+            ...extractDecision(normalized),
+          })
+          if (deps.eventName === "PreModelSwitch" && /timed out/.test(outcome.warning ?? ""))
+            outcome.block = "Model switch hook timed out"
           deps.onAudit?.({
             hookId: `${deps.sessionId ?? "session"}:${deps.eventName ?? "event"}:${startedAt}:${index}`,
             hookEvent: deps.eventName ?? "unknown",
@@ -594,24 +663,54 @@ export async function runGroups(groups, target, payloadJson, signal, cwd, deps =
 
 /** Map an aggregated decision to the SDK's per-event HookJSONOutput. */
 export function mapDecisionToOutput(eventName, dec) {
-  if (eventName === "PreToolUse") {
+  const preserved = dec.sdkOutput ?? {}
+  if (preserved.hookSpecificOutput && preserved.hookSpecificOutput.hookEventName !== eventName) {
+    return mapDecisionToOutput(eventName, {
+      block: "Hook output event does not match the invoked event",
+    })
+  }
+  const mapped = mapLegacyDecisionToOutput(eventName, dec)
+  const result = { ...preserved, ...mapped }
+  if (preserved.hookSpecificOutput || mapped.hookSpecificOutput)
+    result.hookSpecificOutput = {
+      ...preserved.hookSpecificOutput,
+      ...mapped.hookSpecificOutput,
+    }
+  if (eventName === "PermissionRequest" && dec.block !== undefined) {
+    const original = preserved.hookSpecificOutput?.decision
+    delete result.decision
+    delete result.reason
+    result.hookSpecificOutput = {
+      hookEventName: eventName,
+      decision: {
+        ...(original?.behavior === "deny" ? original : {}),
+        behavior: "deny",
+        message: dec.block,
+      },
+    }
+  }
+  return result
+}
+
+function mapLegacyDecisionToOutput(eventName, dec) {
+  if (eventName === "PreToolUse" || eventName === "PreModelSwitch") {
     if (dec.block !== undefined) {
       return {
         hookSpecificOutput: {
-          hookEventName: "PreToolUse",
+          hookEventName: eventName,
           permissionDecision: "deny",
           permissionDecisionReason: dec.block,
         },
       }
     }
-    const hso = { hookEventName: "PreToolUse" }
+    const hso = { hookEventName: eventName }
     let enriched = false
     if (dec.updatedInput !== undefined) {
       hso.permissionDecision = dec.permissionDecision ?? "allow"
       hso.updatedInput = dec.updatedInput
       enriched = true
-    } else if (dec.permissionDecision === "ask") {
-      hso.permissionDecision = "ask"
+    } else if (dec.permissionDecision !== undefined) {
+      hso.permissionDecision = dec.permissionDecision
       enriched = true
     }
     if (dec.additionalContext !== undefined) {
@@ -636,12 +735,12 @@ export function mapDecisionToOutput(eventName, dec) {
     return enriched ? { hookSpecificOutput: hso } : {}
   }
 
-  // Every other lifecycle event. `block` and `additionalContext` are the two
-  // outputs the generic contract defines for all of them; per-event extras
-  // (SessionStart's `watchPaths`, MessageDisplay's `displayContent`) are not
-  // expressible in the settings.json decision vocabulary, so a hook that wants
-  // them uses the SDK/plugin handler path rather than a command hook.
+  // Legacy Cognia outputs remain supported; structured SDK fields are merged
+  // by the caller without flattening event-specific decisions.
   if (dec.block !== undefined) return { decision: "block", reason: dec.block }
+  if (eventName === "WorktreeCreate" && dec.additionalContext !== undefined) {
+    return { hookSpecificOutput: { hookEventName: eventName, worktreePath: dec.additionalContext } }
+  }
   if (dec.additionalContext !== undefined) {
     return {
       hookSpecificOutput: { hookEventName: eventName, additionalContext: dec.additionalContext },
@@ -761,7 +860,12 @@ export function buildAgentHooks(hooksConfig, deps) {
   const map = {}
   for (const eventName of SUPPORTED_EVENTS) {
     if (groupsForEvent(hooksConfig, eventName).length > 0) {
-      map[eventName] = [{ hooks: [makeEventCallback(eventName, hooksConfig, deps)] }]
+      if (eventName === "PreModelSwitch" || eventName === "PostModelSwitch") {
+        map[eventName] = groupsForEvent(hooksConfig, eventName).map((group) => ({
+          ...(group.matcher ? { matcher: group.matcher } : {}),
+          hooks: [makeEventCallback(eventName, { [eventName]: [group] }, deps)],
+        }))
+      } else map[eventName] = [{ hooks: [makeEventCallback(eventName, hooksConfig, deps)] }]
     }
   }
   return Object.keys(map).length > 0 ? map : undefined

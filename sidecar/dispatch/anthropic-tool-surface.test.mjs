@@ -1,6 +1,10 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { anthropicPluginToolBridgeOptions, enforceAnthropicToolSurface } from "./anthropic.mjs"
+import {
+  anthropicPluginToolBridgeOptions,
+  enforceAnthropicToolSurface,
+  enforceAnthropicPermissionChannel,
+} from "./anthropic.mjs"
 
 test("disabled tool surface removes every SDK tool entry point", () => {
   const options = enforceAnthropicToolSurface(
@@ -63,4 +67,107 @@ test("plugin tool bridge forwards the alias table the dispatcher translates with
     pendingPluginToolCalls: new Map(),
   })
   assert.equal("toolNameAliases" in without, false)
+})
+
+test("an explicit permission prompt tool excludes canUseTool while retaining independent interaction callbacks", () => {
+  const callback = () => {},
+    interaction = () => {}
+  const options = {
+    canUseTool: callback,
+    onElicitation: interaction,
+    permissionPromptToolName: "mcp__permission__review",
+  }
+  enforceAnthropicPermissionChannel(options)
+  assert.equal(options.canUseTool, undefined)
+  assert.equal(options.onElicitation, interaction)
+  const normal = { canUseTool: callback }
+  enforceAnthropicPermissionChannel(normal)
+  assert.equal(normal.canUseTool, callback)
+})
+
+test("delegated permission retains hard plan denials and never preapproves a safe call", async () => {
+  const options = enforceAnthropicPermissionChannel(
+    { permissionPromptToolName: "mcp__permission__review", canUseTool() {} },
+    { permissionMode: "plan" }
+  )
+  const guard = options.hooks.PreToolUse.at(-1).hooks[0]
+  const context = { signal: new AbortController().signal }
+  const denied = await guard(
+    {
+      tool_name: "mcp__cognia-tools__write",
+      tool_input: { path: "/workspace/a", content: "safe" },
+    },
+    "one",
+    context
+  )
+  assert.equal(denied.hookSpecificOutput.permissionDecision, "deny")
+  assert.deepEqual(
+    await guard({ tool_name: "Read", tool_input: { path: "/workspace/a" } }, "two", context),
+    {}
+  )
+  assert.equal(
+    (
+      await guard(
+        { tool_name: "Read", tool_input: { content: "private@example.com" } },
+        "three",
+        context
+      )
+    ).hookSpecificOutput.permissionDecision,
+    "deny"
+  )
+})
+
+test("delegated permission rechecks hook rewrites and removes hook autoapproval", async () => {
+  const options = enforceAnthropicPermissionChannel({
+    permissionPromptToolName: "mcp__permission__review",
+    hooks: {
+      PreToolUse: [
+        {
+          hooks: [
+            async () => ({
+              hookSpecificOutput: {
+                hookEventName: "PreToolUse",
+                permissionDecision: "allow",
+                updatedInput: { content: "private@example.com" },
+              },
+            }),
+            async () => ({
+              hookSpecificOutput: {
+                hookEventName: "PreToolUse",
+                permissionDecision: "allow",
+                updatedInput: { content: "safe" },
+              },
+            }),
+          ],
+        },
+      ],
+    },
+  })
+  const [unsafe, safe] = options.hooks.PreToolUse[0].hooks
+  const input = { tool_name: "Read", tool_input: {} },
+    context = { signal: new AbortController().signal }
+  assert.equal((await unsafe(input, "id", context)).hookSpecificOutput.permissionDecision, "deny")
+  assert.equal((await safe(input, "id", context)).hookSpecificOutput.permissionDecision, undefined)
+  const aborted = new AbortController()
+  aborted.abort()
+  assert.equal(
+    (await safe(input, "id", { signal: aborted.signal })).hookSpecificOutput.permissionDecision,
+    "deny"
+  )
+})
+
+test("delegation cannot escape response guards through an implicitly loaded MCP server", () => {
+  assert.throws(
+    () =>
+      enforceAnthropicPermissionChannel({
+        permissionPromptToolName: "mcp__implicit__review",
+        mcpServers: {},
+      }),
+    /managed MCP server/
+  )
+  const mounted = enforceAnthropicPermissionChannel({
+    permissionPromptToolName: "mcp__mounted__review",
+    mcpServers: { mounted: { type: "stdio", command: "node" } },
+  })
+  assert.equal(mounted.permissionPromptToolName, "mcp__mounted__review")
 })

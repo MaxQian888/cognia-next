@@ -74,8 +74,8 @@ test("controlArgs maps params to positional args", () => {
     "github",
     false,
   ])
+  assert.deepEqual(controlArgs("getContextUsage", { junk: 1 }), [undefined])
   // No-arg methods ignore params.
-  assert.deepEqual(controlArgs("getContextUsage", { junk: 1 }), [])
   assert.deepEqual(controlArgs("mcpServerStatus", undefined), [])
   assert.deepEqual(controlArgs("supportedModels"), [])
   assert.deepEqual(controlArgs("steer", { prompt: "redirect", priority: "now" }), [
@@ -105,6 +105,46 @@ test("controlArgs keeps optional trailing args as undefined rather than trimming
   // parameter distinguishes value / null / omitted, so a trimmed call would
   // mean something different from an omitted one.
   assert.deepEqual(controlArgs("setMaxThinkingTokens", { maxThinkingTokens: 0 }), [0, undefined])
+})
+
+test("latest SDK controls preserve settings, context detail and plugin reload options", () => {
+  assert.equal(isControlMethod("updateSettings"), true)
+  assert.equal(isControlMethod("reloadOutputStyles"), true)
+  assert.deepEqual(
+    controlArgs("updateSettings", {
+      source: "localSettings",
+      settings: { outputStyle: "Concise" },
+    }),
+    ["localSettings", { outputStyle: "Concise" }]
+  )
+  assert.deepEqual(controlArgs("getContextUsage", { options: { detail: "summary" } }), [
+    { detail: "summary" },
+  ])
+  assert.deepEqual(controlArgs("reloadPlugins", { options: { holdOnCacheImpact: true } }), [
+    { holdOnCacheImpact: true },
+  ])
+  assert.deepEqual(controlArgs("reloadOutputStyles"), [])
+  assert.equal(
+    controlParamError("updateSettings", {
+      source: "localSettings",
+      settings: { outputStyle: "Concise" },
+    }),
+    null
+  )
+  for (const params of [
+    { source: "userSettings", settings: { outputStyle: "Concise" } },
+    { source: "localSettings", settings: [] },
+    { source: "localSettings", settings: { outputStyle: null } },
+    { source: "localSettings", settings: { permissions: { allow: ["*"] } } },
+  ])
+    assert.notEqual(controlParamError("updateSettings", params), null)
+  assert.notEqual(controlParamError("getContextUsage", { options: { detail: "unknown" } }), null)
+  assert.notEqual(
+    controlParamError("reloadPlugins", { options: { holdOnCacheImpact: "yes" } }),
+    null
+  )
+  assert.equal(controlParamError("getContextUsage", { options: { detail: "summary" } }), null)
+  assert.equal(controlParamError("reloadPlugins", { options: { holdOnCacheImpact: false } }), null)
 })
 
 // ---- param validation --------------------------------------------------------

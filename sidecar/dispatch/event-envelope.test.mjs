@@ -13,6 +13,29 @@ import {
 const here = dirname(fileURLToPath(import.meta.url))
 const fixture = JSON.parse(readFileSync(join(here, "agent-event-envelope.fixture.json"), "utf8"))
 
+test("canonical permission requests preserve SDK approval hints", () => {
+  for (const value of [true, false]) {
+    assert.deepEqual(
+      canonicalEventFromWireMessage({
+        type: "permission_request",
+        requestId: "approval-1",
+        toolName: "Edit",
+        input: {},
+        defaultToNo: value,
+        suppressAlwaysAllowRule: value,
+      }),
+      {
+        kind: "permission-request",
+        requestId: "approval-1",
+        toolName: "Edit",
+        input: {},
+        defaultToNo: value,
+        suppressAlwaysAllowRule: value,
+      }
+    )
+  }
+})
+
 function collectEmitter(extra = {}) {
   const out = []
   const emitter = createEnvelopeEmitter({

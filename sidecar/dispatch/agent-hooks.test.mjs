@@ -30,7 +30,307 @@ import {
 // double quotes tripping cmd.exe.
 const nodeCmd = (js) => `node -e "${js}"`
 
+test("latest SDK structured hook outputs survive the Cognia translator", () => {
+  const cases = {
+    PermissionRequest: { decision: { behavior: "deny", message: "Refused", interrupt: true } },
+    SessionStart: { watchPaths: ["/workspace"], reloadSkills: true, sessionTitle: "Title" },
+    WorktreeCreate: { worktreePath: "/workspace/tree" },
+    Elicitation: { action: "decline", content: { answer: "no" } },
+    PermissionDenied: { retry: true },
+    MessageDisplay: { displayContent: "Replacement" },
+    PreModelSwitch: { permissionDecision: "deny", permissionDecisionReason: "Policy" },
+    PreToolUse: { permissionDecision: "allow", permissionDecisionReason: "Policy" },
+    PostToolUse: { classifierContext: "User confirmed", updatedToolOutput: "safe" },
+  }
+  for (const [event, fields] of Object.entries(cases)) {
+    const expected = { hookSpecificOutput: { hookEventName: event, ...fields } }
+    assert.deepEqual(mapDecisionToOutput(event, extractDecision(expected)), expected, event)
+  }
+  const output = {
+    continue: false,
+    suppressOutput: true,
+    stopReason: "Stop",
+    systemMessage: "Info",
+    terminalSequence: "\u0007",
+  }
+  assert.deepEqual(mapDecisionToOutput("Stop", extractDecision(output)), output)
+})
+
+test("native handler PermissionRequest denial is enforced before later allows", async () => {
+  const groups = [{ hooks: [{ type: "agent" }, { type: "prompt" }] }]
+  const decision = await runGroups(groups, null, "{}", undefined, process.cwd(), {
+    eventName: "PermissionRequest",
+    executeNativeHandler: async (handler) => ({
+      hookSpecificOutput: {
+        hookEventName: "PermissionRequest",
+        decision:
+          handler.type === "agent"
+            ? { behavior: "deny", message: "Policy" }
+            : { behavior: "allow" },
+      },
+    }),
+  })
+  assert.equal(decision.block, "Policy")
+  assert.deepEqual(mapDecisionToOutput("PermissionRequest", decision), {
+    hookSpecificOutput: {
+      hookEventName: "PermissionRequest",
+      decision: { behavior: "deny", message: "Policy" },
+    },
+  })
+})
+
+test("plugin and command hooks retain event-specific SDK decisions", async () => {
+  const output = {
+    hookSpecificOutput: {
+      hookEventName: "PermissionRequest",
+      decision: { behavior: "deny", message: "No", interrupt: true },
+    },
+  }
+  const command = nodeCmd(
+    `process.stdout.write(JSON.stringify(${JSON.stringify(output).replaceAll('"', "'")}))`
+  )
+  const commandResult = await runCommandHandler(command, 2, "{}", undefined, process.cwd())
+  assert.deepEqual(mapDecisionToOutput("PermissionRequest", commandResult), output)
+  const pendingPluginHookCalls = new Map()
+  const pluginResult = await runGroups(
+    [{ hooks: [{ type: "plugin", pluginId: "test", hookId: "guard" }] }],
+    null,
+    "{}",
+    undefined,
+    process.cwd(),
+    {
+      sessionId: "s",
+      eventName: "PermissionRequest",
+      pendingPluginHookCalls,
+      newId: () => "test-call",
+      emitRaw: () => pendingPluginHookCalls.get("test-call").resolve({ result: output }),
+    }
+  )
+  assert.deepEqual(mapDecisionToOutput("PermissionRequest", pluginResult), output)
+  assert.equal(pendingPluginHookCalls.size, 0)
+})
+
+test("structured hook merges retain stop precedence and reject mismatched events", () => {
+  const decision = { warnings: [] }
+  mergeOutcome(
+    decision,
+    extractDecision({
+      continue: false,
+      hookSpecificOutput: { hookEventName: "SessionStart", watchPaths: ["/a"] },
+    })
+  )
+  mergeOutcome(
+    decision,
+    extractDecision({
+      continue: true,
+      hookSpecificOutput: { hookEventName: "SessionStart", reloadSkills: true },
+    })
+  )
+  assert.deepEqual(mapDecisionToOutput("SessionStart", decision), {
+    continue: false,
+    hookSpecificOutput: { hookEventName: "SessionStart", watchPaths: ["/a"], reloadSkills: true },
+  })
+  assert.equal(
+    mapDecisionToOutput("PreToolUse", decision).hookSpecificOutput.permissionDecision,
+    "deny"
+  )
+  assert.deepEqual(mapDecisionToOutput("PermissionRequest", { block: "Policy" }), {
+    hookSpecificOutput: {
+      hookEventName: "PermissionRequest",
+      decision: { behavior: "deny", message: "Policy" },
+    },
+  })
+})
+
 // --- matcher ----------------------------------------------------------------
+
+test("model hook matchers delegate canonical target matching to the SDK", async () => {
+  const seen = []
+  const config = {
+    PreModelSwitch: [
+      { matcher: "claude-opus-5", hooks: [{ type: "agent", marker: "opus" }] },
+      { matcher: ".*sonnet.*", hooks: [{ type: "agent", marker: "sonnet" }] },
+    ],
+  }
+  const hooks = buildAgentHooks(config, {
+    executeNativeHandler: async (handler) => {
+      seen.push(handler.marker)
+      return {}
+    },
+  })
+  assert.deepEqual(
+    hooks.PreModelSwitch.map((group) => group.matcher),
+    ["claude-opus-5", ".*sonnet.*"]
+  )
+  // The SDK calls this callback after matching its canonicalized target name.
+  await hooks.PreModelSwitch[0].hooks[0]({ to_model: "us.anthropic.claude-opus-5-v1:0[1m]" })
+  assert.deepEqual(seen, ["opus"])
+})
+
+test("a PreModelSwitch hook timeout refuses the switch", async () => {
+  const hooks = buildAgentHooks(
+    {
+      PreModelSwitch: [
+        {
+          hooks: [{ type: "command", command: nodeCmd("setTimeout(()=>{},1000)"), timeout: 0.01 }],
+        },
+      ],
+    },
+    {}
+  )
+  const result = await hooks.PreModelSwitch[0].hooks[0]({})
+  assert.equal(result.hookSpecificOutput.permissionDecision, "deny")
+  assert.match(result.hookSpecificOutput.permissionDecisionReason, /timed out/)
+})
+
+test("PII-bearing permission and model-switch responses fail closed in the SDK contract", async () => {
+  for (const event of ["PermissionRequest", "PreModelSwitch"]) {
+    const hooks = buildAgentHooks(
+      { [event]: [{ hooks: [{ type: "agent" }] }] },
+      {
+        executeNativeHandler: async () => ({
+          hookSpecificOutput: {
+            hookEventName: event,
+            ...(event === "PermissionRequest"
+              ? { decision: { behavior: "allow", updatedInput: { value: "alice@example.com" } } }
+              : { permissionDecision: "allow", permissionDecisionReason: "alice@example.com" }),
+          },
+        }),
+      }
+    )
+    const output = await hooks[event][0].hooks[0]({})
+    assert.equal(
+      event === "PermissionRequest"
+        ? output.hookSpecificOutput.decision.behavior
+        : output.hookSpecificOutput.permissionDecision,
+      "deny"
+    )
+    assert.equal(JSON.stringify(output).includes("alice@example.com"), false)
+  }
+})
+
+test("hook output pairing preserves explicit values and invalidates superseded assertions", () => {
+  const decision = { warnings: [] }
+  mergeOutcome(
+    decision,
+    extractDecision({
+      hookSpecificOutput: {
+        hookEventName: "PostToolUse",
+        updatedToolOutput: "first",
+        classifierContext: "User confirmed first",
+      },
+    })
+  )
+  mergeOutcome(
+    decision,
+    extractDecision({
+      hookSpecificOutput: { hookEventName: "PostToolUse", updatedMCPToolOutput: "second" },
+    })
+  )
+  assert.equal(
+    mapDecisionToOutput("PostToolUse", decision).hookSpecificOutput.classifierContext,
+    undefined
+  )
+  assert.equal(
+    mapDecisionToOutput("PostToolUse", decision).hookSpecificOutput.updatedToolOutput,
+    "second"
+  )
+  assert.deepEqual(
+    mapDecisionToOutput("Stop", extractDecision({ decision: "approve", reason: "Ready" })),
+    { decision: "approve", reason: "Ready" }
+  )
+  assert.equal(
+    mapDecisionToOutput(
+      "PermissionRequest",
+      extractDecision({
+        hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "deny" } },
+      })
+    ).hookSpecificOutput.decision.behavior,
+    "deny"
+  )
+  assert.deepEqual(
+    mapDecisionToOutput("WorktreeCreate", parseZeroExitOutput("/workspace/tree\n")),
+    { hookSpecificOutput: { hookEventName: "WorktreeCreate", worktreePath: "/workspace/tree" } }
+  )
+  assert.deepEqual(extractDecision(null), {})
+  assert.equal(hookMatchTarget("unknown", {}), null)
+  const legacyRewrite = { warnings: [] }
+  mergeOutcome(
+    legacyRewrite,
+    extractDecision({
+      hookSpecificOutput: {
+        hookEventName: "PostToolUse",
+        updatedToolOutput: "first",
+        classifierContext: "First assertion",
+      },
+    })
+  )
+  mergeOutcome(legacyRewrite, { updatedToolOutput: "replacement" })
+  assert.equal(
+    mapDecisionToOutput("PostToolUse", legacyRewrite).hookSpecificOutput.classifierContext,
+    undefined
+  )
+  const unbound = { warnings: [] }
+  mergeOutcome(
+    unbound,
+    extractDecision({
+      hookSpecificOutput: { hookEventName: "PostToolUse", classifierContext: "User confirmed" },
+    })
+  )
+  mergeOutcome(
+    unbound,
+    extractDecision({
+      hookSpecificOutput: { hookEventName: "PostToolUse", updatedToolOutput: null },
+    })
+  )
+  assert.deepEqual(mapDecisionToOutput("PostToolUse", unbound), {
+    hookSpecificOutput: {
+      hookEventName: "PostToolUse",
+      classifierContext: "User confirmed",
+      updatedToolOutput: null,
+    },
+  })
+})
+
+test("malformed and failing hook transports produce bounded warnings", async () => {
+  const audits = []
+  const result = await runGroups(
+    [null, {}, { hooks: [null, { type: "plugin" }, { type: "mcp_tool" }] }],
+    null,
+    "{}",
+    undefined,
+    undefined,
+    { onAudit: (audit) => audits.push(audit) }
+  )
+  assert.equal(result.warnings.length, 3)
+  assert.equal(audits.length, 3)
+  assert.match(
+    (await runWebhookHandler("http://127.0.0.1:0", undefined, 1, "{}")).warning,
+    /failed/
+  )
+  assert.match((await runCommandHandler("", 1, "{}", undefined)).warning, /spawn failed/)
+  const controller = new AbortController()
+  const pending = runCommandHandler(nodeCmd("setTimeout(()=>{},1000)"), 3, "{}", controller.signal)
+  controller.abort()
+  assert.equal((await pending).warning, "hook aborted")
+})
+
+test("callback logs native failures and tolerates cyclic diagnostic input", async () => {
+  const config = { Stop: [{ hooks: [{ type: "agent" }] }] }
+  const logs = []
+  const hooks = buildAgentHooks(config, {
+    log: (...args) => logs.push(args),
+    executeNativeHandler: async () => {
+      throw new Error("Unavailable")
+    },
+  })
+  const input = { hook_origin: "hook", hook_recursion_depth: 2 }
+  input.circular = input
+  assert.deepEqual(await hooks.Stop[0].hooks[0](input), {})
+  assert.equal(logs.length, 1)
+  config.Stop = []
+  assert.deepEqual(await hooks.Stop[0].hooks[0]({}), {})
+})
 
 test("matcherMatches: omitted / empty / star match all", () => {
   assert.equal(matcherMatches(undefined, "Bash"), true)
@@ -676,7 +976,7 @@ test("every SDK lifecycle event can be configured, not just the three tool ones"
   // Before this, `SUPPORTED_EVENTS` was a hand-written list of three. The other
   // 28 could be written into settings.json and would never run — no error, no
   // log, just a hook that silently did nothing.
-  assert.equal(SUPPORTED_EVENTS.length, 31)
+  assert.equal(SUPPORTED_EVENTS.length, 33)
 
   const config = Object.fromEntries(
     SUPPORTED_EVENTS.map((e) => [e, [{ hooks: [{ type: "command", command: "true" }] }]])

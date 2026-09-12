@@ -1132,3 +1132,65 @@ describe("Composer — review receipts survive a send that never commits", () =>
     expect(useArtifactStore.getState().peekReviewReceipts("ses_42")).toHaveLength(1)
   })
 })
+
+describe("plugin command progress and cancellation", () => {
+  it.each(["Cancel command", "Stop"])(
+    "shows progress, cancels with %s, and drops a late response",
+    async (cancelLabel) => {
+      const { registerSlashCommand, unregisterSlashCommand } =
+        await import("@/lib/slash-commands/registry")
+      let commandContext!: import("@/lib/slash-commands/registry").SlashCommandContext
+      let finish!: (value: { message: string }) => void
+      registerSlashCommand({
+        id: "test.research",
+        name: "research",
+        source: "plugin",
+        handler: (_args, context) => {
+          commandContext = context!
+          context?.reportProgress?.(0.4, "Searching sources")
+          return new Promise((resolve) => {
+            finish = resolve
+          })
+        },
+      })
+      const Wrapper = withAdapter(makeAdapter())
+      const onStop = jest.fn()
+      const onSend = jest.fn(async () => undefined)
+      const view = render(
+        <Wrapper>
+          <Composer
+            session={mkSession()}
+            onStartNewSession={async () => undefined}
+            onOpenSettings={() => undefined}
+            onSend={onSend}
+            onStop={onStop}
+          />
+        </Wrapper>
+      )
+      try {
+        fireEvent.change(document.querySelector("textarea")!, {
+          target: { value: "/research topic" },
+        })
+        fireEvent.click(screen.getByRole("button", { name: /^Send$/ }))
+        await waitFor(() => expect(screen.getByText("Searching sources")).toBeInTheDocument())
+        expect(screen.getByRole("progressbar")).toHaveAttribute("value", "0.4")
+        fireEvent.click(screen.getByRole("button", { name: cancelLabel }))
+        await waitFor(() => expect(screen.queryByRole("progressbar")).not.toBeInTheDocument())
+        expect(commandContext.signal?.aborted).toBe(true)
+        expect(onStop).not.toHaveBeenCalled()
+        await act(async () => {
+          finish({ message: "late research answer" })
+        })
+        expect(
+          composerReadSlice(useChatStore.getState(), "ses_42").messages.some((message) =>
+            JSON.stringify(message.parts).includes("late research answer")
+          )
+        ).toBe(false)
+        expect(onSend).not.toHaveBeenCalled()
+      } finally {
+        view.unmount()
+        unregisterSlashCommand("test.research")
+      }
+    }
+  )
+})

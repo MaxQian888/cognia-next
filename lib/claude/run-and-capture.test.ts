@@ -1687,6 +1687,33 @@ describe("runAndCaptureAssistantReply", () => {
     expect(result.text).toBe("Hello")
   })
 
+  it("capture responders receive SDK hints and cannot persist a suppressed grant", async () => {
+    const responder = jest.fn(() => ({ decision: "allow_always" as const }))
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      onPermissionRequest: responder,
+    })
+    await flushUntilSubscribed()
+    fire({
+      ...permissionRequest("suppressed", "Read", {}),
+      defaultToNo: true,
+      suppressAlwaysAllowRule: true,
+    } as never)
+    await flushMicrotasks()
+    expect(responder).toHaveBeenCalledWith(
+      expect.objectContaining({ defaultToNo: true, suppressAlwaysAllowRule: true })
+    )
+    expect(approveToolMock).toHaveBeenCalledWith(
+      SESSION,
+      "suppressed",
+      "allow",
+      undefined,
+      undefined
+    )
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+  })
+
   it("applies the global plugin firewall before asking the capture owner", async () => {
     preToolUseMock.mockResolvedValueOnce({ action: "deny", reason: "blocked" } as never)
     const responder = jest.fn(() => ({ decision: "allow" as const }))

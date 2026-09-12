@@ -11,6 +11,7 @@ import { disposeTerminalRepls } from "../builtin-tools/terminal-repl-tool.mjs"
 // / session_ended).
 
 import { query } from "@anthropic-ai/claude-agent-sdk"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { traceAsyncIterable } from "../telemetry.mjs"
 import { randomUUID } from "node:crypto"
 import {
@@ -41,6 +42,7 @@ import {
   classifyToolCallConfinement,
   combineVerdict,
   assertToolCallWithinRoots,
+  buildPluginAccessMap,
 } from "../builtin-tools/confinement.mjs"
 import {
   makeServerAlwaysLoad,
@@ -104,6 +106,103 @@ export function enforceAnthropicToolSurface(options, sendOptions) {
     agent: undefined,
     hooks: undefined,
   }
+}
+
+/** Hard authority shared by normal approvals and delegated SDK permission tools. */
+export function anthropicToolDenial(sendOptions, toolName, input, signal) {
+  if (signal?.aborted) return "tool call interrupted"
+  if (!hasNoLeakingPiiDeep(input)) return "tool input blocked by the PII gate"
+  if (resolveForToolCall(sendOptions.permissionRuleset, toolName, input) === "deny")
+    return "denied by permission ruleset"
+  const pluginAccess = buildPluginAccessMap(sendOptions.pluginTools)
+  try {
+    assertToolCallWithinRoots(
+      sendOptions.builtinProcessSandbox,
+      toolName,
+      input,
+      sendOptions.cwd,
+      pluginAccess
+    )
+  } catch (error) {
+    return String(error?.message ?? error)
+  }
+  if (
+    sendOptions.permissionMode === "plan" &&
+    !isAskUserTool(toolName) &&
+    classifyPlanMode(toolName, {
+      builtinServerName: BUILTIN_SERVER_NAME,
+      pluginServerName: PLUGIN_TOOLS_SERVER_NAME,
+      readOnlyBuiltins: READ_ONLY_TOOL_NAMES,
+      governOnlyCogniaServers: true,
+    }) === "deny"
+  )
+    return `plan mode: tool "${toolName}" is not permitted (read-only tools only)`
+  if (
+    classifyToolCallConfinement(
+      sendOptions.confinement,
+      toolName,
+      input,
+      sendOptions.cwd,
+      pluginAccess
+    ) === "deny"
+  )
+    return "denied: path escapes the workspace into a protected credential location"
+  return undefined
+}
+
+/** Keep Cognia authority without bypassing the SDK's configured permission delegate. */
+export function enforceAnthropicPermissionChannel(options, sendOptions = {}, aliases) {
+  if (!options.permissionPromptToolName) return options
+  if (
+    options.mcpServers &&
+    !Object.keys(options.mcpServers).some((name) =>
+      options.permissionPromptToolName.startsWith(`mcp__${name}__`)
+    )
+  )
+    throw new Error(
+      "Permission prompt tool must belong to a managed MCP server so delegated input remains policy-checked"
+    )
+  const denial = (input, signal, updatedInput = input.tool_input) => {
+    const toolName = restorePluginToolName(aliases, PLUGIN_TOOLS_SERVER_NAME, input.tool_name)
+    const reason = anthropicToolDenial(sendOptions, toolName, updatedInput, signal)
+    return reason
+      ? {
+          hookSpecificOutput: {
+            hookEventName: "PreToolUse",
+            permissionDecision: "deny",
+            permissionDecisionReason: reason,
+          },
+        }
+      : undefined
+  }
+  const previous = options.hooks?.PreToolUse ?? []
+  options.hooks = {
+    ...options.hooks,
+    PreToolUse: [
+      ...previous.map((matcher) => ({
+        ...matcher,
+        hooks: matcher.hooks.map((hook) => async (input, id, context) => {
+          const blocked = denial(input, context.signal)
+          if (blocked) return blocked
+          const result = await hook(input, id, context)
+          const updatedInput = result?.hookSpecificOutput?.updatedInput
+          const rewrittenDenial =
+            updatedInput !== undefined && denial(input, context.signal, updatedInput)
+          if (rewrittenDenial) return rewrittenDenial
+          // An existing allow hook must not short-circuit the configured delegate.
+          if (result?.hookSpecificOutput?.permissionDecision === "allow") {
+            const { permissionDecision, permissionDecisionReason, ...rest } =
+              result.hookSpecificOutput
+            return { ...result, hookSpecificOutput: rest }
+          }
+          return result
+        }),
+      })),
+      { hooks: [async (input, _id, context) => denial(input, context.signal) ?? {}] },
+    ],
+  }
+  delete options.canUseTool
+  return options
 }
 
 /**
@@ -181,6 +280,7 @@ export function anthropicPluginToolBridgeOptions({
   turnId,
   attemptId,
   toolNameAliases,
+  permissionPromptToolName,
 }) {
   return {
     tools,
@@ -193,7 +293,241 @@ export function anthropicPluginToolBridgeOptions({
     remoteExecutionContext,
     turnId,
     attemptId,
+    permissionPromptToolName,
     ...(toolNameAliases instanceof Map ? { toolNameAliases } : {}),
+  }
+}
+
+/**
+ * The Agent SDK `canUseTool` callback, as a standalone factory so the whole
+ * permission path — ruleset, confinement, plugin-access classification, plan
+ * mode, doom guard, approval round-trip — is testable without a live
+ * `query()`. Owns the plugin-access map: `sendOptions.pluginTools` entries
+ * that declared `access`/`pathParams` classify the same way the built-in
+ * read/write sets do.
+ */
+export function createAnthropicCanUseTool({
+  sendOptions,
+  sessionId,
+  emit,
+  log,
+  pendingApprovals,
+  pluginToolNameAliases,
+  doomGuard,
+}) {
+  // Verbose canUseTool tracing (shares the host's COGNIA_SIDECAR_VERBOSE gate).
+  // Surfaces as frontend `log` events so a tool-call hang can be diagnosed
+  // without stderr access.
+  const CANUSETOOL_DEBUG =
+    process.env.COGNIA_SIDECAR_VERBOSE === "1" || process.env.COGNIA_SIDECAR_VERBOSE === "true"
+  // Plugin-declared filesystem access classes + path params (full tool name
+  // → {access, pathKeys}), consumed by the workspace-confinement gates
+  // below — a cliTool/`registerTool` entry that declared `access` gets the
+  // same read/write path classification the built-in tools get.
+  const pluginAccess = buildPluginAccessMap(sendOptions.pluginTools)
+
+  return (modelToolName, input, ctx) => {
+    // Everything below (ruleset, plan-mode policy, suppress and always-allow
+    // lists, the permission request the renderer answers) keys on the
+    // original plugin tool name, not the one the SDK just called it by.
+    const toolName = restorePluginToolName(
+      pluginToolNameAliases,
+      PLUGIN_TOOLS_SERVER_NAME,
+      modelToolName
+    )
+    const hardDenial = anthropicToolDenial(sendOptions, toolName, input, ctx?.signal)
+    if (hardDenial) return Promise.resolve({ behavior: "deny", message: hardDenial })
+    // The `ask_user` elicitation tool is the user interaction itself: the
+    // renderer's AskUserDialog blocks until the user answers, so it must
+    // never surface the generic tool-approval modal. Each call is inherently
+    // human-gated (no runaway loop is possible without a human answering),
+    // so allow it unconditionally — ahead of even the doom-loop guard.
+    if (isAskUserTool(toolName)) {
+      return Promise.resolve({ behavior: "allow", updatedInput: input })
+    }
+    // Doom-loop guard: the Nth identical call must round-trip through the
+    // user even when the suppress-list / ruleset would allow it silently.
+    const doomed = doomGuard.check(toolName, input) === "ask"
+    // ADR-0020 W3 — short-circuit the chat-side approval modal when
+    // the renderer has pre-approved this tool for the session. The
+    // Rust permission gate runs its own check on every `desktop.*`
+    // call, so suppressing here only skips the *redundant* second
+    // prompt. Populated by `applyComputerUseTools` from
+    // per-session grants when `chatConsentMode === "session-grant"`.
+    const suppressList = Array.isArray(sendOptions.suppressApprovalForTools)
+      ? sendOptions.suppressApprovalForTools
+      : null
+    // OpenCode-style static ruleset short-circuit (Layer A), composed with the
+    // workspace-confinement verdict (ADR-0028 lite). Only EXPLICIT allow/deny
+    // rules act here; a confinement "ask" (mutator escaping the workspace roots)
+    // overrides a ruleset "allow" and falls through to the round-trip, while a
+    // confinement "deny" (write into / symlink-escape toward a credential path)
+    // hard-rejects. Anything unresolved ("ask") falls through so the renderer's
+    // richer Auto-mode (Layer B) and the manual approval modal still run.
+    // Fail-open on any resolver error.
+    const ruleset = sendOptions.permissionRuleset
+    let rulesetVerdict = null
+    if (ruleset) {
+      try {
+        rulesetVerdict = resolveForToolCall(ruleset, toolName, input)
+      } catch {
+        rulesetVerdict = null
+      }
+    }
+    let confinementVerdict = null
+    try {
+      confinementVerdict = classifyToolCallConfinement(
+        sendOptions.confinement,
+        toolName,
+        input,
+        sendOptions.cwd,
+        pluginAccess
+      )
+    } catch {
+      confinementVerdict = null
+    }
+    const combinedVerdict = combineVerdict(rulesetVerdict, confinementVerdict)
+    // An explicit DENY outranks the doom-loop escalation: a doom-looped call
+    // to a denied tool (or a credential-escaping write) must stay denied, not
+    // downgrade to an approval prompt the user could accept.
+    if (combinedVerdict === "deny") {
+      return Promise.resolve({
+        behavior: "deny",
+        message:
+          confinementVerdict === "deny" && rulesetVerdict !== "deny"
+            ? "denied: path escapes the workspace into a protected credential location"
+            : "denied by permission ruleset",
+      })
+    }
+    if (!doomed && confinementVerdict !== "ask" && suppressList?.includes(toolName)) {
+      return Promise.resolve({ behavior: "allow", updatedInput: input })
+    }
+    if (
+      !doomed &&
+      confinementVerdict !== "ask" &&
+      sendOptions.permissionMode === "acceptEdits" &&
+      ["directory_create", "file_copy", "file_move", "file_rename"].some(
+        (name) => toolName === `mcp__${BUILTIN_SERVER_NAME}__${name}`
+      )
+    ) {
+      return Promise.resolve({ behavior: "allow", updatedInput: input })
+    }
+    if (
+      !doomed &&
+      sendOptions.permissionMode === "acceptEdits" &&
+      ["sandbox_write", "sandbox_edit", "sandbox_text_editor"].some(
+        (name) => toolName === `mcp__${PLUGIN_TOOLS_SERVER_NAME}__${name}`
+      )
+    ) {
+      return Promise.resolve({ behavior: "allow", updatedInput: input })
+    }
+    // Session-global "Allow always" grant (parity with the ai-sdk gate). An
+    // explicit name-level grant beats a confinement "ask" but not the "deny"
+    // handled above; the doom guard still suspends the silent short-circuit.
+    const alwaysAllow = Array.isArray(sendOptions.alwaysAllowTools)
+      ? sendOptions.alwaysAllowTools
+      : null
+    if (!doomed && confinementVerdict !== "ask" && alwaysAllow && alwaysAllow.includes(toolName)) {
+      return Promise.resolve({ behavior: "allow", updatedInput: input })
+    }
+    // The silent ALLOW short-circuit is what the doom guard exists to
+    // suspend — a doomed call falls through to the approval round-trip.
+    if (combinedVerdict === "allow" && !doomed) {
+      return Promise.resolve({ behavior: "allow", updatedInput: input })
+    }
+    const requestId = randomUUID()
+    // Boundary instrumentation (COGNIA_SIDECAR_VERBOSE=1): the Agent SDK path
+    // forces a `canUseTool` round-trip for every gated tool, so when a turn
+    // "hangs at the tool call" these three log lines localise the stall —
+    // entry (the SDK called us), emit (the request left the sidecar), resolve
+    // (the renderer answered). A missing "resolved" line means the round-trip
+    // never came back (no dialog / swallowed approval).
+    if (CANUSETOOL_DEBUG) {
+      log("info", `[canUseTool] enter tool=${toolName} requestId=${requestId}`)
+    }
+    emit({
+      type: "permission_request",
+      sessionId,
+      requestId,
+      toolUseID: ctx.toolUseID,
+      toolName,
+      input,
+      title: ctx.title,
+      displayName: ctx.displayName,
+      description: ctx.description,
+      blockedPath: ctx.blockedPath,
+      decisionReason: ctx.decisionReason,
+      suggestions: ctx.suggestions,
+      defaultToNo: ctx.defaultToNo,
+      suppressAlwaysAllowRule: ctx.suppressAlwaysAllowRule,
+      ...(sendOptions.remoteExecutionContext
+        ? { remoteExecutionContext: sendOptions.remoteExecutionContext }
+        : {}),
+    })
+    if (CANUSETOOL_DEBUG) {
+      log("info", `[canUseTool] permission_request emitted tool=${toolName} requestId=${requestId}`)
+    }
+    return new Promise((resolve) => {
+      let onAbort = null
+      const settle = (result) => {
+        // Symmetric cleanup: drop the abort listener when the approval
+        // settles normally so listeners don't accumulate on a shared signal.
+        if (onAbort && ctx.signal && typeof ctx.signal.removeEventListener === "function") {
+          ctx.signal.removeEventListener("abort", onAbort)
+        }
+        if (CANUSETOOL_DEBUG) {
+          log(
+            "info",
+            `[canUseTool] resolved tool=${toolName} requestId=${requestId} behavior=${result?.behavior ?? "?"}`
+          )
+        }
+        if (result?.behavior === "allow") {
+          const reason = anthropicToolDenial(
+            sendOptions,
+            toolName,
+            result.updatedInput ?? input,
+            ctx?.signal
+          )
+          if (reason) {
+            resolve({ behavior: "deny", message: reason })
+            return
+          }
+        }
+        resolve(result)
+      }
+      // Stash the original tool input so the host can hand it back as
+      // `updatedInput` when the user approves the call unmodified — the SDK
+      // requires `updatedInput` to be a record on an allow.
+      //
+      // `suggestions` is stashed for the same reason: an "always allow" has
+      // to answer with the SDK's OWN suggested permission updates, and by the
+      // time the renderer replies this context is gone. Taking them from the
+      // reply instead would let the renderer author permission rules.
+      pendingApprovals.set(requestId, {
+        resolve: settle,
+        input,
+        suggestions: ctx.suggestions,
+        suppressAlwaysAllowRule: ctx.suppressAlwaysAllowRule,
+      })
+      if (ctx.signal) {
+        onAbort = () => {
+          if (pendingApprovals.delete(requestId)) {
+            // Distinct terminal: tell the renderer the waiter is gone (the
+            // SDK still gets its required deny below) so the approval UI can
+            // show "interrupted" instead of silently vanishing.
+            emit({
+              type: "permission_interrupted",
+              sessionId,
+              requestId,
+              reason: "aborted",
+            })
+            settle({ behavior: "deny", message: "aborted" })
+          }
+        }
+        if (ctx.signal.aborted) onAbort()
+        else ctx.signal.addEventListener("abort", onAbort, { once: true })
+      }
+    })
   }
 }
 
@@ -206,13 +540,11 @@ export function anthropicPluginToolBridgeOptions({
  *   log: (level: "info"|"warn"|"error", message: string) => void,
  * }} params
  */
-export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, log, hostRpc }) {
+export function dispatchAnthropic(
+  { sessionId, firstPrompt, sendOptions, emit, log, hostRpc },
+  runtime = {}
+) {
   const inputStream = makeInputStream()
-  // Verbose canUseTool tracing (shares the host's COGNIA_SIDECAR_VERBOSE gate).
-  // Surfaces as frontend `log` events so a tool-call hang can be diagnosed
-  // without stderr access.
-  const CANUSETOOL_DEBUG =
-    process.env.COGNIA_SIDECAR_VERBOSE === "1" || process.env.COGNIA_SIDECAR_VERBOSE === "true"
   // MCP server output capture. The Agent SDK forwards the spawned claude-code
   // subprocess's stderr — which carries every stdio MCP server's diagnostic
   // output — through the `stderr` option wired into `options` below. Each line
@@ -326,7 +658,8 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
   // Stamp `alwaysLoad` onto user-configured MCP servers per the tool-search
   // policy (the map is keyed by server name, matching alwaysLoadServers).
   const baseUserServers = guardAnthropicRemoteMcpServers(
-    stampUserServersAlwaysLoad(sendOptions.mcpServers, serverAlwaysLoad)
+    stampUserServersAlwaysLoad(sendOptions.mcpServers, serverAlwaysLoad),
+    { permissionPromptToolName: sendOptions.claudeAgentSdk?.permissionPromptToolName }
   )
   const withBuiltins = builtinServer
     ? Object.prototype.hasOwnProperty.call(baseUserServers, BUILTIN_SERVER_NAME)
@@ -379,6 +712,7 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
         turnId: sendOptions.turnId,
         attemptId: sendOptions.execution?.identity?.attemptId,
         toolNameAliases: pluginToolNameAliases,
+        permissionPromptToolName: sendOptions.claudeAgentSdk?.permissionPromptToolName,
       })
     )
     if (pluginToolNameAliases.size > 0) {
@@ -574,243 +908,22 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       })
     ),
 
-    canUseTool: (modelToolName, input, ctx) => {
-      // Everything below (ruleset, plan-mode policy, suppress and always-allow
-      // lists, the permission request the renderer answers) keys on the
-      // original plugin tool name, not the one the SDK just called it by.
-      const toolName = restorePluginToolName(
-        pluginToolNameAliases,
-        PLUGIN_TOOLS_SERVER_NAME,
-        modelToolName
-      )
-      if (ctx?.signal?.aborted)
-        return Promise.resolve({ behavior: "deny", message: "tool call interrupted" })
-      if (resolveForToolCall(sendOptions.permissionRuleset, toolName, input) === "deny") {
-        return Promise.resolve({ behavior: "deny", message: "denied by permission ruleset" })
-      }
-      try {
-        assertToolCallWithinRoots(
-          sendOptions.builtinProcessSandbox,
-          toolName,
-          input,
-          sendOptions.cwd
-        )
-      } catch (error) {
-        return Promise.resolve({ behavior: "deny", message: String(error?.message ?? error) })
-      }
-      // The `ask_user` elicitation tool is the user interaction itself: the
-      // renderer's AskUserDialog blocks until the user answers, so it must
-      // never surface the generic tool-approval modal. Each call is inherently
-      // human-gated (no runaway loop is possible without a human answering),
-      // so allow it unconditionally — ahead of even the doom-loop guard.
-      if (isAskUserTool(toolName)) {
-        return Promise.resolve({ behavior: "allow", updatedInput: input })
-      }
-      // Plan mode over the servers COGNIA owns. The Agent SDK enforces plan
-      // mode for its own native tools, but has no idea what
-      // `mcp__cognia-tools__*` / `mcp__cognia-plugin-tools__*` do — so without
-      // this every mutating plugin tool (perform_action, browser_evaluate,
-      // terminal_dock_write, ocr.extract, …) and, under the
-      // `coreFilesOnAnthropic` hatch, write/bash/directory_delete, all ran
-      // inside a mode the UI presents as read-only. `not-governed` means the
-      // tool belongs to the SDK or a user MCP server: fall through untouched,
-      // since denying those here would break plan mode for Read/Grep.
-      if (sendOptions.permissionMode === "plan") {
-        const verdict = classifyPlanMode(toolName, {
-          builtinServerName: BUILTIN_SERVER_NAME,
-          pluginServerName: PLUGIN_TOOLS_SERVER_NAME,
-          readOnlyBuiltins: READ_ONLY_TOOL_NAMES,
-          governOnlyCogniaServers: true,
-        })
-        if (verdict === "deny") {
-          return Promise.resolve({
-            behavior: "deny",
-            message: `plan mode: tool "${toolName}" is not permitted (read-only tools only)`,
-          })
-        }
-      }
-      // Doom-loop guard: the Nth identical call must round-trip through the
-      // user even when the suppress-list / ruleset would allow it silently.
-      const doomed = doomGuard.check(toolName, input) === "ask"
-      // ADR-0020 W3 — short-circuit the chat-side approval modal when
-      // the renderer has pre-approved this tool for the session. The
-      // Rust permission gate runs its own check on every `desktop.*`
-      // call, so suppressing here only skips the *redundant* second
-      // prompt. Populated by `applyComputerUseTools` from
-      // per-session grants when `chatConsentMode === "session-grant"`.
-      const suppressList = Array.isArray(sendOptions.suppressApprovalForTools)
-        ? sendOptions.suppressApprovalForTools
-        : null
-      // OpenCode-style static ruleset short-circuit (Layer A), composed with the
-      // workspace-confinement verdict (ADR-0028 lite). Only EXPLICIT allow/deny
-      // rules act here; a confinement "ask" (mutator escaping the workspace roots)
-      // overrides a ruleset "allow" and falls through to the round-trip, while a
-      // confinement "deny" (write into / symlink-escape toward a credential path)
-      // hard-rejects. Anything unresolved ("ask") falls through so the renderer's
-      // richer Auto-mode (Layer B) and the manual approval modal still run.
-      // Fail-open on any resolver error.
-      const ruleset = sendOptions.permissionRuleset
-      let rulesetVerdict = null
-      if (ruleset) {
-        try {
-          rulesetVerdict = resolveForToolCall(ruleset, toolName, input)
-        } catch {
-          rulesetVerdict = null
-        }
-      }
-      let confinementVerdict = null
-      try {
-        confinementVerdict = classifyToolCallConfinement(
-          sendOptions.confinement,
-          toolName,
-          input,
-          sendOptions.cwd
-        )
-      } catch {
-        confinementVerdict = null
-      }
-      const combinedVerdict = combineVerdict(rulesetVerdict, confinementVerdict)
-      // An explicit DENY outranks the doom-loop escalation: a doom-looped call
-      // to a denied tool (or a credential-escaping write) must stay denied, not
-      // downgrade to an approval prompt the user could accept.
-      if (combinedVerdict === "deny") {
-        return Promise.resolve({
-          behavior: "deny",
-          message:
-            confinementVerdict === "deny" && rulesetVerdict !== "deny"
-              ? "denied: path escapes the workspace into a protected credential location"
-              : "denied by permission ruleset",
-        })
-      }
-      if (!doomed && confinementVerdict !== "ask" && suppressList?.includes(toolName)) {
-        return Promise.resolve({ behavior: "allow", updatedInput: input })
-      }
-      if (
-        !doomed &&
-        confinementVerdict !== "ask" &&
-        sendOptions.permissionMode === "acceptEdits" &&
-        ["directory_create", "file_copy", "file_move", "file_rename"].some(
-          (name) => toolName === `mcp__${BUILTIN_SERVER_NAME}__${name}`
-        )
-      ) {
-        return Promise.resolve({ behavior: "allow", updatedInput: input })
-      }
-      if (
-        !doomed &&
-        sendOptions.permissionMode === "acceptEdits" &&
-        ["sandbox_write", "sandbox_edit", "sandbox_text_editor"].some(
-          (name) => toolName === `mcp__${PLUGIN_TOOLS_SERVER_NAME}__${name}`
-        )
-      ) {
-        return Promise.resolve({ behavior: "allow", updatedInput: input })
-      }
-      // Session-global "Allow always" grant (parity with the ai-sdk gate). An
-      // explicit name-level grant beats a confinement "ask" but not the "deny"
-      // handled above; the doom guard still suspends the silent short-circuit.
-      const alwaysAllow = Array.isArray(sendOptions.alwaysAllowTools)
-        ? sendOptions.alwaysAllowTools
-        : null
-      if (
-        !doomed &&
-        confinementVerdict !== "ask" &&
-        alwaysAllow &&
-        alwaysAllow.includes(toolName)
-      ) {
-        return Promise.resolve({ behavior: "allow", updatedInput: input })
-      }
-      // The silent ALLOW short-circuit is what the doom guard exists to
-      // suspend — a doomed call falls through to the approval round-trip.
-      if (combinedVerdict === "allow" && !doomed) {
-        return Promise.resolve({ behavior: "allow", updatedInput: input })
-      }
-      const requestId = randomUUID()
-      // Boundary instrumentation (COGNIA_SIDECAR_VERBOSE=1): the Agent SDK path
-      // forces a `canUseTool` round-trip for every gated tool, so when a turn
-      // "hangs at the tool call" these three log lines localise the stall —
-      // entry (the SDK called us), emit (the request left the sidecar), resolve
-      // (the renderer answered). A missing "resolved" line means the round-trip
-      // never came back (no dialog / swallowed approval).
-      if (CANUSETOOL_DEBUG) {
-        log("info", `[canUseTool] enter tool=${toolName} requestId=${requestId}`)
-      }
-      emit({
-        type: "permission_request",
-        sessionId,
-        requestId,
-        toolUseID: ctx.toolUseID,
-        toolName,
-        input,
-        title: ctx.title,
-        displayName: ctx.displayName,
-        description: ctx.description,
-        blockedPath: ctx.blockedPath,
-        decisionReason: ctx.decisionReason,
-        suggestions: ctx.suggestions,
-        ...(sendOptions.remoteExecutionContext
-          ? { remoteExecutionContext: sendOptions.remoteExecutionContext }
-          : {}),
-      })
-      if (CANUSETOOL_DEBUG) {
-        log(
-          "info",
-          `[canUseTool] permission_request emitted tool=${toolName} requestId=${requestId}`
-        )
-      }
-      return new Promise((resolve) => {
-        let onAbort = null
-        const settle = (result) => {
-          // Symmetric cleanup: drop the abort listener when the approval
-          // settles normally so listeners don't accumulate on a shared signal.
-          if (onAbort && ctx.signal && typeof ctx.signal.removeEventListener === "function") {
-            ctx.signal.removeEventListener("abort", onAbort)
-          }
-          if (CANUSETOOL_DEBUG) {
-            log(
-              "info",
-              `[canUseTool] resolved tool=${toolName} requestId=${requestId} behavior=${result?.behavior ?? "?"}`
-            )
-          }
-          resolve(result)
-        }
-        // Stash the original tool input so the host can hand it back as
-        // `updatedInput` when the user approves the call unmodified — the SDK
-        // requires `updatedInput` to be a record on an allow.
-        //
-        // `suggestions` is stashed for the same reason: an "always allow" has
-        // to answer with the SDK's OWN suggested permission updates, and by the
-        // time the renderer replies this context is gone. Taking them from the
-        // reply instead would let the renderer author permission rules.
-        pendingApprovals.set(requestId, {
-          resolve: settle,
-          input,
-          suggestions: ctx.suggestions,
-        })
-        if (ctx.signal) {
-          onAbort = () => {
-            if (pendingApprovals.delete(requestId)) {
-              // Distinct terminal: tell the renderer the waiter is gone (the
-              // SDK still gets its required deny below) so the approval UI can
-              // show "interrupted" instead of silently vanishing.
-              emit({
-                type: "permission_interrupted",
-                sessionId,
-                requestId,
-                reason: "aborted",
-              })
-              settle({ behavior: "deny", message: "aborted" })
-            }
-          }
-          if (ctx.signal.aborted) onAbort()
-          else ctx.signal.addEventListener("abort", onAbort, { once: true })
-        }
-      })
-    },
+    canUseTool: createAnthropicCanUseTool({
+      sendOptions,
+      sessionId,
+      emit,
+      log,
+      pendingApprovals,
+      pluginToolNameAliases,
+      doomGuard,
+    }),
   }
 
   // Nested `SendOptions.claudeAgentSdk` — the 29 SDK options the flat allowlist
   // above never covered. Applied AFTER the allowlist so the documented
   // precedence (nested > flat > SDK default) holds, and BEFORE the strip pass so
   // an explicit `undefined` in the block still means "use the SDK default".
+  const hostCanUseTool = options.canUseTool
   const sdkOverlay = applyClaudeAgentSdkOptions(options, sendOptions.claudeAgentSdk, {
     resume: resumeId,
     forkSession: isFork,
@@ -826,10 +939,14 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     cwd: sendOptions.cwd,
     activeWorkspaceRoots: [sendOptions.cwd, ...(sendOptions.additionalDirectories ?? [])],
   })
+  options.systemPrompt = foldSystemPrompt(
+    sendOptions.claudeAgentSdk?.systemPrompt ?? sendOptions.systemPrompt,
+    sendOptions.appendSystemPrompt
+  )
   Object.assign(
     options,
     buildSdkInteractionCallbacks(sendOptions.claudeAgentSdk, (toolName, input, ctx) =>
-      options.canUseTool(toolName, input, ctx)
+      hostCanUseTool(toolName, input, ctx)
     )
   )
   for (const warning of sdkOverlay.warnings) {
@@ -853,6 +970,7 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     if (flush) options.sessionStoreFlush = flush
   }
 
+  options = enforceAnthropicPermissionChannel(options, sendOptions, pluginToolNameAliases)
   options = enforceAnthropicToolSurface(options, sendOptions)
   options = applyEmbeddedClaudeExecutable(options)
 
@@ -867,18 +985,21 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
   // token. Claiming one is safe only when every input the handshake baked in
   // matches — `warmFingerprint` is what decides that, and it declines rather
   // than guesses. A miss is an ordinary cold spawn.
-  const pool = warmPool({ log })
+  const pool = runtime.pool ?? warmPool({ log })
   const prewarmEnabled = sendOptions.claudeAgentSdk?.prewarm?.enabled === true
-  const claimed = prewarmEnabled ? pool.claim(sendOptions) : null
+  const claimed = prewarmEnabled ? pool.claim(sendOptions, options) : null
   const rawQuery = claimed
     ? claimed.query(inputStream.iterable)
-    : query({ prompt: inputStream.iterable, options })
+    : (runtime.query ?? query)({ prompt: inputStream.iterable, options })
   // Warm the NEXT subprocess of this shape. Deliberately after the claim and
   // fire-and-forget: the options are only fully known at send time, so a pool
   // entry can only ever be built from a previous send just like this one.
   if (prewarmEnabled) {
     void pool.prewarm(sendOptions, options).then((declined) => {
-      if (declined) log("debug", `prewarm skipped: ${declined}`)
+      if (declined) {
+        log("warn", `prewarm skipped: ${declined}`)
+        emit({ type: "sdk_option_warning", sessionId, message: `Prewarm skipped: ${declined}` })
+      }
     })
   }
   const q = traceAsyncIterable(

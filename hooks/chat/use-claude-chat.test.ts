@@ -326,6 +326,30 @@ jest.mock("@/lib/claude/adapter-hooks", () => ({
 // External-agent branch (D1): dynamically imported by `send` when the agent
 // runtime is "external". Mock both so the branch is drivable from a test.
 const executeOnExternalAgentMock = jest.fn()
+const executeOnRemoteHostAgentMock = jest.fn()
+jest.mock("@/lib/ai/agent/external/remote-execute", () => ({
+  ...jest.requireActual("@/lib/ai/agent/external/remote-execute"),
+  executeOnRemoteHostAgent: (...args: unknown[]) => executeOnRemoteHostAgentMock(...args),
+}))
+const rendererToolHostStartMock = jest.fn(async (..._args: unknown[]) => ({
+  mcpServers: [] as import("@/types/agent/external-agent").AcpMcpServerConfig[],
+  catalogFingerprint: "catalog-1",
+}))
+const rendererToolHostPauseMock = jest.fn(async () => {})
+const rendererToolHostCloseMock = jest.fn(async () => {})
+const createRendererToolHostMock = jest.fn((..._args: unknown[]) => ({
+  start: rendererToolHostStartMock,
+  pause: rendererToolHostPauseMock,
+  close: rendererToolHostCloseMock,
+}))
+const closeExternalSessionMock = jest.fn(async (..._args: unknown[]) => {})
+const setSessionHostFactsMock = jest.fn()
+const respondExternalPermissionMock = jest.fn(async (..._args: unknown[]) => {})
+const externalProtocolMock = { value: "acp" }
+jest.mock("@/lib/ai/agent/external/renderer-tool-host", () => ({
+  RENDERER_TOOL_HOST_APPROVAL_PREFIX: "external-tool-host:",
+  createRendererToolHost: (...args: unknown[]) => createRendererToolHostMock(...args),
+}))
 const getConnectedAgentsMock = jest.fn<unknown[], []>(() => [])
 const checkDelegationMock = jest.fn(
   (): {
@@ -355,6 +379,20 @@ jest.mock("@/lib/ai/agent/external/manager", () => ({
   executeOnExternalAgent: (...a: unknown[]) => executeOnExternalAgentMock(...(a as [])),
   getExternalAgentManager: () => ({
     getConnectedAgents: () => getConnectedAgentsMock(),
+    getAgentCapabilityProfile: () => ({
+      effective: {
+        mcp: { level: "native" },
+        "tools.ordinary": { level: "native" },
+        "tools.results": { level: "native" },
+        "session.resume": {
+          level: externalProtocolMock.value === "dsh-sdk" ? "unsupported" : "native",
+        },
+      },
+    }),
+    closeSession: (...args: unknown[]) => closeExternalSessionMock(...args),
+    setSessionHostFacts: (...args: unknown[]) => setSessionHostFactsMock(...args),
+    respondToPermission: (...args: unknown[]) => respondExternalPermissionMock(...args),
+    getAgent: () => ({ config: { protocol: externalProtocolMock.value } }),
     checkDelegation: (...a: unknown[]) => checkDelegationMock(...(a as [])),
     setDelegationRules: (...a: unknown[]) => setDelegationRulesMock(...(a as [])),
   }),
@@ -844,6 +882,19 @@ beforeEach(() => {
   handleTurnCompleteMock.mockReset()
   buildGoalJudgeClientMock.mockReset().mockReturnValue(null)
   executeOnExternalAgentMock.mockReset()
+  executeOnRemoteHostAgentMock
+    .mockReset()
+    .mockResolvedValue({ success: true, finalResponse: "host done" })
+  rendererToolHostStartMock
+    .mockReset()
+    .mockResolvedValue({ mcpServers: [], catalogFingerprint: "catalog-1" })
+  rendererToolHostPauseMock.mockClear()
+  rendererToolHostCloseMock.mockClear()
+  createRendererToolHostMock.mockClear()
+  closeExternalSessionMock.mockClear()
+  setSessionHostFactsMock.mockClear()
+  externalProtocolMock.value = "acp"
+  respondExternalPermissionMock.mockClear()
   getConnectedAgentsMock.mockReset().mockReturnValue([])
   checkDelegationMock.mockReset().mockReturnValue({ shouldDelegate: false })
   setDelegationRulesMock.mockReset()
@@ -946,6 +997,13 @@ describe("useClaudeChat — actions", () => {
     expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "durable", expect.any(Object), {
       commandId: expect.stringMatching(/^work:/),
     })
+    expect(updateSessionMock).toHaveBeenCalledWith("sess-1", {
+      sdkSessionStorage: { backend: "filesystem" },
+    })
+    const storageCall = updateSessionMock.mock.calls.findIndex((call) => call[1]?.sdkSessionStorage)
+    expect(updateSessionMock.mock.invocationCallOrder[storageCall]).toBeLessThan(
+      sendPromptMock.mock.invocationCallOrder[0]
+    )
     expect(markChatTurnStartedMock).toHaveBeenCalled()
     expect(startLeaseHeartbeatMock).toHaveBeenCalledWith(
       expect.stringMatching(/^work:/),
@@ -1019,9 +1077,22 @@ describe("useClaudeChat — actions", () => {
     await flush()
 
     await act(async () => {
-      await result.current.send("host turn")
+      await result.current.send("host turn", {
+        systemPrompt: "Selected skill",
+        appendSystemPrompt: "Workspace guidance",
+        allowedTools: ["read"],
+      })
     })
 
+    expect(executeOnRemoteHostAgentMock).toHaveBeenCalledWith(
+      "host turn",
+      expect.objectContaining({
+        systemPrompt: "Selected skill\n\nWorkspace guidance",
+        allowedTools: ["read"],
+        mcpServers: [],
+        chatSessionId: "sess-1",
+      })
+    )
     expect(acceptChatTurnMock).not.toHaveBeenCalled()
     expect(sendPromptMock).not.toHaveBeenCalled()
   })
@@ -1126,7 +1197,9 @@ describe("useClaudeChat — actions", () => {
         }),
       })
     )
-    const persistedContext = updateSessionMock.mock.calls.at(-1)?.[1]?.executionContext
+    const persistedContext = updateSessionMock.mock.calls.findLast(
+      (call) => call[1]?.executionContext
+    )?.[1]?.executionContext
     expect(persistedContext).not.toHaveProperty("worktreePath")
     expect(persistedContext).not.toHaveProperty("branch")
   })
@@ -1743,6 +1816,119 @@ describe("useClaudeChat — actions", () => {
     expect(persistMessagesMock).toHaveBeenCalledWith("sess-1", expect.any(Array))
   })
 
+  it("retains one Cognia tool host across external turns and closes its native session on chat disposal", async () => {
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    executeOnExternalAgentMock.mockResolvedValue({
+      success: true,
+      finalResponse: "done",
+      sessionId: "native-1",
+    })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("first")
+    })
+    await act(async () => {
+      await result.current.send("follow-up")
+    })
+    expect(createRendererToolHostMock).toHaveBeenCalledTimes(1)
+    expect(rendererToolHostStartMock).toHaveBeenCalledTimes(2)
+    expect(rendererToolHostPauseMock).toHaveBeenCalledTimes(2)
+    expect(rendererToolHostCloseMock).not.toHaveBeenCalled()
+    expect(executeOnExternalAgentMock.mock.calls[1][1]).toMatchObject({ sessionId: "native-1" })
+    expect(setSessionHostFactsMock).toHaveBeenCalledWith(
+      "ext-1",
+      "sess-1",
+      expect.objectContaining({ toolHostRunning: true })
+    )
+    await act(async () => {
+      await result.current.close("sess-1")
+    })
+    expect(closeExternalSessionMock).toHaveBeenCalledWith("ext-1", "native-1")
+    expect(rendererToolHostCloseMock).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(["pi-rpc", "codex-app-server", "opencode-v2", "acp"])(
+    "projects tools for %s without duplicate host events or native approvals",
+    async (protocol) => {
+      externalProtocolMock.value = protocol
+      useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+      rendererToolHostStartMock.mockResolvedValueOnce({
+        mcpServers: [
+          { type: "http", name: "cognia-tools", url: "http://127.0.0.1:4444/mcp", headers: [] },
+        ],
+        catalogFingerprint: "catalog",
+      })
+      executeOnExternalAgentMock.mockImplementation(async (_prompt, options) => {
+        options.onEvent({
+          type: "permission_request",
+          sessionId: "native-tools",
+          request: {
+            id: "native-ask",
+            toolInfo: { name: "mcp__cognia-tools__read" },
+            options: [{ optionId: "once", kind: "allow_once", name: "Allow" }],
+          },
+        })
+        return { success: true, finalResponse: "done", sessionId: "native-tools" }
+      })
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send("read workspace")
+      })
+      expect(rendererToolHostStartMock.mock.calls[0][0]).toMatchObject({ onToolEvent: undefined })
+      expect(executeOnExternalAgentMock.mock.calls[0][1].context.custom.mcpServers).toEqual([
+        expect.objectContaining({ name: "cognia-tools" }),
+      ])
+      expect(respondExternalPermissionMock).toHaveBeenCalledWith(
+        "ext-1",
+        "native-tools",
+        expect.objectContaining({ requestId: "native-ask", granted: true, optionId: "once" })
+      )
+      expect(chatState.pushApproval).not.toHaveBeenCalledWith(
+        expect.objectContaining({ requestId: expect.stringContaining("native-ask") })
+      )
+    }
+  )
+
+  it("recreates SDK native state when the projected catalog changes and carries the Cognia transcript", async () => {
+    externalProtocolMock.value = "dsh-sdk"
+    listMessagesMock.mockResolvedValue([
+      {
+        id: "old",
+        role: "assistant",
+        parts: [{ type: "text", text: "Retained plan from previous turn" }],
+      },
+      { id: "u1", role: "user", parts: [{ type: "text", text: "new tools" }] },
+    ])
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    executeOnExternalAgentMock.mockResolvedValue({
+      success: true,
+      finalResponse: "done",
+      sessionId: "native-1",
+    })
+    rendererToolHostStartMock
+      .mockResolvedValueOnce({ mcpServers: [], catalogFingerprint: "catalog-1" })
+      .mockResolvedValueOnce({ mcpServers: [], catalogFingerprint: "catalog-2" })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("first")
+    })
+    await act(async () => {
+      await result.current.send("new tools")
+    })
+    expect(closeExternalSessionMock).toHaveBeenCalledWith("ext-1", "native-1")
+    expect(executeOnExternalAgentMock.mock.calls[1][1].sessionId).toBeUndefined()
+    expect(rendererToolHostStartMock.mock.calls[0][0]).toMatchObject({ onToolEvent: undefined })
+    expect(
+      executeOnExternalAgentMock.mock.calls[1][1].context.custom.conversationHistory
+    ).toContain("Retained plan from previous turn")
+    expect(
+      executeOnExternalAgentMock.mock.calls[1][1].context.custom.conversationHistory
+    ).not.toContain("new tools")
+  })
+
   it("delegates a matching turn to the external agent (Thread B)", async () => {
     chatState.activeSessionId = "sess-1"
     getConnectedAgentsMock.mockReturnValue([{ config: { id: "ext-1" } }])
@@ -1760,6 +1946,16 @@ describe("useClaudeChat — actions", () => {
       await result.current.send("refactor this module", {
         additionalDirectories: ["/shared"],
         effort: "xhigh",
+        systemPrompt: "Use the selected skill catalog.",
+        appendSystemPrompt: "Workspace context and skill guidance.",
+        allowedTools: ["mcp__docs__search"],
+        mcpServers: {
+          docs: {
+            type: "http",
+            url: "https://docs.example/mcp",
+            headers: { Authorization: "Bearer scoped-token" },
+          },
+        },
       })
     })
     expect(setDelegationRulesMock).toHaveBeenCalled()
@@ -1768,8 +1964,21 @@ describe("useClaudeChat — actions", () => {
       expect.objectContaining({
         agentId: "ext-1",
         reasoningEffort: "xhigh",
+        systemPrompt: "Use the selected skill catalog.\n\nWorkspace context and skill guidance.",
+        allowedTools: ["mcp__docs__search"],
         context: {
-          custom: { additionalDirectories: ["/shared"], chatSessionId: "sess-1" },
+          custom: {
+            additionalDirectories: ["/shared"],
+            chatSessionId: "sess-1",
+            mcpServers: [
+              {
+                type: "http",
+                name: "docs",
+                url: "https://docs.example/mcp",
+                headers: [{ name: "Authorization", value: "Bearer scoped-token" }],
+              },
+            ],
+          },
         },
       })
     )
@@ -2133,6 +2342,35 @@ describe("useClaudeChat — actions", () => {
     expect(hasSessionGrant("sess-1", "mcp__cognia-plugin-tools__click_text")).toBe(true)
   })
 
+  it("resolves external tool-host approval in the local registry without the agent or SDK permission RPC", async () => {
+    const { awaitApproval, hasSessionBypass } =
+      await import("@/lib/connectors/hitl/approval-registry")
+    const pending = awaitApproval("sess-1", "external-tool-host:lease:tool-1")
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.respondToApproval(
+        {
+          sessionId: "sess-1",
+          requestId: "external-tool-host:lease:tool-1",
+          toolUseID: "tool-1",
+          toolName: "write",
+          input: {},
+          status: "pending",
+        },
+        "allow_always"
+      )
+    })
+    await expect(pending).resolves.toEqual({ decision: "allow_always" })
+    expect(hasSessionBypass("sess-1", "write")).toBe(true)
+    expect(hasSessionBypass("other-session", "write")).toBe(false)
+    await act(async () => {
+      await result.current.close("sess-1")
+    })
+    expect(hasSessionBypass("sess-1", "write")).toBe(false)
+    expect(approveToolMock).not.toHaveBeenCalled()
+  })
+
   it("respondToApproval resolves builtin-skill: approvals locally, never via approveTool", async () => {
     const { resolveApproval, awaitApproval } =
       await import("@/lib/connectors/hitl/approval-registry")
@@ -2184,6 +2422,28 @@ describe("useClaudeChat — actions", () => {
     expect(settingsState.toggleAlwaysAllow).not.toHaveBeenCalled()
     expect(approveToolMock).not.toHaveBeenCalled()
     expect(chatState.clearApproval).toHaveBeenCalledWith(requestId, "sess-1")
+  })
+
+  it("SDK suppressed persistent approval never saves a rule from a stale always response", async () => {
+    settingsState.save.mockClear()
+    settingsState.toggleAlwaysAllow.mockClear()
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.respondToApproval(
+        {
+          sessionId: "sess-1",
+          requestId: "r-sdk",
+          toolName: "read",
+          input: {},
+          suppressAlwaysAllowRule: true,
+        } as never,
+        "allow_always"
+      )
+    })
+    expect(settingsState.save).not.toHaveBeenCalled()
+    expect(settingsState.toggleAlwaysAllow).not.toHaveBeenCalled()
+    expect(approveToolMock).toHaveBeenCalledWith("sess-1", "r-sdk", "allow")
   })
 
   it("respondToApproval (allow_always) toggles the always-allow list", async () => {
@@ -2640,6 +2900,37 @@ describe("useClaudeChat — actions", () => {
     delete (settingsState.settings as Record<string, unknown>).agentPermissions
   })
 
+  it.each([
+    ["pwd", "allow"],
+    ["rm -rf /", "deny"],
+  ] as const)(
+    "routes Auto-mode %s decisions to the renderer tool broker",
+    async (command, expected) => {
+      const { tryAutoModeDecision } = await import("./claude-chat-events")
+      ;(settingsState.settings as Record<string, unknown>).agentPermissions = {
+        autoApprove: { enabled: true },
+      }
+      const respond = jest.fn(async (_decision: "allow" | "deny", _message?: string) => {})
+      try {
+        await expect(
+          tryAutoModeDecision(
+            {
+              sessionId: "sess-1",
+              requestId: "external-tool-host:auto",
+              toolName: "Bash",
+              input: { command },
+            },
+            respond
+          )
+        ).resolves.toBe(true)
+        expect(respond.mock.calls[0][0]).toBe(expected)
+        expect(approveToolMock).not.toHaveBeenCalled()
+      } finally {
+        delete (settingsState.settings as Record<string, unknown>).agentPermissions
+      }
+    }
+  )
+
   it("surfaces the manual approval dialog when the Auto-mode judge hangs (no-dialog hang guard)", async () => {
     const { runAutoModeForTool } = await import("@/lib/claude/permissions/auto-mode-runner")
     renderHook(() => useClaudeChat())
@@ -2798,10 +3089,18 @@ describe("useClaudeChat — actions", () => {
         toolUseID: "tu-3",
         toolName: "edit",
         input: { path: "x.ts" },
+        defaultToNo: true,
+        suppressAlwaysAllowRule: true,
       })
     })
     expect(chatState.pushApproval).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionId: "sess-1", requestId: "req-3", toolName: "edit" })
+      expect.objectContaining({
+        sessionId: "sess-1",
+        requestId: "req-3",
+        toolName: "edit",
+        defaultToNo: true,
+        suppressAlwaysAllowRule: true,
+      })
     )
   })
 })

@@ -804,7 +804,9 @@ async function captureAssistantReplyCore(
           await approveTool(
             sessionId,
             req.requestId,
-            outcome.decision,
+            req.suppressAlwaysAllowRule && outcome.decision === "allow_always"
+              ? "allow"
+              : outcome.decision,
             outcome.message,
             outcome.updatedInput
           )

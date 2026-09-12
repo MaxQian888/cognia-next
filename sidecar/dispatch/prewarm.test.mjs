@@ -272,7 +272,11 @@ test("the dispatcher actually claims and refills the pool", async () => {
     "utf8"
   )
   assert.match(source, /warmPool\(/, "the dispatcher must build the pool")
-  assert.match(source, /pool\.claim\(sendOptions\)/, "a send must try to claim a warm subprocess")
+  assert.match(
+    source,
+    /pool\.claim\(sendOptions, options\)/,
+    "a send must try to claim a warm subprocess"
+  )
   assert.match(source, /pool\.prewarm\(sendOptions/, "a send must refill the pool for the next one")
 })
 
@@ -285,4 +289,158 @@ test("the host closes the pool on exit", async () => {
     "utf8"
   )
   assert.match(source, /resetWarmPool\(\)/, "warm subprocesses would outlive the host")
+})
+
+test("actual resume/fork fields and non-rebindable session resources cannot be pooled", () => {
+  for (const field of ["resumeSessionId", "forkFromSessionId"])
+    assert.match(unpoolableReason(send({ [field]: "saved" }), {}), /resum|fork/)
+  for (const options of [
+    { mcpServers: { tools: { type: "sdk", instance: {} } } },
+    { hooks: { PreToolUse: [{ hooks: [() => {}] }] } },
+    { sessionStore: { load() {} } },
+    { onElicitation() {} },
+  ])
+    assert.ok(unpoolableReason(send(), options))
+})
+
+test("complete effective startup options separate prompts, tools, budgets and output shapes", async () => {
+  const { pool: p } = pool()
+  const original = {
+    systemPrompt: "A",
+    tools: ["Read"],
+    maxBudgetUsd: 1,
+    outputFormat: { type: "json_schema", schema: { type: "object" } },
+  }
+  await p.prewarm(send(), original)
+  for (const changed of [
+    { ...original, systemPrompt: "B" },
+    { ...original, tools: [] },
+    { ...original, maxBudgetUsd: 2 },
+    { ...original, outputFormat: undefined },
+  ])
+    assert.equal(p.claim(send(), changed), null)
+  assert.ok(p.claim(send(), original))
+})
+
+test("a claimed warm query routes callbacks only to its new owning session", async () => {
+  let captured
+  const calls = []
+  const p = createWarmPool({
+    startup: async ({ options }) => {
+      captured = options
+      return { query: () => options, close() {} }
+    },
+  })
+  const first = {
+    tools: [],
+    canUseTool: async () => {
+      calls.push("old")
+      return { behavior: "allow", updatedInput: {} }
+    },
+    stderr: () => calls.push("old-log"),
+  }
+  await p.prewarm(send(), first)
+  assert.equal((await captured.canUseTool("Read", {}, {})).behavior, "deny")
+  captured.stderr("warmup")
+  assert.deepEqual(calls, [])
+  const current = {
+    ...first,
+    canUseTool: async () => {
+      calls.push("new")
+      return { behavior: "deny", message: "new-policy" }
+    },
+    stderr: () => calls.push("new-log"),
+  }
+  const warm = p.claim(send(), current)
+  assert.ok(warm)
+  assert.equal((await warm.query().canUseTool("Read", {}, {})).message, "new-policy")
+  captured.stderr("claimed")
+  assert.deepEqual(calls, ["new", "new-log"])
+})
+
+test("closing the pool during startup closes the eventual child instead of retaining it", async () => {
+  let release
+  const deferred = new Promise((resolve) => {
+    release = resolve
+  })
+  const child = fakeWarm()
+  const p = createWarmPool({ startup: () => deferred })
+  const pending = p.prewarm(send(), {})
+  p.closeAll()
+  release(child.warm)
+  assert.match(await pending, /closed/)
+  assert.equal(p.size, 0)
+  assert.equal(child.state.closed, true)
+})
+
+test("actual text-only dispatcher options prewarm and claim safely across sessions", async () => {
+  const { dispatchAnthropic } = await import("./anthropic.mjs")
+  let cold = 0,
+    claims = 0,
+    warmed = 0
+  const events = []
+  const query = ({ prompt }) => ({
+    async *[Symbol.asyncIterator]() {
+      for await (const input of prompt) {
+        yield { type: "result", subtype: "success", session_id: input.session_id, result: "ok" }
+        break
+      }
+    },
+    close() {},
+  })
+  const p = createWarmPool({
+    startup: async ({ options }) => {
+      warmed++
+      assert.deepEqual(options.mcpServers, {})
+      assert.equal(options.hooks, undefined)
+      return {
+        query(prompt) {
+          claims++
+          return query({ prompt })
+        },
+        close() {},
+      }
+    },
+  })
+  const options = send({
+    cwd: process.cwd(),
+    toolSurface: "none",
+    claudeAgentSdk: { version: 1, prewarm: { enabled: true } },
+  })
+  const run = (sessionId) =>
+    dispatchAnthropic(
+      {
+        sessionId,
+        firstPrompt: "safe",
+        sendOptions: structuredClone(options),
+        emit: (event) => events.push(event),
+        log() {},
+      },
+      {
+        pool: p,
+        query: (args) => {
+          cold++
+          return query(args)
+        },
+      }
+    )
+  try {
+    const first = run("first")
+    await new Promise((resolve) => setImmediate(resolve))
+    const second = run("second")
+    await new Promise((resolve) => setImmediate(resolve))
+    first.closeInput()
+    second.closeInput()
+    assert.equal(cold, 1)
+    assert.equal(claims, 1)
+    assert.equal(warmed, 2)
+    assert.equal(
+      events.some(
+        (event) => event.type === "sdk_option_warning" && /Prewarm skipped/.test(event.message)
+      ),
+      false
+    )
+  } finally {
+    p.closeAll()
+  }
 })

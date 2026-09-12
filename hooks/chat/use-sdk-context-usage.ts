@@ -8,12 +8,12 @@
  * memory files, agents, skills) that the renderer-side estimate in
  * `lib/claude/usage.ts` can't compute.
  *
- * Returns `null` when unavailable (web, non-Anthropic provider, no open
+ * Returns `null` when unavailable (web, unsupported runtime, no open
  * session, or before the first turn) so the indicator falls back cleanly to the
  * message-derived estimate. Refreshes once after each completed turn.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 
 import {
   agentHostAvailable,
@@ -33,31 +33,53 @@ export function useSdkContextUsage(
   providerId?: string
 ): { snapshot: SdkContextUsage | null; refresh: () => void } {
   const status = useChatStore((s) => s.status)
+  const runtimeScope = useChatStore((s) => {
+    const execution = sessionId ? s.lastSendBySession?.[sessionId]?.options.execution : undefined
+    return execution ? `${execution.hostRef}:${execution.runtimeAdapter}` : ""
+  })
   const [snapshot, setSnapshot] = useState<SdkContextUsage | null>(null)
 
-  // Live introspection works only on the Anthropic path (the ai-sdk `q` lacks
-  // the control methods) and only where a host sidecar can be reached: this
-  // shell's own, or the paired host's over the companion transport. Gating on
-  // `isTauri()` kept every companion blind to the SDK's real context window.
-  const enabled =
-    agentHostAvailable(resolveAgentExecutionEnvironment()) &&
-    !!sessionId &&
-    (providerId ?? "anthropic") === "anthropic"
+  // A local or paired host can report which controls the selected runtime supports.
+  const enabled = agentHostAvailable(resolveAgentExecutionEnvironment()) && !!sessionId
+
+  // The live host owns runtime selection; a custom provider may also run the
+  // Claude SDK. Unsupported runtimes are probed once per scope, not each turn.
+  const scope = enabled ? `${sessionId}:${providerId ?? ""}:${runtimeScope}` : null
+  const requestState = useRef({ scope, generation: 0, unsupported: new Set<string>() })
+  useLayoutEffect(() => {
+    requestState.current = {
+      scope,
+      generation: requestState.current.generation + 1,
+      unsupported: new Set(),
+    }
+    return () => {
+      requestState.current.generation += 1
+    }
+  }, [scope])
 
   const refresh = useCallback(() => {
     if (!enabled || !sessionId) return
-    // Best-effort: a `no_active_session` / `unsupported_provider` rejection (or
-    // a timeout) clears the snapshot so the estimate path takes over.
-    getSessionContextUsage(sessionId)
-      .then((u) => setSnapshot(u))
-      .catch(() => setSnapshot(null))
-  }, [enabled, sessionId])
+    const generation = ++requestState.current.generation
+    const current = () =>
+      requestState.current.scope === scope && requestState.current.generation === generation
+    if (!requestState.current.unsupported.has("getSessionContextUsage")) {
+      getSessionContextUsage(sessionId)
+        .then((value) => {
+          if (current()) setSnapshot(value)
+        })
+        .catch((error: unknown) => {
+          if (!current()) return
+          if (String(error).includes("unsupported"))
+            requestState.current.unsupported.add("getSessionContextUsage")
+          setSnapshot(null)
+        })
+    }
+  }, [enabled, sessionId, scope])
 
   // Clear stale data when the session (or eligibility) changes — done during
   // render (React's recommended pattern) so it isn't a synchronous setState in
-  // an effect. `resetKey` folds in `enabled` so switching to a non-Anthropic
-  // provider also clears the snapshot.
-  const resetKey = enabled ? sessionId : null
+  // an effect. The scope includes the provider so runtime switches clear the snapshot.
+  const resetKey = scope
   const [prevKey, setPrevKey] = useState(resetKey)
   if (prevKey !== resetKey) {
     setPrevKey(resetKey)

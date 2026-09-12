@@ -43,6 +43,8 @@ pub enum HookEvent {
     TeammateIdle,
     UserPromptExpansion,
     MessageDisplay,
+    PreModelSwitch,
+    PostModelSwitch,
 }
 
 /// One hook block in `settings.json`'s `hooks.{Event}` array.
@@ -227,6 +229,8 @@ mod tests {
             ("SubagentStart", HookEvent::SubagentStart),
             ("DirectoryAdded", HookEvent::DirectoryAdded),
             ("MessageDisplay", HookEvent::MessageDisplay),
+            ("PreModelSwitch", HookEvent::PreModelSwitch),
+            ("PostModelSwitch", HookEvent::PostModelSwitch),
         ] {
             let event: HookEvent = serde_json::from_value(Value::String(name.into())).unwrap();
             assert_eq!(event, expected);

@@ -130,6 +130,14 @@
     "WorktreeRemove": {
       "desc": "Fires when a git worktree is removed.",
       "label": "Worktree removed"
+    },
+    "PreModelSwitch": {
+      "label": "Before model switch",
+      "desc": "Fires before a model change and can allow, deny, or ask for confirmation."
+    },
+    "PostModelSwitch": {
+      "label": "After model switch",
+      "desc": "Fires after a model change and can add context for the next request."
     }
   }
 }

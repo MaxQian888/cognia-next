@@ -2,8 +2,22 @@ import {
   createSidecarFeatureCallClient,
   discoverMcpServerViaSidecar,
   validateOpenCodeV2Discovery,
+  callSidecarToolHost,
 } from "./feature-call"
 import type { ClaudeEvent, McpServer } from "@cognia/agent-config-types"
+
+it("forwards tool-host lease control through trusted feature calls without model credentials", async () => {
+  const requestResult = jest.fn(async () => ({ accepted: true }))
+  const lease = { leaseId: "scoped-lease", ownerSessionId: "chat-1", pause: true }
+  await expect(callSidecarToolHost("tool-host-stop", lease, requestResult)).resolves.toEqual({
+    accepted: true,
+  })
+  expect(requestResult).toHaveBeenCalledWith({
+    operation: "tool-host-stop",
+    credentials: {},
+    toolHost: lease,
+  })
+})
 
 describe("sidecar feature-call LanguageModelV3 proxy", () => {
   it("forwards a protocol adapter spec for a diagnostic-compatible custom provider", async () => {
@@ -191,6 +205,15 @@ describe("OpenCode V2 discovery validation", () => {
       })
     ).toThrow("invalid endpoint")
   })
+
+  it.each(["1.9.0", "3.0.0", "2.invalid", " "])(
+    "rejects unsupported service version %s",
+    (version) => {
+      expect(() =>
+        validateOpenCodeV2Discovery({ endpoint: "http://127.0.0.1:4096", version })
+      ).toThrow("incompatible service version")
+    }
+  )
 })
 
 describe("sidecar MCP discovery wrapper", () => {

@@ -112,6 +112,7 @@ export async function sendPrompt(
       systemPrompt: options?.systemPrompt,
       appendSystemPrompt: options?.appendSystemPrompt,
       ...(options?.agents ? { agents: options.agents } : {}),
+      ...(options?.pluginTools ? { pluginTools: options.pluginTools } : {}),
       ...(sdk
         ? {
             claudeAgentSdk: {
@@ -347,7 +348,9 @@ export async function sessionControl<T = unknown>(
 
 /** Live context-window usage from the SDK (authoritative window + breakdown). */
 export function getSessionContextUsage(sessionId: string): Promise<SdkContextUsage> {
-  return sessionControl<SdkContextUsage>(sessionId, "getContextUsage")
+  return sessionControl<SdkContextUsage>(sessionId, "getContextUsage", {
+    options: { detail: "summary" },
+  })
 }
 
 /** Live MCP client status for the running session (one entry per server). */
@@ -478,10 +481,12 @@ const SESSION_API_TIMEOUT_MS = 20_000
  * `SESSION_API_CAPABILITIES` first — this is IPC, and ADR-0090 constraint 3
  * wants the fail-closed decision made before it.
  */
+export type SdkSessionApiOptions = Pick<SendOptions, "cwd" | "execution" | "claudeAgentSdk">
+
 export async function sessionApi<T = unknown>(
   method: SessionApiMethod,
   params?: Record<string, unknown>,
-  sendOptions?: Pick<SendOptions, "cwd" | "execution" | "claudeAgentSdk">
+  sendOptions?: SdkSessionApiOptions
 ): Promise<T> {
   return sidecarRoundTrip<T>(
     "agent_session_api",
@@ -494,7 +499,7 @@ export async function sessionApi<T = unknown>(
 /** Sessions the SDK can see, from the store and/or `dir`'s transcripts. */
 export function listSdkSessions<T = unknown>(
   params?: { dir?: string },
-  sendOptions?: Pick<SendOptions, "cwd" | "execution">
+  sendOptions?: SdkSessionApiOptions
 ): Promise<T> {
   return sessionApi<T>("listSessions", params, sendOptions)
 }
@@ -502,7 +507,7 @@ export function listSdkSessions<T = unknown>(
 /** Metadata for one session (title, tag, timestamps). */
 export function getSdkSessionInfo<T = unknown>(
   sessionId: string,
-  sendOptions?: Pick<SendOptions, "cwd" | "execution">
+  sendOptions?: SdkSessionApiOptions
 ): Promise<T> {
   return sessionApi<T>("getSessionInfo", { sessionId }, sendOptions)
 }
@@ -516,7 +521,7 @@ export function getSdkSessionInfo<T = unknown>(
  */
 export function getSdkSessionMessages<T = unknown>(
   sessionId: string,
-  sendOptions?: Pick<SendOptions, "cwd" | "execution">
+  sendOptions?: SdkSessionApiOptions
 ): Promise<T> {
   return sessionApi<T>("getSessionMessages", { sessionId }, sendOptions)
 }
@@ -524,7 +529,7 @@ export function getSdkSessionMessages<T = unknown>(
 /** Subagents that ran inside a session. */
 export function listSdkSubagents<T = unknown>(
   sessionId: string,
-  sendOptions?: Pick<SendOptions, "cwd" | "execution">
+  sendOptions?: SdkSessionApiOptions
 ): Promise<T> {
   return sessionApi<T>("listSubagents", { sessionId }, sendOptions)
 }
@@ -533,7 +538,7 @@ export function listSdkSubagents<T = unknown>(
 export function getSdkSubagentMessages<T = unknown>(
   sessionId: string,
   agentId: string,
-  sendOptions?: Pick<SendOptions, "cwd" | "execution">
+  sendOptions?: SdkSessionApiOptions
 ): Promise<T> {
   return sessionApi<T>("getSubagentMessages", { sessionId, agentId }, sendOptions)
 }
@@ -542,7 +547,7 @@ export function getSdkSubagentMessages<T = unknown>(
 export function renameSdkSession(
   sessionId: string,
   title: string,
-  sendOptions?: Pick<SendOptions, "cwd" | "execution">
+  sendOptions?: SdkSessionApiOptions
 ): Promise<void> {
   return sessionApi<void>("renameSession", { sessionId, title }, sendOptions)
 }
@@ -551,7 +556,7 @@ export function renameSdkSession(
 export function tagSdkSession(
   sessionId: string,
   tag: string | null,
-  sendOptions?: Pick<SendOptions, "cwd" | "execution">
+  sendOptions?: SdkSessionApiOptions
 ): Promise<void> {
   return sessionApi<void>("tagSession", { sessionId, tag }, sendOptions)
 }
@@ -566,7 +571,7 @@ export function tagSdkSession(
  */
 export function deleteSdkSession(
   sessionId: string,
-  sendOptions?: Pick<SendOptions, "cwd" | "execution">
+  sendOptions?: SdkSessionApiOptions
 ): Promise<void> {
   return sessionApi<void>("deleteSession", { sessionId }, sendOptions)
 }
@@ -574,7 +579,7 @@ export function deleteSdkSession(
 /** Copy a session so a new branch can diverge from it. */
 export function forkSdkSession<T = unknown>(
   sessionId: string,
-  sendOptions?: Pick<SendOptions, "cwd" | "execution">
+  sendOptions?: SdkSessionApiOptions
 ): Promise<T> {
   return sessionApi<T>("forkSession", { sessionId }, sendOptions)
 }
@@ -587,7 +592,7 @@ export function forkSdkSession<T = unknown>(
  */
 export function importSdkSessionToStore<T = unknown>(
   sessionId: string,
-  sendOptions?: Pick<SendOptions, "cwd" | "execution" | "claudeAgentSdk">
+  sendOptions?: SdkSessionApiOptions
 ): Promise<T> {
   return sessionApi<T>("importSessionToStore", { sessionId }, sendOptions)
 }
@@ -595,7 +600,7 @@ export function importSdkSessionToStore<T = unknown>(
 /** The effective settings layers the SDK would apply (user/project/local). */
 export function resolveSdkSettings<T = unknown>(
   params?: { dir?: string },
-  sendOptions?: Pick<SendOptions, "cwd" | "execution">
+  sendOptions?: SdkSessionApiOptions
 ): Promise<T> {
   return sessionApi<T>("resolveSettings", params, sendOptions)
 }

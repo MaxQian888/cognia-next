@@ -5,7 +5,7 @@
 // top-level `appendSystemPrompt` field — it lives only on the internal control
 // protocol now. Rather than rely on the runtime still tolerating the untyped
 // field, we fold the stable base prompt and the dynamic appended sections into
-// the typed `systemPrompt: string | string[]` form. The array form preserves
+// the typed custom-prompt form with snapshot:false. The array content preserves
 // the stable→dynamic ordering as separate system blocks (matching the
 // stable/dynamic split `build-options.ts` builds for prompt-cache friendliness).
 // Likewise the deprecated `maxThinkingTokens` option is translated into the
@@ -16,17 +16,37 @@
  * shape. Emptiness is judged after trimming, but the original (untrimmed)
  * content is preserved. Returns:
  *   - `undefined`      when neither part has content (SDK keeps its default),
- *   - a `string`       when exactly one part has content,
- *   - `[base, append]` when both have content (stable→dynamic order).
+ *   - a custom prompt with snapshot:false for Cognia-generated instructions,
+ *   - an explicit SDK custom/preset object preserving its snapshot policy.
  *
  * @param {unknown} base   stable base system prompt (`sendOptions.systemPrompt`)
  * @param {unknown} append dynamic appended sections (`sendOptions.appendSystemPrompt`)
- * @returns {string | string[] | undefined}
+ * @returns {import("@anthropic-ai/claude-agent-sdk").Options["systemPrompt"]}
  */
 export function foldSystemPrompt(base, append) {
-  const b = typeof base === "string" ? base : ""
+  if (base && typeof base === "object" && !Array.isArray(base)) {
+    if (base.type === "custom")
+      return { ...base, prompt: foldPromptParts(base.prompt, append) ?? "" }
+    if (base.type === "preset") {
+      const folded = foldPromptParts(base.append, append)
+      return {
+        ...base,
+        ...(folded === undefined
+          ? {}
+          : { append: Array.isArray(folded) ? folded.join("\n\n") : folded }),
+      }
+    }
+  }
+  const prompt = foldPromptParts(base, append)
+  return prompt === undefined ? undefined : { type: "custom", prompt, snapshot: false }
+}
+
+function foldPromptParts(base, append) {
+  const b = Array.isArray(base)
+    ? base.filter((part) => typeof part === "string")
+    : [typeof base === "string" ? base : ""]
   const a = typeof append === "string" ? append : ""
-  const parts = [b, a].filter((p) => p.trim().length > 0)
+  const parts = [...b, a].filter((p) => p.trim().length > 0)
   if (parts.length === 0) return undefined
   if (parts.length === 1) return parts[0]
   return parts
@@ -34,15 +54,15 @@ export function foldSystemPrompt(base, append) {
 
 /**
  * Translate the deprecated `maxThinkingTokens` budget into the typed `thinking`
- * config. A positive budget enables a fixed thinking budget; any other value
- * (0, missing, negative, non-number) yields `undefined` so the SDK keeps its
- * model default — preserving the prior "only forwarded when > 0" semantics.
+ * config. Zero explicitly disables thinking; invalid or omitted budgets leave
+ * the model default intact.
  *
  * @param {unknown} maxThinkingTokens
- * @returns {{ type: "enabled", budgetTokens: number } | undefined}
+ * @returns {{ type: "enabled", budgetTokens: number } | { type: "disabled" } | undefined}
  */
 export function thinkingFromBudget(maxThinkingTokens) {
-  if (typeof maxThinkingTokens === "number" && maxThinkingTokens > 0) {
+  if (maxThinkingTokens === 0) return { type: "disabled" }
+  if (Number.isInteger(maxThinkingTokens) && maxThinkingTokens > 0) {
     return { type: "enabled", budgetTokens: maxThinkingTokens }
   }
   return undefined

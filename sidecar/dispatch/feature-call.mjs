@@ -3,6 +3,7 @@ import { resolveAdapter as defaultResolveProtocolAdapter } from "./protocol-adap
 import { buildBedrockProviderOptions, discoverBedrockModels } from "./bedrock.mjs"
 import { discoverMcpServer as defaultDiscoverMcpServer } from "./mcp-runtime-gateway.mjs"
 import { toLanguageModelUsage } from "./usage-normalize.mjs"
+import { createToolHostManager } from "./tool-host.mjs"
 
 function modelInput(message) {
   const credentials = message.credentials ?? {}
@@ -49,26 +50,27 @@ async function defaultBuildEmbeddingModel(message) {
 }
 
 async function loadOpenCodeService() {
-  try {
-    return await import("@opencode-ai/client/service")
-  } catch (error) {
-    if (error?.code !== "ERR_PACKAGE_PATH_NOT_EXPORTED" && error?.code !== "ERR_MODULE_NOT_FOUND") {
-      throw error
-    }
-    const clientEntry = import.meta.resolve("@opencode-ai/client")
-    return import(new URL("./service.js", clientEntry))
-  }
+  return import("@opencode/client/service")
+}
+
+function isOpenCodeV2Version(version) {
+  return typeof version === "string" && /^2\.\d+\.\d+(?:[-+][\w.+-]+)?$/.test(version)
 }
 
 export async function discoverOpenCodeV2Service({
   loadService = loadOpenCodeService,
   fetchImpl = fetch,
+  signal,
 } = {}) {
+  signal?.throwIfAborted()
   const { Service } = await loadService()
-  const discovered = await Service.discover()
+  signal?.throwIfAborted()
+  // The current service API has no signal option; it bounds its own health probe.
+  const discovered = await Service.discover({ version: isOpenCodeV2Version })
+  signal?.throwIfAborted()
   if (!discovered) {
     throw new Error(
-      "No compatible OpenCode V2 service was discovered. Start one with `opencode2 service start`."
+      "No compatible OpenCode V2 service was discovered. Start one with `opencode service start`."
     )
   }
   const endpoint = new URL(discovered.url)
@@ -83,17 +85,16 @@ export async function discoverOpenCodeV2Service({
   )
   const healthResponse = await fetchImpl(new URL("/api/health", endpoint), {
     headers,
-    signal: AbortSignal.timeout(2_000),
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(2_000)])
+      : AbortSignal.timeout(2_000),
   })
   const health = await healthResponse.json().catch(() => undefined)
+  signal?.throwIfAborted()
   if (!healthResponse.ok) {
     throw new Error("OpenCode V2 discovery health probe failed")
   }
-  if (
-    typeof health?.version !== "string" ||
-    !health.version.trim() ||
-    typeof health.pid !== "number"
-  ) {
+  if (!isOpenCodeV2Version(health?.version) || !Number.isInteger(health.pid) || health.pid <= 0) {
     throw new Error("OpenCode V2 discovery returned an incompatible health contract")
   }
   return {
@@ -189,6 +190,7 @@ async function streamProtocolAdapter(adapter, request, emitPart) {
 
 export function createFeatureCallHandler({
   emit,
+  hostRpc,
   buildModel = defaultBuildModel,
   buildEmbeddingModel = defaultBuildEmbeddingModel,
   discoverOpenCodeV2 = discoverOpenCodeV2Service,
@@ -196,6 +198,7 @@ export function createFeatureCallHandler({
   resolveProtocolAdapter = defaultResolveProtocolAdapter,
 }) {
   const active = new Map()
+  const toolHosts = createToolHostManager({ emit, hostRpc })
 
   async function call(message) {
     const { requestId, operation } = message
@@ -212,6 +215,24 @@ export function createFeatureCallHandler({
     const sessionId = `feature:${requestId}`
     active.set(requestId, { controller, pendingProtocolExecs, sessionId })
     try {
+      if (operation.startsWith("tool-host-")) {
+        const action = {
+          "tool-host-start": "start",
+          "tool-host-stop": "stop",
+          "tool-host-reply": "reply",
+        }[operation]
+        if (!action) throw new Error(`unsupported feature call operation: ${operation}`)
+        const onAbort = () => void toolHosts.stop(message.toolHost)
+        controller.signal.addEventListener("abort", onAbort, { once: true })
+        try {
+          const result = await toolHosts[action](message.toolHost)
+          controller.signal.throwIfAborted()
+          emit({ type: "feature_call_result", requestId, result })
+        } finally {
+          controller.signal.removeEventListener("abort", onAbort)
+        }
+        return
+      }
       if (operation === "bedrock-discover") {
         const models = await discoverBedrockModels(bedrockSettings(message.credentials))
         emit({ type: "feature_call_result", requestId, result: { models } })
@@ -219,7 +240,8 @@ export function createFeatureCallHandler({
       }
 
       if (operation === "opencode-v2-discover") {
-        const result = await discoverOpenCodeV2()
+        const result = await discoverOpenCodeV2({ signal: controller.signal })
+        controller.signal.throwIfAborted()
         emit({ type: "feature_call_result", requestId, result })
         return
       }
@@ -343,5 +365,11 @@ export function createFeatureCallHandler({
     return true
   }
 
-  return { call, abort, handleProtocolAdapterMessage, activeCount: () => active.size }
+  return {
+    call,
+    abort,
+    handleProtocolAdapterMessage,
+    activeCount: () => active.size,
+    close: () => toolHosts.close(),
+  }
 }

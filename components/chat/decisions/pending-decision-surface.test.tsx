@@ -209,3 +209,20 @@ describe("<PendingDecisionSurface /> — elicitation", () => {
     expect(screen.queryByTestId("decision-submit")).not.toBeInTheDocument()
   })
 })
+
+it("honors SDK deny focus and hides persistent approval when suppressed", async () => {
+  const onRespond = jest.fn()
+  render(
+    <PendingDecisionSurface
+      decision={{
+        kind: "tool-approval",
+        approval: { ...approval, defaultToNo: true, suppressAlwaysAllowRule: true },
+      }}
+      onApprovalRespond={onRespond}
+    />
+  )
+  expect(screen.queryByTestId("decision-allow-always")).not.toBeInTheDocument()
+  expect(screen.getByTestId("decision-deny")).toHaveFocus()
+  await userEvent.setup().keyboard("{Enter}")
+  expect(onRespond).toHaveBeenCalledWith("deny")
+})

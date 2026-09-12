@@ -293,7 +293,10 @@
     "commands": {
       "batchFailed": "{count, plural, one {Command {names} failed} other {Commands {names} failed}}",
       "failed": "Command failed",
-      "unavailable": "/{name} is not available yet."
+      "unavailable": "/{name} is not available yet.",
+      "running": "Running /{command}…",
+      "progress": "/{command} progress",
+      "cancel": "Cancel command"
     },
     "context": {
       "ariaLabel": "Attached files, links, and references",

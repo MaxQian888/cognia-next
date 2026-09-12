@@ -117,7 +117,10 @@ import { useTeamMemberRoles, useTeamMembers } from "@/hooks/use-team-members"
 import { useMarkdownChatAgents } from "@/hooks/chat/use-markdown-chat-agents"
 import { useMentionableSkills } from "@/hooks/chat/use-mentionable-skills"
 import { useMentionablePresets } from "@/hooks/chat/use-mentionable-presets"
-import { usePluginSlashCommands } from "@/hooks/chat/use-plugin-slash-commands"
+import {
+  usePluginSlashCommands,
+  usePluginSlashCommandExecution,
+} from "@/hooks/chat/use-plugin-slash-commands"
 import { useApplyPreset } from "@/hooks/chat/use-apply-preset"
 import { useEffectiveCwd } from "@/hooks/chat/use-effective-cwd"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
@@ -417,6 +420,7 @@ interface InnerProps {
     submission?: { replyTo: MessageReplyTo | null }
   ) => boolean | Promise<boolean>
   onStop: () => void | Promise<void>
+  commandRunning?: boolean
   onCommand: (cmd: SlashCommand, args: string) => Promise<boolean>
   onSubmitMemory: (target: ComposerMemoryTarget, text: string) => Promise<boolean>
   /**
@@ -1860,13 +1864,17 @@ function ComposerInner(props: InnerProps) {
             noteCommandUsed(seg.name)
           }
         }
-        const { outgoingText, overrides, ranAction, errors } = await runSegments(pipelineSegments, {
-          commandMap,
-          runAction: async (command, args) => {
-            await props.onCommand(command, args)
-          },
-          applyTemplate,
-        })
+        const { outgoingText, overrides, ranAction, errors, cancelled } = await runSegments(
+          pipelineSegments,
+          {
+            commandMap,
+            runAction: async (command, args) => {
+              return props.onCommand(command, args)
+            },
+            applyTemplate,
+          }
+        )
+        if (cancelled) return
         useChatStore.getState().setPendingCommandOverrides(overrides)
         // A failed command in a batch used to vanish: `runSegments` isolates the
         // throw into `errors` precisely so the rest of the batch still runs, but
@@ -2628,10 +2636,16 @@ function ComposerInner(props: InnerProps) {
   // case the inline ternaries used to miss: a turn streaming with text already
   // typed is a *send* (it joins the running turn as a follow-up), not a stop.
   const sendButton = resolveSendButton({
-    status: props.session?.platformBinding ? "ready" : props.status,
-    isSending,
+    status: props.commandRunning
+      ? "streaming"
+      : props.session?.platformBinding
+        ? "ready"
+        : props.status,
+    isSending: props.commandRunning ? false : isSending,
     isPreparingAttachments,
-    hasContent: controller.textInput.value.trim().length > 0 || attachments.files.length > 0,
+    hasContent:
+      !props.commandRunning &&
+      (controller.textInput.value.trim().length > 0 || attachments.files.length > 0),
     hasPendingDrafts: false,
     composerDisabled: !!props.disabled,
     outboundBlocked,
@@ -3188,6 +3202,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     [appendMessageToSession, session?.id]
   )
 
+  const {
+    progress: commandProgress,
+    run: runPluginCommand,
+    cancel: cancelPluginCommand,
+  } = usePluginSlashCommandExecution(session?.id ?? null)
+
   const handleSlashCommand = useCallback(
     async (cmd: SlashCommand, args: string): Promise<boolean> => {
       if (cmd.handler) {
@@ -3210,7 +3230,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           pushSystemMessage,
         }
         try {
-          await cmd.handler(ctx)
+          if (cmd.scope === "plugin") {
+            if (!(await runPluginCommand(cmd, ctx))) return false
+          } else {
+            await cmd.handler(ctx)
+          }
           // Registered command names only — never the argument string, which
           // is free user text.
           void trackEvent("app.command.executed", {
@@ -3250,6 +3274,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       setPermissionMode,
       pushSystemMessage,
       tCommands,
+      runPluginCommand,
     ]
   )
 
@@ -3612,7 +3637,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   )
 
   const promptStatus: PromptStatus =
-    status === "streaming" || status === "awaiting_approval"
+    commandProgress || status === "streaming" || status === "awaiting_approval"
       ? "streaming"
       : status === "error"
         ? "error"
@@ -3688,12 +3713,34 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                 />
               </div>
             )}
+            {commandProgress && (
+              <div className="flex items-center gap-3 px-3 py-2 text-sm">
+                <div role="status" className="min-w-0 flex-1" aria-live="polite">
+                  <span className="block truncate">
+                    {commandProgress.message ||
+                      tCommands("running", { command: commandProgress.command })}
+                  </span>
+                  {commandProgress.value !== undefined && (
+                    <progress
+                      className="h-1 w-full"
+                      aria-label={tCommands("progress", { command: commandProgress.command })}
+                      max={1}
+                      value={commandProgress.value}
+                    />
+                  )}
+                </div>
+                <Button type="button" size="sm" variant="ghost" onClick={cancelPluginCommand}>
+                  {tCommands("cancel")}
+                </Button>
+              </div>
+            )}
             <ComposerInner
               session={session}
               status={promptStatus}
               disabled={disabled}
               onSubmit={handleSubmit}
-              onStop={onStop}
+              onStop={commandProgress ? cancelPluginCommand : onStop}
+              commandRunning={!!commandProgress}
               onCommand={handleSlashCommand}
               onSubmitMemory={handleMemorySubmit}
               onSubmitShell={handleBashSubmit}

@@ -44,7 +44,7 @@ test("routes remote Anthropic MCP through a guarded stdio relay without argv sec
   })
 })
 
-test("preserves stdio servers and private-network review state", () => {
+test("guards stdio catalogs and preserves private-network review state", () => {
   const stdio = { type: "stdio", command: "npx", args: ["server"] }
   const result = guardAnthropicRemoteMcpServers(
     {
@@ -57,7 +57,13 @@ test("preserves stdio servers and private-network review state", () => {
     },
     { nodeExecutable: "/node", scriptPath: "/relay", packaged: false }
   )
-  assert.equal(result.local, stdio)
+  assert.equal(result.local.command, "/node")
+  const local = JSON.parse(
+    Buffer.from(result.local.env[__TESTING__.RELAY_CONFIG_ENV], "base64url").toString("utf8")
+  )
+  assert.equal(local.transport, "stdio")
+  assert.equal(local.command, "npx")
+  assert.deepEqual(local.args, ["server"])
   const decoded = JSON.parse(
     Buffer.from(result.intranet.env[__TESTING__.RELAY_CONFIG_ENV], "base64url").toString("utf8")
   )
@@ -76,4 +82,23 @@ test("self-execs the packaged CLI binary in the dedicated relay role", () => {
   assert.deepEqual(result.docs.args, [])
   assert.equal(result.docs.env.COGNIA_ROLE, "mcp-relay")
   assert.equal(result.docs.env.COGNIA_MCP_RELAY_SCRIPT, "/dist/sidecar/mcp-stdio-relay.mjs")
+})
+
+test("permission response guard covers encoded plugin JSON and unprovable originals", async () => {
+  const { permissionDecisionHasUnprovenRewrite } = await import("./anthropic-mcp-relay.mjs")
+  assert.equal(
+    permissionDecisionHasUnprovenRewrite(
+      JSON.stringify({ behavior: "allow", updatedInput: { path: "/unsafe" } }),
+      { path: "/safe" }
+    ),
+    true
+  )
+  assert.equal(
+    permissionDecisionHasUnprovenRewrite({ behavior: "allow", updatedInput: {} }, undefined),
+    true
+  )
+  assert.equal(
+    permissionDecisionHasUnprovenRewrite({ behavior: "deny", message: "No" }, undefined),
+    false
+  )
 })

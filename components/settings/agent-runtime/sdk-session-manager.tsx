@@ -53,16 +53,18 @@ import {
   tagSdkSession,
 } from "@/lib/claude/ipc"
 import { applySdkEvent } from "@/lib/claude/adapter"
-import { listSessions as listChatSessions } from "@/lib/db/sessions"
+import { listSessions as listChatSessions, updateSession } from "@/lib/db/sessions"
 import { persistMessages } from "@/lib/db/messages"
 import { startNewSession } from "@/lib/chat/start-session"
 import { useChatStore } from "@/stores/chat"
-import { getAgentExecutionFlags } from "@/lib/ai/agent/execution/feature-flags"
+import { sdkSessionApiOptions, type SdkSessionStorage } from "@/lib/claude/claude-sdk-rollout"
+import { useProjectStore } from "@/stores/project/project-store"
+import { useSettingsStore } from "@/stores/settings"
+import { resolveEffectiveCwd } from "@/lib/workspace/effective-cwd"
+import { resolveSessionWorkspace } from "@/lib/workspace/session-workspace"
+import { resolveSessionWorkspaceRoot } from "@/lib/task-workspace/session-execution-context"
+import { resolveCharacterById } from "@/lib/db/characters"
 import { useAgentExecutionFlag } from "@/hooks/agent/use-agent-execution-flag"
-import {
-  resolveAgentExecutionSpec,
-  sendSpecFromResolved,
-} from "@/lib/ai/agent/execution/resolve-agent-execution-spec"
 import {
   agentHostAvailable,
   resolveAgentExecutionEnvironment,
@@ -76,6 +78,8 @@ interface SdkSessionInfo {
   cwd?: string
   tag?: string
   gitBranch?: string
+  storage?: "filesystem" | "host-sqlite"
+  storageWorkspace?: string
 }
 
 interface SdkTranscriptPage {
@@ -194,13 +198,68 @@ export function SdkSessionManager() {
     setLoading(true)
     setError(null)
     try {
-      setSessions(await listSdkSessions<SdkSessionInfo[]>())
+      const filesystem = await listSdkSessions<SdkSessionInfo[]>()
+      const merged = new Map(
+        filesystem.map((row) => [
+          JSON.stringify([row.cwd ?? null, row.sessionId]),
+          { ...row, storage: "filesystem" as const } as SdkSessionInfo,
+        ])
+      )
+      const chats = await listChatSessions()
+      const recordedStoreScopes = chats
+        .filter((chat) => chat.sdkSessionId && chat.sdkSessionStorage?.backend === "host-sqlite")
+        .map((chat) => chat.sdkSessionStorage?.workspace ?? undefined)
+      if (sessionStoreEnabled || recordedStoreScopes.length > 0) {
+        const projects = useProjectStore.getState()
+        const defaultWorkingDir = useSettingsStore.getState().settings?.defaultWorkingDir
+        const scopes = new Set<string | undefined>(recordedStoreScopes)
+        if (sessionStoreEnabled) {
+          scopes.add(undefined)
+          scopes.add(defaultWorkingDir || undefined)
+        }
+        for (const row of sessionStoreEnabled ? filesystem : []) if (row.cwd) scopes.add(row.cwd)
+        for (const project of sessionStoreEnabled ? projects.projects : [])
+          scopes.add(resolveEffectiveCwd({ activeProject: project }))
+        for (const chat of chats) {
+          if (!chat.sdkSessionId) continue
+          if (!sessionStoreEnabled || chat.sdkSessionStorage?.backend === "host-sqlite") continue
+          const character = chat.characterId ? await resolveCharacterById(chat.characterId) : null
+          scopes.add(
+            resolveEffectiveCwd({
+              sessionWorkingDir: chat.workingDir,
+              executionWorkspaceRoot: chat.executionContext
+                ? resolveSessionWorkspaceRoot(chat.executionContext)
+                : undefined,
+              activeProject: resolveSessionWorkspace(
+                chat,
+                projects.projects,
+                projects.activeProjectId
+              ),
+              characterWorkingDir: character?.workingDir,
+              defaultWorkingDir,
+            })
+          )
+        }
+        for (const cwd of scopes) {
+          const rows = await listSdkSessions<SdkSessionInfo[]>(
+            undefined,
+            await sdkSessionApiOptions({ cwd, storage: "host-sqlite" })
+          )
+          for (const row of rows)
+            merged.set(JSON.stringify([cwd ?? null, row.sessionId]), {
+              ...row,
+              storageWorkspace: cwd,
+              storage: "host-sqlite",
+            })
+        }
+      }
+      setSessions([...merged.values()])
     } catch {
       setError("errors.loadFailed")
     } finally {
       setLoading(false)
     }
-  }, [hostReachable, enabled])
+  }, [hostReachable, enabled, sessionStoreEnabled])
 
   useEffect(() => {
     if (!hostReachable || !enabled) return
@@ -210,11 +269,22 @@ export function SdkSessionManager() {
 
   if (!hostReachable) return null
 
+  const optionsFor = (session: SdkSessionInfo) =>
+    sdkSessionApiOptions({
+      cwd: session.storage === "host-sqlite" ? session.storageWorkspace : session.cwd,
+      sessionId: session.sessionId,
+      storage: session.storage ?? "filesystem",
+    })
+
   const onRename = async () => {
     if (!renameTarget || !renameDraft.trim()) return
     setBusyId(renameTarget.sessionId)
     try {
-      await renameSdkSession(renameTarget.sessionId, renameDraft.trim())
+      await renameSdkSession(
+        renameTarget.sessionId,
+        renameDraft.trim(),
+        await optionsFor(renameTarget)
+      )
       toast.success(t("renamed"))
       setRenameTarget(null)
       await load()
@@ -228,7 +298,7 @@ export function SdkSessionManager() {
   const onFork = async (session: SdkSessionInfo) => {
     setBusyId(session.sessionId)
     try {
-      await forkSdkSession(session.sessionId)
+      await forkSdkSession(session.sessionId, await optionsFor(session))
       toast.success(t("forked"))
       await load()
     } catch {
@@ -242,7 +312,7 @@ export function SdkSessionManager() {
     if (!deleteTarget) return
     setBusyId(deleteTarget.sessionId)
     try {
-      await deleteSdkSession(deleteTarget.sessionId)
+      await deleteSdkSession(deleteTarget.sessionId, await optionsFor(deleteTarget))
       toast.success(t("deleted"))
       setDeleteTarget(null)
       await load()
@@ -257,7 +327,7 @@ export function SdkSessionManager() {
     if (!tagTarget) return
     setBusyId(tagTarget.sessionId)
     try {
-      await tagSdkSession(tagTarget.sessionId, tagDraft.trim() || null)
+      await tagSdkSession(tagTarget.sessionId, tagDraft.trim() || null, await optionsFor(tagTarget))
       toast.success(t("tagged"))
       setTagTarget(null)
       await load()
@@ -280,9 +350,9 @@ export function SdkSessionManager() {
     setDetailsError(false)
 
     const [infoResult, messagesResult, subagentsResult] = await Promise.allSettled([
-      getSdkSessionInfo<SdkSessionInfo | undefined>(session.sessionId),
-      getSdkSessionMessages(session.sessionId),
-      listSdkSubagents(session.sessionId),
+      getSdkSessionInfo<SdkSessionInfo | undefined>(session.sessionId, await optionsFor(session)),
+      getSdkSessionMessages(session.sessionId, await optionsFor(session)),
+      listSdkSubagents(session.sessionId, await optionsFor(session)),
     ])
     if (request !== detailsRequestRef.current) return
 
@@ -313,7 +383,11 @@ export function SdkSessionManager() {
     setDetailsError(false)
     try {
       const transcript = foldSdkSessionMessages(
-        await getSdkSubagentMessages(detailsTarget.sessionId, agentId)
+        await getSdkSubagentMessages(
+          detailsTarget.sessionId,
+          agentId,
+          await optionsFor(detailsTarget)
+        )
       )
       if (request !== detailsRequestRef.current) return
       setDetailMessages(transcript.messages)
@@ -330,23 +404,50 @@ export function SdkSessionManager() {
   const onContinueInChat = async (session: SdkSessionInfo) => {
     setBusyId(session.sessionId)
     try {
+      if (sessionStoreEnabled && session.storage === "filesystem") {
+        await importSdkSessionToStore(
+          session.sessionId,
+          await sdkSessionApiOptions({
+            cwd: session.cwd,
+            sessionId: session.sessionId,
+            storage: "host-sqlite",
+          })
+        )
+      }
+      const storage: SdkSessionStorage =
+        sessionStoreEnabled || session.storage === "host-sqlite"
+          ? {
+              backend: "host-sqlite",
+              workspace:
+                (session.storage === "host-sqlite" ? session.storageWorkspace : session.cwd) ??
+                null,
+            }
+          : { backend: "filesystem" }
       const existing = (await listChatSessions()).find(
-        (candidate) => candidate.sdkSessionId === session.sessionId
+        (candidate) =>
+          candidate.sdkSessionId === session.sessionId &&
+          (!candidate.sdkSessionStorage ||
+            (candidate.sdkSessionStorage.backend === storage.backend &&
+              (candidate.sdkSessionStorage.workspace ?? null) === (storage.workspace ?? null)))
       )
       let chatSessionId = existing?.id
 
       if (!chatSessionId) {
-        const transcript = foldSdkSessionMessages(await getSdkSessionMessages(session.sessionId))
+        const transcript = foldSdkSessionMessages(
+          await getSdkSessionMessages(session.sessionId, await optionsFor(session))
+        )
         const created = await startNewSession({
           title: session.customTitle || session.summary,
           workingDir: session.cwd,
           sdkSessionId: session.sessionId,
+          sdkSessionStorage: storage,
         })
         chatSessionId = created.id
         await persistMessages(chatSessionId, transcript.messages)
         useChatStore.getState().replaceSessionMessages(chatSessionId, transcript.messages)
       }
 
+      await updateSession(chatSessionId, { sdkSessionStorage: storage })
       useChatStore.getState().setActiveSession(chatSessionId)
       router.push("/")
       toast.success(t("continued"))
@@ -361,23 +462,15 @@ export function SdkSessionManager() {
     if (!session.cwd) return
     setBusyId(session.sessionId)
     try {
-      const { spec } = resolveAgentExecutionSpec({
-        surface: "chat",
-        environment,
-        flags: getAgentExecutionFlags(),
-        policy: { executionKind: "agent", runtimePolicy: "claude-agent-sdk" },
-        legacy: { providerId: "anthropic" },
-        identity: { sessionId: session.sessionId },
-      })
-      await importSdkSessionToStore(session.sessionId, {
-        cwd: session.cwd,
-        execution: sendSpecFromResolved(spec),
-        claudeAgentSdk: {
-          version: 1,
-          persistSession: true,
-          sessionStore: { backend: "host-sqlite" },
-        },
-      })
+      await importSdkSessionToStore(
+        session.sessionId,
+        await sdkSessionApiOptions({
+          cwd: session.cwd,
+          sessionId: session.sessionId,
+          storage: "host-sqlite",
+        })
+      )
+      await load()
       toast.success(t("imported"))
     } catch {
       toast.error(t("errors.importFailed"))
@@ -415,7 +508,14 @@ export function SdkSessionManager() {
         ) : (
           <ul className="divide-y rounded-md border">
             {sessions.map((session) => (
-              <li key={session.sessionId} className="flex items-center justify-between gap-3 p-3">
+              <li
+                key={JSON.stringify([
+                  session.storage,
+                  session.storageWorkspace ?? session.cwd,
+                  session.sessionId,
+                ])}
+                className="flex items-center justify-between gap-3 p-3"
+              >
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-2">
                     <p className="truncate text-sm font-medium">
@@ -479,7 +579,7 @@ export function SdkSessionManager() {
                   >
                     <GitBranchIcon className="size-3.5" />
                   </Button>
-                  {sessionStoreEnabled && session.cwd && (
+                  {sessionStoreEnabled && session.storage !== "host-sqlite" && session.cwd && (
                     <Button
                       size="icon"
                       variant="ghost"

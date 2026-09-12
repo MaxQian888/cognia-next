@@ -10,6 +10,19 @@ import {
   SUMMARY_CAS_ATTEMPTS,
 } from "./session-store.mjs"
 
+test("resuming a stored workspace keeps its namespace after cwd changes", () => {
+  const current = { execution: { tenantId: "tenant" }, cwd: "/new" }
+  assert.deepEqual(
+    storeScope({ ...current, claudeAgentSdk: { sessionStore: { workspace: "/old" } } }),
+    { tenant: "tenant", workspace: "/old" }
+  )
+  assert.deepEqual(
+    storeScope({ ...current, claudeAgentSdk: { sessionStore: { workspace: null } } }),
+    { tenant: "tenant", workspace: "default" }
+  )
+  assert.deepEqual(storeScope(current), { tenant: "tenant", workspace: "/new" })
+})
+
 /**
  * A fake host that records calls and answers with whatever the test queued.
  * Summary state is modelled properly (version + CAS) because the CAS loop is
@@ -161,6 +174,28 @@ test("a valid descriptor produces the full optional surface", () => {
 
 // ---- append + summary --------------------------------------------------------
 
+test("store list and delete operations preserve scoped keys and normalize absent lists", async () => {
+  const calls = []
+  let sessions
+  const sdkStore = createHostSessionStore({
+    hostRpc: {
+      call: async (method, params) => {
+        calls.push({ method, params })
+        return { sessions }
+      },
+    },
+    scope: { tenant: "tenant", workspace: "workspace" },
+  })
+  assert.deepEqual(await sdkStore.listSessions("project"), [])
+  sessions = [{ sessionId: "s", mtime: 1 }]
+  assert.deepEqual(await sdkStore.listSessions("project"), sessions)
+  await sdkStore.delete(KEY)
+  assert.deepEqual(calls.at(-1), {
+    method: "sessionStore.delete",
+    params: { scope: { tenant: "tenant", workspace: "workspace" }, key: KEY },
+  })
+})
+
 test("an empty batch never reaches the host", async () => {
   const host = fakeHost()
   await store(host).append(KEY, [])
@@ -213,6 +248,15 @@ test("a summary that never converges is logged, not thrown", async () => {
     SUMMARY_CAS_ATTEMPTS
   )
   assert.match(warnings.join("\n"), /gave up folding the summary/)
+})
+
+test("summary contention also succeeds when the host supplies no logger", async () => {
+  const host = fakeHost({ failWrites: 99 })
+  await createHostSessionStore({ hostRpc: host, foldSummary: fold }).append(KEY, [ENTRY])
+  assert.equal(
+    host.calls.filter((call) => call.method === "sessionStore.writeSummary").length,
+    SUMMARY_CAS_ATTEMPTS
+  )
 })
 
 test("concurrent appends for one session are serialised", async () => {

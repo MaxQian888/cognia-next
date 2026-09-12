@@ -10,7 +10,65 @@
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { startMockAnthropic, spawnSidecar, assistantText } from "./live-harness.mjs"
+
+test("latest SDK controls reload styles, persist local settings and report summary context", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "cognia-sdk-controls-"))
+  const mock = startMockAnthropic({ chunks: ["PONG"], delayMs: 2_000 })
+  await mock.listen()
+  const sidecar = spawnSidecar({ baseUrl: mock.baseUrl })
+  try {
+    await sidecar.waitFor((m) => m.type === "ready", { timeoutMs: 15_000, label: "ready" })
+    sidecar.send({
+      type: "send",
+      sessionId: "latest-controls",
+      prompt: "Reply PONG",
+      options: {
+        cwd,
+        settingSources: ["local"],
+        trustedWorkspaceRoots: [cwd],
+        claudeAgentSdk: { version: 1, skills: "all" },
+      },
+    })
+    await sidecar.waitFor((m) => m.type === "sdk_session_id", { label: "sdk_session_id" })
+    const calls = [
+      ["reloadOutputStyles", {}],
+      ["updateSettings", { source: "localSettings", settings: { outputStyle: "default" } }],
+      ["getContextUsage", { options: { detail: "summary" } }],
+    ]
+    for (const [method, params] of calls)
+      sidecar.send({
+        type: "control",
+        sessionId: "latest-controls",
+        requestId: method,
+        method,
+        params,
+      })
+    for (const [method] of calls) {
+      const response = await sidecar.waitFor(
+        (m) => m.type === "control_response" && m.requestId === method,
+        { label: method }
+      )
+      assert.equal(response.ok, true, `${method}: ${response.error ?? ""}`)
+    }
+    assert.equal(
+      JSON.parse(readFileSync(join(cwd, ".claude/settings.local.json"), "utf8")).outputStyle,
+      "default"
+    )
+    const result = await sidecar.waitFor((m) => m.type === "event" && m.event?.type === "result", {
+      label: "result",
+    })
+    assert.equal(result.event.subtype, "success")
+    assert.ok(mock.messagesCalls.length > 0)
+  } finally {
+    await sidecar.close()
+    await mock.close()
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
 
 test("anthropic dispatch streams a real assistant reply + success result", async () => {
   const mock = startMockAnthropic({ chunks: ["PONG"] })

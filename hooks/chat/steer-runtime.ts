@@ -266,7 +266,8 @@ export function maybeDrainSteer(
     content: SendContent,
     webSearchContext?: SendOptions["webSearchContext"],
     replyTo?: MessageReplyTo
-  ) => void
+  ) => void | Promise<boolean>,
+  awaitAdmission = false
 ): void {
   steerArmed.delete(sessionId)
   // The turn is over, so its lane is too. The replay below re-enters `send`,
@@ -281,12 +282,25 @@ export function maybeDrainSteer(
   // of now. Flip before dispatching: `replay` is synchronous into `send`, which
   // persists the transcript, and a later flip would race that write.
   const drained = new Set(queue.map((entry) => entry.id))
-  patchSteerMessages(sessionId, (meta) => drained.has(meta.entryId), { state: "applied" })
+  if (!awaitAdmission) {
+    patchSteerMessages(sessionId, (meta) => drained.has(meta.entryId), { state: "applied" })
+  }
   // The drained turn is one prompt, so it can answer one message: the first
   // queued reply target wins, the way the first web-search provider does.
   const payload = buildSteerPayload(queue)
   const webSearchContext = mergeSteerWebSearchContexts(queue.map((entry) => entry.webSearchContext))
   const replyTo = queue.find((entry) => entry.replyTo)?.replyTo
-  if (replyTo) replay(payload, webSearchContext, replyTo)
-  else replay(payload, webSearchContext)
+  const outcome = replyTo
+    ? replay(payload, webSearchContext, replyTo)
+    : replay(payload, webSearchContext)
+  if (awaitAdmission) {
+    const settle = (accepted: boolean) =>
+      patchSteerMessages(sessionId, (meta) => drained.has(meta.entryId), {
+        state: accepted ? "applied" : "failed",
+      })
+    void Promise.resolve(outcome).then(
+      (accepted) => settle(accepted === true),
+      () => settle(false)
+    )
+  }
 }

@@ -49,7 +49,11 @@ describe("sessionControl round-trip", () => {
     await flush()
     expect(callSpy).toHaveBeenCalledWith(
       "claude_session_control",
-      expect.objectContaining({ sessionId: "s1", method: "getContextUsage" })
+      expect.objectContaining({
+        sessionId: "s1",
+        method: "getContextUsage",
+        params: { options: { detail: "summary" } },
+      })
     )
     const { requestId } = callSpy.mock.calls[0][1] as { requestId: string }
     captured!({

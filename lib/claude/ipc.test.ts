@@ -307,6 +307,46 @@ describe("Claude session commands", () => {
     expect(callSpy).toHaveBeenCalledTimes(1)
   })
 
+  it("dispatches the built-in editor and vector manifests through the real PII gate", async () => {
+    const { hasNoLeakingPiiDeep } =
+      jest.requireActual<typeof import("@cognia/redact")>("@cognia/redact")
+    const { buildEditorBuiltinManifestEntries, buildEditorWriteManifestEntries } =
+      await import("@/lib/claude/editor-builtin-tools")
+    const { buildVectorManifestEntries } = await import("@/lib/claude/vector-builtin-tools")
+    mockHasNoLeakingPiiDeep.mockImplementation(hasNoLeakingPiiDeep)
+    callSpy.mockResolvedValueOnce(undefined)
+    const pluginTools = [
+      ...buildEditorBuiltinManifestEntries(),
+      ...buildEditorWriteManifestEntries(),
+      ...buildVectorManifestEntries(),
+    ]
+    await sendPrompt("sess", "Inspect the workspace", { pluginTools })
+    expect(callSpy).toHaveBeenCalledWith("claude_send", {
+      sessionId: "sess",
+      prompt: "Inspect the workspace",
+      options: { pluginTools },
+    })
+  })
+
+  it("blocks provider-visible plugin tool metadata before dispatch", async () => {
+    mockHasNoLeakingPiiDeep.mockImplementation(
+      (payload) => !JSON.stringify(payload).includes("private@example.com")
+    )
+    await expect(
+      sendPrompt("sess", "hello", {
+        pluginTools: [
+          {
+            name: "lookup",
+            pluginId: "fixture",
+            description: "Contact private@example.com",
+            jsonSchema: { type: "object" },
+          },
+        ],
+      })
+    ).rejects.toThrow("renderer PII gate")
+    expect(callSpy).not.toHaveBeenCalled()
+  })
+
   it("sendPrompt forwards sessionId / prompt / options", async () => {
     callSpy.mockResolvedValueOnce(undefined)
     await sendPrompt("sess-1", "hello", { model: "claude-opus-4-7" })

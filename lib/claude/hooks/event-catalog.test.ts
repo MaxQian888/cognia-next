@@ -25,6 +25,8 @@ const ALL_EVENTS: HookEvent[] = [
   "StopFailure",
   "Notification",
   "MessageDisplay",
+  "PreModelSwitch",
+  "PostModelSwitch",
   "PermissionRequest",
   "PermissionDenied",
   "Elicitation",
@@ -49,10 +51,17 @@ const ALL_EVENTS: HookEvent[] = [
 const DORMANT_EVENTS: HookEvent[] = []
 
 describe("HOOK_EVENT_CATALOG", () => {
-  it("tracks the complete Claude Agent SDK 0.3.220 lifecycle surface", () => {
-    expect(HOOK_EVENTS).toHaveLength(31)
+  it("tracks the complete Claude Agent SDK 0.3.269 lifecycle surface", () => {
+    expect(HOOK_EVENTS).toHaveLength(33)
     expect(HOOK_EVENTS).toEqual(
-      expect.arrayContaining(["Setup", "SubagentStart", "DirectoryAdded", "MessageDisplay"])
+      expect.arrayContaining([
+        "Setup",
+        "SubagentStart",
+        "DirectoryAdded",
+        "MessageDisplay",
+        "PreModelSwitch",
+        "PostModelSwitch",
+      ])
     )
   })
   it("contains every HookEvent exactly once", () => {

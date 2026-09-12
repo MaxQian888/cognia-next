@@ -39,6 +39,7 @@ import { resolveForToolCall } from "./permission-resolver.mjs"
 import {
   classifyToolCallConfinement,
   assertToolCallWithinRoots,
+  buildPluginAccessMap,
 } from "../builtin-tools/confinement.mjs"
 import { createDoomLoopGuard } from "./doom-loop.mjs"
 import { markAiSdkToolSource } from "./ai-sdk-tool-search.mjs"
@@ -203,6 +204,11 @@ export function createToolPermissionGate({
     ? sendOptions.alwaysAllowTools
     : null
   const canPrompt = typeof emit === "function" && pendingApprovals instanceof Map
+  // Plugin-declared filesystem access classes + path params (full tool name
+  // → {access, pathKeys}) — lets a cliTool/`registerTool` entry opt into the
+  // same workspace-confinement classification the built-in read/write sets
+  // get. Non-array pluginTools degrades to an empty map (opaque tools).
+  const pluginAccess = buildPluginAccessMap(sendOptions?.pluginTools)
 
   /**
    * @param {string} toolName   namespaced tool name
@@ -218,7 +224,13 @@ export function createToolPermissionGate({
     const ruleVerdict = resolveForToolCall(ruleset, toolName, input)
     if (ruleVerdict === "deny") throw new Error(`denied by permission ruleset: ${toolName}`)
 
-    assertToolCallWithinRoots(sendOptions?.builtinProcessSandbox, toolName, input, sendOptions?.cwd)
+    assertToolCallWithinRoots(
+      sendOptions?.builtinProcessSandbox,
+      toolName,
+      input,
+      sendOptions?.cwd,
+      pluginAccess
+    )
 
     // The `ask_user` elicitation tool is the user interaction itself: the
     // renderer's AskUserDialog blocks until the user answers, so it must never
@@ -251,7 +263,8 @@ export function createToolPermissionGate({
         sendOptions?.confinement,
         toolName,
         input,
-        sendOptions?.cwd
+        sendOptions?.cwd,
+        pluginAccess
       )
     } catch {
       confVerdict = null

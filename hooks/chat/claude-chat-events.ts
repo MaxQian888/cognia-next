@@ -195,12 +195,15 @@ export function drainSteerVia(sessionId: string, sendRef: React.MutableRefObject
  * modal. Fail-open: any error is treated as undecided (`false`). Shared by the
  * subagent-ask routing branch and the normal open-pane branch.
  */
-export async function tryAutoModeDecision(evt: {
-  sessionId: string
-  requestId: string
-  toolName: string
-  input: unknown
-}): Promise<boolean> {
+export async function tryAutoModeDecision(
+  evt: {
+    sessionId: string
+    requestId: string
+    toolName: string
+    input: unknown
+  },
+  respond?: (decision: "allow" | "deny", message?: string) => Promise<void>
+): Promise<boolean> {
   try {
     const settings = useSettingsStore.getState().settings
     const judgeClient = buildUtilityLlmClient({
@@ -227,21 +230,25 @@ export async function tryAutoModeDecision(evt: {
       }),
     ])
     if (decision && decision.decision === "allow") {
-      await approveTool(evt.sessionId, evt.requestId, "allow", undefined, undefined, undefined, {
-        authority: "policy-rule",
-      })
+      if (respond) await respond("allow")
+      else
+        await approveTool(evt.sessionId, evt.requestId, "allow", undefined, undefined, undefined, {
+          authority: "policy-rule",
+        })
       return true
     }
     if (decision && decision.decision === "deny") {
-      await approveTool(
-        evt.sessionId,
-        evt.requestId,
-        "deny",
-        `auto-denied (${decision.source}): ${decision.reason}`,
-        undefined,
-        undefined,
-        { authority: "policy-deny" }
-      )
+      if (respond) await respond("deny", `auto-denied (${decision.source}): ${decision.reason}`)
+      else
+        await approveTool(
+          evt.sessionId,
+          evt.requestId,
+          "deny",
+          `auto-denied (${decision.source}): ${decision.reason}`,
+          undefined,
+          undefined,
+          { authority: "policy-deny" }
+        )
       return true
     }
   } catch (err) {
@@ -593,6 +600,8 @@ export async function handleEvent(
           kind: "permission-request",
           requestId: evt.requestId,
           toolName: evt.toolName,
+          defaultToNo: evt.defaultToNo,
+          suppressAlwaysAllowRule: evt.suppressAlwaysAllowRule,
         },
       ])
       // Remember the call for the post-tool (`tool_result_review`) hook.
@@ -697,6 +706,8 @@ export async function handleEvent(
             description: evt.description,
             blockedPath: evt.blockedPath,
             decisionReason: evt.decisionReason,
+            defaultToNo: evt.defaultToNo,
+            suppressAlwaysAllowRule: evt.suppressAlwaysAllowRule,
             origin: "subagent",
             subagentId: subagentRoute.subagentId,
             subagentRunId: subagentRoute.runId,
@@ -761,6 +772,8 @@ export async function handleEvent(
         description: evt.description,
         blockedPath: evt.blockedPath,
         decisionReason: evt.decisionReason,
+        defaultToNo: evt.defaultToNo,
+        suppressAlwaysAllowRule: evt.suppressAlwaysAllowRule,
       }
       pushInteractiveApproval(approval)
       return

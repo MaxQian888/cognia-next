@@ -1,9 +1,8 @@
-// Frontend type defs mirroring `src-tauri/src/hooks/types.rs`. The hook
-// runtime lives entirely in Rust — these are surface types for UI consumers
-// (e.g. the future hooks settings tab) that need to read or render the hook
-// config block from settings.json.
+// Frontend hook configuration types mirror `src-tauri/src/hooks/types.rs`.
+// Claude SDK hooks execute in the sidecar; host adapters use the native rail.
+// Both share these settings and the event catalog used by the settings UI.
 
-/** Claude Agent SDK 0.3.220 lifecycle events. */
+/** Claude Agent SDK 0.3.269 lifecycle events. */
 export type HookEvent =
   | "PreToolUse"
   | "PostToolUse"
@@ -36,6 +35,8 @@ export type HookEvent =
   | "TeammateIdle"
   | "UserPromptExpansion"
   | "MessageDisplay"
+  | "PreModelSwitch"
+  | "PostModelSwitch"
 
 export type HookHandlerType = "command" | "http" | "mcp_tool" | "prompt" | "agent" | "plugin"
 export type HookShell = "bash" | "powershell"

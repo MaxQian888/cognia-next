@@ -43,6 +43,7 @@ pub const CODE_SANDBOX_LAUNCHER_ENV: &str = "COGNIA_CODE_SANDBOX_LAUNCHER";
 pub fn code_sandbox_scope(scratch: &Path, node_root: &Path, sidecar_root: &Path) -> LaunchScope {
     let scratch = canonical_for_policy(scratch);
     LaunchScope {
+        denied_readable: vec![],
         cwd: scratch.clone(),
         writable: vec![scratch],
         readable: vec![

@@ -1457,6 +1457,20 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
   }
 
+  const customSdkProvider = appSettings?.customProviders?.find(
+    (provider) => provider.id === providerId && provider.experimentalAgentSdk === true
+  )
+  const experimentalSdk = Boolean(customSdkProvider && !ctx.externalRuntimeId)
+  if (experimentalSdk && customSdkProvider?.apiProtocol !== "anthropic") {
+    throw new Error("Claude Agent SDK requires an Anthropic protocol deployment")
+  }
+  const turnRuntime = experimentalSdk
+    ? "claude-agent-sdk"
+    : runtimeFromLegacy({
+        provider: providerId,
+        ...(ctx.externalRuntimeId ? { teammateRuntime: ctx.externalRuntimeId } : {}),
+      })
+
   const accountId = resolveAccountId(
     providerId,
     session ?? null,
@@ -2716,10 +2730,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       const dispatchAgentGate = await resolveDispatchAgentGate(
         ctx,
         opts.permissionMode,
-        runtimeFromLegacy({
-          provider: providerId,
-          ...(ctx.externalRuntimeId ? { teammateRuntime: ctx.externalRuntimeId } : {}),
-        })
+        turnRuntime
       )
       let manifest = buildPluginToolsManifest({
         exposeDockToAgents,
@@ -3815,8 +3826,8 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   }
 
   // --- Extended thinking budget --------------------------------------------
-  // Precedence: session > character > app default. Only forwarded when > 0;
-  // a falsy budget keeps the SDK at its default (no thinking pass).
+  // Precedence: session > character > app default. The settings UI uses zero
+  // for the model default; explicit disabling uses claudeAgentSdk.thinking.
   const thinkingBudget =
     session?.maxThinkingTokens ??
     character?.maxThinkingTokens ??
@@ -4605,10 +4616,18 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       // Host profile, not `isTauri()`: the spec's `hostRef` and fingerprint
       // otherwise labelled every headless and companion turn "web-renderer".
       environment: resolveAgentExecutionEnvironment(),
-      flags: getAgentExecutionFlags(),
+      flags: {
+        ...getAgentExecutionFlags(),
+        ...(experimentalSdk ? { gatewayAgentRouteTickets: true } : {}),
+      },
       // Chat sessions are agent sessions by definition; the legacy
       // provider id still drives the runtime mapping.
-      policy: { executionKind: "agent" },
+      policy: {
+        executionKind: "agent",
+        ...(experimentalSdk
+          ? { runtimePolicy: "claude-agent-sdk" as const, routePolicy: "gateway-required" as const }
+          : {}),
+      },
       legacy: {
         providerId: opts.provider,
         modelId: opts.model,
@@ -4623,8 +4642,18 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     // `sendSpecFromResolved` degrades to `direct`, which is why the route
     // ticket panel could never list anything. Minting is best-effort — a
     // refusal falls back to the direct shape rather than failing the send.
-    const minted =
-      spec.route.kind === "gateway" && session?.id
+    const minted = experimentalSdk
+      ? await (
+          await import("@/lib/gateway/mint-session-ticket")
+        ).prepareExternalAgentGatewayRoute({
+          providerId: providerId!,
+          modelId: opts.model ?? spec.modelBindings.primary,
+          accountId,
+          sessionId: session?.id ?? ctx.executionIdentity?.sessionId ?? crypto.randomUUID(),
+          executionFingerprint: spec.executionFingerprint,
+          ingressProtocol: "anthropic",
+        })
+      : spec.route.kind === "gateway" && session?.id
         ? await (
             await import("@/lib/gateway/mint-session-ticket")
           ).mintSessionRouteTicket({
@@ -4665,17 +4694,36 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         ...opts.env,
         ANTHROPIC_BASE_URL: minted.endpoint,
         ANTHROPIC_API_KEY: minted.secret,
+        ...(experimentalSdk ? { CLAUDE_CODE_OAUTH_TOKEN: "", ANTHROPIC_AUTH_TOKEN: "" } : {}),
       }
     } else {
       opts.execution = sendSpecFromResolved(spec, undefined, composition)
     }
     if (spec.runtimeAdapter === "claude-agent-sdk") {
-      const { claudeSdkRolloutOptions } = await import("./claude-sdk-rollout")
-      const rollout = claudeSdkRolloutOptions(getAgentExecutionFlags())
+      const { claudeSdkRolloutOptions, sdkOptionsForStorage } = await import("./claude-sdk-rollout")
+      const storage =
+        session?.sdkSessionId || session?.forkedFromSdkSessionId
+          ? session.sdkSessionStorage
+          : undefined
+      const flags = getAgentExecutionFlags()
+      // A resumed session keeps its recorded backend even if rollout defaults change.
+      const rollout = claudeSdkRolloutOptions(
+        storage
+          ? {
+              ...flags,
+              claudeSdkSessionStore: storage.backend === "host-sqlite",
+              ...(storage.backend === "host-sqlite" ? { claudeSdkCheckpoint: false } : {}),
+            }
+          : flags
+      )
       if (rollout) opts.claudeAgentSdk = { ...opts.claudeAgentSdk, ...rollout }
+      if (storage) opts.claudeAgentSdk = sdkOptionsForStorage(storage, opts.claudeAgentSdk)
     }
     ctx.onResolvedExecutionSpec?.(spec)
   } catch (err) {
+    // An explicitly chosen SDK runtime must never fall back to another
+    // engine or send directly when its required gateway lease fails.
+    if (experimentalSdk) throw err
     // Never fail the send over spec stamping. But never hide it either: with
     // no `execution` on the wire the sidecar takes the legacy provider branch,
     // no `agent://message` envelopes are emitted and the execution handle has

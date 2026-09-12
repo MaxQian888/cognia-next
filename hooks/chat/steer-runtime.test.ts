@@ -457,3 +457,35 @@ describe("maybeDrainSteer", () => {
     expect(seenAtReplay).toEqual(["applied"])
   })
 })
+
+it.each([false, true])("settles a room steer only after admission (%s)", async (accepted) => {
+  state.sessions["s1"] = {
+    steerQueue: [{ id: "a", text: "follow-up" }],
+    messages: [steerMessage("a", "queued")],
+  }
+  let resolve!: (accepted: boolean) => void
+  const admission = new Promise<boolean>((done) => {
+    resolve = done
+  })
+  maybeDrainSteer("s1", () => admission, true)
+  expect(statesOf("s1")).toEqual(["queued"])
+  resolve(accepted)
+  await Promise.resolve()
+  expect(statesOf("s1")).toEqual([accepted ? "applied" : "failed"])
+})
+
+it("keeps a rejected room steer recoverable without an unhandled rejection", async () => {
+  state.sessions["s1"] = {
+    steerQueue: [{ id: "a", text: "follow-up" }],
+    messages: [steerMessage("a", "queued")],
+  }
+  maybeDrainSteer(
+    "s1",
+    async () => {
+      throw new Error("broker down")
+    },
+    true
+  )
+  await Promise.resolve()
+  expect(statesOf("s1")).toEqual(["failed"])
+})

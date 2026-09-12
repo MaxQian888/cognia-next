@@ -130,6 +130,14 @@
     "WorktreeRemove": {
       "desc": "移除 git 工作树时触发。",
       "label": "工作树移除"
+    },
+    "PreModelSwitch": {
+      "label": "模型切换前",
+      "desc": "在切换模型前触发，可允许、拒绝或要求确认。"
+    },
+    "PostModelSwitch": {
+      "label": "模型切换后",
+      "desc": "在切换模型后触发，可为下一次请求补充上下文。"
     }
   }
 }

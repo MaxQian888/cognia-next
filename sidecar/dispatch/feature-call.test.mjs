@@ -444,7 +444,13 @@ test("validates the discovered OpenCode V2 endpoint and derives its version from
   const result = await discoverOpenCodeV2Service({
     loadService: async () => ({
       Service: {
-        discover: async () => endpoint,
+        discover: async ({ version }) => {
+          assert.equal(version("2.0.0"), true)
+          assert.equal(version("2.1.0"), true)
+          assert.equal(version("1.9.0"), false)
+          assert.equal(version("3.0.0"), false)
+          return endpoint
+        },
         headers: (value) => {
           assert.equal(value, endpoint)
           return { authorization: "Basic ephemeral" }
@@ -515,7 +521,7 @@ test("reports actionable OpenCode V2 discovery and health failures", async () =>
         Service: { discover: async () => undefined, headers: () => undefined },
       }),
     }),
-    /opencode2 service start/
+    /opencode service start/
   )
 
   await assert.rejects(
@@ -545,5 +551,103 @@ test("reports actionable OpenCode V2 discovery and health failures", async () =>
       }),
     }),
     /incompatible health contract/
+  )
+})
+
+test("rejects unsupported OpenCode service versions and invalid process IDs", async () => {
+  for (const health of [
+    { version: "1.9.0", pid: 42 },
+    { version: "3.0.0", pid: 42 },
+    { version: "2.invalid", pid: 42 },
+    { version: "2.0.0", pid: -1 },
+    { version: "2.0.0", pid: 1.5 },
+  ]) {
+    await assert.rejects(
+      discoverOpenCodeV2Service({
+        loadService: async () => ({
+          Service: {
+            discover: async () => ({ url: "http://127.0.0.1:4096" }),
+            headers: () => undefined,
+          },
+        }),
+        fetchImpl: async () => ({ ok: true, json: async () => health }),
+      }),
+      /incompatible health contract/
+    )
+  }
+})
+
+test("propagates cancellation to the OpenCode health probe", async () => {
+  const controller = new AbortController()
+  await assert.rejects(
+    discoverOpenCodeV2Service({
+      signal: controller.signal,
+      loadService: async () => ({
+        Service: {
+          discover: async () => ({ url: "http://127.0.0.1:4096" }),
+          headers: () => undefined,
+        },
+      }),
+      fetchImpl: async (_url, { signal }) => {
+        controller.abort()
+        signal.throwIfAborted()
+      },
+    }),
+    { name: "AbortError" }
+  )
+})
+
+test("does not report a successful OpenCode discovery after cancellation", async () => {
+  const events = []
+  let completeDiscovery
+  const handler = createFeatureCallHandler({
+    emit: (event) => events.push(event),
+    discoverOpenCodeV2: ({ signal }) => {
+      assert.equal(signal.aborted, false)
+      return new Promise((resolve) => {
+        completeDiscovery = resolve
+      })
+    },
+  })
+  const pending = handler.call({ requestId: "cancel-discovery", operation: "opencode-v2-discover" })
+  assert.equal(handler.abort("cancel-discovery"), true)
+  completeDiscovery({ endpoint: "http://127.0.0.1:4096", version: "2.0.0", headers: {} })
+  await pending
+  assert.deepEqual(events, [{ type: "feature_call_aborted", requestId: "cancel-discovery" }])
+  assert.equal(handler.activeCount(), 0)
+})
+
+test("feature tool-host operations own a scoped listener and shutdown closes it", async (t) => {
+  const events = []
+  const handler = createFeatureCallHandler({ emit: (event) => events.push(event) })
+  t.after(() => handler.close())
+  const toolHost = {
+    leaseId: "feature-tool-lease-01234",
+    ownerSessionId: "owner",
+    sendOptions: { builtinTools: {}, planTools: false },
+  }
+  await handler.call({ requestId: "tool-start", operation: "tool-host-start", toolHost })
+  const result = events.find((event) => event.type === "feature_call_result").result
+  assert.equal(result.mcpServers.length, 2)
+  await handler.call({
+    requestId: "tool-reply",
+    operation: "tool-host-reply",
+    toolHost: { ...toolHost, id: "stale", kind: "plugin", result: {} },
+  })
+  assert.equal(events.find((event) => event.requestId === "tool-reply").result.accepted, false)
+  await handler.call({ requestId: "tool-stop", operation: "tool-host-stop", toolHost })
+  await assert.rejects(fetch(result.mcpServers[0].url))
+  await handler.call({ requestId: "bad-tool-op", operation: "tool-host-invalid", toolHost })
+  assert.match(events.find((event) => event.requestId === "bad-tool-op").error, /unsupported/)
+  const starting = handler.call({
+    requestId: "raced-start",
+    operation: "tool-host-start",
+    toolHost,
+  })
+  assert.equal(handler.abort("raced-start"), true)
+  await starting
+  assert.equal(
+    events.find((event) => event.requestId === "raced-start").type,
+    "feature_call_aborted"
   )
 })

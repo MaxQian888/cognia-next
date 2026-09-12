@@ -18,6 +18,7 @@ const replaceSessionMessages = jest.fn()
 const setActiveSession = jest.fn()
 const routerPush = jest.fn()
 const toastError = jest.fn()
+let mockSessionStoreEnabled = true
 
 jest.mock("@/lib/claude/ipc", () => ({
   listSdkSessions: (...args: unknown[]) => listSdkSessions(...args),
@@ -34,6 +35,7 @@ jest.mock("@/lib/claude/ipc", () => ({
 jest.mock("next/navigation", () => ({ useRouter: () => ({ push: routerPush }) }))
 jest.mock("@/lib/db/sessions", () => ({
   listSessions: (...args: unknown[]) => listChatSessions(...args),
+  updateSession: jest.fn(async () => undefined),
 }))
 jest.mock("@/lib/db/messages", () => ({
   persistMessages: (...args: unknown[]) => persistMessages(...args),
@@ -71,7 +73,8 @@ jest.mock("@/lib/ai/agent/execution/feature-flags", () => ({
     claudeSdkParityV1: true,
     claudeSdkSessionStore: true,
   }),
-  isAgentExecutionFlagEnabled: () => true,
+  isAgentExecutionFlagEnabled: (key: string) =>
+    key !== "claudeSdkSessionStore" || mockSessionStoreEnabled,
   subscribeToAgentExecutionFlags: () => () => {},
 }))
 jest.mock("sonner", () => ({
@@ -82,12 +85,15 @@ import { SdkSessionManager } from "./sdk-session-manager"
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockSessionStoreEnabled = true
   // `clearAllMocks` keeps return values; a case that picked another shell must
   // not leak it into the next one.
   mockHostProfile.mockReturnValue("desktop")
-  listSdkSessions.mockResolvedValue([
-    { sessionId: "sdk-1", summary: "Fix auth", lastModified: 10, cwd: "/repo", tag: "work" },
-  ])
+  listSdkSessions.mockImplementation(async (_params, options) =>
+    options?.claudeAgentSdk?.sessionStore
+      ? []
+      : [{ sessionId: "sdk-1", summary: "Fix auth", lastModified: 10, cwd: "/repo", tag: "work" }]
+  )
   renameSdkSession.mockResolvedValue(undefined)
   deleteSdkSession.mockResolvedValue(undefined)
   forkSdkSession.mockResolvedValue({ sessionId: "sdk-2" })
@@ -120,14 +126,30 @@ describe("SdkSessionManager", () => {
     await user.clear(input)
     await user.type(input, "Fixed auth")
     await user.click(screen.getByRole("button", { name: "Save" }))
-    await waitFor(() => expect(renameSdkSession).toHaveBeenCalledWith("sdk-1", "Fixed auth"))
+    await waitFor(() =>
+      expect(renameSdkSession).toHaveBeenCalledWith(
+        "sdk-1",
+        "Fixed auth",
+        expect.objectContaining({ cwd: "/repo", claudeAgentSdk: { version: 1 } })
+      )
+    )
 
     await user.click(screen.getByRole("button", { name: "Fork SDK session" }))
-    await waitFor(() => expect(forkSdkSession).toHaveBeenCalledWith("sdk-1"))
+    await waitFor(() =>
+      expect(forkSdkSession).toHaveBeenCalledWith(
+        "sdk-1",
+        expect.objectContaining({ cwd: "/repo", claudeAgentSdk: { version: 1 } })
+      )
+    )
 
     await user.click(screen.getByRole("button", { name: "Delete SDK session" }))
     await user.click(screen.getByRole("button", { name: "Delete permanently" }))
-    await waitFor(() => expect(deleteSdkSession).toHaveBeenCalledWith("sdk-1"))
+    await waitFor(() =>
+      expect(deleteSdkSession).toHaveBeenCalledWith(
+        "sdk-1",
+        expect.objectContaining({ cwd: "/repo", claudeAgentSdk: { version: 1 } })
+      )
+    )
   })
 
   it.each(["mobile-companion", "cloud-companion", "headless"])(
@@ -156,7 +178,10 @@ describe("SdkSessionManager", () => {
     render(<SdkSessionManager />)
     expect(await screen.findByText("SDK sessions could not be loaded.")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Refresh SDK sessions" }))
-    await waitFor(() => expect(listSdkSessions).toHaveBeenCalledTimes(2))
+    expect(await screen.findByText("Fix auth")).toBeInTheDocument()
+    expect(
+      listSdkSessions.mock.calls.filter((call) => !call[1]?.claudeAgentSdk?.sessionStore)
+    ).toHaveLength(2)
   })
 
   it("localizes rename failures", async () => {
@@ -250,7 +275,13 @@ describe("SdkSessionManager", () => {
     await user.clear(input)
     await user.click(screen.getByRole("button", { name: "Save" }))
 
-    await waitFor(() => expect(tagSdkSession).toHaveBeenCalledWith("sdk-1", null))
+    await waitFor(() =>
+      expect(tagSdkSession).toHaveBeenCalledWith(
+        "sdk-1",
+        null,
+        expect.objectContaining({ cwd: "/repo", claudeAgentSdk: { version: 1 } })
+      )
+    )
   })
 
   it("loads main and subagent transcripts into the shared transcript renderer", async () => {
@@ -295,7 +326,13 @@ describe("SdkSessionManager", () => {
     ).toBeInTheDocument()
 
     await user.click(screen.getByRole("button", { name: "agent-1" }))
-    await waitFor(() => expect(getSdkSubagentMessages).toHaveBeenCalledWith("sdk-1", "agent-1"))
+    await waitFor(() =>
+      expect(getSdkSubagentMessages).toHaveBeenCalledWith(
+        "sdk-1",
+        "agent-1",
+        expect.objectContaining({ cwd: "/repo", claudeAgentSdk: { version: 1 } })
+      )
+    )
     expect(await screen.findByTestId("sdk-transcript")).toHaveTextContent("sub-a")
     expect(screen.getByTestId("sdk-transcript")).toHaveAttribute("data-session-id", "sdk-1:agent-1")
   })
@@ -347,6 +384,7 @@ describe("SdkSessionManager", () => {
         title: "Fix auth",
         workingDir: "/repo",
         sdkSessionId: "sdk-1",
+        sdkSessionStorage: { backend: "host-sqlite", workspace: "/repo" },
       })
     )
     expect(persistMessages).toHaveBeenCalledWith(
@@ -376,5 +414,69 @@ describe("SdkSessionManager", () => {
       )
     ).toBeInTheDocument()
     expect(screen.getByText("No transcript messages were returned.")).toBeInTheDocument()
+  })
+  it("keeps recorded store sessions discoverable after the rollout is disabled", async () => {
+    mockSessionStoreEnabled = false
+    listChatSessions.mockResolvedValue([
+      {
+        id: "chat-stored",
+        sdkSessionId: "stored",
+        workingDir: "/changed",
+        sdkSessionStorage: { backend: "host-sqlite", workspace: "/original" },
+      },
+    ])
+    listSdkSessions.mockImplementation(async (_params, options) =>
+      options?.cwd === "/original"
+        ? [
+            {
+              sessionId: "stored",
+              summary: "Recorded store session",
+              cwd: "/changed",
+              lastModified: 2,
+            },
+          ]
+        : []
+    )
+    render(<SdkSessionManager />)
+    expect(await screen.findByText("Recorded store session")).toBeInTheDocument()
+    expect(listSdkSessions).toHaveBeenCalledWith(
+      undefined,
+      expect.objectContaining({
+        cwd: "/original",
+        claudeAgentSdk: expect.objectContaining({ sessionStore: { backend: "host-sqlite" } }),
+      })
+    )
+    expect(listSdkSessions.mock.calls.some((call) => call[1]?.cwd === "/changed")).toBe(false)
+  })
+
+  it("lists store scopes and keeps every row operation bound to its original workspace", async () => {
+    listSdkSessions.mockImplementation(async (_params, options) => {
+      if (!options?.claudeAgentSdk?.sessionStore)
+        return [{ sessionId: "disk", summary: "Disk", cwd: "/repo", lastModified: 1 }]
+      return options.cwd === "/repo"
+        ? [{ sessionId: "stored", summary: "Stored", cwd: "/repo", lastModified: 2 }]
+        : []
+    })
+    const user = userEvent.setup()
+    render(<SdkSessionManager />)
+    expect(await screen.findByText("Stored")).toBeInTheDocument()
+    const row = screen.getByText("Stored").closest("li")!
+    const { within } = await import("@testing-library/react")
+    await user.click(within(row).getByRole("button", { name: "Fork SDK session" }))
+    await waitFor(() =>
+      expect(forkSdkSession).toHaveBeenCalledWith(
+        "stored",
+        expect.objectContaining({
+          cwd: "/repo",
+          execution: expect.objectContaining({ hostRef: "desktop-sidecar" }),
+          claudeAgentSdk: {
+            version: 1,
+            persistSession: true,
+            sessionStore: { backend: "host-sqlite" },
+          },
+        })
+      )
+    )
+    expect(screen.getByText("Disk")).toBeInTheDocument()
   })
 })

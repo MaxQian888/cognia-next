@@ -612,6 +612,86 @@ test("createToolPermissionGate: confinement hard-denies a credential-path write 
   }
 })
 
+test("createToolPermissionGate: plugin-access map confines a declared read tool to the workspace", async () => {
+  const root = mkConfRoot()
+  const secret = path.join(root, ".ssh", "id_rsa")
+  const tool = "mcp__cognia-plugin-tools__ripgrep-tools:ripgrep_search"
+  const pluginTools = [
+    {
+      name: "ripgrep-tools:ripgrep_search",
+      description: "search",
+      jsonSchema: {},
+      pluginId: "ripgrep-tools",
+      access: "read",
+      pathParams: ["path"],
+    },
+  ]
+  // Permission would auto-approve (ruleset allow) — only the plugin-access
+  // map built inside the gate can turn this into a credential-path deny.
+  const mkGate = () =>
+    createToolPermissionGate({
+      emit: () => {},
+      sessionId: "s1",
+      pendingApprovals: new Map(),
+      sendOptions: {
+        permissionMode: "default",
+        cwd: root,
+        permissionRuleset: { [tool]: "allow" },
+        confinement: { enabled: true, roots: [root] },
+        pluginTools,
+      },
+    })
+  await assert.rejects(
+    mkGate()(tool, { path: secret }),
+    /protected credential path/,
+    "a declared-read plugin tool must get the built-in credential deny"
+  )
+  // The same call without the manifest entry stays opaque — the deny comes
+  // from the plugin-access map, not the qualified name alone.
+  const opaque = createToolPermissionGate({
+    emit: () => {},
+    sessionId: "s1",
+    pendingApprovals: new Map(),
+    sendOptions: {
+      permissionMode: "default",
+      cwd: root,
+      permissionRuleset: { [tool]: "allow" },
+      confinement: { enabled: true, roots: [root] },
+      pluginTools: [],
+    },
+  })
+  await opaque(tool, { path: secret })
+  // And a declared-write plugin tool sees the out-of-root escalation.
+  const writer = "mcp__cognia-plugin-tools__my-plugin:file_writer"
+  const pending = new Map()
+  let emitted = 0
+  const writeGate = createToolPermissionGate({
+    emit: (ev) => {
+      emitted++
+      queueMicrotask(() => pending.get(ev.requestId)?.resolve({ behavior: "allow" }))
+    },
+    sessionId: "s1",
+    pendingApprovals: pending,
+    sendOptions: {
+      permissionMode: "default",
+      cwd: root,
+      confinement: { enabled: true, roots: [root] },
+      pluginTools: [
+        {
+          name: "my-plugin:file_writer",
+          description: "w",
+          jsonSchema: {},
+          pluginId: "my-plugin",
+          access: "write",
+          pathParams: ["path"],
+        },
+      ],
+    },
+  })
+  await writeGate(writer, { path: path.join(mkConfRoot(), "out.txt") })
+  assert.equal(emitted, 1, "out-of-root plugin write must escalate to approval")
+})
+
 test("createToolPermissionGate: dontAsk allows read-only builtins, denies the rest without prompting", async () => {
   const events = []
   const gate = createToolPermissionGate({

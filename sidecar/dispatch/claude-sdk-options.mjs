@@ -38,10 +38,9 @@ import {
 /**
  * CLI flags accepted inside `extraArgs`.
  *
- * Mirrors `ALLOWED_EXTRA_ARGS` in the contract's validator. Checked in BOTH
- * places on purpose: the renderer-side validator gives a good error message,
- * this one is the boundary that actually holds when a payload arrives from
- * somewhere else (companion, CLI, a replayed job).
+ * Mirrors `ALLOWED_EXTRA_ARGS` in the contract's validator. The sidecar invokes
+ * that validator again at this boundary, including for companion/CLI payloads
+ * that never passed through renderer validation.
  */
 export const ALLOWED_EXTRA_ARGS = new Set(["verbose", "replay-user-messages"])
 
@@ -264,6 +263,11 @@ const OVERLAPPING_KEYS = ["tools"]
 
 /** Fields with no flat counterpart — a plain copy. */
 const PLAIN_KEYS = [
+  "permissionPrompts",
+  "perTaskStopAffordance",
+  "pluginDelivery",
+  "thinking",
+  "systemPrompt",
   "outputFormat",
   "sessionId",
   "continue",
@@ -361,18 +365,9 @@ export function applyClaudeAgentSdkOptions(options, nested, ctx = {}) {
   overlay(options, nested, OVERLAPPING_KEYS, warnings, true)
 
   // ---- permissions ----------------------------------------------------------
-  // Re-checked here even though the contract validator already ran: this is the
-  // boundary that holds for payloads that never passed through the renderer.
+  // The boundary validator above already requires both host permission gates.
   if (nested.allowDangerouslySkipPermissions) {
-    if (ctx.permissionMode === "bypassPermissions" && ctx.bypassConfirmed) {
-      options.allowDangerouslySkipPermissions = true
-    } else {
-      warnings.push(
-        "claudeAgentSdk.allowDangerouslySkipPermissions was requested but not granted: it " +
-          "needs permissionMode 'bypassPermissions' plus a confirmed host policy and user " +
-          "confirmation"
-      )
-    }
+    options.allowDangerouslySkipPermissions = true
   }
 
   // ---- plugins --------------------------------------------------------------
@@ -392,12 +387,6 @@ export function applyClaudeAgentSdkOptions(options, nested, ctx = {}) {
   // ---- extraArgs ------------------------------------------------------------
   const extraArgs = { ...(options.extraArgs ?? {}) }
   for (const [key, value] of Object.entries(nested.extraArgs ?? {})) {
-    if (!ALLOWED_EXTRA_ARGS.has(key)) {
-      throw new Error(
-        `claudeAgentSdk.extraArgs["${key}"] is refused: only reviewed, content-free ` +
-          "CLI flags are allowed"
-      )
-    }
     extraArgs[key] = value
   }
   if (options.enableFileCheckpointing) {

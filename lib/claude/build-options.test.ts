@@ -8,6 +8,12 @@ jest.mock("@/lib/runtime/standalone-mode", () => ({
   setMobileRuntimeMode: jest.fn(),
 }))
 
+const mockPrepareSdkGatewayRoute = jest.fn()
+jest.mock("@/lib/gateway/mint-session-ticket", () => ({
+  mintSessionRouteTicket: jest.fn().mockResolvedValue(undefined),
+  prepareExternalAgentGatewayRoute: (...args: unknown[]) => mockPrepareSdkGatewayRoute(...args),
+}))
+
 jest.mock("@/lib/db/characters", () => ({
   // ADR-0030: build-options switched to resolveCharacterById so plugin-
   // overlay characters resolve through the same path as Dexie rows.
@@ -6433,6 +6439,146 @@ describe("resolveSendOptions — reusable Agent Knowledge Bases", () => {
 })
 
 describe("resolveSendOptions — ADR-0090 execution spec stamping", () => {
+  it("resumes in the recorded SQLite workspace after global storage is disabled", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      session: makeSession({
+        id: "s1",
+        sdkSessionId: "sdk-original",
+        sdkSessionStorage: { backend: "host-sqlite", workspace: "/original/workspace" },
+      }),
+    })
+    expect(opts.claudeAgentSdk?.sessionStore).toEqual({
+      backend: "host-sqlite",
+      workspace: "/original/workspace",
+    })
+    expect(opts.claudeAgentSdk?.persistSession).toBe(true)
+  })
+
+  it("keeps a filesystem conversation out of a newly enabled SQLite store", async () => {
+    process.env.NEXT_PUBLIC_CLAUDE_SDK_PARITY_V1 = "1"
+    process.env.NEXT_PUBLIC_CLAUDE_SDK_SESSION_STORE = "1"
+    try {
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1" }),
+        session: makeSession({
+          id: "s1",
+          sdkSessionId: "sdk-original",
+          sdkSessionStorage: { backend: "filesystem" },
+        }),
+      })
+      expect(opts.claudeAgentSdk?.sessionStore).toBeUndefined()
+    } finally {
+      delete process.env.NEXT_PUBLIC_CLAUDE_SDK_SESSION_STORE
+    }
+  })
+
+  it("routes opted-in custom Anthropic providers through SDK with isolated credentials", async () => {
+    mockPrepareSdkGatewayRoute.mockResolvedValue({
+      endpoint: "http://127.0.0.1:9111/v1",
+      ticketId: "sdk-ticket",
+      secret: "test-ticket-key",
+    })
+    const onResolvedExecutionSpec = jest.fn()
+    const opts = await resolveSendOptions({
+      onResolvedExecutionSpec,
+      character: makeChar({ id: "c1", providerId: "acme", model: "custom-model" }),
+      appSettings: {
+        customProviders: [
+          {
+            id: "acme",
+            isCustom: true,
+            apiProtocol: "anthropic",
+            baseURL: "https://llm.acme.dev",
+            apiKey: "test-acme-key",
+            experimentalAgentSdk: true,
+          },
+        ],
+        providerSettings: {},
+      } as unknown as AppSettings,
+    })
+    expect(opts.execution?.runtimeAdapter).toBe("claude-agent-sdk")
+    expect(onResolvedExecutionSpec.mock.calls[0][0].compatibility.evidence).toBe("experimental")
+    expect(opts.execution?.route.kind).toBe("gateway")
+    expect(opts.env).toMatchObject({
+      ANTHROPIC_BASE_URL: "http://127.0.0.1:9111/v1",
+      ANTHROPIC_API_KEY: "test-ticket-key",
+      CLAUDE_CODE_OAUTH_TOKEN: "",
+    })
+    expect(JSON.stringify(opts.execution)).not.toContain("test-acme-key")
+    expect(mockPrepareSdkGatewayRoute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerId: "acme",
+        modelId: "custom-model",
+        ingressProtocol: "anthropic",
+      })
+    )
+  })
+
+  it("does not silently change engines when the custom SDK gateway is unavailable", async () => {
+    mockPrepareSdkGatewayRoute.mockRejectedValueOnce(new Error("gateway unavailable"))
+    await expect(
+      resolveSendOptions({
+        character: makeChar({ id: "c1", providerId: "acme", model: "custom-model" }),
+        appSettings: {
+          customProviders: [
+            {
+              id: "acme",
+              isCustom: true,
+              apiProtocol: "anthropic",
+              experimentalAgentSdk: true,
+              baseURL: "https://llm.acme.dev",
+              apiKey: "test-acme-key",
+            },
+          ],
+          providerSettings: {},
+        } as unknown as AppSettings,
+      })
+    ).rejects.toThrow("gateway unavailable")
+  })
+
+  it("keeps custom SDK opt-in from overriding external runtime selection", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "acme", model: "custom-model" }),
+      externalRuntimeId: "codex-1",
+      appSettings: {
+        customProviders: [
+          {
+            id: "acme",
+            isCustom: true,
+            apiProtocol: "anthropic",
+            baseURL: "https://llm.acme.dev",
+            apiKey: "test-acme-key",
+            experimentalAgentSdk: true,
+          },
+        ],
+        providerSettings: {},
+      } as unknown as AppSettings,
+    })
+    expect(opts.execution?.runtimeAdapter).toBe("external")
+  })
+
+  it("refuses custom SDK opt-in on a non-Anthropic wire protocol", async () => {
+    await expect(
+      resolveSendOptions({
+        character: makeChar({ id: "c1", providerId: "acme" }),
+        appSettings: {
+          customProviders: [
+            {
+              id: "acme",
+              isCustom: true,
+              apiProtocol: "openai",
+              baseURL: "https://llm.acme.dev",
+              apiKey: "test-acme-key",
+              experimentalAgentSdk: true,
+            },
+          ],
+          providerSettings: {},
+        } as unknown as AppSettings,
+      })
+    ).rejects.toThrow(/Anthropic/)
+  })
+
   afterEach(() => {
     delete process.env.NEXT_PUBLIC_GATEWAY_AGENT_ROUTE_TICKETS
     delete process.env.NEXT_PUBLIC_CLAUDE_SDK_PARITY_V1

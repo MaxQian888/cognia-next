@@ -40,6 +40,10 @@ export function canonicalEventsFromWireMessage(msg, state) {
           requestId: msg.requestId,
           toolName: msg.toolName,
           input: msg.input,
+          ...(typeof msg.defaultToNo === "boolean" ? { defaultToNo: msg.defaultToNo } : {}),
+          ...(typeof msg.suppressAlwaysAllowRule === "boolean"
+            ? { suppressAlwaysAllowRule: msg.suppressAlwaysAllowRule }
+            : {}),
         },
       ]
     case "permission_interrupted":

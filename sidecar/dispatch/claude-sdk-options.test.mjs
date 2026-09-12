@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync } from "node:fs"
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 
@@ -16,6 +16,23 @@ import {
 } from "./claude-sdk-options.mjs"
 
 const apply = (nested, ctx, base = {}) => applyClaudeAgentSdkOptions({ ...base }, nested, ctx)
+
+test("native content validation handles missing roots, file links, directory cycles, and malformed roots", () => {
+  assert.throws(() => validateNativeSkillPaths("/missing-cognia-sdk-root", []), /cwd must resolve/)
+  withTempWorkspace((root) => {
+    const skills = join(root, ".claude", "skills")
+    mkdirSync(skills, { recursive: true })
+    writeFileSync(join(skills, "SKILL.md"), "description")
+    symlinkSync(join(skills, "SKILL.md"), join(skills, "linked-file"))
+    symlinkSync(skills, join(skills, "loop"))
+    validateNativeSkillPaths(root, [root])
+    rmSync(skills, { recursive: true })
+    writeFileSync(skills, "not a directory")
+    assert.throws(() => validateNativeSkillPaths(root, [root]), /cannot inspect local content root/)
+  })
+  assert.deepEqual(intersectTrustedWorkspaceRoots(undefined, undefined), [])
+  assert.equal(resolvePlugins([null, { type: "remote" }], []).warnings.length, 2)
+})
 
 function withTempWorkspace(run) {
   const root = mkdtempSync(join(tmpdir(), "cognia-sdk-workspace-"))
@@ -88,8 +105,29 @@ test("the nested value wins over a flat one, and says so", () => {
 })
 
 test("an identical flat value produces no warning", () => {
-  const { warnings } = apply({ version: 1, tools: "same" }, {}, { tools: "same" })
+  const tools = ["Read"]
+  const { warnings } = apply({ version: 1, tools }, {}, { tools })
   assert.deepEqual(warnings, [])
+})
+
+test("current SDK controls and structured thinking/prompt options reach query unchanged", () => {
+  const nested = {
+    version: 1,
+    permissionPrompts: "none",
+    perTaskStopAffordance: false,
+    pluginDelivery: "initialize",
+    thinking: { type: "adaptive", display: "omitted" },
+    systemPrompt: {
+      type: "preset",
+      preset: "claude_code",
+      snapshot: false,
+      excludeDynamicSections: true,
+    },
+  }
+  const { options } = apply(nested)
+  for (const [key, value] of Object.entries(nested))
+    if (key !== "version") assert.deepEqual(options[key], value)
+  assert.throws(() => apply({ version: 1, futureField: true }), /futureField is unsupported/)
 })
 
 // ---- permissions ------------------------------------------------------------
