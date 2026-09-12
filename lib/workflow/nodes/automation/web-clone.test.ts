@@ -16,7 +16,7 @@ jest.mock("@tauri-apps/api/core", () => ({
 
 import "./web-clone"
 import { getExecutor } from "../registry"
-import { buildWebCloneOptions, resolveWebCloneOutput } from "./web-clone"
+import { buildWebCloneOptions, resolveWebCloneInput, resolveWebCloneOutput } from "./web-clone"
 
 function run(params: Record<string, unknown>) {
   const reg = getExecutor("io.webClone" as never, 1)
@@ -44,6 +44,30 @@ describe("resolveWebCloneOutput", () => {
   it("throws for a relative path with no open workspace", () => {
     mockRootDir = null
     expect(() => resolveWebCloneOutput("site")).toThrow(/needs an open workspace/)
+  })
+  it("rejects a relative output that walks out of the workspace", () => {
+    // The plugin + sidecar tool both confine workspace-relative paths; a plain
+    // join left `..` free to write outside the workspace while still reading
+    // as workspace-relative.
+    expect(() => resolveWebCloneOutput("../escape")).toThrow(/must stay inside the workspace/)
+    expect(() => resolveWebCloneOutput("out/../../etc/passwd")).toThrow(
+      /must stay inside the workspace/
+    )
+    expect(resolveWebCloneOutput("out/site.a").output).toBe("/repo/out/site.a")
+  })
+})
+
+describe("resolveWebCloneInput", () => {
+  it("passes an absolute path through unchanged", () => {
+    expect(resolveWebCloneInput("/tmp/snap")).toBe("/tmp/snap")
+  })
+  it("joins a relative path under the workspace root", () => {
+    expect(resolveWebCloneInput("snapshots/site")).toBe("/repo/snapshots/site")
+  })
+  it("rejects .. segments and bare-relative paths without a workspace", () => {
+    expect(() => resolveWebCloneInput("../outside")).toThrow(/must stay inside the workspace/)
+    mockRootDir = null
+    expect(() => resolveWebCloneInput("snapshots/site")).toThrow(/needs an open workspace/)
   })
 })
 
@@ -86,6 +110,30 @@ describe("buildWebCloneOptions", () => {
       buildWebCloneOptions({ url: "https://x/", output: "/o", framework: "qwik" })
     ).toThrow(/unknown framework/)
   })
+  it("builds a convert job from convertLocal, url-free and confined", () => {
+    const job = buildWebCloneOptions({
+      convertLocal: "snapshots/site",
+      output: "out",
+      framework: "react",
+    })
+    expect(job.mode).toBe("convert")
+    expect(job.url).toBeUndefined()
+    expect(job.options.convertLocal).toBe("/repo/snapshots/site")
+    expect(job.options.output).toBe("/repo/out")
+    // Convert always runs the extraction pipeline.
+    expect(job.options.extractComponents).toBe(true)
+    expect(job.options.frameworkCodegen).toMatchObject({ framework: "react" })
+  })
+  it("rejects url + convertLocal together", () => {
+    expect(() =>
+      buildWebCloneOptions({ url: "https://x/", convertLocal: "snap", output: "o" })
+    ).toThrow(/mutually exclusive/)
+  })
+  it("rejects a convertLocal that walks out of the workspace", () => {
+    expect(() => buildWebCloneOptions({ convertLocal: "../outside", output: "o" })).toThrow(
+      /must stay inside the workspace/
+    )
+  })
 })
 
 describe("io.webClone executor", () => {
@@ -124,5 +172,29 @@ describe("io.webClone executor", () => {
     mockIsTauri = false
     await expect(run({ url: "https://x/", output: "site" })).rejects.toThrow(/desktop app/)
     expect(invoke).not.toHaveBeenCalled()
+  })
+
+  it("runs a convert job end to end", async () => {
+    invoke.mockResolvedValue({
+      envelope: {
+        ok: true,
+        result: {
+          sourceUrl: "",
+          timestamp: "t",
+          mode: "convert",
+          output: "/repo/out",
+          stats: {},
+          assets: [],
+        },
+      },
+    })
+    const r = await run({ convertLocal: "snapshots/site", output: "out", framework: "vue" })
+    expect(invoke).toHaveBeenCalledWith(
+      "web_clone_snapshot",
+      expect.objectContaining({
+        job: expect.objectContaining({ mode: "convert", url: undefined }),
+      })
+    )
+    expect(r.output).toMatchObject({ output: "/repo/out", mode: "convert" })
   })
 })

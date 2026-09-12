@@ -2,7 +2,7 @@
   "id": "cognia-web-clone",
   "name": "Web Clone",
   "version": "0.1.0",
-  "description": "Snapshot a live web page \u2014 HTML + all CSS/JS/image/font assets \u2014 into a self-contained file or a directory bundle, with optional component extraction and framework codegen. Adds a /web-clone slash command.",
+  "description": "Snapshot a live web page \u2014 HTML + all CSS/JS/image/font assets \u2014 into a self-contained file or a directory bundle, with optional component extraction and framework codegen; --convert re-runs extraction/codegen on a saved snapshot. Adds a /web-clone slash command.",
   "type": "frontend",
   "capabilities": ["commands"],
   "main": "src/index.ts",
@@ -12,7 +12,7 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "permissions": ["network:fetch", "filesystem:write"],
+  "permissions": ["network:fetch", "filesystem:write", "git:read"],
   "activationEvents": ["startup", "onCommand:web-clone"],
   "runtimeCompatibility": {
     "browser": {
@@ -26,6 +26,10 @@
     "mobile": {
       "availability": "blocked",
       "reason": "No sidecar / Tauri command host in the mobile WebView."
+    },
+    "headless": {
+      "availability": "blocked",
+      "reason": "The snapshot engine is spawned by the Tauri command host; a headless server has no invoke bridge for it. The agent-facing web_clone tools work there via the sidecar instead."
     }
   },
   "commands": [

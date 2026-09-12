@@ -69,14 +69,22 @@ export function WebCloneConfig({ params, onChange }: ConfigProps) {
   const mode = readString(params, "mode", "bundle")
   const framework = readString(params, "framework") || NONE
   const frameworkHint = readString(params, "frameworkHint") || NONE
+  const convertLocal = readString(params, "convertLocal")
 
   return (
     <FieldGroup>
-      <Field label={t("url.label")} name="url" required hint={t("url.hint")}>
+      <Field label={t("url.label")} name="url" required={!convertLocal.trim()} hint={t("url.hint")}>
         <ExpressionField
           value={readString(params, "url")}
           onChange={(v) => onChange(patchParam(params, "url", v))}
           placeholder={t("url.placeholder")}
+        />
+      </Field>
+      <Field label={t("convertLocal.label")} name="convertLocal" hint={t("convertLocal.hint")}>
+        <ExpressionField
+          value={convertLocal}
+          onChange={(v) => onChange(patchParam(params, "convertLocal", v))}
+          placeholder={t("convertLocal.placeholder")}
         />
       </Field>
       <Field label={t("output.label")} name="output" required hint={t("output.hint")}>

@@ -40,6 +40,7 @@ describe("WebCloneConfig", () => {
     const { container } = render(<WebCloneConfig params={{}} onChange={jest.fn()} />)
     for (const name of [
       "url",
+      "convertLocal",
       "output",
       "extractComponents",
       "maxAssets",
@@ -48,6 +49,25 @@ describe("WebCloneConfig", () => {
     ]) {
       expect(container.querySelector(`[data-field="${name}"]`)).not.toBeNull()
     }
+  })
+
+  it("edits convertLocal and drops the url required marker once it is set", () => {
+    const onChange = jest.fn()
+    const { container, rerender } = render(<WebCloneConfig params={{}} onChange={onChange} />)
+    const urlField = container.querySelector('[data-field="url"]') as HTMLElement
+    // `required` renders the red asterisk after the label.
+    expect(urlField.textContent).toContain("*")
+
+    fireEvent.change(fieldControl(container, "convertLocal"), {
+      target: { value: "snapshots/site" },
+    })
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ convertLocal: "snapshots/site" })
+    )
+
+    rerender(<WebCloneConfig params={{ convertLocal: "snapshots/site" }} onChange={onChange} />)
+    const urlFieldAfter = container.querySelector('[data-field="url"]') as HTMLElement
+    expect(urlFieldAfter.textContent).not.toContain("*")
   })
 
   it("edits url and output", () => {

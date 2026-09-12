@@ -3433,6 +3433,11 @@
       "hint": "并发下载数（1–32）。",
       "label": "并发数"
     },
+    "convertLocal": {
+      "hint": "对已保存的快照（bundle 目录或 .html 文件）重跑组件提取 + codegen，不发起抓取。相对路径解析到工作区下；填写后 URL 留空。",
+      "label": "转换本地快照",
+      "placeholder": "./snapshots/site"
+    },
     "extractComponents": {
       "hint": "同时把页面分析成组件结构（模板 / 样式 / 逻辑）。",
       "label": "提取组件"

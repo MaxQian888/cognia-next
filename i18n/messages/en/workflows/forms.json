@@ -3433,6 +3433,11 @@
       "hint": "Number of concurrent downloads (1–32).",
       "label": "Concurrency"
     },
+    "convertLocal": {
+      "hint": "Re-run component extraction + codegen on a saved snapshot (bundle directory or .html file) instead of fetching. Relative paths resolve under the workspace; leave URL empty when set.",
+      "label": "Convert local snapshot",
+      "placeholder": "./snapshots/site"
+    },
     "extractComponents": {
       "hint": "Also analyze the page into a component structure (template / style / logic).",
       "label": "Extract components"

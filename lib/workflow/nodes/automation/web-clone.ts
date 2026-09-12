@@ -67,6 +67,28 @@ function isAbsolutePath(p: string): boolean {
   return /^(?:[a-zA-Z]:[\\/]|\\\\|\/)/.test(p)
 }
 
+/**
+ * Join a workspace-relative path under `root`, rejecting `..` segments. A
+ * plain join left them free to walk back out — `output: "../../etc/x"` read
+ * as workspace-relative while writing outside it. Absolute paths are a
+ * separate, deliberate escape hatch handled by the caller.
+ */
+function joinInsideWorkspace(root: string, rel: string): string {
+  const sep = root.includes("\\") ? "\\" : "/"
+  const base = root.replace(/[\\/]+$/, "")
+  const segments = rel
+    .replace(/^[\\/]+/, "")
+    .split(/[\\/]+/)
+    .filter(Boolean)
+  if (segments.some((segment) => segment === "..")) {
+    throw new Error(
+      `io.webClone: "${rel}" must stay inside the workspace — remove the ".." segments, or pass an absolute path`
+    )
+  }
+  const clean = segments.filter((segment) => segment !== ".").join(sep)
+  return clean ? base + sep + clean : base
+}
+
 /** Resolve the output path to an absolute path, joining under the workspace root. */
 export function resolveWebCloneOutput(output: string): { output: string; cwd?: string } {
   const root = useGitStore.getState().rootDir
@@ -78,19 +100,44 @@ export function resolveWebCloneOutput(output: string): { output: string; cwd?: s
       "io.webClone: a relative output path needs an open workspace (Source Control) — or provide an absolute path"
     )
   }
-  const sep = root.includes("\\") ? "\\" : "/"
-  const abs = root.replace(/[\\/]+$/, "") + sep + output.replace(/^[\\/]+/, "")
-  return { output: abs, cwd: root }
+  return { output: joinInsideWorkspace(root, output), cwd: root }
+}
+
+/**
+ * Resolve a local input path (`convertLocal`) under the workspace root. Same
+ * confinement as the output path: absolute passes through, relative joins
+ * under the workspace with `..` rejected.
+ */
+export function resolveWebCloneInput(path: string): string {
+  const root = useGitStore.getState().rootDir
+  if (isAbsolutePath(path)) return path
+  if (!root) {
+    throw new Error(
+      "io.webClone: a relative convertLocal path needs an open workspace (Source Control) — or provide an absolute path"
+    )
+  }
+  return joinInsideWorkspace(root, path)
 }
 
 /** Build the engine options object from node params. Exported for tests. */
 export function buildWebCloneOptions(params: Record<string, unknown>): {
-  mode: "snapshot"
-  url: string
+  mode: "snapshot" | "convert"
+  url?: string
   options: Record<string, unknown>
 } {
   const url = strParam(params, "url")
-  if (!url) throw new Error("io.webClone requires a non-empty URL")
+  const convertLocalParam = strParam(params, "convertLocal")
+  const isConvert = Boolean(convertLocalParam)
+  if (isConvert && url) {
+    throw new Error(
+      'io.webClone: "url" and "convertLocal" are mutually exclusive — convert re-runs codegen on a saved snapshot and never fetches'
+    )
+  }
+  if (!isConvert && !url) {
+    throw new Error(
+      "io.webClone requires a non-empty URL (or set convertLocal to re-run codegen on a saved snapshot)"
+    )
+  }
   const outputParam = strParam(params, "output")
   if (!outputParam) throw new Error("io.webClone requires an output path")
 
@@ -104,7 +151,7 @@ export function buildWebCloneOptions(params: Record<string, unknown>): {
   const { output } = resolveWebCloneOutput(outputParam)
 
   const options: Record<string, unknown> = {
-    url,
+    url: isConvert ? undefined : url,
     output,
     mode,
     maxAssets: clampInt(numParam(params, "maxAssets"), 100, 1, 5000),
@@ -115,9 +162,11 @@ export function buildWebCloneOptions(params: Record<string, unknown>): {
     retryMaxDelay: 2000,
     inline: true,
     pretty: boolParam(params, "pretty"),
-    extractComponents: boolParam(params, "extractComponents") || wantsCodegen,
+    // Convert always runs the extraction pipeline — it is the whole job.
+    extractComponents: boolParam(params, "extractComponents") || wantsCodegen || isConvert,
     allowPrivateHosts: boolParam(params, "allowPrivateHosts"),
   }
+  if (isConvert) options.convertLocal = resolveWebCloneInput(convertLocalParam!)
   if (frameworkHint) options.frameworkHint = frameworkHint
   const maxFileSize = numParam(params, "maxFileSize")
   if (maxFileSize !== undefined)
@@ -131,7 +180,7 @@ export function buildWebCloneOptions(params: Record<string, unknown>): {
       extractSharedLogic: boolParam(params, "codegenExtractShared"),
     }
   }
-  return { mode: "snapshot", url, options }
+  return isConvert ? { mode: "convert", options } : { mode: "snapshot", url, options }
 }
 
 registerNodeExecutor({
@@ -144,7 +193,12 @@ registerNodeExecutor({
       )
     }
     const job = buildWebCloneOptions(ctx.params)
-    ctx.log("info", `Snapshotting ${job.url} → ${String(job.options.output)}`)
+    ctx.log(
+      "info",
+      job.mode === "convert"
+        ? `Converting ${String(job.options.convertLocal)} → ${String(job.options.output)}`
+        : `Snapshotting ${job.url} → ${String(job.options.output)}`
+    )
 
     const { invoke } = await import("@tauri-apps/api/core")
     const outcome = await invoke<{ envelope: WebCloneEnvelope }>("web_clone_snapshot", {
@@ -158,7 +212,9 @@ registerNodeExecutor({
     const r = envelope.result
     ctx.log(
       "info",
-      `Snapshot complete: ${r.stats.fetched ?? 0}/${r.stats.total ?? 0} assets → ${r.output}`
+      r.mode === "convert"
+        ? `Convert complete → ${r.output}`
+        : `Snapshot complete: ${r.stats.fetched ?? 0}/${r.stats.total ?? 0} assets → ${r.output}`
     )
     return {
       output: {

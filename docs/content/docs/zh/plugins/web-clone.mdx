@@ -1,0 +1,52 @@
+---
+title: "Web Clone 插件"
+description: "/web-clone 斜杠命令——把在线页面快照进工作区，或对已保存的快照重跑组件提取 + 框架 codegen。"
+---
+
+# Web Clone 插件
+
+内置 `cognia-web-clone` 插件（`plugins/web-clone/`）提供 `/web-clone`
+斜杠命令：它与 `web_clone` / `web_clone_convert` agent 工具、
+`io.webClone` 工作流节点共用同一个 vendored 快照引擎，三条入口都汇入
+`web_clone_snapshot` Tauri 命令，引擎行为（含 SSRF 防护）完全一致。
+仅桌面端可用。
+
+## 快照模式
+
+```
+/web-clone <url> [-o <输出>] [-m single|bundle] [--framework <vue|react|angular|svelte|jquery>] [--private]
+```
+
+- `-o <输出>`——输出路径。绝对路径原样使用；相对路径解析到已打开的
+  Source Control 工作区下（拒绝 `..` 段）。不传 `-o` 时默认写到
+  `snapshots/<host>-<时间戳>`（`single` 模式追加 `.html`）。
+- `-m single|bundle` / `--single`——`bundle`（默认）写成资源分离的目录；
+  `single` 内联成单个自包含 HTML 文件。
+- `--framework`——同时按指定框架生成组件代码。
+- `--private`——允许访问内网 / 本机 / 链路本地地址（SSRF 放开，默认关）。
+
+## 转换模式
+
+`--convert <路径>` 对已保存的快照（bundle 目录或 `.html` 文件）重跑
+组件提取 + 框架 codegen，不发起任何抓取。路径与 `-o` 同一套收敛规则，
+结果写到 `<输出>/components`；不传 `-o` 时默认
+`snapshots/convert-<时间戳>`。
+
+```
+/web-clone --convert snapshots/example-com-1730000000000 --framework react -o out
+```
+
+`--convert` 与 URL 互斥，不能同时传。
+
+## 调优与 codegen 参数
+
+`--framework-hint vue|react|svelte` 提示组件边界识别；
+`--extract-components` 只做提取不生成代码；`--drafts` 为每个识别到的
+组件产出一个起始文件；`--extract-shared` 把重复逻辑提升为共享 helper;
+`--no-typescript` 产出 JS。抓取调优：`--max-assets <n>`、
+`--concurrency <n>`、`--timeout <毫秒>`、`--max-file-size <字节>`、
+`--pretty` 格式化输出 HTML。长短参数都支持 `--flag=value` 写法——值以
+`-` 开头时只能用它。
+
+结果行会落在聊天记录里（同时弹 toast)，含 `fetched/total` 资源数以及
+`failed`/`skipped` 尾部统计。

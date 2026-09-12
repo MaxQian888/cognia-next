@@ -1,0 +1,58 @@
+---
+title: "Web Clone Plugin"
+description: "The /web-clone slash command — snapshot a live page into the workspace, or re-run component extraction + framework codegen on a saved snapshot."
+---
+
+# Web Clone Plugin
+
+The built-in `cognia-web-clone` plugin (`plugins/web-clone/`) adds the
+`/web-clone` slash command: a user-facing entry point to the same vendored
+snapshot engine that backs the `web_clone` / `web_clone_convert` agent tools
+and the `io.webClone` workflow node. All three funnel through the
+`web_clone_snapshot` Tauri command, so the engine — including its SSRF gate —
+behaves identically everywhere. Desktop only.
+
+## Snapshot mode
+
+```
+/web-clone <url> [-o <output>] [-m single|bundle] [--framework <vue|react|angular|svelte|jquery>] [--private]
+```
+
+- `-o <output>` — output path. Absolute paths pass through; relative paths
+  resolve under the open Source-Control workspace (`..` segments are
+  rejected). Without `-o`, output defaults to `snapshots/<host>-<timestamp>`
+  (`.html` appended in `single` mode).
+- `-m single|bundle` / `--single` — `bundle` (default) writes a directory with
+  separated assets; `single` inlines everything into one self-contained HTML
+  file.
+- `--framework` — also generate component code for the named framework.
+- `--private` — allow private / loopback / link-local targets (SSRF opt-in;
+  off by default).
+
+## Convert mode
+
+`--convert <path>` re-runs component extraction + framework codegen on an
+already-saved snapshot (a bundle directory or a `.html` file) without
+fetching anything. The path follows the same confinement rules as `-o`, and
+the result lands in `<output>/components` — or `snapshots/convert-<timestamp>`
+when `-o` is omitted.
+
+```
+/web-clone --convert snapshots/example-com-1730000000000 --framework react -o out
+```
+
+`--convert` and a URL are mutually exclusive.
+
+## Tuning and codegen flags
+
+`--framework-hint vue|react|svelte` biases component detection;
+`--extract-components` runs extraction without codegen; `--drafts` emits a
+starter file per detected component; `--extract-shared` lifts repeated logic
+into shared helpers; `--no-typescript` emits JS. Fetch tuning:
+`--max-assets <n>`, `--concurrency <n>`, `--timeout <ms>`,
+`--max-file-size <bytes>`, `--pretty` formats the output HTML. Long and short
+flags both accept `--flag=value` — the only way to pass a value that starts
+with `-`.
+
+The result line lands in the chat transcript (and a toast) — including the
+`fetched/total` asset count plus any `failed`/`skipped` tail.

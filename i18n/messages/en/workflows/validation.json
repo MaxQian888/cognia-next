@@ -19,5 +19,6 @@
   "switchCasesRequired": "Add at least one case",
   "twinIngestSourceRequired": "Provide content (paste mode) or a URL (fetch mode)",
   "variableName": "Use a valid identifier (letters, digits, underscores; not starting with a digit)",
+  "webCloneExclusive": "Provide either a URL or a local snapshot path — not both",
   "webhookPath": "Use letters, digits, dashes, underscores, and slashes only"
 }

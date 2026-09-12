@@ -3,65 +3,263 @@
  *
  * Adds a user-triggered `/web-clone` slash command that snapshots a live web
  * page (HTML + all CSS/JS/image/font assets) into a self-contained file or a
- * directory bundle, with optional component extraction + framework codegen.
+ * directory bundle, with optional component extraction + framework codegen —
+ * or re-runs that extraction/codegen on an already-saved snapshot
+ * (`--convert`), without fetching.
  *
  * This is the on-demand, user-facing entry point to the same vendored engine
- * that backs (a) the sidecar `web_clone` agent tool and (b) the `io.webClone`
- * workflow node. All three funnel through the deterministic
- * `web_clone_snapshot` Tauri command (`src-tauri/src/webclone.rs`), so the
- * engine — and its SSRF gate — is exercised identically everywhere. Desktop
- * only: the engine is a Node process reached via Tauri.
+ * that backs (a) the sidecar `web_clone` / `web_clone_convert` agent tools and
+ * (b) the `io.webClone` workflow node. All three funnel through the
+ * deterministic `web_clone_snapshot` Tauri command
+ * (`src-tauri/src/webclone.rs`), so the engine — and its SSRF gate — is
+ * exercised identically everywhere. Desktop only: the engine is a Node
+ * process reached via Tauri.
+ *
+ * User-facing strings go through `ctx.i18n` (bundles registered at activate,
+ * keys auto-prefixed `plugin.cognia-web-clone.`); `englishT` below keeps the
+ * command usable where `ctx.i18n` is absent (tests, unusual hosts).
  */
 
 import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
 import { readHostCapabilities } from "@cognia/plugin-sdk/api/host-environment"
 import manifestJson from "../plugin.json"
+import { WEBCLONE_I18N, interpolateWebCloneMessage, type WebCloneMessageKey } from "./i18n"
 
 const CODEGEN_FRAMEWORKS = ["vue", "react", "angular", "svelte", "jquery"] as const
 type CodegenFramework = (typeof CODEGEN_FRAMEWORKS)[number]
 
+const FRAMEWORK_HINTS = ["vue", "react", "svelte"] as const
+type FrameworkHint = (typeof FRAMEWORK_HINTS)[number]
+
+export type WebCloneTranslate = (
+  key: WebCloneMessageKey | string,
+  params?: Record<string, string | number | boolean>
+) => string
+
+/** English-table translator used when no host i18n API is available. */
+const englishT: WebCloneTranslate = (key, params) =>
+  interpolateWebCloneMessage(WEBCLONE_I18N.en[key as WebCloneMessageKey] ?? key, params)
+
+/** Machine-checkable parse failures — translated at the command boundary. */
+export type WebCloneParseError =
+  | { code: "missingValue"; flag: string }
+  | { code: "unknownFlag"; flag: string }
+  | { code: "unexpectedArg"; value: string }
+  | { code: "invalidValue"; flag: string; value: string }
+  | { code: "convertWithUrl" }
+
 interface ParsedCommand {
   url?: string
   output?: string
+  /** `--convert <path>` — run extraction/codegen on a saved snapshot. */
+  convertLocal?: string
   mode: "single" | "bundle"
   framework?: CodegenFramework
+  frameworkHint?: FrameworkHint
+  extractComponents: boolean
+  codegenTypescript: boolean
+  codegenGenerateDrafts: boolean
+  codegenExtractShared: boolean
+  maxAssets?: number
+  concurrency?: number
+  timeout?: number
+  maxFileSize?: number
+  pretty: boolean
   allowPrivateHosts: boolean
   help: boolean
+  errors: WebCloneParseError[]
 }
 
 interface WebCloneEnvelope {
   ok: boolean
-  result?: { output: string; stats: Record<string, number>; mode: string }
+  result?: {
+    output: string
+    stats: Record<string, number>
+    mode: string
+  }
   error?: { name: string; message: string; reason?: string }
 }
 
-const USAGE =
-  "Usage: /web-clone <url> [-o <output>] [-m single|bundle] [--framework vue|react|angular|svelte|jquery] [--private]"
+const NUMBER_FLAGS = {
+  "--max-assets": "maxAssets",
+  "--concurrency": "concurrency",
+  "--timeout": "timeout",
+  "--max-file-size": "maxFileSize",
+} as const
 
-/** Parse the raw slash-command argument string into a structured request. */
+/**
+ * Parse the raw slash-command argument string into a structured request.
+ *
+ * Strict rather than silent: unknown flags, dangling values (`-o` followed by
+ * another flag used to BE swallowed as the path), extra positionals, and
+ * invalid enum/number values all land in `errors` so the caller can report
+ * them instead of running a snapshot the user did not ask for. Long AND short
+ * flags accept the `--flag=value` form — the only way to pass a value that
+ * starts with `-`.
+ */
 export function parseWebCloneArgs(raw: string): ParsedCommand {
   const tokens = raw.trim().split(/\s+/).filter(Boolean)
-  const parsed: ParsedCommand = { mode: "bundle", allowPrivateHosts: false, help: false }
+  const parsed: ParsedCommand = {
+    mode: "bundle",
+    allowPrivateHosts: false,
+    extractComponents: false,
+    codegenTypescript: true,
+    codegenGenerateDrafts: false,
+    codegenExtractShared: false,
+    pretty: false,
+    help: false,
+    errors: [],
+  }
+
   for (let i = 0; i < tokens.length; i++) {
-    const tok = tokens[i]!
-    if (tok === "-h" || tok === "--help") {
-      parsed.help = true
-    } else if (tok === "-o" || tok === "--output") {
-      parsed.output = tokens[++i]
-    } else if (tok === "-m" || tok === "--mode") {
-      const v = tokens[++i]
-      if (v === "single" || v === "bundle") parsed.mode = v
-    } else if (tok === "--single") {
-      parsed.mode = "single"
-    } else if (tok === "--framework") {
-      const v = tokens[++i]
-      if (v && (CODEGEN_FRAMEWORKS as readonly string[]).includes(v))
-        parsed.framework = v as CodegenFramework
-    } else if (tok === "--private") {
-      parsed.allowPrivateHosts = true
-    } else if (!tok.startsWith("-") && !parsed.url) {
-      parsed.url = tok
+    let tok = tokens[i]!
+    let inlineValue: string | undefined
+    if (tok.startsWith("-")) {
+      const eq = tok.indexOf("=")
+      if (eq !== -1) {
+        inlineValue = tok.slice(eq + 1)
+        tok = tok.slice(0, eq)
+      }
     }
+
+    /** A value-taking flag: `--flag=v`, or the next token when it isn't another flag. */
+    const readValue = (): string | undefined => {
+      if (inlineValue !== undefined) return inlineValue
+      const next = tokens[i + 1]
+      if (next === undefined || next.startsWith("-")) {
+        parsed.errors.push({ code: "missingValue", flag: tok })
+        return undefined
+      }
+      i++
+      return next
+    }
+
+    /** A boolean flag: `--flag=x` is an error — the flag takes no value. */
+    const boolFlag = (apply: () => void): void => {
+      if (inlineValue !== undefined) {
+        parsed.errors.push({ code: "invalidValue", flag: tok, value: inlineValue })
+        return
+      }
+      apply()
+    }
+
+    switch (tok) {
+      case "-h":
+      case "--help":
+        boolFlag(() => {
+          parsed.help = true
+        })
+        continue
+      case "--single":
+        boolFlag(() => {
+          parsed.mode = "single"
+        })
+        continue
+      case "--private":
+        boolFlag(() => {
+          parsed.allowPrivateHosts = true
+        })
+        continue
+      case "--pretty":
+        boolFlag(() => {
+          parsed.pretty = true
+        })
+        continue
+      case "--extract-components":
+        boolFlag(() => {
+          parsed.extractComponents = true
+        })
+        continue
+      case "--drafts":
+        boolFlag(() => {
+          parsed.codegenGenerateDrafts = true
+        })
+        continue
+      case "--extract-shared":
+        boolFlag(() => {
+          parsed.codegenExtractShared = true
+        })
+        continue
+      case "--no-typescript":
+        boolFlag(() => {
+          parsed.codegenTypescript = false
+        })
+        continue
+      case "-o":
+      case "--output": {
+        const v = readValue()
+        if (v !== undefined) parsed.output = v
+        continue
+      }
+      case "-m":
+      case "--mode": {
+        const v = readValue()
+        if (v !== undefined) {
+          if (v === "single" || v === "bundle") parsed.mode = v
+          else parsed.errors.push({ code: "invalidValue", flag: tok, value: v })
+        }
+        continue
+      }
+      case "--framework": {
+        const v = readValue()
+        if (v !== undefined) {
+          if ((CODEGEN_FRAMEWORKS as readonly string[]).includes(v)) {
+            parsed.framework = v as CodegenFramework
+          } else {
+            parsed.errors.push({ code: "invalidValue", flag: tok, value: v })
+          }
+        }
+        continue
+      }
+      case "--framework-hint": {
+        const v = readValue()
+        if (v !== undefined) {
+          if ((FRAMEWORK_HINTS as readonly string[]).includes(v)) {
+            parsed.frameworkHint = v as FrameworkHint
+          } else {
+            parsed.errors.push({ code: "invalidValue", flag: tok, value: v })
+          }
+        }
+        continue
+      }
+      case "--convert": {
+        const v = readValue()
+        if (v !== undefined) parsed.convertLocal = v
+        continue
+      }
+      default:
+        break
+    }
+
+    // `hasOwn`, not `in`: a prototype name like `--has-own-property` must not
+    // reach the table through the prototype chain.
+    if (Object.hasOwn(NUMBER_FLAGS, tok)) {
+      const v = readValue()
+      if (v !== undefined) {
+        const n = Number(v)
+        if (!Number.isFinite(n)) {
+          parsed.errors.push({ code: "invalidValue", flag: tok, value: v })
+        } else {
+          parsed[NUMBER_FLAGS[tok as keyof typeof NUMBER_FLAGS]] = n
+        }
+      }
+      continue
+    }
+
+    if (tok.startsWith("-") && tok !== "-") {
+      parsed.errors.push({ code: "unknownFlag", flag: tok })
+      continue
+    }
+
+    if (parsed.url === undefined) {
+      parsed.url = tok
+    } else {
+      parsed.errors.push({ code: "unexpectedArg", value: tok })
+    }
+  }
+
+  if (parsed.convertLocal && parsed.url) {
+    parsed.errors.push({ code: "convertWithUrl" })
   }
   return parsed
 }
@@ -69,6 +267,82 @@ export function parseWebCloneArgs(raw: string): ParsedCommand {
 /** True for an absolute POSIX or Windows path. */
 function isAbsolutePath(p: string): boolean {
   return /^(?:[a-zA-Z]:[\\/]|\\\\|\/)/.test(p)
+}
+
+/** `~` is shell syntax — expanding it silently as a literal dir is worse than refusing. */
+function startsWithTilde(p: string): boolean {
+  return p.startsWith("~")
+}
+
+/**
+ * Join a workspace-relative path under `rootDir`, rejecting `..` segments.
+ * Stripping only the leading separators left `..` free to walk back out, so
+ * `-o ../../../.ssh/authorized_keys` silently wrote outside the workspace
+ * while still reading as a workspace-relative path. (An ABSOLUTE path is a
+ * separate, deliberate escape hatch handled by the callers.)
+ */
+function joinUnderWorkspace(rootDir: string, rel: string, t: WebCloneTranslate): string {
+  const sep = rootDir.includes("\\") ? "\\" : "/"
+  const base = rootDir.replace(/[\\/]+$/, "")
+  const segments = rel
+    .replace(/^[\\/]+/, "")
+    .split(/[\\/]+/)
+    .filter(Boolean)
+  if (segments.some((segment) => segment === "..")) {
+    throw new Error(t("outsideWorkspace", { path: rel }))
+  }
+  // Normalize away "." segments so "./snap" lands at <root>/snap, not
+  // <root>/./snap — the engine would work either way, but the resolved path
+  // is what the user sees in the result line.
+  const clean = segments.filter((segment) => segment !== ".").join(sep)
+  return clean ? base + sep + clean : base
+}
+
+/**
+ * Resolve the output path to an absolute path. Explicit absolute paths pass
+ * through; otherwise the output resolves under the open Source-Control
+ * workspace — `snapshots/<host>-<stamp>` for snapshots,
+ * `snapshots/convert-<stamp>` for `--convert`. `stamp` is injected for
+ * deterministic tests.
+ */
+export function resolveOutput(
+  parsed: ParsedCommand,
+  rootDir: string | null,
+  stamp: string,
+  t: WebCloneTranslate = englishT
+): string {
+  const explicit = parsed.output
+  if (explicit) {
+    if (startsWithTilde(explicit)) throw new Error(t("tildeUnsupported", { path: explicit }))
+    if (isAbsolutePath(explicit)) return explicit
+    if (!rootDir) throw new Error(t("noWorkspace"))
+    return joinUnderWorkspace(rootDir, explicit, t)
+  }
+  if (!rootDir) {
+    throw new Error(t("noWorkspace"))
+  }
+  const sep = rootDir.includes("\\") ? "\\" : "/"
+  const base = rootDir.replace(/[\\/]+$/, "")
+  const dir = parsed.convertLocal
+    ? `snapshots${sep}convert-${stamp}`
+    : `snapshots${sep}${safeHostSlug(parsed.url ?? "")}-${stamp}`
+  const suffix = !parsed.convertLocal && parsed.mode === "single" ? ".html" : ""
+  return base + sep + dir + suffix
+}
+
+/**
+ * Resolve the `--convert` input path under the workspace — same confinement
+ * as the output path (absolute passes through, relative joins, `..` rejected).
+ */
+export function resolveInputPath(
+  path: string,
+  rootDir: string | null,
+  t: WebCloneTranslate = englishT
+): string {
+  if (startsWithTilde(path)) throw new Error(t("tildeUnsupported", { path }))
+  if (isAbsolutePath(path)) return path
+  if (!rootDir) throw new Error(t("noWorkspace"))
+  return joinUnderWorkspace(rootDir, path, t)
 }
 
 /** A filesystem-safe token derived from the URL host, for the default output dir. */
@@ -80,106 +354,137 @@ function safeHostSlug(url: string): string {
   }
 }
 
-/**
- * Resolve the output path to an absolute path. Explicit absolute paths pass
- * through; otherwise the output resolves under the open Source-Control
- * workspace (`snapshots/<host>-<stamp>` by default). `stamp` is injected for
- * deterministic tests.
- */
-export function resolveOutput(
-  parsed: ParsedCommand,
-  rootDir: string | null,
-  stamp: string
-): string {
-  const explicit = parsed.output
-  if (explicit && isAbsolutePath(explicit)) return explicit
-  if (!rootDir) {
-    throw new Error(
-      "no open workspace — open a folder in Source Control, or pass an absolute path with -o"
-    )
-  }
-  const sep = rootDir.includes("\\") ? "\\" : "/"
-  const base = rootDir.replace(/[\\/]+$/, "")
-  if (explicit) {
-    // A relative `-o` is documented to resolve UNDER the workspace. Stripping
-    // only the leading separators left `..` free to walk back out, so
-    // `-o ../../../.ssh/authorized_keys` silently wrote outside the workspace
-    // while still reading as a workspace-relative path. (An ABSOLUTE `-o` is a
-    // separate, deliberate escape hatch handled above.)
-    const relative = explicit.replace(/^[\\/]+/, "")
-    if (relative.split(/[\\/]+/).some((segment) => segment === "..")) {
-      throw new Error(
-        `-o "${explicit}" must stay inside the workspace — remove the ".." segments, or pass a full absolute path`
-      )
-    }
-    return base + sep + relative
-  }
-  const dir = `snapshots${sep}${safeHostSlug(parsed.url ?? "")}-${stamp}`
-  const suffix = parsed.mode === "single" ? ".html" : ""
-  return base + sep + dir + suffix
+function clampInt(value: number | undefined, fallback: number, min: number, max: number): number {
+  if (value === undefined) return fallback
+  return Math.min(max, Math.max(min, Math.trunc(value)))
 }
 
-/** Build the runner job from a parsed command + resolved absolute output. */
-export function buildJob(parsed: ParsedCommand, output: string): Record<string, unknown> {
+/** Build the runner job from a parsed command + resolved absolute paths. */
+export function buildJob(
+  parsed: ParsedCommand,
+  output: string,
+  convertLocal?: string
+): Record<string, unknown> {
   const wantsCodegen = Boolean(parsed.framework)
+  const isConvert = Boolean(parsed.convertLocal)
   const options: Record<string, unknown> = {
-    url: parsed.url,
+    url: isConvert ? undefined : parsed.url,
     output,
     mode: parsed.mode,
-    maxAssets: 100,
-    concurrency: 6,
-    timeout: 15000,
+    maxAssets: clampInt(parsed.maxAssets, 100, 1, 5000),
+    concurrency: clampInt(parsed.concurrency, 6, 1, 32),
+    timeout: clampInt(parsed.timeout, 15000, 1000, 120000),
     retryCount: 1,
     retryInitialDelay: 200,
     retryMaxDelay: 2000,
     inline: true,
-    pretty: false,
-    extractComponents: wantsCodegen,
+    pretty: parsed.pretty,
+    // Convert IS the extraction pipeline — there is nothing else to run.
+    extractComponents: parsed.extractComponents || wantsCodegen || isConvert,
     allowPrivateHosts: parsed.allowPrivateHosts,
+  }
+  if (isConvert) options.convertLocal = convertLocal
+  if (parsed.frameworkHint) options.frameworkHint = parsed.frameworkHint
+  if (parsed.maxFileSize !== undefined) {
+    options.maxFileSize = clampInt(parsed.maxFileSize, 0, 0, 1024 * 1024 * 1024)
   }
   if (wantsCodegen) {
     options.frameworkCodegen = {
       framework: parsed.framework,
-      typescript: true,
+      typescript: parsed.codegenTypescript,
       cssModules: false,
-      generateDrafts: false,
-      extractSharedLogic: false,
+      generateDrafts: parsed.codegenGenerateDrafts,
+      extractSharedLogic: parsed.codegenExtractShared,
     }
   }
-  return { mode: "snapshot", url: parsed.url, options }
+  return isConvert ? { mode: "convert", options } : { mode: "snapshot", url: parsed.url, options }
 }
 
-/** Run a parsed `/web-clone` command. Exported for tests (deps injectable). */
+function translateParseError(e: WebCloneParseError, t: WebCloneTranslate): string {
+  switch (e.code) {
+    case "missingValue":
+      return t("missingValue", { flag: e.flag })
+    case "unknownFlag":
+      return t("unknownFlag", { flag: e.flag })
+    case "unexpectedArg":
+      return t("unexpectedArg", { value: e.value })
+    case "invalidValue":
+      return t("invalidValue", { flag: e.flag, value: e.value })
+    case "convertWithUrl":
+      return t("convertWithUrl")
+  }
+}
+
+/**
+ * Run a parsed `/web-clone` command. Exported for tests (deps injectable).
+ * Returns `{ ok, message }` — `ok` drives the toast severity; `message` is
+ * returned through the structured command contract so it lands in the chat
+ * transcript, not just a transient toast.
+ */
 export async function runWebCloneCommand(
   raw: string,
   deps: {
     invoke: (cmd: string, args: Record<string, unknown>) => Promise<{ envelope: WebCloneEnvelope }>
     rootDir: () => string | null
     now: () => number
+    t?: WebCloneTranslate
   }
-): Promise<{ message: string }> {
+): Promise<{ ok: boolean; message: string }> {
+  const t = deps.t ?? englishT
   const parsed = parseWebCloneArgs(raw)
-  if (parsed.help || !parsed.url) {
-    return { message: parsed.url ? USAGE : `Snapshot a web page to disk.\n${USAGE}` }
+  if (parsed.help) {
+    return { ok: true, message: t("usage") }
+  }
+  if (parsed.errors.length > 0) {
+    const details = parsed.errors.map((e) => translateParseError(e, t)).join("; ")
+    return { ok: false, message: `web-clone: ${details}\n${t("usage")}` }
+  }
+  if (!parsed.url && !parsed.convertLocal) {
+    return { ok: true, message: `${t("intro")}\n${t("usage")}` }
   }
   let output: string
+  let convertLocal: string | undefined
   try {
-    output = resolveOutput(parsed, deps.rootDir(), String(deps.now()))
+    output = resolveOutput(parsed, deps.rootDir(), String(deps.now()), t)
+    if (parsed.convertLocal) {
+      convertLocal = resolveInputPath(parsed.convertLocal, deps.rootDir(), t)
+    }
   } catch (err) {
-    return { message: `web-clone: ${err instanceof Error ? err.message : String(err)}` }
+    return { ok: false, message: `web-clone: ${err instanceof Error ? err.message : String(err)}` }
   }
-  const job = buildJob(parsed, output)
+  const job = buildJob(parsed, output, convertLocal)
   try {
     const { envelope } = await deps.invoke("web_clone_snapshot", { job })
     if (!envelope.ok || !envelope.result) {
-      return { message: `web-clone failed: ${envelope.error?.message ?? "unknown error"}` }
+      const error = envelope.error?.message ?? "unknown error"
+      return {
+        ok: false,
+        message:
+          envelope.error?.reason === "private-host"
+            ? t("failedPrivateHost", { error })
+            : t("failed", { error }),
+      }
     }
     const r = envelope.result
+    if (parsed.convertLocal || r.mode === "convert") {
+      return { ok: true, message: t("resultConvert", { output: r.output }) }
+    }
     const fetched = r.stats.fetched ?? 0
     const total = r.stats.total ?? 0
-    return { message: `Snapshot written to ${r.output} (${fetched}/${total} assets fetched).` }
+    const failed = r.stats.failed ?? 0
+    const skipped = r.stats.skipped ?? 0
+    return {
+      ok: true,
+      message:
+        failed > 0 || skipped > 0
+          ? t("resultSnapshotIssues", { output: r.output, fetched, total, failed, skipped })
+          : t("resultSnapshot", { output: r.output, fetched, total }),
+    }
   } catch (err) {
-    return { message: `web-clone failed: ${err instanceof Error ? err.message : String(err)}` }
+    return {
+      ok: false,
+      message: t("failed", { error: err instanceof Error ? err.message : String(err) }),
+    }
   }
 }
 
@@ -192,25 +497,48 @@ const definition: PluginDefinition = {
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("web-clone plugin activated")
 
+    for (const locale of ["en", "zh-CN"] as const) {
+      ctx.i18n?.registerTranslations?.(locale, { ...WEBCLONE_I18N[locale] })
+    }
+    const t: WebCloneTranslate = (key, params) => {
+      const viaHost = ctx.i18n?.t?.(key, params)
+      // The host returns the bare key when the message is missing.
+      if (typeof viaHost === "string" && viaHost !== key) return viaHost
+      return englishT(key, params)
+    }
+
     // The slash command is DECLARED in plugin.json (`commands[]`) and handled
     // here. `hooks.onCommand` receives whitespace-split argv, so the raw tail
-    // is rejoined for handlers that parse their own argument string.
+    // is rejoined for handlers that parse their own argument string. The
+    // structured `{ handled, message }` return makes the result line the
+    // command's chat response — not a generic placeholder.
     return {
       onCommand: async (command: string, args: string[]) => {
         if (command !== "web-clone") return false
         if (!readHostCapabilities().tauri) {
-          ctx.ui?.showToast?.("web-clone runs only on the desktop app.", "error")
-          return true
+          const message = t("desktopOnly")
+          ctx.ui?.showToast?.(message, "error")
+          return { handled: true, message }
         }
         const { invoke } = await import("@tauri-apps/api/core")
         const result = await runWebCloneCommand(args.join(" "), {
           invoke: (cmd, a) =>
             invoke<{ envelope: WebCloneEnvelope }>(cmd, a as Record<string, unknown>),
-          rootDir: () => ctx.git?.getRoot() ?? null,
+          rootDir: () => {
+            try {
+              return ctx.git?.getRoot() ?? null
+            } catch {
+              // ctx.git is permission-gated (`git:read`). A denial degrades
+              // to the "no open workspace" hint rather than a raw
+              // PermissionError surfacing as the command's reply.
+              return null
+            }
+          },
           now: () => Date.now(),
+          t,
         })
-        if (result?.message) ctx.ui?.showToast?.(result.message, "info")
-        return true
+        ctx.ui?.showToast?.(result.message, result.ok ? "success" : "error")
+        return { handled: true, message: result.message }
       },
     }
   },

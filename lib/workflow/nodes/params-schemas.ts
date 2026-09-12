@@ -1839,22 +1839,41 @@ const HttpRequestParams = z.object({
   piiGate: z.enum(["block", "redact"]).optional(),
 })
 
-const WebCloneParams = z.object({
-  url: requiredString("required").refine(isHttpUrlOrExpression, "invalidUrl"),
-  output: requiredString("required"),
-  mode: z.enum(["single", "bundle"]).optional(),
-  extractComponents: z.boolean().optional(),
-  framework: z.enum(["vue", "react", "angular", "svelte", "jquery"]).optional(),
-  frameworkHint: z.enum(["vue", "react", "svelte"]).optional(),
-  maxAssets: numberRange(1, 5000).optional(),
-  concurrency: numberRange(1, 32).optional(),
-  timeout: numberRange(1000, 120000).optional(),
-  maxFileSize: numberRange(0, 1024 * 1024 * 1024).optional(),
-  pretty: z.boolean().optional(),
-  allowPrivateHosts: z.boolean().optional(),
-  codegenGenerateDrafts: z.boolean().optional(),
-  codegenExtractShared: z.boolean().optional(),
-})
+const WebCloneParams = z
+  .object({
+    // Optional only so convert mode can omit it — the superRefine below
+    // re-imposes required-ness whenever convertLocal is absent. A
+    // whitespace-only value counts as absent everywhere (the superRefine
+    // trims too), so it isn't double-flagged as a malformed URL.
+    url: z
+      .string()
+      .refine((v) => !v.trim() || isHttpUrlOrExpression(v), "invalidUrl")
+      .optional(),
+    convertLocal: optionalString,
+    output: requiredString("required"),
+    mode: z.enum(["single", "bundle"]).optional(),
+    extractComponents: z.boolean().optional(),
+    framework: z.enum(["vue", "react", "angular", "svelte", "jquery"]).optional(),
+    frameworkHint: z.enum(["vue", "react", "svelte"]).optional(),
+    maxAssets: numberRange(1, 5000).optional(),
+    concurrency: numberRange(1, 32).optional(),
+    timeout: numberRange(1000, 120000).optional(),
+    maxFileSize: numberRange(0, 1024 * 1024 * 1024).optional(),
+    pretty: z.boolean().optional(),
+    allowPrivateHosts: z.boolean().optional(),
+    codegenGenerateDrafts: z.boolean().optional(),
+    codegenExtractShared: z.boolean().optional(),
+  })
+  .superRefine((value, context) => {
+    const hasUrl = Boolean(value.url?.trim())
+    const hasConvert = Boolean(value.convertLocal?.trim())
+    if (!hasUrl && !hasConvert) {
+      context.addIssue({ code: "custom", message: "required", path: ["url"] })
+    }
+    if (hasUrl && hasConvert) {
+      context.addIssue({ code: "custom", message: "webCloneExclusive", path: ["convertLocal"] })
+    }
+  })
 
 const WebhookRespondParams = z.object({
   status: numberRange(100, 599).optional(),

@@ -1077,6 +1077,37 @@ describe("io schemas", () => {
     expect(s.safeParse({}).success).toBe(true)
     expect(s.safeParse({ status: 200 }).success).toBe(true)
   })
+
+  it("io.webClone requires a source: url OR convertLocal, never both", () => {
+    const s = PARAMS_SCHEMAS["io.webClone"]
+    // Neither → "required" issue lands on url.
+    const neither = s.safeParse({ output: "o" })
+    expect(neither.success).toBe(false)
+    if (!neither.success) {
+      expect(neither.error.issues).toEqual([
+        expect.objectContaining({ path: ["url"], message: "required" }),
+      ])
+    }
+    // Both → "webCloneExclusive" lands on convertLocal.
+    const both = s.safeParse({
+      url: "https://x/",
+      convertLocal: "snapshots/site",
+      output: "o",
+    })
+    expect(both.success).toBe(false)
+    if (!both.success) {
+      expect(both.error.issues).toEqual([
+        expect.objectContaining({ path: ["convertLocal"], message: "webCloneExclusive" }),
+      ])
+    }
+    // Convert-only is valid — url stays optional in the schema because the
+    // executor re-checks it at run time (expressions resolve then).
+    expect(s.safeParse({ convertLocal: "snapshots/site", output: "o" }).success).toBe(true)
+    expect(s.safeParse({ url: "https://x/", output: "o" }).success).toBe(true)
+    // Blank-string url counts as absent; a malformed literal url still fails.
+    expect(s.safeParse({ url: "  ", convertLocal: "snap", output: "o" }).success).toBe(true)
+    expect(s.safeParse({ url: "ftp://x", output: "o" }).success).toBe(false)
+  })
 })
 
 describe("annotation schemas", () => {
