@@ -7,8 +7,10 @@ description: 唯一 Agent Run 租约、审批、重连恢复、撤权、审计�
 
 ## 一个共享会话最多只有一个正在执行的 Agent Run
 
-发起客户端携带稳定 device id 与 Run id 申请租约。服务端验证 `session.run`，只保存 token digest，
-返回绑定用户、设备、会话和 Run 的短期 token。本地模型/工具 runtime 用它发布 Run 事件。并发启动
+发起客户端携带稳定 device id、Run id、operation id 和随机生成且重试时保持不变的 token 申请租约。
+服务端验证 `session.run`，只保存 token digest，返回 token 及绑定用户、设备、会话和 Run 的短期租约。
+使用相同 operation id 更换凭据或 Run 会被拒绝。心跳和释放都必须携带匹配会话的 device id 与 token；
+已过期的心跳不能恢复执行。本地模型/工具 runtime 用它发布 Run 事件。并发启动
 收到 `409`，输入进入队列而不会执行。
 
 只有发起人、maintainer 或 owner 可以 steer。心跳丢失会先暂停 Run，宽限期后转为失败。其他设备
@@ -16,6 +18,9 @@ description: 唯一 Agent Run 租约、审批、重连恢复、撤权、审计�
 
 普通工具由发起人审批。高风险、不可逆或扩大权限的工具必须由 maintainer、owner 或非 Guest
 approver 审批。审批解决会比较当前 revision 并原子消费一次状态转换，因此双击不会批准两次。
+
+普通人工消息的作者由已认证成员身份确定，角色只能为 `user`。仅创建者 owner 在会话明确处于
+私有历史导入阶段、尚未激活时，才可以保留历史作者以及 assistant/system 角色。
 
 ## HTTP 负责修复，WebSocket 负责加速
 
@@ -38,6 +43,8 @@ Org admin 必须填写理由，并选择一到六十分钟的有效期。Grant �
 1. 在两个开关关闭时应用追加式 migrations。
 2. 对选定组织启用服务端开关，验证协议 v2 health。
 3. 向同一 canary 人群发布启用客户端开关的构建。
+   租约凭据变更须配套发布客户端：申请时发送稳定 token，释放时在请求体发送 `{ deviceId, token }`。
+   旧客户端无法通过加固后的接口释放租约；断连后租约仍会正常过期。
 4. 一旦出现跨租户放行、移除后仍可访问、无法恢复的事件缺口或重复工具执行，立即停止灰度。
 5. 关闭任一开关完成回滚；不要 down-migrate，也不要删除共享数据。
 

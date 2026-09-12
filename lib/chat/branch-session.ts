@@ -338,6 +338,7 @@ export async function branchSessionAtMessage(params: BranchSessionParams): Promi
       // The SDK fork reproduces the parent's full context, which — at the tail —
       // is exactly the pre-branch context. Cheapest correct option.
       child.forkedFromSdkSessionId = source.sdkSessionId
+      child.sdkSessionStorage = source.sdkSessionStorage
     } else {
       // Mid-conversation (or no SDK session yet): re-establish the truncated
       // context explicitly on the first send.

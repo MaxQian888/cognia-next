@@ -698,6 +698,7 @@ export async function forkSessionFromParent(parentId: string): Promise<ChatSessi
     effort: parent.effort,
     thinkingLevel: parent.thinkingLevel,
     forkedFromSdkSessionId: parent.sdkSessionId,
+    sdkSessionStorage: parent.sdkSessionStorage,
   })
 }
 

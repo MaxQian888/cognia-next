@@ -326,7 +326,10 @@ describe("branchSessionAtMessage — direct", () => {
   })
 
   it("tail branch with an SDK session uses SDK fork instead of a seed", async () => {
-    await seedSource({ sdkSessionId: "sdk-1" })
+    await seedSource({
+      sdkSessionId: "sdk-1",
+      sdkSessionStorage: { backend: "host-sqlite", workspace: "/original" },
+    })
     const child = await branchSessionAtMessage({
       sourceId: "src1",
       visibleMessages: visible(),
@@ -334,6 +337,7 @@ describe("branchSessionAtMessage — direct", () => {
       mode: "direct",
     })
     expect(child.forkedFromSdkSessionId).toBe("sdk-1")
+    expect(child.sdkSessionStorage).toEqual({ backend: "host-sqlite", workspace: "/original" })
     expect(child.branchSeed).toBeUndefined()
   })
 

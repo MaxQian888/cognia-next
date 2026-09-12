@@ -14,7 +14,7 @@ type WireRow = {
   sessionId: string
   lastReadAt: number
   unreadCount: number
-  updatedAt: number
+  updatedAt?: number
 }
 
 function makeTransport(rows: WireRow[], deleted_ids: string[] = [], next_since = 1): Transport {
@@ -66,4 +66,73 @@ describe("syncSessionState", () => {
     if (!out.ok) return
     expect(out.result.applied).toBe(2)
   })
+})
+
+it("preserves pending read optimism without hiding a newer Host message", async () => {
+  const { setActiveRuntimeTargetContext } = await import("@/lib/runtime/runtime-target-context")
+  setActiveRuntimeTargetContext("acct_read", "host_read")
+  const db = getDb()
+  await db.mobileOutboundQueue.put({
+    id: "read-job",
+    accountId: "acct_read",
+    targetId: "host_read",
+    command: "session_mark_read",
+    status: "pending",
+    attempts: 0,
+    nextAttemptAt: 0,
+    createdAt: 0,
+    idempotencyKey: "read-job",
+    payload: { sessionId: "pending-read", readThrough: 20 },
+  })
+  try {
+    await syncSessionState(makeTransport([wire("pending-read", 3)]), { since: 0 })
+    expect(await db.sessionState.get("pending-read")).toMatchObject({
+      unreadCount: 0,
+      lastReadAt: 20,
+    })
+    await syncSessionState(makeTransport([{ ...wire("pending-read", 4), updatedAt: 21 }]), {
+      since: 0,
+    })
+    expect(await db.sessionState.get("pending-read")).toMatchObject({
+      unreadCount: 4,
+      updatedAt: 21,
+    })
+  } finally {
+    await db.mobileOutboundQueue.delete("read-job")
+  }
+})
+
+it("ignores foreign or unrelated pending reads and accepts legacy Host rows", async () => {
+  const { setActiveRuntimeTargetContext } = await import("@/lib/runtime/runtime-target-context")
+  setActiveRuntimeTargetContext("acct_read", "host_read")
+  const db = getDb()
+  const base = {
+    accountId: "acct_read",
+    targetId: "host_read",
+    command: "session_mark_read" as const,
+    status: "pending" as const,
+    attempts: 0,
+    nextAttemptAt: 0,
+    createdAt: 0,
+    idempotencyKey: "boundary",
+  }
+  await db.mobileOutboundQueue.bulkPut([
+    {
+      ...base,
+      id: "foreign-read",
+      targetId: "host_other",
+      payload: { sessionId: "legacy-read", readThrough: 999 },
+    },
+    { ...base, id: "unrelated-read", payload: { sessionId: "other-session", readThrough: 999 } },
+  ])
+  try {
+    const row = { ...wire("legacy-read", 3), updatedAt: undefined }
+    await syncSessionState(makeTransport([row]), { since: 0 })
+    expect(await db.sessionState.get("legacy-read")).toMatchObject({
+      unreadCount: 3,
+      lastReadAt: 10,
+    })
+  } finally {
+    await db.mobileOutboundQueue.bulkDelete(["foreign-read", "unrelated-read"])
+  }
 })

@@ -355,6 +355,7 @@ describe("forkSessionFromParent", () => {
     const parent = await createSession({
       title: "Parent",
       sdkSessionId: "sdk-parent",
+      sdkSessionStorage: { backend: "host-sqlite", workspace: "/original" },
       messageDisplayOverride: { preset: "focused", overrides: { actions: "hover" } },
     })
 
@@ -375,6 +376,7 @@ describe("forkSessionFromParent", () => {
     const parent = await createSession({
       title: "Parent",
       sdkSessionId: "sdk-parent",
+      sdkSessionStorage: { backend: "host-sqlite", workspace: "/original" },
       providerOverride: "openai",
       accountId: "acct-7",
       squadId: "squad-9",
@@ -403,6 +405,7 @@ describe("forkSessionFromParent", () => {
       toolFilter: { mode: "deny", tools: ["Bash"] },
       effort: "high",
       forkedFromSdkSessionId: "sdk-parent",
+      sdkSessionStorage: { backend: "host-sqlite", workspace: "/original" },
     })
   })
 
@@ -414,6 +417,7 @@ describe("forkSessionFromParent", () => {
     const parent = await createSession({
       title: "Parent",
       sdkSessionId: "sdk-parent",
+      sdkSessionStorage: { backend: "host-sqlite", workspace: "/original" },
       sandboxEnabled: true,
       sandboxTier: "microvm",
     })
@@ -431,6 +435,7 @@ describe("forkSessionFromParent", () => {
       title: "Parent",
       projectId: "proj-elsewhere",
       sdkSessionId: "sdk-parent",
+      sdkSessionStorage: { backend: "host-sqlite", workspace: "/original" },
     })
 
     const child = await forkSessionFromParent(parent.id)

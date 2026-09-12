@@ -26,7 +26,7 @@ import { getExecutionBroker } from "@/lib/execution/broker"
 import { runWithExecutionLease } from "@/lib/execution/admit"
 import { slotKeyForTurn } from "@/lib/execution/slot-key"
 import { resolveEffectiveCwdForSession } from "@/hooks/chat/use-effective-cwd"
-import { acquireChatLease } from "@/lib/execution/chat-lease"
+import { acquireChatLease, releaseChatLease } from "@/lib/execution/chat-lease"
 import { recordChatToolApprovalDecision } from "@/lib/policy/action-review/chat-tool-channel"
 import { pendingRecoveryPhase } from "@/lib/usage/compaction-metrics"
 import type { RoomRunnerDeps } from "./runner-deps"
@@ -60,6 +60,7 @@ export function createProductionRoomDeps(opts: ProductionRoomDepsOptions = {}): 
     execution: {
       isAtCapacity: (kind, sessionId) => getExecutionBroker().isAtCapacity(kind, sessionId),
       runWithExecutionLease: (request, run) => runWithExecutionLease(request as never, run),
+      releaseChatLease,
       acquireChatLease: (input) => acquireChatLease(input as never),
       slotKeyForTurn: (input) => slotKeyForTurn(input as never),
       resolveEffectiveCwdForSession: (session) => resolveEffectiveCwdForSession(session),

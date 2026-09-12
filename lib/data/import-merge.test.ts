@@ -56,6 +56,7 @@ describe("mergeImportedSession (pure)", () => {
     const existing = {
       ...incoming,
       sdkSessionId: "sdk-123",
+      sdkSessionStorage: { backend: "host-sqlite", workspace: "/original" },
       forkedFromSdkSessionId: "fork-9",
       pinned: true,
       folderId: "folder-a",
@@ -73,6 +74,7 @@ describe("mergeImportedSession (pure)", () => {
     expect(merged.updatedAt).toBe(9000)
     // …decorations preserved.
     expect(merged.sdkSessionId).toBe("sdk-123")
+    expect(merged.sdkSessionStorage).toEqual({ backend: "host-sqlite", workspace: "/original" })
     expect(merged.forkedFromSdkSessionId).toBe("fork-9")
     expect(merged.pinned).toBe(true)
     expect(merged.folderId).toBe("folder-a")

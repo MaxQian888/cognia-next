@@ -608,10 +608,9 @@ export async function connectSharedSessionStream(
 
   const updateConnection = async (connected: boolean, lastError?: string) => {
     if (getDb() !== db) return
-    const current = await db.collabChatSyncStates.get(key)
-    // Do not recreate a revoked session's state from a late socket callback.
-    if (!current) return
-    await putCollabChatSyncState({ ...current, connected, lastError, updatedAt: Date.now() })
+    // Update only connection fields atomically: a stale read/put could roll back
+    // a concurrently committed cursor or recreate a revoked session's state.
+    await db.collabChatSyncStates.update(key, { connected, lastError, updatedAt: Date.now() })
   }
   const schedule = () => {
     if (stopped || timer !== undefined) return
@@ -625,6 +624,10 @@ export async function connectSharedSessionStream(
     if (stopped) return
     if (error instanceof CollabError && [401, 403, 404].includes(error.status)) {
       close()
+      if (error.status === 403 || error.status === 404) {
+        assertCurrent(db, options.signal)
+        await purgeRevokedSharedSession(sharedSessionId, orgId, client.baseUrl)
+      }
       return
     }
     if (socket) {

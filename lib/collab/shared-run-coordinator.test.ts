@@ -121,6 +121,7 @@ it("acquires a bound lease, publishes lifecycle events, and releases it", async 
     "org",
     "shared-session",
     "lease",
+    { deviceId: "device", token: "secret" },
     "released"
   )
 })
@@ -325,6 +326,7 @@ it("recovers partial durable assistant output before hydration and finalizes wit
     "org",
     "shared-session",
     "lease",
+    { deviceId: "device", token: "secret" },
     "failed"
   )
 })
@@ -466,10 +468,142 @@ it("recovers an expired claim by releasing only its own lease without replaying 
     "org",
     "shared-session",
     "old",
+    { deviceId: "d", token: "secret" },
     "released"
   )
   expect(client.appendSessionRunEvent).not.toHaveBeenCalled()
 })
+
+it("does not resume journal recovery after account teardown while lease lookup is pending", async () => {
+  const client = fullClient()
+  useContext(client)
+  let resolveLease!: (lease: unknown) => void
+  let lookupStarted!: () => void
+  const started = new Promise<void>((resolve) => {
+    lookupStarted = resolve
+  })
+  client.getActiveSessionRunLease.mockImplementation(() => {
+    lookupStarted()
+    return new Promise((resolve) => {
+      resolveLease = resolve
+    }) as never
+  })
+  const ref = JSON.stringify([client.baseUrl, "org", "local", "user", session.id])
+  await jest.requireMock("@/lib/db/shared-run-journal").putSharedRunJournal(ref, {
+    runId: "run",
+    leaseId: "lease",
+    token: "secret",
+    deviceId: "device",
+    baselineMessageIds: [],
+  })
+  const recovery = recoverSharedSessionRun(session)
+  await started
+  suspendSharedSessionRuns()
+  resolveLease({ id: "lease", runId: "run", holderDeviceId: "device" })
+  await recovery
+  expect(client.appendSessionRunEvent).not.toHaveBeenCalled()
+  expect(client.releaseSessionRunLease).not.toHaveBeenCalled()
+  expect(
+    await jest.requireMock("@/lib/db/shared-run-journal").getSharedRunJournal(ref)
+  ).toBeTruthy()
+})
+
+it("releases a lease returned after suspension without publishing or starting timers", async () => {
+  const client = fullClient()
+  let finishClaim!: (value: unknown) => void
+  let signalClaim!: () => void
+  const claimStarted = new Promise<void>((resolve) => {
+    signalClaim = resolve
+  })
+  client.claimSessionRunQueue.mockImplementationOnce(() => {
+    signalClaim()
+    return new Promise((resolve) => {
+      finishClaim = resolve
+    }) as never
+  })
+  const schedule = jest.fn()
+  const beginning = beginSharedSessionRun(
+    session,
+    "run",
+    { messageId: "message" },
+    {
+      resolveContext: context(client as never),
+      getDeviceId: async () => "device",
+      setInterval: schedule as never,
+    }
+  )
+  const aborted = expect(beginning).rejects.toMatchObject({ name: "AbortError" })
+  await claimStarted
+  suspendSharedSessionRuns()
+  finishClaim({
+    lease: { id: "lease" },
+    token: "secret",
+    item: { requestedByUserId: "user", payload: {} },
+  })
+  await aborted
+  expect(client.releaseSessionRunLease).toHaveBeenCalledWith(
+    "org",
+    "shared-session",
+    "lease",
+    { deviceId: "device", token: "secret" },
+    "failed"
+  )
+  expect(client.appendSessionRunEvent).not.toHaveBeenCalled()
+  expect(schedule).not.toHaveBeenCalled()
+})
+
+it.each(["context", "journal", "claim-journal"])(
+  "preserves recovery records when suspension interrupts %s resolution",
+  async (stage) => {
+    const client = fullClient()
+    useContext(client)
+    const journals = jest.requireMock("@/lib/db/shared-run-journal")
+    const ref = JSON.stringify([client.baseUrl, "org", "local", "user", session.id])
+    const journal = {
+      runId: "run",
+      leaseId: stage === "claim-journal" ? "" : "lease",
+      token: "secret",
+      deviceId: "device",
+      baselineMessageIds: [],
+    }
+    await journals.putSharedRunJournal(ref, journal)
+    let resume!: (value?: unknown) => void
+    let signalStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      signalStarted = resolve
+    })
+    const pause = () => {
+      signalStarted()
+      return new Promise((resolve) => {
+        resume = resolve
+      })
+    }
+    if (stage === "context") {
+      jest.requireMock("./runtime-client").resolveCurrentCollabContext.mockImplementationOnce(pause)
+    } else if (stage === "journal") {
+      journals.getSharedRunJournal.mockImplementationOnce(pause)
+    } else {
+      client.getActiveSessionRunLease.mockResolvedValue({
+        id: "lease",
+        runId: "run",
+        holderDeviceId: "device",
+      } as never)
+      journals.putSharedRunJournal.mockImplementationOnce(pause)
+    }
+    const recovery = recoverSharedSessionRun(session)
+    await started
+    suspendSharedSessionRuns()
+    resume(
+      stage === "context"
+        ? { orgId: "org", userId: "user", localAccountId: "local", client }
+        : journal
+    )
+    await recovery
+    expect(client.appendSessionRunEvent).not.toHaveBeenCalled()
+    expect(client.releaseSessionRunLease).not.toHaveBeenCalled()
+    expect(await journals.getSharedRunJournal(ref)).toBeTruthy()
+  }
+)
 
 it("keeps private sessions independent and rejects unavailable shared identity", async () => {
   expect(await beginSharedSessionRun({ id: "private" }, "r", {})).toEqual({ kind: "private" })
@@ -622,6 +756,7 @@ it("reconciles a successful claim whose response was lost and marks it failed wi
     "org",
     "shared-session",
     "lease",
+    { deviceId: "d", token: "secret" },
     "failed"
   )
 })
@@ -656,6 +791,7 @@ it("releases the claim if run start publication fails", async () => {
     "org",
     "shared-session",
     "lease",
+    { deviceId: "d", token: "secret" },
     "failed"
   )
 })

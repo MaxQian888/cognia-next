@@ -6,6 +6,12 @@
  * by send() in the cases below. Internal event routing is intentionally
  * mocked at the IPC boundary so tests stay deterministic.
  */
+jest.mock("@/lib/tauri/transport-routing", () => ({ isRemoteHostActive: () => false }))
+jest.mock("@/lib/companion/room-send-client", () => ({
+  sendRoomTurn: jest.fn(),
+  stopRoomTurn: jest.fn(),
+}))
+
 import { act, renderHook, waitFor } from "@testing-library/react"
 
 // The factory must not close over a `const` declared in this file: hoisted
@@ -3136,23 +3142,18 @@ describe("useTeamChat — direct-chat parity (steer / lease / per-session)", () 
     )
   })
 
-  it("a lease-acquire failure degrades to sending without admission", async () => {
+  it("does not dispatch or persist a turn when broker admission fails", async () => {
     acquireChatLeaseMock.mockRejectedValueOnce(new Error("broker down"))
-    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
     makeAutoResolveSetup()
     makeLinearTeam([{ id: "alice", name: "Alice" }])
     const { result } = renderHook(() => useTeamChat())
     await flush()
     await act(async () => {
-      await result.current.send("hello")
+      await expect(result.current.send("hello")).rejects.toThrow("broker down")
     })
-    // The turn still ran (member sub-session dispatched).
-    expect(sendPromptMock).toHaveBeenCalled()
-    expect(warn).toHaveBeenCalledWith(
-      "team chat lease acquire failed; sending without admission",
-      expect.any(Error)
-    )
-    warn.mockRestore()
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    expect(persistMessagesMock).not.toHaveBeenCalled()
+    expect(chatState.setSessionDiagnostic).toHaveBeenCalled()
   })
 
   it("the lease's onCancel interrupts the live team turn", async () => {
@@ -3349,4 +3350,89 @@ describe("useTeamChat — direct-chat parity (steer / lease / per-session)", () 
     expect(chatState.replaceSessionMessages).toHaveBeenCalledWith("team-1", expect.any(Array))
     expect(persistMessagesMock).toHaveBeenCalledWith("team-1", expect.any(Array))
   })
+})
+
+describe("remote room mutation rejection", () => {
+  it.each(["regenerate", "editAndResend"] as const)(
+    "clears busy state when %s is refused",
+    async (action) => {
+      isTauriMock.mockReturnValue(false)
+      const pairing = jest.requireMock("@/lib/platform/web-companion")
+        .hasWebCompanionTarget as jest.Mock
+      pairing.mockReturnValue(true)
+      const sendRoomTurn = jest.requireMock("@/lib/companion/room-send-client")
+        .sendRoomTurn as jest.Mock
+      sendRoomTurn.mockResolvedValue({ accepted: false })
+      try {
+        const { result, unmount } = renderHook(() => useTeamChat())
+        await act(async () => {
+          if (action === "regenerate") await result.current.regenerate()
+          else await result.current.editAndResend("u-1", "edit")
+        })
+        expect(chatState.setSessionStatus).toHaveBeenCalledWith("team-1", "idle")
+        expect(chatState.setSessionDiagnostic).toHaveBeenCalledWith("team-1", expect.anything())
+        unmount()
+      } finally {
+        pairing.mockReturnValue(false)
+      }
+    }
+  )
+})
+
+describe("companion steer admission", () => {
+  it.each(["accepted", "refused", "rejected"] as const)(
+    "marks the queued message only after Host admission: %s",
+    async (outcome) => {
+      isTauriMock.mockReturnValue(false)
+      const pairing = jest.requireMock("@/lib/platform/web-companion")
+        .hasWebCompanionTarget as jest.Mock
+      pairing.mockReturnValue(true)
+      const sendRoomTurn = jest.requireMock("@/lib/companion/room-send-client")
+        .sendRoomTurn as jest.Mock
+      let resolve!: (value: { accepted: boolean }) => void
+      let reject!: (error: Error) => void
+      sendRoomTurn.mockReturnValue(
+        new Promise((done, fail) => {
+          resolve = done
+          reject = fail
+        })
+      )
+      chatState.messages = [
+        {
+          id: "queued-message",
+          role: "user",
+          parts: [{ type: "text", text: "follow-up" }],
+          metadata: { steer: { entryId: "queued-entry", state: "queued" } },
+        },
+      ]
+      chatState.steerQueue = [{ id: "queued-entry", text: "follow-up" }]
+      chatState.replaceMessages.mockImplementation((messages: unknown[]) => {
+        chatState.messages = messages
+      })
+      try {
+        const { result, unmount } = renderHook(() => useTeamChat())
+        act(() => {
+          result.current.flushSteer("team-1")
+        })
+        const deliveryState = () =>
+          (chatState.messages[0] as { metadata: { steer: { state: string } } }).metadata.steer.state
+        expect(deliveryState()).toBe("queued")
+        expect(sendRoomTurn).toHaveBeenCalledWith(
+          expect.objectContaining({
+            sessionId: "team-1",
+            content: expect.stringContaining("follow-up"),
+          })
+        )
+        await act(async () => {
+          if (outcome === "rejected") reject(new Error("offline"))
+          else resolve({ accepted: outcome === "accepted" })
+        })
+        expect(deliveryState()).toBe(outcome === "accepted" ? "applied" : "failed")
+        expect(chatState.messages).toHaveLength(1)
+        unmount()
+      } finally {
+        pairing.mockReturnValue(false)
+      }
+    }
+  )
 })

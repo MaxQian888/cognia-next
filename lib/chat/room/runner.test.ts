@@ -271,6 +271,7 @@ function createWorld(init: { session?: Partial<ChatSession>; team?: Partial<Team
     execution: {
       isAtCapacity: () => false,
       runWithExecutionLease: (_request, run) => run(),
+      releaseChatLease: jest.fn(),
       acquireChatLease: async () => undefined,
       slotKeyForTurn: () => undefined,
       resolveEffectiveCwdForSession: async () => null,
@@ -1098,5 +1099,143 @@ describe("room settings steer the turn (ADR-0177 batch 3)", () => {
     expect(speakers(w)).toEqual(["a"])
     expect(w.sleeps()).toBe(0)
     expect(w.drained).toEqual([ROOM])
+  })
+})
+
+describe("multi-device turn admission", () => {
+  it("reserves a room before async preparation and rejects competing mutations", async () => {
+    const w = createWorld()
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const getSession = w.deps.db.getSession
+    w.deps.db.getSession = async (id) => {
+      await gate
+      return getSession(id)
+    }
+    const accepted = jest.fn()
+    const first = w.runner.send("first", { sessionId: ROOM, onAccepted: accepted })
+    await expect(w.runner.send("second", { sessionId: ROOM })).rejects.toThrow("ROOM_BUSY")
+    await expect(w.runner.regenerate(ROOM)).rejects.toThrow("ROOM_BUSY")
+    await expect(w.runner.editAndResend(ROOM, "u-1", "edit")).rejects.toThrow("ROOM_BUSY")
+    expect(accepted).not.toHaveBeenCalled()
+    release()
+    await first
+    expect(accepted).toHaveBeenCalledTimes(1)
+    expect(w.calls.sendPrompt).toHaveLength(2)
+    await w.runner.send("next", { sessionId: ROOM })
+    expect(w.calls.sendPrompt).toHaveLength(4)
+    w.runner.dispose()
+  })
+
+  it("does not admit a turn refused by capacity or the broker", async () => {
+    const w = createWorld()
+    const accepted = jest.fn()
+    w.deps.execution.isAtCapacity = () => true
+    await w.runner.send("blocked", { sessionId: ROOM, onAccepted: accepted })
+    expect(accepted).not.toHaveBeenCalled()
+    w.deps.execution.isAtCapacity = () => false
+    w.deps.execution.acquireChatLease = async () => {
+      throw new Error("quota exhausted")
+    }
+    await expect(
+      w.runner.send("blocked", { sessionId: ROOM, onAccepted: accepted })
+    ).rejects.toThrow("quota exhausted")
+    expect(accepted).not.toHaveBeenCalled()
+    expect(w.calls.sendPrompt).toHaveLength(0)
+    w.runner.dispose()
+  })
+
+  it("acknowledges a durable admitted turn before slow AI preparation", async () => {
+    const w = createWorld()
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    w.deps.ai.tryBuildTwinDeps = async () => {
+      await gate
+      return undefined
+    }
+    const accepted = jest.fn()
+    const run = w.runner.send("first", { sessionId: ROOM, onAccepted: accepted })
+    await flush(1)
+    expect(accepted).toHaveBeenCalledTimes(1)
+    expect(w.db.get(ROOM)).toHaveLength(1)
+    expect(w.calls.sendPrompt).toHaveLength(0)
+    release()
+    await run
+    w.runner.dispose()
+  })
+
+  it("releases broker admission when persistence fails before streaming", async () => {
+    const w = createWorld()
+    w.deps.db.persistMessages = async () => {
+      throw new Error("disk full")
+    }
+    const accepted = jest.fn()
+    await w.runner.send("first", { sessionId: ROOM, onAccepted: accepted })
+    expect(accepted).not.toHaveBeenCalled()
+    expect(w.deps.execution.releaseChatLease).toHaveBeenCalledWith(ROOM)
+    expect(w.calls.sendPrompt).toHaveLength(0)
+    w.runner.dispose()
+  })
+
+  it("reports a refused steer admission instead of losing an unhandled promise", async () => {
+    const w = createWorld()
+    w.deps.execution.acquireChatLease = async () => {
+      throw new Error("broker down")
+    }
+    let admission!: Promise<boolean>
+    w.sinks.steer.drain = (_id, replay) => {
+      admission = replay("follow-up")
+    }
+    w.runner.flushSteer(ROOM)
+    await expect(admission).resolves.toBe(false)
+    expect(w.calls.sendPrompt).toHaveLength(0)
+    expect(w.diagnostics.length).toBeGreaterThan(0)
+    w.runner.dispose()
+  })
+
+  it("releases admission when stopped while the broker is still answering", async () => {
+    const w = createWorld()
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    w.deps.execution.acquireChatLease = () => gate
+    const accepted = jest.fn()
+    const run = w.runner.send("first", { sessionId: ROOM, onAccepted: accepted })
+    await flush(1)
+    await w.runner.stop(ROOM)
+    release()
+    await run
+    expect(accepted).not.toHaveBeenCalled()
+    expect(w.deps.execution.releaseChatLease).toHaveBeenCalledWith(ROOM)
+    expect(w.db.get(ROOM) ?? []).toHaveLength(0)
+    w.runner.dispose()
+  })
+
+  it("honors stop while preparation is pending", async () => {
+    const w = createWorld()
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const listCharacters = w.deps.db.listCharactersByIds
+    w.deps.db.listCharactersByIds = async (ids) => {
+      await gate
+      return listCharacters(ids)
+    }
+    const accepted = jest.fn()
+    const run = w.runner.send("first", { sessionId: ROOM, onAccepted: accepted })
+    await flush(1)
+    await w.runner.stop(ROOM)
+    release()
+    await run
+    expect(accepted).not.toHaveBeenCalled()
+    expect(w.calls.sendPrompt).toHaveLength(0)
+    expect(w.db.get(ROOM) ?? []).toHaveLength(0)
+    w.runner.dispose()
   })
 })

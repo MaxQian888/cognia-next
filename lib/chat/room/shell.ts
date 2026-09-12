@@ -8,11 +8,12 @@
  * one answer, so they cannot disagree about where a turn runs.
  */
 
+import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import { isTauri } from "@/lib/tauri"
 import { isCapacitor } from "@/lib/platform/detect"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 
 /** A paired phone or web companion has a host that orchestrates for it. */
 export function isCompanionShell(): boolean {
-  return !isTauri() && (isCapacitor() || hasWebCompanionTarget())
+  return isRemoteHostActive() || (!isTauri() && (isCapacitor() || hasWebCompanionTarget()))
 }

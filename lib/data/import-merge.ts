@@ -44,6 +44,7 @@ type Db = ReturnType<typeof getDb>
  */
 const PRESERVED_DECORATIONS = [
   "sdkSessionId",
+  "sdkSessionStorage",
   "forkedFromSdkSessionId",
   "pinned",
   "folderId",

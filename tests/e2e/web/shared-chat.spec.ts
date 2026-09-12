@@ -1,6 +1,11 @@
 import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
 import { installCollabScenario, GUEST_ID } from "../helpers/shared-chat"
-import { ensureCogniaAccount, waitForTestGlobals, setCogniaSettings } from "../helpers/db-reset"
+import {
+  ensureCogniaAccount,
+  waitForTestGlobals,
+  setCogniaSettings,
+  readDexieRows,
+} from "../helpers/db-reset"
 
 async function configureStandaloneChat(page: Page) {
   await page.goto("/")
@@ -149,6 +154,29 @@ test("@critical a second participant joins by invitation and receives the first 
       other.getByText("Shared message from the first participant", { exact: true }).first()
     ).toBeVisible()
     expect(scenario.events.filter((event) => event.kind === "message.created")).toHaveLength(1)
+
+    // Keep the shared tab open while viewing a different local conversation.
+    await other.getByRole("button", { name: "New chat" }).first().click()
+    const picker = other.getByRole("dialog", { name: /pick a character/i })
+    await expect(picker).toBeVisible()
+    await picker.getByRole("option").first().click()
+    await expect(
+      other.getByRole("button", { name: "Open private conversation controls" })
+    ).toBeVisible()
+    const previousMessages = await readDexieRows<{ id: string }>(other, { table: "messages" })
+    await composer.fill("Shared message while the other tab is active")
+    await composer.press("Enter")
+    // Message payloads are encrypted at rest; observe the durable row addition
+    // without bypassing the profile's encryption boundary.
+    await expect
+      .poll(async () => {
+        const messages = await readDexieRows<{ id: string }>(other, { table: "messages" })
+        return messages.filter(
+          (message) => !previousMessages.some((prior) => prior.id === message.id)
+        ).length
+      })
+      .toBe(1)
+    expect(scenario.events.filter((event) => event.kind === "message.created")).toHaveLength(2)
   } finally {
     if (test.info().status !== test.info().expectedStatus) {
       const other = otherContext.pages()[0]

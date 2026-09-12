@@ -1108,7 +1108,7 @@ export class CollabClient {
   async acquireSessionRunLease(
     orgId: string,
     sessionId: string,
-    input: { runId: string; deviceId: string; operationId: string }
+    input: { runId: string; deviceId: string; operationId: string; token: string }
   ): Promise<{ lease: RunLease; token: string }> {
     return this.json<{ lease: RunLease; token: string }>(
       orgId,
@@ -1160,12 +1160,13 @@ export class CollabClient {
     orgId: string,
     sessionId: string,
     leaseId: string,
+    input: { deviceId: string; token: string },
     status: "released" | "failed" = "released"
   ): Promise<RunLease> {
     return this.json<RunLease>(
       orgId,
       `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/run-leases/${encodeURIComponent(leaseId)}?status=${status}`,
-      { method: "DELETE" }
+      { method: "DELETE", body: JSON.stringify(input) }
     )
   }
 

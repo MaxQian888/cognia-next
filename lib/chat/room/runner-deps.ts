@@ -81,6 +81,7 @@ export interface RoomRunnerExecution {
     },
     run: () => Promise<T>
   ) => Promise<T>
+  releaseChatLease: (sessionId: string) => void
   acquireChatLease: (input: {
     sessionId: string
     projectId?: string
@@ -193,7 +194,7 @@ export interface RoomRunnerSinks {
         content: SendContent,
         webSearchContext?: SendOptions["webSearchContext"],
         replyTo?: MessageReplyTo
-      ) => void
+      ) => Promise<boolean>
     ) => void
     armed: Set<string>
   }

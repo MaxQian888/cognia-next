@@ -1,3 +1,4 @@
+import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
 import { getDb } from "@/lib/db/schema"
 import type { SessionStateRow } from "@/lib/db/session-state"
 import type { Transport } from "@/lib/tauri/transport-types"
@@ -27,17 +28,45 @@ type SessionStateSyncRow = SessionStateRow & { id: string }
  * construction rather than by two implementations of "unread" that drifted.
  *
  * Host-authoritative and read-only here. The phone clears unread through the
- * normal read path, which writes locally and is mirrored back on the next pull.
+ * durable read relay; a pending read covers only the Host snapshot the device
+ * actually saw, so a later incoming message still lights the badge.
  */
 export function syncSessionState(transport: Transport, cursor: SyncCursor): Promise<SyncOutcome> {
   return runSyncHandler<SessionStateSyncRow>(
     {
       table: "sessionState",
       getTable: () => getDb().sessionState as never,
-      applyRows: async (rows) => {
-        await getDb().sessionState.bulkPut(
-          rows.map(({ id: _id, ...row }) => row as SessionStateRow)
-        )
+      applyRows: async (rows, assertCurrent) => {
+        const db = getDb()
+        const scope = getActiveRuntimeTargetContext()
+        await db.transaction("rw", db.sessionState, db.mobileOutboundQueue, async () => {
+          const pending = await db.mobileOutboundQueue
+            .where("status")
+            .anyOf(["pending", "sending"])
+            .filter(
+              (job) =>
+                job.command === "session_mark_read" &&
+                job.accountId === scope?.accountId &&
+                job.targetId === scope?.targetId
+            )
+            .toArray()
+          assertCurrent()
+          await db.sessionState.bulkPut(
+            rows.map(({ id: _id, ...row }) => {
+              const readThrough = pending.reduce(
+                (latest, job) =>
+                  job.payload.sessionId === row.sessionId &&
+                  typeof job.payload.readThrough === "number"
+                    ? Math.max(latest, job.payload.readThrough)
+                    : latest,
+                -1
+              )
+              return readThrough >= (row.updatedAt ?? row.lastReadAt)
+                ? { ...row, unreadCount: 0, lastReadAt: Math.max(row.lastReadAt, readThrough) }
+                : (row as SessionStateRow)
+            })
+          )
+        })
       },
     },
     transport,

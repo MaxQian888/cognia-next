@@ -58,6 +58,7 @@ jest.mock("@/hooks/chat/use-effective-cwd", () => ({
   resolveEffectiveCwdForSession: jest.fn(async () => "/cwd"),
 }))
 jest.mock("@/lib/execution/chat-lease", () => ({
+  releaseChatLease: jest.fn(),
   acquireChatLease: jest.fn(async () => undefined),
 }))
 jest.mock("@/lib/policy/action-review/chat-tool-channel", () => ({
@@ -135,6 +136,10 @@ it("routes admission through the broker, the lease helper and the slot key", asy
     onCancel: () => {},
   })
   expect(jest.requireMock("@/lib/execution/chat-lease").acquireChatLease).toHaveBeenCalled()
+  deps.execution.releaseChatLease("room-1")
+  expect(jest.requireMock("@/lib/execution/chat-lease").releaseChatLease).toHaveBeenCalledWith(
+    "room-1"
+  )
 })
 
 it("loads the provider attempt options and the subagent bridge lazily", async () => {

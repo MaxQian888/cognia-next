@@ -30,6 +30,7 @@ export function makeFakeDeps(): RoomRunnerDeps {
     execution: {
       isAtCapacity: () => false,
       runWithExecutionLease: (_request, run) => run(),
+      releaseChatLease: jest.fn(),
       acquireChatLease: async () => undefined,
       slotKeyForTurn: () => undefined,
       resolveEffectiveCwdForSession: async () => null,

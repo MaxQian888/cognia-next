@@ -680,7 +680,15 @@ async fn put_member(
         SessionAction::ManageMembers,
     )
     .await?;
-    if body.role == SessionRole::Owner && actor.role != SessionRole::Owner {
+    let existing_role = state
+        .chat_store
+        .list_members(&org_id, &session_id)
+        .await
+        .map_err(ChatFailure::Store)?
+        .into_iter()
+        .find(|member| member.user_id == body.user_id)
+        .map(|member| member.role);
+    if !can_change_member_role(actor.role, existing_role, body.role) {
         return Err(ChatFailure::Forbidden);
     }
     enforce_member_role_ceiling(
@@ -744,9 +752,7 @@ async fn patch_member(
         .into_iter()
         .find(|member| member.user_id == user_id)
         .ok_or(ChatFailure::Hidden)?;
-    if (body.role == SessionRole::Owner || existing.role == SessionRole::Owner)
-        && actor.role != SessionRole::Owner
-    {
+    if !can_change_member_role(actor.role, Some(existing.role), body.role) {
         return Err(ChatFailure::Forbidden);
     }
     enforce_member_role_ceiling(
@@ -779,6 +785,15 @@ async fn patch_member(
             .send(policy_event(&session_id, &user_id, (state.now)()));
     Ok(Json(member))
 }
+fn can_change_member_role(
+    actor: SessionRole,
+    existing: Option<SessionRole>,
+    requested: SessionRole,
+) -> bool {
+    actor == SessionRole::Owner
+        || (existing != Some(SessionRole::Owner) && requested != SessionRole::Owner)
+}
+
 fn member_removal_action(actor_user_id: &str, target_user_id: &str) -> SessionAction {
     if actor_user_id == target_user_id {
         SessionAction::Read
@@ -1351,11 +1366,61 @@ fn message_owned_by(event: &SessionEvent, user_id: &str) -> bool {
     }
 }
 
+fn normalize_human_message(
+    session: &crate::chat::SharedSession,
+    member: &crate::chat::SessionMembership,
+    payload: &mut serde_json::Value,
+) -> Result<(), ChatFailure> {
+    if !payload
+        .get("messageId")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|id| !id.trim().is_empty())
+        || !payload
+            .get("parts")
+            .is_some_and(serde_json::Value::is_array)
+    {
+        return Err(ChatFailure::BadRequest("message is incomplete".into()));
+    }
+    if session.status == SessionStatus::Importing
+        && member.role == SessionRole::Owner
+        && session.created_by_user_id == member.user_id
+    {
+        // Preserve historical authors and roles only during the creator's
+        // explicit private-transcript import, before activation.
+        return Ok(());
+    }
+    if payload.get("role").and_then(serde_json::Value::as_str) != Some("user")
+        || payload.get("imported").and_then(serde_json::Value::as_bool) == Some(true)
+    {
+        return Err(ChatFailure::BadRequest(
+            "human posts require the user role".into(),
+        ));
+    }
+    payload["author"] = serde_json::json!({
+        "kind": if member.guest { "guest" } else { "human" },
+        "id": member.user_id,
+        "displayName": member.display_name,
+    });
+    Ok(())
+}
+
+fn is_import_replay(event: &SessionEvent, body: &AppendEventBody, actor_id: &str) -> bool {
+    event.kind == "message.created"
+        && event.actor_id == actor_id
+        && event.operation_id == body.operation_id
+        && event.payload == body.payload
+        && event
+            .payload
+            .get("imported")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+}
+
 async fn append_event(
     State(state): State<AppState>,
     Path((org_id, session_id)): Path<(String, String)>,
     headers: HeaderMap,
-    Json(body): Json<AppendEventBody>,
+    Json(mut body): Json<AppendEventBody>,
 ) -> Result<(StatusCode, Json<SessionEvent>), ChatFailure> {
     let (session, member) =
         visible(&state, &headers, &org_id, &session_id, SessionAction::Post).await?;
@@ -1372,6 +1437,38 @@ async fn append_event(
         SessionStatus::Archived | SessionStatus::Deleting
     ) {
         return Err(ChatFailure::Forbidden);
+    }
+    if body.operation_id.trim().is_empty() {
+        return Err(ChatFailure::BadRequest("operationId is required".into()));
+    }
+    if body.kind == "message.created" {
+        // Activation may have succeeded while its response was lost. Exact
+        // durable import retries stay readable after the import phase closes.
+        if body
+            .payload
+            .get("imported")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+        {
+            if let Some(message_id) = body
+                .payload
+                .get("messageId")
+                .and_then(serde_json::Value::as_str)
+            {
+                match state
+                    .chat_store
+                    .get_message_event(&org_id, &session_id, message_id)
+                    .await
+                {
+                    Ok(event) if is_import_replay(&event, &body, &member.user_id) => {
+                        return Ok((StatusCode::CREATED, Json(event)));
+                    }
+                    Ok(_) | Err(StoreError::NotFound) => {}
+                    Err(error) => return Err(ChatFailure::Store(error)),
+                }
+            }
+        }
+        normalize_human_message(&session, &member, &mut body.payload)?;
     }
     if matches!(body.kind.as_str(), "message.corrected" | "message.redacted") {
         let target_message_id = body
@@ -1512,6 +1609,7 @@ struct AcquireLeaseBody {
     run_id: String,
     device_id: String,
     operation_id: String,
+    token: String,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1555,8 +1653,16 @@ async fn acquire_run_lease(
     if session.status != SessionStatus::Active {
         return Err(ChatFailure::Forbidden);
     }
+    if body.token.len() < 32
+        || body.token.len() > 256
+        || body.run_id.trim().is_empty()
+        || body.device_id.trim().is_empty()
+        || body.operation_id.trim().is_empty()
+    {
+        return Err(ChatFailure::BadRequest("invalid run lease".into()));
+    }
     let now = (state.now)();
-    let token = format!("rlt_{}", Uuid::new_v4().simple());
+    let token = body.token;
     let lease = state
         .chat_store
         .acquire_run_lease(NewChatRunLease {
@@ -1679,6 +1785,7 @@ async fn heartbeat_run_lease(
             .chat_store
             .heartbeat_run_lease(
                 &org_id,
+                &session_id,
                 &lease_id,
                 &member.user_id,
                 &body.device_id,
@@ -1699,6 +1806,7 @@ async fn release_run_lease(
     Path((org_id, session_id, lease_id)): Path<(String, String, String)>,
     headers: HeaderMap,
     Query(query): Query<ReleaseQuery>,
+    Json(body): Json<HeartbeatBody>,
 ) -> Result<Json<crate::chat_store::ChatRunLease>, ChatFailure> {
     let (_, member) = visible(
         &state,
@@ -1717,7 +1825,16 @@ async fn release_run_lease(
     Ok(Json(
         state
             .chat_store
-            .release_run_lease(&org_id, &lease_id, &member.user_id, (state.now)(), &status)
+            .release_run_lease(
+                &org_id,
+                &session_id,
+                &lease_id,
+                &member.user_id,
+                &body.device_id,
+                &token_hash(&body.token),
+                (state.now)(),
+                &status,
+            )
             .await
             .map_err(ChatFailure::Store)?,
     ))
@@ -2538,6 +2655,118 @@ async fn delete_attachment(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn activated_import_retries_require_the_same_durable_event_and_actor() {
+        use super::*;
+        let payload =
+            serde_json::json!({"messageId":"m", "role":"assistant", "parts":[], "imported":true});
+        let event = SessionEvent {
+            id: "event".into(),
+            session_id: "session".into(),
+            sequence: 1,
+            kind: "message.created".into(),
+            actor_kind: "human".into(),
+            actor_id: "owner".into(),
+            actor_label: None,
+            payload: payload.clone(),
+            created_at: 1,
+            operation_id: "import-op".into(),
+        };
+        let mut body = AppendEventBody {
+            id: None,
+            kind: "message.created".into(),
+            payload,
+            operation_id: "import-op".into(),
+            actor_label: None,
+        };
+        assert!(is_import_replay(&event, &body, "owner"));
+        assert!(!is_import_replay(&event, &body, "other-member"));
+        body.operation_id = "new-import-op".into();
+        assert!(!is_import_replay(&event, &body, "owner"));
+        body.operation_id = "import-op".into();
+        body.payload["parts"] = serde_json::json!([{"type":"text", "text":"changed"}]);
+        assert!(!is_import_replay(&event, &body, "owner"));
+    }
+
+    #[test]
+    fn ordinary_posts_bind_the_author_and_only_explicit_imports_preserve_roles() {
+        use super::*;
+        let mut session = crate::chat::SharedSession {
+            id: "session".into(),
+            org_id: "org".into(),
+            workspace_id: "workspace".into(),
+            title: "Chat".into(),
+            status: SessionStatus::Active,
+            created_by_user_id: "owner".into(),
+            created_at: 1,
+            updated_at: 1,
+            revision: 1,
+            policy_revision: 1,
+        };
+        let mut member = crate::chat::SessionMembership {
+            session_id: "session".into(),
+            user_id: "owner".into(),
+            role: SessionRole::Owner,
+            approver: false,
+            guest: false,
+            display_name: Some("Owner".into()),
+            created_at: 1,
+            updated_at: 1,
+        };
+        let mut payload = serde_json::json!({"messageId":"m", "role":"user", "parts":[], "author":{"kind":"human", "id":"victim"}});
+        normalize_human_message(&session, &member, &mut payload).unwrap();
+        assert_eq!(payload["author"]["id"], "owner");
+        member.guest = true;
+        normalize_human_message(&session, &member, &mut payload).unwrap();
+        assert_eq!(payload["author"]["kind"], "guest");
+        member.guest = false;
+        for role in ["assistant", "system", "tool"] {
+            payload["role"] = serde_json::json!(role);
+            assert!(normalize_human_message(&session, &member, &mut payload).is_err());
+        }
+        payload["role"] = serde_json::json!("assistant");
+        payload["imported"] = serde_json::json!(true);
+        session.status = SessionStatus::Importing;
+        let historical = payload.clone();
+        normalize_human_message(&session, &member, &mut payload).unwrap();
+        assert_eq!(payload, historical);
+        member.role = SessionRole::Member;
+        assert!(normalize_human_message(&session, &member, &mut payload).is_err());
+        member.role = SessionRole::Owner;
+        member.user_id = "other-owner".into();
+        assert!(normalize_human_message(&session, &member, &mut payload).is_err());
+        assert!(normalize_human_message(
+            &session,
+            &member,
+            &mut serde_json::json!({"role":"user"})
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn maintainers_cannot_overwrite_an_owner_through_membership_upsert() {
+        use super::{can_change_member_role, SessionRole};
+        assert!(!can_change_member_role(
+            SessionRole::Maintainer,
+            Some(SessionRole::Owner),
+            SessionRole::Member
+        ));
+        assert!(!can_change_member_role(
+            SessionRole::Maintainer,
+            None,
+            SessionRole::Owner
+        ));
+        assert!(can_change_member_role(
+            SessionRole::Owner,
+            Some(SessionRole::Owner),
+            SessionRole::Member
+        ));
+        assert!(can_change_member_role(
+            SessionRole::Maintainer,
+            Some(SessionRole::Member),
+            SessionRole::Viewer
+        ));
+    }
     use super::*;
 
     #[test]

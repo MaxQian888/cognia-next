@@ -635,6 +635,21 @@ describe("shared chat synchronization", () => {
     stream.close()
   })
 
+  it("purges cached history when stream authorization is revoked after the initial pull", async () => {
+    const client = {
+      ...readerFor(messageEvent),
+      openSessionStream: jest.fn().mockRejectedValue(new CollabError(403, "revoked")),
+    }
+    const stream = await connectSharedSessionStream(client, session.orgId, session.id)
+    try {
+      expect(await getDb().sessions.count()).toBe(0)
+      expect(await getDb().messages.count()).toBe(0)
+      expect(await getDb().collabChatSyncStates.count()).toBe(0)
+    } finally {
+      stream.close()
+    }
+  })
+
   it("does not mark a socket connected if it closes during its handshake", async () => {
     const close = jest.fn(async () => {})
     const client = {

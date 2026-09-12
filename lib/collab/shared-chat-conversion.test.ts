@@ -293,6 +293,7 @@ describe("attachment reads are guarded", () => {
         .mockResolvedValue({ attachment: { id: "att_1" }, ticket: "ticket" }),
       uploadSessionAttachment: jest.fn().mockResolvedValue(undefined),
       commitSessionAttachment: jest.fn().mockResolvedValue(undefined),
+      listSessionEvents: jest.fn().mockResolvedValue([]),
     }
   }
 
@@ -306,6 +307,117 @@ describe("attachment reads are guarded", () => {
       createdAt: 3,
     })
   }
+
+  it.each(["activation", "attachment-commit"])(
+    "reuses durable attachment references after an uncertain %s response",
+    async (failure) => {
+      await putFileMessage("data:image/png;base64,AQID")
+      const client = clientWithAttachments()
+      const draft = await client.createSharedSession()
+      const active = await client.updateSharedSession()
+      client.createSharedSession.mockClear()
+      client.updateSharedSession.mockClear()
+      let published: import("@cognia/agent-config-types").SessionEvent | undefined
+      client.appendSessionEvent.mockImplementation(async (_org, sessionId, input) => {
+        published = {
+          id: "event_1",
+          sessionId,
+          sequence: 1,
+          kind: input.kind,
+          actor: { kind: "human", id: "user_1" },
+          payload: input.payload,
+          createdAt: 11,
+          operationId: input.operationId,
+        }
+        return published
+      })
+      client.listSessionEvents.mockImplementation(async (_org, _session, cursor) =>
+        published && cursor === 0 ? [published] : []
+      )
+      if (failure === "activation") {
+        client.updateSharedSession.mockImplementationOnce(async () => {
+          client.createSharedSession.mockResolvedValue(active)
+          throw new Error("activation response lost")
+        })
+      } else {
+        client.commitSessionAttachment.mockRejectedValueOnce(new Error("commit response lost"))
+      }
+      const input = {
+        localSessionId: "local_1",
+        orgId: "org_1",
+        workspaceId: "workspace_1",
+        readAttachment: async () => new Uint8Array([1, 2, 3]),
+      }
+      await expect(convertLocalSessionToShared(client, input)).rejects.toThrow("response lost")
+      expect((await getDb().sessions.get("local_1"))?.collaboration).toBeUndefined()
+      await expect(convertLocalSessionToShared(client, input)).resolves.toMatchObject({
+        session: active,
+      })
+      expect(client.initializeSessionAttachment).toHaveBeenCalledTimes(1)
+      expect(client.uploadSessionAttachment).toHaveBeenCalledTimes(1)
+      expect(client.appendSessionEvent).toHaveBeenCalledTimes(1)
+      expect(published?.payload.parts).toEqual([
+        expect.objectContaining({ url: "cognia://shared-attachment/att_1" }),
+      ])
+      expect(client.commitSessionAttachment).toHaveBeenLastCalledWith(
+        "org_1",
+        draft.id,
+        "att_1",
+        "event_1"
+      )
+      expect(client.updateSharedSession).toHaveBeenCalledTimes(1)
+      expect((await getDb().sessions.get("local_1"))?.collaboration?.sessionId).toBe(draft.id)
+    }
+  )
+
+  it.each(["foreign-session", "gap", "message-id", "role", "parts"])(
+    "refuses incompatible durable import history: %s",
+    async (mismatch) => {
+      await putFileMessage("data:image/png;base64,AQID")
+      const client = clientWithAttachments()
+      client.listSessionEvents.mockResolvedValueOnce([
+        {
+          id: "event_1",
+          sessionId: mismatch === "foreign-session" ? "other" : "shared_1",
+          sequence: mismatch === "gap" ? 2 : 1,
+          kind: "message.created",
+          actor: { kind: "human", id: "user_1" },
+          operationId: "chat-import:local_1:message:message_1",
+          createdAt: 11,
+          payload: {
+            imported: true,
+            messageId: mismatch === "message-id" ? "other" : "message_1",
+            role: mismatch === "role" ? "assistant" : "user",
+            parts: mismatch === "parts" ? null : [],
+          },
+        },
+      ])
+      await expect(
+        convertLocalSessionToShared(client, {
+          localSessionId: "local_1",
+          orgId: "org_1",
+          workspaceId: "workspace_1",
+        })
+      ).rejects.toThrow(/history/)
+      expect(client.initializeSessionAttachment).not.toHaveBeenCalled()
+      expect((await getDb().sessions.get("local_1"))?.collaboration).toBeUndefined()
+    }
+  )
+
+  it("requires durable history before recovering an already activated import", async () => {
+    await putFileMessage("data:image/png;base64,AQID")
+    const client = clientWithAttachments()
+    client.createSharedSession.mockResolvedValue(await client.updateSharedSession())
+    const { listSessionEvents: _history, ...legacyClient } = client
+    await expect(
+      convertLocalSessionToShared(legacyClient, {
+        localSessionId: "local_1",
+        orgId: "org_1",
+        workspaceId: "workspace_1",
+      })
+    ).rejects.toThrow("recovery requires event history")
+    expect(client.initializeSessionAttachment).not.toHaveBeenCalled()
+  })
 
   // `part.url` comes from whatever a foreign transcript carried — the external
   // agent importers write it verbatim. Fetching it would make the authenticated

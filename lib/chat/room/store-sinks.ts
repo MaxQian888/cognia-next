@@ -56,7 +56,7 @@ export function createStoreRoomSinks(): RoomRunnerSinks {
       enqueue: (sessionId, entry) => useChatStore.getState().enqueueSteer(sessionId, entry),
       clear: (sessionId) => useChatStore.getState().clearSteerQueue(sessionId),
       appendMessage: (sessionId, message) => appendSteerMessage(sessionId, message),
-      drain: (sessionId, replay) => maybeDrainSteer(sessionId, replay),
+      drain: (sessionId, replay) => maybeDrainSteer(sessionId, replay, true),
       armed: steerArmed,
     },
     members: {

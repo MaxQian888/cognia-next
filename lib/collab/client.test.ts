@@ -57,6 +57,34 @@ function grantHeader(call: Call): string | undefined {
 }
 
 describe("CollabClient", () => {
+  it("keeps the acquisition token stable on retry and authenticates release with device credentials", async () => {
+    const { calls, fetchImpl } = harness()
+    const client = new CollabClient({
+      baseUrl: "https://collab.test",
+      accessToken: async () => "logto-token",
+      fetchImpl,
+      now: () => 0,
+    })
+    const input = {
+      runId: "run",
+      deviceId: "device",
+      operationId: "acquire",
+      token: "stable-secret",
+    }
+    await client.acquireSessionRunLease(ORG, "session", input)
+    await client.acquireSessionRunLease(ORG, "session", input)
+    expect(JSON.parse(String(calls[1].init?.body))).toEqual(input)
+    expect(calls[2].init?.body).toBe(calls[1].init?.body)
+    const credentials = { deviceId: input.deviceId, token: input.token }
+    await client.releaseSessionRunLease(ORG, "session", "lease", credentials, "failed")
+    expect(calls[3].url).toBe(
+      `https://collab.test/v1/orgs/${ORG}/chat-sessions/session/run-leases/lease?status=failed`
+    )
+    expect(calls[3].init?.method).toBe("DELETE")
+    expect(JSON.parse(String(calls[3].init?.body))).toEqual(credentials)
+    expect(calls[3].url).not.toContain(input.token)
+  })
+
   it("claims FIFO queue input with an explicit stable token and takeover flag", async () => {
     const { calls, fetchImpl } = harness()
     const client = new CollabClient({

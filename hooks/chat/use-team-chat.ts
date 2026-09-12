@@ -26,7 +26,7 @@
  */
 
 import type { ChatTemplateRun } from "@/lib/chat/template/run"
-import { useCallback, useEffect, useMemo, useRef } from "react"
+import { useCallback, useEffect, useMemo } from "react"
 import { useTranslations } from "next-intl"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
@@ -109,8 +109,6 @@ export function useTeamChat() {
     }
   }, [engine])
 
-  const sendRef = useRef<TeamSendFn | null>(null)
-
   /**
    * Companion send: show the message straight away, hand the turn to the
    * host. The host persists the row and the sync mirror brings it back, so
@@ -119,7 +117,7 @@ export function useTeamChat() {
   const sendViaHost = useCallback(
     async (sessionId: string, content: SendContent, opts?: TeamSendOptions) => {
       const projector = engine.projector
-      if (!projector) return
+      if (!projector) return false
       if (!opts?.skipPersistUserTurn && !opts?.steerDrain) {
         const optimistic = withMetadata(
           makeUserMessage(content, undefined, opts?.attachmentManifest),
@@ -146,6 +144,7 @@ export function useTeamChat() {
             : {}),
         })
         if (!result.accepted) throw new Error("room_send was not accepted")
+        return true
       } catch (err) {
         useChatStore.getState().setSessionStatus(sessionId, "idle")
         useChatStore
@@ -154,6 +153,7 @@ export function useTeamChat() {
             sessionId,
             toDiagnostic(err, { source: "agent-team", meta: { sessionId } })
           )
+        return false
       }
     },
     [engine]
@@ -181,25 +181,21 @@ export function useTeamChat() {
     [engine, sendViaHost, tInlineErr]
   )
 
-  useEffect(() => {
-    sendRef.current = send
-    return () => {
-      if (sendRef.current === send) sendRef.current = null
-    }
-  }, [send])
-
-  const drainSteerInto = useCallback((sessionId: string) => {
-    maybeDrainSteer(
-      sessionId,
-      (payload, webSearchContext, replyTo) =>
-        void sendRef.current?.(payload, {
-          sessionId,
-          steerDrain: true,
-          webSearchContext,
-          ...(replyTo ? { replyTo } : {}),
-        })
-    )
-  }, [])
+  const drainSteerInto = useCallback(
+    (sessionId: string) => {
+      maybeDrainSteer(
+        sessionId,
+        (payload, webSearchContext, replyTo) =>
+          sendViaHost(sessionId, payload, {
+            steerDrain: true,
+            webSearchContext,
+            ...(replyTo ? { replyTo } : {}),
+          }),
+        true
+      )
+    },
+    [sendViaHost]
+  )
 
   /** Cancel an in-flight team turn (the active session's by default). */
   const stop = useCallback(
@@ -275,9 +271,18 @@ export function useTeamChat() {
       if (!sessionId) return
       if (engine.projector) {
         engine.projector.markSending(sessionId)
-        await sendRoomTurn({ sessionId, regenerate: true }).catch((err) =>
-          console.error("room_send regenerate failed", err)
-        )
+        try {
+          const result = await sendRoomTurn({ sessionId, regenerate: true })
+          if (!result.accepted) throw new Error("room_send was not accepted")
+        } catch (err) {
+          useChatStore.getState().setSessionStatus(sessionId, "idle")
+          useChatStore
+            .getState()
+            .setSessionDiagnostic(
+              sessionId,
+              toDiagnostic(err, { source: "agent-team", meta: { sessionId } })
+            )
+        }
         return
       }
       await engine.runner.regenerate(sessionId)
@@ -292,9 +297,22 @@ export function useTeamChat() {
       if (!sessionId) return
       if (engine.projector) {
         engine.projector.markSending(sessionId)
-        await sendRoomTurn({ sessionId, content: newContent, editMessageId: messageId }).catch(
-          (err) => console.error("room_send edit failed", err)
-        )
+        try {
+          const result = await sendRoomTurn({
+            sessionId,
+            content: newContent,
+            editMessageId: messageId,
+          })
+          if (!result.accepted) throw new Error("room_send was not accepted")
+        } catch (err) {
+          useChatStore.getState().setSessionStatus(sessionId, "idle")
+          useChatStore
+            .getState()
+            .setSessionDiagnostic(
+              sessionId,
+              toDiagnostic(err, { source: "agent-team", meta: { sessionId } })
+            )
+        }
         return
       }
       await engine.runner.editAndResend(sessionId, messageId, newContent)

@@ -109,6 +109,7 @@ describe("startNewSession", () => {
       kind: "direct",
       characterId: "c_ada",
       sdkSessionId: "sdk-ada",
+      sdkSessionStorage: { backend: "host-sqlite", workspace: "/original" },
     })
 
     expect(session).toMatchObject({
@@ -116,6 +117,7 @@ describe("startNewSession", () => {
       kind: "direct",
       characterId: "c_ada",
       sdkSessionId: "sdk-ada",
+      sdkSessionStorage: { backend: "host-sqlite", workspace: "/original" },
     })
   })
 

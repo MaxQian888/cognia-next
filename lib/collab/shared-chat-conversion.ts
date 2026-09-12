@@ -21,7 +21,10 @@ type SharedChatConversionClient = { readonly baseUrl?: string } & Pick<
   Partial<
     Pick<
       CollabClient,
-      "initializeSessionAttachment" | "uploadSessionAttachment" | "commitSessionAttachment"
+      | "initializeSessionAttachment"
+      | "uploadSessionAttachment"
+      | "commitSessionAttachment"
+      | "listSessionEvents"
     >
   >
 
@@ -283,6 +286,33 @@ export async function convertLocalSessionToShared(
     operationId: `${prefix}:create`,
   })
 
+  // A prior attempt may have published messages or even activated the session
+  // before losing its response. Reuse authoritative attachment references before
+  // uploading, so retrying never creates different payloads for the same import.
+  const existingImports = new Map<string, SessionEvent>()
+  if (client.listSessionEvents) {
+    let cursor = 0
+    while (true) {
+      const events = await client.listSessionEvents(input.orgId, remoteDraft.id, cursor)
+      if (getDb() !== db) throw new DOMException("Shared conversion cancelled", "AbortError")
+      if (!events.length) break
+      for (const event of events) {
+        if (event.sessionId !== remoteDraft.id || event.sequence !== cursor + 1)
+          throw new Error("Shared import history is incomplete")
+        cursor = event.sequence
+        if (
+          event.kind === "message.created" &&
+          event.actor.id === identity.userId &&
+          event.operationId.startsWith(`${prefix}:message:`) &&
+          event.payload.imported === true
+        )
+          existingImports.set(event.operationId, event)
+      }
+    }
+  } else if (remoteDraft.status !== "importing") {
+    throw new Error("Shared import recovery requires event history")
+  }
+
   const imported: Array<{
     source: StoredMessage
     event: SessionEvent
@@ -290,6 +320,38 @@ export async function convertLocalSessionToShared(
   }> = []
   for (const message of messages) {
     if (getDb() !== db) throw new DOMException("Shared conversion cancelled", "AbortError")
+    const existing = existingImports.get(`${prefix}:message:${message.id}`)
+    if (existing) {
+      if (
+        existing.payload.messageId !== message.id ||
+        existing.payload.role !== message.role ||
+        !Array.isArray(existing.payload.parts)
+      )
+        throw new Error("Shared import history does not match the local message")
+      const parts = existing.payload.parts as StoredMessage["parts"]
+      if (remoteDraft.status === "importing" && !input.prepareAttachmentParts) {
+        for (const [index, part] of parts.entries()) {
+          const source = message.parts[index]
+          if (
+            part.type === "file" &&
+            part.url?.startsWith("cognia://shared-attachment/") &&
+            source?.type === "file" &&
+            !source.url?.startsWith("cognia://shared-attachment/") &&
+            typeof (source as { text?: unknown }).text !== "string"
+          ) {
+            await client.commitSessionAttachment!(
+              input.orgId,
+              remoteDraft.id,
+              part.url.slice("cognia://shared-attachment/".length),
+              existing.id
+            )
+            if (getDb() !== db) throw new DOMException("Shared conversion cancelled", "AbortError")
+          }
+        }
+      }
+      imported.push({ source: message, event: existing, parts })
+      continue
+    }
     const uploaded = hasFilePart(message)
       ? await uploadMessageAttachments(client, input, remoteDraft, message)
       : { parts: message.parts, attachmentIds: [] }
@@ -319,11 +381,14 @@ export async function convertLocalSessionToShared(
   }
 
   if (getDb() !== db) throw new DOMException("Shared conversion cancelled", "AbortError")
-  const active = await client.updateSharedSession(input.orgId, remoteDraft.id, {
-    status: "active",
-    operationId: `${prefix}:activate`,
-    baseRevision: remoteDraft.revision,
-  })
+  const active =
+    remoteDraft.status === "active"
+      ? remoteDraft
+      : await client.updateSharedSession(input.orgId, remoteDraft.id, {
+          status: "active",
+          operationId: `${prefix}:activate`,
+          baseRevision: remoteDraft.revision,
+        })
   const cursor = imported.at(-1)?.event.sequence ?? 0
 
   if (getDb() !== db) throw new DOMException("Shared conversion cancelled", "AbortError")

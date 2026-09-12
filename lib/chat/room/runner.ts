@@ -131,6 +131,8 @@ export const TYPING_POLL_MS = 250
  * the active pane, the RPC arm carries it explicitly. */
 export interface RoomSendOptions {
   sessionId: string
+  /** Internal admission notification; never supplied by a remote payload. */
+  onAccepted?: () => void
   /** Attachment provenance for the optimistic user message. */
   attachmentManifest?: readonly AttachmentManifestEntry[]
   /** Template provenance retained only on the user transcript row. */
@@ -240,6 +242,9 @@ export class RoomRunner {
   private readonly resolvers: ResolverMap = new Map()
   private readonly eventQueues = new Map<string, Promise<void>>()
   private readonly interrupted = new Set<string>()
+  private readonly activeTurns = new Set<string>()
+  private readonly acquiredTurns = new Set<string>()
+  private readonly drainAfterTurn = new Set<string>()
   /** Member sub-sessions the user stopped on their own, without stopping the room. */
   private readonly memberStops = new Set<string>()
   private readonly streams = new RoomStreamRegistry()
@@ -315,6 +320,38 @@ export class RoomRunner {
   // ---- Public actions ----------------------------------------------------
 
   async send(content: SendContent, opts: RoomSendOptions): Promise<void> {
+    const status = this.sinks.status.get(opts.sessionId)
+    if (
+      !skipsUserTurn(opts) &&
+      !opts.branchTag &&
+      (status === "streaming" || status === "awaiting_approval")
+    ) {
+      return this.sendTurn(content, opts)
+    }
+    return this.reserveTurn(opts.sessionId, () => this.sendTurn(content, opts))
+  }
+
+  private async reserveTurn(sessionId: string, run: () => Promise<void>): Promise<void> {
+    if (
+      this.activeTurns.has(sessionId) ||
+      ["streaming", "awaiting_approval"].includes(this.sinks.status.get(sessionId) ?? "")
+    ) {
+      throw Object.assign(new Error("ROOM_BUSY"), { code: "ROOM_BUSY" })
+    }
+    this.activeTurns.add(sessionId)
+    this.interrupted.delete(sessionId)
+    try {
+      await run()
+    } finally {
+      if (this.acquiredTurns.delete(sessionId)) this.deps.execution.releaseChatLease(sessionId)
+      this.pendingBranchTags.delete(sessionId)
+      this.pendingWebSearch.delete(sessionId)
+      this.activeTurns.delete(sessionId)
+      if (this.drainAfterTurn.delete(sessionId)) this.drainSteerInto(sessionId)
+    }
+  }
+
+  private async sendTurn(content: SendContent, opts: RoomSendOptions): Promise<void> {
     const { sessionId } = opts
     const { deps, sinks } = this
 
@@ -352,6 +389,7 @@ export class RoomRunner {
           webSearchContext: opts.webSearchContext,
           ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
         })
+        opts.onAccepted?.()
         return
       }
     }
@@ -378,7 +416,7 @@ export class RoomRunner {
       return
     }
 
-    this.interrupted.delete(sessionId)
+    if (this.interrupted.has(sessionId)) return
     sinks.members.clearStopRequestsFor(sessionId)
 
     const memberIds = team.members.map((m) => m.characterId)
@@ -393,30 +431,34 @@ export class RoomRunner {
     let turnEmbedding: number[] | undefined
     let turnMemoryDeps: ApplyMemoryContextDeps | undefined
     const roomSettings = resolveRoomSettings(session)
-    if (userText.trim()) {
-      turnTwinDeps = await deps.ai.tryBuildTwinDeps()
-      if (turnTwinDeps) {
-        try {
-          const result = await deps.ai.generateSafeEmbedding(userText, {
-            profileId: "team-chat-shared",
-            purpose: "query",
-            embedding: turnTwinDeps.embedding,
-            vectorBackend: turnTwinDeps.vectorBackend ?? "native",
-          })
-          turnEmbedding = result.embedding
-        } catch {
-          turnEmbedding = undefined
-        }
-      }
-      // A room whose memory is switched off never builds the read deps, so no
-      // member can recall a private memory into a room it does not belong in.
-      if (roomSettings.memory) {
-        turnMemoryDeps = await deps.ai.tryBuildMemoryDeps(
-          resolveMemoryConfig(sinks.settings.read()?.memory),
-          turnTwinDeps
-        )
-      }
+    if (this.interrupted.has(sessionId)) return
+    // A turn must be admitted by the execution broker before
+    // any member starts. A quota or lease refusal is an actual rejection.
+    const turnCwd = await deps.execution.resolveEffectiveCwdForSession(session).catch(() => null)
+    try {
+      await deps.execution.acquireChatLease({
+        sessionId,
+        projectId: session.projectId,
+        label: session.title || team.name || `#${sessionId.slice(0, 8)}`,
+        kind: "team",
+        slotKey: deps.execution.slotKeyForTurn({
+          executionContext: session.executionContext,
+          effectiveCwd: turnCwd,
+        }),
+        onCancel: () => {
+          this.interrupted.add(sessionId)
+          void this.interruptTurn(sessionId)
+        },
+      })
+      this.acquiredTurns.add(sessionId)
+    } catch (leaseErr) {
+      sinks.diagnostic(
+        sessionId,
+        toDiagnostic(leaseErr, { source: "agent-team", meta: { sessionId } })
+      )
+      throw leaseErr
     }
+    if (this.interrupted.has(sessionId)) return
 
     // 1. Persist the user turn first, tagging it as a "user" sender.
     let instantPreviewTitle: string | undefined
@@ -457,37 +499,42 @@ export class RoomRunner {
       }
     }
 
-    // Register the team turn with the execution broker (one lease for the
-    // whole sequential fan-out). Best effort: a broker hiccup never blocks
-    // the committed turn.
-    const turnCwd = await deps.execution.resolveEffectiveCwdForSession(session).catch(() => null)
-    try {
-      await deps.execution.acquireChatLease({
-        sessionId,
-        projectId: session.projectId,
-        label: session.title || team.name || `#${sessionId.slice(0, 8)}`,
-        kind: "team",
-        slotKey: deps.execution.slotKeyForTurn({
-          executionContext: session.executionContext,
-          effectiveCwd: turnCwd,
-        }),
-        onCancel: () => {
-          this.interrupted.add(sessionId)
-          void this.interruptTurn(sessionId)
-        },
-      })
-    } catch (leaseErr) {
-      console.warn("team chat lease acquire failed; sending without admission", leaseErr)
-    }
+    if (this.interrupted.has(sessionId)) return
     // Clear any stale error BEFORE flipping to streaming: setError(null) resets
     // status to idle, so the reverse order would strand the run status.
     sinks.status.setError(sessionId, null)
     sinks.status.set(sessionId, "streaming")
+    opts.onAccepted?.()
 
     const turnId = deps.newTurnId()
 
     // 2. Branch on orchestration. Supervisor has its own multi-round loop.
     try {
+      if (userText.trim()) {
+        turnTwinDeps = await deps.ai.tryBuildTwinDeps()
+        if (turnTwinDeps) {
+          try {
+            const result = await deps.ai.generateSafeEmbedding(userText, {
+              profileId: "team-chat-shared",
+              purpose: "query",
+              embedding: turnTwinDeps.embedding,
+              vectorBackend: turnTwinDeps.vectorBackend ?? "native",
+            })
+            turnEmbedding = result.embedding
+          } catch {
+            turnEmbedding = undefined
+          }
+        }
+        // A room whose memory is switched off never builds the read deps, so no
+        // member can recall a private memory into a room it does not belong in.
+        if (roomSettings.memory) {
+          turnMemoryDeps = await deps.ai.tryBuildMemoryDeps(
+            resolveMemoryConfig(sinks.settings.read()?.memory),
+            turnTwinDeps
+          )
+        }
+      }
+      if (this.interrupted.has(sessionId)) return
       const muted = new Set(roomSettings.mutedMemberIds)
       const picked = (opts.targetMemberIds ?? []).length > 0
       let primaryCharacterId: string | undefined
@@ -611,6 +658,12 @@ export class RoomRunner {
             else markTitleFailed(sessionId, { sourceText, resultText, locale })
           })
       }
+    } catch (error) {
+      sinks.diagnostic(
+        sessionId,
+        toDiagnostic(error, { source: "agent-team", meta: { sessionId } })
+      )
+      throw error
     } finally {
       // Seal any coalesced streaming state left by this turn (interrupt and
       // error paths can end mid-stream), then drop the room's stream state so
@@ -633,7 +686,7 @@ export class RoomRunner {
       sinks.members.clearFor(sessionId)
       sinks.members.clearStopRequestsFor(sessionId)
       if ((!hadError && !wasInterrupted) || sinks.steer.armed.has(sessionId)) {
-        this.drainSteerInto(sessionId)
+        this.drainAfterTurn.add(sessionId)
       }
     }
   }
@@ -689,7 +742,11 @@ export class RoomRunner {
    * Re-issue the most recent user turn. Non-destructive: existing replies
    * become branches, tagged per member.
    */
-  async regenerate(sessionId: string): Promise<void> {
+  async regenerate(sessionId: string, onAccepted?: () => void): Promise<void> {
+    return this.reserveTurn(sessionId, () => this.regenerateTurn(sessionId, onAccepted))
+  }
+
+  private async regenerateTurn(sessionId: string, onAccepted?: () => void): Promise<void> {
     const messages =
       this.sinks.messages.read(sessionId) ?? (await this.deps.db.listMessages(sessionId))
     let lastUserIdx = -1
@@ -727,23 +784,39 @@ export class RoomRunner {
         )
         .map((p) => p.text)
         .join("")
-    await this.send(content, { sessionId, skipPersistUserTurn: true })
+    await this.sendTurn(content, { sessionId, skipPersistUserTurn: true, onAccepted })
   }
 
   /** Edit a sent user message without destroying the turn below it. */
   async editAndResend(
     sessionId: string,
     messageId: string,
-    newContent: SendContent
+    newContent: SendContent,
+    options: Omit<RoomSendOptions, "sessionId" | "branchTag"> = {}
+  ): Promise<void> {
+    return this.reserveTurn(sessionId, () =>
+      this.editTurn(sessionId, messageId, newContent, options)
+    )
+  }
+
+  private async editTurn(
+    sessionId: string,
+    messageId: string,
+    newContent: SendContent,
+    options: Omit<RoomSendOptions, "sessionId" | "branchTag">
   ): Promise<void> {
     const messages =
       this.sinks.messages.read(sessionId) ?? (await this.deps.db.listMessages(sessionId))
     const editedIdx = messages.findIndex((message) => message.id === messageId)
-    if (editedIdx < 0) return
+    if (editedIdx < 0 || messages[editedIdx].role !== "user") return
     const { merged, groupId, nextIndex } = tagEditSibling(messages, editedIdx)
     this.sinks.messages.commit(sessionId, merged)
     await this.deps.db.persistMessages(sessionId, merged)
-    await this.send(newContent, { sessionId, branchTag: { groupId, index: nextIndex } })
+    await this.sendTurn(newContent, {
+      ...options,
+      sessionId,
+      branchTag: { groupId, index: nextIndex },
+    })
   }
 
   /** Approve or deny a tool call on a member sub-session. */
@@ -790,14 +863,32 @@ export class RoomRunner {
   }
 
   private drainSteerInto(sessionId: string): void {
-    this.sinks.steer.drain(sessionId, (payload, webSearchContext, replyTo) => {
-      void this.send(payload, {
-        sessionId,
-        steerDrain: true,
-        webSearchContext,
-        ...(replyTo ? { replyTo } : {}),
-      })
-    })
+    this.sinks.steer.drain(
+      sessionId,
+      (payload, webSearchContext, replyTo) =>
+        new Promise<boolean>((resolve) => {
+          let accepted = false
+          void this.send(payload, {
+            sessionId,
+            steerDrain: true,
+            webSearchContext,
+            ...(replyTo ? { replyTo } : {}),
+            onAccepted: () => {
+              accepted = true
+              resolve(true)
+            },
+          }).then(
+            () => resolve(accepted),
+            (error) => {
+              this.sinks.diagnostic(
+                sessionId,
+                toDiagnostic(error, { source: "agent-team", meta: { sessionId } })
+              )
+              resolve(false)
+            }
+          )
+        })
+    )
   }
 
   /** Interrupt every in-flight sub-session of `roomId` and reject its resolvers. */

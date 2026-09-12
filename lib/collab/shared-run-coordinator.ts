@@ -130,8 +130,10 @@ export async function recoverSharedSessionRun(
   session: Pick<ChatSession, "id" | "collaboration">
 ): Promise<void> {
   if (!session.collaboration || activeRuns.has(session.id)) return
+  const generation = coordinatorGeneration
   const db = getDb()
   const context = await resolveCurrentCollabContext()
+  if (generation !== coordinatorGeneration) return
   const binding = session.collaboration
   if (
     !context ||
@@ -141,15 +143,18 @@ export async function recoverSharedSessionRun(
     return
   const ref = journalRef(context, session.id)
   const stored = await getSharedRunJournal(ref, db)
+  if (generation !== coordinatorGeneration) return
   if (!stored) return
   const journal = stored
   assertCurrentDatabase(db)
   const lease = await context.client.getActiveSessionRunLease(context.orgId, binding.sessionId)
+  if (generation !== coordinatorGeneration) return
   assertCurrentDatabase(db)
   if (!journal.leaseId) {
     if (lease?.runId === journal.runId && lease.holderDeviceId === journal.deviceId) {
       journal.leaseId = lease.id
       await putSharedRunJournal(ref, journal, db)
+      if (generation !== coordinatorGeneration) return
     } else {
       await deleteSharedRunJournal(ref, db)
       return
@@ -162,10 +167,12 @@ export async function recoverSharedSessionRun(
       context.orgId,
       binding.sessionId,
       journal.leaseId,
+      { deviceId: journal.deviceId, token: journal.token },
       journal.terminalStatus === "completed" || journal.terminalStatus === "cancelled"
         ? "released"
         : "failed"
     )
+    if (generation !== coordinatorGeneration) return
     await deleteSharedRunJournal(ref, db)
     return
   }
@@ -190,6 +197,7 @@ export async function recoverSharedSessionRun(
 }
 
 const activeRuns = new Map<string, ActiveSharedRun>()
+let coordinatorGeneration = 0
 
 function operationId(prefix: string, runId: string): string {
   return `${prefix}:${runId}`
@@ -426,8 +434,15 @@ export async function beginSharedSessionRun(
   const binding = session?.collaboration
   if (!binding) return { kind: "private" }
   assertSharedChatClientEnabled()
+  const generation = coordinatorGeneration
   const db = getDb()
+  const assertCurrent = () => {
+    assertCurrentDatabase(db)
+    if (generation !== coordinatorGeneration)
+      throw new DOMException("Shared run start cancelled", "AbortError")
+  }
   const context = await (deps.resolveContext ?? resolveCurrentCollabContext)()
+  assertCurrent()
   if (
     !context ||
     context.orgId !== binding.orgId ||
@@ -437,9 +452,11 @@ export async function beginSharedSessionRun(
   }
   assertCurrentDatabase(db)
   const deviceId = await (deps.getDeviceId ?? getDeviceId)()
+  assertCurrent()
   if (!deviceId) throw new Error("Stable device identity is unavailable")
 
   const health = await context.client.health()
+  assertCurrent()
   if (!health.features?.includes("shared-chat-execution-v2")) {
     throw new Error("Collaboration server upgrade required: shared-chat-execution-v2")
   }
@@ -452,8 +469,10 @@ export async function beginSharedSessionRun(
           payload: { messageId: queuedPayload.messageId },
           operationId: operationId("run-queue", String(queuedPayload.requestId ?? runId)),
         })
+  assertCurrent()
   const ref = journalRef(context, session.id)
   const previousClaim = await getSharedRunJournal(ref, db)
+  assertCurrent()
   if (previousClaim && previousClaim.runId !== runId)
     throw new Error("Previous shared run requires recovery before executing another request")
   const claimIntent: SharedRunJournal = previousClaim ?? {
@@ -464,10 +483,11 @@ export async function beginSharedSessionRun(
     queueItemId: queued.id,
     baselineMessageIds: (await sessionMessages(session.id)).map((message) => message.id),
   }
+  assertCurrent()
   await putSharedRunJournal(ref, claimIntent, db)
   let acquired: Awaited<ReturnType<CollabClient["claimSessionRunQueue"]>>
   try {
-    assertCurrentDatabase(db)
+    assertCurrent()
     acquired = await context.client.claimSessionRunQueue(context.orgId, binding.sessionId, {
       runId,
       deviceId,
@@ -483,9 +503,10 @@ export async function beginSharedSessionRun(
   }
 
   claimIntent.leaseId = acquired.lease.id
-  await putSharedRunJournal(ref, claimIntent, db)
-  assertCurrentDatabase(db)
   try {
+    assertCurrent()
+    await putSharedRunJournal(ref, claimIntent, db)
+    assertCurrent()
     await context.client.appendSessionRunEvent(
       context.orgId,
       binding.sessionId,
@@ -503,9 +524,16 @@ export async function beginSharedSessionRun(
         operationId: operationId("run-start", runId),
       }
     )
+    assertCurrent()
   } catch (error) {
     await context.client
-      .releaseSessionRunLease(context.orgId, binding.sessionId, acquired.lease.id, "failed")
+      .releaseSessionRunLease(
+        context.orgId,
+        binding.sessionId,
+        acquired.lease.id,
+        { deviceId, token: acquired.token },
+        "failed"
+      )
       .catch(() => undefined)
     throw error
   }
@@ -570,11 +598,13 @@ export async function beginSharedSessionRun(
   })
   try {
     await persistRun(active)
+    assertCurrent()
   } catch (error) {
     await context.client.releaseSessionRunLease(
       context.orgId,
       binding.sessionId,
       acquired.lease.id,
+      { deviceId, token: acquired.token },
       "failed"
     )
     throw error
@@ -777,6 +807,7 @@ export async function finishSharedSessionRun(
         active.orgId,
         active.sharedSessionId,
         active.leaseId,
+        { deviceId: active.deviceId, token: active.token },
         finalStatus === "failed" ? "failed" : "released"
       )
       await deleteSharedRunJournal(active.journalRef, active.db)
@@ -828,6 +859,7 @@ export async function authorizeSharedSessionApproval(
 
 /** Account/endpoint teardown fences local execution and keeps durable recovery records. */
 export function suspendSharedSessionRuns(): void {
+  coordinatorGeneration += 1
   for (const active of activeRuns.values()) {
     stopHeartbeat(active)
     active.leaseLost = true

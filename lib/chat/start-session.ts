@@ -52,6 +52,7 @@ type SessionSeed = Partial<
     | "issueId"
     | "executionContext"
     | "sdkSessionId"
+    | "sdkSessionStorage"
   >
 >
 

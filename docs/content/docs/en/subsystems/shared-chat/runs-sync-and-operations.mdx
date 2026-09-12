@@ -7,9 +7,12 @@ description: Unique Agent Run leases, approvals, reconnect recovery, revocation,
 
 ## A shared session has at most one executing Agent Run
 
-The initiating client requests a lease with its stable device id and Run id. The service verifies
-`session.run`, stores only a token digest, and returns a short-lived token bound to the user, device,
-session, and Run. The local model/tool runtime publishes Run events with that token. A competing start
+The initiating client requests a lease with its stable device id, Run id, operation id, and a randomly
+generated token retained across retries. The service verifies `session.run`, stores only the token
+digest, and returns the token with a short-lived lease bound to the user, device, session, and Run.
+Reusing an operation id with different credentials or a different Run is rejected. Heartbeat and release
+both require the matching session, device id, and token; an expired heartbeat cannot revive execution.
+The local model/tool runtime publishes Run events with that token. A competing start
 receives `409`; its input is queued rather than executed.
 
 Only the initiator, maintainer, or owner may steer. Heartbeat loss pauses the Run and then fails it after
@@ -19,6 +22,10 @@ worse than asking a user to restart explicitly.
 Ordinary tools use initiator approval. High-risk, irreversible, or permission-expanding tools require a
 maintainer, owner, or non-Guest approver. Approval resolution compares the current revision and consumes
 one transition atomically, so double-clicks cannot approve twice.
+
+Ordinary human messages receive the authenticated member's author identity and must have the `user`
+role. Preserving historical authors and assistant/system roles is allowed only for the creator-owner
+while the session is explicitly importing a private transcript, before activation.
 
 ## HTTP repairs and WebSocket accelerates
 
@@ -43,6 +50,9 @@ validates expiry and writes a metadata-only `session.breakGlassRead` audit with 
 1. Apply additive migrations with both flags disabled.
 2. Enable the service flag for selected organizations and verify protocol v2 health.
 3. Ship a client build with its flag enabled to the same canary population.
+   Deploy lease-credential changes with the matching client: acquisition sends a stable token, and
+   release sends `{ deviceId, token }` in the request body. Older clients cannot release a lease through
+   the hardened endpoint; the lease expires normally if they disconnect.
 4. Stop rollout on any cross-tenant allow, stale access after removal, event gap that cannot recover, or duplicate tool execution.
 5. Roll back by disabling either flag. Do not down-migrate or delete shared data.
 
