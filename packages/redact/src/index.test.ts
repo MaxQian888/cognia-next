@@ -312,6 +312,23 @@ describe("redactText — hardened secret/PII coverage (T0.1)", () => {
 })
 
 describe("hasNoLeakingPiiDeep", () => {
+  it("allows shared acyclic schemas while inspecting their values", () => {
+    const schema = { type: "string", description: "Workspace path" }
+    expect(hasNoLeakingPiiDeep([{ path: schema }, { file: schema }])).toBe(true)
+    schema.description = "Contact alice@example.com"
+    expect(hasNoLeakingPiiDeep([{ path: schema }, { file: schema }])).toBe(false)
+  })
+
+  it("rejects cycles through arrays, maps, and sets without recursion overflow", () => {
+    const array: unknown[] = []
+    array.push(array)
+    const map = new Map<string, unknown>()
+    map.set("self", map)
+    const set = new Set<unknown>()
+    set.add(set)
+    for (const value of [array, map, set]) expect(hasNoLeakingPiiDeep(value)).toBe(false)
+  })
+
   it("passes clean primitives and structures", () => {
     expect(hasNoLeakingPiiDeep(null)).toBe(true)
     expect(hasNoLeakingPiiDeep(undefined)).toBe(true)

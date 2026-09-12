@@ -453,27 +453,32 @@ export function hasNoLeakingPiiDeep(
     return true
   }
   if (value instanceof Date) return true
-  if (Array.isArray(value)) {
-    return value.every((item) => hasNoLeakingPiiDeep(item, seen))
-  }
-  if (value instanceof Map) {
-    for (const [k, v] of value) {
-      if (!hasNoLeakingPiiDeep(k, seen) || !hasNoLeakingPiiDeep(v, seen)) return false
-    }
-    return true
-  }
-  if (value instanceof Set) {
-    for (const item of value) {
-      if (!hasNoLeakingPiiDeep(item, seen)) return false
-    }
-    return true
-  }
   if (typeof value === "object") {
-    if (seen.has(value)) return false // cycle → treat as unsafe
+    if (seen.has(value)) return false // active ancestor → cycle
     seen.add(value)
-    return Object.values(value as Record<string, unknown>).every((v) =>
-      hasNoLeakingPiiDeep(v, seen)
-    )
+    try {
+      if (Array.isArray(value)) {
+        return value.every((item) => hasNoLeakingPiiDeep(item, seen))
+      }
+      if (value instanceof Map) {
+        for (const [k, v] of value) {
+          if (!hasNoLeakingPiiDeep(k, seen) || !hasNoLeakingPiiDeep(v, seen)) return false
+        }
+        return true
+      }
+      if (value instanceof Set) {
+        for (const item of value) {
+          if (!hasNoLeakingPiiDeep(item, seen)) return false
+        }
+        return true
+      }
+      return Object.values(value as Record<string, unknown>).every((v) =>
+        hasNoLeakingPiiDeep(v, seen)
+      )
+    } finally {
+      // Shared JSON-schema objects are aliases, not cycles; scan each occurrence.
+      seen.delete(value)
+    }
   }
   // Functions, symbols, and other exotic types: stringify-and-scan fallback.
   try {
