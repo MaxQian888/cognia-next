@@ -17,6 +17,7 @@ import type {
   FileSelectionRef,
 } from "@/types/artifact/artifact"
 import type { ContextCommentAnchor } from "@/types/context-comment"
+import type { ElementSelectionCore } from "@/types/element-selection"
 
 /** `12-18`, or a bare `12` when the range covers a single line. */
 function rangeLabel(range: { startLine: number; endLine: number }): string {
@@ -87,10 +88,70 @@ const ENTITY_NOUNS: Record<EntitySelectionKind, string> = {
   teammate: "A Squad teammate's role definition",
 }
 
+/**
+ * How a picked element is NAMED in the heading above.
+ *
+ * Component name first when there is one: `<SubmitButton>` identifies the thing
+ * a developer would edit, where a `:nth-of-type` chain identifies only where it
+ * sits. The CSS selector follows as the unambiguous fallback, and a source hint
+ * — read from real `data-inspector-*` attributes — wins outright when present,
+ * because it names the file to change.
+ *
+ * English, like every other string in this file: prompt scaffolding, not UI
+ * copy, so it must not follow the user's locale.
+ */
+function elementLabel(element: ElementSelectionCore): string {
+  const parts: string[] = []
+  if (element.componentName) parts.push(`<${element.componentName}>`)
+  if (element.selector) parts.push(element.selector)
+  if (element.sourceHint) {
+    const { path, line, column } = element.sourceHint
+    parts.push(`${path}:${line}${column != null ? `:${column}` : ""}`)
+  }
+  return parts.length > 0 ? ` — ${parts.join(", ")}` : ""
+}
+
+/**
+ * The facts about a picked element that its markup alone does not carry.
+ *
+ * Deliberately short. The snapshot above is already the element's outerHTML, so
+ * repeating tag/class/text here would be noise; what a model cannot derive from
+ * the markup is where the node sits, what it actually computed to, and which
+ * component owns it.
+ */
+function elementFacts(element: ElementSelectionCore): string[] {
+  const facts: string[] = []
+  if (element.componentStack) facts.push(`Component path: ${element.componentStack}`)
+  if (element.props && Object.keys(element.props).length > 0) {
+    facts.push(
+      `Props: ${Object.entries(element.props)
+        .map(([key, value]) => `${key}=${value}`)
+        .join(", ")}`
+    )
+  }
+  if (element.computedStyles && Object.keys(element.computedStyles).length > 0) {
+    facts.push(
+      `Computed styles: ${Object.entries(element.computedStyles)
+        .map(([key, value]) => `${key}: ${value}`)
+        .join("; ")}`
+    )
+  }
+  if (element.accessibility?.role || element.accessibility?.name) {
+    facts.push(
+      `Accessibility: role=${element.accessibility.role || "none"}, name=${element.accessibility.name || "none"}`
+    )
+  }
+  return facts
+}
+
 function headingFor(sel: ContextSelectionRef): string {
   switch (sel.kind) {
     case "artifact":
-      return `Selection from artifact "${sel.title}" (lines ${rangeLabel(sel.range)}):`
+      // An element pick names the element, because "lines 40-44" is the least
+      // useful thing we know about a node the user pointed at on screen.
+      return sel.element
+        ? `Selected element in artifact "${sel.title}"${elementLabel(sel.element)} (lines ${rangeLabel(sel.range)}):`
+        : `Selection from artifact "${sel.title}" (lines ${rangeLabel(sel.range)}):`
     case "file":
       return sel.range
         ? `Selection from file "${sel.relPath}" (lines ${rangeLabel(sel.range)}):`
@@ -164,6 +225,7 @@ function stalenessNote(sel: ContextSelectionRef): string | null {
 
 function formatOne(sel: ContextSelectionRef): string {
   const lines = [headingFor(sel), "```", sel.snapshot, "```"]
+  if (sel.kind === "artifact" && sel.element) lines.push(...elementFacts(sel.element))
   const note = stalenessNote(sel)
   if (note) lines.push(note)
   if (sel.comment.trim()) {

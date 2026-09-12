@@ -3901,6 +3901,13 @@
     "downloadAsWord": "下载为 Word",
     "duplicate": "复制",
     "editInCanvas": "在画布中编辑",
+    "elementPick": {
+      "hint": "在预览中点击元素即可引用它；按住 {modifier} 可直接发送到对话。",
+      "label": "选取元素",
+      "labelActive": "结束选取",
+      "staged": "已暂存 {element}，将随下一条消息发送",
+      "unavailable": "请先打开预览再选取元素"
+    },
     "exitFullscreen": "退出全屏",
     "exportAs": {
       "html": "导出为 HTML",

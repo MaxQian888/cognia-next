@@ -6,7 +6,12 @@
  * `split` viewMode through a click).
  */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, act } from "@testing-library/react"
+
+import {
+  __resetArtifactPickersForTests,
+  registerArtifactPicker,
+} from "@/lib/artifacts/element-pick-registry"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -144,5 +149,60 @@ describe("ArtifactPanelContent split view", () => {
     // canSplit is false on mobile → not the split group; previewable → preview.
     expect(screen.queryByTestId("artifact-split-view")).not.toBeInTheDocument()
     expect(screen.getByTestId("preview")).toBeInTheDocument()
+  })
+})
+
+describe("ArtifactPanelContent element picking", () => {
+  beforeEach(() => {
+    __resetArtifactPickersForTests()
+  })
+
+  it("shows the toggle on a rendered surface, disabled until a preview registers", () => {
+    setState({ viewMode: "preview" })
+    render(<ArtifactPanelContent panelMode="desktop" />)
+
+    const toggle = screen.getByTestId("artifact-element-pick-toggle")
+    // Rendered-but-disabled, never hidden: hiding would collapse "cannot be
+    // pointed at" and "no preview mounted yet" into the same blank space.
+    expect(toggle).toBeDisabled()
+    expect(toggle).toHaveAttribute("aria-pressed", "false")
+  })
+
+  it("enables and arms once a preview registers its picker", () => {
+    setState({ viewMode: "preview" })
+    render(<ArtifactPanelContent panelMode="desktop" />)
+
+    const arm = jest.fn()
+    act(() => {
+      registerArtifactPicker("a1", { arm, disarm: jest.fn() })
+    })
+
+    const toggle = screen.getByTestId("artifact-element-pick-toggle")
+    expect(toggle).toBeEnabled()
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute("aria-pressed", "true")
+    expect(arm).toHaveBeenCalledTimes(1)
+    expect(arm.mock.calls[0][0].originLabel).toBe("artifact preview")
+  })
+
+  it("also offers the toggle in split view, where a preview is on screen", () => {
+    setState({ viewMode: "split" })
+    render(<ArtifactPanelContent panelMode="desktop" />)
+    expect(screen.getByTestId("artifact-element-pick-toggle")).toBeInTheDocument()
+  })
+
+  it("disarms when the toggle is switched back off", () => {
+    setState({ viewMode: "preview" })
+    render(<ArtifactPanelContent panelMode="desktop" />)
+    const disarm = jest.fn()
+    act(() => {
+      registerArtifactPicker("a1", { arm: jest.fn(), disarm })
+    })
+
+    const toggle = screen.getByTestId("artifact-element-pick-toggle")
+    fireEvent.click(toggle)
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute("aria-pressed", "false")
+    expect(disarm).toHaveBeenCalled()
   })
 })

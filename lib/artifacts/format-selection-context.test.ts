@@ -483,3 +483,91 @@ describe("a snapshot that has gone stale", () => {
     expect(out).not.toContain("has changed since")
   })
 })
+
+describe("element picks", () => {
+  const element = {
+    selector: "#card > button",
+    domPath: "div.card > button",
+    tagName: "button",
+    id: null,
+    classes: "primary",
+    rect: { x: 0, y: 0, width: 10, height: 10 },
+    outerHTML: "<button>Go</button>",
+    text: "Go",
+  }
+
+  it("names the element rather than only the line range", () => {
+    const out = formatContextSelectionsForLLM([
+      {
+        kind: "artifact",
+        artifactId: "a1",
+        title: "Landing",
+        snapshot: "<button>Go</button>",
+        comment: "",
+        range: { startLine: 4, endLine: 4 },
+        element,
+      },
+    ])
+    expect(out).toContain('Selected element in artifact "Landing" — #card > button (lines 4):')
+  })
+
+  it("prefers the component name and the source hint when present", () => {
+    const out = formatContextSelectionsForLLM([
+      {
+        kind: "artifact",
+        artifactId: "a1",
+        title: "Landing",
+        snapshot: "<button>Go</button>",
+        comment: "",
+        range: { startLine: 4, endLine: 4 },
+        element: {
+          ...element,
+          componentName: "SubmitButton",
+          sourceHint: { path: "app/page.tsx", line: 42, column: 7 },
+        },
+      },
+    ])
+    expect(out).toContain("<SubmitButton>")
+    expect(out).toContain("app/page.tsx:42:7")
+  })
+
+  it("adds only what the markup cannot say", () => {
+    const out = formatContextSelectionsForLLM([
+      {
+        kind: "artifact",
+        artifactId: "a1",
+        title: "Landing",
+        snapshot: "<button>Go</button>",
+        comment: "make it blue",
+        range: { startLine: 4, endLine: 4 },
+        element: {
+          ...element,
+          componentStack: "App > Hero > SubmitButton",
+          props: { tone: "primary" },
+          computedStyles: { color: "rgb(0, 0, 0)" },
+          accessibility: { role: "button", name: "Go" },
+        },
+      },
+    ])
+    expect(out).toContain("Component path: App > Hero > SubmitButton")
+    expect(out).toContain("Props: tone=primary")
+    expect(out).toContain("Computed styles: color: rgb(0, 0, 0)")
+    expect(out).toContain("Accessibility: role=button, name=Go")
+    expect(out).toContain("Comment: make it blue")
+  })
+
+  it("leaves a plain text selection's heading untouched", () => {
+    const out = formatContextSelectionsForLLM([
+      {
+        kind: "artifact",
+        artifactId: "a1",
+        title: "Landing",
+        snapshot: "const x = 1",
+        comment: "",
+        range: { startLine: 1, endLine: 2 },
+      },
+    ])
+    expect(out).toContain('Selection from artifact "Landing" (lines 1-2):')
+    expect(out).not.toContain("Selected element")
+  })
+})

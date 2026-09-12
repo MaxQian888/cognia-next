@@ -342,6 +342,69 @@ describe("installElementPicker", () => {
     dispose()
   })
 
+  it("ignores everything outside its root — the renderer-transport case", () => {
+    // A chart artifact draws in the APP's tree, so an unscoped picker would
+    // offer the dock, the rail and the conversation as pick targets.
+    mount(
+      `<div id="app"><aside><button id="rail">rail</button></aside><div id="preview"><button id="bar">bar</button></div></div>`
+    )
+    const root = document.getElementById("preview")!
+    const railClick = jest.fn()
+    document.getElementById("rail")!.addEventListener("click", railClick)
+
+    const onPick = jest.fn()
+    const dispose = installElementPicker(document, { onPick, root })
+
+    document
+      .getElementById("rail")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
+    expect(onPick).not.toHaveBeenCalled()
+    // And the surrounding app stays usable while select mode is armed.
+    expect(railClick).toHaveBeenCalledTimes(1)
+
+    document
+      .getElementById("bar")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
+    expect(onPick).toHaveBeenCalledTimes(1)
+    expect(onPick.mock.calls[0][0].id).toBe("bar")
+    dispose()
+  })
+
+  it("lets the root itself be picked", () => {
+    mount(`<div id="preview"><span>x</span></div>`)
+    const root = document.getElementById("preview")!
+    const onPick = jest.fn()
+    const dispose = installElementPicker(document, { onPick, root })
+    root.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
+    expect(onPick.mock.calls[0][0].id).toBe("preview")
+    dispose()
+  })
+
+  it("drops the highlight when the pointer leaves the root", () => {
+    mount(`<div id="outside">out</div><div id="preview"><b>in</b></div>`)
+    const root = document.getElementById("preview")!
+    const dispose = installElementPicker(document, { onPick: jest.fn(), root })
+    const highlight = document.querySelector<HTMLElement>(`[${PICKER_NODE_ATTRIBUTE}="highlight"]`)!
+
+    document.querySelector("b")!.dispatchEvent(new MouseEvent("pointermove", { bubbles: true }))
+    expect(highlight.style.opacity).toBe("1")
+    document
+      .getElementById("outside")!
+      .dispatchEvent(new MouseEvent("pointermove", { bubbles: true }))
+    expect(highlight.style.opacity).toBe("0")
+    dispose()
+  })
+
+  it("paints the crosshair on its root, not over the whole app", () => {
+    mount(`<div id="preview"><b>in</b></div>`)
+    const root = document.getElementById("preview")!
+    const dispose = installElementPicker(document, { onPick: jest.fn(), root })
+    expect(root.style.cursor).toBe("crosshair")
+    expect(document.documentElement.style.cursor).toBe("")
+    dispose()
+    expect(root.style.cursor).toBe("")
+  })
+
   it("returns a no-op disposer for a document with no body", () => {
     const bare = document.implementation.createDocument(null, null, null)
     expect(() =>

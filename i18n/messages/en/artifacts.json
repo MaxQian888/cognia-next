@@ -48,6 +48,13 @@
   "downloadAsWord": "Download as Word",
   "duplicate": "Duplicate",
   "editInCanvas": "Edit in Canvas",
+  "elementPick": {
+    "hint": "Click an element in the preview to reference it. Hold {modifier} to send it straight to chat.",
+    "label": "Select element",
+    "labelActive": "Stop selecting",
+    "staged": "Staged {element} for the next message",
+    "unavailable": "Open the preview to select an element"
+  },
   "exitFullscreen": "Exit Fullscreen",
   "exportAs": {
     "html": "Export as HTML",

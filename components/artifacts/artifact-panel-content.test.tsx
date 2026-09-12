@@ -4,6 +4,8 @@
 
 import { render, screen, fireEvent } from "@testing-library/react"
 
+import { __resetArtifactPickersForTests } from "@/lib/artifacts/element-pick-registry"
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
@@ -57,6 +59,7 @@ beforeEach(() => {
   localStorage.clear()
   // The active artifact is bucketed per conversation, so the panel only
   // resolves one once a conversation is on screen.
+  __resetArtifactPickersForTests()
   useChatStore.setState({ activeSessionId: "s" })
   useArtifactStore.setState({
     artifacts: {},
@@ -144,5 +147,14 @@ describe("ArtifactPanelContent", () => {
     fireEvent.click(screen.getByTestId("action-edit"))
     expect(screen.getByTestId("light-code-editor")).toBeInTheDocument()
     expect(screen.queryByTestId("monaco")).not.toBeInTheDocument()
+  })
+})
+
+describe("ArtifactPanelContent element picking", () => {
+  it("offers no pick toggle on the source-text tabs", () => {
+    makeArtifact("html")
+    render(<ArtifactPanelContent panelMode="desktop" />)
+    // The default tab is `code`; only rendered surfaces can be pointed at.
+    expect(screen.queryByTestId("artifact-element-pick-toggle")).not.toBeInTheDocument()
   })
 })

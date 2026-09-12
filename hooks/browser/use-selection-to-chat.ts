@@ -2,7 +2,7 @@
 
 import { useCallback } from "react"
 
-import { useClaudeChat } from "@/hooks/chat/use-claude-chat"
+import { useOptionalClaudeChat } from "@/hooks/chat/use-claude-chat"
 import { browserClient } from "@/lib/browser/client"
 import { formatAnnotationBatch } from "@/lib/browser/annotation-queue"
 import {
@@ -43,10 +43,29 @@ export interface SendCommentOptions {
 /**
  * Bridges a browser selection + comment into the existing chat send pipeline —
  * the chat core is untouched. Reuses {@link buildSendContent} for the
- * image+text content blocks and {@link useClaudeChat} for delivery.
+ * image+text content blocks and the shared chat runtime for delivery.
  */
 export function useSelectionToChat() {
-  const { send, interruptAndSteer } = useClaudeChat()
+  // Optional, not strict: the artifacts dock body constructs this hook and is
+  // itself rendered in Storybook and in unit tests where no runtime is
+  // mounted. Every entry point below refuses loudly rather than reporting a
+  // send that never happened.
+  const runtime = useOptionalClaudeChat()
+  type Runtime = NonNullable<typeof runtime>
+  const send = useCallback<Runtime["send"]>(
+    (...args) => {
+      if (!runtime) throw new Error("Cannot send: no ClaudeChatRuntimeProvider is mounted")
+      return runtime.send(...args)
+    },
+    [runtime]
+  )
+  const interruptAndSteer = useCallback<Runtime["interruptAndSteer"]>(
+    (...args) => {
+      if (!runtime) throw new Error("Cannot steer: no ClaudeChatRuntimeProvider is mounted")
+      return runtime.interruptAndSteer(...args)
+    },
+    [runtime]
+  )
 
   const sendComment = useCallback(
     async (

@@ -8,6 +8,8 @@
  * CanvasDocumentVersion remain so the "Edit in Canvas" handoff still works.
  */
 
+import type { ElementSelectionCore } from "@/types/element-selection"
+
 export type ArtifactType =
   | "code" // Code snippets (React, HTML, CSS, JS, Python, etc.)
   | "document" // Markdown documents
@@ -112,6 +114,18 @@ export interface ArtifactSelectionRef extends ContextSelectionBase {
   kind: "artifact"
   artifactId: string
   range: { startLine: number; endLine: number }
+  /**
+   * Set when the user pointed at a RENDERED element rather than selecting
+   * source text — the artifact preview's element picker.
+   *
+   * Additive on purpose: the `range` above stays the diff anchor, so an element
+   * pick is still eligible to be the edit target and can still come back as a
+   * revision proposal. This only adds what the source lines cannot say — which
+   * element, which component, what it computed to — because "the button that
+   * renders at line 42" and "`<SubmitButton>` with these styles" are different
+   * amounts of help to a model asked to change it.
+   */
+  element?: ElementSelectionCore
 }
 
 /** A file (or one diff hunk) handed over from the dock's workspace panel. */

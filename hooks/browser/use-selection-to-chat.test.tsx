@@ -4,6 +4,11 @@ import type { BrowserSelection } from "@/lib/browser/protocol"
 
 const mockSend = jest.fn().mockResolvedValue(undefined)
 const mockInterrupt = jest.fn().mockResolvedValue(undefined)
+/** Swapped to null by the "no provider" cases below. */
+let mockRuntime: { send: typeof mockSend; interruptAndSteer: typeof mockInterrupt } | null = {
+  send: mockSend,
+  interruptAndSteer: mockInterrupt,
+}
 const mockCapture = jest.fn()
 const mockSaveAnnotation = jest.fn().mockResolvedValue(undefined)
 const mockTransitionAnnotation = jest.fn().mockResolvedValue(true)
@@ -13,7 +18,11 @@ let mockStoreState: {
 }
 
 jest.mock("@/hooks/chat/use-claude-chat", () => ({
-  useClaudeChat: () => ({ send: mockSend, interruptAndSteer: mockInterrupt }),
+  // The hook reads the runtime OPTIONALLY, so that surfaces which merely
+  // construct it outside a provider (the artifacts dock body, Storybook) still
+  // render. Returning null here is what the "no provider" cases assert on.
+  useOptionalClaudeChat: () => mockRuntime,
+  useClaudeChat: () => mockRuntime,
 }))
 jest.mock("@/stores/chat/chat-store", () => ({
   useChatStore: { getState: () => mockStoreState },
@@ -283,5 +292,26 @@ describe("sendText", () => {
     await result.current.sendText("go")
     expect(mockInterrupt).not.toHaveBeenCalled()
     expect(mockSend).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("without a chat runtime provider", () => {
+  afterEach(() => {
+    mockRuntime = { send: mockSend, interruptAndSteer: mockInterrupt }
+  })
+
+  it("constructs, so a surface outside the provider still renders", () => {
+    mockRuntime = null
+    // The artifacts dock body builds this hook and is itself rendered in
+    // Storybook and in unit tests, where no runtime is mounted. Throwing on
+    // construction would make those surfaces unrenderable.
+    expect(() => renderHook(() => useSelectionToChat())).not.toThrow()
+  })
+
+  it("refuses loudly instead of reporting a send that never happened", async () => {
+    mockRuntime = null
+    const { result } = renderHook(() => useSelectionToChat())
+    await expect(result.current.sendText("hello")).rejects.toThrow(/ClaudeChatRuntimeProvider/)
+    expect(mockSend).not.toHaveBeenCalled()
   })
 })

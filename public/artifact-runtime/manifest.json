@@ -4,7 +4,7 @@
   "babelVersion": "8.0.4",
   "shellSources": {
     "lib/artifacts/runtime/artifact-shell-entry.ts": "b15648d6da60c48396b38c3ffff8e821014c378c5835f03a11f8cbbfcaceab94",
-    "lib/artifacts/runtime/element-pick.ts": "09bc657d0642049dbbede9321af41319551a0e049508aae88930e9524575e934"
+    "lib/artifacts/runtime/element-pick.ts": "c553166db8d6231112e21a681fdca0eab97e3c8ffd648b283d14157921e1adc3"
   },
   "files": {
     "react-runtime.js": {
@@ -16,8 +16,8 @@
       "sha256": "a8b723044ca8e3f526ff7e4b269797d10eaf0e742087d4ba4e49e953d0adefd7"
     },
     "artifact-shell.js": {
-      "bytes": 12321,
-      "sha256": "5737ad8d0e73b945ee5c0a251652fb67dba4803a25de88b961b5c518239ca22d"
+      "bytes": 12396,
+      "sha256": "f28679f423147b78238871b56fcb3c9e7fc5c9ccc1b116154c56e26a6242de4d"
     }
   }
 }

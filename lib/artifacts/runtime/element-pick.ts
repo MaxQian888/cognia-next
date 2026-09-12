@@ -541,6 +541,17 @@ export interface ElementPickerOptions {
   onCancel?: () => void
   /** Stamped onto every payload this picker produces. */
   originLabel?: string
+  /**
+   * Confine picking to this subtree.
+   *
+   * Load-bearing for the `renderer` transports (chart / mermaid / math / code /
+   * document), which draw as live React *in the app's own tree* rather than in
+   * a frame. Without a root, arming the picker there would offer the whole
+   * application — the dock chrome, the rail, the conversation — as pick
+   * targets, and the user could hand the model the outerHTML of the workbench
+   * instead of their chart. Frames pass no root: their document IS the bound.
+   */
+  root?: Element | null
 }
 
 /**
@@ -589,6 +600,13 @@ export function installElementPicker(doc: Document, options: ElementPickerOption
   const isPickerNode = (node: Element | null): boolean =>
     !!node?.closest?.(`[${PICKER_NODE_ATTRIBUTE}]`)
 
+  /**
+   * Whether this node is in scope. A root that is itself pickable is
+   * deliberate — the user may want to point at the whole chart.
+   */
+  const inScope = (node: Element): boolean =>
+    !options.root || options.root === node || options.root.contains(node)
+
   const paint = (el: Element | null) => {
     current = el
     if (!el) {
@@ -621,6 +639,12 @@ export function installElementPicker(doc: Document, options: ElementPickerOption
   const onPointerMove = (event: Event) => {
     const target = event.target as Element | null
     if (!target || target.nodeType !== 1 || isPickerNode(target)) return
+    if (!inScope(target)) {
+      // Out of bounds is not "keep the last highlight" — a stale box would
+      // claim the pointer is over something it is not.
+      if (current) paint(null)
+      return
+    }
     if (target !== current) paint(target)
   }
 
@@ -629,6 +653,9 @@ export function installElementPicker(doc: Document, options: ElementPickerOption
   const onClick = (event: MouseEvent) => {
     const target = event.target as Element | null
     if (!target || target.nodeType !== 1 || isPickerNode(target)) return
+    // Out of scope: let the click through untouched. Swallowing it would make
+    // the surrounding app unusable while select mode is armed.
+    if (!inScope(target)) return
     // Capture phase + all three, because the artifact's own handlers must not
     // also fire: picking a button in a live React artifact would otherwise
     // submit its form while selecting it.
@@ -644,6 +671,7 @@ export function installElementPicker(doc: Document, options: ElementPickerOption
   const swallow = (event: Event) => {
     const target = event.target as Element | null
     if (isPickerNode(target)) return
+    if (target?.nodeType === 1 && !inScope(target)) return
     event.preventDefault()
     event.stopPropagation()
   }
@@ -662,8 +690,11 @@ export function installElementPicker(doc: Document, options: ElementPickerOption
   doc.addEventListener("mouseup", swallow, true)
   doc.addEventListener("keydown", onKeyDown, true)
 
-  const previousCursor = doc.documentElement?.style.cursor ?? ""
-  if (doc.documentElement) doc.documentElement.style.cursor = "crosshair"
+  // The crosshair marks what is actually pickable, so a scoped picker paints
+  // it on its root rather than over the entire app.
+  const cursorHost = (options.root as HTMLElement | null) ?? (doc.documentElement as HTMLElement)
+  const previousCursor = cursorHost?.style?.cursor ?? ""
+  if (cursorHost?.style) cursorHost.style.cursor = "crosshair"
 
   return () => {
     doc.removeEventListener("pointermove", onPointerMove, true)
@@ -672,7 +703,7 @@ export function installElementPicker(doc: Document, options: ElementPickerOption
     doc.removeEventListener("mousedown", swallow, true)
     doc.removeEventListener("mouseup", swallow, true)
     doc.removeEventListener("keydown", onKeyDown, true)
-    if (doc.documentElement) doc.documentElement.style.cursor = previousCursor
+    if (cursorHost?.style) cursorHost.style.cursor = previousCursor
     highlight.remove()
     label.remove()
     current = null

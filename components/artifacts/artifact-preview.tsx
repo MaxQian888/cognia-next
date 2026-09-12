@@ -37,6 +37,12 @@ import { loggers } from "@cognia/logging"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { registerArtifactPreviewNode } from "@/lib/artifacts/preview-registry"
 import {
+  registerArtifactPicker,
+  type ArtifactPickController,
+  type ArtifactPickRequest,
+} from "@/lib/artifacts/element-pick-registry"
+import { installElementPicker } from "@/lib/artifacts/runtime/element-pick"
+import {
   ArtifactFrameCaptureError,
   ArtifactFrameCaptureTimeoutError,
   registerArtifactFrameCapturer,
@@ -156,12 +162,23 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
   // svg can be. Iframe transports register a CAPTURER instead, below: their
   // frame is opaque-origin, so it has to be asked for a snapshot rather than
   // read (`lib/artifacts/frame-capture-registry.ts`).
+  /**
+   * The mounted node for `renderer` transports, which the picker needs as its
+   * ROOT: those artifacts draw in the app's own tree, so an unscoped picker
+   * would offer the dock and the conversation as pick targets.
+   */
+  const rendererNodeRef = useRef<HTMLDivElement | null>(null)
   const registerRendererNode = useCallback(
     (node: HTMLDivElement | null) => {
+      rendererNodeRef.current = node
       if (!node) return undefined
       // React 19 ref-callback cleanup: the disposer runs on unmount, so a
       // detached node can never be handed to the exporter.
-      return registerArtifactPreviewNode(artifact.id, node)
+      const disposePreviewNode = registerArtifactPreviewNode(artifact.id, node)
+      return () => {
+        if (rendererNodeRef.current === node) rendererNodeRef.current = null
+        disposePreviewNode()
+      }
     },
     [artifact.id]
   )
@@ -214,6 +231,98 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
           ? "svg"
           : "text"
   const needsRuntime = frameMode === "react" || frameMode === "interactive"
+
+  // ---- element picking ----------------------------------------------------
+  // This component is the ONLY place that knows how to reach what it drew, so
+  // it owns the transport branch and the dock just says "arm". See
+  // `lib/artifacts/element-pick-registry.ts`.
+
+  /** The live pick request, or null when select mode is off. */
+  const pickRequestRef = useRef<ArtifactPickRequest | null>(null)
+  /** Disposer for a picker installed into a document we can reach directly. */
+  const disposeLocalPickerRef = useRef<(() => void) | null>(null)
+
+  /**
+   * Install (or re-install) the picker for the CURRENT document.
+   *
+   * Re-entrant on purpose: a preview re-render replaces the document the picker
+   * was installed on — `renderHTML` rewrites the same-origin frame, and a
+   * scripted frame reloads its `srcdoc` — which would silently strand select
+   * mode with a highlight attached to a document nobody can see. Every path
+   * that repaints calls this again.
+   */
+  const applyPicker = useCallback(() => {
+    const request = pickRequestRef.current
+    disposeLocalPickerRef.current?.()
+    disposeLocalPickerRef.current = null
+    if (!request) {
+      // Tell a scripted frame to drop its own picker too; it lives on the
+      // other side of the boundary and cannot observe this component.
+      if (needsRuntime) {
+        iframeRef.current?.contentWindow?.postMessage(
+          { type: "artifact-set-select-mode", on: false },
+          "*"
+        )
+      }
+      return
+    }
+    if (needsRuntime) {
+      // Opaque origin: postMessage is the only channel. Picks arrive back
+      // through the shared message listener below.
+      iframeRef.current?.contentWindow?.postMessage(
+        { type: "artifact-set-select-mode", on: true, originLabel: request.originLabel },
+        "*"
+      )
+      return
+    }
+    const handlers = {
+      originLabel: request.originLabel,
+      onPick: request.onPick,
+      onCancel: () => {
+        pickRequestRef.current = null
+        disposeLocalPickerRef.current?.()
+        disposeLocalPickerRef.current = null
+        request.onCancel?.()
+      },
+    }
+    if (needsIframe) {
+      // `allow-same-origin`: the parent already writes this document, so it can
+      // install the picker directly — no script inside the frame, and no
+      // sandbox relaxed to get one.
+      const doc = iframeRef.current?.contentDocument
+      if (doc) disposeLocalPickerRef.current = installElementPicker(doc, handlers)
+      return
+    }
+    const root = rendererNodeRef.current
+    if (root) {
+      disposeLocalPickerRef.current = installElementPicker(document, { ...handlers, root })
+    }
+  }, [needsIframe, needsRuntime])
+
+  useEffect(() => {
+    const controller: ArtifactPickController = {
+      arm: (request) => {
+        pickRequestRef.current = request
+        applyPicker()
+      },
+      disarm: () => {
+        pickRequestRef.current = null
+        applyPicker()
+      },
+    }
+    return registerArtifactPicker(artifact.id, controller)
+  }, [applyPicker, artifact.id])
+
+  // A picker must never outlive the component: its listeners are capture-phase
+  // and swallow clicks, so a leaked one makes the artifact uninteractive.
+  useEffect(
+    () => () => {
+      pickRequestRef.current = null
+      disposeLocalPickerRef.current?.()
+      disposeLocalPickerRef.current = null
+    },
+    []
+  )
 
   // Answering an export request. A scripted frame is opaque-origin, so the
   // exporter cannot read it and the frame cannot rasterise itself either (see
@@ -539,6 +648,10 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
       // bootstrap reports `artifact-preview-ready`.
       if (frameMode !== "react" && frameMode !== "interactive") {
         setIsLoading(false)
+        // The same-origin frames and the renderer nodes never post `ready`, so
+        // this is their only chance to re-apply a still-armed picker: the
+        // repaint above just replaced the content it was highlighting.
+        applyPicker()
         return
       }
       if (shellReadyRef.current) return
@@ -569,6 +682,7 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
   }, [
     setError,
     artifact.id,
+    applyPicker,
     artifact.content,
     artifact.metadata?.rendererProfile,
     artifact.type,
@@ -615,6 +729,22 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
         void pushScriptedContent()
         return
       }
+      if (event.data?.type === "artifact-element-selected") {
+        // A pick from the opaque-origin frame. The payload was built by the
+        // same `element-pick.ts` the parent uses, bundled into the shell.
+        const modifiers = event.data.modifiers ?? {}
+        pickRequestRef.current?.onPick(event.data.selection, {
+          metaKey: modifiers.metaKey === true,
+          ctrlKey: modifiers.ctrlKey === true,
+        })
+        return
+      }
+      if (event.data?.type === "artifact-element-pick-cancelled") {
+        const request = pickRequestRef.current
+        pickRequestRef.current = null
+        request?.onCancel?.()
+        return
+      }
       if (event.data?.type === "artifact-capture-result") {
         const entry = pendingCaptures.current.get(event.data.requestId)
         entry?.resolve({
@@ -632,6 +762,9 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
       if (event.data?.type === "artifact-preview-ready") {
         setIsLoading(false)
         syncParentContext()
+        // The frame just (re)painted, so a still-armed select mode has to be
+        // re-applied — the document it was installed on is gone.
+        applyPicker()
         return
       }
       if (
@@ -650,6 +783,7 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
       if (shellDeadlineRef.current) clearTimeout(shellDeadlineRef.current)
     }
   }, [
+    applyPicker,
     setError,
     artifact.id,
     artifact.type,

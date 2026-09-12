@@ -11,10 +11,20 @@
  */
 
 import dynamic from "next/dynamic"
+import { useTranslations } from "next-intl"
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { editor as MonacoEditorNS } from "monaco-editor"
 import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
-import { Maximize2, Minimize2, MoreHorizontal, Pencil, Save, X, FileCode } from "lucide-react"
+import {
+  Maximize2,
+  Minimize2,
+  MoreHorizontal,
+  MousePointerSquareDashed,
+  Pencil,
+  Save,
+  X,
+  FileCode,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useMonacoActiveTheme } from "@/hooks/git/use-monaco-active-theme"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -60,6 +70,10 @@ import { ArtifactPreview } from "./artifact-preview"
 import { ArtifactList } from "./artifact-list"
 import { ArtifactReviewView } from "./artifact-review-view"
 import { SelectionCommentButton } from "./selection-comment-button"
+import { useArtifactElementSelection } from "@/hooks/artifacts/use-artifact-element-selection"
+import { useSelectionToChat } from "@/hooks/browser/use-selection-to-chat"
+import { formatContextSelectionsForLLM } from "@/lib/artifacts/format-selection-context"
+import { locateElementRange } from "@/hooks/artifacts/use-artifact-element-selection"
 import { PanelVersionHistory } from "./panel-version-history"
 import {
   DESIGNABLE_TYPES,
@@ -126,6 +140,42 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
     handleRevealInExplorer,
     handleSaveToProject,
   } = useArtifactPanelState()
+
+  // ---- element picking ----------------------------------------------------
+  // Only the rendered surfaces can be pointed at, so the toggle lives with the
+  // preview tabs rather than beside `SelectionCommentButton`, which serves the
+  // source-text modes.
+  const previewVisible = viewMode === "preview" || viewMode === "split"
+  const tElementPick = useTranslations("artifacts.elementPick")
+  /**
+   * The modifier named in the hint. `⌘` on Apple platforms, `Ctrl` elsewhere —
+   * the picker accepts either, so this only decides which one to SHOW.
+   */
+  const pickSendModifier =
+    typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform)
+      ? "\u2318"
+      : "Ctrl"
+  const { sendText } = useSelectionToChat()
+  const elementSelection = useArtifactElementSelection({
+    artifact: activeArtifact,
+    previewVisible,
+    // Reuses the browser surface's delivery path — it already knows not to
+    // interrupt a live turn for a text-only send.
+    sendNow: (element, artifact) =>
+      sendText(
+        formatContextSelectionsForLLM([
+          {
+            kind: "artifact",
+            artifactId: artifact.id,
+            title: artifact.title,
+            snapshot: element.outerHTML || element.text,
+            comment: "",
+            range: locateElementRange(artifact.content, element),
+            element,
+          },
+        ])
+      ),
+  })
 
   // Workbench wiring for the VS Code reuse layer: when the artifact's Monaco
   // editor mounts, attach a stable `artifact:///{id}.{ext}` URI so LSP
@@ -341,6 +391,45 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
     </>
   )
 
+  /**
+   * The select-mode toggle.
+   *
+   * Rendered disabled rather than hidden when the preview has not registered a
+   * picker: hiding it would collapse three different answers — "this artifact
+   * can never be pointed at", "the preview is still mounting", and "something
+   * broke" — into one blank space. The tooltip says which.
+   */
+  const renderElementPickToggle = () => (
+    <Button
+      size="sm"
+      variant={elementSelection.selectMode ? "secondary" : "ghost"}
+      className="h-8 gap-1 px-2 text-xs"
+      disabled={!elementSelection.available}
+      aria-pressed={elementSelection.selectMode}
+      data-testid="artifact-element-pick-toggle"
+      title={
+        elementSelection.available
+          ? tElementPick("hint", { modifier: pickSendModifier })
+          : tElementPick("unavailable")
+      }
+      aria-label={elementSelection.selectMode ? tElementPick("labelActive") : tElementPick("label")}
+      onClick={elementSelection.toggleSelectMode}
+    >
+      <MousePointerSquareDashed className="h-4 w-4" aria-hidden="true" />
+      <span className="hidden @md:inline">
+        {elementSelection.selectMode ? tElementPick("labelActive") : tElementPick("label")}
+      </span>
+      {elementSelection.pickedCount > 0 && (
+        <span
+          className="rounded-pill bg-primary/15 px-1.5 text-[10px] font-medium tabular-nums"
+          data-testid="artifact-element-pick-count"
+        >
+          {elementSelection.pickedCount}
+        </span>
+      )}
+    </Button>
+  )
+
   const renderActionZone = () => {
     if (viewMode === "edit") {
       return renderEditActions()
@@ -348,6 +437,7 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
 
     return (
       <>
+        {activeArtifact && previewVisible && renderElementPickToggle()}
         {activeArtifact &&
           (viewMode === "code" || viewMode === "review" || viewMode === "split") && (
             <SelectionCommentButton artifact={activeArtifact} className="h-8 px-2 text-xs" />
