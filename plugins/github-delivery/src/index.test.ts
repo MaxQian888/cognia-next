@@ -131,6 +131,7 @@ describe("GitHub Delivery v3 official plugin", () => {
           suspended_at: null,
           permissions: {
             checks: "read",
+            actions: "read",
             contents: "write",
             issues: "write",
             metadata: "read",
@@ -142,6 +143,7 @@ describe("GitHub Delivery v3 official plugin", () => {
     await expect(checkGithubHealth(healthy)).resolves.toMatchObject({
       health: "healthy",
       grantedPermissions: [
+        "actions:read",
         "checks:read",
         "contents:write",
         "issues:write",
@@ -224,3 +226,208 @@ describe("GitHub Delivery v3 official plugin", () => {
 })
 
 void ({} as IntegrationActionHandlerContext)
+
+describe("GitHub monitoring events and revision-bound reviews", () => {
+  it("declares PR lifecycle, CI completions and sender identity", () => {
+    const types = githubIntegration.eventTypes.map((event) => event.id)
+    expect(types).toEqual(
+      expect.arrayContaining([
+        "pull_request.ready_for_review",
+        "pull_request.converted_to_draft",
+        "issues.reopened",
+        "workflow_run.completed",
+        "workflow_job.completed",
+        "check_suite.completed",
+      ])
+    )
+    const event = normalizeGithub(
+      {
+        routeId: "route",
+        deliveryId: "d",
+        eventType: "workflow_run",
+        headers: {},
+        receivedAt: "2026-09-12T00:00:00Z",
+        body: JSON.stringify({
+          action: "completed",
+          repository: { full_name: "owner/repo" },
+          sender: { id: 12, login: "bot[bot]" },
+          workflow_run: { head_sha: "a".repeat(40), conclusion: "failure" },
+        }),
+      },
+      { pluginId: "github-delivery", integrationId: "github", accountId: "account" }
+    )
+    expect(event).toMatchObject({
+      eventType: "workflow_run.completed",
+      resource: { id: "owner/repo" },
+      actor: { id: "12", label: "bot[bot]" },
+      payload: { workflow_run: { conclusion: "failure" } },
+    })
+  })
+
+  it("pins a review to the approved commit instead of a later PR head", async () => {
+    const request = jest
+      .fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: {},
+        data: { state: "open", head: { sha: "a".repeat(40) } },
+      })
+      .mockResolvedValueOnce({ status: 200, headers: {}, data: [] })
+      .mockResolvedValueOnce({ status: 200, headers: {}, data: { id: 1 } })
+    await githubExports.reviewPr(
+      {
+        repoFullName: "owner/repo",
+        prNumber: 1,
+        body: "Review",
+        event: "COMMENT",
+        commitId: "a".repeat(40),
+      },
+      { ...providerContext(request), jobId: "job", signal: new AbortController().signal }
+    )
+    expect(JSON.parse(request.mock.calls[2][1].body)).toMatchObject({
+      commit_id: "a".repeat(40),
+      body: "Review",
+      event: "COMMENT",
+    })
+  })
+  it("recovers a matching PR after uncertain publication and rejects a moved base", async () => {
+    const input = {
+      repoFullName: "owner/repo",
+      title: "Fix",
+      head: "bot/fix",
+      base: "main",
+      body: "Result",
+      expectedBaseSha: "a".repeat(40),
+    }
+    const existing = { number: 4, title: "Fix", body: "Result", base: { ref: "main" } }
+    const request = jest
+      .fn()
+      .mockResolvedValueOnce({ status: 200, headers: {}, data: { sha: input.expectedBaseSha } })
+      .mockResolvedValueOnce({ status: 200, headers: {}, data: [existing] })
+    const context = {
+      ...providerContext(request),
+      jobId: "job",
+      signal: new AbortController().signal,
+    }
+    await expect(githubExports.openPr(input, context)).resolves.toEqual(existing)
+    expect(request.mock.calls.every((call) => call[1].method === "GET")).toBe(true)
+    request.mockResolvedValueOnce({ status: 200, headers: {}, data: { sha: "b".repeat(40) } })
+    await expect(githubExports.openPr(input, context)).rejects.toThrow("SHA changed")
+    request
+      .mockResolvedValueOnce({ status: 200, headers: {}, data: { sha: input.expectedBaseSha } })
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: {},
+        data: [{ ...existing, body: "Different" }],
+      })
+    await expect(githubExports.openPr(input, context)).rejects.toThrow("does not match")
+  })
+
+  it("creates one PR only when the approved branch has no previous publication", async () => {
+    const input = {
+      repoFullName: "owner/repo",
+      title: "Fix",
+      head: "bot/fix",
+      base: "main",
+      expectedBaseSha: "a".repeat(40),
+    }
+    const request = jest
+      .fn()
+      .mockResolvedValueOnce({ status: 200, headers: {}, data: { sha: input.expectedBaseSha } })
+      .mockResolvedValueOnce({ status: 200, headers: {}, data: [] })
+      .mockResolvedValueOnce({ status: 201, headers: {}, data: { number: 5 } })
+    await expect(
+      githubExports.openPr(input, {
+        ...providerContext(request),
+        jobId: "job",
+        signal: new AbortController().signal,
+      })
+    ).resolves.toEqual({ number: 5 })
+    expect(request.mock.calls[2][1].method).toBe("POST")
+  })
+
+  it("blocks changed published heads before POST and before accepting a reconciled PR", async () => {
+    const input = {
+      repoFullName: "owner/repo",
+      title: "Fix",
+      head: "bot/fix",
+      base: "main",
+      expectedBaseSha: "a".repeat(40),
+      expectedHeadSha: "b".repeat(40),
+    }
+    const existing = {
+      number: 4,
+      title: "Fix",
+      base: { ref: "main" },
+      head: { sha: input.expectedHeadSha },
+    }
+    for (const previous of [[], [existing]]) {
+      const request = jest
+        .fn()
+        .mockResolvedValueOnce({ status: 200, headers: {}, data: { sha: input.expectedBaseSha } })
+        .mockResolvedValueOnce({ status: 200, headers: {}, data: previous })
+        .mockResolvedValueOnce({ status: 200, headers: {}, data: { sha: "c".repeat(40) } })
+      await expect(
+        githubExports.openPr(input, {
+          ...providerContext(request),
+          jobId: "job",
+          signal: new AbortController().signal,
+        })
+      ).rejects.toThrow("head SHA changed")
+      expect(request.mock.calls.every((call) => call[1].method === "GET")).toBe(true)
+    }
+    const request = jest
+      .fn()
+      .mockResolvedValueOnce({ status: 200, headers: {}, data: { sha: input.expectedBaseSha } })
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: {},
+        data: [{ ...existing, head: { sha: "c".repeat(40) } }],
+      })
+    await expect(
+      githubExports.openPr(input, {
+        ...providerContext(request),
+        jobId: "job",
+        signal: new AbortController().signal,
+      })
+    ).rejects.toThrow("head does not match")
+    expect(request).toHaveBeenCalledTimes(2)
+  })
+
+  it("searches paginated reviews before retrying and refuses a stale review head", async () => {
+    const input = {
+      repoFullName: "owner/repo",
+      prNumber: 1,
+      body: "Stable review",
+      commitId: "a".repeat(40),
+    }
+    const existing = { id: 55, body: input.body, commit_id: input.commitId }
+    const request = jest
+      .fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: {},
+        data: { state: "open", head: { sha: input.commitId } },
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: {},
+        data: Array.from({ length: 100 }, () => ({ body: "Other" })),
+      })
+      .mockResolvedValueOnce({ status: 200, headers: {}, data: [existing] })
+    const context = {
+      ...providerContext(request),
+      jobId: "job",
+      signal: new AbortController().signal,
+    }
+    await expect(githubExports.reviewPr(input, context)).resolves.toEqual(existing)
+    expect(request.mock.calls[2][0]).toContain("page=2")
+    expect(request.mock.calls.every((call) => call[1].method === "GET")).toBe(true)
+    request.mockResolvedValueOnce({
+      status: 200,
+      headers: {},
+      data: { state: "open", head: { sha: "b".repeat(40) } },
+    })
+    await expect(githubExports.reviewPr(input, context)).rejects.toThrow("SHA changed")
+  })
+})

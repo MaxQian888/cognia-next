@@ -1,7 +1,7 @@
 {
   "id": "github-delivery",
   "name": "GitHub Delivery",
-  "description": "GitHub pull request, issue, review, release, tag, and Issue→PR delivery.",
+  "description": "GitHub pull request, issue, review, release, tag, and Issue\u2192PR delivery.",
   "author": {
     "name": "Cognia Official",
     "publicKey": "HywtZKOopAEuRqZGzXIfdqo9ID/FfBgXFvKIj9TF4N0="
@@ -43,7 +43,7 @@
     {
       "id": "github",
       "label": "GitHub",
-      "description": "Pull requests, issues, reviews, releases, tags, and Issue→PR delivery.",
+      "description": "Pull requests, issues, reviews, releases, tags, and Issue\u2192PR delivery.",
       "authStrategies": [
         {
           "id": "github-app",
@@ -52,6 +52,7 @@
           "providerId": "github-app",
           "scopes": [
             "checks:read",
+            "actions:read",
             "contents:write",
             "issues:write",
             "metadata:read",
@@ -222,6 +223,66 @@
           "id": "github_app_authorization.revoked",
           "label": "github_app_authorization.revoked",
           "resourceKinds": ["repository"]
+        },
+        {
+          "id": "pull_request.reopened",
+          "label": "pull_request.reopened",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "pull_request.edited",
+          "label": "pull_request.edited",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "pull_request.ready_for_review",
+          "label": "pull_request.ready_for_review",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "pull_request.converted_to_draft",
+          "label": "pull_request.converted_to_draft",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "pull_request.labeled",
+          "label": "pull_request.labeled",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "pull_request.unlabeled",
+          "label": "pull_request.unlabeled",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "issues.reopened",
+          "label": "issues.reopened",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "issues.edited",
+          "label": "issues.edited",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "issues.unlabeled",
+          "label": "issues.unlabeled",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "check_suite.completed",
+          "label": "check_suite.completed",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "workflow_run.completed",
+          "label": "workflow_run.completed",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "workflow_job.completed",
+          "label": "workflow_job.completed",
+          "resourceKinds": ["repository"]
         }
       ],
       "inboxProjections": [
@@ -233,7 +294,13 @@
             "pull_request.synchronize",
             "pull_request.closed",
             "pull_request.review_requested",
-            "pull_request_review.submitted"
+            "pull_request_review.submitted",
+            "pull_request.reopened",
+            "pull_request.edited",
+            "pull_request.ready_for_review",
+            "pull_request.converted_to_draft",
+            "pull_request.labeled",
+            "pull_request.unlabeled"
           ],
           "threadKeyPointer": "/pull_request/number",
           "titlePointer": "/pull_request/title",
@@ -243,7 +310,15 @@
         {
           "id": "issue-thread",
           "label": "Issue thread",
-          "eventTypes": ["issues.opened", "issues.closed", "issues.assigned", "issues.labeled"],
+          "eventTypes": [
+            "issues.opened",
+            "issues.closed",
+            "issues.assigned",
+            "issues.labeled",
+            "issues.reopened",
+            "issues.edited",
+            "issues.unlabeled"
+          ],
           "threadKeyPointer": "/issue/number",
           "titlePointer": "/issue/title",
           "bodyPointer": "/issue/body",
@@ -289,6 +364,10 @@
               },
               "draft": {
                 "type": "boolean"
+              },
+              "expectedBaseSha": {
+                "type": "string",
+                "pattern": "^[a-fA-F0-9]{40}$"
               }
             },
             "additionalProperties": false
@@ -378,6 +457,10 @@
               "event": {
                 "type": "string",
                 "enum": ["APPROVE", "REQUEST_CHANGES", "COMMENT"]
+              },
+              "commitId": {
+                "type": "string",
+                "pattern": "^[a-fA-F0-9]{40}$"
               }
             },
             "additionalProperties": false
@@ -415,6 +498,10 @@
                 "items": {
                   "type": "object"
                 }
+              },
+              "commitId": {
+                "type": "string",
+                "pattern": "^[a-fA-F0-9]{40}$"
               }
             },
             "additionalProperties": false
@@ -690,7 +777,12 @@
       "allowUploads": true,
       "allowDownloads": true,
       "operations": [
-        { "id": "web-openPr", "operationId": "github.openPr", "label": "openPr", "risk": "write" },
+        {
+          "id": "web-openPr",
+          "operationId": "github.openPr",
+          "label": "openPr",
+          "risk": "write"
+        },
         {
           "id": "web-closePr",
           "operationId": "github.closePr",

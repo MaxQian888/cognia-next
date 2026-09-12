@@ -12,6 +12,7 @@ const API_ORIGIN = "https://api.github.com"
 const API_VERSION = "2022-11-28"
 const REQUIRED_APP_PERMISSIONS = [
   "checks:read",
+  "actions:read",
   "contents:write",
   "issues:write",
   "metadata:read",
@@ -280,14 +281,57 @@ async function actionRequest(
   return (await githubRequest(context, `/repos/${repo(input)}${path}`, method, body)).data
 }
 
-export const openPr: IntegrationActionHandler = (input, context) =>
-  actionRequest(context, input, "/pulls", "POST", {
-    title: requiredString(input, "title"),
-    head: requiredString(input, "head"),
-    base: requiredString(input, "base"),
+export const openPr: IntegrationActionHandler = async (input, context) => {
+  const repository = repo(input)
+  const base = requiredString(input, "base")
+  const head = requiredString(input, "head")
+  const title = requiredString(input, "title")
+  const assertApprovedHead = async () => {
+    // The bound action broker injects this from its host publication checkpoint.
+    if (typeof input.expectedHeadSha !== "string") return
+    const current = await githubRequest<{ sha: string }>(
+      context,
+      `/repos/${repository}/commits/${encodeURIComponent(head)}`
+    )
+    if (current.data.sha !== input.expectedHeadSha)
+      throw new Error("Approved pull request head SHA changed")
+  }
+  if (typeof input.expectedBaseSha === "string") {
+    const current = await githubRequest<{ sha: string }>(
+      context,
+      `/repos/${repository}/commits/${encodeURIComponent(base)}`
+    )
+    if (current.data.sha !== input.expectedBaseSha)
+      throw new Error("Approved pull request base SHA changed")
+    // A crash after POST must recover the same remote PR instead of creating another.
+    const qualifiedHead = head.includes(":") ? head : `${repository.split("/")[0]}:${head}`
+    const existing = await githubRequest<
+      Array<{ title: string; body?: string; base?: { ref?: string }; head?: { sha?: string } }>
+    >(
+      context,
+      `/repos/${repository}/pulls?state=all&head=${encodeURIComponent(qualifiedHead)}&base=${encodeURIComponent(base)}&per_page=100`
+    )
+    if (existing.data.length) {
+      const match = existing.data.find(
+        (pr) =>
+          pr.title === title && (pr.body ?? "") === (input.body ?? "") && pr.base?.ref === base
+      )
+      if (!match) throw new Error("Existing pull request does not match approved content")
+      if (typeof input.expectedHeadSha === "string" && match.head?.sha !== input.expectedHeadSha)
+        throw new Error("Existing pull request head does not match approved publication")
+      await assertApprovedHead()
+      return match
+    }
+  }
+  await assertApprovedHead()
+  return actionRequest(context, input, "/pulls", "POST", {
+    title,
+    head,
+    base,
     body: input.body,
     draft: input.draft === true,
   })
+}
 
 export const closePr: IntegrationActionHandler = (input, context) =>
   actionRequest(context, input, `/pulls/${positiveInteger(input, "prNumber")}`, "PATCH", {
@@ -301,17 +345,40 @@ export const mergePr: IntegrationActionHandler = (input, context) =>
     commit_message: input.commitMessage,
   })
 
-export const reviewPr: IntegrationActionHandler = (input, context) =>
-  actionRequest(context, input, `/pulls/${positiveInteger(input, "prNumber")}/reviews`, "POST", {
+export const reviewPr: IntegrationActionHandler = async (input, context) => {
+  const number = positiveInteger(input, "prNumber")
+  const body = requiredString(input, "body")
+  if (typeof input.commitId === "string") {
+    const path = `/repos/${repo(input)}/pulls/${number}`
+    const current = await githubRequest<{ head: { sha: string }; state: string }>(context, path)
+    if (current.data.state !== "open" || current.data.head.sha !== input.commitId)
+      throw new Error("Approved review target SHA changed or PR closed")
+    // Review markers are stable per run. Search every page before retrying a POST.
+    for (let page = 1; ; page += 1) {
+      const reviews = await githubRequest<Array<{ body?: string; commit_id?: string }>>(
+        context,
+        `${path}/reviews?per_page=100&page=${page}`
+      )
+      const match = reviews.data.find(
+        (review) => review.body === body && review.commit_id === input.commitId
+      )
+      if (match) return match
+      if (reviews.data.length < 100) break
+    }
+  }
+  return actionRequest(context, input, `/pulls/${number}/reviews`, "POST", {
     event: input.event ?? "COMMENT",
-    body: requiredString(input, "body"),
+    body,
+    ...(typeof input.commitId === "string" ? { commit_id: input.commitId } : {}),
   })
+}
 
 export const reviewPrInline: IntegrationActionHandler = (input, context) =>
   actionRequest(context, input, `/pulls/${positiveInteger(input, "prNumber")}/reviews`, "POST", {
     event: input.event ?? "COMMENT",
     body: input.body,
     comments: input.comments,
+    ...(typeof input.commitId === "string" ? { commit_id: input.commitId } : {}),
   })
 
 export const commentPr: IntegrationActionHandler = (input, context) =>
@@ -429,6 +496,7 @@ const actionDefinitions = [
       base: { type: "string" },
       body: { type: "string" },
       draft: { type: "boolean" },
+      expectedBaseSha: { type: "string", pattern: "^[a-fA-F0-9]{40}$" },
     },
   },
   {
@@ -455,7 +523,12 @@ const actionDefinitions = [
     handler: "reviewPr",
     risk: "write",
     required: ["repoFullName", "prNumber", "body"],
-    properties: { ...prProperty, body: { type: "string" }, event: reviewEvent },
+    properties: {
+      ...prProperty,
+      body: { type: "string" },
+      event: reviewEvent,
+      commitId: { type: "string", pattern: "^[a-fA-F0-9]{40}$" },
+    },
   },
   {
     id: "reviewPrInline",
@@ -467,6 +540,7 @@ const actionDefinitions = [
       body: { type: "string" },
       event: reviewEvent,
       comments: { type: "array", items: { type: "object" } },
+      commitId: { type: "string", pattern: "^[a-fA-F0-9]{40}$" },
     },
   },
   {
@@ -564,13 +638,25 @@ const repositoryEvents = [
   "pull_request.opened",
   "pull_request.synchronize",
   "pull_request.closed",
+  "pull_request.reopened",
+  "pull_request.edited",
+  "pull_request.ready_for_review",
+  "pull_request.converted_to_draft",
+  "pull_request.labeled",
+  "pull_request.unlabeled",
   "pull_request.review_requested",
   "issues.opened",
   "issues.closed",
+  "issues.reopened",
+  "issues.edited",
+  "issues.unlabeled",
   "issues.assigned",
   "issues.labeled",
   "issue_comment.created",
   "check_run.completed",
+  "check_suite.completed",
+  "workflow_run.completed",
+  "workflow_job.completed",
   "pull_request_review.submitted",
   "release.published",
   "push.received",
@@ -609,6 +695,13 @@ export function normalizeGithub(
             kind: "installation",
             id: String(installation.id),
             name: installation.account?.login,
+          }
+        : undefined,
+    actor:
+      payload.sender && typeof payload.sender === "object"
+        ? {
+            id: String((payload.sender as { id?: unknown }).id ?? ""),
+            label: (payload.sender as { login?: string }).login,
           }
         : undefined,
     occurredAt: delivery.receivedAt,
