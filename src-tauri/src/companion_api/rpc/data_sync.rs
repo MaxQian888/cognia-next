@@ -54,9 +54,12 @@ pub(super) const COMMANDS: &[&str] = &[
     "workflow_handoff_create",
     "twin_ingest_source",
     "bot_trigger_set_armed",
+    "bot_installation_mutate",
+    "bot_console_read",
     "bot_run_manual",
     "bot_delivery_replay",
     "device_capabilities_report",
+    "session_mark_read",
     "session_attach",
     "session_detach",
     "room_send",
@@ -75,6 +78,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "team_run_resume",
     "team_run_stop",
     "execution_run_control",
+    "execution_run_detail",
     "agent_task_start",
     "agent_task_pause",
     "agent_task_resume",
@@ -743,6 +747,8 @@ pub(super) async fn dispatch(
         // wins over the one `extractCommandArgumentSchemas` would derive from
         // the arm and hand to every name in it.
         | "bot_trigger_set_armed"
+        | "bot_installation_mutate"
+        | "bot_console_read"
         | "bot_run_manual"
         | "bot_delivery_replay"
         // ADR-0060 — device capability report; TS arm persists onto the
@@ -751,6 +757,7 @@ pub(super) async fn dispatch(
         // Remote Session Control — attach/detach a remote watcher + steer
         // host goal loops. Same generic bridge; TS-side dispatch arms live in
         // `lib/companion/desktop-write-source.ts`. Gated by CONTROL_COMMANDS.
+        | "session_mark_read"
         | "session_attach"
         | "session_detach"
         // ADR-0177 team rooms — a companion hands a room turn to this host's
@@ -782,6 +789,7 @@ pub(super) async fn dispatch(
         // ADR-0169 run control: the cockpit's `RunControlCommand` from a
         // paired device, through the same TS gate. Gated by CONTROL_COMMANDS.
         | "execution_run_control"
+        | "execution_run_detail"
         // Single-Agent task board control — TS arms validate Agent ownership,
         // state-machine moves, and Scheduler lifecycle actions.
         | "agent_task_start"

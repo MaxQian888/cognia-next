@@ -240,7 +240,7 @@ async function respond(req: DesktopWriteRequestEvent, bridge: TauriBridge): Prom
   const { requestId, command, payload } = req
   try {
     const result = await dispatchCommand(command, payload, bridge)
-    await bridge.invoke(RESPONSE_COMMAND, { requestId, result, error: null })
+    await bridge.invoke(RESPONSE_COMMAND, { requestId, result: result ?? null, error: null })
   } catch (err: unknown) {
     await bridge.invoke(RESPONSE_COMMAND, {
       requestId,
@@ -413,6 +413,15 @@ export async function dispatchCommand(
     // The Bot control plane. A paired device can arm, run and replay, and the
     // installation lifecycle deliberately has no arm here: an install carries
     // a config blob and credential ids, and stays a Host-side action.
+    case "bot_installation_mutate": {
+      const { mutateBotInstallationOnHost } =
+        await import("@/lib/bot/control-writes/lifecycle-host")
+      return mutateBotInstallationOnHost(payload)
+    }
+    case "bot_console_read": {
+      const { readBotConsoleOnHost } = await import("@/lib/bot/control-writes/lifecycle-host")
+      return readBotConsoleOnHost(payload)
+    }
     case "bot_trigger_set_armed":
       return botTriggerSetArmed(payload)
     case "bot_run_manual":
@@ -452,6 +461,21 @@ export async function dispatchCommand(
     // session so non-foreground `permission_request`s route to the phone
     // instead of being auto-denied. State lives in
     // `lib/companion/remote-attach-registry.ts`.
+    case "session_mark_read": {
+      const sessionId = payload.sessionId
+      const readThrough = payload.readThrough
+      if (
+        typeof sessionId !== "string" ||
+        !sessionId ||
+        !Number.isSafeInteger(readThrough) ||
+        (readThrough as number) < 0
+      ) {
+        throw new Error("Invalid session_mark_read payload")
+      }
+      const { markSessionReadOnHost } = await import("@/lib/db/session-state")
+      await markSessionReadOnHost(sessionId, readThrough as number)
+      return null
+    }
     case "session_attach":
       return sessionAttach(payload)
     case "session_detach":
@@ -501,6 +525,10 @@ export async function dispatchCommand(
       return handleLegacyTeamRunControl()
     // The one remote control seam for a run: the cockpit's own command,
     // revision-checked and idempotent, through the same gate.
+    case "execution_run_detail": {
+      const { readExecutionRunDetailSources } = await import("@/lib/execution/run-detail-source")
+      return readExecutionRunDetailSources(payload.runId as string)
+    }
     case "execution_run_control":
       return handleExecutionRunControl(payload)
     // Single-Agent task board control. Task ownership is revalidated against
@@ -3237,6 +3265,8 @@ async function externalAgentRunTurn(payload: Record<string, unknown>): Promise<{
     // refusal, which is a better answer than this layer guessing.
     model: payload.model as string | undefined,
     reasoningEffort: payload.reasoningEffort as string | undefined,
+    systemPrompt: payload.systemPrompt as string | undefined,
+    allowedTools: payload.allowedTools as string[] | undefined,
     externalSessionId: payload.externalSessionId as string | undefined,
     callerDeviceId: payload.callerDeviceId as string | undefined,
     stamp: {

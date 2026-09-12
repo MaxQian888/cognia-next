@@ -749,6 +749,8 @@ const KNOWN_COMMANDS: &[&str] = &[
     // The Bot control plane. Arm, run by hand and replay a dead letter. The
     // installation lifecycle is Host-only and has no command here.
     "bot_trigger_set_armed",
+    "bot_installation_mutate",
+    "bot_console_read",
     "bot_run_manual",
     "bot_delivery_replay",
     // ADR-0060 — a paired device reports its platform capability manifest
@@ -791,6 +793,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     // elevation as the team controls above, which it retires (they now answer
     // `upgrade-required` on the TS side).
     "execution_run_control",
+    "execution_run_detail",
     "thread_handoff_offer",
     "thread_handoff_preflight",
     "thread_handoff_accept",
@@ -1348,6 +1351,8 @@ pub fn known_commands() -> &'static [&'static str] {
 /// They are cheap to re-run and structurally idempotent.
 #[cfg(test)]
 const READ_ONLY_COMMANDS: &[&str] = &[
+    "execution_run_detail",
+    "bot_console_read",
     // Shared media engine, with caller-owned binary transfers.
     "video_get_info",
     "plugin_media_get_video_frame",

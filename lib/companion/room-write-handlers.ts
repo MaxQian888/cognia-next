@@ -86,6 +86,26 @@ export async function resolveRoomAuthor(
   }
 }
 
+/** Report admission separately from the potentially minutes-long generation. */
+function awaitRoomAdmission(
+  start: (onAccepted: () => void) => Promise<void>
+): Promise<{ accepted: boolean }> {
+  return new Promise((resolve, reject) => {
+    let accepted = false
+    const completion = start(() => {
+      accepted = true
+      resolve({ accepted: true })
+    })
+    void completion.then(
+      () => resolve({ accepted: false }),
+      (error) => {
+        if (accepted) console.error("room turn failed after admission", error)
+        else reject(error)
+      }
+    )
+  })
+}
+
 export async function roomSend(
   payload: Record<string, unknown>,
   deps: RoomWriteHandlerDeps = {}
@@ -96,8 +116,7 @@ export async function roomSend(
   const author = await resolveRoomAuthor(callerDeviceId, deps)
 
   if (payload.regenerate === true) {
-    void runner.regenerate(sessionId).catch((err) => console.error("room regenerate failed", err))
-    return { accepted: true }
+    return awaitRoomAdmission((onAccepted) => runner.regenerate(sessionId, onAccepted))
   }
 
   const content = payload.content
@@ -107,10 +126,9 @@ export async function roomSend(
     throw new Error("room_send.editMessageId must be a string when present")
   }
   if (typeof editMessageId === "string") {
-    void runner
-      .editAndResend(sessionId, editMessageId, content)
-      .catch((err) => console.error("room edit failed", err))
-    return { accepted: true }
+    return awaitRoomAdmission((onAccepted) =>
+      runner.editAndResend(sessionId, editMessageId, content, { author, onAccepted })
+    )
   }
 
   const attachmentManifest = Array.isArray(payload.attachmentManifest)
@@ -138,8 +156,9 @@ export async function roomSend(
   }
   const targetMemberIds = readTargetMemberIds(payload.targetMemberIds)
 
-  void runner
-    .send(content, {
+  return awaitRoomAdmission((onAccepted) =>
+    runner.send(content, {
+      onAccepted,
       sessionId,
       attachmentManifest,
       webSearchContext,
@@ -148,8 +167,7 @@ export async function roomSend(
       ...(replyTo ? { replyTo } : {}),
       ...(targetMemberIds ? { targetMemberIds } : {}),
     })
-    .catch((err) => console.error("room send failed", err))
-  return { accepted: true }
+  )
 }
 
 /** The composer's pick (ADR-0177 batch 3): member ids, or nothing. */

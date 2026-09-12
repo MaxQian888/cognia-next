@@ -56,8 +56,18 @@ pub struct DesktopWriteRequest {
 pub struct DesktopWriteResponse {
     #[serde(alias = "requestId")]
     pub request_id: String,
+    #[serde(default, deserialize_with = "deserialize_present_result")]
     pub result: Option<Value>,
     pub error: Option<String>,
+}
+
+// Successful void handlers return an explicit JSON null. Serde's ordinary
+// Option decoder collapses that into a missing result on the Headless WS path.
+fn deserialize_present_result<'de, D>(deserializer: D) -> Result<Option<Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Value::deserialize(deserializer).map(Some)
 }
 
 /// Pending-request pool keyed by request_id.
@@ -152,8 +162,8 @@ impl DesktopWritesBridge {
             return;
         };
         let payload = match (response.result, response.error) {
-            (Some(value), _) => Ok(value),
-            (None, Some(err)) => Err(err),
+            (_, Some(err)) => Err(err),
+            (Some(value), None) => Ok(value),
             (None, None) => Err("desktop-write-response had neither result nor error".to_string()),
         };
         let _ = sender.send(payload);
@@ -170,6 +180,28 @@ mod tests {
     use super::super::bridge_transport::test_support::RecordingBridgeTransport;
     use super::*;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn wire_null_result_succeeds_but_error_and_missing_result_do_not() {
+        for (payload, expected) in [
+            (json!({"result": null, "error": null}), Ok(Value::Null)),
+            (
+                json!({"result": null, "error": "plugin refused"}),
+                Err("plugin refused"),
+            ),
+            (
+                json!({}),
+                Err("desktop-write-response had neither result nor error"),
+            ),
+        ] {
+            let bridge = DesktopWritesBridge::new();
+            let (request_id, receiver) = bridge.register();
+            let mut wire = payload;
+            wire["requestId"] = Value::String(request_id);
+            bridge.resolve(serde_json::from_value(wire).unwrap());
+            assert_eq!(receiver.await.unwrap(), expected.map_err(str::to_owned));
+        }
+    }
 
     #[tokio::test]
     async fn dispatch_emits_camel_case_request_through_the_transport() {

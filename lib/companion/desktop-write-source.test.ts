@@ -1,6 +1,7 @@
 /**
  * @jest-environment jsdom
  */
+jest.mock("@/lib/db/session-state", () => ({ markSessionReadOnHost: jest.fn() }))
 
 import "fake-indexeddb/auto"
 
@@ -11,6 +12,22 @@ jest.mock("@/lib/thread-handoff/host-dispatch", () => {
   const actual = jest.requireActual("@/lib/thread-handoff/host-dispatch")
   return { ...actual, dispatchThreadHandoffCommand: jest.fn(actual.dispatchThreadHandoffCommand) }
 })
+
+const mockBotLifecycleMutation = jest.fn()
+const mockBotConsoleRead = jest.fn()
+jest.mock("@/lib/bot/control-writes/lifecycle-host", () => ({
+  mutateBotInstallationOnHost: (input: unknown) => mockBotLifecycleMutation(input),
+  readBotConsoleOnHost: (input: unknown) => mockBotConsoleRead(input),
+}))
+
+const remoteRunStartMock = jest.fn(async (_request: unknown) => ({
+  started: true,
+  runId: "run",
+  agentId: "agent",
+}))
+jest.mock("@/lib/ai/agent/external/remote-run-service", () => ({
+  startRemoteExternalRun: (...args: unknown[]) => remoteRunStartMock(args[0]),
+}))
 
 const mockActiveRuntimeTarget = jest.fn()
 // ADR-0131 §2.7 — relayed Inbox writes only run on the process that owns the
@@ -67,7 +84,8 @@ jest.mock("@/lib/ai/eval/artifact-crypto", () => ({
   loadOrCreateAccountArtifactKey: jest.fn(async () => new Uint8Array(32).fill(29)),
 }))
 
-import { dispatchCommand } from "./desktop-write-source"
+import { dispatchCommand, installDesktopWriteSource } from "./desktop-write-source"
+import { waitFor } from "@testing-library/react"
 import { isRetryable } from "@/lib/queue/retry-policy"
 
 const mockExportForPairing = jest.fn()
@@ -248,6 +266,51 @@ beforeEach(async () => {
   await db.twinProfile.clear().catch(() => undefined)
   mockActiveRuntimeTarget.mockReturnValue({ accountId: "local-default", targetId: "target-a" })
 }, 15_000)
+
+describe("dispatchCommand: execution run detail", () => {
+  it("reads only the selected host run and its exact approval contents", async () => {
+    const db = getDb()
+    await db.executionRuns.put({
+      id: "detail-host-run",
+      kind: "bot",
+      sourceId: "installation",
+      title: "Bot",
+      status: "waiting",
+      currentRevision: 3,
+      startedAt: 1,
+      updatedAt: 1,
+    })
+    await db.executionRunInterrupts.put({
+      id: "detail-approval",
+      runId: "detail-host-run",
+      type: "bot_approval",
+      status: "pending",
+      title: "Publish",
+      createdAt: 1,
+      expiresAt: 100,
+      approvalDetail: { approvedActions: [{ actionId: "openPr", input: { title: "Exact" } }] },
+    })
+    await expect(
+      dispatchCommand("execution_run_detail", { runId: "detail-host-run" })
+    ).resolves.toMatchObject({
+      run: { id: "detail-host-run", currentRevision: 3 },
+      interrupts: [
+        {
+          id: "detail-approval",
+          approvalDetail: {
+            approvedActions: [{ actionId: "openPr", input: { title: "Exact" } }],
+          },
+        },
+      ],
+    })
+    await expect(
+      dispatchCommand("execution_run_detail", { runId: "missing-detail-run" })
+    ).resolves.toEqual({ events: [], interrupts: [] })
+    await expect(dispatchCommand("execution_run_detail", { runId: "" })).rejects.toThrow("runId")
+    await db.executionRunInterrupts.delete("detail-approval")
+    await db.executionRuns.delete("detail-host-run")
+  })
+})
 
 describe("dispatchCommand: HostState authority", () => {
   it("validates the caller scope and reuses the authoritative service", async () => {
@@ -2362,4 +2425,89 @@ describe("manual reply metadata boundary", () => {
       ).toBe(0)
     }
   )
+})
+
+it("forwards paired-host canonical instructions and the native tool allowlist", async () => {
+  await dispatchCommand("external_agent_run_turn", {
+    runId: "run",
+    chatSessionId: "chat",
+    prompt: "task",
+    systemPrompt: "Selected skill",
+    allowedTools: ["read"],
+    stamp: { configId: "cfg", revision: "rev", lifecycleGeneration: 1 },
+  })
+  expect(remoteRunStartMock).toHaveBeenCalledWith(
+    expect.objectContaining({
+      systemPrompt: "Selected skill",
+      allowedTools: ["read"],
+      chatSessionId: "chat",
+    })
+  )
+})
+
+describe("dispatchCommand: session_mark_read", () => {
+  it("validates the read watermark and delegates to Host authority", async () => {
+    const state = await import("@/lib/db/session-state")
+    const mark = (state.markSessionReadOnHost as jest.Mock).mockResolvedValue(undefined)
+    try {
+      await expect(
+        dispatchCommand("session_mark_read", { sessionId: "s1", readThrough: 20 })
+      ).resolves.toBeNull()
+      expect(mark).toHaveBeenCalledWith("s1", 20)
+      await expect(
+        dispatchCommand("session_mark_read", { sessionId: "s1", readThrough: -1 })
+      ).rejects.toThrow("Invalid session_mark_read payload")
+      await expect(
+        dispatchCommand("session_mark_read", { sessionId: "", readThrough: 20 })
+      ).rejects.toThrow("Invalid session_mark_read payload")
+    } finally {
+      mark.mockReset()
+    }
+  })
+})
+
+it("routes Bot lifecycle and live console reads through the authoritative domain boundary", async () => {
+  const payload = { operation: "install", operationId: "stable-id", definitionId: "bot:monitor" }
+  mockBotLifecycleMutation.mockResolvedValue({ id: "installed", status: "needs_setup" })
+  await expect(dispatchCommand("bot_installation_mutate", payload)).resolves.toMatchObject({
+    id: "installed",
+    status: "needs_setup",
+  })
+  expect(mockBotLifecycleMutation).toHaveBeenCalledWith(payload)
+  mockBotConsoleRead.mockResolvedValue({
+    rows: [{ id: "installed", config: { repository: "owner/repo" } }],
+  })
+  await expect(
+    dispatchCommand("bot_console_read", { view: "installations" })
+  ).resolves.toMatchObject({ rows: [{ id: "installed" }] })
+  expect(mockBotConsoleRead).toHaveBeenCalledWith({ view: "installations" })
+})
+
+it("serializes successful undefined command results as explicit JSON null", async () => {
+  let receive!: (event: {
+    payload: { requestId: string; command: string; payload: Record<string, unknown> }
+  }) => void
+  const reply = jest.fn().mockResolvedValue(undefined)
+  const stop = await installDesktopWriteSource({
+    forceReinstall: true,
+    bridge: {
+      listen: jest.fn().mockImplementation(async (_event, handler) => {
+        receive = handler
+        return () => {}
+      }),
+      invoke: reply,
+    },
+  })
+  mockBotLifecycleMutation.mockResolvedValue(undefined)
+  receive({
+    payload: { requestId: "void-response", command: "bot_installation_mutate", payload: {} },
+  })
+  await waitFor(() =>
+    expect(reply).toHaveBeenCalledWith("companion_desktop_write_response", {
+      requestId: "void-response",
+      result: null,
+      error: null,
+    })
+  )
+  stop()
 })

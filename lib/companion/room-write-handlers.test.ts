@@ -15,7 +15,7 @@ jest.mock("@/lib/db/paired-devices", () => ({
 }))
 
 import { resolveRoomAuthor, roomSend, roomStop } from "./room-write-handlers"
-import type { RoomRunner } from "@/lib/chat/room/runner"
+import type { RoomRunner, RoomSendOptions } from "@/lib/chat/room/runner"
 
 function fakeRunner() {
   let release: () => void = () => {}
@@ -23,9 +23,20 @@ function fakeRunner() {
     release = resolve
   })
   const runner = {
-    send: jest.fn(() => pending),
-    regenerate: jest.fn(() => pending),
-    editAndResend: jest.fn(() => pending),
+    send: jest.fn((_content: unknown, opts: RoomSendOptions) => {
+      opts.onAccepted?.()
+      return pending
+    }),
+    regenerate: jest.fn((_session: string, onAccepted?: () => void) => {
+      onAccepted?.()
+      return pending
+    }),
+    editAndResend: jest.fn(
+      (_session: string, _message: string, _content: unknown, opts: RoomSendOptions) => {
+        opts.onAccepted?.()
+        return pending
+      }
+    ),
     stop: jest.fn(async () => undefined),
     stopMember: jest.fn(async () => undefined),
   }
@@ -112,6 +123,7 @@ describe("roomSend", () => {
     expect(result).toEqual({ accepted: true })
     expect(calls.send).toHaveBeenCalledWith("hello team", {
       sessionId: "room-1",
+      onAccepted: expect.any(Function),
       attachmentManifest: [{ id: "att-1" }],
       webSearchContext: { query: "q" },
       author: { kind: "human", id: "usr_host", displayName: "Pixel 9", source: "device:dev-1" },
@@ -193,14 +205,22 @@ describe("roomSend", () => {
     await expect(
       roomSend({ sessionId: "room-1", callerDeviceId: "dev-1", regenerate: true }, deps(runner))
     ).resolves.toEqual({ accepted: true })
-    expect(calls.regenerate).toHaveBeenCalledWith("room-1")
+    expect(calls.regenerate).toHaveBeenCalledWith("room-1", expect.any(Function))
     expect(calls.send).not.toHaveBeenCalled()
 
     await roomSend(
       { sessionId: "room-1", callerDeviceId: "dev-1", content: "fixed", editMessageId: "u-1" },
       deps(runner)
     )
-    expect(calls.editAndResend).toHaveBeenCalledWith("room-1", "u-1", "fixed")
+    expect(calls.editAndResend).toHaveBeenCalledWith(
+      "room-1",
+      "u-1",
+      "fixed",
+      expect.objectContaining({
+        onAccepted: expect.any(Function),
+        author: expect.objectContaining({ source: "device:dev-1" }),
+      })
+    )
     await expect(
       roomSend(
         { sessionId: "room-1", callerDeviceId: "dev-1", content: "x", editMessageId: 7 },
@@ -226,10 +246,48 @@ describe("roomSend", () => {
     release()
   })
 
+  it("waits for actual admission and reports early refusals", async () => {
+    let admit!: () => void
+    let finish!: () => void
+    const completion = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    const runner = {
+      send: jest.fn((_content, opts) => {
+        admit = opts.onAccepted
+        return completion
+      }),
+    } as unknown as RoomRunner
+    let settled = false
+    const result = roomSend(
+      { sessionId: "room-1", callerDeviceId: "dev-1", content: "hi" },
+      deps(runner)
+    ).then((value) => {
+      settled = true
+      return value
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(settled).toBe(false)
+    admit()
+    await expect(result).resolves.toEqual({ accepted: true })
+    finish()
+    runner.send = jest.fn(async () => undefined)
+    await expect(
+      roomSend({ sessionId: "room-1", callerDeviceId: "dev-1", content: "hi" }, deps(runner))
+    ).resolves.toEqual({ accepted: false })
+    runner.send = jest.fn(async () => {
+      throw new Error("ROOM_BUSY")
+    })
+    await expect(
+      roomSend({ sessionId: "room-1", callerDeviceId: "dev-1", content: "hi" }, deps(runner))
+    ).rejects.toThrow("ROOM_BUSY")
+  })
+
   it("does not fail the RPC when the detached turn later rejects", async () => {
     const consoleError = jest.spyOn(console, "error").mockImplementation(() => {})
     const runner = {
-      send: jest.fn(async () => {
+      send: jest.fn(async (_content: unknown, opts: RoomSendOptions) => {
+        opts.onAccepted?.()
         throw new Error("member exploded")
       }),
     } as unknown as RoomRunner
@@ -237,7 +295,7 @@ describe("roomSend", () => {
       roomSend({ sessionId: "room-1", callerDeviceId: "dev-1", content: "hi" }, deps(runner))
     ).resolves.toEqual({ accepted: true })
     await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(consoleError).toHaveBeenCalledWith("room send failed", expect.any(Error))
+    expect(consoleError).toHaveBeenCalledWith("room turn failed after admission", expect.any(Error))
     consoleError.mockRestore()
   })
 })

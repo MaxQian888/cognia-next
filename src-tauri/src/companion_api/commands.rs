@@ -297,7 +297,7 @@ pub fn companion_media_response(
 #[tauri::command]
 pub fn companion_desktop_write_response(
     request_id: String,
-    result: Option<serde_json::Value>,
+    result: serde_json::Value,
     error: Option<String>,
     state: State<'_, CompanionServerState>,
 ) -> Result<(), String> {
@@ -305,7 +305,7 @@ pub fn companion_desktop_write_response(
         .desktop_writes_bridge
         .resolve(desktop_writes_bridge::DesktopWriteResponse {
             request_id,
-            result,
+            result: Some(result),
             error,
         });
     Ok(())

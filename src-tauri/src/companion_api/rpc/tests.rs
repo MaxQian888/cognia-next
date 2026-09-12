@@ -4866,3 +4866,31 @@ fn legacy_allowlist_equals_the_generated_remote_set() {
          run pnpm companion-api:gen."
     );
 }
+
+#[test]
+fn execution_run_detail_is_read_only_and_scoped_to_agent_authority() {
+    assert!(KNOWN_COMMANDS.contains(&"execution_run_detail"));
+    assert!(READ_ONLY_COMMANDS.contains(&"execution_run_detail"));
+    assert!(!CONTROL_COMMANDS.contains(&"execution_run_detail"));
+    assert!(data_sync::COMMANDS.contains(&"execution_run_detail"));
+    let descriptor = crate::companion_api::command_manifest::descriptor("execution_run_detail")
+        .expect("run detail must have a manifest descriptor");
+    assert_eq!(descriptor.capability, "agent.run");
+    assert_eq!(
+        descriptor.target,
+        crate::companion_api::command_manifest::CommandTarget::Execution
+    );
+}
+
+#[test]
+fn bot_lifecycle_commands_require_workspace_write_authority() {
+    for command in ["bot_console_read", "bot_installation_mutate"] {
+        assert!(KNOWN_COMMANDS.contains(&command));
+        assert!(data_sync::COMMANDS.contains(&command));
+        let descriptor = crate::companion_api::command_manifest::descriptor(command).unwrap();
+        assert_eq!(descriptor.capability, "workspace.write");
+        assert_eq!(descriptor.target, crate::companion_api::command_manifest::CommandTarget::Execution);
+    }
+    assert!(READ_ONLY_COMMANDS.contains(&"bot_console_read"));
+    assert!(!READ_ONLY_COMMANDS.contains(&"bot_installation_mutate"));
+}
