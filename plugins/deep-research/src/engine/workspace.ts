@@ -19,8 +19,15 @@ import type {
 export interface ResearchState {
   question: string
   config: DeepSearchConfig
-  /** FIFO sub-questions to chase; the original question is seeded first. */
+  /**
+   * FIFO sub-questions still to chase (reflect pushes, a matching search pops).
+   * The original question lives in `question`, not here — seeding the queue with
+   * it meant the head was permanently the question and pushed gaps never
+   * surfaced as fallback queries.
+   */
   gapQueue: string[]
+  /** The (sub)question the last search step actually chased; evidence attributes to it. */
+  activeGap?: string
   /** Searched-but-unread hits. */
   candidates: SearchHit[]
   /** Canonicalised URLs already read. */
@@ -42,11 +49,21 @@ export interface ResearchState {
 const MAX_REPORT_CHARS = 4_000
 const MAX_NOTE_CHARS = 280
 
+/**
+ * Working-memory bounds. Without them a deep run (36 steps × readTopK 4) can
+ * accumulate ~140 evidence items — the answer/eval prompts then ingest 100KB+
+ * of sources and the candidate pool grows without limit.
+ */
+export const MAX_KNOWLEDGE = 40
+export const MAX_CANDIDATES = 80
+/** Cap on open sub-questions; past it a reflect adds nothing. */
+export const MAX_GAP_QUEUE = 12
+
 export function initState(question: string, config: DeepSearchConfig): ResearchState {
   return {
     question,
     config,
-    gapQueue: [question],
+    gapQueue: [],
     candidates: [],
     visitedUrls: new Set(),
     searchedQueries: new Set(),
@@ -93,7 +110,10 @@ export function renderWorkspace(state: ResearchState): string {
   if (state.candidates.length > 0) {
     const top = state.candidates
       .slice(0, 8)
-      .map((c, i) => `[${i + 1}] ${c.title} — ${c.url}`)
+      .map((c, i) => {
+        const date = c.publishedDate?.trim()
+        return `[${i + 1}] ${c.title} — ${c.url}${date ? ` (${date.slice(0, 24)})` : ""}`
+      })
       .join("\n")
     parts.push(`\nUNREAD SOURCES (${state.candidates.length}):\n${top}`)
   }
@@ -110,11 +130,25 @@ export function renderWorkspace(state: ResearchState): string {
 
 /**
  * Compact, citation-numbered evidence block for the answer/eval prompts.
- * `[n]` indices are stable and map to `state.knowledge[n-1]`.
+ * `[n]` indices are stable and map to `state.knowledge[n-1]`. Each header
+ * carries the publication date and verification badge when known — freshness
+ * and trust are signals the drafter and evaluator should weigh, not metadata
+ * the pipeline swallowed.
  */
 export function renderEvidence(state: ResearchState, maxChars = 1_200): string {
   if (state.knowledge.length === 0) return "(no sources gathered yet)"
-  return state.knowledge
-    .map((k, i) => `[${i + 1}] ${k.title} (${k.url})\n${k.content.slice(0, maxChars)}`)
+  const shown = state.knowledge.slice(0, MAX_KNOWLEDGE)
+  const body = shown
+    .map((k, i) => `[${i + 1}] ${sourceLine(k)}\n${k.content.slice(0, maxChars)}`)
     .join("\n\n")
+  const omitted = state.knowledge.length - shown.length
+  return omitted > 0 ? `${body}\n\n(+${omitted} further source(s) omitted)` : body
+}
+
+/** `[n]` header line for one evidence item — title, url, date, badge. */
+function sourceLine(k: KnowledgeItem): string {
+  const date = k.publishedDate?.trim()
+  const datePart = date ? `, ${date.slice(0, 24)}` : ""
+  const badge = k.credibility?.trim() ? ` [${k.credibility.trim()}]` : ""
+  return `${k.title} (${k.url}${datePart})${badge}`
 }

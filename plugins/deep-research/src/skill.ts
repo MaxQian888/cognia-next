@@ -25,9 +25,15 @@ Call \`deep_research\` with a precise \`query\`. Pick \`depth\`:
 - \`standard\` — the default.
 - \`deep\` — exhaustive, for hard or broad questions.
 
+Pick \`mode\`:
+- \`search\` (default) — one cited answer.
+- \`report\` — a multi-section cited report, also saved as a workspace
+  artifact the user can open and export (\`artifactId\` in the result).
+
 The tool runs an autonomous search → read → reason loop and returns a
 **citation-backed** answer. Present its answer with the sources it provides;
-never strip or invent citations.`
+never strip or invent citations. If the result carries \`gaveUp\`, say the
+answer was produced under budget limits.`
 
 export const DEEP_RESEARCH_SKILL: PluginSkillDef = defineSkill({
   id: "deep-research",

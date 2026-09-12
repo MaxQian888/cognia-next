@@ -17,7 +17,7 @@
     "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
     "mobile": { "availability": "supported", "entrypoint": "src/index.ts" }
   },
-  "permissions": ["agent:control", "ai:chat", "ai:embed", "settings:read"],
+  "permissions": ["agent:control", "ai:chat", "ai:embed", "artifact:write", "settings:read"],
   "networkAccess": {
     "allowedDomains": ["*"],
     "reasoning": "The research loop reads pages the web search returns, so the hosts are only known at runtime. Every request goes through the host's own web_fetch — this plugin holds no keys and opens no sockets of its own."
@@ -26,6 +26,7 @@
     "agent:control": "Calls the app's own web_search and web_fetch tools so research reuses your configured search providers, result cache and safety guards instead of shipping a second, weaker copy.",
     "ai:chat": "Drives the research loop with your configured model: rewriting queries, judging sources, and drafting the final cited answer.",
     "ai:embed": "Deduplicates near-identical search results and evidence so the loop spends its budget on genuinely new sources.",
+    "artifact:write": "Saves a finished report as a versioned, exportable workspace artifact so it survives beyond the chat message.",
     "settings:read": "Reads this plugin's own research budgets (token budget, step ceiling, sources per read, answer locale)."
   },
   "activationEvents": ["startup"],

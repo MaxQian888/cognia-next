@@ -1,4 +1,4 @@
-import { normalizeUrl, sameUrl } from "./url"
+import { domainOf, normalizeUrl, sameUrl } from "./url"
 
 describe("normalizeUrl", () => {
   it("drops the fragment and trailing slash, lowercases", () => {
@@ -21,5 +21,19 @@ describe("sameUrl", () => {
 
   it("distinguishes different paths", () => {
     expect(sameUrl("https://x.com/a", "https://x.com/b")).toBe(false)
+  })
+})
+
+describe("domainOf", () => {
+  it("lowercases the host and strips a leading www", () => {
+    expect(domainOf("https://WWW.Example.com/path")).toBe("example.com")
+  })
+
+  it("keeps subdomains distinct from the apex", () => {
+    expect(domainOf("https://en.wikipedia.org/a")).toBe("en.wikipedia.org")
+  })
+
+  it("returns an empty bucket for non-URLs", () => {
+    expect(domainOf("not a url")).toBe("")
   })
 })

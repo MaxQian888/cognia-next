@@ -14,13 +14,13 @@ export function shouldForceAnswer(state: ResearchState): boolean {
   return (
     state.tokensUsed >= state.config.tokenBudget ||
     state.step >= state.config.maxSteps ||
-    state.badAttempts > state.config.maxBadAttempts
+    state.badAttempts >= state.config.maxBadAttempts
   )
 }
 
 /** Human-readable reason for entering beast mode, for the step log. */
 export function beastReason(state: ResearchState): string {
-  if (state.badAttempts > state.config.maxBadAttempts) return "too many failed answer attempts"
+  if (state.badAttempts >= state.config.maxBadAttempts) return "too many failed answer attempts"
   if (state.tokensUsed >= state.config.tokenBudget) return "token budget reached"
   if (state.step >= state.config.maxSteps) return "step limit reached"
   return "forced"

@@ -2,47 +2,95 @@
  * The `/research <question>` slash command — a thin convenience trigger over
  * the same in-plugin engine. It runs the loop to completion and returns the
  * final cited card as the command's chat response, so the report lands in the
- * conversation the user typed in. (For live step-by-step progress, the
- * `deep_research` agent tool is the richer path.)
+ * conversation the user typed in. Hosts can supply cancellation and progress
+ * through the command context.
  */
 import type { PluginCommandContext, PluginCommandResult, PluginContext } from "@cognia/plugin-sdk"
 
+import { persistReport } from "./artifacts"
 import { readEngineConfig } from "./config"
 import { runDeepResearch } from "./engine/deepresearch"
 import { runDeepSearch } from "./engine/deepsearch"
 import { classifyResearchError } from "./errors"
 import { renderErrorCard, renderReportCard, renderResultCard } from "./render"
 import { buildEngineDeps } from "./runtime"
+import { resolveConfig, type ResearchDepth } from "./tool"
+import type { ResearchMode } from "./types"
 
 const USAGE =
   "Usage:\n" +
   "- `/research <question>` — a cited answer.\n" +
-  "- `/research report <topic>` — a multi-section cited report.\n\n" +
-  "（用法：`/research <问题>` 给出带引用的答案；`/research report <主题>` 生成多章节研究报告。）"
+  "- `/research report <topic>` — a multi-section cited report.\n" +
+  "- Prefix with `quick` or `deep` to shrink or raise the research budget " +
+  "(e.g. `/research deep report <topic>`).\n\n" +
+  "（用法：`/research <问题>` 给出带引用的答案；`/research report <主题>` 生成多章节研究报告；" +
+  "可加 `quick`/`deep` 前缀调整预算。）"
+
+export interface ParsedResearchArgs {
+  topic: string
+  mode: ResearchMode
+  depth?: ResearchDepth
+}
+
+/**
+ * Parse the slash tail: leading `report` and `quick|standard|deep` keywords in
+ * any order, then the topic. A topic that happens to START with one of the
+ * keywords ("/research report cards") is split — documented trade-off of a
+ * keyword-prefix grammar, same as before.
+ */
+export function parseResearchArgs(args: string): ParsedResearchArgs | null {
+  let rest = (args ?? "").trim()
+  if (!rest) return null
+  let mode: ResearchMode = "search"
+  let depth: ResearchDepth | undefined
+  while (true) {
+    const m = rest.match(/^(report|quick|standard|deep)\s+(\S[\s\S]*)$/i)
+    if (!m) break
+    const keyword = m[1].toLowerCase()
+    if (keyword === "report") mode = "report"
+    else depth = keyword as ResearchDepth
+    rest = m[2].trim()
+  }
+  if (!rest) return null
+  return { topic: rest, mode, ...(depth ? { depth } : {}) }
+}
 
 export async function handleResearchSlash(
   ctx: PluginContext,
   args: string,
   commandContext?: PluginCommandContext
 ): Promise<PluginCommandResult> {
-  const trimmed = (args ?? "").trim()
-  if (!trimmed) return { handled: true, message: USAGE }
-
-  const reportMatch = trimmed.match(/^report\s+(.+)/i)
-  const isReport = reportMatch !== null
-  const topic = isReport ? reportMatch[1].trim() : trimmed
-  if (!topic) return { handled: true, message: USAGE }
+  const parsed = parseResearchArgs(args)
+  if (!parsed) return { handled: true, message: USAGE }
 
   // The invoking session routes every model call and web-tool invocation this
   // run makes, so the work is billed to the conversation the user is in.
   const deps = buildEngineDeps(ctx, {
+    ...(commandContext?.signal ? { signal: commandContext.signal } : {}),
+    ...(commandContext?.reportProgress ? { reportProgress: commandContext.reportProgress } : {}),
     ...(commandContext?.sessionId ? { sessionId: commandContext.sessionId } : {}),
   })
 
   try {
-    const config = readEngineConfig(ctx)
-    if (isReport) {
-      const report = await runDeepResearch(topic, deps, config)
+    const config = resolveConfig(readEngineConfig(ctx), parsed.depth)
+    if (parsed.mode === "report") {
+      const report = await runDeepResearch(parsed.topic, deps, config)
+      // User-invoked, so the deliverable opens straight into the workspace —
+      // the same gesture every other doc-producing plugin makes. A cancelled
+      // run produced no real document, so there is nothing worth filing.
+      const artifactId =
+        !commandContext?.signal?.aborted && report.sections.length > 0
+          ? await persistReport(ctx, report, {
+              ...(commandContext?.sessionId ? { sessionId: commandContext.sessionId } : {}),
+            })
+          : undefined
+      if (artifactId && !commandContext?.signal?.aborted) {
+        try {
+          ctx.artifact.openArtifact(artifactId)
+        } catch (err) {
+          ctx.logger?.warn("deep-research: artifact panel could not be opened", err)
+        }
+      }
       return {
         handled: true,
         message: renderReportCard(report),
@@ -51,19 +99,24 @@ export async function handleResearchSlash(
           title: report.title,
           citations: report.citations,
           sections: report.sections.length,
+          plannedSections: report.outline.sections.length,
+          gaveUp: report.gaveUp,
           tokens: report.usage.totalTokens,
+          ...(artifactId ? { artifactId } : {}),
         },
       }
     }
-    const result = await runDeepSearch(topic, deps, config)
+    const result = await runDeepSearch(parsed.topic, deps, config)
     return {
       handled: true,
-      message: renderResultCard(topic, result),
+      message: renderResultCard(parsed.topic, result),
       payload: {
         mode: "search",
         citations: result.citations,
         gaveUp: result.gaveUp,
+        ...(result.aborted ? { aborted: true } : {}),
         steps: result.steps.length,
+        trace: result.steps,
         tokens: result.usage.totalTokens,
       },
     }

@@ -26,3 +26,16 @@ export function normalizeUrl(url: string): string {
 export function sameUrl(a: string, b: string): boolean {
   return normalizeUrl(a) === normalizeUrl(b)
 }
+
+/**
+ * Registrable-ish host for diversity capping: lowercase hostname without a
+ * leading `www.`. Returns "" for non-URLs — callers group those under one
+ * bucket so a malformed result cannot dodge the cap.
+ */
+export function domainOf(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase().replace(/^www\./, "")
+  } catch {
+    return ""
+  }
+}

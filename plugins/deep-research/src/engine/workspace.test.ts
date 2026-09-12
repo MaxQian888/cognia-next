@@ -8,9 +8,10 @@ import {
 } from "./workspace"
 
 describe("initState", () => {
-  it("seeds the gap queue with the original question", () => {
+  it("starts with an empty gap queue — the question itself is not an open gap", () => {
     const s = initState("why is the sky blue?", DEFAULT_CONFIG)
-    expect(s.gapQueue).toEqual(["why is the sky blue?"])
+    expect(s.gapQueue).toEqual([])
+    expect(s.question).toBe("why is the sky blue?")
     expect(s.allowAnswer).toBe(true)
     expect(s.knowledge).toEqual([])
   })
@@ -40,14 +41,21 @@ describe("renderWorkspace", () => {
   it("includes question, memory, gaps, unread sources and progress", () => {
     const s = initState("the question", { ...DEFAULT_CONFIG, maxSteps: 10 })
     s.evolvingReport = "- known thing"
+    s.gapQueue.push("open sub-question")
     s.candidates.push({ title: "Src A", url: "https://a.com", content: "x", score: 1 })
     s.step = 3
     const out = renderWorkspace(s)
     expect(out).toContain("QUESTION: the question")
     expect(out).toContain("known thing")
     expect(out).toContain("OPEN QUESTIONS")
+    expect(out).toContain("open sub-question")
     expect(out).toContain("Src A")
     expect(out).toContain("step 3/10")
+  })
+
+  it("omits the open-questions section when the queue is empty", () => {
+    const out = renderWorkspace(initState("q", DEFAULT_CONFIG))
+    expect(out).not.toContain("OPEN QUESTIONS")
   })
 })
 
@@ -60,6 +68,34 @@ describe("renderEvidence", () => {
     expect(out).toContain("[1] A (https://a.com)")
     expect(out).toContain("[2] B (https://b.com)")
   })
+
+  it("shows the publication date and verification badge when known", () => {
+    // Freshness and trust are signals the drafter/evaluator should weigh.
+    const s = initState("q", DEFAULT_CONFIG)
+    s.knowledge.push({
+      url: "https://a.com",
+      title: "A",
+      content: "alpha",
+      publishedDate: "2026-08-30",
+      credibility: "verified",
+    })
+    const out = renderEvidence(s)
+    expect(out).toContain("(https://a.com, 2026-08-30)")
+    expect(out).toContain("[verified]")
+  })
+
+  it("shows the candidate's date so the controller can prefer fresh reads", () => {
+    const s = initState("q", DEFAULT_CONFIG)
+    s.candidates.push({
+      title: "Fresh",
+      url: "https://a.com",
+      content: "x",
+      score: 1,
+      publishedDate: "2026-09-01",
+    })
+    expect(renderWorkspace(s)).toContain("https://a.com (2026-09-01)")
+  })
+
   it("notes when no evidence is gathered", () => {
     expect(renderEvidence(initState("q", DEFAULT_CONFIG))).toContain("no sources")
   })

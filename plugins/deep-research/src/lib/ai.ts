@@ -32,6 +32,8 @@ export interface AiChunk {
 export interface AiCallContext {
   /** Session the call belongs to — the host resolves credentials from it. */
   sessionId?: string
+  /** Message the call belongs to, when the run happens inside a turn. */
+  messageId?: string
   /** Cancellation signal for the underlying provider request. */
   signal?: AbortSignal
 }
@@ -106,10 +108,11 @@ export async function completeJson<T>(
  */
 export function bindAiBridge(
   ai: AiBridge,
-  context: { sessionId?: string; signal?: AbortSignal } = {}
+  context: { sessionId?: string; messageId?: string; signal?: AbortSignal } = {}
 ): AiBridge {
   const routing = {
     ...(context.sessionId ? { sessionId: context.sessionId } : {}),
+    ...(context.messageId ? { messageId: context.messageId } : {}),
     ...(context.signal ? { signal: context.signal } : {}),
   }
   return {

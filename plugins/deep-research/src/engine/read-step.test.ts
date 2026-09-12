@@ -1,4 +1,5 @@
 import type { AiBridge } from "../lib/ai"
+import { ResearchToolError } from "../errors"
 import { DEFAULT_CONFIG, type EngineDeps, type SearchHit } from "../types"
 import { runReadStep } from "./read-step"
 import { initState, type ResearchState } from "./workspace"
@@ -72,6 +73,52 @@ describe("runReadStep", () => {
     const { added } = await runReadStep(["https://a.com"], s, deps({ read }), 2)
     expect(added).toHaveLength(0)
     expect(s.candidates.find((c) => c.url === "https://a.com")).toBeUndefined()
+  })
+
+  it("fetches the targets in parallel and keeps their order in the result", async () => {
+    const s = state()
+    let inFlight = 0
+    let maxInFlight = 0
+    const read = jest.fn(async (url: string) => {
+      inFlight++
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      await Promise.resolve()
+      inFlight--
+      return `body of ${url}`
+    })
+    const { added } = await runReadStep(
+      ["https://a.com", "https://b.com", "https://c.com"],
+      s,
+      deps({ read }),
+      3
+    )
+    expect(added.map((k) => k.url)).toEqual(["https://a.com", "https://b.com", "https://c.com"])
+    expect(maxInFlight).toBeGreaterThan(1)
+  })
+
+  it("rethrows a fatal read failure after the batch settles", async () => {
+    const s = state()
+    const fatal = new ResearchToolError("RATE_LIMITED", "throttled", true)
+    const read = jest.fn(async (url: string) => {
+      if (url === "https://a.com") throw fatal
+      return `body of ${url}`
+    })
+    await expect(runReadStep([], s, deps({ read }), 3)).rejects.toBe(fatal)
+  })
+
+  it("carries the hit's date and verification badge onto the evidence", async () => {
+    const s = state()
+    s.candidates.length = 0
+    s.candidates.push({
+      url: "https://a.com",
+      title: "A",
+      content: "snippet",
+      score: 1,
+      publishedDate: "2026-08-30",
+      credibility: "verified",
+    })
+    const { added } = await runReadStep(["https://a.com"], s, deps(), 2)
+    expect(added[0]).toMatchObject({ publishedDate: "2026-08-30", credibility: "verified" })
   })
 
   it("drops semantically duplicate evidence", async () => {

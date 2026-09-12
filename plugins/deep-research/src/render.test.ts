@@ -43,25 +43,58 @@ describe("renderResultCard", () => {
       "answered under budget limits"
     )
   })
+
+  it("flags a cancelled run distinctly from a budget-forced one", () => {
+    expect(renderResultCard("Why?", { ...result, gaveUp: true, aborted: true })).toContain(
+      "cancelled — partial findings"
+    )
+  })
+
+  it("shows a source's publication date when the provider reported one", () => {
+    const dated: DeepSearchResult = {
+      ...result,
+      citations: [{ url: "https://a.test", title: "A", publishedDate: "2026-08-30" }],
+    }
+    expect(renderResultCard("Why?", dated)).toContain("[A](https://a.test) (2026-08-30)")
+  })
 })
 
 describe("renderReportCard", () => {
-  it("appends a section/token footer to the report body", () => {
-    const report: DeepResearchResult = {
-      topic: "T",
+  const report: DeepResearchResult = {
+    topic: "T",
+    title: "Title",
+    report: "# Title\n\nBody",
+    outline: {
       title: "Title",
-      report: "# Title\n\nBody",
-      outline: { title: "Title", sections: [] },
       sections: [
-        { heading: "H", question: "Q", answer: "A", citations: [], gaveUp: false },
-        { heading: "H2", question: "Q2", answer: "A2", citations: [], gaveUp: false },
+        { heading: "H", question: "Q" },
+        { heading: "H2", question: "Q2" },
       ],
-      citations: [],
-      usage: { totalTokens: 99 },
-    }
+    },
+    sections: [
+      { heading: "H", question: "Q", answer: "A", citations: [], gaveUp: false, steps: 4 },
+      { heading: "H2", question: "Q2", answer: "A2", citations: [], gaveUp: false, steps: 5 },
+    ],
+    citations: [],
+    usage: { totalTokens: 99 },
+    gaveUp: false,
+  }
+
+  it("appends a section/token footer to the report body", () => {
     const card = renderReportCard(report)
     expect(card).toContain("# Title")
     expect(card).toContain("2 sections · 99 tokens · deep research report")
+  })
+
+  it("flags a partial report and shows ran/planned sections", () => {
+    const partial: DeepResearchResult = {
+      ...report,
+      sections: report.sections.slice(0, 1),
+      gaveUp: true,
+    }
+    const card = renderReportCard(partial)
+    expect(card).toContain("1/2 sections")
+    expect(card).toContain("⚠️ partial")
   })
 })
 

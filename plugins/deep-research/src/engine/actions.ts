@@ -7,6 +7,7 @@
 import type { AiBridge } from "../lib/ai"
 import { completeJson } from "../lib/ai"
 import { extractJson } from "../lib/json"
+import { classifyResearchError } from "../errors"
 import type { ResearchAction } from "../types"
 import { canAnswer } from "./budget"
 import { decideActionMessages } from "./prompts"
@@ -30,7 +31,8 @@ interface RawDecision {
 
 export async function decideNextAction(
   state: ResearchState,
-  ai: AiBridge
+  ai: AiBridge,
+  signal?: AbortSignal
 ): Promise<{ decision: ActionDecision; tokens: number }> {
   const allowAnswer = canAnswer(state)
   const messages = decideActionMessages(renderWorkspace(state), allowAnswer, state.config.locale)
@@ -41,7 +43,18 @@ export async function decideNextAction(
       maxTokens: 600,
     })
     return { decision: normalizeDecision(res.value, state, allowAnswer), tokens: res.tokens }
-  } catch {
+  } catch (err) {
+    // A fatal precondition (no provider, revoked permission, PII refusal) or a
+    // caller abort must not degrade into a heuristic move: the loop would
+    // burn its whole step budget on searches before the real failure surfaced
+    // in `draftAnswer`. Transient model noise still falls back.
+    if (
+      signal?.aborted ||
+      (err instanceof Error && err.name === "AbortError") ||
+      classifyResearchError(err) !== "FAILED"
+    ) {
+      throw err
+    }
     return { decision: heuristicDecision(state, allowAnswer), tokens: 0 }
   }
 }

@@ -8,7 +8,7 @@ import type { EngineDeps, KnowledgeItem, SearchHit } from "../types"
 import { isFatalResearchError } from "../errors"
 import { normalizeUrl } from "../lib/url"
 import { cosineSimilarity } from "../lib/vector"
-import type { ResearchState } from "./workspace"
+import { MAX_KNOWLEDGE, type ResearchState } from "./workspace"
 
 const DUP_THRESHOLD = 0.95
 
@@ -19,31 +19,51 @@ export async function runReadStep(
   readTopK: number
 ): Promise<{ added: KnowledgeItem[]; tokens: number }> {
   const targets = chooseTargets(urls, state, readTopK)
-  const question = state.gapQueue[0] ?? state.question
-  const readItems: KnowledgeItem[] = []
+  // Attribute to the gap the last search actually chased, not whatever sits at
+  // the head of the still-open queue.
+  const question = state.activeGap ?? state.question
 
+  // Every target is a committed read: mark visited and drop from the pool
+  // before the fetches run in parallel.
   for (const hit of targets) {
     state.visitedUrls.add(normalizeUrl(hit.url))
     state.candidates = state.candidates.filter((c) => normalizeUrl(c.url) !== normalizeUrl(hit.url))
-    let content: string
-    try {
-      content = await deps.read(hit.url, hit)
-    } catch (err) {
-      // Same split as the search step: one unreadable page is skipped, but a
-      // reader that is switched off or rate-limited ends the run rather than
-      // letting the loop quietly answer from snippets alone.
-      if (isFatalResearchError(err)) throw err
-      deps.logger?.warn(`read failed for ${hit.url}`, err)
+  }
+
+  // Reads are independent — fetching them serially made the read step the
+  // slowest move in the loop for no reason. `allSettled` keeps target order
+  // and lets a per-page fault skip a source while a run-wide failure still
+  // ends the run (same split as the search step: one dead page is noise, a
+  // switched-off / rate-limited / cancelled reader is the end).
+  const settled = await Promise.allSettled(targets.map((hit) => deps.read(hit.url, hit)))
+  const readItems: KnowledgeItem[] = []
+  for (const [i, outcome] of settled.entries()) {
+    const hit = targets[i]
+    if (outcome.status === "rejected") {
+      if (isFatalResearchError(outcome.reason) || deps.signal?.aborted) throw outcome.reason
+      deps.logger?.warn(`read failed for ${hit.url}`, outcome.reason)
       continue
     }
-    const trimmed = (content ?? "").trim()
+    const trimmed = (outcome.value ?? "").trim()
     if (!trimmed) continue
-    readItems.push({ url: hit.url, title: hit.title, content: trimmed, question })
+    readItems.push({
+      url: hit.url,
+      title: hit.title,
+      content: trimmed,
+      question,
+      ...(hit.publishedDate ? { publishedDate: hit.publishedDate } : {}),
+      ...(hit.credibility ? { credibility: hit.credibility } : {}),
+    })
   }
 
   const added = await dropDuplicates(readItems, state, deps)
-  state.knowledge.push(...added)
-  return { added, tokens: 0 }
+  const room = Math.max(0, MAX_KNOWLEDGE - state.knowledge.length)
+  const kept = added.slice(0, room)
+  if (kept.length < added.length) {
+    deps.logger?.warn(`knowledge store full — dropped ${added.length - kept.length} item(s)`)
+  }
+  state.knowledge.push(...kept)
+  return { added: kept, tokens: 0 }
 }
 
 /** Resolve the candidate hits to read: requested URLs first, else top of pool. */

@@ -24,7 +24,8 @@ export async function evaluateAnswer(
   answer: string,
   evidence: string,
   ai: AiBridge,
-  locale?: string
+  locale?: string,
+  signal?: AbortSignal
 ): Promise<{ evaluation: Evaluation; tokens: number }> {
   try {
     const res = await completeJson<RawEvaluation>(
@@ -34,7 +35,10 @@ export async function evaluateAnswer(
       { temperature: 0, maxTokens: 400 }
     )
     return { evaluation: normalizeEvaluation(res.value), tokens: res.tokens }
-  } catch {
+  } catch (err) {
+    // Fail-open covers a flaky evaluator, not a cancellation: an aborted run
+    // must not accept an answer just because the eval stream was cut short.
+    if (signal?.aborted || (err instanceof Error && err.name === "AbortError")) throw err
     return {
       evaluation: { pass: true, reasons: ["evaluator unavailable — accepted by default"] },
       tokens: 0,

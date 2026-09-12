@@ -29,23 +29,34 @@ function renderSources(citations: Citation[]): string {
   for (const c of citations) {
     if (seen.has(c.url)) continue
     seen.add(c.url)
-    items.push(`${items.length + 1}. [${c.title || c.url}](${c.url})`)
+    const date = c.publishedDate?.trim()
+    items.push(
+      `${items.length + 1}. [${c.title || c.url}](${c.url})${date ? ` (${date.slice(0, 24)})` : ""}`
+    )
   }
   return `**Sources**\n${items.join("\n")}`
 }
 
 function renderFooter(result: DeepSearchResult): string {
   const steps = result.steps.length
-  const tokens = result.usage.totalTokens.toLocaleString()
-  const note = result.gaveUp
-    ? "⚠️ answered under budget limits — may be incomplete"
-    : "✓ evidence-checked"
+  // Explicit locale: bare toLocaleString picks up the host's, so digit
+  // grouping differed between user machines for the same run.
+  const tokens = result.usage.totalTokens.toLocaleString("en-US")
+  const note = result.aborted
+    ? "⚠️ cancelled — partial findings"
+    : result.gaveUp
+      ? "⚠️ answered under budget limits — may be incomplete"
+      : "✓ evidence-checked"
   return `*${steps} steps · ${tokens} tokens · ${note}*`
 }
 
 /** Render a DeepResearch report (already full markdown) with a small footer. */
 export function renderReportCard(result: DeepResearchResult): string {
-  const footer = `*${result.sections.length} sections · ${result.usage.totalTokens.toLocaleString()} tokens · deep research report*`
+  const ran = result.sections.length
+  const planned = result.outline.sections.length
+  const sectionCount = ran < planned ? `${ran}/${planned}` : `${ran}`
+  const partial = result.gaveUp ? " · ⚠️ partial" : ""
+  const footer = `*${sectionCount} sections · ${result.usage.totalTokens.toLocaleString("en-US")} tokens · deep research report${partial}*`
   return `${result.report.trim()}\n\n${footer}`
 }
 

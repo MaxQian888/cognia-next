@@ -111,6 +111,35 @@ describe("decideNextAction", () => {
     expect(decision.action).toBe("read")
     expect(tokens).toBe(0)
   })
+
+  it("rethrows a fatal model precondition instead of burning steps on the fallback", async () => {
+    // Without this the loop heuristically searched until the step cap before
+    // draftAnswer finally surfaced "no provider" — a slow, expensive failure.
+    const noProvider = Object.assign(new Error("no model"), { code: "NO_PROVIDER_AVAILABLE" })
+    const ai: AiBridge = {
+      chat: async function* () {
+        throw noProvider
+      },
+      embed: async () => [],
+    }
+    await expect(decideNextAction(withState(), ai)).rejects.toBe(noProvider)
+  })
+
+  it("rethrows when the run was cancelled mid-decision", async () => {
+    // What must not happen: an abort thrown INSIDE the chat being swallowed
+    // into a heuristic move that keeps the loop running.
+    const controller = new AbortController()
+    const throwing: AiBridge = {
+      chat: async function* () {
+        controller.abort()
+        throw new Error("stream aborted")
+      },
+      embed: async () => [],
+    }
+    await expect(decideNextAction(withState(), throwing, controller.signal)).rejects.toThrow(
+      "stream aborted"
+    )
+  })
 })
 
 describe("normalizeDecision optional-key shape", () => {

@@ -33,6 +33,21 @@ describe("readEngineConfig", () => {
     expect(readEngineConfig(context({}))).toEqual({})
   })
 
+  it("drops values equal to the declared defaults — seeded rows are not user choices", () => {
+    // The host seeds schema defaults into `getAll()`, so every key is always
+    // present. If they were passed through wholesale, `depth: "quick"` would
+    // be silently pinned by defaults the user never typed.
+    expect(
+      readEngineConfig(
+        context({ tokenBudget: 120_000, maxSteps: 24, readTopK: 3, searchResultsPerQuery: 6 })
+      )
+    ).toEqual({})
+    // …while a genuinely diverged value still passes through.
+    expect(readEngineConfig(context({ maxSteps: 24, tokenBudget: 500 }))).toEqual({
+      tokenBudget: 500,
+    })
+  })
+
   it("drops non-positive and non-finite budgets", () => {
     // A zero step ceiling ends the run before it starts, and NaN poisons every
     // comparison downstream — both are worse than the schema default.

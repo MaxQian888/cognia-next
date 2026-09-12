@@ -7,6 +7,8 @@
  * self-evaluates answers (separate evaluator) before returning. Budget-forcing
  * + beast mode guarantee termination with a best-effort answer.
  */
+import { unwrapUntrustedContent } from "@cognia/plugin-sdk"
+
 import type { DeepSearchConfig, DeepSearchResult, EngineDeps } from "../types"
 import { DEFAULT_CONFIG } from "../types"
 import { decideNextAction, type ActionDecision } from "./actions"
@@ -18,6 +20,7 @@ import { runSearchStep } from "./search-step"
 import {
   appendReportNote,
   initState,
+  MAX_GAP_QUEUE,
   recordStep,
   renderEvidence,
   type ResearchState,
@@ -34,14 +37,14 @@ export async function runDeepSearch(
 
   while (true) {
     if (deps.signal?.aborted) {
-      return finalize(state, deps, "aborted")
+      return abortResult(state, deps)
     }
     state.step += 1
     if (shouldForceAnswer(state)) {
       return finalize(state, deps, beastReason(state))
     }
 
-    const { decision, tokens } = await decideNextAction(state, deps.ai)
+    const { decision, tokens } = await decideNextAction(state, deps.ai, deps.signal)
     state.tokensUsed += tokens
     deps.reportProgress?.(progress(state), describe(decision))
 
@@ -59,7 +62,9 @@ export async function runDeepSearch(
     } else if (decision.action === "reflect") {
       let pushed = 0
       for (const gap of decision.gaps) {
-        if (!state.gapQueue.includes(gap)) {
+        const key = gap.trim().toLowerCase()
+        const known = state.gapQueue.some((g) => g.trim().toLowerCase() === key)
+        if (!known && state.gapQueue.length < MAX_GAP_QUEUE) {
           state.gapQueue.push(gap)
           pushed += 1
         }
@@ -81,7 +86,8 @@ async function tryAnswer(state: ResearchState, deps: EngineDeps): Promise<DeepSe
     answer,
     renderEvidence(state),
     deps.ai,
-    state.config.locale
+    state.config.locale,
+    deps.signal
   )
   state.tokensUsed += evalTokens
 
@@ -106,6 +112,30 @@ async function tryAnswer(state: ResearchState, deps: EngineDeps): Promise<DeepSe
     `rejected: ${evaluation.reasons.join("; ") || "insufficient grounding"}`
   )
   return null
+}
+
+/**
+ * Cancellation: return what was gathered WITHOUT one last model call — a user
+ * who hit Stop does not want to wait for (or pay for) a beast-mode draft.
+ */
+function abortResult(state: ResearchState, deps: EngineDeps): DeepSearchResult {
+  recordStep(state, "answer", "aborted")
+  deps.reportProgress?.(1, "Cancelled")
+  return {
+    answer: state.evolvingReport
+      ? `Research was cancelled. Findings gathered so far:\n\n${state.evolvingReport}`
+      : "Research was cancelled before an answer could be drafted.",
+    citations: state.knowledge.map((k) => ({
+      url: k.url,
+      title: unwrapUntrustedContent(k.title),
+      ...(k.publishedDate ? { publishedDate: k.publishedDate } : {}),
+    })),
+    knowledge: state.knowledge,
+    steps: state.steps,
+    usage: { totalTokens: state.tokensUsed },
+    gaveUp: true,
+    aborted: true,
+  }
 }
 
 /** Beast mode: force the best possible answer from current evidence and return. */

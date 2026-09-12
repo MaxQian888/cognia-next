@@ -1,0 +1,7 @@
+---
+"cognia-next": minor
+---
+
+feat(deep-research): persist reports and harden the research loop. Finished reports are saved as versioned, exportable workspace artifacts (the `/research report` command opens the deliverable; the `deep_research` tool returns `artifactId`); `messageId` now routes model and web calls alongside `sessionId`; search results carry publication date and the host's source-verification badge through evidence, citations and the rendered Sources list, with prompts anchored on today's date so freshness is decidable; per-query domain caps stop one site flooding the candidate pool; read steps fetch sources in parallel; the tool result returns a step `trace` and per-`sectionDetails`; and the evaluator fails answers that paper over contradicting sources.
+
+Loop hardening: the `depth` tool arg applies again (seeded config defaults no longer pin presets); inline `[n]` citations are renumbered to match the Sources list and remapped to a single global index across report sections; cancelled runs return partial findings instantly without a farewell model call and stop launching report sections; fatal provider errors surface immediately instead of looping to the step cap; the gap queue is a real FIFO; evidence/candidate stores are bounded; `maxBadAttempts` fires at the configured count; report mode surfaces partial-section coverage; `locale` reaches every model prompt; and `/research` accepts `quick`/`deep` prefixes.

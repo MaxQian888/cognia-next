@@ -48,13 +48,26 @@ describe("makeSearchFn", () => {
     const invokeTool = jest.fn(async () => searchSuccess([]))
     const search = makeSearchFn(context(invokeTool as unknown as Invoke), {
       sessionId: "s-1",
+      messageId: "m-1",
     })
     await search("cognia", 7)
     expect(invokeTool).toHaveBeenCalledWith(
       "web_search",
       { query: "cognia", maxResults: 7 },
-      { sessionId: "s-1" }
+      { sessionId: "s-1", messageId: "m-1" }
     )
+  })
+
+  it("carries the host's verification badge onto the hit", async () => {
+    // Source verification is opt-in host-side; when it ran, the badge is a
+    // trust signal the drafter and evaluator should see, not metadata to drop.
+    const search = makeSearchFn(
+      context(async () =>
+        searchSuccess([{ title: "T", url: "https://a.test", credibility: "verified" }])
+      )
+    )
+    const [hit] = await search("q", 3)
+    expect(hit.credibility).toBe("verified")
   })
 
   it("raises a fatal NO_SEARCH_PROVIDER when search cannot run", async () => {

@@ -70,6 +70,8 @@ function toResearchError(
 interface HostToolOptions {
   /** Session the run belongs to — routes the call to the right credentials. */
   sessionId?: string
+  /** Message the run belongs to, when the caller is inside a turn. */
+  messageId?: string
   signal?: AbortSignal
   /** Cap on retained page characters. */
   readMaxChars?: number
@@ -78,6 +80,7 @@ interface HostToolOptions {
 function invocation(options: HostToolOptions): PluginInvocationOptions {
   return {
     ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+    ...(options.messageId ? { messageId: options.messageId } : {}),
     ...(options.signal ? { signal: options.signal } : {}),
   }
 }
@@ -112,6 +115,9 @@ export function makeSearchFn(ctx: PluginContext, options: HostToolOptions = {}):
       content: hit.content ? wrapUntrustedContent(hit.content) : "",
       score: hit.score ?? 0,
       ...(hit.publishedDate ? { publishedDate: hit.publishedDate } : {}),
+      // Host-side source verification is opt-in; when it ran, the badge is a
+      // real trust signal the drafter and evaluator should see.
+      ...(hit.credibility ? { credibility: hit.credibility } : {}),
     }))
   }
 }

@@ -74,15 +74,36 @@ describe("buildEngineDeps", () => {
     )
   })
 
-  it("routes host tool calls to the same session and signal", async () => {
+  it("routes host tool calls to the same session, message and signal", async () => {
     const { ctx, recorded } = context()
     const controller = new AbortController()
-    const deps = buildEngineDeps(ctx, { sessionId: "s-9", signal: controller.signal })
+    const deps = buildEngineDeps(ctx, {
+      sessionId: "s-9",
+      messageId: "m-9",
+      signal: controller.signal,
+    })
     await deps.search("cognia", 3)
     expect(recorded.invokeTool).toHaveBeenCalledWith(
       "web_search",
       { query: "cognia", maxResults: 3 },
-      { sessionId: "s-9", signal: controller.signal }
+      { sessionId: "s-9", messageId: "m-9", signal: controller.signal }
+    )
+  })
+
+  it("routes model calls to the run's message as well as its session", async () => {
+    const { ctx, recorded } = context()
+    const deps = buildEngineDeps(ctx, { sessionId: "s-9", messageId: "m-9" })
+    for await (const _ of deps.ai.chat([{ role: "user", content: "hi" }])) {
+      // drain
+    }
+    await deps.ai.embed(["x"])
+    expect(recorded.chat).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ sessionId: "s-9", messageId: "m-9" })
+    )
+    expect(recorded.embed).toHaveBeenCalledWith(
+      ["x"],
+      expect.objectContaining({ sessionId: "s-9", messageId: "m-9" })
     )
   })
 

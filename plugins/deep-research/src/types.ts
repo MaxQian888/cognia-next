@@ -44,7 +44,10 @@ export interface SearchHit {
   /** Snippet or provider-supplied raw content (used as a cheap "read"). */
   content: string
   score: number
+  /** Provider-reported publication date (free-form — ISO, a year, "3d ago"). */
   publishedDate?: string
+  /** Host source-verification badge, present only when the user enabled it. */
+  credibility?: string
 }
 
 /** A piece of evidence the loop has accepted into working memory. */
@@ -54,11 +57,17 @@ export interface KnowledgeItem {
   content: string
   /** Which (sub)question this evidence was gathered for, if any. */
   question?: string
+  /** Provider-reported publication date — freshness is a real ranking signal. */
+  publishedDate?: string
+  /** Host source-verification badge, if the user enabled verification. */
+  credibility?: string
 }
 
 export interface Citation {
   url: string
   title: string
+  /** Carried to the rendered Sources list so readers can judge freshness. */
+  publishedDate?: string
 }
 
 /** One recorded move, surfaced as a progress card. */
@@ -76,6 +85,8 @@ export interface DeepSearchResult {
   usage: { totalTokens: number }
   /** True when the answer was forced out by budget/step limits, not by passing evaluation. */
   gaveUp: boolean
+  /** True when the run was cancelled; `answer` holds the partial findings, not a draft. */
+  aborted?: boolean
 }
 
 // ── DeepResearch (report layer) ──────────────────────────────────────────────
@@ -96,6 +107,10 @@ export interface SectionResult {
   answer: string
   citations: Citation[]
   gaveUp: boolean
+  /** True when this section was cancelled mid-loop; its answer is a stub. */
+  aborted?: boolean
+  /** Loop iterations this section spent — surfaced for per-section diagnostics. */
+  steps: number
 }
 
 export interface DeepResearchResult {
@@ -104,10 +119,13 @@ export interface DeepResearchResult {
   /** Final coherent markdown report. */
   report: string
   outline: ResearchOutline
+  /** Sections that actually ran — can be fewer than `outline.sections` when the run stopped early. */
   sections: SectionResult[]
-  /** Deduplicated, aggregated across all sections. */
+  /** Deduplicated, aggregated across the sections that made it into the report. */
   citations: Citation[]
   usage: { totalTokens: number }
+  /** True when the run was cut short or any section settled for a budget-forced answer. */
+  gaveUp: boolean
 }
 
 /**

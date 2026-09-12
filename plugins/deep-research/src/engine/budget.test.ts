@@ -19,8 +19,11 @@ describe("shouldForceAnswer", () => {
   it("fires on step ceiling", () => {
     expect(shouldForceAnswer(state({ step: 5 }))).toBe(true)
   })
-  it("fires past max bad attempts", () => {
-    expect(shouldForceAnswer(state({ badAttempts: 2 }))).toBe(true)
+  it("fires AT max bad attempts — the count is rejections tolerated, not one past it", () => {
+    // `badAttempts` counts rejected drafts; maxBadAttempts=1 means the loop
+    // settles after one rejection, not two.
+    expect(shouldForceAnswer(state({ badAttempts: 1 }))).toBe(true)
+    expect(shouldForceAnswer(state({ badAttempts: 0 }))).toBe(false)
   })
 })
 

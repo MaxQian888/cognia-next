@@ -23,6 +23,8 @@ export interface BuildDepsOptions {
    * invocation so the work is billed and routed to the session the user is in.
    */
   sessionId?: string
+  /** Message this run belongs to, when invoked inside a turn. */
+  messageId?: string
 }
 
 /**
@@ -37,6 +39,7 @@ export interface BuildDepsOptions {
 export function buildEngineDeps(ctx: PluginContext, options: BuildDepsOptions = {}): EngineDeps {
   const routing = {
     ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+    ...(options.messageId ? { messageId: options.messageId } : {}),
     ...(options.signal ? { signal: options.signal } : {}),
   }
   return {

@@ -6,6 +6,7 @@
  */
 import { defineTool, type PluginContext, type PluginToolContext } from "@cognia/plugin-sdk"
 
+import { persistReport } from "./artifacts"
 import { readEngineConfig } from "./config"
 import { runDeepSearch } from "./engine/deepsearch"
 import { runDeepResearch } from "./engine/deepresearch"
@@ -83,15 +84,28 @@ export async function runResearchTool(
   const deps = buildEngineDeps(ctx, {
     ...(toolCtx?.reportProgress ? { reportProgress: toolCtx.reportProgress } : {}),
     ...(toolCtx?.signal ? { signal: toolCtx.signal } : {}),
-    // The tool call's own session — the host routes model + web calls with it,
-    // and on a multi-session host there is nothing ambient to fall back on.
+    // The tool call's own session + message — the host routes model and web
+    // calls with them, and on a multi-session host there is nothing ambient
+    // to fall back on.
     ...(toolCtx?.sessionId ? { sessionId: toolCtx.sessionId } : {}),
+    ...(toolCtx?.messageId ? { messageId: toolCtx.messageId } : {}),
   })
   const config = resolveConfig(readEngineConfig(ctx), args.depth)
 
   try {
     if (args.mode === "report") {
       const report = await runDeepResearch(query, deps, config)
+      // A finished report is a document: keep a versioned, exportable copy in
+      // the workspace. Best-effort — a host without artifact support still
+      // gets the report inline. A cancelled run produced no real document, so
+      // there is nothing worth filing.
+      const artifactId =
+        toolCtx?.signal?.aborted || report.sections.length === 0
+          ? undefined
+          : await persistReport(ctx, report, {
+              ...(toolCtx?.sessionId ? { sessionId: toolCtx.sessionId } : {}),
+              ...(toolCtx?.messageId ? { messageId: toolCtx.messageId } : {}),
+            })
       return {
         ok: true as const,
         mode: "report" as const,
@@ -99,7 +113,18 @@ export async function runResearchTool(
         report: report.report,
         citations: report.citations,
         sections: report.sections.length,
+        plannedSections: report.outline.sections.length,
+        // Which sections were forced/aborted — the caller cannot see inside
+        // `report`, and "5 sections" alone hides that two are stubs.
+        sectionDetails: report.sections.map((s) => ({
+          heading: s.heading,
+          gaveUp: s.gaveUp,
+          steps: s.steps,
+          ...(s.aborted ? { aborted: true as const } : {}),
+        })),
+        gaveUp: report.gaveUp,
         tokens: report.usage.totalTokens,
+        ...(artifactId ? { artifactId } : {}),
       }
     }
 
@@ -110,10 +135,19 @@ export async function runResearchTool(
       answer: result.answer,
       citations: result.citations,
       gaveUp: result.gaveUp,
+      ...(result.aborted ? { aborted: true as const } : {}),
       steps: result.steps.length,
+      // The move-by-move trace — an orchestrating agent that wonders why a
+      // source was missed can see exactly what the loop did.
+      trace: result.steps,
       tokens: result.usage.totalTokens,
     }
   } catch (err) {
+    // A cancellation is not a failure — report it as such instead of letting
+    // an AbortError message masquerade as a research error.
+    if (toolCtx?.signal?.aborted || (err instanceof Error && err.name === "AbortError")) {
+      return { ok: false as const, aborted: true as const, error: "Deep Research was cancelled." }
+    }
     // Classified rather than raw: the model reads this string, and "no search
     // provider configured" is actionable where a stack-shaped message is not.
     const detail = err instanceof Error ? err.message : String(err)

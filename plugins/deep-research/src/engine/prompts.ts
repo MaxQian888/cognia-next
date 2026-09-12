@@ -9,6 +9,15 @@ function localeLine(locale?: string): string {
 }
 
 /**
+ * The model has no clock. Without an explicit date, "latest", "recent" and
+ * "in 2025" are judged against the training cutoff, and stale pages read as
+ * current. Anchoring on today's ISO date makes freshness a decidable signal.
+ */
+function todayLine(): string {
+  return `\nToday is ${new Date().toISOString().slice(0, 10)}.`
+}
+
+/**
  * Ask the model to choose the next move. The model sees the bounded workspace
  * and must return a single JSON object. `allowAnswer=false` hard-blocks the
  * `answer` action (budget-forcing after a failed attempt).
@@ -27,6 +36,7 @@ export function decideActionMessages(
     "answer. Prefer reading unread sources before searching again; reflect to " +
     "break the question into sub-questions when stuck. Only answer when the " +
     "evidence actually supports a confident, citable response." +
+    todayLine() +
     localeLine(locale)
   const user =
     `${workspace}\n\n` +
@@ -55,6 +65,7 @@ export function outlineMessages(topic: string, landscape: string, locale?: strin
     "You are a research lead planning a report. Using the landscape scan, design " +
     "a focused outline: a title plus 3-6 sections, each a distinct facet with a " +
     "specific, searchable research question. Avoid overlap between sections." +
+    todayLine() +
     localeLine(locale)
   const user =
     `TOPIC: ${topic}\n\n` +
@@ -81,14 +92,16 @@ export function coherenceMessages(
     "You are a senior analyst assembling a final research report. Merge the " +
     "section findings into one coherent markdown report: a short executive " +
     "summary, then the sections in a logical order with smooth transitions and " +
-    "unified terminology. PRESERVE every inline [n] citation marker and source " +
-    "URL exactly; never invent facts or sources. Remove redundancy." +
+    "unified terminology. Every inline [n] citation marker already indexes the " +
+    "consolidated Sources list — copy each marker EXACTLY as written, never " +
+    'renumber them, and drop any per-section "Sources" lists you find. Never ' +
+    "invent facts or sources. Remove redundancy." +
     localeLine(locale)
   const user =
     `TOPIC: ${topic}\nWORKING TITLE: ${title}\n\n` +
     `SECTION FINDINGS:\n${sectionBlocks}\n\n` +
-    `Write the final markdown report. End with a single consolidated "Sources" ` +
-    `list (deduplicated).`
+    `Write the final markdown report. Do not append a sources list — one is ` +
+    `added automatically.`
   return [
     { role: "system", content: system },
     { role: "user", content: user },
@@ -113,12 +126,13 @@ export function draftAnswerMessages(
       ? " You are out of research budget: commit to the best answer the current " +
         "evidence supports, and clearly flag any remaining uncertainty."
       : "") +
+    todayLine() +
     localeLine(locale)
   const user =
     `QUESTION: ${question}\n\n` +
     `SOURCES:\n${evidence}\n\n` +
-    `Write the answer with inline [n] citations. End with a short "Sources:" ` +
-    `list mapping each [n] to its URL.`
+    `Write the answer with inline [n] citations. Do not append a sources list — ` +
+    `one is rendered from the citation data automatically.`
   return [
     { role: "system", content: system },
     { role: "user", content: user },
@@ -134,14 +148,17 @@ export function evaluateMessages(
   question: string,
   answer: string,
   evidence: string,
-  _locale?: string
+  locale?: string
 ): AiMessage[] {
   const system =
     "You are a strict answer evaluator. Decide the evaluation criteria " +
     "appropriate to the question (e.g. factual accuracy, completeness, " +
     "freshness, directness), then judge the candidate answer against the " +
-    "sources. An answer fails if any claim is unsupported by the sources or " +
-    "the question is not actually answered."
+    "sources. An answer fails if any claim is unsupported by the sources, if " +
+    "the question is not actually answered, or if the sources directly " +
+    "contradict each other and the answer papers over it." +
+    todayLine() +
+    localeLine(locale)
   const user =
     `QUESTION: ${question}\n\n` +
     `CANDIDATE ANSWER:\n${answer}\n\n` +

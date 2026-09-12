@@ -1,6 +1,8 @@
 import type { PluginCommandResult, PluginContext } from "@cognia/plugin-sdk"
 
 import definition from "./index"
+import manifestJson from "../plugin.json"
+import { DEEP_RESEARCH_TOOL } from "./tool"
 
 function ctx(): PluginContext {
   return {
@@ -40,6 +42,7 @@ describe("manifest", () => {
       "agent:control",
       "ai:chat",
       "ai:embed",
+      "artifact:write",
       "settings:read",
     ])
   })
@@ -78,6 +81,29 @@ describe("manifest", () => {
 
   it("declares the deep_research tool so it is discoverable before activation", () => {
     expect(manifest.tools?.map((tool) => tool.name)).toEqual(["deep_research"])
+  })
+
+  it("keeps the manifest's tool schema in sync with the registered tool", () => {
+    // The schema is declared in two places — plugin.json (for discovery) and
+    // defineTool (for registration). Nothing derives one from the other, so
+    // drift is silent; a duplicated command registration already shipped once.
+    const declared = (manifestJson.tools as Array<Record<string, unknown>>)[0]
+    expect(declared.name).toBe(DEEP_RESEARCH_TOOL.name)
+    expect(declared.description).toBe(DEEP_RESEARCH_TOOL.description)
+    expect(declared.parametersSchema).toEqual(DEEP_RESEARCH_TOOL.parametersSchema)
+  })
+
+  it("keeps manifest defaults in sync with the engine defaults", () => {
+    // `readEngineConfig` treats a value equal to the declared default as unset;
+    // if these drift apart the `depth` presets go dead again.
+    const defaults = (manifestJson as { defaultConfig?: Record<string, unknown> }).defaultConfig
+    expect(defaults).toEqual({
+      tokenBudget: 120_000,
+      maxSteps: 24,
+      maxBadAttempts: 2,
+      readTopK: 3,
+      searchResultsPerQuery: 6,
+    })
   })
 })
 

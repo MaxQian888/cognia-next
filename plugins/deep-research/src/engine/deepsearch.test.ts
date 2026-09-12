@@ -101,6 +101,34 @@ describe("runDeepSearch", () => {
     expect(reflect?.detail).toContain("2 sub-question")
   })
 
+  it("consumes the head gap when a search chases it and falls back to the next gap", async () => {
+    const searched: string[] = []
+    const d = deps(
+      {
+        decisions: [
+          '{"action":"reflect","gaps":["chase me first","second gap"]}',
+          '{"action":"search","queries":["chase me first"]}',
+          // An empty-query search decision falls back to the next open gap —
+          // previously it re-issued the original question forever because the
+          // queue head never moved.
+          '{"action":"search"}',
+          '{"action":"read","urls":["https://a.com"]}',
+          '{"action":"answer"}',
+        ],
+      },
+      {
+        search: async (q) => {
+          searched.push(q)
+          return [hit("https://a.com")]
+        },
+      }
+    )
+    const result = await runDeepSearch("q", d, { maxSteps: 10 })
+    // The empty-query fallback searched the NEXT open gap, not the dead head.
+    expect(searched).toEqual(["chase me first", "second gap"])
+    expect(result.gaveUp).toBe(false)
+  })
+
   it("enters beast mode and gives up when the step limit is hit", async () => {
     const d = deps({ decisions: ['{"action":"reflect","gaps":["x"]}'] })
     const result = await runDeepSearch("q", d, { maxSteps: 3 })
@@ -108,15 +136,38 @@ describe("runDeepSearch", () => {
     expect(result.steps.at(-1)?.detail).toMatch(/forced/)
   })
 
-  it("aborts immediately when the signal is already aborted", async () => {
+  it("aborts immediately when the signal is already aborted — without a farewell model call", async () => {
     const controller = new AbortController()
     controller.abort()
+    const chat = jest.fn(async function* () {
+      yield { content: "should not run", usage: { totalTokens: 1 } }
+    })
     const d = deps(
       { decisions: ['{"action":"search","queries":["x"]}'] },
-      { signal: controller.signal }
+      { signal: controller.signal, ai: { chat, embed: async (t: string[]) => t.map(() => [0]) } }
     )
     const result = await runDeepSearch("q", d, { maxSteps: 5 })
     expect(result.gaveUp).toBe(true)
+    expect(result.aborted).toBe(true)
     expect(result.steps.at(-1)?.detail).toMatch(/aborted/)
+    // Cancellation returns the partial findings — a beast-mode draft would
+    // spend one more model call on a run the caller already gave up on.
+    expect(chat).not.toHaveBeenCalled()
+  })
+
+  it("propagates a fatal model error from the decider instead of looping to the step cap", async () => {
+    const noProvider = Object.assign(new Error("no model"), { code: "NO_PROVIDER_AVAILABLE" })
+    const d = deps(
+      { decisions: [] },
+      {
+        ai: {
+          chat: async function* () {
+            throw noProvider
+          },
+          embed: async (t: string[]) => t.map(() => [0]),
+        },
+      }
+    )
+    await expect(runDeepSearch("q", d, { maxSteps: 5 })).rejects.toBe(noProvider)
   })
 })

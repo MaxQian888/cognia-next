@@ -1,6 +1,6 @@
 import type { AiBridge } from "../lib/ai"
 import { DEFAULT_CONFIG, type EngineDeps, type SearchHit } from "../types"
-import { runSearchStep } from "./search-step"
+import { MAX_PER_DOMAIN, runSearchStep } from "./search-step"
 import { initState, type ResearchState } from "./workspace"
 
 function hit(url: string, title = url): SearchHit {
@@ -82,6 +82,40 @@ describe("runSearchStep", () => {
     })
     const { added } = await runSearchStep(["q"], s, d)
     expect(added).toHaveLength(1)
+  })
+
+  it("caps a single domain's yield per query so one site cannot flood the pool", async () => {
+    const s = state()
+    const d = deps({
+      search: async () => [
+        hit("https://wiki.test/a"),
+        hit("https://wiki.test/b"),
+        hit("https://wiki.test/c"),
+        hit("https://wiki.test/d"),
+        hit("https://blog.test/a"),
+      ],
+    })
+    const { added } = await runSearchStep(["q"], s, d)
+    expect(added.map((h) => h.url)).toEqual([
+      "https://wiki.test/a",
+      "https://wiki.test/b",
+      "https://blog.test/a",
+    ])
+    expect(added.filter((h) => h.url.includes("wiki.test"))).toHaveLength(MAX_PER_DOMAIN)
+  })
+
+  it("resets the domain cap per issued query", async () => {
+    const s = state()
+    const d = deps({
+      search: async (query) => [
+        hit(`https://wiki.test/${query}-a`),
+        hit(`https://wiki.test/${query}-b`),
+        hit(`https://wiki.test/${query}-c`),
+      ],
+    })
+    const { added } = await runSearchStep(["q1", "q2"], s, d)
+    // 2 per query × 2 queries — the cap bounds one response, not the batch.
+    expect(added).toHaveLength(4)
   })
 
   it("keeps all hits when embedding fails", async () => {
