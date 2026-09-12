@@ -1,3 +1,8 @@
+import {
+  sdkOptionsForStorage,
+  sdkSessionStorageFromOptions,
+  type SdkSessionStorage,
+} from "@/lib/claude/claude-sdk-rollout"
 /**
  * Persistent multi-turn agent session — the core behind the interactive TUI.
  *
@@ -288,6 +293,7 @@ function restoreRuntimeHistory(options: SendOptions, entries: ReturnType<typeof 
         provider?: string
         runtime?: string
         sdkSessionId?: string
+        sdkSessionStorage?: SdkSessionStorage
         messages?: unknown[]
       }
     | undefined
@@ -302,6 +308,15 @@ function restoreRuntimeHistory(options: SendOptions, entries: ReturnType<typeof 
     if (typeof saved.sdkSessionId !== "string" || !saved.sdkSessionId)
       fail("the native SDK session id is missing")
     options.resumeSessionId = saved.sdkSessionId
+    if (saved.sdkSessionStorage) {
+      if (
+        !["filesystem", "host-sqlite"].includes(saved.sdkSessionStorage.backend) ||
+        (saved.sdkSessionStorage.workspace != null &&
+          typeof saved.sdkSessionStorage.workspace !== "string")
+      )
+        fail("the SDK storage binding is invalid")
+      options.claudeAgentSdk = sdkOptionsForStorage(saved.sdkSessionStorage, options.claudeAgentSdk)
+    }
     return
   }
   if ([...entries].reverse().find((entry) => entry.role !== "system")?.role !== "assistant")
@@ -700,7 +715,10 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
                 (sendOptions.provider === "anthropic" ? "claude-agent-sdk" : "ai-sdk"),
               provider: sendOptions.provider,
               ...(result.sdkSessionId || sendOptions.resumeSessionId
-                ? { sdkSessionId: result.sdkSessionId ?? sendOptions.resumeSessionId }
+                ? {
+                    sdkSessionId: result.sdkSessionId ?? sendOptions.resumeSessionId,
+                    sdkSessionStorage: sdkSessionStorageFromOptions(sendOptions),
+                  }
                 : {}),
               ...(result.conversationSnapshot ? { messages: result.conversationSnapshot } : {}),
             },

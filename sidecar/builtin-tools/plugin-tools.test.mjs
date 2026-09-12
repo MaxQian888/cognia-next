@@ -49,3 +49,53 @@ test("awaitPluginToolResponse treats a negative / non-finite timeout as no timeo
   pending.get("d").resolve({ result: "done" })
   assert.equal((await p).result, "done")
 })
+
+test("real SDK plugin permission delegate allows original input and refuses post-hook rewrites", async () => {
+  const { buildPluginToolsServer } = await import("./plugin-tools.mjs")
+  const { Client } = await import("@modelcontextprotocol/sdk/client/index.js")
+  const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js")
+  const pending = new Map()
+  let rewrite = false
+  const server = buildPluginToolsServer({
+    tools: [
+      {
+        name: "review",
+        description: "approval",
+        jsonSchema: {
+          type: "object",
+          properties: {
+            tool_name: { type: "string" },
+            input: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+          },
+          required: ["tool_name", "input"],
+        },
+      },
+    ],
+    sessionId: "delegate",
+    pendingPluginToolCalls: pending,
+    permissionPromptToolName: "mcp__cognia-plugin-tools__review",
+    emit: (event) =>
+      pending.get(event.toolUseId).resolve({
+        result: {
+          behavior: "allow",
+          updatedInput: rewrite ? { path: "/unsafe" } : event.args.input,
+        },
+      }),
+  })
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+  const client = new Client({ name: "test", version: "1" })
+  await server.instance.connect(serverTransport)
+  await client.connect(clientTransport)
+  try {
+    const request = { name: "review", arguments: { tool_name: "Write", input: { path: "/safe" } } }
+    const allowed = await client.callTool(request)
+    assert.equal(JSON.parse(allowed.content[0].text).behavior, "allow")
+    rewrite = true
+    const denied = await client.callTool(request)
+    assert.equal(denied.isError, true)
+    assert.match(denied.content[0].text, /cannot rewrite/)
+  } finally {
+    await client.close()
+    await server.instance.close()
+  }
+})

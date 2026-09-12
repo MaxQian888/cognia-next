@@ -26,6 +26,11 @@ describe("runtime-options", () => {
     expect(runtimeLabelKey("devin")).toBe("devin")
   })
 
+  it("excludes retired OpenCode HTTP runtimes from teammate launch options", () => {
+    expect(RUNTIME_OPTIONS).not.toContain("opencode-server")
+    expect(RUNTIME_OPTIONS).not.toContain("opencode-remote")
+  })
+
   it("maps the OpenCode ACP runtime to its own label", () => {
     expect(runtimeLabelKey("opencode-acp")).toBe("opencodeAcp")
   })

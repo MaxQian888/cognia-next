@@ -600,6 +600,23 @@ export interface SendOptions {
     description: string
     jsonSchema: object
     pluginId: string
+    /**
+     * Declared filesystem access class — `"read"`/`"write"` opt the tool into
+     * the sidecar's workspace-confinement read/write classification. Omitted
+     * tools stay opaque (historical default).
+     */
+    access?: "read" | "write"
+    /**
+     * Parameter names whose values are filesystem paths — joined with the
+     * sidecar's built-in path-key set for confinement classification.
+     */
+    pathParams?: string[]
+    /**
+     * Sidecar relay round-trip ceiling (ms) for this tool — the resolved
+     * resilience budget (attempts + slack). Omit → 120s default; `0` disables
+     * (synthetic entries only: `ask_user`, `dispatch_agent`).
+     */
+    timeoutMs?: number
   }>
 
   /**
@@ -1220,6 +1237,10 @@ export interface PermissionRequestEvent {
   blockedPath?: string
   decisionReason?: string
   suggestions?: unknown[]
+  /** Select the decline action initially; an explicit user allow is still valid. */
+  defaultToNo?: boolean
+  /** This request must not offer or create a persistent permission rule. */
+  suppressAlwaysAllowRule?: boolean
 }
 
 /**
@@ -1303,6 +1324,7 @@ export interface ToolResultReviewEvent {
   toolName: string
   result: unknown
   isError: boolean
+  input?: Record<string, unknown>
 }
 
 // ---- Live session introspection & control (Claude Agent SDK Query methods) --
@@ -1338,6 +1360,7 @@ export type SessionControlMethod =
   | "readFile"
   | "reconnectMcpServer"
   | "reinitialize"
+  | "reloadOutputStyles"
   | "reloadPlugins"
   | "reloadSkills"
   | "rewindFiles"
@@ -1353,6 +1376,7 @@ export type SessionControlMethod =
   | "supportedCommands"
   | "supportedModels"
   | "toggleMcpServer"
+  | "updateSettings"
 
 /**
  * Capability each control method needs, so callers can fail closed BEFORE any
@@ -1376,6 +1400,7 @@ export const SESSION_CONTROL_CAPABILITIES: Record<SessionControlMethod, AgentCap
   readFile: "checkpoint",
   reconnectMcpServer: "mcp",
   reinitialize: "session.manage",
+  reloadOutputStyles: "session.manage",
   reloadPlugins: "plugins.native",
   reloadSkills: "skills.native",
   rewindFiles: "checkpoint",
@@ -1391,6 +1416,7 @@ export const SESSION_CONTROL_CAPABILITIES: Record<SessionControlMethod, AgentCap
   supportedCommands: "commands.dynamic",
   supportedModels: "set-model",
   toggleMcpServer: "mcp",
+  updateSettings: "session.manage",
 }
 
 /**
@@ -1522,6 +1548,50 @@ export type FeatureCallOperation =
   | "bedrock-discover"
   | "opencode-v2-discover"
   | "mcp-discover"
+  | "tool-host-start"
+  | "tool-host-stop"
+  | "tool-host-reply"
+
+/** Trusted renderer-to-sidecar lease control; never exposed through MCP. */
+export interface ToolHostControl {
+  leaseId: string
+  ownerSessionId: string
+  sendOptions?: SendOptions
+  renew?: boolean
+  pause?: boolean
+  kind?: "permission" | "plugin" | "review" | "preflight"
+  id?: string
+  result?: unknown
+  generation?: number
+}
+
+export interface ToolHostEvent {
+  type: "tool_host_event"
+  sessionId: string
+  leaseId: string
+  generation: number
+  event:
+    | PermissionRequestEvent
+    | PluginToolExecEvent
+    | ToolResultReviewEvent
+    | {
+        type: "tool_host_pre_tool"
+        sessionId: string
+        requestId: string
+        toolName: string
+        input: Record<string, unknown>
+      }
+    | {
+        type: "tool_host_cancel"
+        sessionId: string
+      }
+    | {
+        type: "tool_host_call_cancel"
+        sessionId: string
+        id: string
+        kind: "permission" | "plugin" | "review" | "preflight"
+      }
+}
 
 /** Ephemeral, secret-resolved definition sent only to the trusted sidecar. */
 export interface McpFeatureServer {
@@ -1554,6 +1624,7 @@ export interface FeatureCallRequest {
   model?: string
   credentials: FeatureCallCredentials
   mcpServer?: McpFeatureServer
+  toolHost?: ToolHostControl
   /** Same protocol-adapter descriptor used by ordinary provider execution. */
   protocolAdapterSpec?: SendOptions["protocolAdapterSpec"]
   options?: Record<string, unknown>
@@ -1715,6 +1786,7 @@ export type ClaudeEvent =
   | CommandAckEvent
   | SessionApiResponseEvent
   | FeatureCallEvent
+  | ToolHostEvent
   | McpLogEvent
   | AgentTraceSpanEvent
 
@@ -2298,6 +2370,8 @@ export interface ChatSession {
    * conversation survives sidecar restarts and app reloads.
    */
   sdkSessionId?: string
+  /** Original native transcript backend; never contains host credentials or tenant authority. */
+  sdkSessionStorage?: { backend: "filesystem" | "host-sqlite"; workspace?: string | null }
   /** Nonsecret, agent-scoped native session link for isolated gateway task resume. */
   externalAgentSession?: { agentId: string; sessionId: string }
   /**
@@ -5857,6 +5931,8 @@ export interface PendingApproval {
   description?: string
   blockedPath?: string
   decisionReason?: string
+  defaultToNo?: boolean
+  suppressAlwaysAllowRule?: boolean
   /**
    * Approval lifecycle. Absent/"pending" = live (answerable). "interrupted" =
    * the sidecar waiter died (turn aborted / session closed) and the tool was

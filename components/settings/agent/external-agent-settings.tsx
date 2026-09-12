@@ -375,7 +375,10 @@ function AgentEditorDialog({
   // in `components/agent/external-agent-manager.tsx`. Picking a preset fills
   // the form fields and stamps `metadata.preset` on save so `isFromPreset()`
   // can later badge the row.
-  const [selectedPreset, setSelectedPreset] = useState<string>(initialPreset ?? "")
+  const [selectedPreset, setSelectedPreset] = useState<string>(
+    initialPreset ||
+      (editingAgentId ? String(getAgent(editingAgentId)?.metadata?.preset ?? "") : "")
+  )
   // Both path affordances below are this device's filesystem: an external agent
   // spawns through a local process, so there is no host to browse instead.
   const directoryPicker = useDirectoryPicker()
@@ -388,7 +391,7 @@ function AgentEditorDialog({
       if (preset) {
         return {
           ...DEFAULT_FORM_DATA,
-          name: initialPreset === "opencode-v2-preview" ? t("opencodeV2PresetName") : preset.name,
+          name: initialPreset === "opencode-v2-service" ? t("opencodeV2PresetName") : preset.name,
           protocol: preset.protocol,
           transport: preset.transport,
           processCommand: preset.process?.command ?? "",
@@ -396,7 +399,7 @@ function AgentEditorDialog({
           networkEndpoint: preset.network?.endpoint ?? "",
           defaultPermissionMode: preset.defaultPermissionMode,
           description:
-            initialPreset === "opencode-v2-preview"
+            initialPreset === "opencode-v2-service"
               ? t("opencodeV2PresetDescription")
               : initialPreset === "devin"
                 ? t("devinPresetDescription")
@@ -442,6 +445,8 @@ function AgentEditorDialog({
       piExtensionPolicy: piExtensionPolicyFromMetadata(agent.metadata),
     }
   })
+
+  const managedDsh = getPresetConfig(selectedPreset)?.metadata?.requiresManagedRuntime === true
 
   const handleSave = useCallback(() => {
     const toNonNegativeInteger = (value: string, fallback: number): number => {
@@ -492,8 +497,25 @@ function AgentEditorDialog({
       selectedPreset && selectedPreset !== "custom" ? getPresetConfig(selectedPreset) : null
 
     if (formData.protocol === "opencode-v2") {
-      // The preview adapter discovers the local service and ephemeral auth
-      // through the desktop sidecar; no endpoint or process is persisted.
+      const endpoint = formData.networkEndpoint.trim()
+      if (endpoint) {
+        let validEndpoint = false
+        try {
+          validEndpoint = ["http:", "https:"].includes(new URL(endpoint).protocol)
+        } catch {
+          // An explicit endpoint must be absolute; empty uses local discovery.
+        }
+        if (!validEndpoint) {
+          toast.error(t("endpointInvalid"))
+          return
+        }
+      }
+      // Explicit empty values also clear a saved endpoint/workspace on edit.
+      input.network = {
+        endpoint,
+        apiKey: formData.networkApiKey || undefined,
+      }
+      input.process = { command: "", args: [], cwd: formData.processCwd.trim() || undefined }
     } else if (formData.protocol === "opencode") {
       // OpenCode auto-spawns a local `opencode serve` when the toggle is on
       // (seeded from the preset); otherwise it connects to a server endpoint.
@@ -514,14 +536,17 @@ function AgentEditorDialog({
         }
       }
     } else if (formData.transport === "stdio") {
-      if (!formData.processCommand.trim()) {
+      if (!managedDsh && !formData.processCommand.trim()) {
         toast.error(t("commandRequired"))
         return
       }
       input.process = {
-        command: formData.processCommand.trim(),
-        args: formData.processArgs.split(" ").filter(Boolean),
+        command: managedDsh ? "" : formData.processCommand.trim(),
+        args: managedDsh ? [] : formData.processArgs.split(" ").filter(Boolean),
         cwd: formData.processCwd || undefined,
+        ...(managedDsh && formData.networkApiKey
+          ? { env: { DEEPSEEK_API_KEY: formData.networkApiKey } }
+          : {}),
       }
     } else {
       if (!formData.networkEndpoint.trim()) {
@@ -600,6 +625,15 @@ function AgentEditorDialog({
       input.metadata = opencodeMetadata
     }
 
+    if (formData.protocol === "opencode-v2") {
+      // Metadata updates merge with saved values; null explicitly clears auth.
+      input.metadata = {
+        ...(input.metadata ?? {}),
+        serverPassword: formData.opencodeServerPassword || null,
+        serverUsername: formData.opencodeServerUsername.trim() || null,
+      }
+    }
+
     if (formData.protocol === "pi-rpc") {
       // The adapter reads this off `metadata` when building spawn args, so it
       // must survive an edit that started from a preset (which supplies its
@@ -621,7 +655,7 @@ function AgentEditorDialog({
     onOpenChange(false)
     setFormData(DEFAULT_FORM_DATA)
     setSelectedPreset("")
-  }, [formData, selectedPreset, onSave, onOpenChange, t, tGateway])
+  }, [formData, selectedPreset, managedDsh, onSave, onOpenChange, t, tGateway])
 
   // Preset picker — keep tightly aligned with the chat-side AddAgentDialog
   // pattern. When a real preset is chosen, prefill the form fields so the user
@@ -635,7 +669,7 @@ function AgentEditorDialog({
       if (!preset) return
       setFormData((current) => ({
         ...current,
-        name: presetId === "opencode-v2-preview" ? t("opencodeV2PresetName") : preset.name,
+        name: presetId === "opencode-v2-service" ? t("opencodeV2PresetName") : preset.name,
         protocol: preset.protocol,
         transport: preset.transport,
         processCommand: preset.process?.command || current.processCommand,
@@ -643,7 +677,7 @@ function AgentEditorDialog({
         networkEndpoint: preset.network?.endpoint || current.networkEndpoint,
         defaultPermissionMode: preset.defaultPermissionMode,
         description:
-          presetId === "opencode-v2-preview"
+          presetId === "opencode-v2-service"
             ? t("opencodeV2PresetDescription")
             : presetId === "devin"
               ? t("devinPresetDescription")
@@ -680,7 +714,7 @@ function AgentEditorDialog({
                       <SelectItem key={presetId} value={presetId}>
                         <div className="flex items-center gap-2">
                           <span>
-                            {presetId === "opencode-v2-preview"
+                            {presetId === "opencode-v2-service"
                               ? t("opencodeV2PresetName")
                               : preset.name}
                           </span>
@@ -761,7 +795,7 @@ function AgentEditorDialog({
                   onValueChange={(v) =>
                     setFormData({ ...formData, transport: v as AgentFormData["transport"] })
                   }
-                  disabled={formData.protocol === "codex-app-server"}
+                  disabled={managedDsh || formData.protocol === "codex-app-server"}
                 >
                   <SelectTrigger data-testid="transport-select">
                     <SelectValue />
@@ -900,6 +934,71 @@ function AgentEditorDialog({
             </FormSection>
           )}
 
+          {formData.protocol === "opencode-v2" && (
+            <FormSection
+              title={t("sectionConnection")}
+              defaultOpen
+              dataTestId="opencode-v2-options-section"
+            >
+              <p className="text-xs text-muted-foreground">{t("opencodeV2PresetSetupHint")}</p>
+              <div className="grid gap-2">
+                <Label htmlFor="opencode-v2-endpoint">{t("endpoint")}</Label>
+                <Input
+                  id="opencode-v2-endpoint"
+                  value={formData.networkEndpoint}
+                  onChange={(e) => setFormData({ ...formData, networkEndpoint: e.target.value })}
+                  placeholder={t("opencodeV2EndpointPlaceholder")}
+                />
+                <p className="text-xs text-muted-foreground">{t("opencodeV2EndpointHint")}</p>
+              </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="grid gap-2">
+                  <Label htmlFor="opencode-v2-server-password">{tManager("serverPassword")}</Label>
+                  <Input
+                    id="opencode-v2-server-password"
+                    type="password"
+                    value={formData.opencodeServerPassword}
+                    onChange={(e) =>
+                      setFormData({ ...formData, opencodeServerPassword: e.target.value })
+                    }
+                    placeholder="••••••••"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="opencode-v2-server-username">{tManager("serverUsername")}</Label>
+                  <Input
+                    id="opencode-v2-server-username"
+                    value={formData.opencodeServerUsername}
+                    onChange={(e) =>
+                      setFormData({ ...formData, opencodeServerUsername: e.target.value })
+                    }
+                    // i18n-exempt: the native service's default Basic-Auth username
+                    placeholder="opencode"
+                  />
+                </div>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="opencode-v2-api-key">{t("apiKey")}</Label>
+                <Input
+                  id="opencode-v2-api-key"
+                  type="password"
+                  value={formData.networkApiKey}
+                  onChange={(e) => setFormData({ ...formData, networkApiKey: e.target.value })}
+                  placeholder={t("apiKeyPlaceholder")}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="opencode-v2-cwd">{t("workingDirectory")}</Label>
+                <Input
+                  id="opencode-v2-cwd"
+                  value={formData.processCwd}
+                  onChange={(e) => setFormData({ ...formData, processCwd: e.target.value })}
+                  placeholder={t("cwdPlaceholder")}
+                />
+              </div>
+            </FormSection>
+          )}
+
           {/* Connection — stdio process args or the network endpoint, whichever
               the chosen transport actually uses. */}
           {formData.protocol !== "opencode" && formData.protocol !== "opencode-v2" && (
@@ -915,10 +1014,32 @@ function AgentEditorDialog({
             >
               {formData.transport === "stdio" ? (
                 <>
+                  {managedDsh && (
+                    <div className="grid gap-2">
+                      <p className="text-xs text-muted-foreground">
+                        {t("deepseekHarness.managedLaunchNotice")}
+                      </p>
+                      <Label htmlFor="dsh-api-key">{t("apiKey")}</Label>
+                      <Input
+                        id="dsh-api-key"
+                        type="password"
+                        autoComplete="new-password"
+                        value={formData.networkApiKey}
+                        onChange={(event) =>
+                          setFormData({ ...formData, networkApiKey: event.target.value })
+                        }
+                        placeholder={t("apiKeyPlaceholder")}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        {t("deepseekHarness.credentialNotice")}
+                      </p>
+                    </div>
+                  )}
                   <div className="grid gap-2">
                     <Label htmlFor="command">{t("command")}</Label>
                     <Input
                       id="command"
+                      disabled={managedDsh}
                       value={formData.processCommand}
                       onChange={(e) => setFormData({ ...formData, processCommand: e.target.value })}
                       // i18n-exempt: example CLI command, not UI prose
@@ -929,6 +1050,7 @@ function AgentEditorDialog({
                     <Label htmlFor="args">{t("arguments")}</Label>
                     <Input
                       id="args"
+                      disabled={managedDsh}
                       value={formData.processArgs}
                       onChange={(e) => setFormData({ ...formData, processArgs: e.target.value })}
                       // i18n-exempt: example CLI arguments, not UI prose
@@ -1437,7 +1559,7 @@ function PresetGalleryCard({ disabled, onPick }: PresetGalleryCardProps) {
                   <div className="flex min-w-0 items-center gap-2">
                     <BrandIcon id={id} size={24} />
                     <p className="truncate text-sm font-medium">
-                      {id === "opencode-v2-preview" ? t("opencodeV2PresetName") : config.name}
+                      {id === "opencode-v2-service" ? t("opencodeV2PresetName") : config.name}
                     </p>
                   </div>
                   {(CODEX_EXECUTABLE_PRESET_IDS as readonly string[]).includes(id) &&
@@ -1466,7 +1588,7 @@ function PresetGalleryCard({ disabled, onPick }: PresetGalleryCardProps) {
                   )}
                 </div>
                 <p className="line-clamp-3 text-xs text-muted-foreground">
-                  {id === "opencode-v2-preview"
+                  {id === "opencode-v2-service"
                     ? t("opencodeV2PresetDescription")
                     : id === "devin"
                       ? t("devinPresetDescription")
@@ -2310,8 +2432,7 @@ export function ExternalAgentSettings() {
                     setEditorOpen(true)
                   }}
                 />
-                {/* DeepSeek Harness is the one backend with no binary to detect,
-                    so its install lives here rather than behind a preset pick. */}
+                {/* Managed DeepSeek Harness installation and certification. */}
                 <DeepSeekHarnessCard />
               </div>
             )}

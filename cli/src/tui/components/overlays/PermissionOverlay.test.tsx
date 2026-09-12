@@ -6,6 +6,7 @@ import {
   choiceToDecision,
   DEFAULT_PERMISSION_CHOICES,
   initialChoiceIndex,
+  permissionChoicesForRequest,
   permissionDetail,
   PermissionOverlay,
   permissionReason,
@@ -552,3 +553,9 @@ it.each([
     expect(onResolve).toHaveBeenCalledWith(expect.objectContaining({ decision }))
   }
 )
+
+it("SDK hints remove persistent approval and select deny even for a non-shell tool", () => {
+  const choices = permissionChoicesForRequest({ suppressAlwaysAllowRule: true })
+  expect(choices.map((choice) => choice.value)).toEqual(["allow", "deny"])
+  expect(initialChoiceIndex("Edit", {}, choices, true)).toBe(1)
+})

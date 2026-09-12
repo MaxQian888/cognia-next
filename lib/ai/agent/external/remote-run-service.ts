@@ -72,6 +72,8 @@ export interface RemoteRunRequest {
   model?: string
   /** Thinking level for this turn, in the app's vocabulary (`low` to `max`). */
   reasoningEffort?: string
+  systemPrompt?: string
+  allowedTools?: string[]
   /** Resume an agent session this run already created. */
   externalSessionId?: string
   /**
@@ -164,6 +166,9 @@ export interface ExternalRunManager {
       sessionId?: string
       model?: string
       reasoningEffort?: string
+      systemPrompt?: string
+      allowedTools?: string[]
+      context?: { custom: { chatSessionId: string } }
       onEvent?: (event: ExternalAgentEvent) => void
       signal?: AbortSignal
     }
@@ -501,6 +506,9 @@ export async function startRemoteExternalRun(request: RemoteRunRequest): Promise
         // empty one would switch a session onto nothing.
         ...(request.model ? { model: request.model } : {}),
         ...(request.reasoningEffort ? { reasoningEffort: request.reasoningEffort } : {}),
+        ...(request.systemPrompt !== undefined ? { systemPrompt: request.systemPrompt } : {}),
+        ...(request.allowedTools !== undefined ? { allowedTools: request.allowedTools } : {}),
+        context: { custom: { chatSessionId: request.chatSessionId } },
         signal: controller.signal,
         onEvent: (event) => {
           if (run.settled) return

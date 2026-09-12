@@ -130,6 +130,8 @@ export async function startRemoteExternalTurn(input: {
   model?: string
   /** The composer's thinking level, in the app's vocabulary. */
   reasoningEffort?: string
+  systemPrompt?: string
+  allowedTools?: string[]
   externalSessionId?: string
 }): Promise<RemoteTurnStart> {
   // Starting a turn is an interactive approval, like the configuration writes
@@ -151,6 +153,8 @@ export async function startRemoteExternalTurn(input: {
     // as "inherit", so an explicit null would be both a 422 and a lie.
     ...(input.model ? { model: input.model } : {}),
     ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+    ...(input.systemPrompt !== undefined ? { systemPrompt: input.systemPrompt } : {}),
+    ...(input.allowedTools !== undefined ? { allowedTools: input.allowedTools } : {}),
     ...(input.externalSessionId ? { externalSessionId: input.externalSessionId } : {}),
   })
 

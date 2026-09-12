@@ -454,6 +454,7 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
 
   const isOpenCode = formData.protocol === "opencode"
   const isOpenCodeV2 = formData.protocol === "opencode-v2"
+  const managedDsh = getPresetConfig(selectedPreset)?.metadata?.requiresManagedRuntime === true
   const isStdio = !isOpenCode && !isOpenCodeV2 && formData.transport === "stdio"
 
   const handlePresetChange = (presetId: string) => {
@@ -510,7 +511,11 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
         toast.error(tSettings("endpointRequired"))
         return
       }
-    } else if (isStdio && !formData.command.trim()) {
+    } else if (
+      isStdio &&
+      !getPresetConfig(selectedPreset)?.metadata?.requiresManagedRuntime &&
+      !formData.command.trim()
+    ) {
       toast.error(tSettings("commandRequired"))
       return
     } else if (!isStdio && !formData.endpoint.trim()) {
@@ -884,6 +889,34 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
               </>
             ) : isStdio ? (
               <>
+                {managedDsh && (
+                  <div className="grid gap-2">
+                    <p className="text-xs text-muted-foreground">
+                      {tSettings("deepseekHarness.managedLaunchNotice")}
+                    </p>
+                    <Label htmlFor="dsh-api-key">{tSettings("apiKey")}</Label>
+                    <Input
+                      id="dsh-api-key"
+                      type="password"
+                      autoComplete="new-password"
+                      value={formData.dshApiKey ?? ""}
+                      onChange={(event) =>
+                        setFormData({ ...formData, dshApiKey: event.target.value })
+                      }
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      {tSettings("deepseekHarness.credentialNotice")}
+                    </p>
+                    <Label htmlFor="dsh-workspace">{tSettings("workingDirectory")}</Label>
+                    <Input
+                      id="dsh-workspace"
+                      value={formData.dshWorkspace ?? ""}
+                      onChange={(event) =>
+                        setFormData({ ...formData, dshWorkspace: event.target.value })
+                      }
+                    />
+                  </div>
+                )}
                 {planeWarning && (
                   <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
                     {tManager("stdioNeedsAProcess")} {planeWarning}
@@ -897,7 +930,8 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                     onChange={(e) => setFormData({ ...formData, command: e.target.value })}
                     // i18n-exempt: example CLI command, not UI prose
                     placeholder="npx"
-                    required={isStdio}
+                    required={isStdio && !managedDsh}
+                    disabled={managedDsh}
                   />
                 </div>
                 <div className="grid gap-2">
@@ -1252,8 +1286,14 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
         config.metadata = { preview: true, localServiceDiscovery: true }
       } else if (data.transport === "stdio") {
         config.process = {
-          command: data.command,
-          args: data.args.split(" ").filter(Boolean),
+          command: config.metadata?.requiresManagedRuntime ? "" : data.command,
+          args: config.metadata?.requiresManagedRuntime ? [] : data.args.split(" ").filter(Boolean),
+          ...(config.metadata?.requiresManagedRuntime
+            ? {
+                cwd: data.dshWorkspace?.trim() || undefined,
+                ...(data.dshApiKey ? { env: { DEEPSEEK_API_KEY: data.dshApiKey } } : {}),
+              }
+            : {}),
           bare: data.bare || undefined,
           debug: data.debug || undefined,
         }

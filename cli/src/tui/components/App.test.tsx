@@ -753,6 +753,48 @@ describe("App", () => {
     expect(container.textContent).toContain("Turn stopped by user")
   })
 
+  it("SDK deny-default hint makes Enter deny without offering or persisting always", async () => {
+    const persistToolApproval = jest.fn()
+    let decision: unknown
+    const create: CreateSession = () => ({
+      sessionId: "sdk-hints",
+      async send(_prompt, opts) {
+        decision = await opts.gate({
+          toolName: "Bash",
+          input: { command: "chmod +x deploy.sh" },
+          requestId: "hint",
+          sessionId: "s",
+          defaultToNo: true,
+          suppressAlwaysAllowRule: true,
+        } as never)
+        return result("done")
+      },
+      close: jest.fn(),
+    })
+    const { container } = render(
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={create}
+        home="/home/u/.cognia"
+        persistToolApproval={persistToolApproval}
+      />
+    )
+    type("go")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("Allow Bash"))
+    expect(container.textContent).not.toContain("Allow always")
+    await act(async () => {
+      __fireInput("", { return: true })
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(decision).toMatchObject({ decision: "deny" }))
+    expect(persistToolApproval).not.toHaveBeenCalled()
+  })
+
   it("persists an 'Allow always' choice and invalidates options", async () => {
     const persistToolApproval = jest.fn()
     const invalidate = jest.fn()

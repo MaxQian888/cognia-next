@@ -61,7 +61,9 @@
       "negotiatedNoToolExecution": "Agent 声明不执行工具",
       "advertisedCompactCommand": "Agent 提供了 /compact 命令",
       "noAdvertisedCompactCommand": "Agent 未提供 /compact 命令",
-      "userDeclared": "这是你为该 agent 声明的"
+      "userDeclared": "这是你为该 agent 声明的",
+      "cogniaExtensionBridge": "由随附的 Cognia 扩展提供",
+      "isolatedLocalService": "由此对话专用的本地服务提供"
     },
     "adapterMethod": {
       "steerTurn": "Cognia 适配器已实现 steerTurn",
@@ -275,7 +277,7 @@
     "unsupportedProtocol": "目前可执行代理仅支持 ACP。",
     "websocketProtocolComingSoon": "WebSocket（即将支持）",
     "connectingHint": "正在连接 Agent… 启动期间你可以继续使用 Cognia。",
-    "devinSetupHint": "安装 Devin CLI 并运行一次 `devin auth login`。Cognia 通过 `devin acp` 启动并读取会话模型列表；使用 `acp --model swe2` 可在启动时选择 SWE-2。 如需修改文件，请选择“接受编辑（Code）”模式。 实测 Devin 3000.10.21 未加载 Cognia 传入的 MCP 服务；原生工具可用。"
+    "devinSetupHint": "安装 Devin CLI 并运行一次 `devin auth login`。Cognia 通过 `devin acp` 启动并读取会话模型列表；使用 `acp --model swe2` 可在启动时选择 SWE-2。 如需修改文件，请选择“接受编辑（Code）”模式。 每个会话均可使用 Cognia 工具和 Devin 原生工具。"
   },
   "runCommand": "运行 /{name}",
   "runtimes": {
@@ -392,7 +394,7 @@
     "customConfiguration": "自定义配置",
     "cwdPlaceholder": "留空使用当前目录",
     "deepseekHarness": {
-      "approvalNotice": "该传输层无法在对话进行中申请授权，因此权限在运行时启动时就已确定。",
+      "approvalNotice": "SDK 原生工具无法在执行中请求审批，其权限在启动时确定。Cognia 工具遵循宿主权限策略。",
       "cancelNotice": "取消对话会关闭整个运行时：该传输层没有单次对话取消能力。",
       "capabilities": "能力",
       "capabilityApproval": "对话中授权",
@@ -406,7 +408,7 @@
       "capabilityUsage": "Token 用量",
       "channel": "通道",
       "checking": "检查中…",
-      "description": "由 Cognia 托管的 DeepSeek Harness 运行时。与其他外部 Agent 不同，DeepSeek Harness 未发布可执行文件，因此 Cognia 在隔离目录中安装并认证自己的运行时。",
+      "description": "Cognia 在隔离目录中安装固定版本的 DeepSeek Harness 官方运行时，并在使用前校验依赖包和启动配置。",
       "doctor": "检查",
       "experimentalBadge": "实验性",
       "experimentalNotice": "上游仍处于开发者预览阶段，并明确提示会有破坏性变更。Cognia 锁定确切版本，一旦漂移则拒绝启动。",
@@ -437,7 +439,11 @@
       "removeSucceeded": "DeepSeek Harness 运行时已删除。",
       "title": "DeepSeek Harness",
       "unhealthy": "运行时存在问题。",
-      "upstreamVersion": "上游版本"
+      "upstreamVersion": "上游版本",
+      "managedLaunchNotice": "先安装托管运行时，再保存此配置。Cognia 会在启动时解析可执行文件和运行配置。",
+      "credentialNotice": "API Key 将保存到本地密钥库。编辑时留空可保留已有密钥。",
+      "committedEventsNotice": "两种传输均提供已提交的文本、推理和工具事件，并可通过 MCP 使用 Cognia 工具。不支持实时 token 增量；SDK 额外提供用量和子代理关系，ACP 支持逐工具审批和会话恢复。",
+      "capabilityMcp": "Cognia 与 MCP 工具"
     },
     "defaultPermissionMode": "默认权限模式",
     "defaultPermissionModeDesc": "新代理会话使用的默认权限模式",
@@ -498,6 +504,7 @@
     "enableExternalAgents": "启用外部代理",
     "enableExternalAgentsDesc": "允许通过 ACP 协议使用外部代理（如 Claude Code）",
     "endpoint": "Endpoint URL",
+    "endpointInvalid": "请输入有效的 HTTP 或 HTTPS 服务地址。",
     "endpointRequired": "HTTP 传输需要填写 Endpoint URL",
     "executionTimeoutMs": "执行超时（毫秒）",
     "fromPreset": "来自预设：{name}",
@@ -523,10 +530,10 @@
       "refresh": "刷新状态",
       "title": "OpenCode 服务器"
     },
-    "opencodeV2PresetDescription": "记录 Cognia 固定的旧版预览协议；当前 OpenCode V2 构建与其不兼容。",
-    "opencodeV2PresetName": "OpenCode V2 旧版预览协议",
-    "opencodeV2PresetSetupHint": "仅供文档参考。在重新生成预览客户端前，请使用稳定版 OpenCode HTTP/SSE 或 ACP。",
-    "opencodeV2Protocol": "OpenCode V2（旧版预览）",
+    "opencodeV2PresetDescription": "通过 HTTP 和 SSE 连接当前版本的 OpenCode 服务。",
+    "opencodeV2PresetName": "OpenCode V2",
+    "opencodeV2PresetSetupHint": "先运行当前版本的 OpenCode 服务，然后通过本地发现或服务地址连接。",
+    "opencodeV2Protocol": "OpenCode V2（HTTP + SSE）",
     "passBareFlag": "附加 --bare",
     "passBareFlagHint": "跳过磁盘自动发现（CLAUDE.md、hooks、插件、MCP）。会在启动时追加到 args 末尾。",
     "passDebugFlag": "附加 --debug",
@@ -621,7 +628,9 @@
       "evidenceListing": "已列出",
       "evidenceListingTitle": "Pi 的 auth check 不认识这个提供方（由扩展注册），但 Pi 列出了它的模型，而这只会在凭证可用时发生。"
     },
-    "devinPresetDescription": "通过原生 ACP 服务运行 Devin，复用已有的 CLI 登录。连接后可选择 SWE-2 等模型。 如需修改文件，请选择“接受编辑（Code）”模式。 实测 Devin 3000.10.21 未加载 Cognia 传入的 MCP 服务；原生工具可用。"
+    "devinPresetDescription": "通过原生 ACP 服务运行 Devin，复用已有的 CLI 登录。连接后可选择 SWE-2 等模型。 如需修改文件，请选择“接受编辑（Code）”模式。 每个会话均可使用 Cognia 工具和 Devin 原生工具。",
+    "opencodeV2EndpointPlaceholder": "留空以发现本地服务",
+    "opencodeV2EndpointHint": "本地发现使用临时认证。填写原生服务地址时，请使用服务密码；Basic Auth 用户名默认为 opencode。可选 API 密钥用于采用 Bearer 认证的代理服务。"
   },
   "statusConnected": "已连接",
   "statusConnecting": "连接中",

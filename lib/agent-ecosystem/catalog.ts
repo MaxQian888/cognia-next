@@ -53,7 +53,7 @@ export const AGENT_ECOSYSTEMS: readonly AgentEcosystemEntry[] = [
   },
   {
     id: "opencode",
-    runtimeIds: ["opencode", "opencode-acp", "opencode-remote", "opencode-v2-service"],
+    runtimeIds: ["opencode-v2-service", "opencode-acp", "opencode", "opencode-remote"],
     sessionSourceIds: ["opencode"],
     migrationVendor: "opencode",
     vendorRootKeys: ["opencodeDataDir", "opencodeConfigDir", "opencodePlatformDataDir"],

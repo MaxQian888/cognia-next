@@ -3,6 +3,9 @@
 let mockProcessExitCb: ((event: { agentId: string; code: number }) => void) | undefined
 const mockGatewayMint = jest.fn()
 const mockGatewayRevoke = jest.fn().mockResolvedValue(true)
+jest.mock("./dsh-managed-launch", () => ({
+  prepareDshManagedLaunch: async (config: unknown) => config,
+}))
 jest.mock("@/lib/gateway/mint-session-ticket", () => ({
   prepareExternalAgentGatewayRoute: (...args: unknown[]) => mockGatewayMint(...args),
 }))
@@ -65,6 +68,7 @@ jest.mock("@/lib/tauri", () => ({
 
 import {
   ExternalAgentManager,
+  createConfiguredProtocolAdapter,
   getExternalAgentManager,
   checkExternalAgentDelegation,
   executeOnExternalAgent,
@@ -73,6 +77,8 @@ import {
 } from "./manager"
 import { protocolAdapterRegistry, type SessionCreateOptions } from "./protocol-adapter"
 import { PiRpcClientAdapter } from "./pi-rpc-client"
+import { AcpClientAdapter } from "./acp-client"
+import { DevinAcpAdapter } from "./devin-acp-adapter"
 import {
   __setModelSurfaceDepsForTests,
   cachedAgentModelSurface,
@@ -1188,6 +1194,42 @@ describe("capability profile (ADR-0090 external SSOT)", () => {
     expect(profile?.negotiated).toBe(true)
     expect(profile?.protocol).toBe("acp")
     expect(profile?.digest).toMatch(/^eacp1-/)
+  })
+
+  it("does not project a local tool bridge into an unrelated OpenCode endpoint", async () => {
+    const m = freshManager()
+    protocolAdapterRegistry.register("opencode-v2", () => currentMock as never)
+    await m.addAgent(
+      buildBaseConfig({
+        protocol: "opencode-v2",
+        network: { endpoint: "https://remote.example.test" },
+      })
+    )
+    expect(m.getAgentCapabilityProfile("agent-1")?.effective.mcp.level).toBe("unsupported")
+    expect(m.getAgentCapabilityProfile("agent-1")?.effective["tools.ordinary"].level).toBe("native")
+  })
+
+  it("scopes running tool-host evidence to its owning chat and clears it on pause", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    m.setSessionHostFacts("agent-1", "chat-a", {
+      toolHostRunning: true,
+      subagentDispatchProjected: true,
+      hookRuntimeAvailable: true,
+    })
+    expect(
+      m.getAgentCapabilityProfile("agent-1", "chat-a")?.effective["subagents.model-selection"].level
+    ).toBe("equivalent")
+    expect(
+      m.getAgentCapabilityProfile("agent-1", "chat-b")?.effective["subagents.model-selection"].level
+    ).toBe("unsupported")
+    expect(
+      m.getAgentCapabilityProfile("agent-1")?.effective["subagents.model-selection"].level
+    ).toBe("unsupported")
+    m.setSessionHostFacts("agent-1", "chat-a", null)
+    expect(
+      m.getAgentCapabilityProfile("agent-1", "chat-a")?.effective["subagents.model-selection"].level
+    ).toBe("unsupported")
   })
 
   it("resolves adapter-method capabilities from the live instance", async () => {
@@ -2872,6 +2914,73 @@ describe("Cognia gateway task lifecycle", () => {
     }
   })
 
+  it.each([false, true])(
+    "continues SDK gateway tasks with preserved Cognia history (stream=%s)",
+    async (stream) => {
+      const { manager, restorePlane } = prepare()
+      const children: MockAdapter[] = []
+      protocolAdapterRegistry.register("dsh-sdk", () => {
+        const adapter = new MockAdapter()
+        adapter.events = [
+          {
+            type: "message_delta",
+            sessionId: "s_1",
+            timestamp: new Date(),
+            delta: { type: "text", text: "ok" },
+          },
+        ]
+        children.push(adapter)
+        return adapter as never
+      })
+      try {
+        await manager.addAgent({
+          ...managedConfig(),
+          protocol: "dsh-sdk",
+          process: { command: "", cwd: "/workspace" },
+          metadata: { preset: "deepseek-harness-readonly", dshProfileId: "cognia-sdk-readonly" },
+        })
+        let first: { sessionId: string }
+        if (stream) {
+          let sessionId = ""
+          for await (const event of manager.executeStreaming(
+            "managed",
+            "Remember the release plan"
+          )) {
+            if (event.sessionId) sessionId = event.sessionId
+          }
+          first = { sessionId }
+        } else first = await manager.execute("managed", "Remember the release plan")
+        const second = await manager.execute("managed", "Continue it", {
+          sessionId: first.sessionId,
+        })
+        expect(second.success).toBe(true)
+        expect(children).toHaveLength(3)
+        expect(children[2].lastSessionOptions?.context).toMatchObject({
+          custom: {
+            conversationHistory: "User: Remember the release plan\n\nAssistant: ok",
+            sessionId: undefined,
+          },
+        })
+        expect(parseGatewaySessionId(second.sessionId)?.taskId).toBe(
+          parseGatewaySessionId(first.sessionId)?.taskId
+        )
+        expect(mockGatewayRevoke).toHaveBeenCalledTimes(2)
+        await manager.closeSession("managed", second.sessionId)
+        await expect(
+          manager.execute("managed", "Restore", { sessionId: second.sessionId })
+        ).rejects.toThrow("preserved Cognia conversation transcript")
+        await expect(
+          manager.execute("managed", "Restore", {
+            sessionId: second.sessionId,
+            context: { custom: { conversationHistory: "Prior persisted Cognia transcript" } },
+          })
+        ).resolves.toMatchObject({ success: true })
+      } finally {
+        restorePlane()
+      }
+    }
+  )
+
   it("awaits the same teardown when abort and task cleanup race", async () => {
     const { manager, children, restorePlane } = prepare()
     try {
@@ -2988,5 +3097,100 @@ describe("Cognia gateway task lifecycle", () => {
     } finally {
       restorePlane()
     }
+  })
+})
+
+describe("Devin ACP adapter selection", () => {
+  it("isolates built-in native Devin while preserving custom registered adapters", () => {
+    protocolAdapterRegistry.register("acp", () => new AcpClientAdapter())
+    const config = buildBaseConfig({
+      transport: "stdio",
+      process: { command: "/usr/local/bin/devin", args: ["acp"] },
+    })
+    expect(createConfiguredProtocolAdapter(config)).toBeInstanceOf(DevinAcpAdapter)
+    expect(createConfiguredProtocolAdapter({ ...config, transport: "http" })).toBeInstanceOf(
+      AcpClientAdapter
+    )
+    expect(
+      createConfiguredProtocolAdapter({ ...config, process: { command: "other" } })
+    ).toBeInstanceOf(AcpClientAdapter)
+    const custom = new MockAdapter()
+    protocolAdapterRegistry.register("acp", () => custom as never)
+    expect(createConfiguredProtocolAdapter(config)).toBe(custom)
+  })
+})
+
+it("retires only the exited Devin process and resumes stale preferred sessions independently", async () => {
+  const restorePlane = __setProcessPlaneDepsForTests({ hasLocalProcessTable: () => true })
+  try {
+    const manager = freshManager()
+    const discovery = new MockAdapter()
+    const children: MockAdapter[] = []
+    const wrapper = new DevinAcpAdapter(discovery as unknown as AcpClientAdapter, () => {
+      const child = new MockAdapter()
+      const id = `devin-session-${children.length}`
+      child.createSession = jest.fn(async () => {
+        const session: ExternalAgentSession = {
+          id,
+          agentId: "agent-1",
+          status: "active",
+          createdAt: new Date(),
+          lastActivityAt: new Date(),
+        }
+        child.sessions.set(id, session)
+        return session
+      })
+      child.resumeSessionImpl = jest.fn(async (sessionId) => {
+        const session: ExternalAgentSession = {
+          id: sessionId,
+          agentId: "agent-1",
+          status: "active",
+          createdAt: new Date(),
+          lastActivityAt: new Date(),
+        }
+        child.sessions.set(sessionId, session)
+        return session
+      })
+      child.disconnect = jest.fn(child.disconnect.bind(child))
+      children.push(child)
+      return child as unknown as AcpClientAdapter
+    })
+    protocolAdapterRegistry.register("acp", () => wrapper)
+    const instance = await manager.addAgent(
+      buildBaseConfig({ transport: "stdio", process: { command: "devin", args: ["acp"] } })
+    )
+    const first = await manager.createSession("agent-1")
+    const second = await manager.createSession("agent-1")
+    mockProcessExitCb?.({ agentId: "agent-1:devin:1", code: 9 })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(instance.sessions.has(first.id)).toBe(false)
+    expect(instance.sessions.has(second.id)).toBe(true)
+    expect(children[1].disconnect).not.toHaveBeenCalled()
+    expect(discovery.connectImpl).toHaveBeenCalledTimes(1)
+
+    // A stale copy may still exist in a caller/cache; live adapter state wins.
+    instance.sessions.set(first.id, first)
+    await manager.execute("agent-1", "resume", { sessionId: first.id })
+    expect(children).toHaveLength(3)
+    expect(children[2].resumeSessionImpl).toHaveBeenCalledWith(first.id)
+    await manager.performHealthCheck()
+    expect(children[1].disconnect).not.toHaveBeenCalled()
+    expect(discovery.connectImpl).toHaveBeenCalledTimes(1)
+  } finally {
+    restorePlane()
+  }
+})
+
+describe("current OpenCode native client access", () => {
+  it("returns only the connected current OpenCode adapter", () => {
+    const { OpenCodeV2ClientAdapter } = jest.requireMock("./opencode-v2-client")
+    const manager = freshManager()
+    const adapter = new OpenCodeV2ClientAdapter()
+    const adapters = (manager as unknown as { adapters: Map<string, unknown> }).adapters
+    adapters.set("current", adapter)
+    adapters.set("other", { protocol: "opencode-v2" })
+    expect(manager.getOpenCodeV2Adapter("current")).toBe(adapter)
+    expect(manager.getOpenCodeV2Adapter("other")).toBeNull()
+    expect(manager.getOpenCodeV2Adapter("missing")).toBeNull()
   })
 })

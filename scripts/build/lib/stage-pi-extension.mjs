@@ -17,6 +17,7 @@
 import { createHash } from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
+import { buildSync } from "esbuild"
 
 /** Mirrors `EXTENSION_RELATIVE` / `INTEGRITY_RELATIVE` in cli/src/agent/tool-host/pi-extension.ts. */
 export const PI_EXTENSION_DIR = "pi-extension"
@@ -29,8 +30,9 @@ function digestOf(file, read = fs.readFileSync) {
 }
 
 /**
- * Copy `sidecar/pi-extension/{cognia-pi-extension.ts,integrity.json}` from
- * `root` into `<sidecarOutDir>/pi-extension/`, verifying the pin first.
+ * Bundle `sidecar/pi-extension/cognia-pi-extension.ts` and its dependencies
+ * into `<sidecarOutDir>/pi-extension/`, verifying the source pin first and
+ * writing a manifest for the compiled artifact consumed by the host verifier.
  *
  * The digest is checked HERE rather than left to the runtime because the two
  * failures are not equally recoverable. A stale pin caught at build time is a
@@ -85,8 +87,14 @@ export function stagePiExtension({ root, sidecarOutDir, fsImpl = fs } = {}) {
   fsImpl.mkdirSync(destDir, { recursive: true })
   const destExtension = path.join(destDir, PI_EXTENSION_FILE)
   const destIntegrity = path.join(destDir, PI_INTEGRITY_FILE)
-  fsImpl.cpSync(srcExtension, destExtension)
-  fsImpl.cpSync(srcIntegrity, destIntegrity)
+  const bundled = buildSync({
+    entryPoints: [srcExtension], bundle: true, write: false,
+    platform: "node", format: "esm", target: "node26", logLevel: "silent",
+    banner: { js: 'import { createRequire as cogniaCreateRequire } from "node:module"; const require = cogniaCreateRequire(import.meta.url);' },
+  }).outputFiles[0].contents
+  const sha256 = createHash("sha256").update(bundled).digest("hex")
+  fsImpl.writeFileSync(destExtension, bundled)
+  fsImpl.writeFileSync(destIntegrity, JSON.stringify({ sha256, sourceSha256: actual }, null, 2) + "\n")
 
-  return { sha256: actual, dir: destDir, files: [destExtension, destIntegrity] }
+  return { sha256, dir: destDir, files: [destExtension, destIntegrity] }
 }

@@ -183,3 +183,15 @@ implement it, verified against Pi 0.84.1's own `dist/cli/auth-check.d.ts` rather
 
 `print-api-key`, `print-bearer-token` and `--credentials` remain banned, and are now refused at the
 argv builder rather than by convention.
+
+### 2026-09-12 — Full Cognia tool projection on the current native protocol
+
+The certified minimum is now Pi `0.85.1` (`@earendil-works/pi-coding-agent`). The native RPC transport remains the only Pi execution protocol; the retired ACP bridge is not restored.
+
+The earlier per-session MCP non-goal is superseded: the first-party extension consumes session-owned MCP definitions through `COGNIA_TOOLHOST_PI_MCP_SERVERS`, connects with the official MCP SDK, and registers the discovered tools before acknowledging readiness. This includes Cognia built-in tools, plugin tools and assigned MCP servers. Additional roots remain explicit Cognia broker grants. A fork copies its own source session's launch options, rather than the last unrelated session's options.
+
+Cognia tool calls use the common permission, confinement, PreToolUse argument review, PostToolUse result review and PII paths. Native Pi tools retain the existing native permission path; their tool results also pass the extension's PII redaction. Tool cancellation and session shutdown close requests and MCP transports. This does not claim that a remote MCP server's internals or a third-party Pi extension run Cognia's own hooks.
+
+Desktop resources retain the source extension with its pinned digest and bundled sidecar dependencies. Standalone CLI/brain packaging verifies that source pin, bundles the extension's runtime dependencies, and writes a digest for the resulting artifact. No optional external package installation is required to activate Cognia tools. The launch allowlist admits the exact `PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR` keys so the selected runtime configuration survives both hosts; it does not admit an arbitrary `PI_` prefix.
+
+See `docs/research/2026-09-12-external-agent-capability-parity.md` for the cross-agent capability matrix and verification boundaries.

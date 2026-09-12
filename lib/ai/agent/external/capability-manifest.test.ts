@@ -56,6 +56,13 @@ describe("the shipped manifest", () => {
     }
   })
 
+  it("does not advertise capabilities for retired OpenCode V1 configs", () => {
+    const manifest = externalCapabilityManifest()
+    expect(manifest.protocols).not.toHaveProperty("opencode")
+    expect(manifest.presetRefinements).not.toHaveProperty("opencode-remote")
+    expect(presetCapabilityLayer("opencode-remote").cells).toEqual({})
+  })
+
   it("only refines presets against their own protocol", () => {
     const manifest = externalCapabilityManifest()
     for (const entry of Object.values(manifest.presetRefinements)) {
@@ -72,31 +79,20 @@ describe("the shipped manifest", () => {
       "unsupported"
     )
     // Only ACP forwards MCP servers at session/new; Codex reaches the same
-    // outcome through a per-thread config override, and nothing else can.
+    // outcome through a per-thread config override, and DSH SDK mounts at startup.
     expect(manifest.protocols.acp.capabilities.mcp.level).toBe("native")
+    expect(manifest.protocols["dsh-sdk"].capabilities.mcp.level).toBe("equivalent")
     expect(manifest.protocols["codex-app-server"].capabilities.mcp.level).toBe("equivalent")
-    expect(manifest.protocols.opencode.capabilities.mcp.level).toBe("unsupported")
-    expect(manifest.protocols["pi-rpc"].capabilities.mcp.level).toBe("unsupported")
+    expect(manifest.protocols["opencode-v2"].capabilities.mcp.level).toBe("equivalent")
+    expect(manifest.protocols["pi-rpc"].capabilities.mcp.level).toBe("equivalent")
     expect(manifest.protocols["pi-rpc"].capabilities.images.level).toBe("native")
     // Only the native Codex app-server enumerates models without a session.
     expect(manifest.protocols["codex-app-server"].capabilities["models.list"].level).toBe("native")
     expect(manifest.protocols.acp.capabilities["models.list"].level).toBe("unsupported")
 
-    // Both OpenCode adapters expose reasoning events and command discovery;
-    // stable maps file parts and V2 maps PromptInput.files.
-    for (const protocol of ["opencode", "opencode-v2"] as const) {
-      expect(manifest.protocols[protocol].capabilities.images.level).toBe("native")
-      expect(manifest.protocols[protocol].capabilities["commands.dynamic"].level).toBe("native")
-    }
-    // Reasoning EVENTS are not the `thinking` capability, and the two SDK majors
-    // diverge on it. v1 has no reasoning field anywhere in its API — effort is
-    // only settable in the user's own opencode.json. v2 added variants, which
-    // its docs call named request overlays for reasoning effort, and the adapter
-    // sends the pick as the `variant` half of the `ModelRef` on switchModel — a
-    // different channel reaching the same outcome, which is what `equivalent`
-    // means here and why it carries its own reasonKey rather than `native`.
-    expect(manifest.protocols.opencode.capabilities.thinking.level).toBe("unsupported")
-    expect(manifest.protocols.opencode.capabilities.thinking.reasonKey).toBe("noProtocolSlot")
+    // Current OpenCode supports attachments, command discovery and model variants.
+    expect(manifest.protocols["opencode-v2"].capabilities.images.level).toBe("native")
+    expect(manifest.protocols["opencode-v2"].capabilities["commands.dynamic"].level).toBe("native")
     expect(manifest.protocols["opencode-v2"].capabilities.thinking.level).toBe("equivalent")
     expect(manifest.protocols["opencode-v2"].capabilities.thinking.reasonKey).toBe(
       "modelVariantOverlay"
@@ -110,13 +106,16 @@ describe("the shipped manifest", () => {
   })
 
   it("answers steering per protocol, and lets the adapter layer tighten it", () => {
-    // The CLI's old table claimed `steer` for OpenCode, whose adapter has no
-    // `steerTurn` and whose protocol has no mid-turn input method. Only two
-    // protocols actually do.
+    // Steering is only available where the current protocol exposes it.
     const manifest = externalCapabilityManifest()
     expect(manifest.protocols["codex-app-server"].capabilities.steer.level).toBe("native")
     expect(manifest.protocols["pi-rpc"].capabilities.steer.level).toBe("native")
-    for (const protocol of ["acp", "opencode", "opencode-v2", "dsh-sdk", "a2a"] as const) {
+    expect(manifest.protocols["opencode-v2"].capabilities.steer.level).toBe("native")
+    expect(manifest.protocols["opencode-v2"].capabilities["permissions.set-mode"].level).toBe(
+      "native"
+    )
+    expect(manifest.presetRefinements["opencode-v2-service"].protocol).toBe("opencode-v2")
+    for (const protocol of ["acp", "dsh-sdk", "a2a"] as const) {
       expect(manifest.protocols[protocol].capabilities.steer.level).toBe("unsupported")
     }
     // A protocol slot is necessary but not sufficient: if Cognia's adapter
@@ -136,7 +135,7 @@ describe("protocolCapabilityLayer", () => {
     // A plugin protocol declares its own row; a legacy `http` config has none
     // at all. Both must produce every id as `unknown`, never an empty object —
     // an absent cell reads as "unsupported" at every call site downstream.
-    for (const protocol of ["my-plugin:demo", "http"]) {
+    for (const protocol of ["my-plugin:demo", "http", "opencode"]) {
       const layer = protocolCapabilityLayer(protocol)
       for (const id of EXTERNAL_AGENT_CAPABILITY_IDS) {
         expect(layer.cells[id]).toEqual({
@@ -155,12 +154,12 @@ describe("presetCapabilityLayer", () => {
     expect(presetCapabilityLayer("not-a-preset").cells).toEqual({})
   })
 
-  it("carries the DSH interactive channel's committed-replies-only clamp", () => {
+  it("carries current DSH ACP committed-stream limits without hiding its tools", () => {
     const layer = presetCapabilityLayer("deepseek-harness-acp")
     expect(layer.layer).toBe("refinement")
     expect(layer.cells.streaming?.level).toBe("unsupported")
-    expect(layer.cells["tools.ordinary"]?.level).toBe("unsupported")
-    expect(layer.cells.images?.level).toBe("unsupported")
+    expect(layer.cells["tools.ordinary"]?.level).toBe("native")
+    expect(layer.cells.images).toBeUndefined()
   })
 
   it("no longer refines the removed Pi ACP bridge", () => {
@@ -169,7 +168,7 @@ describe("presetCapabilityLayer", () => {
     // declares the same thing at the PROTOCOL layer, so the guarantee moved
     // rather than disappeared — assert it in its new home too.
     expect(presetCapabilityLayer("pi").cells).toEqual({})
-    expect(protocolCapabilityLayer("pi-rpc").cells.mcp?.level).toBe("unsupported")
+    expect(protocolCapabilityLayer("pi-rpc").cells.mcp?.level).toBe("equivalent")
   })
 })
 

@@ -1,4 +1,8 @@
-import { mcpServerToAcpConfig, resolveAcpMcpServers } from "./resolve-acp-mcp-servers"
+import {
+  mcpServerToAcpConfig,
+  resolveAcpMcpServers,
+  resolvedMcpServerMapToAcpConfigs,
+} from "./resolve-acp-mcp-servers"
 import type { McpServer } from "@cognia/agent-config-types"
 import { listMcpServers } from "@/lib/db/mcp-servers"
 
@@ -120,5 +124,44 @@ describe("resolveAcpMcpServers", () => {
     ])
     const out = await resolveAcpMcpServers(["a", "b"])
     expect(out).toEqual([{ name: "dup", command: "first", args: [] }])
+  })
+})
+
+describe("resolvedMcpServerMapToAcpConfigs", () => {
+  it("preserves the resolved turn subset and transient credentials without rereading storage", () => {
+    mockList.mockClear()
+    expect(
+      resolvedMcpServerMapToAcpConfigs({
+        local: { command: "/usr/bin/node", args: ["/bridge.mjs"], env: { TOKEN: "lease" } },
+        remote: {
+          type: "http",
+          url: "https://mcp.example",
+          headers: { Authorization: "Bearer lease" },
+        },
+      })
+    ).toEqual([
+      {
+        name: "local",
+        command: "/usr/bin/node",
+        args: ["/bridge.mjs"],
+        env: [{ name: "TOKEN", value: "lease" }],
+      },
+      {
+        name: "remote",
+        type: "http",
+        url: "https://mcp.example",
+        headers: [{ name: "Authorization", value: "Bearer lease" }],
+      },
+    ])
+    expect(mockList).not.toHaveBeenCalled()
+    expect(resolvedMcpServerMapToAcpConfigs()).toEqual([])
+  })
+  it("fails visibly instead of silently dropping an unforwardable assigned server", () => {
+    expect(() => resolvedMcpServerMapToAcpConfigs({ internal: { type: "sdk" } })).toThrow(
+      "cannot be forwarded"
+    )
+    expect(() => resolvedMcpServerMapToAcpConfigs({ broken: { type: "http" } })).toThrow(
+      "incomplete"
+    )
   })
 })

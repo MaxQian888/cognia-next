@@ -61,7 +61,9 @@
       "negotiatedNoToolExecution": "the agent advertised no tool execution",
       "advertisedCompactCommand": "the agent advertises a /compact command",
       "noAdvertisedCompactCommand": "the agent advertises no /compact command",
-      "userDeclared": "you declared this for this agent"
+      "userDeclared": "you declared this for this agent",
+      "cogniaExtensionBridge": "provided by the bundled Cognia extension",
+      "isolatedLocalService": "provided by a private local service for this conversation"
     },
     "adapterMethod": {
       "steerTurn": "Cognia's adapter implements steerTurn",
@@ -275,7 +277,7 @@
     "unsupportedProtocol": "Only ACP is currently supported for executable agents.",
     "websocketProtocolComingSoon": "WebSocket (coming soon)",
     "connectingHint": "Connecting to the agent… You can keep using Cognia while it starts.",
-    "devinSetupHint": "Install Devin CLI and run `devin auth login` once. Cognia launches `devin acp` and discovers models from the session; use `acp --model swe2` to select SWE-2 at launch. Choose Accept Edits (Code) when you want Devin to modify files. Devin 3000.10.21 did not load Cognia-provided MCP servers in live tests; native tools work."
+    "devinSetupHint": "Install Devin CLI and run `devin auth login` once. Cognia launches `devin acp` and discovers models from the session; use `acp --model swe2` to select SWE-2 at launch. Choose Accept Edits (Code) when you want Devin to modify files. Cognia tools are available in each conversation alongside Devin’s native tools."
   },
   "runCommand": "Run /{name}",
   "runtimes": {
@@ -392,7 +394,7 @@
     "customConfiguration": "Custom configuration",
     "cwdPlaceholder": "Leave empty for current directory",
     "deepseekHarness": {
-      "approvalNotice": "This transport cannot ask for approval while a turn is running, so authority is fixed when the runtime starts.",
+      "approvalNotice": "Native SDK tools cannot request approval during a turn, so their authority is fixed at startup. Cognia tools follow the host permission policy.",
       "cancelNotice": "Cancelling a turn closes the runtime: this transport has no mid-turn cancel.",
       "capabilities": "Capabilities",
       "capabilityApproval": "Mid-turn approval",
@@ -406,7 +408,7 @@
       "capabilityUsage": "Token usage",
       "channel": "Channel",
       "checking": "Checking…",
-      "description": "A managed DeepSeek Harness runtime. Unlike other external agents, DeepSeek Harness publishes no executable, so Cognia installs and certifies its own runtime in an isolated home.",
+      "description": "Cognia installs a pinned version of the official DeepSeek Harness runtime in an isolated directory and verifies its packages and launch profiles before use.",
       "doctor": "Check",
       "experimentalBadge": "Experimental",
       "experimentalNotice": "Upstream is a developer preview and warns of compatibility-breaking changes. Cognia pins an exact version and refuses to start on drift.",
@@ -437,7 +439,11 @@
       "removeSucceeded": "DeepSeek Harness runtime removed.",
       "title": "DeepSeek Harness",
       "unhealthy": "Runtime has problems.",
-      "upstreamVersion": "Upstream version"
+      "upstreamVersion": "Upstream version",
+      "managedLaunchNotice": "Install the managed runtime, then save this profile. Cognia resolves its executable and composition at launch.",
+      "credentialNotice": "The API key is stored in the local keyring. Leave this field blank when editing to keep the existing key.",
+      "committedEventsNotice": "Both transports provide committed text, reasoning and tool events, and can use Cognia tools through MCP. Live token deltas are unavailable; SDK also reports usage and subagent lineage, while ACP supports per-tool approval and session resume.",
+      "capabilityMcp": "Cognia and MCP tools"
     },
     "defaultPermissionMode": "Default Permission Mode",
     "defaultPermissionModeDesc": "Default permission mode for new agent sessions",
@@ -498,6 +504,7 @@
     "enableExternalAgents": "Enable External Agents",
     "enableExternalAgentsDesc": "Allow using external agents like Claude Code via ACP protocol",
     "endpoint": "Endpoint URL",
+    "endpointInvalid": "Enter a valid HTTP or HTTPS endpoint URL.",
     "endpointRequired": "Endpoint URL is required for HTTP transport",
     "executionTimeoutMs": "Execution Timeout (ms)",
     "fromPreset": "From preset: {name}",
@@ -523,10 +530,10 @@
       "refresh": "Refresh status",
       "title": "OpenCode server"
     },
-    "opencodeV2PresetDescription": "Documents Cognia's pinned legacy preview contract. Current OpenCode V2 builds are incompatible.",
-    "opencodeV2PresetName": "OpenCode V2 legacy preview contract",
-    "opencodeV2PresetSetupHint": "Documentation only. Use stable OpenCode HTTP/SSE or ACP until the preview client is regenerated.",
-    "opencodeV2Protocol": "OpenCode V2 (legacy preview)",
+    "opencodeV2PresetDescription": "Connect to the current OpenCode service over HTTP and SSE.",
+    "opencodeV2PresetName": "OpenCode V2",
+    "opencodeV2PresetSetupHint": "Run the current OpenCode service, then connect through local discovery or its service endpoint.",
+    "opencodeV2Protocol": "OpenCode V2 (HTTP + SSE)",
     "passBareFlag": "Pass --bare",
     "passBareFlagHint": "Skip on-disk auto-discovery (CLAUDE.md, hooks, plugins, MCP). Appended to args at spawn time.",
     "passDebugFlag": "Pass --debug",
@@ -621,7 +628,9 @@
       "evidenceListing": "Listed",
       "evidenceListingTitle": "Pi's auth check does not know this provider (it is registered by an extension), but Pi lists its models, which it only does once credentials resolve."
     },
-    "devinPresetDescription": "Run Devin through its native ACP server using your existing CLI login. Select models, including SWE-2, after connecting. Choose Accept Edits (Code) when you want Devin to modify files. Devin 3000.10.21 did not load Cognia-provided MCP servers in live tests; native tools work."
+    "devinPresetDescription": "Run Devin through its native ACP server using your existing CLI login. Select models, including SWE-2, after connecting. Choose Accept Edits (Code) when you want Devin to modify files. Cognia tools are available in each conversation alongside Devin’s native tools.",
+    "opencodeV2EndpointPlaceholder": "Leave blank to discover the local service",
+    "opencodeV2EndpointHint": "Local discovery uses ephemeral authentication. For an explicit native service endpoint, use its server password; the Basic Auth username defaults to opencode. The optional API key is for Bearer-authenticated proxy endpoints."
   },
   "statusConnected": "Connected",
   "statusConnecting": "Connecting",

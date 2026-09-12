@@ -18,6 +18,7 @@ use cognia_automation::sandbox::launcher::LaunchScope;
 struct Args {
     scope: LaunchScope,
     target: Vec<String>,
+    bot_isolation: bool,
 }
 
 fn parse_args(raw: impl IntoIterator<Item = String>) -> Result<Args, String> {
@@ -27,6 +28,7 @@ fn parse_args(raw: impl IntoIterator<Item = String>) -> Result<Args, String> {
     let mut readable = Vec::new();
     let mut denied_readable = Vec::new();
     let mut network = false;
+    let mut bot_isolation = false;
 
     while let Some(arg) = iter.next() {
         if arg == "--" {
@@ -44,6 +46,7 @@ fn parse_args(raw: impl IntoIterator<Item = String>) -> Result<Args, String> {
                     network,
                 },
                 target,
+                bot_isolation,
             });
         }
         match arg.as_str() {
@@ -52,6 +55,7 @@ fn parse_args(raw: impl IntoIterator<Item = String>) -> Result<Args, String> {
             "--readable" => readable.push(next_value(&mut iter, "--readable")?),
             "--deny-readable" => denied_readable.push(next_value(&mut iter, "--deny-readable")?),
             "--network" => network = true,
+            "--bot-isolation" => bot_isolation = true,
             other => return Err(format!("unknown argument: {other}")),
         }
     }
@@ -99,6 +103,22 @@ fn render_launch(args: &Args) -> Result<Vec<String>, String> {
         return Err("/usr/bin/sandbox-exec is unavailable".into());
     }
     let mut launch = sandbox_exec_prefix(&args.scope);
+    if args.bot_isolation {
+        // SQLite and executable loaders canonicalize ancestor directories.
+        // Permit metadata, while file contents beneath denied HOME stay hidden.
+        launch[2].push_str("(allow file-read-metadata)\n");
+        // Scrubbing SSH_AUTH_SOCK alone is insufficient: a process could
+        // discover an ambient agent socket by listing the host temp directory.
+        launch[2].push_str("(deny network-outbound (remote unix-socket (subpath \"/\")))\n");
+        for root in std::iter::once(&args.scope.cwd).chain(args.scope.writable.iter()) {
+            let escaped = root.replace('\\', "\\\\").replace('"', "\\\"");
+            launch[2].push_str(&format!("(allow network-outbound (remote unix-socket (subpath \"{escaped}\")))\n"));
+        }
+        launch[2].push_str("(allow network-outbound (remote unix-socket (literal \"/private/var/run/mDNSResponder\")))\n");
+        // Keychain access is an IPC operation, not a read of its on-disk
+        // database. Denying HOME alone does not prevent credential-helper use.
+        launch[2].push_str("(deny mach-lookup (global-name \"com.apple.securityd\") (global-name \"com.apple.securityd.xpc\") (global-name \"com.apple.SecurityServer\") (global-name \"com.apple.security.agent\"))\n");
+    }
     launch.extend(args.target.clone());
     Ok(launch)
 }
@@ -112,20 +132,25 @@ fn render_launch(_args: &Args) -> Result<Vec<String>, String> {
 }
 
 #[cfg(unix)]
-fn exec_launch(launch: Vec<String>) -> Result<(), String> {
+fn exec_launch(launch: Vec<String>, bot_isolation: bool) -> Result<(), String> {
     use std::os::unix::process::CommandExt;
 
     let (program, args) = launch
         .split_first()
         .ok_or_else(|| "sandbox renderer returned an empty command".to_string())?;
-    let error = std::process::Command::new(program).args(args).exec();
+    let mut command = std::process::Command::new(program);
+    command.args(args);
+    if bot_isolation {
+        command.env_clear().envs(bot_environment(std::env::vars()));
+    }
+    let error = command.exec();
     Err(format!(
         "failed to exec sandbox launcher {program}: {error}"
     ))
 }
 
 #[cfg(not(unix))]
-fn exec_launch(_launch: Vec<String>) -> Result<(), String> {
+fn exec_launch(_launch: Vec<String>, _bot_isolation: bool) -> Result<(), String> {
     Err("stdio-preserving sandbox exec is unavailable on this platform".into())
 }
 
@@ -135,7 +160,23 @@ fn run() -> Result<(), String> {
     if std::env::var("COGNIA_EXTERNAL_AGENT_LAUNCHER_DEBUG").as_deref() == Ok("1") {
         eprintln!("external-agent sandbox launch: {launch:?}");
     }
-    exec_launch(launch)
+    exec_launch(launch, args.bot_isolation)
+}
+
+/// The Bot agent receives its model credential, never ambient GitHub/SSH or
+/// interpreter injection credentials. Git's global helper configuration is
+/// disabled independently of filesystem confinement.
+fn bot_environment(env: impl IntoIterator<Item = (String, String)>) -> std::collections::BTreeMap<String, String> {
+    let mut result: std::collections::BTreeMap<_, _> = env.into_iter().filter(|(key, _)| matches!(key.as_str(),
+        "PATH" | "HOME" | "USER" | "LOGNAME" | "SHELL" | "LANG" | "LC_ALL" | "LC_CTYPE" | "TZ" | "TERM" | "TMPDIR" | "TMP" | "TEMP" |
+        "XDG_CONFIG_HOME" | "XDG_DATA_HOME" | "XDG_CACHE_HOME" | "XDG_STATE_HOME" | "SSL_CERT_FILE" | "SSL_CERT_DIR" | "NODE_EXTRA_CA_CERTS" |
+        "HTTP_PROXY" | "HTTPS_PROXY" | "NO_PROXY" | "http_proxy" | "https_proxy" | "no_proxy" | "DEVIN_API_KEY" | "DEVIN_TOKEN" | "DEVIN_BASE_URL" |
+        "DISABLE_AUTO_UPDATE" | "NO_COLOR" | "FORCE_COLOR" | "NVM_BIN" | "NVM_DIR" | "PNPM_HOME" | "BUN_INSTALL"
+    )).collect();
+    result.insert("GIT_CONFIG_GLOBAL".into(), "/dev/null".into());
+    result.insert("GIT_CONFIG_NOSYSTEM".into(), "1".into());
+    result.insert("GIT_TERMINAL_PROMPT".into(), "0".into());
+    result
 }
 
 fn main() {
@@ -197,6 +238,25 @@ mod tests {
     fn rejects_missing_target_and_unknown_flags() {
         assert!(parse_args(["--cwd".into(), "/work".into()]).is_err());
         assert!(parse_args(["--wat".into()]).is_err());
+    }
+
+    #[test]
+    fn bot_scope_scrubs_publication_credentials_and_injection_hooks() {
+        let env = bot_environment([("GH_TOKEN", "secret"), ("GITHUB_TOKEN", "secret"), ("SSH_AUTH_SOCK", "/socket"), ("NODE_OPTIONS", "--require bad"), ("DEVIN_API_KEY", "model-only"), ("PATH", "/bin"), ("XDG_CONFIG_HOME", "/isolated/config")].map(|(key, value)| (key.into(), value.into())));
+        for key in ["GH_TOKEN", "GITHUB_TOKEN", "SSH_AUTH_SOCK", "NODE_OPTIONS"] { assert!(!env.contains_key(key)); }
+        assert_eq!(env["DEVIN_API_KEY"], "model-only");
+        assert_eq!(env["GIT_CONFIG_GLOBAL"], "/dev/null");
+        assert_eq!(env["GIT_TERMINAL_PROMPT"], "0");
+        let args = parse_args(["--bot-isolation", "--cwd", "/work", "--deny-readable", "/home/user", "--", "devin", "acp"].into_iter().map(str::to_string)).unwrap();
+        assert!(args.bot_isolation);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn bot_scope_blocks_keychain_ipc() {
+        let args = parse_args(["--bot-isolation", "--cwd", "/tmp", "--", "/usr/bin/true"].into_iter().map(str::to_string)).unwrap();
+        let launch = render_launch(&args).unwrap();
+        assert!(launch[2].contains("(deny mach-lookup (global-name \"com.apple.securityd\")"));
     }
 
     #[cfg(target_os = "macos")]

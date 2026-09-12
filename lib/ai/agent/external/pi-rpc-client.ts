@@ -61,7 +61,7 @@ import {
 // ============================================================================
 
 /** The one version this integration is certified against (ADR-0119). */
-export const PI_CERTIFIED_VERSION = "0.84.3"
+export const PI_CERTIFIED_VERSION = "0.85.1"
 
 export type PiVersionVerdict =
   /** Exactly the certified version. */
@@ -335,6 +335,8 @@ interface PiProcess {
   queues: Set<EventQueue>
   busy: boolean
   cancelling?: boolean
+  closing?: Promise<void>
+  spawning?: Promise<unknown>
   lastUsedAt: number
   exited: boolean
   /** Resolves when the bundled extension reports itself ready. */
@@ -487,6 +489,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
 
   async disconnect(): Promise<void> {
     await Promise.all([...this.processes.keys()].map((id) => this.closeSession(id)))
+    this.sessionOptions.clear()
     this._connectionStatus = "disconnected"
   }
 
@@ -569,7 +572,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
           env: config.process?.env,
         },
       })
-      await Promise.race([exited, delay(timeoutMs)])
+      await withTimeout(exited, timeoutMs, undefined)
       return { stdout, exitCode }
     } finally {
       offStdout()
@@ -594,12 +597,30 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
    * persisted link needs nothing but the id — no absolute session-file path
    * ever has to cross a device boundary.
    */
-  async resumeSession(sessionId: string): Promise<ExternalAgentSession> {
+  async resumeSession(
+    sessionId: string,
+    suppliedOptions?: SessionCreateOptions
+  ): Promise<ExternalAgentSession> {
     const pending = this.sessionRestarts.get(sessionId)
-    if (pending) return pending
+    if (pending) {
+      const session = await pending
+      return suppliedOptions === undefined
+        ? session
+        : this.resumeSession(sessionId, suppliedOptions)
+    }
     const existing = this.processes.get(sessionId)
-    if (existing && !existing.exited) return this.requireSession(sessionId)
-    const options = existing?.createOptions ?? this.lastCreateOptions ?? {}
+    const options =
+      suppliedOptions ?? existing?.createOptions ?? this.sessionOptions.get(sessionId) ?? {}
+    if (existing && !existing.exited && !existing.cancelling) {
+      if (
+        suppliedOptions === undefined ||
+        JSON.stringify(existing.createOptions) === JSON.stringify(options)
+      )
+        return this.requireSession(sessionId)
+      if (existing.busy)
+        throw new Error("Cannot replace Pi session configuration during an active turn")
+    }
+    buildPiSystemPrompt(options)
     const restart = (async () => {
       // Retire the dead peer/listeners before reusing its host process id.
       if (existing) await this.closeSession(sessionId)
@@ -619,15 +640,22 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
   }
 
   /** Branch an existing Pi session into a fresh one via `--fork`. */
-  async forkSession(sessionId: string): Promise<ExternalAgentSession> {
+  async forkSession(
+    sessionId: string,
+    options?: SessionCreateOptions
+  ): Promise<ExternalAgentSession> {
     const source = this.processes.get(sessionId)
     const sourcePiId = source?.piSessionId ?? sessionId
-    return this.startSession(this.newSessionId(), this.lastCreateOptions ?? {}, {
-      forkFrom: sourcePiId,
-    })
+    return this.startSession(
+      this.newSessionId(),
+      options ?? source?.createOptions ?? this.sessionOptions.get(sessionId) ?? {},
+      {
+        forkFrom: sourcePiId,
+      }
+    )
   }
 
-  private lastCreateOptions?: SessionCreateOptions
+  private sessionOptions = new Map<string, SessionCreateOptions>()
   private sessionRestarts = new Map<string, Promise<ExternalAgentSession>>()
 
   private async startSession(
@@ -639,7 +667,6 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     // Checked per session rather than at connect: an operator flipping the
     // switch should stop the next session, not require a restart.
     if (isPiRpcDisabled()) throw new PiDisabledError()
-    this.lastCreateOptions = options
 
     // Refuse before anything is spawned or reclaimed. A session that cannot
     // intercept Pi's native tools must not reach the point of having a process.
@@ -651,6 +678,13 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     // spawn config it has already crossed the boundary. Mirrors
     // `cli/src/agent/external-agent-session.ts`.
     const systemPrompt = buildPiSystemPrompt(options)
+    const cwd = options.cwd ?? this._config.process?.cwd
+    const additionalDirectories = options.additionalDirectories ?? []
+    if (additionalDirectories.some((entry) => !/^(\/|[A-Za-z]:[\\/]|\\\\)/.test(entry)))
+      throw new Error("Pi additionalDirectories must be absolute paths")
+    const mcpServers = options.mcpServers ?? []
+    if (mcpServers.some((server) => "serverId" in server))
+      throw new Error("Pi cannot mount ACP-channel MCP; use stdio, HTTP, or SSE transport")
 
     const agentId = `${this._config.id}:${piSessionId}`
     const args = this.buildArgs(piSessionId, options, extra, extension)
@@ -678,11 +712,11 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     })
 
     const record: PiProcess = {
-      createOptions: { ...options },
+      createOptions: structuredClone(options),
       agentId,
       piSessionId,
       peer,
-      cwd: options.cwd,
+      cwd,
       unlisten: [],
       framing: "unknown",
       queues: new Set(),
@@ -695,116 +729,136 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
       record.settleHandshake = resolve
     })
     this.processes.set(piSessionId, record)
+    this.sessionOptions.set(piSessionId, record.createOptions)
 
-    // Two hosts, two framings, one codec.
-    //
-    // The Node/CLI backend honours `framing: "raw"` and emits base64 chunks on
-    // `stdout-raw`. The Rust host (desktop and headless) reads with
-    // `BufReader::lines()` and emits `\n`-stripped lines on `stdout`; its
-    // `ExternalAgentSpawnConfig` has no `framing` field, so the flag below is
-    // simply ignored there. Subscribing to only `stdout-raw` is why the desktop
-    // received nothing at all: the process started, the version probe (which
-    // listens on `stdout`) succeeded, and then every frame fell on the floor.
-    //
-    // The two are mutually exclusive per host today. The latch makes that a
-    // property of the data rather than an assumption: once a raw frame arrives,
-    // line events for this session are ignored, so a host that later emitted
-    // both cannot double-feed the decoder.
-    record.unlisten.push(
-      await this.host.listen<{ agentId: string; data: string }>(
-        "external-agent://stdout-raw",
-        (payload) => {
-          if (payload.agentId !== agentId) return
-          record.framing = "raw"
-          peer.ingest(base64ToBytes(payload.data))
-        }
+    try {
+      // Two hosts, two framings, one codec.
+      //
+      // The Node/CLI backend honours `framing: "raw"` and emits base64 chunks on
+      // `stdout-raw`. The Rust host (desktop and headless) reads with
+      // `BufReader::lines()` and emits `\n`-stripped lines on `stdout`; its
+      // `ExternalAgentSpawnConfig` has no `framing` field, so the flag below is
+      // simply ignored there. Subscribing to only `stdout-raw` is why the desktop
+      // received nothing at all: the process started, the version probe (which
+      // listens on `stdout`) succeeded, and then every frame fell on the floor.
+      //
+      // The two are mutually exclusive per host today. The latch makes that a
+      // property of the data rather than an assumption: once a raw frame arrives,
+      // line events for this session are ignored, so a host that later emitted
+      // both cannot double-feed the decoder.
+      record.unlisten.push(
+        await this.host.listen<{ agentId: string; data: string }>(
+          "external-agent://stdout-raw",
+          (payload) => {
+            if (payload.agentId !== agentId) return
+            record.framing = "raw"
+            peer.ingest(base64ToBytes(payload.data))
+          }
+        )
       )
-    )
-    record.unlisten.push(
-      await this.host.listen<{ agentId: string; data: string }>(
-        "external-agent://stdout",
-        (payload) => {
-          if (payload.agentId !== agentId) return
-          if (record.framing === "raw") return
-          record.framing = "line"
-          // Re-append exactly the one byte the line reader stripped, so the
-          // strict LF codec sees the frame Pi actually wrote. Safe because the
-          // Rust reader splits on the `\n` BYTE only: U+2028/U+2029 do not
-          // split there (that is a Node `readline` defect, ADR-0119), and a raw
-          // `\r` cannot occur inside a Pi frame because `JSON.stringify`
-          // escapes it as `\\r`.
-          peer.ingest(textToBytes(`${payload.data}\n`))
-        }
+      record.unlisten.push(
+        await this.host.listen<{ agentId: string; data: string }>(
+          "external-agent://stdout",
+          (payload) => {
+            if (payload.agentId !== agentId) return
+            if (record.framing === "raw") return
+            record.framing = "line"
+            // Re-append exactly the one byte the line reader stripped, so the
+            // strict LF codec sees the frame Pi actually wrote. Safe because the
+            // Rust reader splits on the `\n` BYTE only: U+2028/U+2029 do not
+            // split there (that is a Node `readline` defect, ADR-0119), and a raw
+            // `\r` cannot occur inside a Pi frame because `JSON.stringify`
+            // escapes it as `\\r`.
+            peer.ingest(textToBytes(`${payload.data}\n`))
+          }
+        )
       )
-    )
-    record.unlisten.push(
-      await this.host.listen<{ agentId: string; code: number }>(
-        "external-agent://exit",
-        (payload) => {
-          if (payload.agentId !== agentId) return
-          record.exited = true
-          peer.endOfStream()
-          this.cancelPendingDialogs(piSessionId, record)
-          peer.rejectAll(`Pi process exited (code ${payload.code})`)
-          this.dispatchError(piSessionId, `Pi process exited with code ${payload.code}`)
-          this.finishQueues(record)
-        }
+      record.unlisten.push(
+        await this.host.listen<{ agentId: string; code: number }>(
+          "external-agent://exit",
+          (payload) => {
+            if (payload.agentId !== agentId) return
+            record.exited = true
+            record.settleHandshake?.()
+            peer.endOfStream()
+            this.cancelPendingDialogs(piSessionId, record)
+            peer.rejectAll(`Pi process exited (code ${payload.code})`)
+            this.dispatchError(piSessionId, `Pi process exited with code ${payload.code}`)
+            this.finishQueues(record)
+          }
+        )
       )
-    )
 
-    await this.host.invoke("spawn_external_agent", {
-      config: {
-        id: agentId,
-        command: this._config.process?.command ?? "pi",
-        args,
-        cwd: options.cwd,
-        env: {
-          ...this._config.process?.env,
-          // The extension owns no policy: it applies this table. Computing it
-          // here keeps the matrix in tested app code (`pi-permission.ts`).
-          [PI_TOOL_POLICY_ENV]: encodePiToolPolicy(
-            resolvePiToolPolicy(options.permissionMode, options.allowedTools)
-          ),
-          ...(systemPrompt ? { [PI_SYSTEM_PROMPT_ENV]: systemPrompt } : {}),
+      if (record.cancelling) throw new Error("Pi session closed during startup")
+      record.spawning = this.host.invoke("spawn_external_agent", {
+        config: {
+          id: agentId,
+          command: this._config.process?.command ?? "pi",
+          args,
+          cwd,
+          env: {
+            ...this._config.process?.env,
+            COGNIA_TOOLHOST_PI_MCP_SERVERS: JSON.stringify(mcpServers),
+            COGNIA_TOOLHOST_PI_ADDITIONAL_DIRECTORIES: JSON.stringify(additionalDirectories),
+            // The extension owns no policy: it applies this table. Computing it
+            // here keeps the matrix in tested app code (`pi-permission.ts`).
+            [PI_TOOL_POLICY_ENV]: encodePiToolPolicy(
+              resolvePiToolPolicy(options.permissionMode, options.allowedTools)
+            ),
+            ...(systemPrompt ? { [PI_SYSTEM_PROMPT_ENV]: systemPrompt } : {}),
+          },
+          // The whole reason this adapter exists on a separate framing path.
+          framing: "raw",
         },
-        // The whole reason this adapter exists on a separate framing path.
-        framing: "raw",
-      },
-    })
+      })
 
-    // Unconditional: `assertExtensionReady` above already refused the session
-    // if no verified extension exists, so reaching here means one was loaded
-    // and must prove it. The budget follows the policy, because `session_start`
-    // waits for every OTHER loaded extension too and only `isolated` bounds
-    // that set.
-    const settled = await Promise.race([
-      record.handshake.then(() => true),
-      delay(piHandshakeTimeoutMs(this.extensionPolicy())).then(() => false),
-    ])
-    if (!settled) {
-      await this.closeSession(piSessionId)
-      throw new PiExtensionHandshakeError(piSessionId, this.extensionPolicy())
-    }
+      await record.spawning
 
-    const session: ExternalAgentSession = {
-      id: piSessionId,
-      agentId: this._config.id,
-      status: "active",
-      permissionMode: options.permissionMode,
-      allowedTools: options.allowedTools,
-      context: options.context as ExternalAgentSession["context"],
-      createdAt: new Date(),
-      lastActivityAt: new Date(),
-      metadata: {
-        piSessionId,
-        piVersion: this.versionVerdict?.version,
-        piVersionStatus: this.versionVerdict?.status,
-        cwd: options.cwd,
-        forkedFrom: extra.forkFrom,
-      },
+      // Unconditional: `assertExtensionReady` above already refused the session
+      // if no verified extension exists, so reaching here means one was loaded
+      // and must prove it. The budget follows the policy, because `session_start`
+      // waits for every OTHER loaded extension too and only `isolated` bounds
+      // that set.
+      const settled = await withTimeout(
+        record.handshake.then(() => true),
+        piHandshakeTimeoutMs(this.extensionPolicy(), mcpServers.length),
+        false
+      )
+      if (record.exited) throw new Error("Pi process exited before the Cognia extension was ready")
+      if (record.cancelling) throw new Error("Pi session closed during startup")
+      if (!settled) {
+        await this.closeSession(piSessionId)
+        throw new PiExtensionHandshakeError(piSessionId, this.extensionPolicy(), mcpServers.length)
+      }
+
+      const session: ExternalAgentSession = {
+        id: piSessionId,
+        agentId: this._config.id,
+        status: "active",
+        permissionMode: options.permissionMode,
+        allowedTools: options.allowedTools,
+        context: options.context as ExternalAgentSession["context"],
+        createdAt: new Date(),
+        lastActivityAt: new Date(),
+        metadata: {
+          piSessionId,
+          piVersion: this.versionVerdict?.version,
+          piVersionStatus: this.versionVerdict?.status,
+          cwd,
+          additionalDirectories,
+          forkedFrom: extra.forkFrom,
+        },
+      }
+      this._sessions.set(piSessionId, session)
+      return session
+    } catch (error) {
+      try {
+        await this.closeSession(piSessionId)
+      } catch (cleanup) {
+        throw new AggregateError([error, cleanup], "Pi startup and process cleanup failed")
+      }
+      throw error
     }
-    this._sessions.set(piSessionId, session)
-    return session
   }
 
   private buildArgs(
@@ -816,6 +870,13 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     const configured = this._config?.process?.args ?? ["--mode", "rpc"]
     const args = [...configured]
     if (!args.includes("--mode")) args.push("--mode", "rpc")
+    if (typeof options.metadata?.selectedModel === "string") {
+      const selected = parsePiModel(options.metadata.selectedModel)
+      if (selected.provider) args.push("--provider", selected.provider)
+      args.push("--model", selected.modelId)
+    }
+    if (typeof options.metadata?.reasoningEffort === "string")
+      args.push("--thinking", options.metadata.reasoningEffort)
 
     if (extra.forkFrom) args.push("--fork", extra.forkFrom)
     args.push("--session-id", piSessionId)
@@ -830,7 +891,12 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     const floor = processToolFloor(options.permissionMode, options.allowedTools, {
       interceptionAvailable: true,
     })
-    if (floor.length > 0) args.push("--tools", floor.join(","))
+    if (options.mcpServers?.length && (floor.length > 0 || options.permissionMode === "dontAsk")) {
+      // Latest Pi applies --tools to dynamically registered extension tools
+      // too. Exclude refused native tools without hiding the MCP projection.
+      const excluded = [...PI_BUILTIN_TOOL_NAMES].filter((name) => !floor.includes(name))
+      if (excluded.length) args.push("--exclude-tools", excluded.join(","))
+    } else if (floor.length > 0) args.push("--tools", floor.join(","))
 
     // `-e` still loads under `--no-extensions`, which is exactly what makes
     // isolation workable: the user's stack stays off while Cognia's own
@@ -909,32 +975,46 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
   async closeSession(sessionId: string): Promise<void> {
     const record = this.processes.get(sessionId)
     if (!record) return
-    this.processes.delete(sessionId)
+    if (record.closing) return record.closing
+    record.closing = this.disposeSession(sessionId, record)
+    try {
+      await record.closing
+    } finally {
+      record.closing = undefined
+    }
+  }
+
+  private async disposeSession(sessionId: string, record: PiProcess): Promise<void> {
     this._sessions.delete(sessionId)
     record.cancelling = true
+    record.settleHandshake?.()
+    // A close can arrive while the host is still materializing the process.
+    // Wait for that boundary before killing so no child appears after teardown.
+    await record.spawning?.catch(() => undefined)
     if (!record.exited) {
       // Ask Pi to stop cleanly first; a hard kill mid-tool-call can leave a
       // half-written file behind.
       try {
         const aborted = record.peer.sendCommand("abort", {}, 5000)
         this.cancelPendingDialogs(sessionId, record)
-        await Promise.race([aborted, delay(5000)])
+        await withTimeout(aborted, 5000, undefined)
       } catch {
         // Already gone, or refused — the kill below is the real guarantee.
       }
     }
     this.cancelPendingDialogs(sessionId, record)
     record.peer.close("Session closed")
-    for (const off of record.unlisten.splice(0)) off()
     this.finishQueues(record)
 
     if (!record.exited) {
       try {
         await this.host.invoke("kill_external_agent", { agentId: record.agentId })
-      } catch {
-        // The process may have exited between the abort and the kill.
+      } catch (error) {
+        if (!record.exited) throw error
       }
     }
+    for (const off of record.unlisten.splice(0)) off()
+    this.processes.delete(sessionId)
   }
 
   // ------------------------------------------------------------------ prompt
@@ -946,6 +1026,28 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
   ): AsyncIterable<ExternalAgentEvent> {
     if (!hasNoLeakingExternalAgentPromptInput(message, { sessionId })) {
       throw new PiOutboundBlockedError()
+    }
+    const currentOptions =
+      this.processes.get(sessionId)?.createOptions ?? this.sessionOptions.get(sessionId)
+    if (currentOptions && options) {
+      const nextOptions = { ...currentOptions }
+      for (const key of [
+        "systemPrompt",
+        "instructionEnvelope",
+        "briefMode",
+        "context",
+        "permissionMode",
+        "allowedTools",
+      ] as const) {
+        if (options[key] !== undefined) Object.assign(nextOptions, { [key]: options[key] })
+      }
+      if (options.workingDirectory !== undefined) nextOptions.cwd = options.workingDirectory
+      if (JSON.stringify(nextOptions) !== JSON.stringify(currentOptions)) {
+        // Pi has no RPC system-prompt setter. Resume its persisted conversation
+        // in a fresh process so the next turn receives current instructions,
+        // policy and MCP scopes before any model request is made.
+        await this.resumeSession(sessionId, nextOptions)
+      }
     }
     // Recovery is only before a new turn. Never replay a prompt whose tool
     // effects may already have reached the host before an unexpected exit.
@@ -1206,6 +1308,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
         "set_model",
         provider ? { provider, modelId: id } : { modelId: id }
       )
+      record.createOptions.metadata = { ...record.createOptions.metadata, selectedModel: modelId }
     } catch (error) {
       throw new Error(this.explainModelRefusal(modelId, error), { cause: error })
     }
@@ -1244,6 +1347,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     const resolved = clampThinkingLevel(level, available.levels ?? [])
     if (!resolved) return undefined
     await record.peer.sendCommand("set_thinking_level", { level: resolved })
+    record.createOptions.metadata = { ...record.createOptions.metadata, reasoningEffort: resolved }
     return resolved
   }
 
@@ -1745,6 +1849,34 @@ export function buildPiSystemPrompt(options: SessionCreateOptions): string | und
     options.briefMode ? "Answer concisely." : undefined,
   ].filter((piece): piece is string => Boolean(piece && piece.trim()))
 
+  if (options.context) {
+    const { workingDirectory: _cwd, custom, ...semantic } = options.context
+    const customContext =
+      custom && typeof custom === "object" && !Array.isArray(custom)
+        ? Object.fromEntries(
+            Object.entries(custom).filter(
+              ([key, value]) =>
+                ![
+                  "cwd",
+                  "workingDirectory",
+                  "additionalDirectories",
+                  "mcpServers",
+                  "traceId",
+                  "spanId",
+                  "parentSpanId",
+                  "sessionId",
+                  "turnId",
+                ].includes(key) && value !== undefined
+            )
+          )
+        : undefined
+    const payload = {
+      ...semantic,
+      ...(customContext && Object.keys(customContext).length ? { custom: customContext } : {}),
+    }
+    if (Object.keys(payload).length) pieces.push(`Task context: ${JSON.stringify(payload)}`)
+  }
+
   if (pieces.length === 0) return undefined
 
   if (!hasNoLeakingPiiDeep(pieces)) {
@@ -1792,10 +1924,13 @@ export const PI_EXTENSION_HANDSHAKE_TIMEOUT_MS = 5000
 export const PI_EXTENSION_HANDSHAKE_TIMEOUT_GLOBAL_MS = 30_000
 
 /** The budget this policy's startup set deserves. */
-export function piHandshakeTimeoutMs(policy: PiExtensionPolicy): number {
-  return policy === "isolated"
-    ? PI_EXTENSION_HANDSHAKE_TIMEOUT_MS
-    : PI_EXTENSION_HANDSHAKE_TIMEOUT_GLOBAL_MS
+export function piHandshakeTimeoutMs(policy: PiExtensionPolicy, mcpServerCount = 0): number {
+  const base =
+    policy === "isolated"
+      ? PI_EXTENSION_HANDSHAKE_TIMEOUT_MS
+      : PI_EXTENSION_HANDSHAKE_TIMEOUT_GLOBAL_MS
+  // Each declared MCP server has a bounded connect and tools/list round-trip.
+  return Math.min(120_000, base + mcpServerCount * 30_000)
 }
 
 /** Marker the bundled extension writes on `session_start`. */
@@ -1845,8 +1980,8 @@ export class PiExtensionUnavailableError extends Error {
  */
 export class PiExtensionHandshakeError extends Error {
   readonly reasonCode = "extension_handshake_failed"
-  constructor(sessionId: string, policy: PiExtensionPolicy = "isolated") {
-    const timeout = piHandshakeTimeoutMs(policy)
+  constructor(sessionId: string, policy: PiExtensionPolicy = "isolated", mcpServerCount = 0) {
+    const timeout = piHandshakeTimeoutMs(policy, mcpServerCount)
     super(
       `The Cognia Pi extension did not report ready for session ${sessionId} within ` +
         `${timeout}ms` +
@@ -1915,6 +2050,16 @@ function base64ToBytes(base64: string): Uint8Array {
   return bytes
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), ms)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }

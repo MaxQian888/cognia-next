@@ -13,6 +13,7 @@
  * tool on a session it no longer belongs to.
  */
 
+import { dispatchPreToolUse, dispatchPostToolUse } from "@/lib/claude/adapter-hooks"
 import net from "node:net"
 import fs from "node:fs"
 import path from "node:path"
@@ -20,7 +21,6 @@ import { randomBytes } from "node:crypto"
 
 import type { PermissionRequestEvent } from "@cognia/agent-config-types"
 import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
-import type { PluginToolManifestEntry } from "@/lib/plugin/bridge/sidecar-tools-bridge"
 
 import type { ResolvedCliSessionContext } from "../session-context"
 import type { PermissionResponder } from "../permission-gate"
@@ -36,6 +36,7 @@ import {
   type ExecResult,
   type HelloParams,
   type ReportParams,
+  type ReviewParams,
   type ToolHostRequest,
   type ToolHostServerName,
   type ToolHostSessionDescriptor,
@@ -89,6 +90,9 @@ export interface ToolHostBrokerParams {
    * no barrier, which is the right default for a caller with no UI.
    */
   awaitApprovals?: () => Promise<void>
+  isTurnActive?: () => boolean
+  beforeToolUse?: typeof dispatchPreToolUse
+  afterToolUse?: typeof dispatchPostToolUse
   /** Execute one `cognia-plugin-tools` call through the existing CLI executors. */
   execHostTool: (name: string, args: unknown) => Promise<ExecResult>
   /** Surface a projected tool call in the TUI, like a built-in one. */
@@ -156,14 +160,11 @@ export async function startToolHostBroker(params: ToolHostBrokerParams): Promise
   const visibleBuiltins = new Set(visibleBuiltinTools(session.sendOptions))
   const visibleHost = new Set(visibleHostTools(session.sendOptions))
   const roots = confinementRoots(session)
-  // `SendOptions.pluginTools` is typed without the per-entry `timeoutMs` the
-  // manifest builder actually sets (`PluginToolManifestEntry`), and human-blocking
-  // tools depend on it being forwarded — `ask_user` must NOT inherit a relay
-  // timeout, or a slow answer severs a perfectly valid call.
+  // Human-blocking tools depend on the per-entry `timeoutMs` being forwarded —
+  // `ask_user` must NOT inherit a relay timeout, or a slow answer severs a
+  // perfectly valid call.
   const hostToolsByName = new Map(
-    ((session.sendOptions.pluginTools ?? []) as PluginToolManifestEntry[]).map(
-      (entry) => [entry.name, entry] as const
-    )
+    (session.sendOptions.pluginTools ?? []).map((entry) => [entry.name, entry] as const)
   )
 
   const descriptor: ToolHostSessionDescriptor = {
@@ -215,6 +216,7 @@ export async function startToolHostBroker(params: ToolHostBrokerParams): Promise
   ): Promise<AuthorizeResult> {
     if (closed) return { allow: false, reason: "the Cognia session has ended" }
     if (cancelledReason) return { allow: false, reason: cancelledReason }
+    if (params.isTurnActive?.() === false) return { allow: false, reason: "No active turn" }
     // Nothing starts while the user is answering a question. Awaited BEFORE
     // this call's own approval is raised, so a call never waits on itself, and
     // re-checked afterwards because the answer may have ended the session.
@@ -227,6 +229,33 @@ export async function startToolHostBroker(params: ToolHostBrokerParams): Promise
     if (!visible.has(p.name)) {
       return { allow: false, reason: `"${p.name}" is not available in this session` }
     }
+    let updatedArgs: unknown
+    try {
+      const before = await Promise.race([
+        (params.beforeToolUse ?? dispatchPreToolUse)(
+          namespacedFor(server, p.name),
+          p.args,
+          session.sessionId
+        ),
+        cancellation.then((reason) => ({ action: "deny" as const, reason })),
+      ])
+      if (before.action === "deny")
+        return { allow: false, reason: before.reason ?? "Denied by a Cognia pre-tool hook" }
+      if (before.action === "modify") {
+        if (
+          !before.modifiedArgs ||
+          typeof before.modifiedArgs !== "object" ||
+          Array.isArray(before.modifiedArgs)
+        )
+          return { allow: false, reason: "Cognia pre-tool hook returned invalid arguments" }
+        updatedArgs = before.modifiedArgs
+        p = { ...p, args: updatedArgs }
+      }
+    } catch {
+      return { allow: false, reason: "Cognia tool preflight failed" }
+    }
+    if (closed || cancelledReason || params.isTurnActive?.() === false)
+      return { allow: false, reason: cancelledReason ?? "No active turn" }
     const fixedScope = session.sendOptions.builtinProcessSandbox
     const readOnly = server === COGNIA_TOOLS_SERVER && READ_ONLY_BUILTIN_TOOLS.has(p.name)
     const scopeRoots = fixedScope
@@ -249,7 +278,8 @@ export async function startToolHostBroker(params: ToolHostBrokerParams): Promise
     const full = namespacedFor(server, p.name)
     if (isExplicitlyDenied(session.sendOptions, full, p.args))
       return { allow: false, reason: "denied by permission ruleset" }
-    if (!needsApproval(session.sendOptions, full, p.args)) return { allow: true }
+    if (!needsApproval(session.sendOptions, full, p.args))
+      return { allow: true, ...(updatedArgs !== undefined ? { updatedArgs } : {}) }
     if (!params.gate) {
       return { allow: false, reason: `"${p.name}" needs approval and none is available` }
     }
@@ -276,7 +306,29 @@ export async function startToolHostBroker(params: ToolHostBrokerParams): Promise
     if (decision.decision === "deny") {
       return { allow: false, reason: decision.message ?? `"${p.name}" was denied` }
     }
-    return { allow: true }
+    return { allow: true, ...(updatedArgs !== undefined ? { updatedArgs } : {}) }
+  }
+
+  async function review(server: ToolHostServerName, p: ReviewParams): Promise<unknown> {
+    if (closed || cancelledReason || params.isTurnActive?.() === false)
+      throw new Error(cancelledReason ?? "No active turn")
+    const visible = server === COGNIA_TOOLS_SERVER ? visibleBuiltins : visibleHost
+    if (!visible.has(p.name)) throw new Error("Tool is not available in this session")
+    const reviewed = await Promise.race([
+      (params.afterToolUse ?? dispatchPostToolUse)(
+        namespacedFor(server, p.name),
+        p.args,
+        p.result,
+        session.sessionId
+      ),
+      cancellation.then(() => {
+        throw new Error("Tool review was cancelled")
+      }),
+    ])
+    if (closed || cancelledReason || params.isTurnActive?.() === false)
+      throw new Error(cancelledReason ?? "No active turn")
+    const result = reviewed.modifiedResult ?? p.result
+    return result
   }
 
   function handle(socket: net.Socket, server: { name: ToolHostServerName | null }) {
@@ -334,6 +386,16 @@ export async function startToolHostBroker(params: ToolHostBrokerParams): Promise
         reply({ result: await authorize(state.name, (request.params ?? {}) as AuthorizeParams) })
         return
       }
+      case "review": {
+        try {
+          reply({
+            result: { result: await review(state.name, (request.params ?? {}) as ReviewParams) },
+          })
+        } catch (error) {
+          reply({ error: error instanceof Error ? error.message : "Tool result review failed" })
+        }
+        return
+      }
       case "exec": {
         const p = (request.params ?? {}) as ExecParams
         // `exec` is only for broker-owned host tools; a bridge asking us to run
@@ -347,18 +409,31 @@ export async function startToolHostBroker(params: ToolHostBrokerParams): Promise
           reply({ result: { error: verdict.reason } })
           return
         }
+        const effectiveArgs = verdict.updatedArgs ?? p.args
         const callKey = `toolhost-${++callSeq}`
         params.onToolCall?.({
           server: state.name,
           name: p.name,
-          input: p.args,
+          input: effectiveArgs,
           callKey,
         })
         let outcome: ExecResult
         try {
-          outcome = await params.execHostTool(p.name, p.args)
+          outcome = await params.execHostTool(p.name, effectiveArgs)
         } catch (err) {
           outcome = { error: err instanceof Error ? err.message : String(err) }
+        }
+        try {
+          const reviewed = await review(state.name, {
+            name: p.name,
+            args: effectiveArgs,
+            result: outcome.error ?? outcome.result,
+          })
+          outcome = outcome.error
+            ? { error: typeof reviewed === "string" ? reviewed : JSON.stringify(reviewed) }
+            : { result: reviewed }
+        } catch (err) {
+          outcome = { error: err instanceof Error ? err.message : "Tool result review failed" }
         }
         params.onToolResult?.({
           callKey,

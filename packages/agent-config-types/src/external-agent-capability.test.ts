@@ -57,19 +57,20 @@ function profileFrom(
 }
 
 describe("protocol vocabulary", () => {
-  it("registers exactly the seven protocols that have an adapter", () => {
+  it("registers exactly the six protocols that have an adapter", () => {
     expect([...BUILTIN_EXECUTABLE_EXTERNAL_AGENT_PROTOCOLS].sort()).toEqual([
       "a2a",
       "acp",
       "codex-app-server",
       "dsh-sdk",
-      "opencode",
       "opencode-v2",
       "pi-rpc",
     ])
   })
 
   it("keeps legacy protocols readable but never selectable", () => {
+    expect(LEGACY_EXTERNAL_AGENT_PROTOCOLS).toContain("opencode")
+    expect(isSelectableExternalAgentProtocol("opencode-v2")).toBe(true)
     for (const legacy of LEGACY_EXTERNAL_AGENT_PROTOCOLS) {
       expect(isLegacyExternalAgentProtocol(legacy)).toBe(true)
       expect(isBuiltinExecutableExternalAgentProtocol(legacy)).toBe(false)

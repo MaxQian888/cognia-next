@@ -7,6 +7,8 @@ import {
 
 import {
   DshLaunchConfigurationError,
+  DSH_UPSTREAM_VERSION,
+  DSH_CONFORMANCE_SUITE_VERSION,
   buildDshChannelManifest,
   buildDshLaunchSpec,
   dshRuntimeCapabilities,
@@ -31,7 +33,7 @@ function channel(overrides: Partial<DshRuntimeChannel> = {}): DshRuntimeChannel 
     channelId: "dsh-0.1.0-rc.6",
     lockfileDigest: LOCK_DIGEST,
     compositionDigest: COMP_DIGEST,
-    upstreamVersion: "0.1.0-rc.6",
+    upstreamVersion: DSH_UPSTREAM_VERSION,
     nodeMajorRequired: 26,
     platforms: ["darwin-arm64"],
     profiles: [
@@ -48,7 +50,7 @@ function channel(overrides: Partial<DshRuntimeChannel> = {}): DshRuntimeChannel 
         requiresNativeSubprocess: true,
       },
     ],
-    conformanceSuiteVersion: "1",
+    conformanceSuiteVersion: DSH_CONFORMANCE_SUITE_VERSION,
     experimental: true,
     ...overrides,
   }
@@ -90,6 +92,20 @@ describe("platform helpers", () => {
 })
 
 describe("doctorDshRuntime", () => {
+  it("requires reinstalling old or uncertified protocol channels", () => {
+    for (const overrides of [
+      { upstreamVersion: "0.1.0-rc.6" },
+      { conformanceSuiteVersion: "legacy" },
+    ]) {
+      const report = doctorDshRuntime(channel(overrides), facts(), "cognia-sdk-readonly")
+      expect(report.healthy).toBe(false)
+      expect(report.findings).toContainEqual(expect.objectContaining({ code: "channel-malformed" }))
+    }
+  })
+
+  it("rejects an undeclared profile", () => {
+    expect(doctorDshRuntime(channel(), facts(), "cognia-acp").healthy).toBe(false)
+  })
   it("reports healthy for a matching install", () => {
     const report = doctorDshRuntime(channel(), facts(), "cognia-sdk-readonly")
     expect(report).toEqual({ healthy: true, findings: [] })
@@ -329,13 +345,27 @@ describe("buildDshLaunchSpec", () => {
     expect(spec.env).not.toHaveProperty("COGNIA_DSH_PERSONA")
   })
 
+  it("gates persona independently of provider credentials", () => {
+    expect(() => buildDshLaunchSpec(options({ persona: "alice@example.com" }))).toThrow("PII gate")
+  })
+
   it("passes optional tuning when supplied", () => {
     const spec = buildDshLaunchSpec(
-      options({ model: "deepseek-v4-pro", contextWindow: 128000, persona: "Be terse." })
+      options({
+        model: "deepseek-v4-pro",
+        contextWindow: 128000,
+        persona: "Be terse.",
+        baseUrl: "http://127.0.0.1:9876",
+        reasoningEffort: "high",
+        maxTokens: 1024,
+      })
     )
     expect(spec.env.COGNIA_DSH_MODEL).toBe("deepseek-v4-pro")
     expect(spec.env.COGNIA_DSH_CONTEXT_WINDOW).toBe("128000")
     expect(spec.env.COGNIA_DSH_PERSONA).toBe("Be terse.")
+    expect(spec.env.COGNIA_DSH_REASONING_EFFORT).toBe("high")
+    expect(spec.env.COGNIA_DSH_MAX_TOKENS).toBe("1024")
+    expect(spec.env.DEEPSEEK_BASE_URL).toBe("http://127.0.0.1:9876")
   })
 
   it("skips allowlisted variables that are absent or empty", () => {
@@ -414,7 +444,7 @@ describe("buildDshChannelManifest", () => {
     expect(acp.capabilities.transport).toBe("acp")
     expect(acp.capabilities.interactiveApproval).toBe(true)
     expect(acp.capabilities.turnCancellation).toBe(true)
-    expect(acp.capabilities.toolEvents).toBe(false)
+    expect(acp.capabilities.toolEvents).toBe(true)
   })
 
   it("marks only the workspace profile as needing a native toolchain", () => {
@@ -436,9 +466,8 @@ describe("buildDshChannelManifest", () => {
 })
 
 describe("dshRuntimeCapabilities", () => {
-  it("grants streaming to the SDK transport but not ACP", () => {
-    // ACP is committed-answers-only, so a streaming capability would be a lie.
-    expect(dshRuntimeCapabilities(DSH_SDK_CAPABILITIES)).toContain("streaming")
+  it("does not advertise token deltas on either current transport", () => {
+    expect(dshRuntimeCapabilities(DSH_SDK_CAPABILITIES)).not.toContain("streaming")
     expect(dshRuntimeCapabilities(DSH_ACP_CAPABILITIES)).not.toContain("streaming")
   })
 
@@ -447,12 +476,14 @@ describe("dshRuntimeCapabilities", () => {
     expect(dshRuntimeCapabilities(DSH_SDK_CAPABILITIES)).not.toContain("permissions.set-mode")
   })
 
-  it("never grants session.resume, which neither transport supports", () => {
-    // The static `RUNTIME_CAPABILITIES.external` table does grant it, which is
-    // exactly why this intersection exists.
-    for (const snapshot of [DSH_SDK_CAPABILITIES, DSH_ACP_CAPABILITIES]) {
-      expect(dshRuntimeCapabilities(snapshot)).not.toContain("session.resume")
-    }
+  it("grants persisted resume only to the current ACP transport", () => {
+    expect(dshRuntimeCapabilities(DSH_ACP_CAPABILITIES)).toContain("session.resume")
+    expect(dshRuntimeCapabilities(DSH_SDK_CAPABILITIES)).not.toContain("session.resume")
+  })
+
+  it("grants Cognia MCP tools to both managed transports", () => {
+    expect(dshRuntimeCapabilities(DSH_ACP_CAPABILITIES)).toContain("mcp")
+    expect(dshRuntimeCapabilities(DSH_SDK_CAPABILITIES)).toContain("mcp")
   })
 
   it("always grants the ordinary tool surface", () => {

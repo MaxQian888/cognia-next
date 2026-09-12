@@ -39,7 +39,7 @@ export type ExternalAgentPresetId =
   | "opencode-acp"
   | "opencode-server"
   | "opencode-remote"
-  | "opencode-v2-preview"
+  | "opencode-v2-service"
   | "deepseek-harness-readonly"
   | "deepseek-harness-workspace"
   | "deepseek-harness-acp"
@@ -148,7 +148,7 @@ const OPENCODE_SERVER_PRESET: ExternalAgentPresetConfig = {
   metadata: { autoSpawnServer: true },
   setupHint: "Requires the OpenCode CLI on PATH and the Cognia desktop app.",
   docsUrl: "https://opencode.ai/docs/server/",
-  supportTier: "executable",
+  supportTier: "documented-only",
   defaultPermissionMode: "default",
   tags: ["opencode", "sdk", "local"],
 }
@@ -161,7 +161,7 @@ const OPENCODE_REMOTE_PRESET: ExternalAgentPresetConfig = {
   network: { endpoint: "http://127.0.0.1:4096" },
   setupHint: "Start a server with `opencode serve` (optionally OPENCODE_SERVER_PASSWORD).",
   docsUrl: "https://opencode.ai/docs/server/",
-  supportTier: "executable",
+  supportTier: "documented-only",
   defaultPermissionMode: "default",
   tags: ["opencode", "sdk", "remote"],
 }
@@ -173,46 +173,42 @@ const OPENCODE_ACP_PRESET: ExternalAgentPresetConfig = {
   transport: "stdio",
   process: { command: "opencode", args: ["acp"] },
   setupHint:
-    "Requires OpenCode v1.18.14 or newer on PATH; authenticate with `opencode auth login`.",
+    "Requires the current @opencode/cli (2.0.0 or newer) on PATH; authenticate in OpenCode.",
   docsUrl: "https://opencode.ai/docs/acp/",
   supportTier: "executable",
   defaultPermissionMode: "default",
   tags: ["opencode", "acp", "stdio", "local"],
 }
 
-const OPENCODE_V2_PREVIEW_PRESET: ExternalAgentPresetConfig = {
-  name: "OpenCode V2 legacy preview contract",
+const OPENCODE_V2_SERVICE_PRESET: ExternalAgentPresetConfig = {
+  name: "OpenCode V2",
   description:
-    "Documents Cognia's pinned legacy preview contract; current OpenCode V2 builds are not compatible.",
+    "Connect to the current OpenCode service over HTTP and SSE, using local discovery or an explicit endpoint.",
   protocol: "opencode-v2",
   transport: "sse",
-  metadata: { preview: true, localServiceDiscovery: true },
+  metadata: { localServiceDiscovery: true },
   setupHint:
-    "Not executable against current OpenCode V2 builds. Use stable OpenCode HTTP/SSE or ACP until the preview client is regenerated.",
+    "Run the current OpenCode service, or configure its endpoint. Local discovery requires the Cognia desktop service bridge.",
   docsUrl: "https://opencode.ai/v2/docs/build/client",
-  supportTier: "documented-only",
+  supportTier: "executable",
   defaultPermissionMode: "default",
-  tags: ["opencode", "v2", "beta", "preview", "local-service"],
+  tags: ["opencode", "v2", "local-service"],
 }
 
 /**
  * DeepSeek Harness presets.
  *
- * Unlike every other preset here, these name no binary on PATH. DSH publishes
- * no executable for this transport, so Cognia ships its own host composition
- * and launcher (`runtime/deepseek-harness/`) into an isolated runtime home. The
- * installer fills in `process.command` / `process.args` with absolute paths;
- * until then `isExternalAgentExecutable` reports the agent as not runnable and
- * the UI offers Install.
+ * These presets use Cognia's pinned official DSH runtime and owned launch
+ * profiles (`runtime/deepseek-harness/`) in an isolated runtime home. Managed
+ * launch preparation resolves absolute process paths after certification.
  */
 const DEEPSEEK_HARNESS_READONLY_PRESET: ExternalAgentPresetConfig = {
   name: "DeepSeek Harness (read-only)",
   description:
-    "Observation-rich DeepSeek Harness runtime: full tool, reasoning, usage, and subagent events. Reads files but cannot modify them or run commands, and cannot ask for approval mid-turn.",
+    "DeepSeek Harness with committed tool, reasoning, usage and subagent events. Native file access is read-only; Cognia tools follow the host permission policy.",
   protocol: "dsh-sdk",
   transport: "stdio",
-  // Filled in by the installer; empty args keep the agent non-executable until
-  // a certified runtime is actually present.
+  // Resolved at connect after the managed runtime passes certification.
   process: { command: "", args: [] },
   metadata: { dshProfileId: "cognia-sdk-readonly", requiresManagedRuntime: true },
   envVarHint: "DEEPSEEK_API_KEY",
@@ -229,7 +225,7 @@ const DEEPSEEK_HARNESS_READONLY_PRESET: ExternalAgentPresetConfig = {
 const DEEPSEEK_HARNESS_WORKSPACE_PRESET: ExternalAgentPresetConfig = {
   name: "DeepSeek Harness (workspace write)",
   description:
-    "DeepSeek Harness with workspace-write authority and a shell. Everything it may do is granted at launch and cannot be revoked mid-turn on this transport.",
+    "DeepSeek Harness with native workspace-write authority and a shell. Cognia tools follow the host permission policy; cancelling SDK execution closes its runtime.",
   protocol: "dsh-sdk",
   transport: "stdio",
   process: { command: "", args: [] },
@@ -249,20 +245,17 @@ const DEEPSEEK_HARNESS_WORKSPACE_PRESET: ExternalAgentPresetConfig = {
  * Uses Cognia's existing `AcpClientAdapter`; upstream's server negotiates
  * protocol version 1, which is what `SUPPORTED_ACP_PROTOCOL_VERSIONS` accepts.
  *
- * The trade against the SDK presets is severe and deliberate. Upstream calls
- * this server "automation-only": committed assistant text is all that reaches
- * the wire, so there is no streaming, no tool activity, no reasoning and no
- * usage. What it buys is the one thing the SDK transport cannot do — answer a
- * permission request mid-turn, and cancel a single turn without killing the
- * runtime.
+ * The pinned current server publishes committed text, reasoning and tool
+ * events, mounts MCP per session, and supports persisted resume. ACP additionally
+ * carries per-tool approval and turn cancellation; SDK exposes usage and lineage.
  */
 const DEEPSEEK_HARNESS_ACP_PRESET: ExternalAgentPresetConfig = {
   name: "DeepSeek Harness (interactive)",
   description:
-    "DeepSeek Harness over ACP. Asks you to approve individual tool calls and can cancel a single turn, but reports only committed replies — no streaming, tool activity, reasoning, or usage.",
+    "DeepSeek Harness over ACP with Cognia tools, per-tool approval, turn cancellation, persisted session resume, and committed text, reasoning and tool updates.",
   protocol: "acp",
   transport: "stdio",
-  // Filled in by the installer, like the SDK presets: there is no binary here.
+  // Resolved at connect through the same managed launch path as the SDK presets.
   process: { command: "", args: [] },
   metadata: { dshProfileId: "cognia-acp", requiresManagedRuntime: true },
   envVarHint: "DEEPSEEK_API_KEY",
@@ -298,7 +291,7 @@ export const EXTERNAL_AGENT_PRESETS: Record<
   "opencode-acp": OPENCODE_ACP_PRESET,
   "opencode-server": OPENCODE_SERVER_PRESET,
   "opencode-remote": OPENCODE_REMOTE_PRESET,
-  "opencode-v2-preview": OPENCODE_V2_PREVIEW_PRESET,
+  "opencode-v2-service": OPENCODE_V2_SERVICE_PRESET,
   "deepseek-harness-readonly": DEEPSEEK_HARNESS_READONLY_PRESET,
   "deepseek-harness-workspace": DEEPSEEK_HARNESS_WORKSPACE_PRESET,
   "deepseek-harness-acp": DEEPSEEK_HARNESS_ACP_PRESET,
@@ -418,7 +411,7 @@ export function listDynamicPresetEntries(): Array<{
 
 /**
  * The builtin *executable* external-agent preset ids — every static preset
- * except the `custom` sentinel and service-discovered preview integrations.
+ * except the `custom` sentinel and runtimes without an executable process.
  * These are exactly the ids a teammate `runtime` or a subagent `externalPresetId`
  * may name; plugin-contributed presets stay outside this closed set and are
  * reached through the capability overlay instead. Derived from the record so it
@@ -428,13 +421,14 @@ export function listDynamicPresetEntries(): Array<{
  * Presets that name a runnable command directly.
  *
  * The DeepSeek Harness presets are excluded: they name no binary on PATH and
- * only become runnable once the managed runtime is installed, at which point
- * the installer writes absolute paths into the agent config. Listing them as
- * executable would offer them as `--backend` choices that cannot spawn.
+ * require managed installation and launch preparation. They cannot be used by
+ * direct `--backend` paths that only spawn a preset's static process command.
  */
 const NON_EXECUTABLE_PRESET_IDS = [
   "custom",
-  "opencode-v2-preview",
+  "opencode-server",
+  "opencode-remote",
+  "opencode-v2-service",
   "deepseek-harness-readonly",
   "deepseek-harness-workspace",
   "deepseek-harness-acp",

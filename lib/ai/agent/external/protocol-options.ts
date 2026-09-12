@@ -26,17 +26,15 @@ import { listPluginProtocolAdapters } from "./protocol-adapter"
  * existing dialogs). Only the LEGACY explanation is translated, because that
  * one is a sentence about why the option cannot be chosen.
  */
-const PROTOCOL_LABELS: Record<BuiltinExecutableExternalAgentProtocol, string> = {
+const PROTOCOL_LABELS: Record<BuiltinExecutableExternalAgentProtocol | "opencode", string> = {
   acp: "ACP (Agent Client Protocol)",
   "codex-app-server": "Codex app-server (JSON-RPC)",
   "dsh-sdk": "DeepSeek Harness SDK",
   "pi-rpc": "Pi native RPC",
   opencode: "OpenCode (HTTP + SSE)",
-  "opencode-v2": "OpenCode V2 (Preview)",
+  "opencode-v2": "OpenCode V2 (HTTP + SSE)",
   a2a: "A2A (Agent-to-Agent)",
 }
-
-const DOCUMENTED_ONLY_PROTOCOLS = new Set<BuiltinExecutableExternalAgentProtocol>(["opencode-v2"])
 
 export interface ExternalProtocolOption {
   value: string
@@ -65,9 +63,9 @@ export interface ExternalProtocolOption {
  * see what the stored config says and change it, but cannot re-choose it.
  */
 export function externalProtocolOptions(current?: string): ExternalProtocolOption[] {
-  const options: ExternalProtocolOption[] = BUILTIN_EXECUTABLE_EXTERNAL_AGENT_PROTOCOLS.filter(
-    (value) => !DOCUMENTED_ONLY_PROTOCOLS.has(value)
-  ).map((value) => ({ value, label: PROTOCOL_LABELS[value], selectable: true }))
+  const options: ExternalProtocolOption[] = BUILTIN_EXECUTABLE_EXTERNAL_AGENT_PROTOCOLS.map(
+    (value) => ({ value, label: PROTOCOL_LABELS[value], selectable: true })
+  )
   for (const { protocol } of listPluginProtocolAdapters()) {
     if (options.some((option) => option.value === protocol)) continue
     options.push({

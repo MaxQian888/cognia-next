@@ -38,7 +38,6 @@ export const SUPPORTED_EXTERNAL_AGENT_PROTOCOLS = [
   "codex-app-server",
   "dsh-sdk",
   "pi-rpc",
-  "opencode",
   "opencode-v2",
   "a2a",
 ] as const
@@ -486,6 +485,9 @@ export function getUnsupportedProtocolReason(protocol: ExternalAgentProtocol): s
   if (isSupportedExternalAgentProtocol(protocol)) {
     return ""
   }
+  if (protocol === "opencode") {
+    return "The legacy OpenCode protocol is no longer supported. Create an OpenCode V2 service configuration."
+  }
   // A namespaced `${pluginId}:${id}` protocol is contributed by a plugin
   // adapter. Reaching here means it is not currently registered — almost
   // always because the providing plugin is disabled or not installed.
@@ -623,30 +625,15 @@ export function getExternalAgentExecutionBlock(
       transient: isTransientReachBlock(runtimeReach),
     }
   }
-  // An OpenCode config without an explicit endpoint auto-spawns `opencode
-  // serve` (see OpenCodeClientAdapter.resolveBaseUrl), which needs the desktop
-  // process bridge. Without this gate the browser marks the agent executable
-  // and the desktop-only error surfaces later, at connect time.
   if (
-    config.protocol === "opencode" &&
-    !runtimeSupportsExternalAgents &&
-    !config.network?.endpoint &&
-    (config.metadata?.autoSpawnServer === true || Boolean(config.process?.command))
+    config.protocol === "opencode-v2" &&
+    !config.network?.endpoint?.trim() &&
+    !runtimeSupportsExternalAgents
   ) {
     return {
       code: "transport_blocked",
       reason:
-        "Auto-spawning an OpenCode server requires the desktop (Tauri) runtime; configure a server endpoint instead.",
-      // Same environment scope as the transport gate above, so it follows the
-      // same rule about what may be persisted from it.
-      transient: isTransientReachBlock(runtimeReach),
-    }
-  }
-  if (config.protocol === "opencode-v2" && !runtimeSupportsExternalAgents) {
-    return {
-      code: "transport_blocked",
-      reason:
-        "The legacy OpenCode V2 preview contract is documented-only and incompatible with current OpenCode V2 builds. Use stable OpenCode HTTP/SSE or ACP.",
+        "Local OpenCode service discovery requires the desktop service bridge; configure an explicit service endpoint instead.",
       transient: isTransientReachBlock(runtimeReach),
     }
   }

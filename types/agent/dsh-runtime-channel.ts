@@ -4,10 +4,9 @@ import { z } from "zod"
  * Certification and capability contract for a Cognia-owned DeepSeek Harness
  * (DSH) runtime installation.
  *
- * DSH ships no executable for either transport Cognia integrates against, so a
- * "channel" is not an upstream artifact Cognia points at. It is the triple
- * Cognia itself owns and versions: a pinned dependency lockfile, a host-plane
- * Cordis composition, and the launcher that boots it (`runtime/deepseek-harness/`).
+ * A channel pins the current upstream dsh executable and its protocol packages,
+ * together with Cognia's certified host composition and launcher. The package
+ * lock and composition digests identify the exact runtime we can execute.
  *
  * @see runtime/deepseek-harness/README.md for why Cognia owns the host plane.
  */
@@ -16,7 +15,7 @@ import { z } from "zod"
  * The transports Cognia drives a DSH runtime over.
  *
  * These are not interchangeable and a session may never move between them:
- * `acp` cannot report tool activity or reasoning at all, and `dsh-sdk` cannot
+ * both publish committed tool/reasoning events, while `dsh-sdk` cannot
  * ask for approval or cancel a single turn. Switching would silently change
  * both what the user can see and what they can veto.
  */
@@ -26,7 +25,7 @@ export type DshTransport = (typeof DSH_TRANSPORTS)[number]
 /**
  * The certified host compositions Cognia ships.
  *
- * `cognia-sdk-readonly` is the default. Its read-only guarantee does not come
+ * `cognia-sdk-readonly` is the default. Its native file read-only guarantee does not come
  * from the sandbox mode alone — DSH lets a model retry a denied call with
  * `sandbox_permissions: "workspace-write"`, and that escalation only fails
  * closed because the profile composes no `ctx.approval` provider.
@@ -46,22 +45,22 @@ export type DshPlatform = (typeof DSH_PLATFORMS)[number]
  *
  * Every field here is a statement of fact about upstream, not an aspiration.
  * It exists because `RUNTIME_CAPABILITIES.external` in the execution resolver
- * grants the external adapter `session.resume`, `steer`, `set-model`, and
- * `permissions.interrupt-resume` — DSH supports none of those on either
- * transport. Resolved specs intersect the static table with this snapshot so
+ * grants capabilities across multiple protocols. Current DSH ACP supports
+ * persisted resume and model configuration; SDK control remains launch-scoped.
+ * Resolved specs intersect the static table with this snapshot so
  * the compatibility gate cannot pass capabilities the runtime lacks, and the UI
  * cannot render controls that do nothing.
  */
 export const dshCapabilitySnapshotSchema = z.object({
   transport: z.enum(DSH_TRANSPORTS),
 
-  /** Streaming deltas. ACP emits committed messages only. */
+  /** Live token deltas. Current SDK and ACP publish committed messages only. */
   streamingDeltas: z.boolean(),
-  /** Per-tool call/result events. ACP keeps tool activity off the wire entirely. */
+  /** Per-tool call/result events settled on the wire. */
   toolEvents: z.boolean(),
-  /** Model reasoning content. ACP: none. */
+  /** Committed model reasoning content. */
   reasoning: z.boolean(),
-  /** Token accounting. SDK reports it per step on an `assistant/chunk`. */
+  /** Token accounting. SDK reports it on committed `assistant/message` records. */
   usage: z.boolean(),
   /** Parent/child agent lineage via `subagent.started` / `subagent.finished`. */
   subagentLineage: z.boolean(),
@@ -70,9 +69,9 @@ export const dshCapabilitySnapshotSchema = z.object({
   interactiveApproval: z.boolean(),
   /** Cancelling one turn while keeping the runtime. SDK must close the process. */
   turnCancellation: z.boolean(),
-  /** Passing Cognia's MCP servers through. ACP rejects a non-empty `mcpServers`. */
+  /** Passing Cognia servers through native ACP or isolated SDK startup mounting. */
   mcpPassthrough: z.boolean(),
-  /** Reattaching to an earlier session. Neither transport supports it. */
+  /** Reattaching to an earlier persisted session. */
   sessionResume: z.boolean(),
 })
 export type DshCapabilitySnapshot = z.infer<typeof dshCapabilitySnapshotSchema>
@@ -96,10 +95,9 @@ export type DshProfileDescriptor = z.infer<typeof dshProfileDescriptorSchema>
 /**
  * A certified, installed runtime.
  *
- * Identity is the three digests, not a version string. DSH published six release
- * candidates in three days, its README warns of compatibility-breaking changes,
- * and `SESSION_FORMAT_VERSION` is `0` with no compatibility promise — so semver
- * carries no compatibility signal and is recorded for display only.
+ * The pinned dependency and composition digests identify the certified build.
+ * Cognia supports the current session format 3 wire only; historical format
+ * migrations belong to upstream storage and are not SDK compatibility paths.
  */
 export const dshRuntimeChannelSchema = z.object({
   schemaVersion: z.literal(1),
@@ -134,12 +132,12 @@ export type DshRuntimeChannel = z.infer<typeof dshRuntimeChannelSchema>
 /**
  * Capability facts for the SDK transport.
  *
- * Confirmed against a live run of `runtime/deepseek-harness/host.sdk-readonly.yml`
- * and against upstream's own recorded notification snapshots.
+ * Confirmed against published 0.1.5-rc.1 SDK protocol/server and session format
+ * 3 declarations. Only durable message settlements cross the current SDK wire.
  */
 export const DSH_SDK_CAPABILITIES: DshCapabilitySnapshot = {
   transport: "dsh-sdk",
-  streamingDeltas: true,
+  streamingDeltas: false,
   toolEvents: true,
   reasoning: true,
   usage: true,
@@ -154,28 +152,20 @@ export const DSH_SDK_CAPABILITIES: DshCapabilitySnapshot = {
   sessionResume: false,
 }
 
-/**
- * Capability facts for the ACP transport.
- *
- * `@deepseek-ai/dsh-acp` describes itself as an "Automation-only" server:
- * "Committed answers only -- live progress, reasoning, tool activity, plans,
- * titles, and usage stay off the wire." Everything observable is therefore
- * false, which is why this transport is not Cognia's default.
+/** Current ACP server publishes committed tool/reasoning updates, mounts MCP
+ * clients per session, and advertises list/resume/close plus model config options.
  */
 export const DSH_ACP_CAPABILITIES: DshCapabilitySnapshot = {
   transport: "acp",
   streamingDeltas: false,
-  toolEvents: false,
-  reasoning: false,
+  toolEvents: true,
+  reasoning: true,
   usage: false,
   subagentLineage: false,
-  // One-shot allow/reject only; there is no allow-always option.
   interactiveApproval: true,
   turnCancellation: true,
-  // "empty additionalDirectories and mcpServers are accepted, non-empty values reject"
-  mcpPassthrough: false,
-  // "Fresh sessions only -- load, list, resume, delete, and fork are unsupported."
-  sessionResume: false,
+  mcpPassthrough: true,
+  sessionResume: true,
 }
 
 export function dshCapabilitiesForTransport(transport: DshTransport): DshCapabilitySnapshot {
@@ -183,7 +173,8 @@ export function dshCapabilitiesForTransport(transport: DshTransport): DshCapabil
 }
 
 /**
- * Whether a profile can be trusted to refuse mutations.
+ * Whether the native DSH file tools refuse mutations.
+ * Cognia MCP tools independently follow the host broker permission policy.
  *
  * Read-only is a property of the whole composition, not of the sandbox mode:
  * the model can request escalation to `workspace-write`, and the request is

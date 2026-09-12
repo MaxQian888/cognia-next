@@ -32,10 +32,10 @@ import { AGENT_CAPABILITY_IDS } from "./agent-execution"
  * answer the handshake.
  */
 export type BuiltinExecutableExternalAgentProtocol =
-  "acp" | "codex-app-server" | "dsh-sdk" | "pi-rpc" | "opencode" | "opencode-v2" | "a2a"
+  "acp" | "codex-app-server" | "dsh-sdk" | "pi-rpc" | "opencode-v2" | "a2a"
 
 export const BUILTIN_EXECUTABLE_EXTERNAL_AGENT_PROTOCOLS: readonly BuiltinExecutableExternalAgentProtocol[] =
-  ["acp", "codex-app-server", "dsh-sdk", "pi-rpc", "opencode", "opencode-v2", "a2a"]
+  ["acp", "codex-app-server", "dsh-sdk", "pi-rpc", "opencode-v2", "a2a"]
 
 /**
  * Protocols that exist in stored configs but have no adapter.
@@ -44,14 +44,16 @@ export const BUILTIN_EXECUTABLE_EXTERNAL_AGENT_PROTOCOLS: readonly BuiltinExecut
  * manager since the module was written, so an `http` / `websocket` / `custom`
  * config has never been runnable — selecting one produces "no adapter for
  * protocol" at connect time. They stay READABLE so an old config still renders
- * (and can be migrated), and are excluded from every selector.
+ * (and can be migrated), and are excluded from every selector. OpenCode V1
+ * was retired when the current V2 service became the sole native integration.
  */
-export type LegacyExternalAgentProtocol = "http" | "websocket" | "custom"
+export type LegacyExternalAgentProtocol = "http" | "websocket" | "custom" | "opencode"
 
 export const LEGACY_EXTERNAL_AGENT_PROTOCOLS: readonly LegacyExternalAgentProtocol[] = [
   "http",
   "websocket",
   "custom",
+  "opencode",
 ]
 
 /**

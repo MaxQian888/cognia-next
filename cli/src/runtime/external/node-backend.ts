@@ -4,6 +4,7 @@ import fs from "node:fs"
 import path from "node:path"
 import readline from "node:readline"
 import { deleteGatewayTask, gatewayRuntimeEnvironment, prepareGatewayTask } from "./gateway-task"
+import { devinOwnedConfigRoot, prepareDevinMcpConfig } from "./devin-mcp-config"
 
 import {
   agentSearchDirs,
@@ -106,6 +107,8 @@ const CONFIG_ENV_KEYS = new Set([
   // inject plugins and arbitrary JS into a certified composition.
   "DSH_HOME",
   "MODEL_PROVIDER",
+  "PI_CODING_AGENT_DIR",
+  "PI_CODING_AGENT_SESSION_DIR",
 ])
 const RUNTIME_ENV_KEYS = new Set([
   "PATH",
@@ -198,6 +201,17 @@ function validateCommand(
   const command = config.command.trim()
   if (!command) throw new Error("empty command")
   if (command.includes("/") || command.includes("\\")) {
+    // A managed launch resolves the exact host Node executable. Keep the
+    // exception narrower than arbitrary absolute binaries or arbitrary JS.
+    try {
+      if (
+        fs.realpathSync(command) === fs.realpathSync(process.execPath) &&
+        isDshLauncherInvocation(config.args ?? [], workspacesRoot)
+      )
+        return
+    } catch {
+      // Missing paths follow the ordinary rejection below.
+    }
     throw new Error(`command must be a bare allowlisted binary name, got a path: ${command}`)
   }
   const base = baseCommand(command)
@@ -269,8 +283,32 @@ function validateCwd(root: string, requested?: string): string {
 
 export function buildExternalAgentChildEnv(
   ambient: NodeJS.ProcessEnv,
-  overrides: Record<string, string> | undefined
+  overrides: Record<string, string> | undefined,
+  managedDsh = false
 ): NodeJS.ProcessEnv {
+  if (managedDsh) {
+    const inherited = new Set([
+      "PATH",
+      "LANG",
+      "LC_ALL",
+      "TZ",
+      "TMPDIR",
+      "HOME",
+      "DSH_HOME",
+      "DEEPSEEK_API_KEY",
+      "DEEPSEEK_BASE_URL",
+      "COGNIA_GATEWAY_TASK_CONFIG",
+      "COGNIA_GATEWAY_TOKEN",
+    ])
+    return {
+      NODE_ENV: "production",
+      ...Object.fromEntries(
+        Object.entries(overrides ?? {}).filter(
+          ([key]) => inherited.has(key) || key.startsWith("COGNIA_DSH_")
+        )
+      ),
+    }
+  }
   if (overrides?.COGNIA_GATEWAY_TASK_HOME) {
     const env = { ...gatewayRuntimeEnvironment(ambient), ...overrides }
     delete env.COGNIA_GATEWAY_TASK_HOME
@@ -295,6 +333,11 @@ export function buildExternalAgentChildEnv(
     ) {
       env[key] = value
     }
+  }
+  if (overrides?.COGNIA_BOT_ISOLATION === "1" && overrides.COGNIA_BOT_STATE_DIR) {
+    env.XDG_DATA_HOME = path.join(overrides.COGNIA_BOT_STATE_DIR, "data")
+    env.XDG_CACHE_HOME = path.join(overrides.COGNIA_BOT_STATE_DIR, "cache")
+    env.XDG_STATE_HOME = path.join(overrides.COGNIA_BOT_STATE_DIR, "state")
   }
   return env
 }
@@ -436,30 +479,53 @@ export class NodeExternalAgentBackend {
       throw new Error(`Selected workspace changed on disk: ${root}`)
     }
     const cwd = validateCwd(root, config.cwd)
-    const prepared = prepareGatewayTask({ ...config, cwd })
+    const gateway = prepareGatewayTask({ ...config, cwd })
+    let prepared: ReturnType<typeof prepareDevinMcpConfig>
+    try {
+      prepared = prepareDevinMcpConfig(gateway.config)
+    } catch (error) {
+      gateway.cleanup()
+      throw error
+    }
+    const cleanup = () => {
+      prepared.cleanup()
+      gateway.cleanup()
+    }
     config = prepared.config
     let launch: ExternalAgentLaunch
     try {
       launch = await this.resolveLaunch(config)
     } catch (error) {
-      prepared.cleanup()
+      cleanup()
       throw error
     }
     this.emit(CHANNEL.spawn, { agentId: config.id, status: "starting" })
     this.emit(CHANNEL.state, { agentId: config.id, state: "Starting" })
-    const env = buildExternalAgentChildEnv(process.env, config.env)
+    const env = buildExternalAgentChildEnv(
+      process.env,
+      config.env,
+      isDshLauncherInvocation(config.args ?? [], this.workspacesRoot)
+    )
+    const devinConfigRoot = devinOwnedConfigRoot(config)
+    if (devinConfigRoot) env.XDG_CONFIG_HOME = devinConfigRoot
     // The launcher child (and the sandboxed exec it starts) resolves the agent
     // binary from PATH, so it must see the SAME enriched search path the
     // readiness probe used — otherwise a binary the probe found in a fallback
     // install root (Homebrew, ~/.cargo/bin, a native installer's dir) would be
     // reported present yet fail to spawn.
     env.PATH = resolveAgentSearchPath()
-    const child = spawn(launch.command, launch.args, {
-      cwd,
-      env,
-      stdio: ["pipe", "pipe", "pipe"],
-      detached: process.platform !== "win32",
-    })
+    let child: ChildProcessWithoutNullStreams
+    try {
+      child = spawn(launch.command, launch.args, {
+        cwd,
+        env,
+        stdio: ["pipe", "pipe", "pipe"],
+        detached: process.platform !== "win32",
+      })
+    } catch (error) {
+      cleanup()
+      throw error
+    }
     const record: ProcessRecord = { child, stopping: false }
     this.processes.set(config.id, record)
     if (config.framing === "raw") {
@@ -481,13 +547,22 @@ export class NodeExternalAgentBackend {
       this.emit(CHANNEL.state, { agentId: config.id, state: "Running" })
     })
     child.once("error", (error) => {
-      prepared.cleanup()
+      cleanup()
       this.processes.delete(config.id)
       this.emit(CHANNEL.state, { agentId: config.id, state: "Failed" })
       this.emit(CHANNEL.stderr, { agentId: config.id, data: error.message })
     })
     child.once("exit", (code, signal) => {
-      prepared.cleanup()
+      // A crashed ACP leader can leave MCP descendants alive with its tokens.
+      // Reap only this launch's process group before discarding its overlay.
+      if (devinConfigRoot && process.platform !== "win32" && child.pid) {
+        try {
+          process.kill(-child.pid, "SIGKILL")
+        } catch {
+          /* Group already exited. */
+        }
+      }
+      cleanup()
       this.processes.delete(config.id)
       this.emit(CHANNEL.state, { agentId: config.id, state: "Stopped" })
       this.emit(CHANNEL.exit, { agentId: config.id, code: code ?? 0, signal })

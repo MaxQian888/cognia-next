@@ -45,13 +45,12 @@ function baseConfig(overrides: Partial<ExternalAgentConfig> = {}): ExternalAgent
 }
 
 describe("SUPPORTED_EXTERNAL_AGENT_PROTOCOLS", () => {
-  it("contains the seven registered built-in adapters", () => {
+  it("contains the six registered built-in adapters", () => {
     expect(SUPPORTED_EXTERNAL_AGENT_PROTOCOLS).toEqual([
       "acp",
       "codex-app-server",
       "dsh-sdk",
       "pi-rpc",
-      "opencode",
       "opencode-v2",
       "a2a",
     ])
@@ -61,7 +60,7 @@ describe("SUPPORTED_EXTERNAL_AGENT_PROTOCOLS", () => {
 describe("isSupportedExternalAgentProtocol", () => {
   it("returns true for the built-in protocols", () => {
     expect(isSupportedExternalAgentProtocol("acp")).toBe(true)
-    expect(isSupportedExternalAgentProtocol("opencode")).toBe(true)
+    expect(isSupportedExternalAgentProtocol("opencode")).toBe(false)
     expect(isSupportedExternalAgentProtocol("opencode-v2")).toBe(true)
     expect(isSupportedExternalAgentProtocol("codex-app-server")).toBe(true)
     expect(isSupportedExternalAgentProtocol("a2a")).toBe(true)
@@ -207,41 +206,27 @@ describe("getExternalAgentExecutionBlock", () => {
     __resetPluginProtocolAdaptersForTesting()
   })
 
-  it("blocks an auto-spawn OpenCode config off-desktop (spawn needs Tauri)", () => {
-    const cfg = baseConfig({
-      protocol: "opencode" as never,
-      transport: "sse" as never,
-      process: { command: "opencode", args: [] },
-      metadata: { autoSpawnServer: true },
-    })
+  it("blocks the retired OpenCode protocol", () => {
+    const cfg = baseConfig({ protocol: "opencode", transport: "sse", metadata: {} })
+    expect(getExternalAgentExecutionBlock(cfg, true)?.code).toBe("protocol_unsupported")
+  })
+
+  it("requires a service bridge for OpenCode local discovery", () => {
+    const cfg = baseConfig({ protocol: "opencode-v2", transport: "sse", metadata: {} })
     const block = getExternalAgentExecutionBlock(cfg, false)
     expect(block?.code).toBe("transport_blocked")
-    expect(block?.reason).toMatch(/desktop/i)
-    // Same config IS executable on desktop.
+    expect(block?.reason).toMatch(/service bridge/i)
     expect(getExternalAgentExecutionBlock(cfg, true)).toBeNull()
   })
 
-  it("does not block a remote OpenCode config (explicit endpoint) off-desktop", () => {
+  it("allows an explicit OpenCode endpoint without the desktop service bridge", () => {
     const cfg = baseConfig({
-      protocol: "opencode" as never,
-      transport: "sse" as never,
-      process: undefined,
+      protocol: "opencode-v2",
+      transport: "sse",
       network: { endpoint: "http://127.0.0.1:4096" },
       metadata: {},
     })
     expect(getExternalAgentExecutionBlock(cfg, false)).toBeNull()
-  })
-
-  it("does not recommend launching the incompatible legacy OpenCode V2 service", () => {
-    const cfg = baseConfig({
-      protocol: "opencode-v2" as never,
-      transport: "sse" as never,
-      metadata: {},
-    })
-    const block = getExternalAgentExecutionBlock(cfg, false)
-    expect(block?.code).toBe("transport_blocked")
-    expect(block?.reason).toMatch(/documented-only/i)
-    expect(block?.reason).not.toContain("opencode2 service start")
   })
 
   it("blocks documented-only ecosystem surfaces", () => {

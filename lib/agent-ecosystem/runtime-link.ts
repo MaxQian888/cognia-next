@@ -11,14 +11,10 @@
  * stays safe for the fast `node` Jest project.
  */
 
+import { isBuiltinExecutableExternalAgentProtocol } from "@cognia/agent-config-types/external-agent-capability"
 import { findRuntimeById } from "@/lib/ai/agent/external/runtime-catalog"
 
-import {
-  AGENT_ECOSYSTEMS,
-  findEcosystemById,
-  findEcosystemByMigrationVendor,
-  primaryRuntimeIdForMigrationVendor,
-} from "./catalog"
+import { AGENT_ECOSYSTEMS, findEcosystemById, findEcosystemByMigrationVendor } from "./catalog"
 
 // Built once. `presetIdsForSessionSource` is called per row when the support
 // matrix renders, and a linear scan per row is the kind of thing that only
@@ -33,7 +29,12 @@ const ECOSYSTEM_ID_BY_SOURCE: ReadonlyMap<string, string> = new Map(
 export function presetIdsForEcosystem(ecosystemId: string): string[] {
   const entry = findEcosystemById(ecosystemId)
   if (!entry) return []
-  return entry.runtimeIds.flatMap((runtimeId) => findRuntimeById(runtimeId)?.presetIds ?? [])
+  return entry.runtimeIds.flatMap((runtimeId) => {
+    const runtime = findRuntimeById(runtimeId)
+    return runtime && isBuiltinExecutableExternalAgentProtocol(runtime.protocol)
+      ? runtime.presetIds
+      : []
+  })
 }
 
 /** The preset a "connect this agent" offer should create, or null. */
@@ -51,9 +52,7 @@ export function primaryPresetIdForEcosystem(ecosystemId: string): string | null 
  * that class of mistake unrepresentable.
  */
 export function primaryPresetIdForMigrationVendor(vendor: string): string | null {
-  const runtimeId = primaryRuntimeIdForMigrationVendor(vendor)
-  if (!runtimeId) return null
-  return findRuntimeById(runtimeId)?.presetIds[0] ?? null
+  return presetIdsForMigrationVendor(vendor)[0] ?? null
 }
 
 /** Every preset id a migration vendor's ecosystem can launch. */

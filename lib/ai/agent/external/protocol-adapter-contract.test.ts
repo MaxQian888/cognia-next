@@ -51,7 +51,6 @@ describe("the registered protocol set", () => {
       "acp",
       "codex-app-server",
       "dsh-sdk",
-      "opencode",
       "opencode-v2",
       "pi-rpc",
     ])

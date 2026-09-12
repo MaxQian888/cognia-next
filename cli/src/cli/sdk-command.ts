@@ -16,6 +16,8 @@ export const SDK_HELP = `cognia-agent sdk — Claude Agent SDK management
   sdk fork --session <id> [--json]
   sdk delete --session <id> --confirm                irreversible
   sdk settings [--cwd <dir>] [--json]                effective SDK settings
+
+  All session operations accept --cwd <dir> and --storage filesystem|host-sqlite.
 `
 
 interface SdkApi {
@@ -38,7 +40,7 @@ export interface SdkCommandDeps {
   api?: SdkApi
 }
 
-async function defaultDeps(out: OutputSink): Promise<Required<SdkCommandDeps>> {
+async function defaultDeps(out: OutputSink, args: ParsedArgs): Promise<Required<SdkCommandDeps>> {
   const [runtime, resolver, flags, bootstrap, ipc] = await Promise.all([
     import("@/lib/ai/agent/execution/capability-snapshot"),
     import("@/lib/ai/agent/execution/resolve-agent-execution-spec"),
@@ -46,6 +48,19 @@ async function defaultDeps(out: OutputSink): Promise<Required<SdkCommandDeps>> {
     import("../runtime/bootstrap"),
     import("@/lib/claude/ipc"),
   ])
+  const { sdkSessionApiOptions } = await import("@/lib/claude/claude-sdk-rollout")
+  const activeFlags = flags.getAgentExecutionFlags()
+  const requestedStorage = stringFlag(args, "storage")
+  const sessionOptions = await sdkSessionApiOptions({
+    cwd: stringFlag(args, "cwd") ?? process.cwd(),
+    storage:
+      requestedStorage === "host-sqlite" ||
+      (!requestedStorage && activeFlags.claudeSdkParityV1 && activeFlags.claudeSdkSessionStore)
+        ? "host-sqlite"
+        : "filesystem",
+    surface: "cli",
+    environment: { isTauri: false, isHeadlessHost: true },
+  })
   return {
     out,
     buildSnapshot: () =>
@@ -60,16 +75,17 @@ async function defaultDeps(out: OutputSink): Promise<Required<SdkCommandDeps>> {
       ),
     bootstrap: () => bootstrap.bootstrapSidecar(),
     api: {
-      list: () => ipc.listSdkSessions(),
-      info: (sessionId) => ipc.getSdkSessionInfo(sessionId),
-      messages: (sessionId) => ipc.getSdkSessionMessages(sessionId),
-      subagents: (sessionId) => ipc.listSdkSubagents(sessionId),
-      subagentMessages: (sessionId, agentId) => ipc.getSdkSubagentMessages(sessionId, agentId),
-      rename: ipc.renameSdkSession,
-      tag: ipc.tagSdkSession,
-      delete: ipc.deleteSdkSession,
-      fork: (sessionId) => ipc.forkSdkSession(sessionId),
-      settings: (cwd) => ipc.resolveSdkSettings(cwd ? { dir: cwd } : undefined),
+      list: () => ipc.listSdkSessions(undefined, sessionOptions),
+      info: (sessionId) => ipc.getSdkSessionInfo(sessionId, sessionOptions),
+      messages: (sessionId) => ipc.getSdkSessionMessages(sessionId, sessionOptions),
+      subagents: (sessionId) => ipc.listSdkSubagents(sessionId, sessionOptions),
+      subagentMessages: (sessionId, agentId) =>
+        ipc.getSdkSubagentMessages(sessionId, agentId, sessionOptions),
+      rename: (sessionId, title) => ipc.renameSdkSession(sessionId, title, sessionOptions),
+      tag: (sessionId, tag) => ipc.tagSdkSession(sessionId, tag, sessionOptions),
+      delete: (sessionId) => ipc.deleteSdkSession(sessionId, sessionOptions),
+      fork: (sessionId) => ipc.forkSdkSession(sessionId, sessionOptions),
+      settings: (cwd) => ipc.resolveSdkSettings(cwd ? { dir: cwd } : undefined, sessionOptions),
     },
   }
 }
@@ -82,10 +98,15 @@ function emit(out: OutputSink, value: unknown, json: boolean): void {
 export async function sdkCommand(args: ParsedArgs, provided?: SdkCommandDeps): Promise<number> {
   const out = provided?.out
   if (!out) throw new Error("sdkCommand requires an output sink")
+  const storage = stringFlag(args, "storage")
+  if (storage && storage !== "filesystem" && storage !== "host-sqlite") {
+    out.error("sdk: --storage must be filesystem or host-sqlite\n")
+    return 2
+  }
   const deps =
     provided.buildSnapshot && provided.bootstrap && provided.api
       ? (provided as Required<SdkCommandDeps>)
-      : await defaultDeps(out)
+      : await defaultDeps(out, args)
   const verb = args.subcommand ?? args.positionals[0]
   const json = boolFlag(args, "json")
   if (!verb || verb === "help") {

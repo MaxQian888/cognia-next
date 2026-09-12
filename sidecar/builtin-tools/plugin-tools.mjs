@@ -15,6 +15,8 @@
 // calls don't trample each other and the parent can resolve them via the
 // `toolUseId` key.
 
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
+import { permissionDecisionHasUnprovenRewrite } from "../dispatch/anthropic-mcp-relay.mjs"
 import { randomUUID } from "node:crypto"
 import { z } from "zod"
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk"
@@ -136,8 +138,10 @@ export function buildPluginToolsServer({
   turnId,
   attemptId,
   toolNameAliases,
+  permissionPromptToolName,
 }) {
   if (!Array.isArray(tools) || tools.length === 0) return null
+  if (!hasNoLeakingPiiDeep(tools)) throw new Error("Plugin tool metadata blocked by the PII gate")
 
   const perToolAlways =
     alwaysLoadToolNames instanceof Set ? alwaysLoadToolNames : new Set(alwaysLoadToolNames ?? [])
@@ -183,6 +187,17 @@ export function buildPluginToolsServer({
           return toolError(response.error, "plugin tool")
         }
         const result = response?.result ?? null
+        if (
+          permissionPromptToolName ===
+            `mcp__${SERVER_NAME}__${modelNameOf.get(t.name) ?? t.name}` &&
+          permissionDecisionHasUnprovenRewrite(result, args.input)
+        )
+          return toolError(
+            "Permission delegate cannot rewrite tool input after policy validation",
+            "plugin tool"
+          )
+        if (!hasNoLeakingPiiDeep(result))
+          return toolError("Plugin tool result blocked by the PII gate", "plugin tool")
         // A plugin that already speaks MCP (image / audio / resource blocks)
         // passes through untouched; everything else keeps the JSON-text shape.
         return isCallToolResult(result) ? result : toolText(result)

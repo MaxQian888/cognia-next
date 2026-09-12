@@ -1,7 +1,9 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { createHash } from "node:crypto"
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs"
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs"
+import { spawnSync } from "node:child_process"
+import { fileURLToPath } from "node:url"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 
@@ -13,6 +15,26 @@ import {
 
 const SOURCE = "export const cognia = 1\n"
 const DIGEST = createHash("sha256").update(SOURCE).digest("hex")
+
+test("standalone packaged extension loads its MCP and PII dependencies without node_modules", (t) => {
+  const root = fileURLToPath(new URL("../../../", import.meta.url))
+  const out = mkdtempSync(join(tmpdir(), "cognia-pi-standalone-"))
+  t.after(() => rmSync(out, { recursive: true, force: true }))
+  const staged = stagePiExtension({ root, sidecarOutDir: join(out, "sidecar") })
+  const run = spawnSync(process.execPath, ["--input-type=module", "-e", `const extension = await import(${JSON.stringify(staged.files[0])}); if(typeof extension.createMcpProjection !== 'function') throw new Error('missing MCP projection');`], { cwd: out, encoding: "utf8" })
+  assert.equal(run.status, 0, run.stderr)
+  assert.ok(!existsSync(join(out, "node_modules")))
+})
+
+test("desktop resource bundle includes the raw extension's declared runtime dependencies", () => {
+  const config = JSON.parse(readFileSync(new URL("../../../src-tauri/tauri.conf.json", import.meta.url), "utf8"))
+  const resources = JSON.stringify(config.bundle.resources)
+  assert.match(resources, /sidecar\/pi-extension/)
+  assert.match(resources, /sidecar\/node_modules/)
+  const pkg = JSON.parse(readFileSync(new URL("../../../sidecar/package.json", import.meta.url), "utf8"))
+  assert.ok(pkg.dependencies["@modelcontextprotocol/sdk"])
+  assert.ok(pkg.dependencies["@cognia/redact"])
+})
 
 /** A throwaway repo root with `sidecar/pi-extension/` populated. */
 function makeRoot({ source = SOURCE, manifest = { sha256: DIGEST } } = {}) {
@@ -31,9 +53,11 @@ test("stages both files under pi-extension/ and reports the digest", () => {
 
   const staged = join(out, "pi-extension", PI_EXTENSION_FILE)
   const stagedManifest = join(out, "pi-extension", PI_INTEGRITY_FILE)
-  assert.equal(readFileSync(staged, "utf8"), SOURCE)
-  assert.equal(JSON.parse(readFileSync(stagedManifest, "utf8")).sha256, DIGEST)
-  assert.equal(result.sha256, DIGEST)
+  assert.match(readFileSync(staged, "utf8"), /cognia = 1/)
+  const compiledDigest = createHash("sha256").update(readFileSync(staged)).digest("hex")
+  assert.equal(JSON.parse(readFileSync(stagedManifest, "utf8")).sha256, compiledDigest)
+  assert.equal(JSON.parse(readFileSync(stagedManifest, "utf8")).sourceSha256, DIGEST)
+  assert.equal(result.sha256, compiledDigest)
   assert.deepEqual(result.files, [staged, stagedManifest])
 })
 
@@ -98,7 +122,8 @@ test("refuses a digest that does not match the pin, and stages nothing", () => {
 test("compares the pin case-insensitively", () => {
   const root = makeRoot({ manifest: { sha256: DIGEST.toUpperCase() } })
   const out = join(root, "out", "sidecar")
-  assert.equal(stagePiExtension({ root, sidecarOutDir: out }).sha256, DIGEST)
+  stagePiExtension({ root, sidecarOutDir: out })
+  assert.equal(JSON.parse(readFileSync(join(out, "pi-extension", PI_INTEGRITY_FILE), "utf8")).sourceSha256, DIGEST)
 })
 
 test("requires root and sidecarOutDir", () => {

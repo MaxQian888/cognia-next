@@ -84,9 +84,10 @@ export function riskLevelFor(toolName: string, input?: unknown): BuiltinToolRisk
 export function initialChoiceIndex(
   toolName: string,
   input: unknown,
-  choices: readonly PermissionChoice[]
+  choices: readonly PermissionChoice[],
+  defaultToNo = false
 ): number {
-  if (classifyToolCommand(toolName, input)?.verdict !== "deny") return 0
+  if (!defaultToNo && classifyToolCommand(toolName, input)?.verdict !== "deny") return 0
   const deny = choices.findIndex((c) => c.value === "deny")
   return deny >= 0 ? deny : 0
 }
@@ -124,7 +125,7 @@ export function permissionDetail(
 
 export function PermissionOverlay({
   req,
-  choices,
+  choices: suppliedChoices,
   index,
   onMove,
   onResolve,
@@ -140,6 +141,7 @@ export function PermissionOverlay({
   columns?: number
 }) {
   const theme = useTheme()
+  const choices = permissionChoicesForRequest(req, suppliedChoices)
   const t = useCliTranslations("cliUiApproval")
   const boxRef = React.useRef<DOMElement | null>(null)
   const [reading, setReading] = React.useState({ req, open: false, scroll: 0 })
@@ -339,3 +341,12 @@ export const DEFAULT_PERMISSION_CHOICES: PermissionChoice[] = [
   { label: "Allow always", value: "allow_always" },
   { label: "Deny", value: "deny" },
 ]
+
+export function permissionChoicesForRequest(
+  request: Pick<PermissionRequestEvent, "suppressAlwaysAllowRule">,
+  choices: PermissionChoice[] = DEFAULT_PERMISSION_CHOICES
+): PermissionChoice[] {
+  return request.suppressAlwaysAllowRule
+    ? choices.filter((choice) => choice.value !== "allow_always")
+    : choices
+}

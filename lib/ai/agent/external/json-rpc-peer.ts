@@ -50,6 +50,8 @@ export interface JsonRpcPeerOptions {
   concurrentServerRequests?: boolean
   /** Default per-request timeout in ms. */
   defaultTimeout?: number
+  /** Disable the ACP cancellation extension for peers such as the DSH SDK. */
+  cancellationNotifications?: boolean
 }
 
 interface PendingRequest {
@@ -106,7 +108,9 @@ export class JsonRpcPeer {
 
     return new Promise<T>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
-        this.sendNotification("$/cancel_request", { requestId: id })
+        if (this.opts.cancellationNotifications !== false) {
+          this.sendNotification("$/cancel_request", { requestId: id })
+        }
         this.pending.delete(id)
         reject(new Error(`Request timeout: ${method}`))
       }, timeout)
@@ -148,7 +152,9 @@ export class JsonRpcPeer {
     if (outbound) {
       clearTimeout(outbound.timeout)
       this.pending.delete(requestId)
-      this.sendNotification("$/cancel_request", { requestId })
+      if (this.opts.cancellationNotifications !== false) {
+        this.sendNotification("$/cancel_request", { requestId })
+      }
       outbound.reject(new JsonRpcMethodError(-32800, "Request cancelled"))
       return true
     }

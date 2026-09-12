@@ -229,7 +229,7 @@ export function externalCapabilityManifestVersion(): number {
 /**
  * Layer 1 for a protocol.
  *
- * A protocol with no manifest row (a plugin protocol, or a legacy `http`
+ * A protocol with no manifest row (a plugin protocol, or retired `opencode` / `http`
  * config) gets a complete `unknown` row rather than an empty one: the merge
  * relies on every id being present so a later layer's absence cannot silently
  * mean "supported".

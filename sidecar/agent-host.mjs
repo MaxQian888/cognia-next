@@ -74,6 +74,7 @@ import {
 import { createFeatureCallHandler } from "./dispatch/feature-call.mjs"
 import { createHostRpc } from "./host-rpc.mjs"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
+import { guardAnthropicRemoteMcpServers } from "./dispatch/anthropic-mcp-relay.mjs"
 
 // Resolve sidecar + SDK versions for the `ready` payload. createRequire is
 // used so we can read package.json without taking JSON-import dependency on
@@ -143,12 +144,11 @@ function log(level, message) {
   emit({ type: "log", level, message })
 }
 
-const featureCalls = createFeatureCallHandler({ emit })
-
 // Direct request/response channel to the Rust host, answered in
 // `src-tauri/src/claude/sidecar.rs` without touching the renderer. Background
 // jobs ride this so they work identically on desktop, headless, and remote.
 const hostRpc = createHostRpc({ emit })
+const featureCalls = createFeatureCallHandler({ emit, hostRpc })
 
 // ---- Per-session state ----------------------------------------------------
 
@@ -359,6 +359,7 @@ export function providerVisibleSendPayloadIsSafe({ prompt, options }) {
     systemPrompt: options?.systemPrompt,
     appendSystemPrompt: options?.appendSystemPrompt,
     ...(options?.agents ? { agents: options.agents } : {}),
+    ...(options?.pluginTools ? { pluginTools: options.pluginTools } : {}),
     ...(sdk
       ? {
           claudeAgentSdk: {
@@ -679,6 +680,28 @@ export function controlPreflight(adapterId, method, params) {
  * Never throws: a control request must never fault the host (mirrors
  * handleSetMode / handleInterrupt).
  */
+export function guardedControlParams(method, params, sendOptions = {}) {
+  if (method === "setMcpServers") {
+    if (sendOptions.toolSurface === "none" && Object.keys(params.servers).length)
+      throw new Error("tool surface is disabled")
+    // Server names enter model-visible tool names; credentials remain transport-only.
+    if (!hasNoLeakingPiiDeep(Object.keys(params.servers)))
+      throw new Error("control blocked by the PII gate")
+    return {
+      ...params,
+      servers: guardAnthropicRemoteMcpServers(params.servers, {
+        permissionPromptToolName: sendOptions.claudeAgentSdk?.permissionPromptToolName,
+      }),
+    }
+  }
+  if (
+    (method === "applyFlagSettings" || method === "updateSettings") &&
+    !hasNoLeakingPiiDeep(params.settings)
+  )
+    throw new Error("control blocked by the PII gate")
+  return params
+}
+
 async function handleControl(msg) {
   const { sessionId, requestId, method, params } = msg
   const respond = (extra) => emit(buildControlResponse({ sessionId, requestId, method, ...extra }))
@@ -710,7 +733,14 @@ async function handleControl(msg) {
     respond({ ok: false, error: "unsupported_provider" })
     return
   }
-  const outcome = await runControlWithTimeout(fn, s.q, controlArgs(method, params))
+  let effectiveParams
+  try {
+    effectiveParams = guardedControlParams(method, params, s.sendOptions)
+  } catch (error) {
+    respond({ ok: false, error: error.message })
+    return
+  }
+  const outcome = await runControlWithTimeout(fn, s.q, controlArgs(method, effectiveParams))
   // Keep the shared sendOptions ref consistent so any later resolve agrees with
   // the live switch (mirrors handleSetMode's permissionMode mutation). Only on a
   // confirmed (non-timed-out) success.
@@ -760,7 +790,15 @@ async function handleControl(msg) {
  */
 export function buildPermissionResult(
   decision,
-  { updatedInput, message, input, suggestions, interrupt, rich = false } = {}
+  {
+    updatedInput,
+    message,
+    input,
+    suggestions,
+    interrupt,
+    suppressAlwaysAllowRule = false,
+    rich = false,
+  } = {}
 ) {
   if (decision === "deny") {
     return {
@@ -771,7 +809,7 @@ export function buildPermissionResult(
     }
   }
 
-  const always = decision === "allow_always"
+  const always = decision === "allow_always" && !suppressAlwaysAllowRule
   const durable = rich && always ? persistableSuggestions(suggestions) : []
 
   return {
@@ -819,6 +857,7 @@ function handlePermissionResponse(msg) {
       // anything the renderer supplied. A renderer-authored rule set would be
       // an unreviewed write into the permission store.
       suggestions: pending.suggestions,
+      suppressAlwaysAllowRule: pending.suppressAlwaysAllowRule,
       interrupt,
       rich: Boolean(s.sendOptions?.execution),
     })
@@ -1259,6 +1298,7 @@ function startReadLoop() {
     // Fail in-flight host RPCs first: their replies can never arrive now, and
     // a tool awaiting one would otherwise hang until its own timeout.
     hostRpc.rejectAll("sidecar stdin closed")
+    await featureCalls.close()
     for (const id of Array.from(sessions.keys())) {
       handleClose({ sessionId: id })
     }

@@ -50,6 +50,8 @@ export interface ToolHostSnapshot {
   hostToolCount: number
   /** True when `dispatch_agent` is among the projected host tools. */
   subagentDispatch: boolean
+  /** Cognia prompt, stream and projected-tool hooks wrap this session. */
+  hookRuntimeAvailable?: boolean
   /** Enabled user MCP servers forwarded alongside Cognia's own. */
   userMcpCount: number
   /** Bridges currently connected to the broker. */

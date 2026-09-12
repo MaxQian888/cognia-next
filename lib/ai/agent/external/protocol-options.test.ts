@@ -1,3 +1,4 @@
+import { BUILTIN_EXECUTABLE_EXTERNAL_AGENT_PROTOCOLS } from "@cognia/agent-config-types/external-agent-capability"
 import { externalProtocolOptions } from "./protocol-options"
 import {
   __resetPluginProtocolAdaptersForTesting,
@@ -10,21 +11,27 @@ describe("externalProtocolOptions", () => {
   afterEach(() => __resetPluginProtocolAdaptersForTesting())
 
   it("offers every protocol that has a registered adapter", () => {
+    expect(values()).toEqual(BUILTIN_EXECUTABLE_EXTERNAL_AGENT_PROTOCOLS)
     expect(values().sort()).toEqual([
       "a2a",
       "acp",
       "codex-app-server",
       "dsh-sdk",
-      "opencode",
+      "opencode-v2",
       "pi-rpc",
     ])
   })
 
-  it("keeps the documented-only OpenCode V2 protocol out of new-config choices", () => {
-    expect(values()).not.toContain("opencode-v2")
-    expect(externalProtocolOptions("opencode-v2")[0]).toEqual({
+  it("offers the current OpenCode service and keeps the old protocol unselectable", () => {
+    expect(externalProtocolOptions()).toContainEqual({
       value: "opencode-v2",
-      label: "OpenCode V2 (Preview)",
+      label: "OpenCode V2 (HTTP + SSE)",
+      selectable: true,
+    })
+    expect(values()).not.toContain("opencode")
+    expect(externalProtocolOptions("opencode")[0]).toEqual({
+      value: "opencode",
+      label: "OpenCode (HTTP + SSE)",
       selectable: false,
       reasonKey: "legacyProtocolUnavailable",
     })

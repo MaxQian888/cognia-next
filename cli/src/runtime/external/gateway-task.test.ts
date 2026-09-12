@@ -80,9 +80,91 @@ describe("gateway task host state", () => {
     resumed.cleanup()
   })
 
+  it("admits DSH gateway leases without moving certified DSH state or persisting secrets", () => {
+    const input = config()
+    const payload = JSON.parse(input.env.COGNIA_GATEWAY_TASK_CONFIG)
+    payload.runtime = "dsh"
+    payload.files = {}
+    const prepared = prepareGatewayTask(
+      {
+        ...input,
+        command: "/managed/node",
+        args: ["/managed/dsh/launcher.mjs"],
+        env: {
+          ...input.env,
+          COGNIA_GATEWAY_TASK_CONFIG: JSON.stringify(payload),
+          COGNIA_DSH_GATEWAY_TOKEN: "temporary-lease",
+          COGNIA_DSH_GATEWAY_CONFIG:
+            '{"providers":{"cognia":{"apiKeyEnv":"COGNIA_DSH_GATEWAY_TOKEN"}}}',
+          DSH_HOME: "/managed/dsh/dsh-home",
+          COGNIA_DSH_SESSION_ROOT: "/managed/dsh/sessions",
+        },
+      },
+      home
+    )
+    const env = prepared.config.env!
+    expect(env.HOME).toContain("cognia-agent-tasks")
+    expect(env.DSH_HOME).toBe("/managed/dsh/dsh-home")
+    expect(env.COGNIA_DSH_SESSION_ROOT).toBe("/managed/dsh/sessions")
+    expect(env.COGNIA_DSH_GATEWAY_TOKEN).toBe("temporary-lease")
+    expect(env.COGNIA_GATEWAY_TASK_CONFIG).toBeUndefined()
+    expect(fs.readFileSync(path.join(env.HOME, "binding.json"), "utf8")).not.toContain(
+      "temporary-lease"
+    )
+    prepared.cleanup()
+    deleteGatewayTask("task-one", home)
+    expect(fs.existsSync(env.HOME)).toBe(false)
+  })
+
+  it("leaves ordinary launches untouched and validates every gateway payload boundary", () => {
+    const ordinary = { id: "ordinary", command: "node" }
+    const prepared = prepareGatewayTask(ordinary, home)
+    expect(prepared.config).toBe(ordinary)
+    expect(() => prepared.cleanup()).not.toThrow()
+    for (const patch of [
+      { runtime: "unknown" },
+      { files: null },
+      { files: { "unknown.json": "x" } },
+      { files: { "pi/models.json": 42 } },
+      { files: { "pi/models.json": "x".repeat(262145) } },
+    ]) {
+      const input = config()
+      input.env.COGNIA_GATEWAY_TASK_CONFIG = JSON.stringify({
+        ...JSON.parse(input.env.COGNIA_GATEWAY_TASK_CONFIG),
+        ...patch,
+      })
+      expect(() => prepareGatewayTask(input, home)).toThrow("Invalid gateway task configuration")
+    }
+    expect(() => deleteGatewayTask("../escape", home)).toThrow("Invalid gateway task id")
+    expect(() => deleteGatewayTask("absent", home)).not.toThrow()
+  })
+  it("refuses gateway root and generated-file symlinks", () => {
+    const original = prepareGatewayTask(config(), home)
+    const root = original.config.env!.HOME
+    original.cleanup()
+    fs.symlinkSync(path.join(home, "outside"), path.join(root, "pi/models.json"))
+    // A dangling link is rejected by privateWrite if the target exists.
+    fs.writeFileSync(path.join(home, "outside"), "outside")
+    expect(() => prepareGatewayTask(config(), home)).toThrow("must not be a symlink")
+    expect(fs.readFileSync(path.join(home, "outside"), "utf8")).toBe("outside")
+    fs.rmSync(root, { recursive: true, force: true })
+    fs.mkdirSync(path.join(home, "outside-dir"))
+    fs.symlinkSync(path.join(home, "outside-dir"), root, "dir")
+    expect(() => prepareGatewayTask(config(), home)).toThrow("must not be a symlink")
+    expect(() => deleteGatewayTask("task-one", home)).toThrow("must not be a symlink")
+  })
+  it("does not delete task state through a symlinked parent", () => {
+    const parent = path.join(home, ".local/share/cognia-agent-tasks")
+    fs.mkdirSync(path.dirname(parent), { recursive: true })
+    fs.mkdirSync(path.join(home, "outside"))
+    fs.symlinkSync(path.join(home, "outside"), parent, "dir")
+    expect(() => deleteGatewayTask("task-one", home)).toThrow("must not be a symlink")
+  })
+
   it("inherits runtime essentials without provider keys or configuration", () => {
     expect(
       gatewayRuntimeEnvironment({
+        NODE_ENV: "test",
         PATH: "/bin",
         OPENAI_API_KEY: "upstream",
         CODEX_HOME: "/user",
@@ -90,6 +172,6 @@ describe("gateway task host state", () => {
         NODE_OPTIONS: "--require evil",
         SSL_CERT_FILE: "/cert",
       })
-    ).toEqual({ PATH: "/bin", SSL_CERT_FILE: "/cert" })
+    ).toEqual({ NODE_ENV: "test", PATH: "/bin", SSL_CERT_FILE: "/cert" })
   })
 })

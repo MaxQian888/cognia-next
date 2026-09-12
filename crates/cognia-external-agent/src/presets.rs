@@ -76,7 +76,7 @@ const NPX_PACKAGE_ALLOWLIST: &[&str] = &[
     "@agentclientprotocol/claude-agent-acp",
     "@zed-industries/claude-code-acp",
     "@zed-industries/codex-acp",
-  "@agentclientprotocol/codex-acp",
+    "@agentclientprotocol/codex-acp",
     "@anthropic-ai/claude-code",
     "@google/gemini-cli",
     "@qwen-code/qwen-code",
@@ -98,10 +98,16 @@ const ENV_KEY_ALLOWLIST: &[&str] = &[
     // it DSH falls back to ~/.dsh, where a user-writable cordis.patch.yml can
     // inject plugins and arbitrary JS into a certified composition.
     "DSH_HOME",
-  "MODEL_PROVIDER",
+    "MODEL_PROVIDER",
+    "PI_CODING_AGENT_DIR",
+    "PI_CODING_AGENT_SESSION_DIR",
     // Host-consumed task configuration and its one-time gateway lease.
     "COGNIA_GATEWAY_TASK_CONFIG",
     "COGNIA_GATEWAY_TOKEN",
+    "COGNIA_DEVIN_MCP_SERVERS",
+    "COGNIA_BOT_ISOLATION",
+    "COGNIA_BOT_STATE_DIR",
+    "DISABLE_AUTO_UPDATE",
 ];
 
 /// Env key prefixes allowed through (provider credentials + agent config).
@@ -234,7 +240,10 @@ impl SpawnPolicy {
         mut config: ExternalAgentSpawnConfig,
     ) -> Result<ValidatedSpawn, PolicyViolation> {
         self.validate_command(&config.command, &config.args)?;
+        crate::devin_mcp_config::validate_target(&config.command, &config.args, &config.env)
+            .map_err(PolicyViolation)?;
         config.cwd = Some(self.validate_cwd(config.cwd.as_deref())?);
+        validate_bot_runtime_state(&config)?;
         let (env, dropped) = filter_env(std::mem::take(&mut config.env));
         config.env = env;
         Ok(ValidatedSpawn {
@@ -269,6 +278,8 @@ impl SpawnPolicy {
         mut config: ExternalAgentSpawnConfig,
     ) -> Result<ValidatedSpawn, PolicyViolation> {
         self.validate_command(&config.command, &config.args)?;
+        crate::devin_mcp_config::validate_target(&config.command, &config.args, &config.env)
+            .map_err(PolicyViolation)?;
         config.cwd = match config
             .cwd
             .as_deref()
@@ -286,6 +297,7 @@ impl SpawnPolicy {
                     .to_string(),
             ),
         };
+        validate_bot_runtime_state(&config)?;
         let (env, dropped) = filter_env(std::mem::take(&mut config.env));
         config.env = env;
         Ok(ValidatedSpawn {
@@ -300,6 +312,15 @@ impl SpawnPolicy {
             return Err(PolicyViolation("empty command".into()));
         }
         if trimmed.contains('/') || trimmed.contains('\\') {
+            let configured_node = crate::command_resolver::resolve_command_path("node")
+                .and_then(|path| path.canonicalize().ok());
+            let requested_node = Path::new(trimmed).canonicalize().ok();
+            if requested_node.is_some()
+                && requested_node == configured_node
+                && is_dsh_launcher_invocation(args, &self.workspaces_dir)
+            {
+                return Ok(());
+            }
             return Err(PolicyViolation(format!(
                 "command must be a bare allowlisted binary name, got a path: {trimmed:?}"
             )));
@@ -460,6 +481,47 @@ fn is_dsh_launcher_invocation(args: &[String], workspaces_dir: &Path) -> bool {
 /// Keep allowlisted env keys; drop everything else (default-deny — this is
 /// what keeps `LD_PRELOAD`/`DYLD_*`/`NODE_OPTIONS` out). Returns the kept
 /// map and the dropped key names for the audit record.
+/// Preserve the isolation request through native env filtering only when the
+/// runtime state is the checkout's dedicated sibling, never an arbitrary root.
+fn validate_bot_runtime_state(config: &ExternalAgentSpawnConfig) -> Result<(), PolicyViolation> {
+    let isolation = config.env.get("COGNIA_BOT_ISOLATION");
+    let state = config.env.get("COGNIA_BOT_STATE_DIR");
+    if isolation.is_none() && state.is_none() {
+        return Ok(());
+    }
+    if isolation.map(String::as_str) != Some("1") {
+        return Err(PolicyViolation(
+            "Bot isolation must be explicitly enabled".into(),
+        ));
+    }
+    let cwd = Path::new(
+        config
+            .cwd
+            .as_deref()
+            .ok_or_else(|| PolicyViolation("Bot isolation requires a checkout".into()))?,
+    );
+    let name = cwd
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| PolicyViolation("Bot checkout has no directory name".into()))?;
+    let parent = cwd
+        .parent()
+        .ok_or_else(|| PolicyViolation("Bot checkout has no parent".into()))?;
+    let expected = parent.join(format!("{name}-state"));
+    let state = Path::new(
+        state.ok_or_else(|| PolicyViolation("Bot isolation requires runtime state".into()))?,
+    );
+    if state != expected
+        || state.is_symlink()
+        || (state.exists() && state.canonicalize().ok().as_ref() != Some(&expected))
+    {
+        return Err(PolicyViolation(
+            "Bot runtime state must be the checkout's dedicated sibling".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn filter_env(env: HashMap<String, String>) -> (HashMap<String, String>, Vec<String>) {
     let mut kept = HashMap::new();
     let mut dropped = Vec::new();
@@ -499,6 +561,68 @@ mod tests {
         (tmp, policy)
     }
 
+    #[test]
+    fn bot_runtime_isolation_survives_native_policy_filtering() {
+        let (tmp, policy) = policy(false);
+        let checkout = tmp.path().join("workspaces/run");
+        std::fs::create_dir_all(&checkout).unwrap();
+        let checkout = checkout.canonicalize().unwrap();
+        let mut request = config("devin", &["acp"]);
+        request.cwd = Some(checkout.to_string_lossy().into_owned());
+        request
+            .env
+            .insert("COGNIA_BOT_ISOLATION".into(), "1".into());
+        request.env.insert(
+            "COGNIA_BOT_STATE_DIR".into(),
+            format!("{}-state", checkout.display()),
+        );
+        for validated in [
+            policy.validate(request.clone()).unwrap(),
+            policy.validate_desktop(request.clone()).unwrap(),
+        ] {
+            assert_eq!(
+                validated
+                    .config
+                    .env
+                    .get("COGNIA_BOT_ISOLATION")
+                    .map(String::as_str),
+                Some("1")
+            );
+            assert_eq!(
+                validated.config.env.get("COGNIA_BOT_STATE_DIR"),
+                request.env.get("COGNIA_BOT_STATE_DIR")
+            );
+        }
+        request.env.insert(
+            "COGNIA_BOT_STATE_DIR".into(),
+            tmp.path().to_string_lossy().into_owned(),
+        );
+        assert!(policy.validate(request.clone()).is_err());
+        assert!(policy.validate_desktop(request.clone()).is_err());
+        request.env.remove("COGNIA_BOT_ISOLATION");
+        assert!(policy.validate(request).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bot_runtime_state_rejects_a_symlink_to_another_run() {
+        let (tmp, policy) = policy(false);
+        let checkout = tmp.path().join("workspaces/run");
+        std::fs::create_dir_all(&checkout).unwrap();
+        let checkout = checkout.canonicalize().unwrap();
+        std::os::unix::fs::symlink(tmp.path(), format!("{}-state", checkout.display())).unwrap();
+        let mut request = config("devin", &["acp"]);
+        request.cwd = Some(checkout.to_string_lossy().into_owned());
+        request
+            .env
+            .insert("COGNIA_BOT_ISOLATION".into(), "1".into());
+        request.env.insert(
+            "COGNIA_BOT_STATE_DIR".into(),
+            format!("{}-state", checkout.display()),
+        );
+        assert!(policy.validate(request).is_err());
+    }
+
     // ── Policy matrix: command ───────────────────────────────────────────────
 
     #[test]
@@ -523,6 +647,39 @@ mod tests {
         // Windows shims normalize.
         assert!(p.validate(config("claude.CMD", &[])).is_ok());
         assert!(p.validate(config("codex.exe", &[])).is_ok());
+    }
+
+    #[test]
+    fn devin_mcp_payload_reaches_only_the_native_devin_acp_launch() {
+        let (_tmp, p) = policy(false);
+        let mut input = config("devin", &["acp"]);
+        input
+            .env
+            .insert(crate::devin_mcp_config::PAYLOAD_ENV.into(), "[]".into());
+        input
+            .env
+            .insert(crate::devin_mcp_config::WRAPPED_ENV.into(), "1".into());
+        assert!(!p
+            .validate(input.clone())
+            .unwrap()
+            .config
+            .env
+            .contains_key(crate::devin_mcp_config::WRAPPED_ENV));
+        assert!(p
+            .validate(input.clone())
+            .unwrap()
+            .config
+            .env
+            .contains_key(crate::devin_mcp_config::PAYLOAD_ENV));
+        assert!(p
+            .validate_desktop(input.clone())
+            .unwrap()
+            .config
+            .env
+            .contains_key(crate::devin_mcp_config::PAYLOAD_ENV));
+        input.command = "codex".into();
+        assert!(p.validate(input.clone()).is_err());
+        assert!(p.validate_desktop(input).is_err());
     }
 
     #[test]
@@ -613,6 +770,23 @@ mod tests {
             ],
         );
         assert!(p.validate(ok).is_ok());
+        if let Some(node) = crate::command_resolver::resolve_command_path("node") {
+            assert!(p
+                .validate(config(
+                    node.to_str().expect("node path"),
+                    &[
+                        launcher.to_str().expect("launcher"),
+                        composition.to_str().expect("composition"),
+                    ]
+                ))
+                .is_ok());
+            assert!(p
+                .validate(config(
+                    node.to_str().expect("node path"),
+                    &["-e", "process.exit(0)"]
+                ))
+                .is_err());
+        }
 
         // A script outside the data root would make `node` a universal escape
         // from the allowlist.
@@ -834,6 +1008,21 @@ mod tests {
         assert!(validated.config.env.contains_key("COGNIA_TOOLHOST_SERVER"));
         // The prefix must not have widened into a general COGNIA_ passthrough.
         assert_eq!(validated.dropped_env_keys, vec!["COGNIA_UNRELATED"]);
+    }
+
+    #[test]
+    fn pi_task_directories_survive_without_allowing_arbitrary_pi_options() {
+        let (accepted, dropped) = filter_env(HashMap::from([
+            ("PI_CODING_AGENT_DIR".into(), "/task/pi".into()),
+            (
+                "PI_CODING_AGENT_SESSION_DIR".into(),
+                "/task/pi/sessions".into(),
+            ),
+            ("PI_UNTRUSTED_OPTION".into(), "blocked".into()),
+        ]));
+        assert_eq!(accepted["PI_CODING_AGENT_DIR"], "/task/pi");
+        assert_eq!(accepted["PI_CODING_AGENT_SESSION_DIR"], "/task/pi/sessions");
+        assert_eq!(dropped, vec!["PI_UNTRUSTED_OPTION"]);
     }
 
     #[test]

@@ -140,6 +140,10 @@ export function canonicalEventFromExternalEvent(event: unknown): CanonicalAgentE
         requestId: String(record.requestId ?? ""),
         toolName: String(record.toolName ?? "unknown"),
         input: record.input as Record<string, unknown> | undefined,
+        ...(typeof record.defaultToNo === "boolean" ? { defaultToNo: record.defaultToNo } : {}),
+        ...(typeof record.suppressAlwaysAllowRule === "boolean"
+          ? { suppressAlwaysAllowRule: record.suppressAlwaysAllowRule }
+          : {}),
       }
     case "session_started":
       return { kind: "lifecycle", phase: "started" }

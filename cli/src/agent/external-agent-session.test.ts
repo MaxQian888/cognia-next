@@ -1,6 +1,22 @@
 /**
  * @jest-environment node
  */
+jest.mock("@/lib/claude/adapter-hooks", () => {
+  const actual = jest.requireActual("@/lib/claude/adapter-hooks")
+  return {
+    ...actual,
+    ...Object.fromEntries(
+      [
+        "dispatchUserPromptSubmit",
+        "dispatchStreamStart",
+        "dispatchStreamChunk",
+        "dispatchStreamEnd",
+        "dispatchChatError",
+        "dispatchTokenUsage",
+      ].map((name) => [name, jest.fn(actual[name])])
+    ),
+  }
+})
 jest.mock("./configured-plugin-tool-handle", () => ({
   makeConfiguredCliPluginToolHandle: jest.fn(() => jest.fn(async () => ({ result: "ok" }))),
 }))
@@ -46,6 +62,31 @@ import {
   externalAgentCredentialEnv,
   type ExternalAgentSessionManager,
 } from "./external-agent-session"
+
+it.each(["deepseek-harness-readonly", "deepseek-harness-workspace", "deepseek-harness-acp"])(
+  "%s uses only its selected provider credential",
+  (presetId) => {
+    expect(
+      externalAgentCredentialEnv(
+        {
+          ...DEFAULT_RESOLVED_CONFIG,
+          cwd: "/workspace",
+          providers: {
+            deepseek: { apiKey: "dsh-fixture", baseURL: "http://127.0.0.1:9999/v1" },
+            openai: { apiKey: "must-not-forward" },
+          },
+        },
+        presetId
+      )
+    ).toEqual({ DEEPSEEK_API_KEY: "dsh-fixture", DEEPSEEK_BASE_URL: "http://127.0.0.1:9999/v1" })
+    expect(
+      externalAgentCredentialEnv(
+        { ...DEFAULT_RESOLVED_CONFIG, cwd: "/workspace", providers: {} },
+        presetId
+      )
+    ).toEqual({})
+  }
+)
 
 function memoryTranscript(seed: Record<string, string> = {}): {
   fs: TranscriptFs
@@ -283,6 +324,98 @@ describe("createExternalAgentSession", () => {
     await session.close()
   })
 
+  it("runs shared prompt and stream hooks around an external turn", async () => {
+    const hooks = jest.requireMock("@/lib/claude/adapter-hooks")
+    const submit = hooks.dispatchUserPromptSubmit.mockResolvedValueOnce({
+      action: "modify",
+      modifiedPrompt: "hook rewritten prompt",
+    })
+    const begin = hooks.dispatchStreamStart
+    const chunk = hooks.dispatchStreamChunk
+    const end = hooks.dispatchStreamEnd
+    const usage = hooks.dispatchTokenUsage
+    const { manager } = fakeManager()
+    const session = createExternalAgentSession({
+      disableToolHost: true,
+      config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "claude-code" },
+      manager,
+      transcriptFs: memoryTranscript().fs,
+    })
+    try {
+      await session.send("original", { gate: async () => ({ decision: "allow" }) })
+      expect(manager.execute).toHaveBeenCalledWith(
+        expect.any(String),
+        "hook rewritten prompt",
+        expect.any(Object)
+      )
+      expect(begin).toHaveBeenCalledWith(session.sessionId)
+      expect(chunk).toHaveBeenCalledWith(session.sessionId, "hello", "hello")
+      expect(end).toHaveBeenCalledWith(session.sessionId, "hello")
+      expect(usage).toHaveBeenCalledWith(session.sessionId, { inputTokens: 3, outputTokens: 2 })
+    } finally {
+      await session.close()
+      submit.mockClear()
+      begin.mockClear()
+      chunk.mockClear()
+      end.mockClear()
+      usage.mockClear()
+    }
+  })
+
+  it("uses native tool events once while the Cognia broker owns execution", async () => {
+    const { manager } = fakeManager()
+    let host: Parameters<
+      NonNullable<import("./external-agent-session").ExternalAgentSessionParams["startToolHost"]>
+    >[0]
+    const execute = (manager.execute as jest.Mock).getMockImplementation()!
+    ;(manager.execute as jest.Mock).mockImplementation(async (id, prompt, options) => {
+      host.onToolCall?.({ name: "read", input: {}, callKey: "host" })
+      host.onToolResult?.({ name: "read", callKey: "host", ok: true })
+      options.onEvent({
+        type: "tool_use_start",
+        toolUseId: "native",
+        toolName: "mcp__cognia-tools__read",
+        input: {},
+      })
+      options.onEvent({
+        type: "tool_result",
+        toolUseId: "native",
+        toolName: "mcp__cognia-tools__read",
+        result: "content",
+        isError: false,
+      })
+      return execute(id, prompt, options)
+    })
+    const receive = jest.fn()
+    const session = createExternalAgentSession({
+      config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "pi-rpc" },
+      manager,
+      connection: {
+        agentId: "pi-existing",
+        presetId: "pi-rpc",
+        capabilities: { negotiated: { mcpTools: true, toolExecution: true } },
+      },
+      transcriptFs: memoryTranscript().fs,
+      buildToolHostServers: () => [],
+      startToolHost: async (params) => {
+        host = params
+        return {
+          isClosed: () => false,
+          connections: () => 0,
+          cancelInFlight: jest.fn(),
+          close: async () => {},
+        } as never
+      },
+    })
+    try {
+      await session.send("read", { gate: async () => ({ decision: "allow" }), onAction: receive })
+      expect(receive.mock.calls.filter(([event]) => event.type === "TOOL_CALL")).toHaveLength(1)
+      expect(receive.mock.calls.filter(([event]) => event.type === "TOOL_RESULT")).toHaveLength(1)
+    } finally {
+      await session.close()
+    }
+  })
+
   it.each(["onEnvelope", "onAction", "onEvent"] as const)(
     "delivers hosted tool events to %s consumers",
     async (channel) => {
@@ -300,6 +433,11 @@ describe("createExternalAgentSession", () => {
       const session = createExternalAgentSession({
         config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "claude-code" },
         manager,
+        connection: {
+          agentId: "external-fixture",
+          presetId: "claude-code",
+          capabilities: { negotiated: { toolExecution: false } },
+        },
         transcriptFs: memoryTranscript().fs,
         startToolHost: async (params) => {
           host = params
@@ -985,6 +1123,32 @@ describe("classifyExternalFailure", () => {
 describe("external-agent turn bounds", () => {
   const baseConfig = { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "claude-code" }
 
+  it("replays the persisted Cognia transcript for a DSH SDK gateway follow-up", async () => {
+    const transcript = memoryTranscript()
+    transcript.fs.append = (file, line) => {
+      transcript.written[file] = (transcript.written[file] ?? "") + line
+    }
+    const { manager, getExecuteOptions } = fakeManager({
+      sessionId: "cognia-gateway:fixture:dsh-first",
+    })
+    const session = createExternalAgentSession({
+      disableToolHost: true,
+      config: { ...baseConfig, agentBackend: "deepseek-harness-readonly" },
+      sessionId: "dsh-history",
+      home: "/home/.cognia",
+      manager,
+      transcriptFs: transcript.fs,
+    })
+    await session.send("remember first", { gate: async () => ({ decision: "allow" }) })
+    expect(getExecuteOptions()?.context?.custom?.conversationHistory).toBeUndefined()
+    await session.send("second turn", { gate: async () => ({ decision: "allow" }) })
+    const history = getExecuteOptions()?.context?.custom?.conversationHistory
+    expect(history).toContain("remember first")
+    expect(history).toContain("hello")
+    expect(history).not.toContain("second turn")
+    await session.close()
+  })
+
   /** A manager whose turn emits one event and then never finishes. */
   function hangingManager(opts: { onPermission?: boolean } = {}) {
     const manager: ExternalAgentSessionManager = {
@@ -1434,53 +1598,58 @@ describe("external-agent turn bounds", () => {
     })
   })
 
-  it("publishes supplied config as unconfirmed and requires consent to recreate the protocol session", async () => {
-    let command = "first"
-    const { manager } = fakeManager()
-    manager.createSession = jest.fn(async () => ({ id: "applied-session" }))
-    manager.closeSession = jest.fn(async () => undefined)
-    const session = createExternalAgentSession({
-      disableToolHost: true,
-      config: baseConfig,
-      manager,
-      sessionId: "mcp-runtime-test",
-      transcriptFs: memoryTranscript().fs,
-      resolveMcpServers: () =>
-        [
-          { id: "files", name: "files", transport: "stdio", enabled: true, config: { command } },
-        ] as never,
-    })
-    await session.send("go", { gate: async () => ({ decision: "allow" }) })
-    expect(readSessionMcpStatus(session.sessionId)?.servers[0]).toMatchObject({
-      name: "files",
-      state: "forwarded",
-      source: "cognia",
-    })
-    command = "second"
-    session.invalidateOptions?.()
-    expect(readSessionMcpStatus(session.sessionId)?.pending).toBe(true)
-    expect(await applySessionMcpStatus(session.sessionId)).toMatchObject({
-      restarted: false,
-      requiresRestart: true,
-    })
-    expect(manager.cancel).not.toHaveBeenCalled()
-    expect(manager.createSession).not.toHaveBeenCalled()
-    expect(await applySessionMcpStatus(session.sessionId, true)).toMatchObject({ restarted: true })
-    expect(manager.closeSession).toHaveBeenCalledWith(expect.any(String), "acp-session-1")
-    expect(manager.createSession).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({ mcpServers: [expect.objectContaining({ command: "second" })] })
-    )
-    expect(readSessionMcpStatus(session.sessionId)).toMatchObject({
-      externalSessionId: "applied-session",
-      pending: false,
-    })
-    expect(manager.execute).toHaveBeenCalledTimes(1)
-    await session.close()
-    expect(readSessionMcpStatus(session.sessionId)).toBeUndefined()
-  })
+  it.each(["claude-code", "deepseek-harness-readonly", "deepseek-harness-acp"])(
+    "%s publishes supplied MCP config and recreates only with consent",
+    async (agentBackend) => {
+      let command = "first"
+      const { manager } = fakeManager()
+      manager.createSession = jest.fn(async () => ({ id: "applied-session" }))
+      manager.closeSession = jest.fn(async () => undefined)
+      const session = createExternalAgentSession({
+        disableToolHost: true,
+        config: { ...baseConfig, agentBackend },
+        manager,
+        sessionId: "mcp-runtime-test",
+        transcriptFs: memoryTranscript().fs,
+        resolveMcpServers: () =>
+          [
+            { id: "files", name: "files", transport: "stdio", enabled: true, config: { command } },
+          ] as never,
+      })
+      await session.send("go", { gate: async () => ({ decision: "allow" }) })
+      expect(readSessionMcpStatus(session.sessionId)?.servers[0]).toMatchObject({
+        name: "files",
+        state: "forwarded",
+        source: "cognia",
+      })
+      command = "second"
+      session.invalidateOptions?.()
+      expect(readSessionMcpStatus(session.sessionId)?.pending).toBe(true)
+      expect(await applySessionMcpStatus(session.sessionId)).toMatchObject({
+        restarted: false,
+        requiresRestart: true,
+      })
+      expect(manager.cancel).not.toHaveBeenCalled()
+      expect(manager.createSession).not.toHaveBeenCalled()
+      expect(await applySessionMcpStatus(session.sessionId, true)).toMatchObject({
+        restarted: true,
+      })
+      expect(manager.closeSession).toHaveBeenCalledWith(expect.any(String), "acp-session-1")
+      expect(manager.createSession).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ mcpServers: [expect.objectContaining({ command: "second" })] })
+      )
+      expect(readSessionMcpStatus(session.sessionId)).toMatchObject({
+        externalSessionId: "applied-session",
+        pending: false,
+      })
+      expect(manager.execute).toHaveBeenCalledTimes(1)
+      await session.close()
+      expect(readSessionMcpStatus(session.sessionId)).toBeUndefined()
+    }
+  )
 
-  it("Pi reports unsupported supplied MCP configs and refuses misleading apply", async () => {
+  it("Pi forwards supplied MCP configs through its Cognia extension", async () => {
     const { manager } = fakeManager()
     const session = createExternalAgentSession({
       disableToolHost: true,
@@ -1503,12 +1672,24 @@ describe("external-agent turn bounds", () => {
     await session.send("go", { gate: async () => ({ decision: "allow" }) })
     expect(readSessionMcpStatus(session.sessionId)?.servers[0]).toMatchObject({
       name: "files",
-      state: "unknown",
-      reasonCode: "protocol_unsupported",
+      state: "forwarded",
+      reasonCode: "unconfirmed",
     })
-    expect(readSessionMcpStatus(session.sessionId)?.appliedConfigVersion).toBeUndefined()
+    expect(readSessionMcpStatus(session.sessionId)?.appliedConfigVersion).toBeDefined()
+    expect(manager.execute).toHaveBeenCalledWith(
+      expect.any(String),
+      "go",
+      expect.objectContaining({
+        context: {
+          custom: {
+            mcpServers: [expect.objectContaining({ name: "files", command: "node" })],
+            additionalDirectories: [],
+          },
+        },
+      })
+    )
     await expect(applySessionMcpStatus(session.sessionId)).rejects.toThrow(
-      "does not consume supplied MCP"
+      "cannot apply MCP configuration explicitly"
     )
     await session.close()
   })

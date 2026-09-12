@@ -48,3 +48,14 @@ describe("isToolPreApproved", () => {
     expect(isToolPreApproved("Bash", { command: "rm" }, ["Bash(ls"])).toBe(false)
   })
 })
+
+describe("projected Cognia tool identity", () => {
+  it("requires an exact mounted bridge namespace", async () => {
+    const { isCogniaProjectedTool } = await import("./tool-preapproval")
+    expect(isCogniaProjectedTool("mcp__cognia-tools__read", ["cognia-tools"])).toBe(true)
+    expect(isCogniaProjectedTool("mcp__cognia-plugin-tools__write", ["cognia-tools"])).toBe(false)
+    expect(isCogniaProjectedTool("mcp__cognia-tools-evil__read", ["cognia-tools"])).toBe(false)
+    expect(isCogniaProjectedTool("mcp__cognia-tools__read", [])).toBe(false)
+    expect(isCogniaProjectedTool("Read", ["cognia-tools"])).toBe(false)
+  })
+})

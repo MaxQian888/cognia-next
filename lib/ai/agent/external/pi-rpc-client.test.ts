@@ -41,15 +41,15 @@ describe("classifyPiVersion", () => {
   it("certifies exactly the pinned version", () => {
     expect(classifyPiVersion(PI_CERTIFIED_VERSION)).toEqual({
       status: "certified",
-      version: "0.84.3",
+      version: PI_CERTIFIED_VERSION,
     })
-    expect(classifyPiVersion(" v0.84.3 ").status).toBe("certified")
+    expect(classifyPiVersion(` v${PI_CERTIFIED_VERSION} `).status).toBe("certified")
   })
 
   it("allows a newer version but marks it unverified", () => {
     // A Pi upgrade must degrade to a warning, not an outage.
-    expect(classifyPiVersion("0.84.4").status).toBe("unverified")
-    expect(classifyPiVersion("0.85.0").status).toBe("unverified")
+    expect(classifyPiVersion("0.85.2").status).toBe("unverified")
+    expect(classifyPiVersion("0.86.0").status).toBe("unverified")
     expect(classifyPiVersion("1.0.0").status).toBe("unverified")
   })
 
@@ -70,7 +70,7 @@ describe("classifyPiVersion", () => {
 
   it("treats a shorter version as zero-padded, not as newer", () => {
     expect(classifyPiVersion("0.84").status).toBe("unsupported")
-    expect(classifyPiVersion("0.85").status).toBe("unverified")
+    expect(classifyPiVersion("0.86").status).toBe("unverified")
   })
 })
 
@@ -142,6 +142,12 @@ describe("extensionPolicyArgs", () => {
 })
 
 describe("piHandshakeTimeoutMs", () => {
+  it("budgets MCP startup round-trips with a finite overall deadline", () => {
+    expect(piHandshakeTimeoutMs("isolated", 1)).toBe(35000)
+    expect(piHandshakeTimeoutMs("global", 2)).toBe(90000)
+    expect(piHandshakeTimeoutMs("isolated", 20)).toBe(120000)
+    expect(new PiExtensionHandshakeError("session", "isolated", 1).message).toContain("35000ms")
+  })
   /**
    * `session_start` fires only once every loaded extension has initialised, so
    * the budget has to cover whatever the policy lets load. Measured against Pi
@@ -834,9 +840,9 @@ describe("PiRpcClientAdapter — connect", () => {
 
   it("connects on a newer version but records it as unverified", async () => {
     const host = createFakeHost()
-    const adapter = await connected(host, "0.85.0")
+    const adapter = await connected(host, "0.86.0")
     expect(adapter.isConnected()).toBe(true)
-    expect(adapter.versionStatus).toMatchObject({ status: "unverified", version: "0.85.0" })
+    expect(adapter.versionStatus).toMatchObject({ status: "unverified", version: "0.86.0" })
   })
 
   it("refuses an older version and reports the diagnostic reason code", async () => {
@@ -854,6 +860,156 @@ describe("PiRpcClientAdapter — connect", () => {
 })
 
 describe("PiRpcClientAdapter — sessions", () => {
+  it("uses fresh resume/fork scopes instead of cached MCP credentials and instructions", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    const oldOptions = {
+      cwd: "/old",
+      systemPrompt: "Old instructions",
+      mcpServers: [
+        {
+          name: "tools",
+          type: "http" as const,
+          url: "http://localhost/old",
+          headers: [{ name: "Authorization", value: "old-token" }],
+        },
+      ],
+    }
+    const original = await adapter.createSession(oldOptions)
+    const fresh = {
+      cwd: "/new",
+      systemPrompt: "Fresh instructions",
+      additionalDirectories: ["/fresh-root"],
+      permissionMode: "dontAsk" as const,
+      mcpServers: [
+        {
+          name: "tools",
+          type: "http" as const,
+          url: "http://localhost/new",
+          headers: [{ name: "Authorization", value: "new-token" }],
+        },
+      ],
+    }
+    await adapter.resumeSession(original.id, fresh)
+    expect(host.killed.some((id) => id.endsWith(original.id))).toBe(true)
+    expect(host.spawns.at(-1)?.env?.COGNIA_TOOLHOST_PI_MCP_SERVERS).toBe(
+      JSON.stringify(fresh.mcpServers)
+    )
+    expect(host.spawns.at(-1)?.env?.COGNIA_TOOLHOST_PI_SYSTEM_PROMPT).toBe("Fresh instructions")
+    await adapter.forkSession(original.id, { ...fresh, systemPrompt: "Fork instructions" })
+    expect(host.spawns.at(-1)?.env?.COGNIA_TOOLHOST_PI_SYSTEM_PROMPT).toBe("Fork instructions")
+    await adapter.disconnect()
+  })
+
+  it("refreshes changed turn instructions in the persisted session and excludes routing secrets", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    const session = await adapter.createSession({ cwd: "/w", systemPrompt: "Initial" })
+    const iterator = adapter
+      .prompt(
+        session.id,
+        {
+          id: "next",
+          role: "user",
+          content: [{ type: "text", text: "next turn" }],
+          timestamp: new Date(),
+        },
+        {
+          systemPrompt: "Updated",
+          instructionEnvelope: { hash: "new", developerInstructions: "Current skill" },
+          context: {
+            parentTask: "Semantic task",
+            custom: {
+              traceId: "private-trace",
+              mcpServers: [{ headers: { Authorization: "never-forward-token" } }],
+              objective: "Semantic objective",
+            },
+          },
+        }
+      )
+      [Symbol.asyncIterator]()
+    const first = iterator.next()
+    for (let i = 0; i < 100 && !host.lastCommand("prompt"); i++) await Promise.resolve()
+    expect(host.lastCommand("prompt")).toBeDefined()
+    const spawn = host.spawns.at(-1)!
+    expect(spawn.args).toContain(session.id)
+    const preamble = spawn.env!.COGNIA_TOOLHOST_PI_SYSTEM_PROMPT
+    expect(preamble).toContain("Updated")
+    expect(preamble).toContain("Current skill")
+    expect(preamble).toContain("Semantic task")
+    expect(preamble).toContain("Semantic objective")
+    expect(preamble).not.toContain("private-trace")
+    expect(preamble).not.toContain("never-forward-token")
+    const command = host.lastCommand("prompt")!
+    host.emitStdout(
+      spawn.id,
+      JSON.stringify({ id: command.id, type: "response", command: "prompt", success: true }) + "\n"
+    )
+    host.emitStdout(spawn.id, JSON.stringify({ type: "agent_settled" }) + "\n")
+    await first
+    await iterator.return?.()
+    await adapter.disconnect()
+  })
+  it.each(["plan", "dontAsk"])(
+    "keeps projected tools visible under %s without allowing native writes",
+    async (permissionMode) => {
+      const host = createFakeHost()
+      const adapter = await connected(host)
+      await adapter.createSession({
+        permissionMode,
+        mcpServers: [{ name: "cognia-tools", command: "node", args: [] }],
+      })
+      const spawn = host.spawns.at(-1)!
+      expect(spawn.args).not.toContain("--tools")
+      expect(spawn.args).toContain("--exclude-tools")
+      expect(spawn.args[spawn.args.indexOf("--exclude-tools") + 1]).toContain("write")
+      await adapter.disconnect()
+    }
+  )
+  it("projects scoped MCP servers and extra roots independently for each session, fork and resume", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    const mcpServers = [
+      {
+        name: "cognia-tools",
+        type: "http" as const,
+        url: "http://localhost:4321/mcp",
+        headers: [{ name: "Authorization", value: "Bearer scoped-token" }],
+      },
+    ]
+    const first = await adapter.createSession({
+      cwd: "/first",
+      additionalDirectories: ["/extra"],
+      mcpServers,
+    })
+    await adapter.createSession({ cwd: "/second", mcpServers: [] })
+    const forked = await adapter.forkSession(first.id)
+    await adapter.closeSession(first.id)
+    await adapter.resumeSession(first.id)
+    const spawns = host.spawns.filter((spawn) => spawn.args.includes("--session-id"))
+    for (const spawn of [spawns[0], spawns[2], spawns[3]]) {
+      expect(JSON.parse(spawn.env!.COGNIA_TOOLHOST_PI_MCP_SERVERS)).toEqual(mcpServers)
+      expect(JSON.parse(spawn.env!.COGNIA_TOOLHOST_PI_ADDITIONAL_DIRECTORIES)).toEqual(["/extra"])
+    }
+    expect(JSON.parse(spawns[1].env!.COGNIA_TOOLHOST_PI_MCP_SERVERS)).toEqual([])
+    expect(forked.metadata?.cwd).toBe("/first")
+    expect(JSON.stringify(first.metadata)).not.toContain("scoped-token")
+    await adapter.disconnect()
+  })
+
+  it("rejects unsupported channel MCP and relative workspace roots before spawning", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    await expect(adapter.createSession({ additionalDirectories: ["relative"] })).rejects.toThrow(
+      /absolute/
+    )
+    await expect(
+      adapter.createSession({ mcpServers: [{ name: "channel", serverId: "channel-id" }] })
+    ).rejects.toThrow(/ACP|channel/)
+    expect(host.spawns.filter((spawn) => spawn.args.includes("--session-id"))).toHaveLength(0)
+    await adapter.disconnect()
+  })
+
   it("spawns one raw-framed process per session with the isolation flags", async () => {
     const host = createFakeHost()
     const adapter = await connected(host)
@@ -929,7 +1085,7 @@ describe("PiRpcClientAdapter — sessions", () => {
     const session = await adapter.createSession({ cwd: "/w" })
     expect(session.metadata).toMatchObject({
       piSessionId: "sess-1",
-      piVersion: "0.84.3",
+      piVersion: PI_CERTIFIED_VERSION,
       cwd: "/w",
     })
     expect(JSON.stringify(session.metadata)).not.toMatch(/\.jsonl/)
@@ -1144,6 +1300,18 @@ describe("isCogniaHandshake", () => {
 })
 
 describe("buildPiSystemPrompt", () => {
+  it("includes semantic task context but omits transport routing and empty custom data", () => {
+    expect(
+      buildPiSystemPrompt({
+        context: { parentTask: "Current task", custom: { cwd: "/w", traceId: "trace" } },
+      })
+    ).toBe('Task context: {"parentTask":"Current task"}')
+    expect(buildPiSystemPrompt({ context: { workingDirectory: "/w" } })).toBeUndefined()
+    expect(buildPiSystemPrompt({ context: { custom: [] } })).toBeUndefined()
+    expect(() =>
+      buildPiSystemPrompt({ context: { parentTask: "Email alice@example.com" } })
+    ).toThrow(PiOutboundBlockedError)
+  })
   it("joins the system prompt, envelope and brief-mode instruction", () => {
     const prompt = buildPiSystemPrompt({
       systemPrompt: "You are Cognia.",
@@ -2221,6 +2389,78 @@ describe("PiRpcClientAdapter — elicitation", () => {
 })
 
 describe("PiRpcClientAdapter — teardown", () => {
+  it("waits for in-flight spawn before teardown and never returns a closed session", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    const invoke = host.invoke.bind(host)
+    let release!: () => void
+    let entered = false
+    host.invoke = async <T>(name: string, args: Record<string, unknown>): Promise<T> => {
+      if (name === "spawn_external_agent") {
+        entered = true
+        await new Promise<void>((resolve) => {
+          release = resolve
+        })
+      }
+      return invoke<T>(name, args)
+    }
+    const creating = adapter.createSession({ cwd: "/w" })
+    const rejected = expect(creating).rejects.toThrow(/closed during startup/)
+    for (let index = 0; index < 100 && !entered; index++) await Promise.resolve()
+    expect(entered).toBe(true)
+    const closing = adapter.closeSession("sess-1")
+    release()
+    await Promise.all([closing, rejected])
+    expect(host.killed.filter((id) => id.endsWith(":sess-1"))).toHaveLength(1)
+    await adapter.disconnect()
+  })
+  it("reports a startup process exit immediately instead of waiting for a handshake timeout", async () => {
+    const host = createFakeHost({ autoHandshake: false })
+    const adapter = await connected(host)
+    const invoke = host.invoke.bind(host)
+    host.invoke = async <T>(name: string, args: Record<string, unknown>): Promise<T> => {
+      const result = await invoke<T>(name, args)
+      if (name === "spawn_external_agent") host.emitExit(String(result), 1)
+      return result
+    }
+    await expect(adapter.createSession({ cwd: "/w" })).rejects.toThrow(/exited before/)
+    await adapter.disconnect()
+  })
+  it("retains a process after kill failure so close retries and concurrent closes coalesce", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    const session = await adapter.createSession({ cwd: "/w" })
+    const invoke = host.invoke.bind(host)
+    let kills = 0
+    host.invoke = async <T>(name: string, args: Record<string, unknown>): Promise<T> => {
+      if (name === "kill_external_agent" && ++kills === 1) throw new Error("kill failed")
+      return invoke<T>(name, args)
+    }
+    await expect(adapter.closeSession(session.id)).rejects.toThrow("kill failed")
+    await Promise.all([adapter.closeSession(session.id), adapter.closeSession(session.id)])
+    expect(kills).toBe(2)
+    expect(host.killed.filter((id) => id.includes(session.id))).toHaveLength(1)
+    await adapter.disconnect()
+  })
+
+  it("cleans startup listeners and process records after spawn failure", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    const invoke = host.invoke.bind(host)
+    let fail = true
+    host.invoke = async <T>(name: string, args: Record<string, unknown>): Promise<T> => {
+      if (name === "spawn_external_agent" && fail) {
+        fail = false
+        throw new Error("spawn failed")
+      }
+      return invoke<T>(name, args)
+    }
+    await expect(adapter.createSession({ cwd: "/w" })).rejects.toThrow("spawn failed")
+    const healthy = await adapter.createSession({ cwd: "/next" })
+    expect(healthy.status).toBe("active")
+    await adapter.disconnect()
+  })
+
   it("closes every live session on disconnect, killing each process", async () => {
     const host = createFakeHost()
     const adapter = await connected(host)

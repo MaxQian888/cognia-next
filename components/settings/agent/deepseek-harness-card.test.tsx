@@ -28,7 +28,9 @@ function state(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function renderCard(props: { profileId?: "cognia-sdk-readonly" | "cognia-sdk-workspace" } = {}) {
+function renderCard(
+  props: { profileId?: "cognia-sdk-readonly" | "cognia-sdk-workspace" | "cognia-acp" } = {}
+) {
   return render(
     <NextIntlClientProvider locale="en" messages={messages}>
       <DeepSeekHarnessCard {...props} />
@@ -42,6 +44,14 @@ beforeEach(() => {
 })
 
 describe("DeepSeekHarnessCard", () => {
+  it("shows ACP tools without SDK-only approval and cancellation notices", () => {
+    renderCard({ profileId: "cognia-acp" })
+    const dsh = messages.externalAgent.settings.deepseekHarness
+    expect(screen.getByText(dsh.capabilityMcp)).toBeInTheDocument()
+    expect(screen.queryByText(dsh.approvalNotice)).not.toBeInTheDocument()
+    expect(screen.queryByText(dsh.cancelNotice)).not.toBeInTheDocument()
+  })
+
   it("renders a dashed placeholder in hosts that cannot manage a runtime", () => {
     useDshRuntime.mockReturnValue(state({ supported: false }))
     renderCard()
@@ -120,6 +130,7 @@ describe("DeepSeekHarnessCard", () => {
     // Both are surprises if discovered mid-run, so they are stated up front.
     renderCard()
     const dsh = messages.externalAgent.settings.deepseekHarness
+    expect(screen.getByText(dsh.committedEventsNotice)).toBeInTheDocument()
     expect(screen.getByText(dsh.approvalNotice)).toBeInTheDocument()
     expect(screen.getByText(dsh.cancelNotice)).toBeInTheDocument()
   })

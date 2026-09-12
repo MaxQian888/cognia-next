@@ -56,6 +56,17 @@ function baseInput(
 }
 
 describe("resolveAgentExecutionSpec — legacy parity (shadow mode)", () => {
+  it("labels an explicitly selected uncertified Anthropic deployment as experimental", () => {
+    const { spec } = resolveAgentExecutionSpec(
+      baseInput({
+        policy: { runtimePolicy: "claude-agent-sdk" },
+        legacy: { providerId: "custom-anthropic", modelId: "custom-model" },
+      })
+    )
+    expect(spec.runtimeAdapter).toBe("claude-agent-sdk")
+    expect(spec.runtimePolicySource).toBe("explicit")
+    expect(spec.compatibility.evidence).toBe("experimental")
+  })
   it("reproduces the provider-id dispatch decision under auto/legacy", () => {
     const anthropic = resolveAgentExecutionSpec(
       baseInput({ legacy: { providerId: "anthropic", toolsEnabled: true, requireTools: true } })

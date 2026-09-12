@@ -4,6 +4,7 @@ import path from "node:path"
 
 import {
   CHANNEL_MANIFEST_FILE,
+  gatherDshRuntimeFacts,
   DshInstallError,
   RUNTIME_ARTIFACTS,
   computeCompositionDigest,
@@ -287,5 +288,62 @@ describe("removeDshRuntime", () => {
 
   it("is idempotent when nothing is installed", () => {
     expect(() => removeDshRuntime({ dataRoot })).not.toThrow()
+  })
+})
+
+it("reports exact launch paths and only allowlisted host environment", () => {
+  const facts = gatherDshRuntimeFacts(dataRoot)
+  expect(facts.runtimeHome).toBe(runtimeHomeFor(dataRoot))
+  expect(facts.nodePath).toBe(process.execPath)
+  expect(facts.defaultWorkspace).toBe(process.cwd())
+  expect(
+    Object.keys(facts.parentEnv).every((key) =>
+      ["PATH", "LANG", "LC_ALL", "TZ", "TMPDIR"].includes(key)
+    )
+  ).toBe(true)
+})
+
+describe("managed profile patch-layer verification", () => {
+  function manifest(profile: string) {
+    return {
+      name: profile,
+      private: true,
+      type: "module",
+      dsh: { profile: { bundles: ["@deepseek-ai/dsh-sdk-minimal"], patchReload: "startup" } },
+    }
+  }
+  it("allows only exact generated manifests across all profiles after first launch", () => {
+    const home = dshHomeFor(dataRoot)
+    for (const profile of ["cognia-sdk-readonly", "cognia-sdk-workspace", "cognia-acp"]) {
+      const dir = path.join(home, "profiles", profile)
+      fs.mkdirSync(dir, { recursive: true })
+      fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify(manifest(profile)))
+    }
+    expect(findStrayPatchLayers(home)).toEqual([])
+    const modified = path.join(home, "profiles", "cognia-sdk-readonly", "package.json")
+    fs.writeFileSync(
+      modified,
+      JSON.stringify({ ...manifest("cognia-sdk-readonly"), dependencies: { malicious: "*" } })
+    )
+    expect(findStrayPatchLayers(home)).toEqual([modified])
+  })
+  it("rejects symlinked profile manifests even with approved content", () => {
+    const home = dshHomeFor(dataRoot)
+    const dir = path.join(home, "profiles", "cognia-acp")
+    fs.mkdirSync(dir, { recursive: true })
+    const target = path.join(dataRoot, "approved.json")
+    fs.writeFileSync(target, JSON.stringify(manifest("cognia-acp")))
+    const link = path.join(dir, "package.json")
+    fs.symlinkSync(target, link)
+    expect(findStrayPatchLayers(home)).toEqual([link])
+  })
+  it("rejects symlinked profile directories and home .env", () => {
+    const home = dshHomeFor(dataRoot)
+    const profiles = path.join(home, "profiles")
+    fs.mkdirSync(profiles, { recursive: true })
+    const linked = path.join(profiles, "cognia-acp")
+    fs.symlinkSync(sourceDir, linked)
+    fs.writeFileSync(path.join(home, ".env"), "NODE_OPTIONS=bad")
+    expect(findStrayPatchLayers(home)).toEqual([path.join(home, ".env"), linked].sort())
   })
 })

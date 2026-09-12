@@ -455,7 +455,11 @@ export function resolveAgentExecutionSpec(
             evidence: "experimental" as const,
             recordRef: externalProfile.profileDigest,
           }
-        : { evidence: "native" },
+        : adapter === "claude-agent-sdk" &&
+            input.legacy?.providerId &&
+            input.legacy.providerId !== "anthropic"
+          ? { evidence: "experimental" }
+          : { evidence: "native" },
     capabilities: {
       effective,
       disabledOptional: [

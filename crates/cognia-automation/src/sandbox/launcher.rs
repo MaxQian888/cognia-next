@@ -131,6 +131,9 @@ pub fn bwrap_prefix(bwrap: &str, scope: &LaunchScope, empty_dir: &Path) -> Vec<S
         if Path::new(denied).exists() {
             let kind = if Path::new(denied).is_file() { ProtKind::File } else { ProtKind::Dir };
             push_empty_bind(&mut args, kind, empty_dir, denied);
+            for allowed in scope.readable.iter().filter(|allowed| Path::new(allowed).starts_with(denied) && *allowed != denied) {
+                args.extend(["--ro-bind-try".into(), allowed.clone(), allowed.clone()]);
+            }
             for allowed in writable.iter().filter(|allowed| Path::new(allowed).starts_with(denied) && *allowed != denied) {
                 args.extend(["--bind".into(), allowed.clone(), allowed.clone()]);
             }
@@ -224,6 +227,9 @@ pub fn render_sbpl(scope: &LaunchScope) -> String {
     push_protected_denies(&mut out, &writable);
     for denied in &scope.denied_readable {
         out.push_str(&format!("(deny file-read* file-write* (subpath \"{}\"))\n", escape_sbpl(denied)));
+        for allowed in scope.readable.iter().filter(|allowed| Path::new(allowed).starts_with(denied) && *allowed != denied) {
+            out.push_str(&format!("(allow file-read* (subpath \"{}\"))\n", escape_sbpl(allowed)));
+        }
         for allowed in writable.iter().filter(|allowed| Path::new(allowed).starts_with(denied) && *allowed != denied) {
             out.push_str(&format!("(allow file-read* file-write* (subpath \"{}\"))\n", escape_sbpl(allowed)));
         }

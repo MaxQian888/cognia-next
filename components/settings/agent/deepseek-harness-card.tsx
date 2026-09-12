@@ -17,13 +17,11 @@ import {
 /**
  * Manage the Cognia-owned DeepSeek Harness runtime.
  *
- * Unlike every other external-agent surface, this one owns an install: DSH
- * publishes no executable for the transport Cognia drives, so there is nothing
- * on PATH to detect and the runtime has to be installed and certified here.
+ * Cognia installs the pinned official DSH runtime in an isolated home and
+ * certifies its dependencies and launch profiles before accepting connections.
  *
- * The capability rows are not decoration. This transport cannot ask for
- * approval mid-turn and cannot cancel a single turn, and a user who does not
- * know that before starting a run will be surprised by both.
+ * Capability rows and notices describe the selected profile: SDK native
+ * approval and cancellation differ from ACP and from the Cognia tool broker.
  */
 
 interface DeepSeekHarnessCardProps {
@@ -53,6 +51,7 @@ export function DeepSeekHarnessCard({
   const capabilityRows = [
     ["capabilityStreaming", capabilities.streamingDeltas],
     ["capabilityToolEvents", capabilities.toolEvents],
+    ["capabilityMcp", capabilities.mcpPassthrough],
     ["capabilityReasoning", capabilities.reasoning],
     ["capabilityUsage", capabilities.usage],
     ["capabilitySubagents", capabilities.subagentLineage],
@@ -133,9 +132,15 @@ export function DeepSeekHarnessCard({
         ))}
       </div>
 
+      <p className="text-xs text-muted-foreground">{t("committedEventsNotice")}</p>
+
       {/* Stated up front, not discovered mid-run. */}
-      <p className="text-xs text-muted-foreground">{t("approvalNotice")}</p>
-      <p className="text-xs text-muted-foreground">{t("cancelNotice")}</p>
+      {!capabilities.interactiveApproval && (
+        <p className="text-xs text-muted-foreground">{t("approvalNotice")}</p>
+      )}
+      {!capabilities.turnCancellation && (
+        <p className="text-xs text-muted-foreground">{t("cancelNotice")}</p>
+      )}
 
       {error ? (
         <p className="text-xs text-destructive" role="alert" data-testid="dsh-error">

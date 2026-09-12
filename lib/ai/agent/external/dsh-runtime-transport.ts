@@ -1,31 +1,20 @@
 import type { ExternalAgentConfig } from "@/types/agent/external-agent"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
-
-import type { DshRuntimeTransport, DshRuntimeTransportHandlers } from "./dsh-sdk-client"
+import { nanoid } from "nanoid"
+import { agentInvoke, agentListen } from "./agent-transport"
+import { JsonRpcPeer } from "./json-rpc-peer"
+import { PiFrameDecoder } from "./pi-rpc-peer"
+import type {
+  DshRuntimeTransport,
+  DshRuntimeTransportHandlers,
+  DshPromptContentBlock,
+} from "./dsh-sdk-client"
 import { redactDshOutput } from "./dsh-runtime-install"
 
-/**
- * Host-side transport for the DeepSeek Harness SDK runtime.
- *
- * `@deepseek-ai/dsh-sdk-client` spawns a subprocess and is installed into the
- * isolated runtime home, never into the Cognia workspace. This module is
- * reachable from `app/layout.tsx` through `manager.ts`, so it IS in the client
- * bundle — which means the specifier must never appear in any module graph, not
- * even inside a dynamic `import()`. See {@link loadHarnessClientModule}.
- *
- * The upstream client already owns the shutdown ladder
- * (`shutdown` RPC -> stdin EOF -> SIGTERM -> SIGKILL) and typed transport
- * errors, so this wrapper adds only host gating, redaction, and the shape the
- * adapter expects.
- */
-
-/** Minimal surface used from `@deepseek-ai/dsh-sdk-client`'s `HarnessClient`. */
-interface HarnessClientLike {
-  start(): Promise<void>
-  initialize(params: Record<string, unknown>): Promise<unknown>
-  prompt(params: Record<string, unknown>): Promise<{ messageId: string }>
-  subscribe(): { [Symbol.asyncIterator](): AsyncIterator<unknown> }
-  close(): Promise<void>
+/** The existing host process plane works in Tauri, CLI and headless hosts. */
+export interface DshProcessHost {
+  invoke: typeof agentInvoke
+  listen: typeof agentListen
 }
 
 export interface DshTransportLaunch {
@@ -36,73 +25,10 @@ export interface DshTransportLaunch {
   provider: string
   model: string
   maxTokens?: number
+  reasoningEffort?: string
 }
 
 export class DshRuntimeUnavailableError extends Error {}
-
-interface HarnessClientModule {
-  HarnessClient: new (options: Record<string, unknown>) => HarnessClientLike
-}
-
-/**
- * Bundler-opaque dynamic import.
- *
- * `manager.ts` is reachable from `app/layout.tsx`, so this module IS in the
- * client bundle. A plain `await import("@deepseek-ai/dsh-sdk-client")` — even
- * through a variable — still forces Turbopack and webpack to resolve the
- * specifier at build time, and it is unresolvable by design: the package is
- * installed into the isolated runtime home, never into the Cognia workspace.
- * Routing through `new Function` is what keeps the specifier out of every
- * module graph. The argument is a path Cognia computed under its own data
- * root, never user input.
- */
-const dynamicImport = new Function("specifier", "return import(specifier)") as (
-  specifier: string
-) => Promise<unknown>
-
-/**
- * Load the SDK client from the installed runtime home.
- *
- * The launcher path is `<runtimeHome>/launcher.mjs`, so the runtime home — and
- * therefore the client's real location — is derivable from the launch spec
- * Cognia just validated. Importing it from there rather than by bare specifier
- * matches where the file actually is.
- */
-export async function loadHarnessClientModule(
-  command: string,
-  args: readonly string[]
-): Promise<HarnessClientModule> {
-  const launcherPath = args[0]
-  if (!launcherPath) {
-    throw new DshRuntimeUnavailableError(
-      `Cannot locate the DeepSeek Harness SDK client: no launcher path in the launch spec for ${command}.`
-    )
-  }
-  // Plain string arithmetic rather than `node:path`, so this module pulls in no
-  // Node built-in that would then need stubbing for the browser bundle.
-  const separator = launcherPath.includes("\\") && !launcherPath.includes("/") ? "\\" : "/"
-  const runtimeHome = launcherPath.slice(0, launcherPath.lastIndexOf(separator))
-  const clientEntry = [
-    runtimeHome,
-    "node_modules",
-    "@deepseek-ai",
-    "dsh-sdk-client",
-    "lib",
-    "index.js",
-  ].join(separator)
-  const url = clientEntry.startsWith("file:")
-    ? clientEntry
-    : `file://${separator === "\\" ? "/" : ""}${clientEntry.split("\\").join("/")}`
-
-  try {
-    return (await dynamicImport(url)) as HarnessClientModule
-  } catch (error) {
-    throw new DshRuntimeUnavailableError(
-      `The DeepSeek Harness SDK client is missing from the installed runtime ` +
-        `(${clientEntry}). Reinstall the runtime. ${(error as Error).message}`
-    )
-  }
-}
 
 /** Defaults matching `runtime/deepseek-harness/host.sdk-readonly.yml`. */
 const DEFAULT_PROVIDER = "deepseek-official"
@@ -111,8 +37,8 @@ const DEFAULT_MODEL = "deepseek-v4-flash"
 /**
  * Derive the launch spec from a stored agent config.
  *
- * The installer writes the resolved runtime paths into the config's `process`
- * block, so a connect does not have to re-derive the runtime home. The API key
+ * Managed launch preparation puts resolved paths into a transient `process`
+ * block immediately before connect. The API key
  * is NOT stored there — it is injected into `process.env` by the execution host
  * immediately before connect, from a `CredentialReference`, and this function
  * only forwards what it is handed.
@@ -142,110 +68,259 @@ export function resolveDshLaunchFromConfig(config: ExternalAgentConfig): DshTran
     workspace: env.COGNIA_DSH_WORKSPACE ?? process_.cwd ?? "",
     provider: DEFAULT_PROVIDER,
     model: env.COGNIA_DSH_MODEL ?? DEFAULT_MODEL,
+    ...(env.COGNIA_DSH_REASONING_EFFORT
+      ? { reasoningEffort: env.COGNIA_DSH_REASONING_EFFORT }
+      : {}),
+    ...(env.COGNIA_DSH_MAX_TOKENS ? { maxTokens: parseMaxTokens(env.COGNIA_DSH_MAX_TOKENS) } : {}),
   }
 }
 
-/**
- * Build a transport for a config.
- *
- * @throws {DshRuntimeUnavailableError} in hosts that cannot spawn processes.
- */
+function parseMaxTokens(raw: string): number {
+  const value = Number(raw)
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new DshRuntimeUnavailableError(
+      "DeepSeek Harness maxTokens must be a positive safe integer."
+    )
+  }
+  return value
+}
+
+/** No Node library is imported into the renderer: the host owns every child. */
 export function createDshRuntimeTransport(
   config: ExternalAgentConfig,
   resolveLaunch: (config: ExternalAgentConfig) => DshTransportLaunch,
   hostSupportsSubprocess: boolean,
-  /** Overridable for tests; defaults to loading from the installed runtime home. */
-  loadModule: typeof loadHarnessClientModule = loadHarnessClientModule
+  host: DshProcessHost = { invoke: agentInvoke, listen: agentListen }
 ): DshRuntimeTransport {
   if (!hostSupportsSubprocess) {
     throw new DshRuntimeUnavailableError(
-      "The DeepSeek Harness runtime needs a local subprocess and is unavailable in this host. " +
-        "It runs on desktop (Tauri), CLI, and headless only."
+      "DeepSeek Harness requires an available external-agent process host."
     )
   }
-  return new HarnessSubprocessTransport(config, resolveLaunch, loadModule)
+  return new HarnessSubprocessTransport(config, resolveLaunch, host)
 }
 
 class HarnessSubprocessTransport implements DshRuntimeTransport {
-  private client?: HarnessClientLike
+  private peer?: JsonRpcPeer
+  private processId?: string
   private running = false
+  private starting?: Promise<void>
+  private closing?: Promise<void>
+  private readonly unlisten: Array<() => void> = []
   private readonly secrets: string[] = []
+  private stderr = ""
+  private handlers?: DshRuntimeTransportHandlers
+  // Reuse the bounded, LF-only byte decoder; JSON-RPC correlation stays in JsonRpcPeer.
+  private readonly decoder = new PiFrameDecoder()
 
   constructor(
     private readonly config: ExternalAgentConfig,
     private readonly resolveLaunch: (config: ExternalAgentConfig) => DshTransportLaunch,
-    private readonly loadModule: typeof loadHarnessClientModule
+    private readonly host: DshProcessHost
   ) {}
 
-  async start(handlers: DshRuntimeTransportHandlers): Promise<void> {
-    const launch = this.resolveLaunch(this.config)
-    // The API key is the one value that must never reach a log or event; keep a
-    // reference purely so stderr can be scrubbed of it.
-    const apiKey = launch.env.DEEPSEEK_API_KEY
-    if (apiKey) this.secrets.push(apiKey)
-
-    const { HarnessClient } = await this.loadModule(launch.command, launch.args)
-
-    const client = new HarnessClient({
-      launch: { command: launch.command, args: launch.args },
-      env: launch.env,
-    })
-    await client.start()
-    await client.initialize({
-      cwd: launch.workspace,
-      provider: launch.provider,
-      model: launch.model,
-      ...(launch.maxTokens !== undefined ? { maxTokens: launch.maxTokens } : {}),
-    })
-
-    this.client = client
-    this.running = true
-    void this.pump(client, handlers)
+  start(handlers: DshRuntimeTransportHandlers): Promise<void> {
+    if (this.starting)
+      return Promise.reject(
+        new DshRuntimeUnavailableError("DeepSeek Harness runtime is already started.")
+      )
+    this.starting = this.startOnce(handlers)
+    return this.starting
   }
 
-  private async pump(
-    client: HarnessClientLike,
-    handlers: DshRuntimeTransportHandlers
-  ): Promise<void> {
+  private async startOnce(handlers: DshRuntimeTransportHandlers): Promise<void> {
+    if (this.processId || this.closing)
+      throw new DshRuntimeUnavailableError("DeepSeek Harness runtime is already started or closed.")
+    const launch = this.resolveLaunch(this.config)
+    this.handlers = handlers
+    for (const [key, value] of Object.entries(launch.env)) {
+      if (/KEY|TOKEN|SECRET/.test(key)) this.secrets.push(value)
+    }
+    // MCP credentials live inside a session-scoped JSON envelope rather than
+    // top-level environment keys. Child startup errors must redact them too.
     try {
-      for await (const notification of client.subscribe()) {
-        handlers.onNotification(notification)
+      const servers: unknown = JSON.parse(launch.env.COGNIA_DSH_MCP_SERVERS ?? "[]")
+      if (Array.isArray(servers)) {
+        for (const server of servers) {
+          for (const pairs of [server?.env, server?.headers]) {
+            if (Array.isArray(pairs)) {
+              for (const pair of pairs)
+                if (typeof pair?.value === "string") this.secrets.push(pair.value)
+            }
+          }
+        }
       }
-      this.running = false
-      handlers.onClosed("The DeepSeek Harness runtime closed its notification stream.")
+    } catch {
+      /* The managed launcher reports invalid configuration. */
+    }
+    const processId = `dsh-${nanoid()}`
+    this.processId = processId
+    const peer = new JsonRpcPeer({
+      defaultTimeout: this.config.timeout ?? 30000,
+      cancellationNotifications: false,
+      writeRaw: (message) =>
+        this.host.invoke("send_to_external_agent", { agentId: processId, message }),
+      onNotification: (method, params) => this.handlers?.onNotification({ method, params }),
+    })
+    this.peer = peer
+    try {
+      this.unlisten.push(
+        await this.host.listen<{ agentId: string; data: string }>(
+          "external-agent://stdout-raw",
+          (payload) => {
+            if (payload.agentId !== processId) return
+            try {
+              const bytes = Uint8Array.from(atob(payload.data), (char) => char.charCodeAt(0))
+              for (const frame of this.decoder.push(bytes)) peer.ingest(frame)
+            } catch (error) {
+              this.failed(error instanceof Error ? error.message : String(error))
+              void this.close().catch(() => {})
+            }
+          }
+        )
+      )
+      this.unlisten.push(
+        await this.host.listen<{ agentId: string; data: string }>(
+          "external-agent://stderr",
+          (payload) => {
+            if (payload.agentId === processId)
+              this.stderr = redactDshOutput(this.stderr + payload.data, this.secrets).slice(-4096)
+          }
+        )
+      )
+      this.unlisten.push(
+        await this.host.listen<{ agentId: string; code: number }>(
+          "external-agent://exit",
+          (payload) => {
+            if (payload.agentId !== processId) return
+            this.processId = undefined
+            const reason = `DeepSeek Harness exited (code ${payload.code}). ${this.stderr}`
+            this.failed(reason)
+            this.cleanup()
+          }
+        )
+      )
+      await this.host.invoke("spawn_external_agent", {
+        config: {
+          id: processId,
+          command: launch.command,
+          args: launch.args,
+          cwd: launch.workspace,
+          env: launch.env,
+          framing: "raw",
+        },
+      })
+      const result = await peer.sendRequest<{ serverInfo?: { name?: string; version?: string } }>(
+        "initialize",
+        {
+          cwd: launch.workspace,
+          provider: launch.provider,
+          model: launch.model,
+          ...(launch.maxTokens !== undefined ? { maxTokens: launch.maxTokens } : {}),
+          ...(launch.reasoningEffort ? { reasoningEffort: launch.reasoningEffort } : {}),
+        }
+      )
+      // Upstream does not negotiate versions: enforce the named SDK endpoint;
+      // package/session versions are certified by the managed launcher and codec.
+      if (
+        result?.serverInfo?.name !== "deepseek-harness-sdk-runtime" ||
+        result.serverInfo.version !== "0.0.1"
+      ) {
+        throw new Error("DeepSeek Harness returned an unsupported SDK server identity.")
+      }
+      if (!this.processId) throw new Error("DeepSeek Harness exited during initialization.")
+      this.running = true
     } catch (error) {
       this.running = false
-      // TransportClosedError carries an exit code and a bounded stderr tail,
-      // which is exactly the kind of text that can contain a leaked key.
-      const message = error instanceof Error ? error.message : String(error)
-      handlers.onClosed(redactDshOutput(message, this.secrets))
+      peer.rejectAll("DeepSeek Harness initialization failed.")
+      const message = redactDshOutput(
+        error instanceof Error ? error.message : String(error),
+        this.secrets
+      )
+      // A failed handshake cannot safely accept shutdown; reap through the host.
+      try {
+        await this.host.invoke("kill_external_agent", { agentId: processId })
+      } catch (cleanupError) {
+        throw new DshRuntimeUnavailableError(
+          `${message} Cleanup failed: ${redactDshOutput(String(cleanupError), this.secrets)}`
+        )
+      }
+      this.processId = undefined
+      this.cleanup()
+      throw new DshRuntimeUnavailableError(message)
     }
   }
 
-  async prompt(sessionId: string, text: string): Promise<string> {
-    const client = this.client
-    if (!client || !this.running) {
+  async prompt(sessionId: string, contentBlocks: DshPromptContentBlock[]): Promise<string> {
+    if (!this.peer || !this.running)
       throw new DshRuntimeUnavailableError("The DeepSeek Harness runtime is not running.")
-    }
-    const providerPayload = {
-      sessionId,
-      contentBlocks: [{ type: "text", text }],
-    }
-    if (!hasNoLeakingPiiDeep(providerPayload)) {
+    const payload = { sessionId, contentBlocks }
+    if (!hasNoLeakingPiiDeep(payload))
       throw new Error("DeepSeek Harness prompt blocked by PII gate")
+    try {
+      const result = await this.peer.sendRequest<{ messageId?: unknown }>("session/prompt", payload)
+      if (typeof result?.messageId !== "string" || !result.messageId)
+        throw new Error("DeepSeek Harness returned an invalid prompt admission receipt.")
+      return result.messageId
+    } catch (error) {
+      throw new Error(
+        redactDshOutput(error instanceof Error ? error.message : String(error), this.secrets)
+      )
     }
-    const result = await client.prompt(providerPayload)
-    // An inbox-admission receipt, not a turn result: the turn boundary comes
-    // from session.status running -> idle.
-    return result.messageId
   }
 
-  async close(): Promise<void> {
-    const client = this.client
-    this.client = undefined
+  close(): Promise<void> {
+    if (this.closing) return this.closing
+    this.closing = this.stop().catch((error) => {
+      this.closing = undefined
+      throw error
+    })
+    return this.closing
+  }
+
+  private async stop(): Promise<void> {
+    // Closing during listener registration/spawn must wait for startup to
+    // settle, otherwise the host can spawn a child after teardown has finished.
+    await this.starting?.catch(() => {})
+    const processId = this.processId
+    const wasRunning = this.running
     this.running = false
-    // Upstream's close() runs the full shutdown ladder and is idempotent.
-    if (client) await client.close()
+    // Intentional shutdown must not become a spurious runtime failure.
+    this.handlers = undefined
+    try {
+      if (processId) {
+        if (wasRunning) await this.peer?.sendRequest("shutdown", undefined, 1000).catch(() => {})
+        // The host owns bounded process-group termination and reaping.
+        if (this.processId === processId) {
+          try {
+            await this.host.invoke("kill_external_agent", { agentId: processId })
+          } catch (error) {
+            // Exit can race the host command. A confirmed exit is already reaped.
+            if (this.processId === processId) {
+              throw new Error(redactDshOutput(String(error), this.secrets))
+            }
+          }
+        }
+        this.processId = undefined
+      }
+    } finally {
+      this.peer?.rejectAll("DeepSeek Harness runtime closed.")
+      if (!this.processId) this.cleanup()
+    }
+  }
+
+  private failed(reason: string): void {
+    this.running = false
+    this.peer?.rejectAll(reason)
+    this.handlers?.onClosed(reason)
+    this.handlers = undefined
+  }
+
+  private cleanup(): void {
+    for (const off of this.unlisten.splice(0)) off()
+    this.decoder.reset()
+    this.peer = undefined
+    this.stderr = ""
     this.secrets.length = 0
   }
 

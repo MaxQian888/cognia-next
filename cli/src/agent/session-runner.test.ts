@@ -1510,7 +1510,20 @@ describe("durable runtime history", () => {
         sdkSessionId: provider === "anthropic" ? "sdk-original" : undefined,
         conversationSnapshot: provider === "anthropic" ? undefined : conversationSnapshot,
       }))
-      const options = { provider, model: "m" }
+      const options = {
+        provider,
+        model: "m",
+        cwd: "/original",
+        ...(provider === "anthropic"
+          ? {
+              claudeAgentSdk: {
+                version: 1 as const,
+                persistSession: true,
+                sessionStore: { backend: "host-sqlite" as const },
+              },
+            }
+          : {}),
+      }
       const params = {
         config: cfg({ provider }),
         home: HOME,
@@ -1524,11 +1537,21 @@ describe("durable runtime history", () => {
       await first.send("ORIGINAL_REQUEST", { gate: createPermissionGate({ yes: true }) })
       await first.close()
       const nextCapture = jest.fn(async () => result("continued"))
-      const next = createAgentSession({ ...params, capture: nextCapture as never })
+      const next = createAgentSession({
+        ...params,
+        resolveOptions: async () => ({ provider, model: "m", cwd: "/changed" }),
+        capture: nextCapture as never,
+      })
       await next.send("FOLLOWUP_REQUEST", { gate: createPermissionGate({ yes: true }) })
       const sent = (nextCapture.mock.calls as unknown[][])[0][2] as SendOptions
-      if (provider === "anthropic") expect(sent.resumeSessionId).toBe("sdk-original")
-      else expect(sent.initialConversation).toEqual(conversationSnapshot)
+      if (provider === "anthropic") {
+        expect(sent.resumeSessionId).toBe("sdk-original")
+        expect(sent.cwd).toBe("/changed")
+        expect(sent.claudeAgentSdk?.sessionStore).toEqual({
+          backend: "host-sqlite",
+          workspace: "/original",
+        })
+      } else expect(sent.initialConversation).toEqual(conversationSnapshot)
       await next.close()
     }
   )

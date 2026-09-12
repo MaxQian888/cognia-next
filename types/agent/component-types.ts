@@ -118,6 +118,9 @@ export interface ReplayEvent {
 export interface AddAgentFormData {
   preset?: string
   cogniaModel?: import("./external-agent").ExternalAgentCogniaModelBinding | null
+  /** DeepSeek key is handed only to the lifecycle keyring writer. */
+  dshApiKey?: string
+  dshWorkspace?: string
   name: string
   protocol: ExternalAgentProtocol
   transport: ExternalAgentTransport

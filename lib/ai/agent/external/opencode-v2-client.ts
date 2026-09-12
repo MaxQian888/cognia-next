@@ -1,10 +1,20 @@
-import type { OpencodeClient, SessionV2Info } from "@opencode-ai/sdk/v2/client"
+import type {
+  OpenCodeClient,
+  ModelInfo,
+  ModelRef,
+  SessionInfo,
+  SessionMessageInfo,
+  PermissionRuleset,
+} from "@opencode/client"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
-
 import { discoverOpenCodeV2ViaSidecar } from "@/lib/claude/feature-call"
+import { platformStreamingFetch } from "@/lib/network/platform-streaming-fetch"
 import type {
   AcpAvailableCommand,
   AcpConfigOption,
+  AcpElicitationRequest,
+  AcpElicitationResponse,
+  AcpPermissionMode,
   AcpPermissionResponse,
   AcpSessionModelState,
   ExternalAgentConfig,
@@ -12,209 +22,209 @@ import type {
   ExternalAgentExecutionOptions,
   ExternalAgentMessage,
   ExternalAgentSession,
-  ExternalAgentTokenUsage,
 } from "@/types/agent/external-agent"
-import { BaseProtocolAdapter, type SessionCreateOptions } from "./protocol-adapter"
-import { buildOpenCodeFileParts, hasNoLeakingOpenCodePromptInput } from "./opencode-client"
 import {
-  isExplicitlyUnsupportedCapabilityError,
-  type ExternalAgentCompactionCapability,
-  type ExternalAgentCompactionOptions,
+  BaseProtocolAdapter,
+  type SessionCreateOptions,
+  type SessionListOptions,
+} from "./protocol-adapter"
+import { hasNoLeakingExternalAgentPromptInput } from "./outbound-prompt-pii"
+import { validateAcpElicitationResponse } from "./acp-elicitation"
+import { OpenCodeV2EventMapper, mapOpenCodeV2Messages } from "./opencode-v2-events"
+import {
+  canProjectOpenCodeV2Mcp,
+  launchOpenCodeV2Service,
+  type OpenCodeV2OwnedService,
+} from "./opencode-v2-launcher"
+import type {
+  ExternalAgentCompactionCapability,
+  ExternalAgentCompactionOptions,
 } from "./session-capabilities"
 
-const PINNED_PREVIEW_SERVICE_VERSION = "2.0.0-beta.1"
-
-type SdkResult<T> = {
-  data?: T
-  error?: unknown
-  response?: { status?: number }
-}
-
-type OpenCodeV2Health = {
-  healthy?: boolean
-  version?: string
-  pid?: number
-}
-
-function readRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined
-}
-
-function readString(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined
-}
-
-function sdkError(result: SdkResult<unknown>): Error {
-  const error = readRecord(result.error)
-  const message =
-    readString(error?.message) ??
-    readString(error?._tag) ??
-    (typeof result.error === "string" ? result.error : "OpenCode V2 request failed")
-  return Object.assign(new Error(message), {
-    status: result.response?.status,
-    code: error?.code ?? error?._tag,
-  })
-}
-
-function unwrap<T>(result: SdkResult<T>): T {
-  if (result.error !== undefined) throw sdkError(result)
-  return result.data as T
-}
-
-function nestedData<T>(result: SdkResult<unknown>): T {
-  const outer = unwrap(result) as Record<string, unknown>
-  return outer.data as T
-}
-
-function eventResult(value: unknown): string | Record<string, unknown> {
-  const direct = readString(value) ?? readRecord(value)
-  if (direct !== undefined) return direct
-  if (value === undefined || value === null) return ""
-  try {
-    return JSON.stringify(value)
-  } catch {
-    return String(value)
-  }
-}
-
-function eventTime(data: Record<string, unknown> | undefined): Date {
-  const value = data?.timestamp
-  return typeof value === "number" ? toDate(value) : new Date()
-}
-
-function toDate(value: number | undefined): Date {
-  if (!value) return new Date()
-  return new Date(value < 10_000_000_000 ? value * 1000 : value)
-}
-
-function isHealthyService(health: OpenCodeV2Health): boolean {
-  return (
-    health.healthy === true ||
-    (typeof health.version === "string" &&
-      health.version.length > 0 &&
-      typeof health.pid === "number")
-  )
-}
-
-function messageText(message: ExternalAgentMessage): string {
-  return (message.content ?? [])
-    .filter((part) => part.type === "text")
-    .map((part) => ("text" in part ? part.text : ""))
-    .join("\n")
-}
-
-function stepTokenUsage(data: Record<string, unknown> | undefined): ExternalAgentTokenUsage {
-  const tokens = readRecord(data?.tokens)
-  const cache = readRecord(tokens?.cache)
-  const input = typeof tokens?.input === "number" ? tokens.input : 0
-  const output = typeof tokens?.output === "number" ? tokens.output : 0
-  const reasoning = typeof tokens?.reasoning === "number" ? tokens.reasoning : 0
-  return {
-    promptTokens: input,
-    completionTokens: output,
-    totalTokens: input + output + reasoning,
-    cacheReadTokens: typeof cache?.read === "number" ? cache.read : undefined,
-    cacheWriteTokens: typeof cache?.write === "number" ? cache.write : undefined,
-  }
-}
-
-/**
- * The config-option id the variant picker is exposed under.
- *
- * OpenCode has no reasoning-LEVEL control. What it has is variants: its docs
- * call them "named request overlays for one model, commonly used for reasoning
- * effort or token budgets", selected per session as the `#variant` half of a
- * `provider/model#variant` reference. So the honest control is a picker over
- * THIS model's variants, not a low/medium/high slider whose tiers OpenCode
- * never defined.
- */
-const VARIANT_OPTION_ID = "variant"
-
-/**
- * The "no overlay" choice — the base model with none of its variants applied.
- *
- * It cannot collide with a real variant id: OpenCode parses a model reference
- * by splitting on the first `#`, so everything after it is the id and a `#`
- * can never appear inside one. An empty string would have been the obvious
- * sentinel, but Radix rejects `value=""` on a select item, and the picker this
- * feeds is a Radix select.
- */
 const NO_VARIANT = "#none"
+const CURRENT_VERSION = /^2\.\d+\.\d+(?:\+[\w.-]+)?$/
 
+function string(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined
+}
+
+function modelRef(value: string): ModelRef {
+  const slash = value.indexOf("/")
+  if (slash <= 0 || slash === value.length - 1)
+    throw new Error("OpenCode model must use provider/model format")
+  const [id, variant] = value.slice(slash + 1).split("#")
+  if (!id) throw new Error("OpenCode model must use provider/model format")
+  return { providerID: value.slice(0, slash), id, ...(variant ? { variant } : {}) }
+}
+
+function permissionRules(
+  mode: AcpPermissionMode,
+  mountedServers: string[] = []
+): PermissionRuleset {
+  // Cognia's broker owns grants, confinement and approvals for its own tools.
+  // Keep native policy intact while avoiding a second denial/approval gate.
+  const projected: PermissionRuleset = mountedServers
+    .filter((name) => ["cognia-tools", "cognia-plugin-tools"].includes(name))
+    .map((name) => ({ action: `${name}_*`, resource: "*", effect: "allow" }))
+  switch (mode) {
+    case "default":
+      return [{ action: "*", resource: "*", effect: "ask" }, ...projected]
+    case "bypassPermissions":
+      return [{ action: "*", resource: "*", effect: "allow" }, ...projected]
+    case "acceptEdits":
+      return [
+        { action: "*", resource: "*", effect: "ask" },
+        { action: "read", resource: "*", effect: "allow" },
+        { action: "edit", resource: "*", effect: "allow" },
+        ...projected,
+      ]
+    case "plan":
+      return [
+        { action: "*", resource: "*", effect: "deny" },
+        { action: "read", resource: "*", effect: "allow" },
+        { action: "glob", resource: "*", effect: "allow" },
+        { action: "grep", resource: "*", effect: "allow" },
+        { action: "list", resource: "*", effect: "allow" },
+        ...projected,
+      ]
+    default:
+      throw new Error(`OpenCode does not support permission mode: ${mode}`)
+  }
+}
+
+function assertSafe(value: unknown): void {
+  const decoded: string[] = []
+  const pending: unknown[] = [value]
+  const seen = new Set<object>()
+  while (pending.length) {
+    const item = pending.pop()
+    if (typeof item === "string") {
+      const data = item.match(/^data:([^;,]*)(;[^,]*)?,([\s\S]*)$/i)
+      if (
+        !data ||
+        !/^(?:text\/|image\/svg\+xml|application\/(?:json|xml|javascript|yaml))|\+(?:json|xml)$/i.test(
+          data[1] || "text/plain"
+        )
+      )
+        continue
+      try {
+        const content = decodeURIComponent(data[3])
+        decoded.push(
+          data[2]?.toLowerCase().includes(";base64")
+            ? new TextDecoder("utf-8", { fatal: true }).decode(
+                Uint8Array.from(atob(content), (byte) => byte.charCodeAt(0))
+              )
+            : content
+        )
+      } catch {
+        throw new Error("OpenCode text attachment is not valid encoded text")
+      }
+    } else if (item && typeof item === "object" && !seen.has(item)) {
+      seen.add(item)
+      pending.push(...Object.values(item))
+    }
+  }
+  if (!hasNoLeakingPiiDeep({ value, decoded }))
+    throw new Error("OpenCode outbound request blocked by the PII gate")
+}
+
+interface ActiveTurn {
+  controller: AbortController
+  mapper: OpenCodeV2EventMapper
+  requests: Map<string, AcpElicitationRequest>
+  submitted: boolean
+  interrupt?: Promise<unknown>
+}
+
+/** Current stable OpenCode /api contract. No V1 or beta transport fallback. */
 export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
   readonly protocol = "opencode-v2"
+  private client?: OpenCodeClient
+  private connectionService?: OpenCodeV2OwnedService
+  private catalog = new Map<string, ModelInfo[]>()
+  private models = new Map<string, ModelRef>()
+  private commands = new Map<string, AcpAvailableCommand[]>()
+  private active = new Map<string, ActiveTurn>()
+  private restoredForms = new Map<string, { sessionId: string; request: AcpElicitationRequest }>()
+  private connection = new AbortController()
+  private owned = new Map<string, OpenCodeV2OwnedService & { client: OpenCodeClient }>()
+  private mountedMcp = new Map<string, string[]>()
 
-  private client?: OpencodeClient
-  private commands: AcpAvailableCommand[] = []
-  private models = new Map<string, AcpSessionModelState>()
-  /**
-   * Variant ids per `provider/model`, from `v2.model.list()`.
-   *
-   * Kept because a variant is only meaningful against the model that declares
-   * it, and OpenCode does not fall back: its docs warn that "an unknown variant
-   * fails model resolution instead of silently using the base model". Offering
-   * or forwarding one we did not read back from the catalog would turn a picker
-   * into a way to break the next turn.
-   */
-  private modelVariants = new Map<string, string[]>()
-  /** The variant each session currently runs under, absent when it is on base. */
-  private sessionVariants = new Map<string, string>()
-  private nativeCompactionUnsupported = false
+  constructor(private readonly launchService = launchOpenCodeV2Service) {
+    super()
+  }
 
   async connect(config: ExternalAgentConfig): Promise<void> {
+    await this.disconnect()
     this._config = config
     this._connectionStatus = "connecting"
-    this.nativeCompactionUnsupported = false
+    this.connection = new AbortController()
     try {
-      const discovery = await discoverOpenCodeV2ViaSidecar()
-      if (discovery.version !== PINNED_PREVIEW_SERVICE_VERSION) {
-        throw new Error(
-          `Incompatible OpenCode V2 service ${discovery.version}; Cognia's pinned preview contract requires ${PINNED_PREVIEW_SERVICE_VERSION}. Current OpenCode V2 builds use a different protocol surface.`
+      const explicitEndpoint = config.network?.endpoint?.trim()
+      if (config.metadata?.cogniaGatewayTask) {
+        this.connectionService = await this.launchService(
+          config,
+          [],
+          config.process?.cwd,
+          this.connection.signal
         )
       }
-      const { createOpencodeClient } = await import("@opencode-ai/sdk/v2/client")
-      this.client = createOpencodeClient({
-        baseUrl: discovery.endpoint,
-        headers: discovery.headers,
+      const discovery =
+        this.connectionService ??
+        (explicitEndpoint ? undefined : await discoverOpenCodeV2ViaSidecar(this.connection.signal))
+      const endpoint = this.connectionService?.endpoint ?? explicitEndpoint ?? discovery!.endpoint
+      const url = new URL(endpoint)
+      if (!["http:", "https:"].includes(url.protocol))
+        throw new Error("OpenCode requires an HTTP(S) endpoint")
+      const headers = new Headers(discovery?.headers)
+      new Headers(config.network?.headers).forEach((value, key) => headers.set(key, value))
+      const bearer = config.network?.bearerToken ?? config.network?.apiKey
+      if (bearer) headers.set("Authorization", `Bearer ${bearer}`)
+      const password = string(config.metadata?.serverPassword)
+      if (password) {
+        const login = `${string(config.metadata?.serverUsername) ?? "opencode"}:${password}`
+        const bytes = new TextEncoder().encode(login)
+        headers.set(
+          "Authorization",
+          `Basic ${btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(""))}`
+        )
+      }
+      const { OpenCode } = await import("@opencode/client")
+      this.client = OpenCode.make({
+        baseUrl: endpoint,
+        headers: Object.fromEntries(headers.entries()),
+        fetch: (input, init) => {
+          // Apply the same policy to direct native calls, including imported
+          // history, form replies, and instructions that become model context.
+          if (typeof init?.body === "string") assertSafe(JSON.parse(init.body))
+          return platformStreamingFetch(input, { ...init, readTimeout: 90_000 })
+        },
       })
-
-      const health = unwrap<OpenCodeV2Health>(await this.client.v2.health.get())
-      if (!isHealthyService(health)) {
-        throw new Error("OpenCode V2 service health probe failed")
+      const health = await this.client.health.get({ signal: this.connection.signal })
+      if (
+        health.healthy !== true ||
+        !CURRENT_VERSION.test(health.version) ||
+        !Number.isSafeInteger(health.pid) ||
+        health.pid <= 0
+      ) {
+        throw new Error(`Requires current OpenCode V2; received ${health.version ?? "unknown"}`)
       }
-      const sessionProbe = unwrap<Record<string, unknown>>(
-        await this.client.v2.session.list({ limit: 1 })
-      )
-      if (!Array.isArray(sessionProbe.data)) {
-        throw new Error("OpenCode service does not expose the expected V2 session contract")
-      }
-
-      await this.discoverCapabilities()
+      const probe = await this.client.session.list({ limit: 1 }, { signal: this.connection.signal })
+      if (!Array.isArray(probe.data)) throw new Error("Invalid OpenCode V2 session contract")
       this._capabilities = {
         streaming: true,
         toolExecution: true,
-        fileOperations: false,
+        fileOperations: true,
         codeExecution: true,
-        mcpTools: false,
+        mcpTools: canProjectOpenCodeV2Mcp(config),
         multiTurn: true,
         permissionModes: ["default", "acceptEdits", "bypassPermissions", "plan"],
-        custom: {
-          preview: true,
-          serviceVersion: discovery.version,
-          surfaceSupport: {
-            pty: "unsupported",
-            tui: "unsupported",
-            mcp: "unsupported",
-            file: "unsupported",
-            find: "unsupported",
-            providerManagement: "unsupported",
-          },
-        },
+        custom: { serviceVersion: health.version, nativeApi: "@opencode/client", protocol: "v2" },
       }
       this._connectionStatus = "connected"
     } catch (error) {
+      await this.connectionService?.close().catch(() => undefined)
+      this.connectionService = undefined
       this.client = undefined
       this._connectionStatus = "error"
       throw error
@@ -222,69 +232,417 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
   }
 
   async disconnect(): Promise<void> {
+    const turns = [...this.active.entries()]
+    this.connection.abort()
+    for (const [, turn] of turns) turn.controller.abort()
+    const outcomes = await Promise.allSettled(
+      turns
+        .filter(([, turn]) => turn.submitted)
+        .map(([sessionID, turn]) => {
+          turn.interrupt ??= this.getSdkClient(sessionID).session.interrupt(
+            { sessionID },
+            { signal: AbortSignal.timeout(5_000) }
+          )
+          return turn.interrupt
+        })
+    )
+    const stopped = await Promise.allSettled([
+      ...[...this.owned.entries()].map(async ([id, service]) => {
+        await service.close()
+        this.owned.delete(id)
+      }),
+      ...(this.connectionService
+        ? [
+            (async () => {
+              await this.connectionService!.close()
+              this.connectionService = undefined
+            })(),
+          ]
+        : []),
+    ])
+    this.mountedMcp.clear()
+    this.active.clear()
+    this.restoredForms.clear()
     this.client = undefined
-    this.commands = []
+    this.catalog.clear()
+    this.commands.clear()
     this.models.clear()
-    this.modelVariants.clear()
-    this.sessionVariants.clear()
     this._sessions.clear()
+    this._capabilities = undefined
     this._connectionStatus = "disconnected"
+    const failed = [...outcomes, ...stopped].find((result) => result.status === "rejected")
+    if (failed?.status === "rejected") throw failed.reason
+  }
+
+  getSdkClient(sessionId?: string): OpenCodeClient {
+    if (sessionId && this.owned.has(sessionId)) return this.owned.get(sessionId)!.client
+    if (!this.client) throw new Error("Not connected to OpenCode V2 service")
+    return this.client
+  }
+
+  private sessionMcpServers(options?: SessionCreateOptions) {
+    const custom = options?.context?.custom as
+      { mcpServers?: SessionCreateOptions["mcpServers"] } | undefined
+    return options?.mcpServers ?? custom?.mcpServers ?? []
+  }
+
+  private async ownedClient(options?: SessionCreateOptions) {
+    const servers = this.sessionMcpServers(options)
+    if (!servers?.length && !this._config?.metadata?.cogniaGatewayTask) return undefined
+    const service = await this.launchService(
+      this._config!,
+      servers ?? [],
+      options?.cwd ?? this._config?.process?.cwd,
+      this.connection.signal
+    )
+    try {
+      const { OpenCode } = await import("@opencode/client")
+      const client = OpenCode.make({
+        baseUrl: service.endpoint,
+        headers: service.headers,
+        fetch: (input, init) => {
+          if (typeof init?.body === "string") assertSafe(JSON.parse(init.body))
+          return platformStreamingFetch(input, { ...init, readTimeout: 90_000 })
+        },
+      })
+      const health = await client.health.get({ signal: this.connection.signal })
+      if (
+        health.healthy !== true ||
+        !CURRENT_VERSION.test(health.version) ||
+        !Number.isSafeInteger(health.pid) ||
+        health.pid <= 0
+      )
+        throw new Error("Requires current OpenCode V2 for Cognia tool projection")
+      return { ...service, client }
+    } catch (error) {
+      await service.close().catch(() => undefined)
+      throw error
+    }
   }
 
   async healthCheck(): Promise<boolean> {
-    if (!this.client || !this.isConnected()) return false
+    if (!this.isConnected()) return false
     try {
-      return isHealthyService(unwrap<OpenCodeV2Health>(await this.client.v2.health.get()))
+      const health = await this.getSdkClient().health.get({ signal: AbortSignal.timeout(5_000) })
+      return health.healthy === true && CURRENT_VERSION.test(health.version)
     } catch {
       return false
     }
   }
 
-  async createSession(options?: SessionCreateOptions): Promise<ExternalAgentSession> {
-    const client = this.requireClient()
-    const directory =
-      readString(options?.cwd) ??
-      readString(options?.metadata?.cwd) ??
-      readString(options?.metadata?.directory)
-    const info = nestedData<SessionV2Info>(
-      await client.v2.session.create({
-        location: directory ? { directory } : undefined,
-      })
-    )
-    const session = this.mapSession(info)
-    this._sessions.set(session.id, session)
-    this.attachRuntimeMetadata(session)
+  private requireSession(sessionId: string): ExternalAgentSession {
+    const session = this._sessions.get(sessionId)
+    if (!session) throw new Error(`Session not found: ${sessionId}`)
     return session
   }
 
-  async listSessions(): Promise<
-    Array<{ sessionId: string; title?: string; createdAt?: string; updatedAt?: string }>
-  > {
-    const result = unwrap<Record<string, unknown>>(await this.requireClient().v2.session.list())
-    const sessions = Array.isArray(result.data) ? (result.data as SessionV2Info[]) : []
-    return sessions.map((session) => ({
+  private async remember(
+    info: SessionInfo,
+    options?: SessionCreateOptions
+  ): Promise<ExternalAgentSession> {
+    const session: ExternalAgentSession = {
+      id: info.id,
+      agentId: this._config!.id,
+      status: "active",
+      permissionMode: options?.permissionMode ?? this._config?.defaultPermissionMode ?? "default",
+      createdAt: new Date(info.time.created),
+      lastActivityAt: new Date(info.time.updated),
+      messages: [],
+      metadata: {
+        ...info.metadata,
+        title: info.title,
+        directory: info.location.directory,
+        cwd: info.location.directory,
+        parentID: info.parentID,
+        agent: info.agent,
+      },
+    }
+    const location = { directory: info.location.directory }
+    await this.getSdkClient(info.id).plugin.awaitActivation({ location })
+    const [models, commands] = await Promise.all([
+      this.getSdkClient(info.id).model.list({ location }),
+      this.getSdkClient(info.id).command.list({ location }),
+    ])
+    this.catalog.set(
+      info.id,
+      models.data.filter((model) => model.enabled)
+    )
+    this.commands.set(
+      info.id,
+      commands.data.map((command) => ({
+        name: command.name,
+        description: command.description ?? "",
+        input: { hint: "arguments" },
+      }))
+    )
+    const selectedModel =
+      info.model ?? (await this.getSdkClient(info.id).model.default({ location })).data
+    if (selectedModel)
+      this.models.set(info.id, {
+        providerID: selectedModel.providerID,
+        id: selectedModel.id,
+        ...("variant" in selectedModel && selectedModel.variant
+          ? { variant: selectedModel.variant }
+          : {}),
+      })
+    this._sessions.set(info.id, session)
+    this.updateMetadata(info.id)
+    return session
+  }
+
+  private validateSessionOptions(options?: SessionCreateOptions): void {
+    if (options?.additionalDirectories?.length && !this.sessionMcpServers(options).length)
+      throw new Error(
+        "OpenCode V2 accepts one session location; additional workspace roots are unsupported"
+      )
+    assertSafe({
+      systemPrompt: options?.systemPrompt,
+      instructionEnvelope: options?.instructionEnvelope,
+      context: this.instructionContext(options),
+    })
+  }
+
+  async createSession(options?: SessionCreateOptions): Promise<ExternalAgentSession> {
+    this.validateSessionOptions(options)
+    const directory =
+      options?.cwd ??
+      string(options?.metadata?.cwd) ??
+      string(options?.metadata?.directory) ??
+      this._config?.process?.cwd
+    const mode = options?.permissionMode ?? this._config?.defaultPermissionMode ?? "default"
+    const selected = string(options?.metadata?.model) ?? string(this._config?.metadata?.model)
+    const owned = await this.ownedClient(options)
+    const client = owned?.client ?? this.getSdkClient()
+    let info: SessionInfo
+    try {
+      info = await client.session.create({
+        ...(directory ? { location: { directory } } : {}),
+        ...(selected ? { model: modelRef(selected) } : {}),
+        ...(string(options?.metadata?.agent) ? { agent: string(options?.metadata?.agent) } : {}),
+        permissions: permissionRules(
+          mode,
+          this.sessionMcpServers(options).map((server) => server.name)
+        ),
+      })
+    } catch (error) {
+      await owned?.close().catch(() => undefined)
+      throw error
+    }
+    if (owned) {
+      this.owned.set(info.id, owned)
+      this.mountedMcp.set(
+        info.id,
+        this.sessionMcpServers(options).map((server) => server.name)
+      )
+    }
+    try {
+      const session = await this.remember(info, { ...options, permissionMode: mode })
+      await this.applyInstructions(info.id, options)
+      this.connection.signal.throwIfAborted()
+      return session
+    } catch (error) {
+      this.forgetSession(info.id)
+      await client.session.remove({ sessionID: info.id }).catch(() => undefined)
+      this.owned.delete(info.id)
+      await owned?.close().catch(() => undefined)
+      throw error
+    }
+  }
+
+  private instructionContext(options?: { context?: unknown }) {
+    if (!options?.context) return undefined
+    const { custom, ...rest } = options.context as Record<string, unknown>
+    const safeCustom = custom
+      ? Object.fromEntries(
+          Object.entries(custom).filter(
+            ([name]) => !["mcpServers", "chatSessionId", "additionalDirectories"].includes(name)
+          )
+        )
+      : undefined
+    return {
+      ...rest,
+      ...(safeCustom && Object.keys(safeCustom).length ? { custom: safeCustom } : {}),
+    }
+  }
+
+  private async applyInstructions(
+    sessionId: string,
+    options?: {
+      systemPrompt?: string
+      instructionEnvelope?: SessionCreateOptions["instructionEnvelope"]
+      context?: unknown
+      briefMode?: boolean
+    }
+  ): Promise<void> {
+    const instruction = [
+      options?.systemPrompt,
+      options?.instructionEnvelope?.developerInstructions,
+      options?.instructionEnvelope?.customInstructions,
+      options?.instructionEnvelope?.skillsSummary,
+      options?.instructionEnvelope?.projectContextSummary,
+      options?.context ? JSON.stringify(this.instructionContext(options)) : undefined,
+      options?.briefMode ? "Keep responses concise." : undefined,
+    ]
+      .filter(Boolean)
+      .join("\n\n")
+    assertSafe(instruction)
+    if (instruction)
+      await this.getSdkClient(sessionId).session.instructions.entry.put({
+        sessionID: sessionId,
+        key: "cognia",
+        value: instruction,
+      })
+  }
+
+  async resumeSession(
+    sessionId: string,
+    options?: SessionCreateOptions
+  ): Promise<ExternalAgentSession> {
+    this.validateSessionOptions(options)
+    if (this.owned.has(sessionId))
+      throw new Error("Close the OpenCode session before resuming it with new options")
+    const owned = await this.ownedClient(options)
+    if (owned) this.owned.set(sessionId, owned)
+    if (owned)
+      this.mountedMcp.set(
+        sessionId,
+        this.sessionMcpServers(options).map((server) => server.name)
+      )
+    try {
+      const info = await this.getSdkClient(sessionId).session.get({ sessionID: sessionId })
+      if (options?.cwd && options.cwd !== info.location.directory)
+        throw new Error("OpenCode session belongs to a different working directory")
+      const session = await this.remember(info, options)
+      const messages: SessionMessageInfo[] = []
+      const seen = new Set<string>()
+      let cursor: string | undefined
+      do {
+        const page = await this.getSdkClient(sessionId).message.list({
+          sessionID: sessionId,
+          limit: 100,
+          ...(cursor ? { cursor } : { order: "asc" as const }),
+        })
+        messages.push(...page.data)
+        cursor = page.cursor.next ?? undefined
+        if (cursor && seen.has(cursor))
+          throw new Error("OpenCode message pagination repeated a cursor")
+        if (cursor) seen.add(cursor)
+      } while (cursor)
+      session.messages = mapOpenCodeV2Messages(messages)
+      const [permissions, forms] = await Promise.all([
+        this.getSdkClient(sessionId).permission.list({ sessionID: sessionId }),
+        this.getSdkClient(sessionId).form.list({ sessionID: sessionId }),
+      ])
+      for (const [id, form] of this.restoredForms)
+        if (form.sessionId === sessionId) this.restoredForms.delete(id)
+      const mapper = new OpenCodeV2EventMapper(sessionId, this.mountedMcp.get(sessionId))
+      const pending: ExternalAgentEvent[] = permissions.flatMap((permission) =>
+        mapper.map({
+          type: "permission.asked",
+          id: permission.id,
+          created: Date.now(),
+          data: permission,
+        })
+      )
+      for (const form of forms) {
+        const events = mapper.map({
+          type: "form.created",
+          id: form.id,
+          created: Date.now(),
+          data: { form },
+        })
+        for (const event of events) {
+          if (event.type === "elicitation_request")
+            this.restoredForms.set(event.request.id, { sessionId, request: event.request })
+          if (event.type === "error")
+            await this.getSdkClient(sessionId).form.cancel({
+              sessionID: sessionId,
+              formID: form.id,
+            })
+        }
+        pending.push(...events)
+      }
+      session.metadata = { ...session.metadata, pendingInteractions: pending }
+      if (options?.permissionMode) await this.setSessionMode(sessionId, options.permissionMode)
+      if (string(options?.metadata?.model))
+        await this.setSessionModel(sessionId, string(options?.metadata?.model)!)
+      await this.applyInstructions(sessionId, options)
+      return session
+    } catch (error) {
+      this.forgetSession(sessionId)
+      this.owned.delete(sessionId)
+      await owned?.close().catch(() => undefined)
+      throw error
+    }
+  }
+
+  async forkSession(
+    sessionId: string,
+    options?: SessionCreateOptions
+  ): Promise<ExternalAgentSession> {
+    this.validateSessionOptions(options)
+    const sourceClient = this.getSdkClient(sessionId)
+    const source = await sourceClient.session.get({ sessionID: sessionId })
+    if (options?.cwd && source.location.directory !== options.cwd)
+      throw new Error("OpenCode fork belongs to a different working directory")
+    const info = await this.getSdkClient(sessionId).session.fork({
+      sessionID: sessionId,
+      boundary: { type: "through" },
+    })
+    try {
+      return await this.resumeSession(info.id, options)
+    } catch (error) {
+      this.forgetSession(info.id)
+      await sourceClient.session.remove({ sessionID: info.id }).catch(() => undefined)
+      throw error
+    }
+  }
+
+  async listSessions(options?: SessionListOptions) {
+    const sessions = new Map<string, SessionInfo>()
+    const seen = new Set<string>()
+    let cursor: string | undefined
+    do {
+      const page = await this.getSdkClient().session.list({
+        limit: 100,
+        ...(cursor ? { cursor } : options?.cwd ? { directory: options.cwd } : {}),
+      })
+      for (const session of page.data) sessions.set(session.id, session)
+      cursor = page.cursor.next ?? undefined
+      if (cursor && seen.has(cursor))
+        throw new Error("OpenCode session pagination repeated a cursor")
+      if (cursor) seen.add(cursor)
+    } while (cursor)
+    return [...sessions.values()].map((session) => ({
       sessionId: session.id,
+      cwd: session.location.directory,
       title: session.title,
-      createdAt: toDate(session.time?.created).toISOString(),
-      updatedAt: toDate(session.time?.updated).toISOString(),
+      createdAt: new Date(session.time.created).toISOString(),
+      updatedAt: new Date(session.time.updated).toISOString(),
     }))
   }
 
-  async resumeSession(sessionId: string): Promise<ExternalAgentSession> {
-    const info = nestedData<SessionV2Info>(
-      await this.requireClient().v2.session.get({ sessionID: sessionId })
-    )
-    const session = this.mapSession(info)
-    this._sessions.set(session.id, session)
-    this.attachRuntimeMetadata(session)
-    return session
+  private forgetSession(sessionId: string): void {
+    this._sessions.delete(sessionId)
+    this.models.delete(sessionId)
+    this.catalog.delete(sessionId)
+    this.commands.delete(sessionId)
+    this.mountedMcp.delete(sessionId)
+    for (const [id, form] of this.restoredForms)
+      if (form.sessionId === sessionId) this.restoredForms.delete(id)
   }
 
   async closeSession(sessionId: string): Promise<void> {
     await this.cancel(sessionId)
-    this._sessions.delete(sessionId)
-    this.models.delete(sessionId)
-    this.sessionVariants.delete(sessionId)
+    await this.owned.get(sessionId)?.close()
+    this.owned.delete(sessionId)
+    this.forgetSession(sessionId)
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    await this.cancel(sessionId)
+    await this.getSdkClient(sessionId).session.remove({ sessionID: sessionId })
+    await this.closeSession(sessionId)
   }
 
   async *prompt(
@@ -292,165 +650,372 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
     message: ExternalAgentMessage,
     options?: ExternalAgentExecutionOptions
   ): AsyncIterable<ExternalAgentEvent> {
-    const client = this.requireClient()
-    const session = this._sessions.get(sessionId)
-    if (!session) throw new Error(`Session not found: ${sessionId}`)
-    this.updateSession(sessionId, { status: "executing" })
-
-    if (!hasNoLeakingOpenCodePromptInput(message)) {
-      this.updateSession(sessionId, { status: "active" })
-      throw new Error("OpenCode V2 outbound prompt blocked by the PII gate")
-    }
-
-    const files = buildOpenCodeFileParts(message.content).map((file) => ({
-      uri: file.url,
-      ...(file.filename ? { name: file.filename } : {}),
-    }))
-    const prompt = {
-      text: messageText(message),
-      ...(files.length > 0 ? { files } : {}),
-    }
-    if (!hasNoLeakingPiiDeep(prompt)) {
-      this.updateSession(sessionId, { status: "active" })
-      throw new Error("OpenCode V2 outbound prompt blocked by the PII gate")
-    }
-
-    const subscription = await client.v2.session.events({ sessionID: sessionId })
-    const stream = subscription.stream
-    const onAbort = () => void this.cancel(sessionId)
-    options?.signal?.addEventListener("abort", onAbort, { once: true })
-    try {
-      unwrap(
-        await client.v2.session.prompt(
-          {
-            sessionID: sessionId,
-            id: message.id,
-            prompt,
-            delivery: "queue",
-          },
-          options?.signal ? { signal: options.signal } : undefined
-        )
+    this.requireSession(sessionId)
+    if (options?.systemPrompt !== undefined || options?.instructionEnvelope || options?.context)
+      await this.applyInstructions(sessionId, options)
+    if (!hasNoLeakingExternalAgentPromptInput(message))
+      throw new Error("OpenCode outbound prompt blocked by the PII gate")
+    const text = message.content
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join("\n")
+    const encodeText = (value: string) =>
+      btoa(
+        Array.from(new TextEncoder().encode(value), (byte) => String.fromCharCode(byte)).join("")
       )
-      const iterator = stream[Symbol.asyncIterator]()
-      let completion: Promise<{ kind: "complete" }> | undefined
-      let tokenUsage: ExternalAgentTokenUsage | undefined
-      let terminalEventEmitted = false
-      const waitForIdle = () => {
-        completion ??= (async () => {
-          unwrap(await client.v2.session.wait({ sessionID: sessionId }))
-          return { kind: "complete" as const }
-        })()
-        return completion
-      }
-
-      try {
-        while (true) {
-          const nextEvent = iterator.next().then((result) => ({ kind: "event" as const, result }))
-          const next = completion ? await Promise.race([nextEvent, completion]) : await nextEvent
-          if (next.kind === "complete") break
-          if (next.result.done) {
-            await waitForIdle()
-            break
-          }
-
-          const raw = next.result.value
-          const event = readRecord(raw)
-          const eventType = readString(event?.type)
-          const eventData = readRecord(event?.properties) ?? readRecord(event?.data)
-          if (eventType === "session.next.step.ended") {
-            tokenUsage = stepTokenUsage(eventData)
-            void waitForIdle()
-            continue
-          }
-
-          const mapped = this.mapEvent(sessionId, raw)
-          for (const event of mapped) yield event
-          if (mapped.some((event) => event.type === "done")) {
-            terminalEventEmitted = true
-            break
-          }
+    const dataUri = (mime: string, value: string) => `data:${mime};base64,${value}`
+    const files: Array<{ uri: string; name?: string }> = []
+    for (const part of message.content) {
+      if (part.type === "image") {
+        const uri =
+          part.source.type === "url"
+            ? part.source.url
+            : part.source.data !== undefined
+              ? dataUri(part.source.mediaType, part.source.data)
+              : undefined
+        if (!uri) throw new Error("OpenCode image attachment has no source")
+        files.push({ uri, ...(part.alt ? { name: part.alt } : {}) })
+      } else if (part.type === "audio") {
+        files.push({ uri: dataUri(part.mimeType, part.data) })
+      } else if (part.type === "resource_link") {
+        files.push({ uri: part.uri, name: part.name })
+      } else if (part.type === "resource") {
+        const resource = part.resource
+        files.push({
+          uri:
+            resource.text !== undefined
+              ? dataUri(resource.mimeType ?? "text/plain", encodeText(resource.text))
+              : resource.blob !== undefined
+                ? dataUri(resource.mimeType ?? "application/octet-stream", resource.blob)
+                : resource.uri,
+        })
+      } else if (part.type === "file") {
+        let uri: string
+        if (part.content !== undefined)
+          uri = dataUri(
+            part.mimeType ?? "text/plain",
+            part.encoding === "base64" ? part.content : encodeText(part.content)
+          )
+        else if (/^[a-z][a-z0-9+.-]*:\/\//i.test(part.path)) uri = part.path
+        else {
+          const path = part.path.replace(/\\/g, "/")
+          const directory = string(this.requireSession(sessionId).metadata?.directory)!
+          const url = new URL("file:///")
+          url.pathname = /^[A-Za-z]:\//.test(path)
+            ? `/${path}`
+            : path.startsWith("/")
+              ? path
+              : `${directory}/${path}`
+          uri = url.toString()
         }
-      } finally {
-        await iterator.return?.()
+        files.push({ uri, name: part.path.split(/[\\/]/).at(-1) })
+      } else if (part.type !== "text") {
+        throw new Error(`OpenCode prompt does not accept ${part.type} content`)
       }
-      if (!terminalEventEmitted) {
-        yield {
-          type: "done",
-          sessionId,
-          timestamp: new Date(),
-          success: true,
-          stopReason: "end_turn",
-          ...(tokenUsage ? { tokenUsage } : {}),
+    }
+    const input = {
+      sessionID: sessionId,
+      id: message.id.startsWith("msg_") ? message.id : `msg_${message.id}`,
+      text,
+      ...(files.length ? { files } : {}),
+      delivery: "queue" as const,
+    }
+    assertSafe(input)
+    const match = text.match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/)
+    const command =
+      match && this.getAvailableCommands(sessionId).some((item) => item.name === match[1])
+        ? match
+        : undefined
+    yield* this.runTurn(
+      sessionId,
+      (client, signal) =>
+        command
+          ? client.session.command(
+              {
+                sessionID: sessionId,
+                command: command[1],
+                text: command[2] ?? "",
+                ...(files.length ? { files } : {}),
+                delivery: "queue",
+              },
+              { signal }
+            )
+          : client.session.prompt(input, { signal }),
+      options
+    )
+  }
+
+  private async *runTurn(
+    sessionId: string,
+    submit: (client: OpenCodeClient, signal: AbortSignal) => Promise<unknown>,
+    options?: ExternalAgentExecutionOptions
+  ): AsyncIterable<ExternalAgentEvent> {
+    if (this.active.has(sessionId)) throw new Error("OpenCode session already has an active turn")
+    const client = this.getSdkClient(sessionId)
+    options?.signal?.throwIfAborted()
+    if ((await client.session.active())[sessionId])
+      throw new Error(
+        "OpenCode session is already running; use steering or cancel it before starting a new turn"
+      )
+    if (this.active.has(sessionId)) throw new Error("OpenCode session already has an active turn")
+    const controller = new AbortController()
+    const timeoutMs = options?.timeout ?? this._config?.timeout ?? 300_000
+    const timer = setTimeout(
+      () => controller.abort(new Error("OpenCode turn timed out")),
+      timeoutMs
+    )
+    const abort = () => controller.abort(options?.signal?.reason)
+    options?.signal?.addEventListener("abort", abort, { once: true })
+    if (options?.signal?.aborted) abort()
+    const turn: ActiveTurn = {
+      controller,
+      mapper: new OpenCodeV2EventMapper(sessionId, this.mountedMcp.get(sessionId)),
+      requests: new Map(),
+      submitted: false,
+    }
+    this.active.set(sessionId, turn)
+    this.updateSession(sessionId, { status: "executing" })
+    const iterator = client.event.subscribe({ signal: controller.signal })[Symbol.asyncIterator]()
+    let completed = false
+    const interruptOnAbort = () => {
+      if (turn.submitted && !completed) {
+        turn.interrupt ??= client.session.interrupt(
+          { sessionID: sessionId },
+          { signal: AbortSignal.timeout(5_000) }
+        )
+        // Retain the rejection for awaited cleanup without an unhandled
+        // rejection when an external caller has paused the generator.
+        void turn.interrupt.catch(() => undefined)
+      }
+    }
+    controller.signal.addEventListener("abort", interruptOnAbort, { once: true })
+    try {
+      controller.signal.throwIfAborted()
+      // SSE is lazy and live-only: finish its handshake before submitting work.
+      while (true) {
+        const first = await iterator.next()
+        controller.signal.throwIfAborted()
+        if (first.done) throw new Error("OpenCode event stream closed before connecting")
+        if (first.value.type === "server.connected") break
+      }
+      turn.submitted = true
+      await submit(client, controller.signal)
+      while (true) {
+        const next = await iterator.next()
+        controller.signal.throwIfAborted()
+        if (next.done) throw new Error("OpenCode event stream ended before execution completed")
+        for (const event of turn.mapper.map(next.value)) {
+          if (event.type === "error" && event.code?.startsWith("opencode_form_")) {
+            // A form the shared renderer cannot represent must not leave the
+            // server waiting indefinitely for an answer the user cannot send.
+            for (const formID of turn.mapper.pendingForms.keys()) {
+              if (!turn.requests.has(formID)) {
+                await client.form.cancel({ sessionID: sessionId, formID })
+                turn.mapper.pendingForms.delete(formID)
+              }
+            }
+          }
+          if (event.type === "elicitation_request")
+            turn.requests.set(event.request.id, event.request)
+          if (event.type === "done") completed = true
+          yield event
         }
+        if (completed) break
       }
     } finally {
-      options?.signal?.removeEventListener("abort", onAbort)
+      clearTimeout(timer)
+      options?.signal?.removeEventListener("abort", abort)
+      controller.abort()
+      controller.signal.removeEventListener("abort", interruptOnAbort)
+      await iterator.return?.()
+      this.active.delete(sessionId)
       this.updateSession(sessionId, { status: "active" })
+      // Cancel the server even when the consumer stops reading the generator.
+      if (turn.submitted && !completed) {
+        turn.interrupt ??= client.session.interrupt(
+          { sessionID: sessionId },
+          { signal: AbortSignal.timeout(5_000) }
+        )
+        await turn.interrupt
+      }
     }
   }
 
   async cancel(sessionId: string): Promise<void> {
-    if (!this.client) return
-    unwrap(await this.client.v2.session.interrupt({ sessionID: sessionId }))
+    const turn = this.active.get(sessionId)
+    if (turn) {
+      turn.controller.abort()
+      if (turn.submitted) {
+        turn.interrupt ??= this.getSdkClient(sessionId).session.interrupt(
+          { sessionID: sessionId },
+          { signal: AbortSignal.timeout(5_000) }
+        )
+        await turn.interrupt
+      }
+      return
+    }
+    if (this.client) await this.getSdkClient(sessionId).session.interrupt({ sessionID: sessionId })
+  }
+
+  async steerTurn(sessionId: string, text: string): Promise<void> {
+    if (!this.active.get(sessionId)?.submitted)
+      throw new Error("OpenCode session has no active turn")
+    assertSafe(text)
+    await this.getSdkClient(sessionId).session.prompt({
+      sessionID: sessionId,
+      text,
+      delivery: "steer",
+    })
   }
 
   async respondToPermission(sessionId: string, response: AcpPermissionResponse): Promise<void> {
-    const reply = response.granted
-      ? response.rememberChoice || response.scope === "always"
-        ? "always"
-        : "once"
-      : "reject"
-    unwrap(
-      await this.requireClient().v2.session.permission.reply({
-        sessionID: sessionId,
-        requestID: response.requestId,
-        reply,
-        message: response.reason,
-      })
-    )
+    this.requireSession(sessionId)
+    assertSafe(response.reason)
+    await this.getSdkClient(sessionId).permission.reply({
+      sessionID: sessionId,
+      requestID: response.requestId,
+      reply: response.granted
+        ? response.rememberChoice || response.scope === "always"
+          ? "always"
+          : "once"
+        : "reject",
+      ...(response.reason ? { message: response.reason } : {}),
+    })
+    this.removePendingInteraction(sessionId, response.requestId, !response.granted)
   }
 
-  async setSessionModel(sessionId: string, modelId: string): Promise<void> {
-    // Switching models drops the variant. Variants are declared per model, and
-    // OpenCode fails model resolution on an unknown one rather than ignoring
-    // it — so carrying the old model's overlay across would not degrade to the
-    // base model, it would break the next turn.
-    await this.switchModel(sessionId, modelId, undefined)
+  private removePendingInteraction(
+    sessionId: string,
+    requestId: string,
+    rejectPermissions = false
+  ): void {
+    const session = this.requireSession(sessionId)
+    const pending = session.metadata?.pendingInteractions as ExternalAgentEvent[] | undefined
+    if (pending)
+      session.metadata = {
+        ...session.metadata,
+        pendingInteractions: pending.filter(
+          (event) =>
+            (event.type !== "permission_request" && event.type !== "elicitation_request") ||
+            (!(rejectPermissions && event.type === "permission_request") &&
+              event.request.id !== requestId)
+        ),
+      }
+  }
+
+  async respondToElicitation(response: AcpElicitationResponse): Promise<void> {
+    const entry = [...this.active.entries()].find(([, turn]) =>
+      turn.requests.has(response.requestId)
+    )
+    const restored = this.restoredForms.get(response.requestId)
+    const sessionId = entry?.[0] ?? restored?.sessionId
+    const request = entry?.[1].requests.get(response.requestId) ?? restored?.request
+    if (!sessionId || !request) throw new Error(`Unknown OpenCode form: ${response.requestId}`)
+    const answer = validateAcpElicitationResponse(request, response)
+    if (answer.action === "accept" && request.mode === "form") {
+      for (const [key, value] of Object.entries(answer.content ?? {})) {
+        const property = request.requestedSchema!.properties[key]
+        const fail = () => {
+          throw new Error(`Invalid OpenCode form field: ${key}`)
+        }
+        if (typeof value === "number") {
+          if (typeof property.minimum === "number" && value < property.minimum) fail()
+          if (typeof property.maximum === "number" && value > property.maximum) fail()
+        }
+        if (typeof value === "string") {
+          const length = Array.from(value).length
+          if (typeof property.minLength === "number" && length < property.minLength) fail()
+          if (typeof property.maxLength === "number" && length > property.maxLength) fail()
+          if (
+            typeof property.pattern === "string" &&
+            !new RegExp(property.pattern, "u").test(value)
+          )
+            fail()
+        }
+        if (Array.isArray(value)) {
+          if (typeof property.minItems === "number" && value.length < property.minItems) fail()
+          if (typeof property.maxItems === "number" && value.length > property.maxItems) fail()
+          const allowed = property.items?.enum ?? property.items?.oneOf?.map((item) => item.const)
+          if (allowed && value.some((item) => !allowed.includes(item))) fail()
+        }
+      }
+    }
+    assertSafe(answer.content)
+    const formID =
+      string(request.raw.openCodeForm && (request.raw.openCodeForm as { id?: string }).id) ??
+      response.requestId
+    if (answer.action === "accept")
+      await this.getSdkClient(sessionId).form.reply({
+        sessionID: sessionId,
+        formID,
+        answer: answer.content ?? {},
+      })
+    else await this.getSdkClient(sessionId).form.cancel({ sessionID: sessionId, formID })
+    entry?.[1].requests.delete(response.requestId)
+    entry?.[1].mapper.pendingForms.delete(formID)
+    this.restoredForms.delete(response.requestId)
+    this.removePendingInteraction(sessionId, response.requestId)
+  }
+
+  async setSessionMode(sessionId: string, mode: AcpPermissionMode): Promise<void> {
+    this.requireSession(sessionId)
+    await this.getSdkClient(sessionId).permission.rules({
+      sessionID: sessionId,
+      permissions: permissionRules(mode, this.mountedMcp.get(sessionId)),
+    })
+    this.updateSession(sessionId, { permissionMode: mode })
+  }
+
+  private updateMetadata(sessionId: string): void {
+    const session = this.requireSession(sessionId)
+    session.metadata = {
+      ...session.metadata,
+      availableCommands: this.getAvailableCommands(sessionId),
+      models: this.getSessionModels(sessionId),
+      configOptions: this.getConfigOptions(sessionId),
+    }
   }
 
   getSessionModels(sessionId: string): AcpSessionModelState | undefined {
-    return this.models.get(sessionId)
+    const available = this.catalog.get(sessionId)
+    if (!available) return undefined
+    const model = this.models.get(sessionId)
+    return {
+      currentModelId: model ? `${model.providerID}/${model.id}` : "",
+      availableModels: available.map((model) => ({
+        modelId: `${model.providerID}/${model.id}`,
+        name: model.name,
+      })),
+    }
   }
 
-  // --------------------------------------------------------------------------
-  // Session config options (synthesized — model variant)
-  //
-  // OpenCode V2 has no ACP-style config-option surface, so this synthesizes one
-  // the same way the Codex adapter synthesizes its reasoning-effort picker: the
-  // existing session panel renders it with no new chat UI. The value it writes
-  // is real — it rides `v2.session.switchModel` as the `variant` half of the
-  // model reference, which is the channel OpenCode's own `provider/model#variant`
-  // syntax names.
-  // --------------------------------------------------------------------------
+  async setSessionModel(sessionId: string, value: string): Promise<void> {
+    this.requireSession(sessionId)
+    const model = modelRef(value)
+    await this.getSdkClient(sessionId).session.switchModel({ sessionID: sessionId, model })
+    this.models.set(sessionId, model)
+    this.updateMetadata(sessionId)
+  }
 
   getConfigOptions(sessionId: string): AcpConfigOption[] | undefined {
     if (!this._sessions.has(sessionId)) return undefined
-    const variants = this.variantsForSession(sessionId)
-    // A model with no variants gets no picker at all. An empty select would
-    // claim a control that has nothing to choose between, which is the same
-    // silent lie as claiming the capability outright.
-    if (variants.length === 0) return []
+    const model = this.models.get(sessionId)
+    const variants =
+      this.catalog
+        .get(sessionId)
+        ?.find((entry) => entry.id === model?.id && entry.providerID === model.providerID)
+        ?.variants ?? []
+    if (!variants.length) return []
     return [
       {
-        id: VARIANT_OPTION_ID,
+        id: "variant",
         name: "Model variant",
-        description: "Reasoning effort and token budget overlays declared by this model.",
         category: "thought_level",
         type: "select",
-        currentValue: this.sessionVariants.get(sessionId) ?? NO_VARIANT,
+        currentValue: model?.variant ?? NO_VARIANT,
         options: [
-          { value: NO_VARIANT, name: "Base model", description: "No variant overlay." },
-          ...variants.map((variant) => ({ value: variant, name: variant })),
+          { value: NO_VARIANT, name: "Base model" },
+          ...variants.map((variant) => ({ value: variant.id, name: variant.id })),
         ],
       },
     ]
@@ -461,317 +1026,64 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
     configId: string,
     value: string | boolean
   ): Promise<AcpConfigOption[]> {
-    if (!this._sessions.has(sessionId)) throw new Error(`Session not found: ${sessionId}`)
-    if (configId !== VARIANT_OPTION_ID) throw new Error(`Unknown config option: ${configId}`)
-    if (typeof value !== "string") {
-      throw new Error(`Config option ${configId} requires a string value`)
+    this.requireSession(sessionId)
+    const option = this.getConfigOptions(sessionId)?.find((option) => option.id === configId)
+    const model = this.models.get(sessionId)
+    if (
+      !option ||
+      option.type !== "select" ||
+      !model ||
+      typeof value !== "string" ||
+      !option.options.some((item) => "value" in item && item.value === value)
+    )
+      throw new Error("Invalid OpenCode model variant")
+    const next = {
+      providerID: model.providerID,
+      id: model.id,
+      ...(value !== NO_VARIANT ? { variant: value } : {}),
     }
-    const variant = value === NO_VARIANT ? undefined : value
-    // Refuse a variant this model never published. OpenCode would answer with a
-    // model-resolution failure on the next prompt instead of here, which reads
-    // as "the agent broke" rather than "that variant does not exist".
-    if (variant && !this.variantsForSession(sessionId).includes(variant)) {
-      throw new Error(`OpenCode V2 model has no variant "${variant}"`)
-    }
-    const modelId = this.models.get(sessionId)?.currentModelId
-    if (!modelId) throw new Error("OpenCode V2 session has no model to apply a variant to")
-    await this.switchModel(sessionId, modelId, variant)
+    await this.getSdkClient(sessionId).session.switchModel({ sessionID: sessionId, model: next })
+    this.models.set(sessionId, next)
+    this.updateMetadata(sessionId)
     return this.getConfigOptions(sessionId) ?? []
   }
 
-  /** The variant ids the session's CURRENT model declares. */
-  private variantsForSession(sessionId: string): string[] {
-    const modelId = this.models.get(sessionId)?.currentModelId
-    return (modelId && this.modelVariants.get(modelId)) || []
+  getAvailableCommands(sessionId?: string): AcpAvailableCommand[] {
+    return sessionId
+      ? [...(this.commands.get(sessionId) ?? [])]
+      : [...this.commands.values()].flat()
   }
 
-  /**
-   * The one place a model reference is written, so model and variant can never
-   * be sent as a mismatched pair.
-   */
-  private async switchModel(
-    sessionId: string,
-    modelId: string,
-    variant: string | undefined
-  ): Promise<void> {
-    const [providerID, id] = modelId.split("/", 2)
-    if (!providerID || !id) throw new Error("OpenCode V2 model must use provider/model format")
-    unwrap(
-      await this.requireClient().v2.session.switchModel({
-        sessionID: sessionId,
-        model: { providerID, id, ...(variant ? { variant } : {}) },
-      })
-    )
-    const current = this.models.get(sessionId)
-    if (current) this.models.set(sessionId, { ...current, currentModelId: modelId })
-    if (variant) this.sessionVariants.set(sessionId, variant)
-    else this.sessionVariants.delete(sessionId)
-  }
-
-  getAvailableCommands(): AcpAvailableCommand[] {
-    return [...this.commands]
+  getSessionExtensionSupport() {
+    const supported = { state: "supported" as const }
+    return { "session/list": supported, "session/fork": supported, "session/resume": supported }
   }
 
   async getCompactionCapability(sessionId: string): Promise<ExternalAgentCompactionCapability> {
-    const command = await this.getAdvertisedCommandCompactionCapability(sessionId)
-    if (!this.isConnected()) return { status: "unknown", routes: [], reason: "not_connected" }
-    if (this.nativeCompactionUnsupported) return command
-    return {
-      status: "supported",
-      routes: [{ kind: "native", supportsFocus: false }, ...command.routes],
-    }
-  }
-
-  getProviderUndoCapability(sessionId: string) {
-    return this.getAdvertisedProviderUndoCapability(sessionId)
-  }
-
-  undoLastProviderChange(sessionId: string) {
-    return this.undoWithAdvertisedCommand(sessionId)
+    if (!this._sessions.has(sessionId))
+      return { status: "unknown", routes: [], reason: "session_not_found" }
+    return { status: "supported", routes: [{ kind: "native", supportsFocus: false }] }
   }
 
   async compactSession(
     sessionId: string,
     options: ExternalAgentCompactionOptions = {}
   ): Promise<void> {
-    if (options.focus) {
-      await this.compactWithAdvertisedCommand(sessionId, options)
-      return
-    }
-    const client = this.requireClient()
-    try {
-      unwrap(await client.v2.session.compact({ sessionID: sessionId }))
-    } catch (error) {
-      if (!isExplicitlyUnsupportedCapabilityError(error)) throw error
-      this.nativeCompactionUnsupported = true
-      await this.compactWithAdvertisedCommand(sessionId, options)
-      return
-    }
-    unwrap(await client.v2.session.wait({ sessionID: sessionId }))
-  }
-
-  private requireClient(): OpencodeClient {
-    if (!this.client) throw new Error("Not connected to OpenCode V2 service")
-    return this.client
-  }
-
-  private async discoverCapabilities(): Promise<void> {
-    const client = this.requireClient()
-    const commandResult = unwrap<Record<string, unknown>>(await client.v2.command.list())
-    const rawCommands = Array.isArray(commandResult.data)
-      ? (commandResult.data as Array<Record<string, unknown>>)
-      : []
-    this.commands = rawCommands.flatMap((command): AcpAvailableCommand[] => {
-      const name = readString(command.name)
-      const template = readString(command.template) ?? ""
-      if (!name) return []
-      return [
-        {
-          name,
-          description: readString(command.description) ?? "",
-          input: template.includes("$ARGUMENTS") ? { hint: "$ARGUMENTS" } : null,
-        },
-      ]
-    })
-
-    const modelResult = unwrap<Record<string, unknown>>(await client.v2.model.list())
-    const rawModels = Array.isArray(modelResult.data)
-      ? (modelResult.data as Array<Record<string, unknown>>)
-      : []
-    const availableModels = rawModels
-      .filter((model) => model.enabled !== false)
-      .map((model) => ({
-        modelId: `${readString(model.providerID) ?? ""}/${readString(model.id) ?? ""}`,
-        name: readString(model.name) ?? readString(model.id) ?? "Unknown model",
-      }))
-      .filter((model) => !model.modelId.startsWith("/") && !model.modelId.endsWith("/"))
-    // `ModelV2Info.variants` is the only place the ids are published. A model
-    // with none simply gets no entry, and `getConfigOptions` then offers no
-    // picker rather than an empty one.
-    this.modelVariants.clear()
-    for (const model of rawModels) {
-      const modelId = `${readString(model.providerID) ?? ""}/${readString(model.id) ?? ""}`
-      if (modelId.startsWith("/") || modelId.endsWith("/")) continue
-      const variants = Array.isArray(model.variants)
-        ? (model.variants as Array<Record<string, unknown>>)
-            .map((variant) => readString(variant.id))
-            .filter((id): id is string => !!id)
-        : []
-      if (variants.length > 0) this.modelVariants.set(modelId, variants)
-    }
-    this.models.set("__default__", {
-      availableModels,
-      currentModelId: availableModels[0]?.modelId ?? "",
-    })
-  }
-
-  private attachRuntimeMetadata(session: ExternalAgentSession): void {
-    const defaultModels = this.models.get("__default__")
-    const model = readString(session.metadata?.model)
-    if (defaultModels) {
-      this.models.set(session.id, {
-        ...defaultModels,
-        currentModelId: model ?? defaultModels.currentModelId,
-      })
-    }
-    const variant = readString(session.metadata?.modelVariant)
-    if (variant) this.sessionVariants.set(session.id, variant)
-    else this.sessionVariants.delete(session.id)
-    // `configOptions` on the session is what seeds the panel before any event
-    // arrives (`use-external-agent` reads it on activation), so the variant
-    // picker is there from the first render instead of after the first change.
-    session.metadata = {
-      ...session.metadata,
-      availableCommands: this.getAvailableCommands(),
-      configOptions: this.getConfigOptions(session.id),
+    this.requireSession(sessionId)
+    if (options.focus)
+      throw new Error("OpenCode native compaction does not accept focus instructions")
+    for await (const event of this.runTurn(sessionId, (client, signal) =>
+      client.session.compact({ sessionID: sessionId, delivery: "queue" }, { signal })
+    )) {
+      if (event.type === "error") throw new Error(event.error)
+      if (event.type === "done" && !event.success) throw new Error("OpenCode compaction failed")
     }
   }
 
-  private mapSession(info: SessionV2Info): ExternalAgentSession {
-    return {
-      id: info.id,
-      agentId: this._config?.id ?? "opencode-v2",
-      status: "active",
-      permissionMode: this._config?.defaultPermissionMode ?? "default",
-      createdAt: toDate(info.time?.created),
-      lastActivityAt: toDate(info.time?.updated),
-      messages: [],
-      metadata: {
-        title: info.title,
-        projectID: info.projectID,
-        directory: info.location?.directory,
-        parentID: info.parentID,
-        model: info.model ? `${info.model.providerID}/${info.model.id}` : undefined,
-        // `SessionV2Info.model` is a `ModelRef`, so the variant a session was
-        // created or switched onto is readable back rather than inferred — the
-        // picker opens on what OpenCode is actually running, including for a
-        // session this process did not create.
-        modelVariant: info.model?.variant,
-        preview: true,
-      },
-    }
+  getProviderUndoCapability(sessionId: string) {
+    return this.getAdvertisedProviderUndoCapability(sessionId)
   }
-
-  private mapEvent(sessionId: string, raw: unknown): ExternalAgentEvent[] {
-    const event = readRecord(raw)
-    const type = readString(event?.type)
-    const data = readRecord(event?.properties) ?? readRecord(event?.data)
-    const timestamp = eventTime(data)
-    const messageId = readString(data?.assistantMessageID) ?? "assistant"
-
-    switch (type) {
-      case "session.next.text.started":
-        return [{ type: "message_start", sessionId, timestamp, messageId, role: "assistant" }]
-      case "session.next.text.delta":
-        return [
-          {
-            type: "message_delta",
-            sessionId,
-            timestamp,
-            messageId,
-            delta: { type: "text", text: readString(data?.delta) ?? "" },
-          },
-        ]
-      case "session.next.text.ended":
-        return [{ type: "message_end", sessionId, timestamp, messageId }]
-      case "session.next.reasoning.delta":
-        return [
-          {
-            type: "thinking",
-            sessionId,
-            timestamp,
-            thinking: readString(data?.delta) ?? "",
-          },
-        ]
-      case "session.next.tool.called":
-        return [
-          {
-            type: "tool_use_start",
-            sessionId,
-            timestamp,
-            toolUseId: readString(data?.callID) ?? "tool",
-            toolName: readString(data?.tool) ?? "unknown",
-            rawInput: readRecord(data?.input) ?? {},
-          },
-        ]
-      case "session.next.tool.success":
-      case "session.next.tool.failed":
-        return [
-          {
-            type: "tool_result",
-            sessionId,
-            timestamp,
-            toolUseId: readString(data?.callID) ?? "tool",
-            result: eventResult(
-              data?.result ??
-                data?.structured ??
-                data?.content ??
-                readRecord(data?.error)?.message ??
-                data?.error
-            ),
-            isError: type.endsWith("failed"),
-          },
-        ]
-      case "permission.v2.asked":
-        return [
-          {
-            type: "permission_request",
-            sessionId,
-            timestamp,
-            request: {
-              id: readString(data?.id) ?? "permission",
-              requestId: readString(data?.id) ?? "permission",
-              sessionId,
-              title: readString(data?.action) ?? "Permission requested",
-              toolInfo: {
-                id: readString(data?.action) ?? "unknown",
-                name: readString(data?.action) ?? "unknown",
-              },
-              rawInput: { resources: data?.resources },
-            },
-          },
-        ]
-      case "session.next.compaction.started":
-        return [
-          {
-            type: "progress",
-            sessionId,
-            timestamp,
-            progress: 0,
-            message: "context_compaction",
-          },
-        ]
-      case "session.next.compaction.ended":
-        return [
-          {
-            type: "progress",
-            sessionId,
-            timestamp,
-            progress: 1,
-            message: "context_compaction_complete",
-          },
-        ]
-      case "session.next.step.failed":
-        return [
-          {
-            type: "error",
-            sessionId,
-            timestamp,
-            error:
-              readString(readRecord(data?.error)?.message) ?? "OpenCode V2 session step failed",
-            recoverable: false,
-          },
-          {
-            type: "done",
-            sessionId,
-            timestamp,
-            success: false,
-          },
-        ]
-      case "session.next.step.ended":
-        return []
-      default:
-        return []
-    }
+  undoLastProviderChange(sessionId: string) {
+    return this.undoWithAdvertisedCommand(sessionId)
   }
 }

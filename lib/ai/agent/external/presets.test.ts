@@ -87,13 +87,15 @@ describe("EXTERNAL_AGENT_PRESETS", () => {
 })
 
 describe("BUILTIN_EXECUTABLE_PRESET_IDS", () => {
-  it("excludes custom, preview integrations, and managed-runtime backends", () => {
+  it("excludes retired protocols, service discovery, and managed-runtime backends", () => {
     // The DeepSeek Harness presets name no binary on PATH: they become runnable
     // only after the managed runtime is installed, so offering them as spawnable
     // backends would produce choices that cannot spawn.
     const nonExecutable = [
       "custom",
-      "opencode-v2-preview",
+      "opencode-server",
+      "opencode-remote",
+      "opencode-v2-service",
       "deepseek-harness-readonly",
       "deepseek-harness-workspace",
       "deepseek-harness-acp",
@@ -113,8 +115,10 @@ describe("BUILTIN_EXECUTABLE_PRESET_IDS", () => {
     )
   })
 
-  it("keeps the stale OpenCode V2 preview contract documented-only", () => {
-    expect(EXTERNAL_AGENT_PRESETS["opencode-v2-preview"]?.supportTier).toBe("documented-only")
+  it("enables the current OpenCode service and retires V1 presets", () => {
+    expect(EXTERNAL_AGENT_PRESETS["opencode-v2-service"]?.supportTier).toBe("executable")
+    expect(EXTERNAL_AGENT_PRESETS["opencode-server"]?.supportTier).toBe("documented-only")
+    expect(EXTERNAL_AGENT_PRESETS["opencode-remote"]?.supportTier).toBe("documented-only")
   })
 
   it("only lists ids that resolve to a real preset config", () => {
@@ -140,9 +144,11 @@ describe("getAvailablePresets", () => {
     expect(ids).not.toContain("custom")
   })
 
-  it("keeps documented-only presets discoverable but out of runnable choices", () => {
-    expect(getAvailablePresets()).toContain("opencode-v2-preview")
-    expect(getRunnablePresets()).not.toContain("opencode-v2-preview")
+  it("offers the current service and ACP as runnable choices", () => {
+    expect(getAvailablePresets()).toContain("opencode-v2-service")
+    expect(getRunnablePresets()).toContain("opencode-v2-service")
+    expect(getRunnablePresets()).not.toContain("opencode-server")
+    expect(getRunnablePresets()).not.toContain("opencode-remote")
     expect(getRunnablePresets()).toContain("opencode-acp")
   })
 })

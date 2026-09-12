@@ -281,7 +281,8 @@ describe("permission choreography", () => {
       transcriptFs: memoryFs(),
       assembler: createCliContextAssembler(sharedSeams(config)),
       startToolHost: host.start as never,
-      buildToolHostServers: () => [] as never,
+      buildToolHostServers: () =>
+        [{ name: "cognia-tools", command: "node", args: [], env: [] }] as never,
     })
     manager.execute = jest.fn(async (_id, _prompt, opts) => {
       const response = await opts?.onPermissionRequest?.({
@@ -474,6 +475,11 @@ describe("tool-host rendering", () => {
     const session = createExternalAgentSession({
       config,
       manager,
+      connection: {
+        agentId: "render-fixture",
+        presetId: "claude-code",
+        capabilities: { negotiated: { toolExecution: false } },
+      },
       home: HOME,
       sessionId: "s1",
       transcriptFs: memoryFs(),

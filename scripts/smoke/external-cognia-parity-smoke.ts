@@ -2,7 +2,7 @@
  * Real-agent smoke for the Cognia tool bridge (ADR external-hosting parity).
  *
  * Unit tests and the bridge integration fixture both stub the AGENT. This runs
- * the real one — `codex app-server` or Claude Code over ACP — through the real
+ * the real one — `codex app-server`, Claude Code, or Devin over ACP — through the real
  * `ExternalAgentManager`, the real sandbox launcher, the real broker and the
  * real bridge, and asserts the thing that actually matters:
  *
@@ -47,7 +47,7 @@ type Backend = (typeof BACKENDS)[number]
  * bridge. The observation is printed so the gap stays visible.
  */
 const READ_TOOL = "read"
-const WRITE_TOOL = "write"
+const WRITE_TOOL = "file_append"
 const PROBE_TOOL = "git_status"
 const HOST_TOOL = "ask_user"
 
@@ -59,7 +59,7 @@ function prompt(cwd: string): string {
     `2. Call \`mcp__cognia-plugin-tools__${HOST_TOOL}\` with`,
     '   {"question": "Continue the smoke?", "options": [{"value": "yes", "label": "Yes"}]}.',
     `3. Call \`mcp__cognia-tools__${WRITE_TOOL}\` with`,
-    `   {"file_path": "${cwd}/SMOKE.txt", "content": "cognia parity ok"}.`,
+    `   {"path": "${cwd}/SMOKE.txt", "content": "cognia parity ok"}.`,
     `4. Call \`mcp__cognia-tools__${PROBE_TOOL}\` with {"cwd": "${cwd}"}.`,
     "5. Reply with the single word DONE.",
     "Do not use your own built-in file or shell tools — use the mcp__cognia-tools__ ones.",
@@ -120,8 +120,8 @@ async function runBackend(
 ): Promise<{ ok: boolean; detail: string }> {
   const cwd = makeWorkspace(root)
   const observed: Observed = { calls: [], results: [] }
-  let approvalPrompts = 0
-  const expectedApprovals = backend === "devin" ? 0 : 1
+  const approvals: Array<{ id: string; tool: string }> = []
+  const expectedApprovals = backend === "devin" ? undefined : 1
   const unsubscribeAskUser = useAskUserStore.subscribe((state) => {
     if (!state.active) return
     state.resolveActive({ selected: ["yes"], text: "", cancelled: false })
@@ -134,9 +134,12 @@ async function runBackend(
   try {
     const result = await session.send(prompt(cwd), {
       gate: createPermissionGate({
-        prompt: async () => {
-          approvalPrompts += 1
-          return true
+        prompt: async (request) => {
+          const id = String(request.requestId ?? "")
+          approvals.push({ id, tool: request.toolName })
+          // Cognia tool calls need only the broker's authoritative approval.
+          // An agent-level request here means the canonical tool name was lost.
+          return backend !== "devin" || id.startsWith("toolhost-")
         },
       }),
       // The broker projects its tool calls as TUI actions; capture them here
@@ -154,7 +157,15 @@ async function runBackend(
       timeoutMs: 300_000,
     })
     const parity = readToolHostStatus(session.sessionId)
-    const wroteFile = fs.existsSync(path.join(cwd, "SMOKE.txt"))
+    const wroteFile =
+      fs.existsSync(path.join(cwd, "SMOKE.txt")) &&
+      fs.readFileSync(path.join(cwd, "SMOKE.txt"), "utf8") === "cognia parity ok"
+    const approvalsValid =
+      backend === "devin"
+        ? approvals.every((approval) => approval.id.startsWith("toolhost-")) &&
+          new Set(approvals.map((approval) => approval.tool)).size === approvals.length &&
+          !approvals.some((approval) => approval.tool === `mcp__cognia-tools__${WRITE_TOOL}`)
+        : approvals.length === expectedApprovals
     const sawRead = observed.results.some((r) => r.name === READ_TOOL && r.ok)
     const sawWrite = observed.results.some((r) => r.name === WRITE_TOOL && r.ok)
     const sawHostTool = observed.results.some((r) => r.name === HOST_TOOL && r.ok)
@@ -165,7 +176,8 @@ async function runBackend(
       `  read-only    ${sawRead ? "OK" : "MISSING"} (${READ_TOOL})`,
       `  mutating     ${sawWrite ? "OK" : "MISSING"} (${WRITE_TOOL})`,
       `  host tool    ${sawHostTool ? "OK" : "MISSING"} (${HOST_TOOL})`,
-      `  approvals    ${approvalPrompts} (expected exactly ${expectedApprovals})`,
+      `  approvals    ${approvals.length} (${approvalsValid ? "OK" : "INVALID"}; ${backend === "devin" ? "broker only, no duplicate prompts or Accept Edits write prompt" : `expected exactly ${expectedApprovals}`})`,
+      ...approvals.map((approval) => `  approval     ${approval.id}: ${approval.tool}`),
       `  git probe    ${
         observed.results.some((r) => r.name === PROBE_TOOL && r.ok)
           ? "OK"
@@ -177,8 +189,7 @@ async function runBackend(
     // The mutating half is only proven by the file actually appearing: a tool
     // result Cognia recorded but that changed nothing would be the same silent
     // lie this work exists to remove.
-    const ok =
-      sawRead && sawWrite && sawHostTool && wroteFile && approvalPrompts === expectedApprovals
+    const ok = sawRead && sawWrite && sawHostTool && wroteFile && approvalsValid
     return { ok, detail: lines.join("\n") }
   } finally {
     unsubscribeAskUser()

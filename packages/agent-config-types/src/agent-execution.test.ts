@@ -263,6 +263,13 @@ describe("isAgentEventEnvelope", () => {
 
   it("accepts the elicitation, retry, queue and resource kinds", () => {
     const events: CanonicalAgentEvent[] = [
+      {
+        kind: "permission-request",
+        requestId: "p1",
+        toolName: "Edit",
+        defaultToNo: true,
+        suppressAlwaysAllowRule: true,
+      },
       { kind: "elicitation-request", requestId: "e1", source: "ask_user", prompt: "which?" },
       { kind: "elicitation-resolved", requestId: "e1", outcome: "timeout" },
       { kind: "retry", phase: "scheduled", attempt: 1, maxRetries: 2, code: "provider_error" },

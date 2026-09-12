@@ -2743,6 +2743,12 @@ export function App({
   const resolvePermission = useCallback(
     (decision: CapturePermissionDecision) => {
       if (
+        state.overlay.kind === "permission" &&
+        state.overlay.req.suppressAlwaysAllowRule &&
+        decision.decision === "allow_always"
+      )
+        decision = { ...decision, decision: "allow" }
+      if (
         !attachedHostConnectionRef.current &&
         decision.decision === "allow_always" &&
         state.overlay.kind === "permission"

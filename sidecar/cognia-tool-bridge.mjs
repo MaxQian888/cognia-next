@@ -20,8 +20,10 @@
 // definitions and handlers already are. Reimplementing them CLI-side would have
 // meant a second schema source and a second set of handlers.
 
+import { assertModelSafeToolOutput } from "./dispatch/ai-sdk-tools.mjs"
 import net from "node:net"
 import { pathToFileURL } from "node:url"
+import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js"
 
 import { collectCogniaToolDefs, READ_ONLY_TOOL_NAMES } from "./builtin-tools/index.mjs"
 import { createReadTracker } from "./builtin-tools/core/read-tracker.mjs"
@@ -39,7 +41,7 @@ import { makeLazyCodeGraphResolver } from "./dispatch/codegraph-resolver-factory
 
 const COGNIA_TOOLS_SERVER = "cognia-tools"
 const COGNIA_PLUGIN_TOOLS_SERVER = "cognia-plugin-tools"
-const PROTOCOL_VERSION = "2025-06-18"
+const PROTOCOL_VERSION = LATEST_PROTOCOL_VERSION
 
 /** Connect to the Cognia broker and expose a request/response helper. */
 export function connectBroker(socketPath, { connect = net.connect } = {}) {
@@ -148,15 +150,16 @@ export function buildToolSurface(serverName, session, broker) {
           ? tool.jsonSchema
           : { type: "object", properties: {} },
       async run(args) {
-        const verdict = await broker.call("authorize", { name: tool.name, args })
-        if (!verdict.allow) {
-          return { content: [{ type: "text", text: `Error: ${verdict.reason}` }], isError: true }
-        }
+        // Host execution authorizes inside the broker before invoking the handler.
+        // A separate authorize call would ask twice for the same operation.
         const outcome = await broker.call("exec", { name: tool.name, args })
         if (outcome && outcome.error) {
-          return { content: [{ type: "text", text: `Error: ${outcome.error}` }], isError: true }
+          return assertModelSafeToolOutput({
+            content: [{ type: "text", text: `Error: ${outcome.error}` }],
+            isError: true,
+          })
         }
-        return toMcpContent(outcome?.result ?? null)
+        return toMcpContent(assertModelSafeToolOutput(outcome?.result ?? null))
       },
     }))
   }
@@ -235,7 +238,8 @@ export function buildToolSurface(serverName, session, broker) {
           }
           // Only then validate + normalise, so the handler receives the same
           // parsed shape it would get on the Anthropic and ai-sdk rails.
-          const parsed = parseToolArgs(def.inputSchema, args)
+          const effectiveArgs = verdict.updatedArgs ?? args
+          const parsed = parseToolArgs(def.inputSchema, effectiveArgs)
           let result
           if (!parsed.ok) {
             // Falls through to the report below rather than returning early: a
@@ -255,6 +259,13 @@ export function buildToolSurface(serverName, session, broker) {
               }
             }
           }
+          // Review in the Cognia host before any content is returned to the model.
+          const reviewed = await broker.call("review", {
+            name: def.name,
+            args: effectiveArgs,
+            result,
+          })
+          result = toMcpContent(assertModelSafeToolOutput(reviewed.result))
           // Report so the call renders in the TUI and lands in the audit trail
           // exactly like a built-in one. Best-effort: a failed report must not
           // turn a successful tool call into an error.

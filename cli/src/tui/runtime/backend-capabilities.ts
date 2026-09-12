@@ -36,7 +36,10 @@ import {
   type ExternalAgentCapabilityId,
   type ExternalAgentCapabilityProfileV1,
 } from "@cognia/agent-config-types/external-agent-capability"
-import { negotiateCapabilityProfile } from "@/lib/ai/agent/external/capability-profile"
+import {
+  buildDeclaredCapabilityProfile,
+  negotiateCapabilityProfile,
+} from "@/lib/ai/agent/external/capability-profile"
 import { liveCapabilityFacts } from "@/lib/ai/agent/external/capability-live-facts"
 import { getPresetConfig } from "@/lib/ai/agent/external/presets"
 // Pure mode arithmetic (a protocol→supported-modes table plus a permissiveness
@@ -181,6 +184,8 @@ const REASON = {
   noAdvertisedCompactCommand: "the agent advertises no /compact command",
   nativeSummarizeRoute: "served by the provider's own summarize route",
   noManifestRow: "nothing describes this protocol's capabilities",
+  isolatedLocalService: "provided by a private local service for this conversation",
+  cogniaExtensionBridge: "provided by the bundled Cognia extension",
   cogniaHookRuntime: "Cognia's hook runtime wraps the turn",
   cogniaDispatchAgent: "served by Cognia's dispatch_agent tool",
 } as const
@@ -284,6 +289,7 @@ export interface ToolHostStatus {
   hostToolCount: number
   /** True when `dispatch_agent` is among the projected host tools. */
   subagentDispatch: boolean
+  hookRuntimeAvailable?: boolean
 }
 
 export interface ExternalCapabilityInput {
@@ -309,12 +315,19 @@ export interface ExternalCapabilityInput {
  * see in `/tools` would be uncallable. The connect flow uses this to fail before
  * the composer opens rather than after the first tool call.
  */
-export function canHostCogniaTools(negotiated: AcpCapabilities | undefined): boolean {
+export function canHostCogniaTools(
+  negotiated: AcpCapabilities | undefined,
+  protocol?: string
+): boolean {
   // Absent capabilities mean the handshake never reported them; ACP agents that
   // accept `session/new` MCP servers advertise `mcpTools`. Treat an explicit
   // `false` as a refusal and an omission as "assume the protocol slot exists",
   // which is what every shipped preset does.
-  return negotiated?.mcpTools !== false
+  if (negotiated?.mcpTools === false) return false
+  return (
+    !protocol ||
+    isCapabilityUsable(buildDeclaredCapabilityProfile({ protocol }).effective.mcp.level)
+  )
 }
 
 /**
@@ -329,7 +342,9 @@ export function canHostCogniaTools(negotiated: AcpCapabilities | undefined): boo
 export function externalCapabilities(input: ExternalCapabilityInput): BackendCapabilities {
   const unsupported = (reason: string): FeatureSupport => ({ supported: false, reason })
   const host = input.toolHost
-  const attachable = host ? host.attachable : canHostCogniaTools(input.negotiated)
+  const protocol =
+    input.protocol ?? resolvePresetProtocol(input.presetId ?? input.backend) ?? input.backend
+  const attachable = host ? host.attachable : canHostCogniaTools(input.negotiated, protocol)
   const toolHostRunning = attachable && (host ? host.running : true)
 
   const presetId = input.presetId ?? input.backend
@@ -344,11 +359,7 @@ export function externalCapabilities(input: ExternalCapabilityInput): BackendCap
     hostFacts: {
       toolHostRunning,
       subagentDispatchProjected: host?.subagentDispatch ?? false,
-      // The CLI's external-agent session does not wrap the turn in Cognia's
-      // lifecycle hooks. The renderer does; that difference is the whole
-      // reason this is a host fact rather than a protocol row, and reporting
-      // it as "only the built-in agent reports this" named the wrong cause.
-      hookRuntimeAvailable: false,
+      hookRuntimeAvailable: host?.hookRuntimeAvailable ?? false,
     },
     // The launch path already refused an unsandboxable platform before this
     // point, so a connected agent is by construction on a supported one.
@@ -379,7 +390,8 @@ export function externalCapabilities(input: ExternalCapabilityInput): BackendCap
     features: {
       // Was unconditionally SUPPORTED. Only ACP carries MCP servers at
       // `session/new`; Codex reaches the same outcome through a per-thread
-      // config override, and OpenCode / Pi / DSH have no channel at all — so
+      // config override, and DSH through a session-owned startup composition.
+      // OpenCode / Pi have separate protocol-specific bridges, so
       // `/mcp` used to offer a toggle that forwarded nothing on four of seven
       // protocols.
       mcp: fromProfile(profile, "mcp"),
@@ -388,7 +400,9 @@ export function externalCapabilities(input: ExternalCapabilityInput): BackendCap
       // Skills and plugin tools are NOT agent capabilities: they ride Cognia's
       // tool host. Mapping them onto `skills.native` / `plugins.native` would
       // claim the AGENT supports them, which is a different (and false) thing.
-      skills: attachable ? SUPPORTED : unsupported(REASON.noToolHost),
+      // Selected skill instructions travel in the shared prompt assembler even
+      // when a remote endpoint cannot load additional skills through tools.
+      skills: SUPPORTED,
       plugins: projected(host?.hostToolCount ?? 0),
       compact: fromProfile(profile, "compaction"),
       resume: fromProfile(profile, "session.resume"),

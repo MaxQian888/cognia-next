@@ -903,12 +903,45 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     return session
   }
 
+  private instructionText(options?: {
+    systemPrompt?: string
+    instructionEnvelope?: SessionCreateOptions["instructionEnvelope"]
+    context?: unknown
+  }): string {
+    const envelope = options?.instructionEnvelope
+    const context = options?.context as Record<string, unknown> | undefined
+    const { custom, ...rest } = context ?? {}
+    const safeCustom = custom
+      ? Object.fromEntries(
+          Object.entries(custom).filter(
+            ([key]) => !["mcpServers", "chatSessionId", "additionalDirectories"].includes(key)
+          )
+        )
+      : undefined
+    const safeContext = {
+      ...rest,
+      ...(safeCustom && Object.keys(safeCustom).length ? { custom: safeCustom } : {}),
+    }
+    return [
+      ...new Set(
+        [
+          options?.systemPrompt,
+          envelope?.developerInstructions,
+          envelope?.customInstructions,
+          envelope?.skillsSummary,
+          envelope?.projectContextSummary,
+          Object.keys(safeContext).length ? JSON.stringify(safeContext) : undefined,
+        ].filter(Boolean)
+      ),
+    ].join("\n\n")
+  }
+
   /** Session metadata assembled from create options + per-agent codexOptions. */
   private buildSessionMetadata(options?: SessionCreateOptions): Record<string, unknown> {
     const metadata: Record<string, unknown> = {
       ...(options?.metadata ?? {}),
       ...(options?.cwd ? { cwd: options.cwd } : {}),
-      ...(options?.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
+      ...(this.instructionText(options) ? { systemPrompt: this.instructionText(options) } : {}),
       ...(options?.briefMode ? { briefMode: true } : {}),
     }
     // Per-agent defaults plumbed by the manager as metadata.codexOptions;
@@ -1190,21 +1223,43 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     return session
   }
 
-  async forkSession(sessionId: string): Promise<ExternalAgentSession> {
+  async forkSession(
+    sessionId: string,
+    options?: SessionCreateOptions
+  ): Promise<ExternalAgentSession> {
     const source = this._sessions.get(sessionId)
+    const metadata = { ...source?.metadata, ...this.buildSessionMetadata(options) }
+    const mode = options?.permissionMode ?? source?.permissionMode ?? "default"
+    const params: Record<string, unknown> = {
+      threadId: sessionId,
+      approvalsReviewer: "user",
+      approvalPolicy: this.approvalPolicyFor(mode),
+      sandbox: this.sandboxModeParam(metadata, mode),
+      ...(metadata.cwd ? { cwd: metadata.cwd } : {}),
+      ...(metadata.selectedModel ? { model: metadata.selectedModel } : {}),
+    }
+    const systemPrompt = resolveSystemPromptText(metadata)
+    if (systemPrompt) params.developerInstructions = systemPrompt
+    const config = withCodexMcpServers(undefined, options?.mcpServers)
+    if (config) params.config = config
+    if (this.configRequirementsRead) await this.awaitConfigRequirements()
+    assertCodexRequestAllowed(
+      { sandbox: readString(params.sandbox), approvalPolicy: readString(params.approvalPolicy) },
+      this.status.configRequirements
+    )
     const result = await this.callSessionExtension<{
       thread?: { id?: string; turns?: Array<{ items?: CodexThreadItem[] }> }
       model?: string
       reasoningEffort?: string
       cwd?: string
-    }>("session/fork", "thread/fork", { threadId: sessionId })
+    }>("session/fork", "thread/fork", params)
     const threadId = readString(result?.thread?.id)
     if (!threadId) throw new Error("Codex app-server did not return a forked thread id")
     const session: ExternalAgentSession = {
       id: threadId,
       agentId: this._config!.id,
       status: "active",
-      permissionMode: source?.permissionMode ?? "default",
+      permissionMode: mode,
       capabilities: this._capabilities,
       tools: this._tools ?? [],
       messages: result.thread?.turns
@@ -1213,7 +1268,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       createdAt: new Date(),
       lastActivityAt: new Date(),
       metadata: {
-        ...(source?.metadata ?? {}),
+        ...metadata,
         forkedFrom: sessionId,
         ...(result.model ? { selectedModel: result.model } : {}),
         ...(result.reasoningEffort ? { reasoningEffort: result.reasoningEffort } : {}),
@@ -1596,9 +1651,14 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   ): CodexUserInput[] {
     const input: CodexUserInput[] = []
 
-    // Prepend the (brief-aware) system prompt once per thread as a leading text
-    // item — app-server threads have no dedicated systemPrompt field, so the
-    // instructions captured at createSession ride in as the first user input.
+    const instruction = this.instructionText(options)
+    const session = this._sessions.get(sessionId)!
+    if (instruction && instruction !== session.metadata?.systemPrompt) {
+      session.metadata = { ...session.metadata, systemPrompt: instruction }
+      this.sentSystemPrompt.delete(sessionId)
+    }
+    // Creation/resume/fork use native developerInstructions. A changed turn
+    // context uses text input because turn/start has no instruction override.
     if (!this.sentSystemPrompt.has(sessionId)) {
       const sys = this.resolveSystemPrompt(sessionId)
       if (sys) input.push({ type: "text", text: sys })

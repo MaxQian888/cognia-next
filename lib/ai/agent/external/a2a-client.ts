@@ -178,6 +178,7 @@ interface AgentCard {
 interface A2aSessionCtx {
   contextId?: string
   taskId?: string
+  options?: SessionCreateOptions
 }
 
 /**
@@ -411,6 +412,10 @@ export class A2aClientAdapter extends BaseProtocolAdapter {
   }
 
   async createSession(options?: SessionCreateOptions): Promise<ExternalAgentSession> {
+    if (options?.mcpServers?.length)
+      throw new Error("A2A does not support client MCP server mounts")
+    if (options?.additionalDirectories?.length)
+      throw new Error("A2A does not support local workspace root grants")
     const id = this.generateSessionId()
     const now = new Date()
     const session: ExternalAgentSession = {
@@ -424,7 +429,7 @@ export class A2aClientAdapter extends BaseProtocolAdapter {
     }
     this._sessions.set(id, session)
     // The agent owns context creation; reuse the opaque contextId it returns.
-    this.sessionCtx.set(id, {})
+    this.sessionCtx.set(id, { options: options ? structuredClone(options) : undefined })
     return session
   }
 
@@ -447,6 +452,44 @@ export class A2aClientAdapter extends BaseProtocolAdapter {
       }
       const isV1 = this.protocolVersion === "1.0"
       const parts = buildA2aParts(message, isV1)
+      const sessionOptions = ctx.options
+      const envelope = options?.instructionEnvelope ?? sessionOptions?.instructionEnvelope
+      const context = options?.context ?? sessionOptions?.context
+      // Routing metadata contains local credentials and grants, not task text.
+      const safeContext = context
+        ? Object.fromEntries(
+            Object.entries(context)
+              .filter(
+                ([key]) => !["mcpServers", "additionalDirectories", "chatSessionId"].includes(key)
+              )
+              .map(([key, value]) => [
+                key,
+                key === "custom" && value && typeof value === "object"
+                  ? Object.fromEntries(
+                      Object.entries(value).filter(
+                        ([name]) =>
+                          !["mcpServers", "additionalDirectories", "chatSessionId"].includes(name)
+                      )
+                    )
+                  : value,
+              ])
+          )
+        : undefined
+      const instructions = [
+        options?.systemPrompt ?? sessionOptions?.systemPrompt,
+        envelope?.developerInstructions,
+        envelope?.customInstructions,
+        envelope?.skillsSummary,
+        envelope?.projectContextSummary,
+        safeContext ? JSON.stringify(safeContext) : undefined,
+        (options?.briefMode ?? sessionOptions?.briefMode) ? "Keep responses concise." : undefined,
+      ]
+        .filter(Boolean)
+        .join("\n\n")
+      if (instructions) {
+        const text = `Cognia task instructions and context:\n${instructions}`
+        parts.unshift(isV1 ? { text } : { kind: "text", text })
+      }
 
       const a2aMessage: A2aMessage = {
         ...(isV1 ? {} : { kind: "message" as const }),
@@ -779,6 +822,5 @@ function buildAuthHeaders(net: ExternalAgentConfig["network"]): Record<string, s
 }
 
 function toAcpCapabilities(card: AgentCard | undefined): AcpCapabilities | undefined {
-  if (!card) return undefined
-  return { streaming: card.capabilities?.streaming ?? false } as AcpCapabilities
+  return { streaming: card?.capabilities?.streaming ?? false, mcpTools: false } as AcpCapabilities
 }

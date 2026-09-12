@@ -73,6 +73,26 @@ describe("JsonRpcPeer", () => {
   })
 
   describe("request/response correlation", () => {
+    it("does not send unsupported cancellation notifications when disabled", async () => {
+      jest.useFakeTimers()
+      try {
+        const { peer, writes } = makePeer({ cancellationNotifications: false })
+        const timedOut = expect(peer.sendRequest("initialize", undefined, 10)).rejects.toThrow(
+          "timeout"
+        )
+        jest.advanceTimersByTime(10)
+        await timedOut
+        const cancelled = expect(peer.sendRequest("session/prompt")).rejects.toThrow("cancelled")
+        peer.cancelRequest(2)
+        await cancelled
+        expect(writes.map((frame) => JSON.parse(frame).method)).toEqual([
+          "initialize",
+          "session/prompt",
+        ])
+      } finally {
+        jest.useRealTimers()
+      }
+    })
     it("resolves a pending request with its result", async () => {
       const { peer } = makePeer()
       const p = peer.sendRequest<{ thread: { id: string } }>("thread/start")

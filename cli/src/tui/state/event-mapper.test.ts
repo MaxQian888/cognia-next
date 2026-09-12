@@ -308,13 +308,23 @@ describe("canonicalEnvelopeToActions", () => {
         requestId: "permission-1",
         toolName: "bash",
         input: { command: "pwd" },
+        defaultToNo: true,
+        suppressAlwaysAllowRule: true,
       })
     )
     expect(request).toMatchObject({
       type: "OVERLAY_OPEN",
       overlay: {
         kind: "permission",
-        req: { requestId: "permission-1", sessionId: "s1", toolName: "bash" },
+        req: {
+          requestId: "permission-1",
+          sessionId: "s1",
+          toolName: "bash",
+          defaultToNo: true,
+          suppressAlwaysAllowRule: true,
+        },
+        index: 1,
+        choices: [{ value: "allow" }, { value: "deny" }],
       },
     })
     expect(

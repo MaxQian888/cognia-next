@@ -41,9 +41,9 @@ describe("DSH capability facts", () => {
   // These constants are the anti-drift mechanism for upstream's documented
   // limitations. If a future RC changes one, the change must be deliberate.
 
-  it("grants the SDK transport full observability", () => {
+  it("grants SDK committed-message observability without live deltas", () => {
     expect(DSH_SDK_CAPABILITIES).toMatchObject({
-      streamingDeltas: true,
+      streamingDeltas: false,
       toolEvents: true,
       reasoning: true,
       usage: true,
@@ -58,13 +58,13 @@ describe("DSH capability facts", () => {
     expect(DSH_SDK_CAPABILITIES.turnCancellation).toBe(false)
   })
 
-  it("denies the ACP transport every observability capability", () => {
+  it("reports current ACP committed tool and reasoning observations", () => {
     // "Committed answers only -- live progress, reasoning, tool activity,
     // plans, titles, and usage stay off the wire."
     expect(DSH_ACP_CAPABILITIES).toMatchObject({
       streamingDeltas: false,
-      toolEvents: false,
-      reasoning: false,
+      toolEvents: true,
+      reasoning: true,
       usage: false,
       subagentLineage: false,
     })
@@ -75,27 +75,20 @@ describe("DSH capability facts", () => {
     expect(DSH_ACP_CAPABILITIES.turnCancellation).toBe(true)
   })
 
-  it("denies MCP passthrough on ACP but allows it on SDK", () => {
-    // session/new rejects a non-empty mcpServers.
-    expect(DSH_ACP_CAPABILITIES.mcpPassthrough).toBe(false)
+  it("provides Cognia MCP clients on both transports", () => {
+    expect(DSH_ACP_CAPABILITIES.mcpPassthrough).toBe(true)
     expect(DSH_SDK_CAPABILITIES.mcpPassthrough).toBe(true)
   })
 
-  it("denies session resume on both transports", () => {
+  it("exposes persisted resume only on ACP", () => {
     expect(DSH_SDK_CAPABILITIES.sessionResume).toBe(false)
-    expect(DSH_ACP_CAPABILITIES.sessionResume).toBe(false)
+    expect(DSH_ACP_CAPABILITIES.sessionResume).toBe(true)
   })
 
   it("makes the two transports differ on exactly the observability/control split", () => {
     // The whole reason SDK is the default channel: it is strictly better at
     // being watched, strictly worse at being interrupted.
-    const observability = [
-      "streamingDeltas",
-      "toolEvents",
-      "reasoning",
-      "usage",
-      "subagentLineage",
-    ] as const
+    const observability = ["usage", "subagentLineage"] as const
     for (const key of observability) {
       expect(DSH_SDK_CAPABILITIES[key]).toBe(true)
       expect(DSH_ACP_CAPABILITIES[key]).toBe(false)

@@ -1,616 +1,326 @@
-import { readFileSync } from "node:fs"
-import { join } from "node:path"
-
 import {
-  DshVersionDriftError,
   dshEventDedupeKey,
+  DshVersionDriftError,
   translateDshNotification,
   translateDshNotifications,
 } from "./dsh-session-event-codec"
 
-const FIXTURE_DIR = join(process.cwd(), "tests", "fixtures", "dsh")
+const frame = (type: string, data: unknown, extra = {}) => ({
+  method: "session.event",
+  params: { sessionId: "s", event: { type, data, seq: 1, time: 1234, ...extra } },
+})
+const assistant = (content: unknown[], usage?: unknown) =>
+  frame("assistant/message", { message: { id: "a", content }, usage, stream: [] })
 
-function loadTrace(name: string): unknown[] {
-  return readFileSync(join(FIXTURE_DIR, name), "utf8")
-    .split("\n")
-    .filter((line) => line.trim().length > 0)
-    .map((line) => JSON.parse(line) as unknown)
-}
-
-function sessionEvent(type: string, data: unknown, seq = 1) {
-  return { method: "session.event", params: { sessionId: "s1", event: { type, seq, data } } }
-}
-
-describe("translateDshNotification", () => {
-  it("maps turn/start to session_start", () => {
-    const { events } = translateDshNotification(sessionEvent("turn/start", { turn: 1 }))
-    expect(events).toEqual([expect.objectContaining({ type: "session_start", sessionId: "s1" })])
-  })
-
-  it("maps a completed turn/end to a successful done", () => {
-    const { events } = translateDshNotification(
-      sessionEvent("turn/end", { turn: 1, reason: { kind: "completed" } })
-    )
-    expect(events[0]).toMatchObject({ type: "done", success: true, stopReason: "end_turn" })
-  })
-
-  it.each([
-    ["max-tokens", "max_tokens"],
-    ["aborted", "cancelled"],
-    ["interrupted", "cancelled"],
-    ["blocked", "refusal"],
-  ])("maps turn/end reason %s to %s without claiming success", (kind, stopReason) => {
-    const { events } = translateDshNotification(sessionEvent("turn/end", { reason: { kind } }))
-    expect(events[0]).toMatchObject({ type: "done", success: false, stopReason })
-  })
-
-  it("treats an unmapped turn/end reason as an error rather than success", () => {
-    // An unrecognized terminal reason is not evidence the turn completed.
-    const { events } = translateDshNotification(
-      sessionEvent("turn/end", { reason: { kind: "some-future-reason" } })
-    )
-    expect(events[0]).toMatchObject({ type: "done", success: false })
-    expect(events[0]).not.toHaveProperty("stopReason")
-  })
-
-  it("maps a text-delta chunk to a text message_delta", () => {
-    const { events } = translateDshNotification(
-      sessionEvent("assistant/chunk", { chunk: { type: "text-delta", text: "hi" } })
-    )
-    expect(events[0]).toMatchObject({ type: "message_delta", delta: { type: "text", text: "hi" } })
-  })
-
-  it("maps a reasoning-delta chunk to thinking, not commentary", () => {
-    // Reasoning stays governed by the reasoning disclosure policy; commentary
-    // is user-visible narration and would leak it.
-    const { events } = translateDshNotification(
-      sessionEvent("assistant/chunk", { chunk: { type: "reasoning-delta", text: "pondering" } })
-    )
-    expect(events[0]).toMatchObject({ type: "thinking", thinking: "pondering" })
-  })
-
-  it("drops empty deltas instead of emitting blank events", () => {
-    const { events } = translateDshNotification(
-      sessionEvent("assistant/chunk", { chunk: { type: "text-delta", text: "" } })
-    )
-    expect(events).toEqual([])
-  })
-
-  it("maps a usage chunk without double-counting cache or reasoning tokens", () => {
-    // cacheReadTokens are not newly billed, and reasoningTokens are already
-    // inside outputTokens; adding either inflates every total.
-    const { events } = translateDshNotification(
-      sessionEvent("assistant/chunk", {
-        chunk: {
-          type: "usage",
-          usage: { inputTokens: 123, outputTokens: 89, cacheReadTokens: 1664, reasoningTokens: 17 },
-        },
-      })
-    )
-    expect(events[0]).toMatchObject({ type: "usage_update", used: 212 })
-  })
-
-  it("warns on an unknown chunk type without failing", () => {
-    // Chunk kinds are presentation detail; the committed message still carries
-    // the content, so this must not break the stream.
-    const { events, warnings } = translateDshNotification(
-      sessionEvent("assistant/chunk", { chunk: { type: "video-delta" } })
-    )
-    expect(events).toEqual([])
-    expect(warnings).toEqual([{ kind: "unknown-chunk-type", detail: "video-delta" }])
-  })
-
-  it("maps tool/call with parsed arguments", () => {
-    const { events } = translateDshNotification(
-      sessionEvent("tool/call", {
-        callId: "call_1",
-        name: "bash",
-        arguments: '{"command":"echo hi"}',
-      })
-    )
-    expect(events[0]).toMatchObject({
-      type: "tool_use_start",
-      toolUseId: "call_1",
-      toolName: "bash",
-      rawInput: { command: "echo hi" },
-    })
-  })
-
-  it("still emits the tool call when arguments are unparsable", () => {
-    // A model can emit malformed JSON arguments. The call happened; dropping it
-    // would orphan the tool/result that follows.
-    const { events, warnings } = translateDshNotification(
-      sessionEvent("tool/call", { callId: "c1", name: "bash", arguments: "{not json" })
-    )
-    expect(events[0]).toMatchObject({
-      type: "tool_use_start",
-      toolUseId: "c1",
-      rawInput: undefined,
-    })
-    expect(warnings[0]?.kind).toBe("malformed-payload")
-  })
-
-  it("maps tool/result and preserves the error flag", () => {
-    const { events } = translateDshNotification(
-      sessionEvent("tool/result", {
+describe("current DeepSeek Harness session format 3", () => {
+  it("emits committed text and governed reasoning exactly once without replaying the embedded stream", () => {
+    const result = translateDshNotification(
+      frame("assistant/message", {
         message: {
-          source: { kind: "tool", callId: "call_1" },
+          id: "a",
           content: [
-            {
-              type: "tool-result",
-              toolCallId: "call_1",
-              content: [{ type: "text", text: "denied" }],
-              isError: true,
-            },
+            { type: "text", text: "answer" },
+            { type: "reasoning", text: "thought" },
+            { type: "tool-call", id: "c", name: "read", arguments: "{}" },
           ],
         },
+        stream: [{ type: "text-chunks", texts: ["answer"], dt: [0], time0: 1234, index: 0 }],
       })
     )
-    expect(events[0]).toMatchObject({
-      type: "tool_result",
-      toolUseId: "call_1",
-      result: "denied",
-      isError: true,
+    expect(result.events.map((event) => event.type)).toEqual([
+      "message_start",
+      "message_delta",
+      "thinking",
+      "message_end",
+    ])
+    expect(result.events[1]).toMatchObject({
+      messageId: "a",
+      delta: { type: "text", text: "answer" },
+      timestamp: new Date(1234),
     })
   })
-
-  it("maps session.status idle to done and ignores running", () => {
-    // running -> idle is the only reliable turn boundary: session/prompt returns
-    // an inbox-admission receipt, never a turn result.
+  it("includes cache input in totals and preserves provider totals and reasoning", () => {
+    const events = translateDshNotification(
+      assistant([], {
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheReadTokens: 20,
+        cacheWriteTokens: 3,
+        reasoningTokens: 2,
+        totalTokens: 38,
+      })
+    ).events
+    expect(events.at(-1)).toMatchObject({
+      tokenUsage: {
+        promptTokens: 33,
+        completionTokens: 5,
+        totalTokens: 38,
+        cacheReadTokens: 20,
+        cacheWriteTokens: 3,
+        reasoningTokens: 2,
+      },
+    })
+    expect(
+      translateDshNotification(assistant([], { inputTokens: 2, outputTokens: 3 })).events.at(-1)
+    ).toMatchObject({ tokenUsage: { totalTokens: 5 } })
+  })
+  it("does not fabricate accounting when the provider omitted it", () => {
+    expect(translateDshNotification(assistant([])).events.at(-1)).toMatchObject({
+      tokenUsage: undefined,
+    })
+  })
+  it.each([
+    ["completed", true, "end_turn"],
+    ["aborted", false, "cancelled"],
+    ["interrupted", false, "cancelled"],
+    ["blocked", false, "refusal"],
+    ["max-tokens", false, "max_tokens"],
+  ])("maps terminal reason %s", (kind, success, stopReason) => {
+    expect(translateDshNotification(frame("turn/end", { reason: { kind } })).events).toEqual([
+      expect.objectContaining({ type: "done", success, stopReason }),
+    ])
+  })
+  it("carries a structured provider failure before the failed terminal verdict", () => {
+    expect(
+      translateDshNotification(
+        frame("turn/end", { reason: { kind: "error", error: { code: "AUTH", message: "denied" } } })
+      ).events
+    ).toMatchObject([
+      { type: "error", error: "denied", code: "AUTH" },
+      { type: "done", success: false },
+    ])
+  })
+  it("never converts an idle status into success", () => {
     expect(
       translateDshNotification({
         method: "session.status",
-        params: { sessionId: "s1", status: "idle" },
-      }).events[0]
-    ).toMatchObject({ type: "done", success: true })
-    expect(
-      translateDshNotification({
-        method: "session.status",
-        params: { sessionId: "s1", status: "running" },
+        params: { sessionId: "s", status: "idle" },
       }).events
     ).toEqual([])
   })
-})
-
-describe("subagent lineage", () => {
-  it("maps subagent.started to a progress marker carrying the child id", () => {
-    const { events } = translateDshNotification({
-      method: "subagent.started",
-      params: { sessionId: "parent", childSessionId: "child-1" },
-    })
-    expect(events[0]).toMatchObject({
-      type: "progress",
-      progress: 0,
-      message: "subagent:started:child-1",
-    })
-  })
-
-  it("maps subagent.finished to a completed progress marker", () => {
-    const { events } = translateDshNotification({
-      method: "subagent.finished",
-      params: { sessionId: "parent", childSessionId: "child-1", stopReason: "completed" },
-    })
-    expect(events[0]).toMatchObject({
-      type: "progress",
-      progress: 1,
-      message: "subagent:finished:child-1",
-    })
-  })
-
-  it("still emits lineage when the child id is absent", () => {
-    // subagent.finished is documented as in-process only, so an out-of-process
-    // child may report partial lineage. Losing the event entirely would leave
-    // the run looking like it never spawned anything.
-    const started = translateDshNotification({
-      method: "subagent.started",
-      params: { sessionId: "p" },
-    })
-    const finished = translateDshNotification({
-      method: "subagent.finished",
-      params: { sessionId: "p" },
-    })
-    expect(started.events[0]).toMatchObject({ message: "subagent:started:unknown" })
-    expect(finished.events[0]).toMatchObject({ message: "subagent:finished:unknown" })
-  })
-})
-
-describe("partial and unusual payloads", () => {
-  it("warns when assistant/chunk carries no chunk object", () => {
-    const { events, warnings } = translateDshNotification(sessionEvent("assistant/chunk", {}))
-    expect(events).toEqual([])
-    expect(warnings[0]).toMatchObject({ kind: "malformed-payload" })
-  })
-
-  it("maps a tool-call-delta when it carries both id and delta", () => {
-    const { events } = translateDshNotification(
-      sessionEvent("assistant/chunk", {
-        chunk: { type: "tool-call-delta", id: "c1", delta: '{"cmd":' },
-      })
-    )
-    expect(events[0]).toMatchObject({ type: "tool_use_delta", toolUseId: "c1", delta: '{"cmd":' })
-  })
-
-  it("drops a tool-call-delta with no attributable call id", () => {
-    // The committed tool/call carries complete arguments, so an unattributable
-    // fragment is safe to discard but must not be guessed onto another call.
-    const { events } = translateDshNotification(
-      sessionEvent("assistant/chunk", { chunk: { type: "tool-call-delta", delta: "x" } })
-    )
-    expect(events).toEqual([])
-  })
-
-  it("ignores stream framing chunks", () => {
-    for (const type of ["block-start", "block-end", "finish"]) {
-      const { events, warnings } = translateDshNotification(
-        sessionEvent("assistant/chunk", { chunk: { type, blockType: "text" } })
-      )
-      expect(events).toEqual([])
-      expect(warnings).toEqual([])
-    }
-  })
-
-  it("emits tool_use_start for tool-call blocks in a committed assistant/message", () => {
-    const { events } = translateDshNotification(
-      sessionEvent("assistant/message", {
-        message: {
-          role: "assistant",
-          content: [
-            { type: "reasoning", text: "thinking" },
-            { type: "tool-call", id: "c9", name: "read" },
-          ],
-        },
-      })
-    )
-    expect(events).toEqual([
-      expect.objectContaining({ type: "tool_use_start", toolUseId: "c9", toolName: "read" }),
+  it("retains exact tool input and does not duplicate tool invocations", () => {
+    const events = translateDshNotification(
+      frame("tool/call", { callId: "c", name: "read", arguments: '{"path":"a"}' })
+    ).events
+    expect(events).toMatchObject([
+      { type: "tool_use_start", toolUseId: "c", rawInput: { path: "a" } },
+      { type: "tool_use_delta", delta: '{"path":"a"}' },
+      { type: "tool_use_end", input: { path: "a" } },
     ])
   })
-
-  it("warns when assistant/message has no message", () => {
-    const { events, warnings } = translateDshNotification(sessionEvent("assistant/message", {}))
-    expect(events).toEqual([])
-    expect(warnings[0]).toMatchObject({ kind: "malformed-payload" })
-  })
-
-  it("accepts tool/call arguments already given as an object", () => {
-    const { events } = translateDshNotification(
-      sessionEvent("tool/call", { callId: "c1", name: "bash", arguments: { command: "ls" } })
+  it("preserves malformed model arguments while warning", () => {
+    const result = translateDshNotification(
+      frame("tool/call", { callId: "c", name: "read", arguments: "{" })
     )
-    expect(events[0]).toMatchObject({ rawInput: { command: "ls" } })
+    expect(result.events[1]).toMatchObject({ delta: "{" })
+    expect(result.warnings[0].kind).toBe("malformed-payload")
   })
-
-  it("warns when tool/call is missing its name", () => {
-    const { events, warnings } = translateDshNotification(
-      sessionEvent("tool/call", { callId: "c1" })
-    )
-    expect(events).toEqual([])
-    expect(warnings[0]).toMatchObject({ kind: "malformed-payload" })
-  })
-
-  it("warns when tool/result has no attributable call id", () => {
-    const { events, warnings } = translateDshNotification(
-      sessionEvent("tool/result", { message: { content: [] } })
-    )
-    expect(events).toEqual([])
-    expect(warnings[0]).toMatchObject({ kind: "malformed-payload" })
-  })
-
-  it("falls back to a top-level callId on tool/result", () => {
-    const { events } = translateDshNotification(
-      sessionEvent("tool/result", { callId: "c2", message: { content: [] } })
-    )
-    expect(events[0]).toMatchObject({ type: "tool_result", toolUseId: "c2", isError: false })
-  })
-
-  it("yields empty result text when the result content is not an array", () => {
-    const { events } = translateDshNotification(
-      sessionEvent("tool/result", {
-        message: { source: { callId: "c3" }, content: [{ type: "tool-result", content: "oops" }] },
+  it("keeps all tool result blocks and tool-private metadata", () => {
+    const content = [
+      { type: "text", text: "ok" },
+      { type: "image", attachment: { id: "image" } },
+    ]
+    const result = translateDshNotification(
+      frame("tool/result", {
+        message: {
+          source: { callId: "c" },
+          content: [{ type: "tool-result", toolCallId: "c", content, isError: true }],
+        },
+        meta: { diff: "x" },
+        error: { code: "X" },
       })
     )
-    expect(events[0]).toMatchObject({ toolUseId: "c3", result: "" })
+    expect(result.events[0]).toMatchObject({
+      type: "tool_result",
+      toolUseId: "c",
+      result: { content },
+      isError: true,
+      rawOutput: { content, meta: { diff: "x" }, error: { code: "X" } },
+    })
   })
-
-  it("emits nothing for provenance-only events", () => {
+  it("joins every text-only tool result block", () => {
+    expect(
+      translateDshNotification(
+        frame("tool/result", {
+          message: {
+            source: { callId: "c" },
+            content: [
+              {
+                type: "tool-result",
+                toolCallId: "c",
+                content: [
+                  { type: "text", text: "a" },
+                  { type: "text", text: "b" },
+                ],
+              },
+            ],
+          },
+        })
+      ).events[0]
+    ).toMatchObject({ result: "ab" })
+  })
+  it("uses parentSessionId for subagent lineage without exposing child reasoning as progress", () => {
+    const result = translateDshNotification({
+      method: "subagent.finished",
+      params: {
+        parentSessionId: "p",
+        childSessionId: "c",
+        provider: "local",
+        agentId: "c",
+        status: "ok",
+        stopReason: "completed",
+        lastAssistantMessage: [{ type: "reasoning", text: "private" }],
+      },
+    })
+    expect(result.events[0]).toMatchObject({ type: "progress", sessionId: "p", progress: 1 })
+    expect(JSON.stringify(result)).not.toContain("private")
+  })
+  it("retains unsuccessful attempt output outside the final answer and keeps thinking governed", () => {
+    const result = translateDshNotification(
+      frame("assistant/attempt", {
+        stream: [
+          { type: "text-chunks", texts: ["partial"] },
+          { type: "reasoning-chunks", texts: ["secret"] },
+          { type: "tool-call-chunks", name: "read", id: "c", args: [] },
+          { type: "chunk", chunk: { type: "usage", usage: { inputTokens: 2, outputTokens: 1 } } },
+          {
+            type: "chunk",
+            chunk: { type: "finish", reason: { kind: "error", failure: { message: "retrying" } } },
+          },
+        ],
+      })
+    )
+    expect(result.events.some((event) => event.type === "message_delta")).toBe(false)
+    expect(result.events.find((event) => event.type === "thinking")).toMatchObject({
+      thinking: "secret",
+    })
+    expect(
+      JSON.stringify(result.events.filter((event) => event.type === "progress"))
+    ).not.toContain("secret")
+  })
+  it("recognizes current core and plugin event vocabulary", () => {
+    for (const type of [
+      "system/message",
+      "user/message",
+      "session/end-seed",
+      "step/start",
+      "step/end",
+      "approval/policy",
+      "agent/inbox/spliced",
+      "compaction/prune",
+      "todo/write",
+      "tool/ptc-dispatch-start",
+      "goal/change",
+    ]) {
+      expect(() => translateDshNotification(frame(type, {}))).not.toThrow()
+    }
+    expect(
+      translateDshNotification(frame("session/title", { title: "Title" })).events[0]
+    ).toMatchObject({ type: "session_info_update", title: "Title" })
+  })
+  it("preserves unsupported committed content as diagnostic progress", () => {
+    expect(
+      translateDshNotification(assistant([{ type: "file", attachment: { id: "f" } }])).events[1]
+    ).toMatchObject({ type: "progress", message: expect.stringContaining('"id":"f"') })
+  })
+  it.each([
+    frame("assistant/chunk", { chunk: { type: "text-delta", text: "legacy" } }),
+    frame("future/event", {}),
+    frame("future/event", { ignorable: true }),
+    frame("turn/end", { reason: { kind: "future" } }),
+  ])("refuses removed wire or unknown required semantics", (notification) => {
+    expect(() => translateDshNotification(notification)).toThrow(DshVersionDriftError)
+  })
+  it("honors only the envelope ignorable marker", () => {
+    expect(translateDshNotification(frame("plugin/unknown", {}, { ignorable: true }))).toEqual({
+      events: [],
+      warnings: [{ kind: "ignorable-unknown-event", detail: "plugin/unknown" }],
+    })
+  })
+  it.each([
+    null,
+    { method: "session.event", params: {} },
+    frame("assistant/message", {}),
+    frame("tool/call", {}),
+    frame("tool/result", {}),
+    { method: "session.status", params: { sessionId: "s", status: "invalid" } },
+    { method: "subagent.started", params: { parentSessionId: "s" } },
+    frame("assistant/attempt", {}),
+    frame("session/title", {}),
+  ])("rejects malformed required payloads", (notification) => {
+    expect(() => translateDshNotification(notification)).toThrow()
+  })
+  it("does not expose request provenance or system input as output", () => {
     for (const type of [
       "request/header",
       "request/context",
-      "session/title",
-      "agent/inbox/spliced",
+      "system/message",
       "user/message",
+      "agent/inbox/spliced",
     ]) {
-      const { events, warnings } = translateDshNotification(sessionEvent(type, {}))
-      expect(events).toEqual([])
-      expect(warnings).toEqual([])
+      expect(translateDshNotification(frame(type, { private: "reasoning replay" })).events).toEqual(
+        []
+      )
     }
   })
-
-  it("maps step boundaries to message boundaries", () => {
-    expect(translateDshNotification(sessionEvent("step/start", {})).events[0]).toMatchObject({
-      type: "message_start",
-      role: "assistant",
-    })
-    expect(translateDshNotification(sessionEvent("step/end", {})).events[0]).toMatchObject({
-      type: "message_end",
-    })
+  it("reports an error without provider details as a failure", () => {
+    expect(
+      translateDshNotification(frame("turn/end", { reason: { kind: "error" } })).events[0]
+    ).toMatchObject({ error: "DeepSeek Harness turn failed" })
   })
-
-  it("ignores a usage chunk with no usage object", () => {
-    const { events } = translateDshNotification(
-      sessionEvent("assistant/chunk", { chunk: { type: "usage" } })
-    )
-    expect(events).toEqual([])
-  })
-
-  it("defaults missing token fields to zero rather than NaN", () => {
-    const { events } = translateDshNotification(
-      sessionEvent("assistant/chunk", { chunk: { type: "usage", usage: { inputTokens: 5 } } })
-    )
-    expect(events[0]).toMatchObject({ type: "usage_update", used: 5 })
-  })
-
-  it("ignores non-finite token counts instead of propagating NaN", () => {
-    const { events } = translateDshNotification(
-      sessionEvent("assistant/chunk", {
-        chunk: { type: "usage", usage: { inputTokens: Number.NaN, outputTokens: "12" } },
-      })
-    )
-    expect(events[0]).toMatchObject({ type: "usage_update", used: 0 })
-  })
-
-  it("accepts a delta field as an alias for text on content chunks", () => {
-    // Observed shape uses `text`; the alias keeps a minor upstream rename from
-    // silently emptying the stream.
+  it("handles absent accounting fields without producing NaN", () => {
     expect(
       translateDshNotification(
-        sessionEvent("assistant/chunk", { chunk: { type: "text-delta", delta: "aliased" } })
-      ).events[0]
-    ).toMatchObject({ delta: { type: "text", text: "aliased" } })
-    expect(
-      translateDshNotification(
-        sessionEvent("assistant/chunk", { chunk: { type: "reasoning-delta", delta: "aliased" } })
-      ).events[0]
-    ).toMatchObject({ type: "thinking", thinking: "aliased" })
+        assistant([], { inputTokens: NaN, outputTokens: Infinity, reasoningTokens: "invalid" })
+      ).events.at(-1)
+    ).toMatchObject({
+      tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, reasoningTokens: 0 },
+    })
   })
-
-  it("maps a tool-call-delta keyed by toolCallId", () => {
-    const { events } = translateDshNotification(
-      sessionEvent("assistant/chunk", {
-        chunk: { type: "tool-call-delta", toolCallId: "c7", arguments: "{" },
+  it("handles attempt framing and missing failure details without exposing block reasoning", () => {
+    const result = translateDshNotification(
+      frame("assistant/attempt", {
+        stream: [
+          { type: "tool-call-chunks", id: "c" },
+          { type: "tool-call-chunks" },
+          { type: "chunk", chunk: { type: "block-start", blockType: "reasoning" } },
+          {
+            type: "chunk",
+            chunk: { type: "block-end", block: { type: "reasoning", text: "private" } },
+          },
+          { type: "chunk", chunk: { type: "block-end", block: { type: "text", text: "partial" } } },
+          { type: "chunk", chunk: { type: "finish" } },
+        ],
       })
     )
-    expect(events[0]).toMatchObject({ type: "tool_use_delta", toolUseId: "c7", delta: "{" })
+    expect(JSON.stringify(result)).not.toContain("private")
+    expect(result.events.at(-1)).toMatchObject({
+      type: "progress",
+      message: "assistant/attempt:unknown:",
+    })
   })
-
-  it("skips non-text blocks when flattening tool result content", () => {
-    const { events } = translateDshNotification(
-      sessionEvent("tool/result", {
-        message: {
-          source: { callId: "c4" },
-          content: [
-            {
-              type: "tool-result",
-              content: [
-                { type: "image", data: "..." },
-                { type: "text", text: "ok" },
-              ],
-            },
-          ],
-        },
-      })
-    )
-    expect(events[0]).toMatchObject({ toolUseId: "c4", result: "ok" })
-  })
-
-  it("tolerates a tool/result whose content array holds non-objects", () => {
-    const { events } = translateDshNotification(
-      sessionEvent("tool/result", { callId: "c5", message: { content: ["junk"] } })
-    )
-    expect(events[0]).toMatchObject({ toolUseId: "c5", result: "", isError: false })
-  })
-
-  it("tolerates a tool/result with no message at all", () => {
-    const { events } = translateDshNotification(sessionEvent("tool/result", { callId: "c6" }))
-    expect(events[0]).toMatchObject({ toolUseId: "c6", result: "" })
-  })
-
-  it("ignores non-object blocks in a committed assistant/message", () => {
-    const { events } = translateDshNotification(
-      sessionEvent("assistant/message", {
-        message: { content: ["junk", { type: "tool-call", id: "c8", name: "read" }] },
-      })
-    )
-    expect(events).toHaveLength(1)
-    expect(events[0]).toMatchObject({ toolUseId: "c8" })
-  })
-
-  it("ignores an assistant/message whose content is not an array", () => {
-    const { events } = translateDshNotification(
-      sessionEvent("assistant/message", { message: { content: "plain" } })
-    )
-    expect(events).toEqual([])
-  })
-
-  it("skips a tool-call block missing its id or name", () => {
-    const { events } = translateDshNotification(
-      sessionEvent("assistant/message", {
-        message: {
-          content: [
-            { type: "tool-call", name: "read" },
-            { type: "tool-call", id: "x" },
-          ],
-        },
-      })
-    )
-    expect(events).toEqual([])
-  })
-
-  it("treats a turn/end with no reason object as an error", () => {
-    const { events } = translateDshNotification(sessionEvent("turn/end", {}))
-    expect(events[0]).toMatchObject({ type: "done", success: false })
-    expect(events[0]).not.toHaveProperty("stopReason")
-  })
-
-  it("treats an event with a non-string type as drift", () => {
-    expect(() =>
-      translateDshNotification({
-        method: "session.event",
-        params: { sessionId: "s1", event: { type: 42, seq: 1 } },
-      })
-    ).toThrow(DshVersionDriftError)
-  })
-
-  it("warns when the method is absent entirely", () => {
-    const { warnings } = translateDshNotification({ params: { sessionId: "s1" } })
-    expect(warnings[0]?.detail).toContain("(none)")
-  })
-})
-
-describe("translateDshNotifications", () => {
-  it("preserves wire order across a batch", () => {
-    const { events } = translateDshNotifications([
-      sessionEvent("turn/start", {}, 1),
-      sessionEvent("assistant/chunk", { chunk: { type: "text-delta", text: "a" } }, 2),
-      sessionEvent("turn/end", { reason: { kind: "completed" } }, 3),
-    ])
-    expect(events.map((e) => e.type)).toEqual(["session_start", "message_delta", "done"])
-  })
-
-  it("accumulates warnings across a batch", () => {
-    const { warnings } = translateDshNotifications([
-      sessionEvent("assistant/chunk", { chunk: { type: "video-delta" } }),
-      sessionEvent("assistant/chunk", { chunk: { type: "audio-delta" } }),
-    ])
-    expect(warnings).toHaveLength(2)
-  })
-})
-
-describe("version drift", () => {
-  it("throws on an unrecognized required event", () => {
-    // SESSION_FORMAT_VERSION is 0 with no compatibility promise, so a new
-    // required event means the channel no longer matches this codec.
-    expect(() => translateDshNotification(sessionEvent("turn/teleport", {}))).toThrow(
-      DshVersionDriftError
-    )
-  })
-
-  it("names the offending event so doctor can report it", () => {
-    expect(() => translateDshNotification(sessionEvent("turn/teleport", {}))).toThrow(
-      /turn\/teleport/
-    )
-  })
-
-  it("downgrades an unrecognized event marked ignorable to a warning", () => {
-    const notification = {
-      method: "session.event",
-      params: { sessionId: "s1", event: { type: "telemetry/ping", seq: 9, ignorable: true } },
-    }
-    const { events, warnings } = translateDshNotification(notification)
-    expect(events).toEqual([])
-    expect(warnings).toEqual([{ kind: "ignorable-unknown-event", detail: "telemetry/ping" }])
-  })
-
-  it("aborts a batch at the drifting event rather than partially translating", () => {
-    const batch = [sessionEvent("turn/start", {}), sessionEvent("turn/teleport", {})]
-    expect(() => translateDshNotifications(batch)).toThrow(DshVersionDriftError)
-  })
-})
-
-describe("malformed input", () => {
   it.each([
-    ["null", null],
-    ["a string", "nope"],
-    ["an object without params", { method: "session.event" }],
-  ])("warns instead of throwing on %s", (_label, input) => {
-    const { events, warnings } = translateDshNotification(input)
-    expect(events).toEqual([])
-    expect(warnings[0]?.kind).toBe("malformed-payload")
+    { params: { sessionId: "s" } },
+    { method: "future/method", params: { sessionId: "s" } },
+    { method: "session.event", params: { sessionId: "s" } },
+    { method: "session.event", params: { sessionId: "s", event: { data: {} } } },
+    frame("turn/end", {}),
+    assistant([null]),
+    assistant([{ type: "reasoning", text: 42 }]),
+    frame("assistant/attempt", { stream: [null] }),
+    frame("assistant/attempt", { stream: [{ type: "unknown" }] }),
+    frame("assistant/attempt", { stream: [{}] }),
+  ])("fails closed on malformed current frames and unknown compact records", (notification) => {
+    expect(() => translateDshNotification(notification)).toThrow()
   })
-
-  it("warns on session.event without an event object", () => {
-    const { warnings } = translateDshNotification({
-      method: "session.event",
-      params: { sessionId: "s1" },
-    })
-    expect(warnings[0]?.kind).toBe("malformed-payload")
-  })
-
-  it("warns on an unknown method", () => {
-    const { warnings } = translateDshNotification({ method: "session.telepathy", params: {} })
-    expect(warnings[0]?.kind).toBe("malformed-payload")
-  })
-})
-
-describe("dshEventDedupeKey", () => {
-  it("separates identical seqs across sessions and channels", () => {
-    // Two channels can run concurrently during an upgrade and generate session
-    // ids independently.
-    const a = dshEventDedupeKey("ch1", "s1", 7)
-    expect(a).not.toBe(dshEventDedupeKey("ch1", "s2", 7))
-    expect(a).not.toBe(dshEventDedupeKey("ch2", "s1", 7))
-    expect(a).toBe(dshEventDedupeKey("ch1", "s1", 7))
-  })
-})
-
-describe("recorded wire traces", () => {
-  const traces = [
-    "upstream-bash-tool.notifications.jsonl",
-    "upstream-persistent-tools.notifications.jsonl",
-    "cognia-sdk-readonly.notifications.jsonl",
-  ]
-
-  it.each(traces)("translates %s without version drift", (name) => {
-    // The whole point of keeping real traces: the codec must survive upstream's
-    // own reference composition, not just hand-written frames.
-    expect(() => translateDshNotifications(loadTrace(name))).not.toThrow()
-  })
-
-  it.each(traces)("reports no malformed payloads for %s", (name) => {
-    const { warnings } = translateDshNotifications(loadTrace(name))
-    expect(warnings.filter((w) => w.kind === "malformed-payload")).toEqual([])
-  })
-
-  it("pairs every tool result with a preceding tool call in the upstream bash trace", () => {
-    const { events } = translateDshNotifications(
-      loadTrace("upstream-bash-tool.notifications.jsonl")
-    )
-    const started = new Set<string>()
-    for (const event of events) {
-      if (event.type === "tool_use_start") started.add(event.toolUseId)
-      if (event.type === "tool_result") expect(started.has(event.toolUseId)).toBe(true)
-    }
-    expect(started.size).toBeGreaterThan(0)
-  })
-
-  it("surfaces the sandbox denial from the Cognia read-only capture", () => {
-    // This trace records the model being refused a write and then failing to
-    // escalate. If a composition change ever granted the escalation, the error
-    // result would disappear and this assertion would fail.
-    const { events } = translateDshNotifications(
-      loadTrace("cognia-sdk-readonly.notifications.jsonl")
-    )
-    const errors = events.filter((e) => e.type === "tool_result" && e.isError)
-    expect(errors.length).toBeGreaterThan(0)
-    const combined = errors
-      .map((e) => (e.type === "tool_result" && typeof e.result === "string" ? e.result : ""))
-      .join("\n")
-    expect(combined).toMatch(/read-only/i)
-  })
-
-  it("ends the Cognia capture with a successful turn", () => {
-    const { events } = translateDshNotifications(
-      loadTrace("cognia-sdk-readonly.notifications.jsonl")
-    )
-    const done = events.filter((e) => e.type === "done")
-    expect(done.at(-1)).toMatchObject({ type: "done", success: true })
-  })
-
-  it("emits usage from the Cognia capture", () => {
-    const { events } = translateDshNotifications(
-      loadTrace("cognia-sdk-readonly.notifications.jsonl")
-    )
-    const usage = events.filter((e) => e.type === "usage_update")
-    expect(usage.length).toBeGreaterThan(0)
-    expect(usage.every((e) => e.type === "usage_update" && e.used > 0)).toBe(true)
+  it("keeps batch wire order and session-scoped dedupe identities", () => {
+    expect(
+      translateDshNotifications([
+        frame("turn/start", {}),
+        frame("turn/end", { reason: { kind: "completed" } }),
+      ]).events.map((event) => event.type)
+    ).toEqual(["session_start", "done"])
+    expect(dshEventDedupeKey("channel", "s", 1)).not.toBe(dshEventDedupeKey("channel", "other", 1))
+    expect(dshEventDedupeKey("channel", "s", 1)).not.toBe(dshEventDedupeKey("other", "s", 1))
   })
 })

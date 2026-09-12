@@ -441,17 +441,11 @@ describe("backend identity helpers", () => {
 })
 
 describe("connectBackend — Cognia tool-host compatibility", () => {
-  it("fails before the composer opens when the agent cannot host Cognia's bridge", async () => {
+  it("keeps text-only endpoints usable while reporting their tool limitation", async () => {
     const host = fakeHost({ getAgentCapabilities: () => ({ mcpTools: false }) })
     const result = await connectBackend(deps({ host }))
-
-    expect(result.ok).toBe(false)
-    if (!result.ok) {
-      expect(result.failure.message).toMatch(/does not accept MCP servers/)
-      expect(result.failure.hint).toMatch(/backend builtin/)
-    }
-    // Nothing half-registered is left behind for a retry to inherit.
-    expect(host.removeAgent).toHaveBeenCalledWith("cli-external-1")
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.connection.negotiated?.mcpTools).toBe(false)
   })
 
   it("connects normally when the agent simply did not report the capability", async () => {

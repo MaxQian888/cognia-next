@@ -36,7 +36,9 @@ function toNameValuePairs(record: unknown): Array<{ name: string; value: string 
 }
 
 /** Project one enabled MCP server into an ACP config, or `null` if malformed. */
-export function mcpServerToAcpConfig(server: McpServer): AcpMcpServerConfig | null {
+export function mcpServerToAcpConfig(
+  server: Pick<McpServer, "name" | "config" | "transport">
+): AcpMcpServerConfig | null {
   const cfg = (server.config ?? {}) as Record<string, unknown>
   if (server.transport === "stdio") {
     const command = typeof cfg.command === "string" ? cfg.command : undefined
@@ -80,4 +82,21 @@ export async function resolveAcpMcpServers(ids: string[]): Promise<AcpMcpServerC
     }
   }
   return out
+}
+
+/** Project the already-authorized, credential-resolved map from SendOptions.
+ * This preserves the canonical turn subset instead of rereading the MCP registry.
+ */
+export function resolvedMcpServerMapToAcpConfigs(
+  servers?: Record<string, Record<string, unknown>>
+): AcpMcpServerConfig[] {
+  return Object.entries(servers ?? {}).map(([name, config]) => {
+    const transport = config.type ?? (typeof config.command === "string" ? "stdio" : "http")
+    if (transport !== "stdio" && transport !== "http" && transport !== "sse") {
+      throw new Error(`MCP server ${name} cannot be forwarded to an external runtime`)
+    }
+    const projected = mcpServerToAcpConfig({ name, transport, config })
+    if (!projected) throw new Error(`MCP server ${name} has incomplete connection settings`)
+    return projected
+  })
 }

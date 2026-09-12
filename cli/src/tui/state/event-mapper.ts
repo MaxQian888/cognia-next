@@ -10,9 +10,13 @@ import {
   type CanonicalAgentEvent,
 } from "@cognia/agent-config-types/agent-execution"
 
+import type { PermissionRequestEvent } from "@cognia/agent-config-types"
 import type { TuiAction } from "./types"
 import { validateContentPart } from "../render/content-part-policy"
-import { DEFAULT_PERMISSION_CHOICES } from "../components/overlays/PermissionOverlay"
+import {
+  permissionChoicesForRequest,
+  initialChoiceIndex,
+} from "../components/overlays/PermissionOverlay"
 
 export type CanonicalTuiClassification = "transcript" | "status" | "interactive" | "audit"
 
@@ -415,25 +419,30 @@ export function canonicalEnvelopeToActions(
           postTokens: event.postTokens ?? 0,
         },
       ]
-    case "permission-request":
+    case "permission-request": {
+      const req: PermissionRequestEvent = {
+        type: "permission_request",
+        sessionId: envelope.sessionId,
+        requestId: event.requestId,
+        toolUseID: event.requestId,
+        toolName: event.toolName,
+        input: event.input ?? {},
+        defaultToNo: event.defaultToNo,
+        suppressAlwaysAllowRule: event.suppressAlwaysAllowRule,
+      }
+      const choices = permissionChoicesForRequest(req)
       return [
         {
           type: "OVERLAY_OPEN",
           overlay: {
             kind: "permission",
-            req: {
-              type: "permission_request",
-              sessionId: envelope.sessionId,
-              requestId: event.requestId,
-              toolUseID: event.requestId,
-              toolName: event.toolName,
-              input: event.input ?? {},
-            },
-            choices: DEFAULT_PERMISSION_CHOICES,
-            index: 0,
+            req,
+            choices,
+            index: initialChoiceIndex(req.toolName, req.input, choices, req.defaultToNo),
           },
         },
       ]
+    }
     case "permission-resolved":
       return [{ type: "REMOTE_PERMISSION_RESOLVED", requestId: event.requestId }]
     default: {

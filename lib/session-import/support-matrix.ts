@@ -22,12 +22,8 @@ export function buildExternalSessionSupportMatrix(): {
   const presetIds = Object.entries(EXTERNAL_AGENT_PRESETS)
     .filter(([, preset]) => preset !== null)
     .map(([id]) => id)
-  // A documented-only preset is not something a session can resume into.
-  // `opencode-v2-preview` is the live case: it exists so the pinned legacy
-  // contract is discoverable, and its own description says current OpenCode V2
-  // builds are not compatible with it. The hand-written alias table this
-  // replaced happened to omit it, and reading the ecosystem's runtimes without
-  // this filter would have silently widened the claim.
+  // Retired native protocols may still describe imported history, but cannot
+  // be offered as execution targets for resuming that history.
   const runnable = new Set(getRunnablePresets())
   const claimed = new Set<string>()
   const importSources = getSessionSources().map((source) => {

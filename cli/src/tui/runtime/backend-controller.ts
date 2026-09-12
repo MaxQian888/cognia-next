@@ -34,11 +34,7 @@ import {
 } from "../../runtime/external/sandbox-launcher"
 import { piMetadataForPreset } from "../../config/active-model"
 import type { ResolvedConfig } from "../../config/schema"
-import {
-  canHostCogniaTools,
-  externalCapabilities,
-  type BackendCapabilities,
-} from "./backend-capabilities"
+import { externalCapabilities, type BackendCapabilities } from "./backend-capabilities"
 import { buildCodexOptions } from "./backend-bridge"
 import { selectCliAgentWorkspace } from "../../runtime/external/host-branch"
 import { createCliTranslator } from "../i18n"
@@ -284,20 +280,8 @@ export async function connectBackend(deps: BackendConnectDeps): Promise<BackendC
       })
     }
 
-    // Under the default parity contract, an agent that cannot host Cognia's tool
-    // bridge is INCOMPATIBLE — not "ready with fewer tools". Every Cognia tool
-    // the user can see in `/tools` would be uncallable, so fail here rather than
-    // let them discover it one silent tool call at a time, after the composer
-    // opened and they had already typed a request.
-    if (!canHostCogniaTools(negotiated)) {
-      await host.removeAgent(agentId).catch(() => undefined)
-      return fail({
-        kind: "handshake",
-        stage: "launch",
-        message: `${presetId} does not accept MCP servers, so Cognia cannot give it any of its own tools.`,
-        hint: "Pick a different agent, or run /backend builtin to use Cognia's own.",
-      })
-    }
+    // Remote protocols remain usable for text tasks. Capability projection
+    // disables Cognia tools when the running endpoint cannot attach them.
     return {
       ok: true,
       connection: {

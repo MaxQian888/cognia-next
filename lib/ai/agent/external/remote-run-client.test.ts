@@ -253,10 +253,14 @@ describe("starting a turn", () => {
       prompt: "hi",
       model: "z-ai/glm-5.3-flash",
       reasoningEffort: "high",
+      systemPrompt: "Selected skill: verify results",
+      allowedTools: ["read"],
     })
     expect(calls[0].payload).toMatchObject({
       model: "z-ai/glm-5.3-flash",
       reasoningEffort: "high",
+      systemPrompt: "Selected skill: verify results",
+      allowedTools: ["read"],
     })
   })
 

@@ -189,6 +189,7 @@ pub fn mint_bridge_ticket(
     // `mintSessionRouteTicket`.
     let failover = candidates.len() > 1;
     let mint = MintRequest {
+        provider_overrides: Vec::new(),
         session_id: request.session_id,
         parent_session_id: request.parent_session_id,
         execution_fingerprint: request.execution_fingerprint,

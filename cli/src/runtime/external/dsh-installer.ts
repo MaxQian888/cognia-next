@@ -2,6 +2,7 @@ import { spawn } from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { isDeepStrictEqual } from "node:util"
 
 import type {
   DshDoctorReport,
@@ -47,9 +48,11 @@ const COMPOSITION_DIGEST_FILES = [
 ] as const
 
 export const CHANNEL_MANIFEST_FILE = "cognia-channel.json"
-export const UPSTREAM_VERSION = "0.1.0-rc.6"
-export const NODE_MAJOR_REQUIRED = 26 as const
-export const CONFORMANCE_SUITE_VERSION = "1"
+export {
+  DSH_UPSTREAM_VERSION as UPSTREAM_VERSION,
+  DSH_NODE_MAJOR_REQUIRED as NODE_MAJOR_REQUIRED,
+  DSH_CONFORMANCE_SUITE_VERSION as CONFORMANCE_SUITE_VERSION,
+} from "@/lib/ai/agent/external/dsh-runtime-install"
 
 export interface DshInstallPaths {
   /** Cognia data root, e.g. `~/.cognia`. */
@@ -200,20 +203,57 @@ async function defaultNpmInstall(cwd: string): Promise<void> {
  */
 export function findStrayPatchLayers(dshHome: string): string[] {
   const found: string[] = []
-  const homePatch = path.join(dshHome, "cordis.patch.yml")
-  if (fs.existsSync(homePatch)) found.push(homePatch)
-
-  const profilesDir = path.join(dshHome, "profiles")
-  if (fs.existsSync(profilesDir)) {
-    for (const entry of fs.readdirSync(profilesDir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue
-      for (const name of ["cordis.patch.yml", "package.json"]) {
-        const candidate = path.join(profilesDir, entry.name, name)
-        if (fs.existsSync(candidate)) found.push(candidate)
-      }
+  const exists = (file: string) => {
+    try {
+      return fs.lstatSync(file)
+    } catch {
+      return undefined
     }
   }
-  return found
+  for (const name of ["cordis.patch.yml", ".env"]) {
+    const candidate = path.join(dshHome, name)
+    if (exists(candidate)) found.push(candidate)
+  }
+  const profilesDir = path.join(dshHome, "profiles")
+  const profilesStat = exists(profilesDir)
+  if (!profilesStat) return found
+  if (!profilesStat.isDirectory() || profilesStat.isSymbolicLink()) return [...found, profilesDir]
+  for (const entry of fs.readdirSync(profilesDir, { withFileTypes: true })) {
+    // The official CLI installs a dependency lookup link alongside profiles.
+    if (entry.name === "node_modules") continue
+    const profileDir = path.join(profilesDir, entry.name)
+    if (entry.isSymbolicLink()) {
+      found.push(profileDir)
+      continue
+    }
+    if (!entry.isDirectory()) continue
+    for (const name of ["cordis.patch.yml", "package.json"]) {
+      const candidate = path.join(profileDir, name)
+      const stat = exists(candidate)
+      if (!stat) continue
+      let managed = false
+      if (
+        name === "package.json" &&
+        stat.isFile() &&
+        !stat.isSymbolicLink() &&
+        ["cognia-sdk-readonly", "cognia-sdk-workspace", "cognia-acp"].includes(entry.name)
+      ) {
+        try {
+          // Mirrors launcher.mjs managedProfileManifest; no dependencies or extra fields.
+          managed = isDeepStrictEqual(JSON.parse(fs.readFileSync(candidate, "utf8")), {
+            name: entry.name,
+            private: true,
+            type: "module",
+            dsh: { profile: { bundles: ["@deepseek-ai/dsh-sdk-minimal"], patchReload: "startup" } },
+          })
+        } catch {
+          managed = false
+        }
+      }
+      if (!managed) found.push(candidate)
+    }
+  }
+  return found.sort()
 }
 
 /** Whether a C/C++ toolchain is present, for profiles needing a node-pty build. */
@@ -316,6 +356,10 @@ export interface DshInstallDigests {
 
 /** Gather install facts; never throws, so a broken install stays diagnosable. */
 export function gatherDshRuntimeFacts(dataRoot: string): {
+  runtimeHome: string
+  nodePath: string
+  defaultWorkspace: string
+  parentEnv: Record<string, string>
   manifestJson: string | null
   lockfileDigest: string
   compositionDigest: string
@@ -332,6 +376,14 @@ export function gatherDshRuntimeFacts(dataRoot: string): {
     manifestJson = null
   }
   return {
+    runtimeHome: home,
+    nodePath: process.execPath,
+    defaultWorkspace: process.cwd(),
+    parentEnv: Object.fromEntries(
+      ["PATH", "LANG", "LC_ALL", "TZ", "TMPDIR"].flatMap((key) =>
+        process.env[key] ? [[key, process.env[key]!]] : []
+      )
+    ),
     manifestJson,
     // "unreadable" can never equal a certified digest, so the verdict function
     // reports a mismatch rather than the whole check throwing.

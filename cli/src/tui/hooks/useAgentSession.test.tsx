@@ -473,6 +473,46 @@ describe("useAgentSession", () => {
     expect(hooks.onSessionEnd).toHaveBeenCalledTimes(1)
   })
 
+  it("SDK hints reach the overlay and stale always answers remain single-use", async () => {
+    let resolved: unknown
+    const h = harness({
+      sendImpl: async (_p, o) => {
+        void o
+          .gate({
+            type: "permission_request",
+            sessionId: "s",
+            requestId: "sdk-hints",
+            toolUseID: "t",
+            toolName: "Edit",
+            input: {},
+            defaultToNo: true,
+            suppressAlwaysAllowRule: true,
+          })
+          .then((decision) => {
+            resolved = decision
+          })
+        return result()
+      },
+    })
+    await act(async () => {
+      await h.api().send("change")
+    })
+    const action = h.actions.find(
+      (action) => action.type === "OVERLAY_OPEN" && action.overlay.kind === "permission"
+    )
+    expect(action).toMatchObject({
+      overlay: {
+        index: 1,
+        choices: [{ value: "allow" }, { value: "deny" }],
+        req: { defaultToNo: true, suppressAlwaysAllowRule: true },
+      },
+    })
+    await act(async () => {
+      h.api().resolvePermission({ decision: "allow_always" })
+    })
+    expect(resolved).toEqual({ decision: "allow" })
+  })
+
   it("fires PermissionRequest on a tool ask and PermissionDenied on deny", async () => {
     const hooks = spyHookRunner()
     const h = harness({

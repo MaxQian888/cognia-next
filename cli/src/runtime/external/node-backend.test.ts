@@ -36,6 +36,28 @@ function nextEvent<T>(
 }
 
 describe("NodeExternalAgentBackend", () => {
+  it("rejects a Devin MCP payload on another runtime before resolving a launch", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-agent-payload-"))
+    const resolveLaunch = jest.fn(async () => ({ command: "must-not-run", args: [] }))
+    const backend = new NodeExternalAgentBackend({ workspacesRoot: workspace, resolveLaunch })
+    try {
+      await expect(
+        backend.invoke("spawn_external_agent", {
+          config: {
+            id: "wrong-runtime",
+            command: "codex",
+            args: ["app-server"],
+            cwd: workspace,
+            env: { COGNIA_DEVIN_MCP_SERVERS: "[]" },
+          },
+        })
+      ).rejects.toThrow("Invalid Devin MCP configuration")
+      expect(resolveLaunch).not.toHaveBeenCalled()
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
   it("preserves Devin authentication inputs without admitting unrelated secrets", () => {
     const env = buildExternalAgentChildEnv(
       { NODE_ENV: "test", DEVIN_API_KEY: "ambient-devin", AWS_SECRET_ACCESS_KEY: "unrelated" },
@@ -68,6 +90,9 @@ describe("NodeExternalAgentBackend", () => {
         FACTORY_API_KEY: "configured-droid",
         NODE_OPTIONS: "--inspect",
         PATH: "/untrusted/bin",
+        PI_CODING_AGENT_DIR: "/task/pi",
+        PI_CODING_AGENT_SESSION_DIR: "/task/pi/sessions",
+        PI_UNTRUSTED_OPTION: "blocked",
       }
     )
 
@@ -81,10 +106,13 @@ describe("NodeExternalAgentBackend", () => {
       FACTORY_API_KEY: "configured-droid",
       DISABLE_AUTO_UPDATE: "1",
       PWD: "/work",
+      PI_CODING_AGENT_DIR: "/task/pi",
+      PI_CODING_AGENT_SESSION_DIR: "/task/pi/sessions",
     })
     expect(env.NODE_OPTIONS).toBeUndefined()
     expect(env.PATH).toBeUndefined()
     expect(env.AWS_SECRET_ACCESS_KEY).toBeUndefined()
+    expect(env.PI_UNTRUSTED_OPTION).toBeUndefined()
   })
 
   it("emits the frozen lifecycle payloads and line-frames stdio", async () => {
@@ -443,6 +471,35 @@ describe("isDshLauncherInvocation", () => {
     fs.rmSync(dataRoot, { recursive: true, force: true })
   })
 
+  it("admits the canonical host Node path only with a managed composition", async () => {
+    const backend = new NodeExternalAgentBackend({
+      workspacesRoot,
+      resolveLaunch: async (config) => ({ command: config.command, args: config.args ?? [] }),
+    })
+    const exited = nextEvent(backend, "external-agent://exit")
+    await expect(
+      backend.invoke("spawn_external_agent", {
+        config: {
+          id: "dsh",
+          command: process.execPath,
+          args: [launcher, composition],
+          cwd: workspacesRoot,
+        },
+      })
+    ).resolves.toBe("dsh")
+    await exited
+    await expect(
+      backend.invoke("spawn_external_agent", {
+        config: {
+          id: "evil",
+          command: process.execPath,
+          args: ["-e", "process.exit(0)"],
+          cwd: workspacesRoot,
+        },
+      })
+    ).rejects.toThrow("bare allowlisted")
+  })
+
   it("admits the managed launcher inside the runtime home", () => {
     expect(isDshLauncherInvocation([launcher, composition], workspacesRoot)).toBe(true)
   })
@@ -519,4 +576,49 @@ describe("isDshLauncherInvocation", () => {
     expect(isDshLauncherInvocation([linked, composition], workspacesRoot)).toBe(false)
     fs.rmSync(outside, { recursive: true, force: true })
   })
+})
+
+it("keeps the DSH environment isolated from ambient and configured unrelated secrets", () => {
+  const env = buildExternalAgentChildEnv(
+    { NODE_ENV: "test", OPENAI_API_KEY: "ambient", HOME: "/personal" },
+    {
+      HOME: "/managed",
+      DSH_HOME: "/managed/dsh-home",
+      DEEPSEEK_API_KEY: "deepseek",
+      COGNIA_GATEWAY_TASK_CONFIG: "task-fixture",
+      COGNIA_GATEWAY_TOKEN: "task-token-fixture",
+      COGNIA_DSH_WORKSPACE: "/work",
+      ANTHROPIC_API_KEY: "other",
+      NODE_OPTIONS: "--inspect",
+      LANG: "en_US.UTF-8",
+    },
+    true
+  )
+  expect(env).toEqual({
+    NODE_ENV: "production",
+    HOME: "/managed",
+    DSH_HOME: "/managed/dsh-home",
+    DEEPSEEK_API_KEY: "deepseek",
+    COGNIA_GATEWAY_TASK_CONFIG: "task-fixture",
+    COGNIA_GATEWAY_TOKEN: "task-token-fixture",
+    COGNIA_DSH_WORKSPACE: "/work",
+    LANG: "en_US.UTF-8",
+  })
+})
+
+it("passes only an explicit managed DeepSeek endpoint", () => {
+  expect(
+    buildExternalAgentChildEnv(
+      { NODE_ENV: "test", DEEPSEEK_BASE_URL: "https://ambient.invalid" },
+      {},
+      true
+    )
+  ).not.toHaveProperty("DEEPSEEK_BASE_URL")
+  expect(
+    buildExternalAgentChildEnv(
+      { NODE_ENV: "test", DEEPSEEK_BASE_URL: "https://ambient.invalid" },
+      { DEEPSEEK_BASE_URL: "http://127.0.0.1:9876" },
+      true
+    )
+  ).toEqual({ NODE_ENV: "production", DEEPSEEK_BASE_URL: "http://127.0.0.1:9876" })
 })

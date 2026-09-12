@@ -89,6 +89,10 @@ const DEVIN_PERMISSION_MODES: Record<AcpPermissionMode, string> = {
   dontAsk: "ask",
 }
 
+type CachedAcpToolCall = Extract<AcpSessionUpdate, { sessionUpdate: "tool_call_update" }> & {
+  _meta?: Record<string, unknown> | null
+}
+
 function isAbsoluteWorkspacePath(path: string): boolean {
   return path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\")
 }
@@ -256,7 +260,7 @@ type AcpNewSessionResult = Omit<SdkNewSessionResponse, "modes" | "configOptions"
  * ACP unstable session/list item
  * (supported by Zed ACP adapters and compatible implementations)
  */
-interface AcpSessionListItem {
+export interface AcpSessionListItem {
   sessionId: string
   cwd: string
   additionalDirectories?: string[]
@@ -571,10 +575,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   // Tauri event unsubscribe functions
   private unsubscribeFunctions: Array<() => void> = []
 
-  private toolCallStates = new Map<
-    string,
-    Map<string, Extract<AcpSessionUpdate, { sessionUpdate: "tool_call_update" }>>
-  >()
+  private toolCallStates = new Map<string, Map<string, CachedAcpToolCall>>()
 
   // Pending permission requests waiting for UI response
   private pendingPermissions: Map<
@@ -775,7 +776,9 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         // Stdio MCP servers are baseline ACP support. The negotiated flags
         // only describe additional HTTP/SSE server transports.
         mcpTools: true,
-        multiTurn: initResult.agentCapabilities?.loadSession,
+        multiTurn:
+          this._config?.metadata?.dshProfileId === "cognia-acp" ||
+          initResult.agentCapabilities?.loadSession,
       }
       this._tools = []
 
@@ -1167,7 +1170,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   private buildSessionRequestMeta(
     options?: SessionCreateOptions
   ): AcpSessionRequestMeta | undefined {
-    const customContext = options?.context || {}
+    const customContext = this.instructionContext(options?.context) || {}
     const instructionEnvelope = options?.instructionEnvelope
     const effectiveCwd =
       options?.cwd ||
@@ -1234,6 +1237,8 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       ...(options?.metadata ?? {}),
     }
 
+    metadata.cogniaInstructionContext =
+      this.cogniaInstructionContext(options) || inheritedMetadata?.cogniaInstructionContext
     if (options?.instructionEnvelope) {
       metadata.instructionEnvelope = options.instructionEnvelope
     }
@@ -1463,6 +1468,9 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     this.rapidExitCount = 0
     this.lastConnectedAt = undefined
     if (this._connectionStatus === "disconnected") {
+      // A process exit changes status before its listeners, pending approvals,
+      // and native terminals have been released. Retirement still owns cleanup.
+      await this.teardownTransport()
       return
     }
 
@@ -1482,12 +1490,62 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     log.info("Disconnected")
   }
 
+  private isDshAgent(): boolean {
+    return this._config?.metadata?.dshProfileId === "cognia-acp"
+  }
+
+  /** ACP extension metadata has no negotiated instruction semantics. Deliver
+   * task instructions as user context once per revision. */
+  private cogniaInstructionContext(options?: {
+    systemPrompt?: string
+    instructionEnvelope?: ExternalAgentExecutionOptions["instructionEnvelope"]
+    context?: unknown
+  }): string {
+    const envelope = options?.instructionEnvelope
+    const context = this.instructionContext(options?.context)
+    return [
+      ...new Set(
+        [
+          options?.systemPrompt,
+          envelope?.developerInstructions,
+          envelope?.customInstructions,
+          envelope?.skillsSummary,
+          envelope?.projectContextSummary,
+          context && Object.keys(context).length ? JSON.stringify(context) : undefined,
+        ].filter((value): value is string => typeof value === "string" && !!value.trim())
+      ),
+    ].join("\n\n")
+  }
+
+  private instructionContext(context: unknown): Record<string, unknown> | undefined {
+    if (!context || typeof context !== "object") return undefined
+    const { custom, ...rest } = context as Record<string, unknown>
+    const safeCustom =
+      custom && typeof custom === "object"
+        ? Object.fromEntries(
+            Object.entries(custom).filter(
+              ([key]) => !["mcpServers", "chatSessionId", "additionalDirectories"].includes(key)
+            )
+          )
+        : undefined
+    return {
+      ...rest,
+      ...(safeCustom && Object.keys(safeCustom).length ? { custom: safeCustom } : {}),
+    }
+  }
+
   private resolveAdditionalDirectories(options?: SessionCreateOptions): string[] | undefined {
     const directories = options?.additionalDirectories
     if (!directories?.length) {
       return undefined
     }
-    if (!this._agentCapabilities?.sessionCapabilities?.additionalDirectories) {
+    if (
+      !this.isDshAgent() &&
+      !this._agentCapabilities?.sessionCapabilities?.additionalDirectories &&
+      !options?.mcpServers?.some((server) =>
+        ["cognia-tools", "cognia-plugin-tools"].includes(server.name)
+      )
+    ) {
       throw new Error("Agent does not advertise ACP additionalDirectories support")
     }
     const invalid = directories.find(
@@ -1574,7 +1632,10 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     const params: AcpNewSessionParams = {
       cwd,
       mcpServers,
-      ...(additionalDirectories ? { additionalDirectories } : {}),
+      ...(additionalDirectories &&
+      this._agentCapabilities?.sessionCapabilities?.additionalDirectories
+        ? { additionalDirectories }
+        : {}),
       _meta: this.buildSessionRequestMeta(options),
     }
 
@@ -1867,6 +1928,23 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       options?.files
     )
 
+    let deliveredCogniaContext: string | undefined
+    {
+      const context =
+        this.cogniaInstructionContext(options) || session.metadata?.cogniaInstructionContext
+      if (
+        typeof context === "string" &&
+        context &&
+        context !== session.metadata?.cogniaSentInstructionContext
+      ) {
+        if (!hasNoLeakingPiiDeep(context))
+          throw new Error("ACP outbound payload blocked by the PII gate")
+        promptBlocks.unshift({ type: "text", text: `[Cognia task context]\n${context}` })
+        session.metadata = { ...session.metadata, cogniaInstructionContext: context }
+        deliveredCogniaContext = context
+      }
+    }
+
     // Update session status
     this.updateSession(sessionId, { status: "executing" })
 
@@ -1937,6 +2015,14 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 
       if (error) {
         throw error
+      }
+      if (deliveredCogniaContext && !cancellationSent) {
+        this.updateSession(sessionId, {
+          metadata: {
+            ...this._sessions.get(sessionId)?.metadata,
+            cogniaSentInstructionContext: deliveredCogniaContext,
+          },
+        })
       }
     } finally {
       this.removeEventListener(sessionId, listener)
@@ -2141,6 +2227,13 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   }
 
   async setSessionMode(sessionId: string, modeId: AcpPermissionMode): Promise<void> {
+    if (this._config?.metadata?.dshProfileId === "cognia-acp") {
+      if (!this._sessions.has(sessionId)) throw new Error(`Session not found: ${sessionId}`)
+      // DSH has no session/set_mode. Its tool requests are governed by the
+      // client permission broker, whose policy is the local session mode.
+      this.updateSession(sessionId, { permissionMode: modeId })
+      return
+    }
     const nativeMode = this.isDevinAgent() ? (DEVIN_PERMISSION_MODES[modeId] ?? modeId) : modeId
     const modeOption = this.getConfigOptions(sessionId)?.find(
       (option) => option.type === "select" && option.category === "mode"
@@ -2325,7 +2418,10 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       sessionId,
       cwd,
       mcpServers,
-      ...(additionalDirectories ? { additionalDirectories } : {}),
+      ...(additionalDirectories &&
+      this._agentCapabilities?.sessionCapabilities?.additionalDirectories
+        ? { additionalDirectories }
+        : {}),
       _meta: this.buildSessionRequestMeta(options),
     }
 
@@ -2507,7 +2603,10 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         sessionId,
         cwd,
         mcpServers,
-        ...(additionalDirectories ? { additionalDirectories } : {}),
+        ...(additionalDirectories &&
+        this._agentCapabilities?.sessionCapabilities?.additionalDirectories
+          ? { additionalDirectories }
+          : {}),
         _meta: this.buildSessionRequestMeta(options),
       } as Record<string, unknown>)
       const inheritedMetadata = this._sessions.get(sessionId)?.metadata as
@@ -2621,7 +2720,10 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         sessionId,
         cwd,
         mcpServers,
-        ...(additionalDirectories ? { additionalDirectories } : {}),
+        ...(additionalDirectories &&
+        this._agentCapabilities?.sessionCapabilities?.additionalDirectories
+          ? { additionalDirectories }
+          : {}),
         _meta: this.buildSessionRequestMeta(options),
       } as Record<string, unknown>)
 
@@ -2689,11 +2791,20 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       return false
     }
 
+    const peer = this.peer
     try {
       await this.sendRequest("ping", {}, 5000)
-      return true
-    } catch {
-      return false
+      return this.isConnected() && !this.intentionalDisconnect && this.peer === peer
+    } catch (error) {
+      // ACP has no standard ping method. A matching JSON-RPC -32601 response
+      // still proves this connection is responsive; other failures do not.
+      return (
+        this.isConnected() &&
+        !this.intentionalDisconnect &&
+        this.peer === peer &&
+        error instanceof Error &&
+        error.message.startsWith("-32601:")
+      )
     }
   }
 
@@ -3105,6 +3216,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         kind?: string
         rawInput?: Record<string, unknown>
         locations?: AcpToolCallLocation[]
+        _meta?: Record<string, unknown> | null
       }
       toolCallId?: string
       title?: string
@@ -3138,14 +3250,29 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     // rendered with no title/kind/rawInput.
     const tc = params.toolCall ?? params
     const tcToolCallId = tc.toolCallId ?? params.toolCallId
-    const tcTitle = tc.title ?? params.title
-    const tcKind = tc.kind ?? params.kind
-    const tcRawInput = tc.rawInput ?? params.rawInput
-    const tcLocations = tc.locations ?? params.locations
+    // A permission's ToolCallUpdate may contain only its id. Resolve omitted
+    // fields from this session's live tool state, keeping newer request fields.
+    const cached = tcToolCallId ? this.toolCallStates.get(sessionId)?.get(tcToolCallId) : undefined
+    const tcTitle = tc.title ?? params.title ?? cached?.title
+    const tcKind = tc.kind ?? params.kind ?? cached?.kind
+    const tcRawInput = tc.rawInput ?? params.rawInput ?? cached?.rawInput
+    const tcLocations = tc.locations ?? params.locations ?? cached?.locations
+    const toolMeta =
+      cached?._meta || params._meta || tc._meta
+        ? { ...cached?._meta, ...params._meta, ...tc._meta }
+        : undefined
+    // Devin supplies its programmatic tool identity in vendor metadata rather
+    // than the human-readable title. This restores namespace recognition by
+    // the host's existing permission callback; it does not grant permission.
+    const devinToolName = this.isDevinAgent()
+      ? [toolMeta?.["cognition.ai/inferenceToolName"], toolMeta?.["cognition.ai/toolName"]].find(
+          (value): value is string => typeof value === "string" && value.trim().length > 0
+        )
+      : undefined
 
     const toolInfo: AcpToolInfo = params.toolInfo || {
       id: tcToolCallId || "tool_call",
-      name: tcTitle || "Tool request",
+      name: devinToolName || tcTitle || "Tool request",
       category: tcKind,
     }
     // JSON-RPC ids are collision-free on the connection. Tool/request domain
@@ -3168,7 +3295,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       options: params.options,
       rawInput: tcRawInput,
       locations: tcLocations,
-      _meta: params._meta,
+      _meta: toolMeta,
       reason: params.reason || `Tool "${tcTitle || toolInfo.name}" requires permission`,
       riskLevel: params.riskLevel,
       autoApproveTimeout: params.autoApproveTimeout,
@@ -3523,9 +3650,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       }
 
       case "tool_call": {
-        const states =
-          this.toolCallStates.get(sessionId) ??
-          new Map<string, Extract<AcpSessionUpdate, { sessionUpdate: "tool_call_update" }>>()
+        const states = this.toolCallStates.get(sessionId) ?? new Map<string, CachedAcpToolCall>()
         this.toolCallStates.set(sessionId, states)
         states.set(update.toolCallId, { ...update, sessionUpdate: "tool_call_update" })
         if (
@@ -3557,11 +3682,17 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       }
 
       case "tool_call_update": {
-        const states =
-          this.toolCallStates.get(sessionId) ??
-          new Map<string, Extract<AcpSessionUpdate, { sessionUpdate: "tool_call_update" }>>()
+        const states = this.toolCallStates.get(sessionId) ?? new Map<string, CachedAcpToolCall>()
         this.toolCallStates.set(sessionId, states)
-        const toolUpdate = { ...states.get(update.toolCallId), ...update }
+        const previous = states.get(update.toolCallId)
+        const updateMeta = (update as CachedAcpToolCall)._meta
+        const toolUpdate = {
+          ...previous,
+          ...update,
+          ...(previous?._meta || updateMeta
+            ? { _meta: { ...previous?._meta, ...updateMeta } }
+            : {}),
+        }
         states.set(toolUpdate.toolCallId, toolUpdate)
         const content = toolUpdate.content ?? []
         const text = content.flatMap((block) =>

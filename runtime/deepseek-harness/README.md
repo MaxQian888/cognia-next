@@ -1,80 +1,119 @@
-# Cognia-owned DeepSeek Harness runtime composition
+# Cognia-managed DeepSeek Harness runtime
 
-This directory is **Cognia source**, versioned with Cognia — not a vendored copy of DeepSeek
-Harness (DSH). It exists because DSH ships no runnable entry point for the two transports Cognia
-integrates against.
+This directory owns the launch boundary, Cognia services bridge, and permission overlays for DeepSeek Harness.
+It uses the official `@deepseek-ai/dsh` product launcher and the shipped
+`@deepseek-ai/dsh-sdk-minimal` bundle. The former hand-written Cordis root and
+`dsh-agent-spine-demo` composition are no longer supported.
 
-## Why Cognia has to own this
+## Supported release and protocol
 
-DSH splits its Cordis composition into two planes:
+The supported npm `latest` release is **0.1.5-rc.1**, verified on 2026-09-12.
+`0.1.5-rc.2` is the separate `next` channel. The runtime manifest pins the product,
+transport packages, and the complete DSH dependency namespace to rc.1: upstream's
+caret dependencies otherwise resolve 210 transitive packages from the next channel.
+The explicit overrides come from the installed product's dependency closure and
+must be refreshed together on the next supported release upgrade. The installer
+retains a lockfile and validates its digest.
 
-- the **agent plane** (`agent.cordis.yml`) — persona, model-facing tools, tool presentation;
-- the **host plane** — the registries themselves, the sandbox and approval stack, persistence,
-  and the model route.
+The SDK requests are `initialize`, `session/prompt`, and `shutdown`; notifications
+remain `session.event`, `session.status`, `subagent.started`, and `subagent.finished`.
+Durable sessions use format **3**. The transport's `serverInfo.version` is still
+`0.0.1`, so it cannot establish package compatibility. The launcher checks installed
+package versions before loading upstream code and rejects older releases.
 
-The published npm packages ship **only the agent plane** (four presets inside `@deepseek-ai/dsh`).
-The host compositions (`base.cordis.yml` / `web.cordis.yml`) are referenced in upstream comments
-but are not published. On top of that:
+## Profiles
 
-- `@deepseek-ai/dsh-acp` and `@deepseek-ai/dsh-sdk-client` both have `"bin": null` — they are
-  Cordis plugin libraries, not executables.
-- The one published binary, `@deepseek-ai/dsh` (`bin: dsh`), exposes only `web` and `plugin`
-  subcommands and contains no ACP code at all.
-- `@deepseek-ai/dsh-sdk-client` states plainly: _"No bundled-runtime resolution — callers name the
-  runtime executable explicitly"_, with `{ command: 'node', args: ['lib/bin.js', 'cordis.yml'] }`
-  as the reference launch spec.
+The existing `host.*.yml` artifact names now contain **patch overlays**, applied
+last through the official `dsh --profile <name> --patch <absolute-overlay>` grammar.
+All profiles inherit the maintained minimal agent kernel, projection registry,
+LLM service, and session persistence, then add sandboxed filesystem tools and a
+local image attachment store.
 
-So there is nothing to "install and launch by absolute path". Cognia must supply the host plane,
-and that host plane is where the sandbox and approval stack live — i.e. it is security-critical
-and belongs under review, not vendored.
+| Artifact                 | Managed profile        | Authority                                                                               |
+| ------------------------ | ---------------------- | --------------------------------------------------------------------------------------- |
+| `host.sdk-readonly.yml`  | `cognia-sdk-readonly`  | Read-only files; shell, PTY, jobs, and approval service disabled/absent.                |
+| `host.sdk-workspace.yml` | `cognia-sdk-workspace` | Workspace-write files and persistent shell; requires Cognia launch-time preapproval.    |
+| `host.acp.yml`           | `cognia-acp`           | Workspace-write files; no shell; wider one-shot operations require ACP client approval. |
 
-## Contents
+Readonly writes and model-requested escalation fail closed. SDK workspace also has
+no approval provider, so it cannot grant itself a broader mode. ACP replaces both
+SDK startup and transport rows with the official ACP app and server; its approval
+service forwards `session/request_permission` to Cognia. Neither SDK composition
+advertises an interactive approval capability.
 
-| File                     | Role                                                                    |
-| ------------------------ | ----------------------------------------------------------------------- |
-| `host.sdk-readonly.yml`  | Default SDK profile. Sandbox mode `read-only`, no shell/terminal tools. |
-| `host.sdk-workspace.yml` | SDK profile with `workspace-write` and pre-approved tooling.            |
-| `launcher.mjs`           | Thin wrapper over `@deepseek-ai/dsh-app-boot`'s `boot()`.               |
-| `package.json`           | Exact-pinned DSH dependency set for the isolated runtime home.          |
+## Cognia tools and model gateway
 
-`launcher.mjs` passes `bareModuleBaseUrl` to `boot()`. Upstream documents that parameter as being
-for exactly this case: _"a closed runtime passes `bareModuleBaseUrl` … so its installed package
-tree remains authoritative even when the config lives inside another Node project."_
+`launcher.mjs` also exports a Cordis startup plugin, mounted through the overlay's
+relative `./launcher.mjs` entry. Both transports wait for `cogniaServicesReady`,
+so the first prompt cannot race MCP discovery or gateway route registration.
 
-## Trust boundary: `DSH_HOME` must be pinned
+For SDK, Cognia creates one runtime per session and supplies
+`COGNIA_DSH_MCP_SERVERS` as a JSON array of standard ACP server declarations:
+stdio `{name, command, args, env:[{name,value}]}` or HTTP
+`{type:"http", name, url, headers:[{name,value}]}`. The launcher validates them,
+normalizes names identically to ACP, and mounts the official `dsh-mcp-client`
+with `failOnStartupError:true`. For ACP, use the same declarations through
+`session/new` and `session/resume`; upstream already mounts them per agent.
+MCP tools retain `mcp__cognia-tools__<tool>` / `mcp__cognia-plugin-tools__<tool>`
+identity. Cognia's broker owns permissions, approvals, extra workspace roots,
+and actual tool execution; the DSH bridge does not duplicate those decisions.
+MCP resources/prompts are not upstream bridged capabilities.
 
-`resolveDshHome()` resolves `$DSH_HOME`, else `~/.dsh`. Under that root, DSH reads user-writable
-layers that are applied **after every bundle layer** and may `insert` arbitrary plugin rows and
-evaluate arbitrary JavaScript via the `!!js` YAML tag:
+A Cognia model lease sets `COGNIA_DSH_PROVIDER=cognia`, `COGNIA_DSH_MODEL`,
+`COGNIA_DSH_GATEWAY_TOKEN`, and `COGNIA_DSH_GATEWAY_CONFIG`. The latter contains
+`{providers:{cognia:{api:"openai-completions",baseURL,apiKeyEnv:"COGNIA_DSH_GATEWAY_TOKEN",models:[...]}}}`.
+The startup plugin registers this route through official `dsh-llm-pi-ai`, while
+the overlay disables the direct DeepSeek adapter. No DeepSeek credential is
+required for this route. The host owns lease lifetime and credential cleanup.
 
-- `$DSH_HOME/cordis.patch.yml`
-- `$DSH_HOME/profiles/<name>/cordis.patch.yml`
-- `$DSH_HOME/profiles/<name>/package.json` (out-of-tree plugin `dependencies`)
+`COGNIA_DSH_ALLOWED_TOOLS` is preapproval metadata, not a visibility allowlist.
+`COGNIA_DSH_ADDITIONAL_DIRECTORIES` is broker policy scope. Both are validated
+JSON string arrays; extra roots do not widen native DSH filesystem/shell policy.
+Upstream's native sandbox supports one workspace root plus platform temporary
+roots; additional-root work goes through the Cognia broker's governed tools.
 
-These are live-watched through `watchUserPatches` and recompose the tree transactionally at
-runtime.
+## Isolation
 
-**If `DSH_HOME` were left at its default, a file in the user's home directory could mount write and
-network tools onto Cognia's "certified read-only" profile while the lockfile and composition
-digests still verified.** The launcher therefore refuses to start unless `DSH_HOME` points inside
-the Cognia-owned runtime home, and `doctor` asserts no unplanned patch layer exists there.
+The runtime manager must set `COGNIA_DSH_RUNTIME_HOME` and `DSH_HOME`. The latter
+must resolve to a strict child of the runtime home. The launcher validates canonical
+paths, including nonexistent children behind symlinked ancestors, and accepts only
+the three managed overlays inside the runtime home.
 
-## Native dependencies
+Each profile gets a deterministic manifest at
+`$DSH_HOME/profiles/<managed-profile>/package.json`, with exactly one bundle,
+`@deepseek-ai/dsh-sdk-minimal`, and `patchReload: startup`. Existing manifests must
+match exactly; additional dependencies or changed bundle lists are rejected.
+Home/profile `cordis.patch.yml` files and a home `.env` are rejected. The product
+launches with cwd set to the isolated Harness home, preventing workspace `.env`
+credentials from reentering Cognia's scrubbed process environment. The original
+workspace is pinned in `COGNIA_DSH_WORKSPACE`, SDK `initialize.cwd`, and ACP
+`session/new.cwd`. Session persistence stays inside the runtime home, and image
+attachments stay under `DSH_HOME`. Telemetry is disabled.
 
-`koffi` is a hard dependency of `@deepseek-ai/dsh-fs-local` (which `dsh-fs-sandbox` extends), but
-it is imported only from an `async function win32()` path that loads `advapi32.dll` /
-`kernel32.dll`. On macOS and Linux it is never imported, so it is installed but **not built**
-(`--ignore-scripts`). Windows support would require building it.
+The official launcher supplies Cordis startup services, module fallback links,
+stdin lifetime, and bounded signal shutdown. Stdout carries JSON-RPC exclusively;
+Cognia preflight failures go to stderr.
 
-`node-pty` (via `@deepseek-ai/dsh-subprocess-local`) is a _static_ top-level import, so any
-composition that loads the local subprocess provider needs its native binding. Upstream ships
-prebuilds for `darwin-arm64`, `darwin-x64`, `win32-arm64`, `win32-x64` — **there is no Linux
-prebuild**. The read-only profile avoids this by not composing a subprocess provider at all.
+## Verification
 
-## Upstream version
+```sh
+node --test launcher.test.mjs
+npm install --ignore-scripts --no-audit --no-fund
+node --test launcher.smoke.test.mjs services.smoke.test.mjs
+```
 
-Pinned to `0.1.0-rc.6`. DSH is a developer preview whose README warns of
-compatibility-breaking changes, and whose `SESSION_FORMAT_VERSION` is `0` with no compatibility
-promise. Version preflight keys on the installed npm package versions, never on the protocol
-handshake: `dsh-sdk-protocol` documents _"No protocol-version negotiation — the handshake carries
-only `serverInfo.version` (`0.0.1`, unvalidated by clients)"_.
+Install this package into an isolated directory, never into Cognia's application
+workspace. `launcher.test.mjs` checks argument validation, path containment, hidden
+patches, manifest injection, and stale release refusal. `launcher.smoke.test.mjs`
+launches actual product subprocesses using `mock-deepseek.mjs`, a loopback SSE
+provider with a dummy credential. It exercises SDK initialize, prompt receipts,
+tool execution/denial, final output, idle, shutdown, image input, persisted v3
+headers, and ACP initialize/new/prompt/permission rejection/disconnect. It rejects
+the obsolete dotted `session.prompt` request. `services.smoke.test.mjs` also drives SDK startup MCP, ACP session MCP, the generic Cognia model route, and denied-tool-result propagation without duplicate approvals. These tests spend no model credits.
+
+The package carries the full official launcher closure, including optional native
+providers. The smoke results establish the local macOS installation; other platforms
+still need their own native-binding and sandbox checks before claiming device support.
+
+Upstream: [product launcher](https://www.npmjs.com/package/@deepseek-ai/dsh/v/0.1.5-rc.1),
+[SDK minimal bundle](https://www.npmjs.com/package/@deepseek-ai/dsh-sdk-minimal/v/0.1.5-rc.1).

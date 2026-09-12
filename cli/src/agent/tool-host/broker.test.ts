@@ -738,3 +738,83 @@ it("refuses an immutable sandbox scope violation before requesting approval", as
   expect(gate).not.toHaveBeenCalled()
   c.end()
 })
+
+describe("Cognia tool lifecycle hooks", () => {
+  it("rechecks rewritten arguments against workspace policy before execution", async () => {
+    const beforeToolUse = jest.fn(async () => ({
+      action: "modify" as const,
+      modifiedArgs: { path: "/outside/secret" },
+    }))
+    const broker = await start({ beforeToolUse })
+    const { c } = await connected(broker)
+    try {
+      expect(
+        await c.call("authorize", { name: "read", args: { path: "/work/file" } })
+      ).toMatchObject({ allow: false })
+      expect(beforeToolUse).toHaveBeenCalledWith(
+        "mcp__cognia-tools__read",
+        { path: "/work/file" },
+        "sess1"
+      )
+    } finally {
+      c.end()
+    }
+  })
+  it("reviews plugin results and builtin results before returning them", async () => {
+    const beforeToolUse = jest.fn(async () => ({
+      action: "modify" as const,
+      modifiedArgs: { query: "rewritten" },
+    }))
+    const afterToolUse = jest.fn(async () => ({ modifiedResult: "reviewed result" }))
+    const execHostTool = jest.fn(async () => ({ result: "raw result" }))
+    const broker = await start({ beforeToolUse, afterToolUse, execHostTool })
+    const plugin = await connected(broker, COGNIA_PLUGIN_TOOLS_SERVER)
+    const builtin = await connected(broker)
+    try {
+      expect(
+        await plugin.c.call("exec", { name: "web_search", args: { query: "original" } })
+      ).toEqual({ result: "reviewed result" })
+      expect(execHostTool).toHaveBeenCalledWith("web_search", { query: "rewritten" })
+      expect(
+        await builtin.c.call("review", {
+          name: "read",
+          args: { path: "/work/file" },
+          result: "file contents",
+        })
+      ).toEqual({ result: "reviewed result" })
+      expect(afterToolUse).toHaveBeenLastCalledWith(
+        "mcp__cognia-tools__read",
+        { path: "/work/file" },
+        "file contents",
+        "sess1"
+      )
+    } finally {
+      plugin.c.end()
+      builtin.c.end()
+    }
+  })
+  it("denies hook-blocked and inactive calls even when they need no approval", async () => {
+    const blocked = await start({
+      beforeToolUse: async () => ({ action: "deny", reason: "hook says no" }),
+    })
+    const one = await connected(blocked)
+    const inactive = await start({ isTurnActive: () => false })
+    const two = await connected(inactive)
+    try {
+      expect(await one.c.call("authorize", { name: "read", args: {} })).toEqual({
+        allow: false,
+        reason: "hook says no",
+      })
+      expect(await two.c.call("authorize", { name: "read", args: {} })).toEqual({
+        allow: false,
+        reason: "No active turn",
+      })
+      await expect(
+        two.c.call("review", { name: "read", args: {}, result: "late" })
+      ).rejects.toThrow("No active turn")
+    } finally {
+      one.c.end()
+      two.c.end()
+    }
+  })
+})

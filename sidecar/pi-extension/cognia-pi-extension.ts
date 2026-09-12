@@ -1,9 +1,9 @@
 /**
  * Cognia's first-party Pi extension (ADR-0119).
  *
- * Loaded with `pi -e <this file>` by `PiRpcClientAdapter`. It is shipped as raw
- * TypeScript because Pi compiles `.ts` extensions itself — there is no build
- * step, which is also what lets the adapter pin this file by SHA-256.
+ * Loaded with `pi -e <this file>` by `PiRpcClientAdapter`. Desktop ships the
+ * pinned TypeScript with sidecar dependencies; standalone CLI packages bundle
+ * these dependencies and pin the compiled output during staging.
  *
  * It does three things and decides nothing:
  *
@@ -22,7 +22,18 @@
  * than allowing.
  */
 
-import net from "node:net"
+import { Client } from "@modelcontextprotocol/sdk/client/index.js"
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv"
+import {
+  ElicitRequestSchema,
+  ListRootsRequestSchema,
+  ToolListChangedNotificationSchema,
+} from "@modelcontextprotocol/sdk/types.js"
+import { hasNoLeakingPiiDeep, redactText } from "@cognia/redact"
+import { pathToFileURL } from "node:url"
 
 // Pi supplies these at load time; the package is not a Cognia dependency, so
 // the types are declared structurally rather than imported.
@@ -30,8 +41,14 @@ interface PiUi {
   confirm(title: string, message?: string, options?: { signal?: AbortSignal }): Promise<boolean>
   notify(message: string, level?: "info" | "warning" | "error"): void
   setStatus(key: string, text: string): void
+  input?(
+    title: string,
+    placeholder?: string,
+    options?: { signal?: AbortSignal }
+  ): Promise<string | undefined>
 }
 interface PiCtx {
+  cwd?: string
   ui: PiUi
   hasUI?: boolean
   signal?: AbortSignal
@@ -42,10 +59,12 @@ interface PiToolCallEvent {
   input?: Record<string, unknown>
 }
 interface PiToolResult {
-  content: Array<{ type: "text"; text: string }>
+  content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>
   details?: Record<string, unknown>
 }
 interface PiExtensionApi {
+  getActiveTools?(): string[]
+  setActiveTools?(names: string[]): void
   on(event: string, handler: (event: never, ctx: PiCtx) => unknown | Promise<unknown>): void
   registerTool(spec: {
     name: string
@@ -97,112 +116,10 @@ function readPolicy(raw: string | undefined): PiToolPolicy {
 }
 
 // ---------------------------------------------------------------------------
-// Tool-host broker client (NDJSON over a unix socket / named pipe)
-// ---------------------------------------------------------------------------
-
-/** The subset of the broker's session descriptor this extension needs. */
-interface ToolHostSessionDescriptor {
-  hostTools?: Array<{ name: string; description?: string; jsonSchema?: unknown }>
-}
-
-interface BrokerRequest {
-  id: number
-  method: "hello" | "authorize" | "exec" | "report"
-  params?: unknown
-}
-
-class BrokerClient {
-  private socket?: net.Socket
-  private buffer = ""
-  private nextId = 1
-  private readonly pending = new Map<
-    number,
-    (value: { result?: unknown; error?: string }) => void
-  >()
-  private ready?: Promise<ToolHostSessionDescriptor | undefined>
-
-  constructor(
-    private readonly endpoint: string,
-    private readonly token: string,
-    private readonly server: string
-  ) {}
-
-  connect(): Promise<ToolHostSessionDescriptor | undefined> {
-    if (this.ready) return this.ready
-    this.ready = new Promise<ToolHostSessionDescriptor | undefined>((resolve, reject) => {
-      const socket = net.createConnection(this.endpoint)
-      this.socket = socket
-      socket.setEncoding("utf8")
-      socket.on("data", (chunk: string) => this.ingest(chunk))
-      socket.on("error", (error) => {
-        this.failAll(String(error))
-        reject(error)
-      })
-      socket.on("close", () => this.failAll("tool host closed the connection"))
-      socket.once("connect", () => {
-        this.request("hello", { token: this.token, server: this.server })
-          .then((response) => {
-            if (response.error) return reject(new Error(response.error))
-            // `hello` answers with the session descriptor; that is where the
-            // projectable tool list lives.
-            const result = response.result as { session?: ToolHostSessionDescriptor } | undefined
-            resolve(result?.session)
-          })
-          .catch(reject)
-      })
-    })
-    return this.ready
-  }
-
-  request(
-    method: BrokerRequest["method"],
-    params: unknown
-  ): Promise<{ result?: unknown; error?: string }> {
-    const socket = this.socket
-    if (!socket || socket.destroyed) {
-      return Promise.resolve({ error: "tool host is not connected" })
-    }
-    const id = this.nextId++
-    return new Promise((resolve) => {
-      this.pending.set(id, resolve)
-      socket.write(`${JSON.stringify({ id, method, params })}\n`)
-    })
-  }
-
-  private ingest(chunk: string): void {
-    this.buffer += chunk
-    const lines = this.buffer.split("\n")
-    this.buffer = lines.pop() ?? ""
-    for (const line of lines) {
-      if (!line.trim()) continue
-      let message: { id?: number; result?: unknown; error?: string }
-      try {
-        message = JSON.parse(line)
-      } catch {
-        // A malformed frame means the channel is no longer trustworthy.
-        this.socket?.destroy()
-        this.failAll("tool host sent a malformed frame")
-        return
-      }
-      if (typeof message.id !== "number") continue
-      const resolve = this.pending.get(message.id)
-      if (!resolve) continue
-      this.pending.delete(message.id)
-      resolve({ result: message.result, error: message.error })
-    }
-  }
-
-  private failAll(reason: string): void {
-    for (const [, resolve] of this.pending) resolve({ error: reason })
-    this.pending.clear()
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Extension entry point
 // ---------------------------------------------------------------------------
 
-export const COGNIA_PI_EXTENSION_VERSION = 1
+export const COGNIA_PI_EXTENSION_VERSION = 2
 
 /**
  * Marker prefixing the title of a native-tool approval dialog.
@@ -236,16 +153,8 @@ export const __markerPayloadForTests = (
 export default function cogniaPiExtension(pi: PiExtensionApi): void {
   const env = process.env
   const policy = readPolicy(env.COGNIA_TOOLHOST_PI_POLICY)
-  const endpoint = env.COGNIA_TOOLHOST_SOCKET
-  const token = env.COGNIA_TOOLHOST_TOKEN
-  const server = env.COGNIA_TOOLHOST_SERVER
-
-  // Only the plugin plane is projectable from here: `exec` refuses the
-  // built-in plane by design, since built-ins execute inside the MCP bridge.
-  const broker =
-    endpoint && token && server === "cognia-plugin-tools"
-      ? new BrokerClient(endpoint, token, server)
-      : undefined
+  const servers = readMcpServers(env.COGNIA_TOOLHOST_PI_MCP_SERVERS)
+  const projection = createMcpProjection(pi, servers)
 
   // Cognia's system prompt / instruction envelope, already PII-gated on the
   // adapter side. Injected per turn because Pi rebuilds its system prompt for
@@ -258,13 +167,30 @@ export default function cogniaPiExtension(pi: PiExtensionApi): void {
     })
   }
 
-  pi.on("session_start", (_event, ctx) => {
-    // The adapter watches for this line to confirm interception is live. A
-    // session that never sees it is refused rather than run ungated.
+  pi.on("session_start", async (_event, ctx) => {
+    await projection.start(ctx)
     ctx.ui.setStatus(
       "cognia",
-      `cognia-ready v${COGNIA_PI_EXTENSION_VERSION} mode=${policy.mode} toolhost=${broker ? "on" : "off"}`
+      `cognia-ready v${COGNIA_PI_EXTENSION_VERSION} mode=${policy.mode} toolhost=${servers.length ? "on" : "off"}`
     )
+  })
+  pi.on("session_shutdown", () => projection.close())
+  pi.on("tool_result", (event: never) => {
+    const result = event as unknown as {
+      content?: Array<Record<string, unknown>>
+      isError?: boolean
+    }
+    try {
+      return {
+        content: projection.result({ content: result.content }).content,
+        isError: result.isError,
+      }
+    } catch (error) {
+      return { content: [{ type: "text", text: safeText(String(error)) }], isError: true }
+    }
+  })
+  pi.on("before_agent_start", async (_event, ctx) => {
+    await projection.refresh(ctx)
   })
 
   /**
@@ -295,6 +221,7 @@ export default function cogniaPiExtension(pi: PiExtensionApi): void {
    */
   pi.on("tool_call", async (event: never, ctx: PiCtx) => {
     const call = event as unknown as PiToolCallEvent
+    if (projection.owns(call.toolName)) return undefined
     // Capture the current turn signal: ctx may expose a live getter whose value
     // changes when an aborted turn unwinds and another turn starts.
     const signal = ctx.signal
@@ -340,13 +267,6 @@ export default function cogniaPiExtension(pi: PiExtensionApi): void {
       return { block: true, reason: `Cognia permission check failed: ${String(error)}` }
     }
   })
-
-  // Cognia's own tools, relayed to the broker. Registration is best-effort:
-  // a host with no tool bridge simply projects nothing, while native-tool
-  // interception above stays active regardless.
-  if (broker) {
-    void registerProjectedTools(pi, broker)
-  }
 }
 
 /**
@@ -387,65 +307,331 @@ function describeCall(toolName: string, input: Record<string, unknown> | undefin
   return typeof command === "string" ? `${toolName}: ${command}` : toolName
 }
 
-/**
- * Project Cognia's PLUGIN tools into Pi.
- *
- * Scope is deliberate. The broker's `exec` only serves the
- * `cognia-plugin-tools` plane: Cognia's built-in tools are executed by the MCP
- * bridge, which carries their real implementations, and this extension has no
- * access to those. Registering built-ins here would advertise tools that
- * cannot run.
- *
- * The tool list comes from the `hello` response's session descriptor — the
- * broker exposes no listing method, and inventing one would fail at runtime.
- */
-async function registerProjectedTools(pi: PiExtensionApi, broker: BrokerClient): Promise<void> {
-  let descriptor: ToolHostSessionDescriptor | undefined
-  try {
-    descriptor = await broker.connect()
-  } catch {
-    // No bridge: native interception above still applies, and the adapter
-    // reports the missing tool host through its own capability path.
-    return
-  }
-
-  for (const tool of descriptor?.hostTools ?? []) {
-    if (!tool?.name) continue
-    pi.registerTool({
-      name: `cognia_${tool.name}`,
-      label: tool.name,
-      description: tool.description ?? `Cognia tool: ${tool.name}`,
-      parameters: tool.jsonSchema ?? { type: "object", properties: {} },
-      async execute(_toolCallId, params) {
-        // Re-authorized broker-side on every call: holding the token grants
-        // nothing on its own, so a leaked token cannot widen access.
-        const authorized = await broker.request("authorize", { name: tool.name, args: params })
-        const verdict = authorized.result as { allow?: boolean; reason?: string } | undefined
-        if (authorized.error || !verdict?.allow) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Denied by Cognia: ${verdict?.reason ?? authorized.error ?? "not allowed"}`,
-              },
-            ],
-          }
-        }
-        const executed = await broker.request("exec", { name: tool.name, args: params })
-        if (executed.error) {
-          return { content: [{ type: "text", text: `Cognia tool failed: ${executed.error}` }] }
-        }
-        return { content: [{ type: "text", text: stringify(executed.result) }] }
-      },
-    })
-  }
+interface McpServerConfig {
+  name: string
+  type?: "http" | "sse"
+  command?: string
+  args?: string[]
+  env?: Array<{ name: string; value: string }>
+  url?: string
+  headers?: Array<{ name: string; value: string }>
 }
 
-function stringify(value: unknown): string {
-  if (typeof value === "string") return value
-  try {
-    return JSON.stringify(value) ?? ""
-  } catch {
-    return String(value)
+export function readMcpServers(raw: string | undefined): McpServerConfig[] {
+  if (!raw) return []
+  const servers = JSON.parse(raw) as McpServerConfig[]
+  if (!Array.isArray(servers)) throw new Error("Invalid Cognia Pi MCP configuration")
+  const names = new Set<string>()
+  for (const server of servers) {
+    if (!server || !/^[a-zA-Z0-9_-]+$/.test(server.name) || names.has(server.name))
+      throw new Error("Invalid or duplicate Cognia MCP server name")
+    names.add(server.name)
+    if (server.type === undefined) {
+      if (
+        !server.command ||
+        !Array.isArray(server.args) ||
+        server.args.some((arg) => typeof arg !== "string")
+      )
+        throw new Error("Invalid Cognia MCP stdio configuration")
+    } else if (server.type === "http" || server.type === "sse") {
+      const url = new URL(server.url ?? "")
+      if (!["http:", "https:"].includes(url.protocol) || url.username || url.password)
+        throw new Error("Invalid Cognia MCP URL")
+    } else throw new Error("Unsupported Cognia Pi MCP transport")
+    for (const entries of [server.env, server.headers]) {
+      if (
+        entries !== undefined &&
+        (!Array.isArray(entries) ||
+          entries.some(
+            (entry) => typeof entry?.name !== "string" || typeof entry?.value !== "string"
+          ))
+      )
+        throw new Error("Invalid Cognia MCP environment or headers")
+    }
   }
+  return servers
+}
+
+function safeText(value: string): string {
+  return redactText(value).redacted
+}
+
+/** Pi supports text and image tool blocks. Preserve resource text explicitly. */
+export function piMcpResult(value: unknown): PiToolResult {
+  const result = value as {
+    content?: Array<Record<string, unknown>>
+    structuredContent?: unknown
+    isError?: boolean
+  }
+  const content: PiToolResult["content"] = []
+  for (const block of result.content ?? []) {
+    if (block.type === "text" && typeof block.text === "string")
+      content.push({ type: "text", text: safeText(block.text) })
+    else if (
+      block.type === "image" &&
+      typeof block.data === "string" &&
+      typeof block.mimeType === "string"
+    )
+      content.push({ type: "image", data: block.data, mimeType: block.mimeType })
+    else if (block.type === "resource" && block.resource && typeof block.resource === "object") {
+      const resource = block.resource as { text?: string; blob?: string; mimeType?: string }
+      if (typeof resource.text === "string")
+        content.push({ type: "text", text: safeText(resource.text) })
+      else if (
+        typeof resource.blob === "string" &&
+        /^(text\/|application\/(json|xml|javascript))/.test(resource.mimeType ?? "")
+      )
+        content.push({
+          type: "text",
+          text: safeText(Buffer.from(resource.blob, "base64").toString("utf8")),
+        })
+      else
+        throw new Error(
+          "Pi cannot represent this MCP binary resource; use a text or image tool result"
+        )
+    } else if (block.type === "resource_link")
+      content.push({ type: "text", text: safeText(JSON.stringify(block)) })
+    else throw new Error(`Pi cannot represent MCP tool content type ${String(block.type)}`)
+  }
+  if (result.structuredContent !== undefined)
+    content.push({ type: "text", text: safeText(JSON.stringify(result.structuredContent)) })
+  if (!hasNoLeakingPiiDeep(content)) throw new Error("MCP tool output blocked by the PII gate")
+  if (result.isError)
+    throw new Error(
+      content
+        .filter((block) => block.type === "text")
+        .map((block) => block.text)
+        .join("\n") || "MCP tool failed"
+    )
+  return { content, details: {} }
+}
+
+/** Official MCP clients live for exactly one Pi session, never during probes. */
+export function createMcpProjection(pi: PiExtensionApi, servers: McpServerConfig[]) {
+  const validator = new AjvJsonSchemaValidator()
+  const credentials = servers.flatMap((server) =>
+    [...(server.headers ?? []), ...(server.env ?? [])]
+      .filter((entry) => entry.value && /key|token|secret|auth/i.test(entry.name))
+      .flatMap((entry) => [entry.value, ...(/^Bearer\s+(\S+)$/i.exec(entry.value)?.slice(1) ?? [])])
+  )
+  const clients = new Map<string, Client>()
+  const known = new Set<string>()
+  const available = new Set<string>()
+  let context: PiCtx | undefined
+  let lifetime = new AbortController()
+  let refreshing: Promise<void> | undefined
+  let started = false
+  let generation = 0
+
+  function scrub(error: unknown): Error {
+    return new Error(scrubText(error instanceof Error ? error.message : String(error)))
+  }
+
+  function scrubText(text: string): string {
+    for (const credential of credentials) text = text.split(credential).join("[REDACTED]")
+    return safeText(text)
+  }
+
+  function result(value: unknown): PiToolResult {
+    return piMcpResult(
+      JSON.parse(
+        JSON.stringify(value, (_key, entry) =>
+          typeof entry === "string" ? scrubText(entry) : entry
+        )
+      )
+    )
+  }
+
+  async function refresh(ctx?: PiCtx): Promise<void> {
+    if (ctx) context = ctx
+    if (refreshing) return refreshing
+    const signal = lifetime.signal
+    refreshing = (async () => {
+      const next = new Map<
+        string,
+        {
+          server: string
+          client: Client
+          tool: Awaited<ReturnType<Client["listTools"]>>["tools"][number]
+        }
+      >()
+      for (const [server, client] of clients) {
+        let cursor: string | undefined
+        const seen = new Set<string>()
+        do {
+          const page = await client.listTools(cursor ? { cursor } : {}, {
+            signal,
+            timeout: 15_000,
+          })
+          if (
+            !hasNoLeakingPiiDeep(page.tools) ||
+            credentials.some((value) => JSON.stringify(page.tools).includes(value))
+          )
+            throw new Error("MCP tool catalog blocked by the PII gate")
+          for (const tool of page.tools) {
+            const name = `mcp__${server}__${tool.name}`
+            if (!/^[a-zA-Z0-9_.-]+$/.test(tool.name) || next.has(name))
+              throw new Error("Invalid or duplicate MCP tool name")
+            next.set(name, { server, client, tool })
+          }
+          cursor = page.nextCursor
+          if (cursor && seen.has(cursor))
+            throw new Error("MCP tool discovery returned a repeating cursor")
+          if (cursor) seen.add(cursor)
+        } while (cursor)
+      }
+      signal.throwIfAborted()
+      const active = pi.getActiveTools?.() ?? []
+      const previouslyAvailable = new Set(available)
+      available.clear()
+      for (const [name, { client, tool }] of next) {
+        known.add(name)
+        available.add(name)
+        pi.registerTool({
+          name,
+          label: tool.title ?? tool.name,
+          description: tool.description ?? `MCP tool ${tool.name}`,
+          parameters: tool.inputSchema,
+          async execute(_toolCallId, params, signal, onUpdate) {
+            if (!available.has(name) || lifetime.signal.aborted)
+              throw new Error("Cognia MCP tool is no longer available")
+            const abortSignal = signal
+              ? AbortSignal.any([signal, lifetime.signal])
+              : lifetime.signal
+            try {
+              const response = await client.callTool(
+                { name: tool.name, arguments: params },
+                undefined,
+                {
+                  signal: abortSignal,
+                  timeout: 24 * 60 * 60 * 1000,
+                  onprogress: (progress) =>
+                    onUpdate?.({
+                      content: [
+                        {
+                          type: "text",
+                          text: scrubText(
+                            progress.message ??
+                              `${progress.progress}${progress.total === undefined ? "" : `/${progress.total}`}`
+                          ),
+                        },
+                      ],
+                      details: {},
+                    }),
+                }
+              )
+              return result(response)
+            } catch (error) {
+              throw scrub(error)
+            }
+          },
+        })
+      }
+      if (pi.setActiveTools && pi.getActiveTools)
+        pi.setActiveTools([
+          ...new Set([
+            ...active.filter((name) => !known.has(name) || available.has(name)),
+            ...[...available].filter((name) => !previouslyAvailable.has(name)),
+          ]),
+        ])
+    })()
+    try {
+      await refreshing
+    } catch (error) {
+      throw scrub(error)
+    } finally {
+      refreshing = undefined
+    }
+  }
+
+  async function close(): Promise<void> {
+    generation++
+    started = false
+    lifetime.abort(new Error("Pi session closed"))
+    available.clear()
+    await Promise.allSettled([...clients.values()].map((client) => client.close()))
+    await refreshing?.catch(() => undefined)
+    clients.clear()
+  }
+
+  async function start(ctx: PiCtx): Promise<void> {
+    const cleanup = close()
+    const startingGeneration = generation
+    await cleanup
+    if (startingGeneration !== generation) throw new Error("Pi session closed during startup")
+    lifetime = new AbortController()
+    context = ctx
+    try {
+      for (const server of servers) {
+        const client = new Client(
+          { name: "cognia-pi", version: "2.0.0" },
+          { capabilities: { roots: { listChanged: false }, elicitation: { form: {}, url: {} } } }
+        )
+        clients.set(server.name, client)
+        client.setRequestHandler(ListRootsRequestSchema, () => {
+          const extra = JSON.parse(
+            process.env.COGNIA_TOOLHOST_PI_ADDITIONAL_DIRECTORIES ?? "[]"
+          ) as string[]
+          const paths = [ctx.cwd ?? process.cwd(), ...extra]
+          const roots = paths.map((entry) => ({ uri: pathToFileURL(entry).href }))
+          if (!hasNoLeakingPiiDeep(roots))
+            throw new Error("MCP workspace roots blocked by the PII gate")
+          return { roots }
+        })
+        client.setRequestHandler(ElicitRequestSchema, async (request, extra) => {
+          const ui = context?.ui
+          if (!ui || context?.hasUI === false) return { action: "cancel" as const }
+          const signal = AbortSignal.any([lifetime.signal, extra.signal])
+          if (request.params.mode === "url") {
+            const accepted = await ui.confirm(request.params.message, request.params.url, {
+              signal,
+            })
+            return { action: accepted ? ("accept" as const) : ("decline" as const) }
+          }
+          if (!ui.input) return { action: "cancel" as const }
+          const answer = await ui.input(
+            request.params.message,
+            JSON.stringify(request.params.requestedSchema),
+            { signal }
+          )
+          if (answer === undefined) return { action: "cancel" as const }
+          const content = JSON.parse(answer) as Record<string, string | number | boolean>
+          if (!validator.getValidator(request.params.requestedSchema)(content).valid)
+            throw new Error("MCP elicitation response does not match the requested schema")
+          if (!hasNoLeakingPiiDeep(content))
+            throw new Error("MCP elicitation response blocked by the PII gate")
+          return { action: "accept" as const, content }
+        })
+        client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
+          if (!started) return
+          void refresh().catch((error) => context?.ui.notify(scrub(error).message, "error"))
+        })
+        const headers = Object.fromEntries(
+          (server.headers ?? []).map(({ name, value }) => [name, value])
+        )
+        const transport =
+          server.type === "http"
+            ? new StreamableHTTPClientTransport(new URL(server.url!), { requestInit: { headers } })
+            : server.type === "sse"
+              ? new SSEClientTransport(new URL(server.url!), { requestInit: { headers } })
+              : new StdioClientTransport({
+                  command: server.command!,
+                  args: server.args,
+                  cwd: ctx.cwd,
+                  env: Object.fromEntries(
+                    (server.env ?? []).map(({ name, value }) => [name, value])
+                  ),
+                  stderr: "pipe",
+                })
+        await client.connect(transport, { signal: lifetime.signal, timeout: 15_000 })
+      }
+      started = true
+      await refresh(ctx)
+    } catch (error) {
+      await close()
+      throw scrub(error)
+    }
+  }
+
+  return { start, refresh, close, result, owns: (name: string) => known.has(name) }
 }

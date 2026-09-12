@@ -175,10 +175,15 @@ describe("starting a run", () => {
       prompt: "hi",
       model: "z-ai/glm-5.3-flash",
       reasoningEffort: "high",
+      systemPrompt: "Selected skill: verify results",
+      allowedTools: ["read"],
     })
     expect(h.manager.executed[0]).toMatchObject({
       model: "z-ai/glm-5.3-flash",
       reasoningEffort: "high",
+      systemPrompt: "Selected skill: verify results",
+      allowedTools: ["read"],
+      context: { custom: { chatSessionId: "chat-1" } },
     })
   })
 

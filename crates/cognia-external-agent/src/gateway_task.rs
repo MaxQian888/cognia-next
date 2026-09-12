@@ -19,7 +19,7 @@ fn payload(env: &HashMap<String, String>) -> Result<Option<TaskPayload>, String>
     let value: TaskPayload = serde_json::from_str(raw).map_err(|_| "Invalid gateway task configuration")?;
     if value.task_id.is_empty() || value.task_id.len() > 128 ||
         !value.task_id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_') ||
-        !["codex", "opencode", "pi", "claude", "qwen"].contains(&value.runtime.as_str()) ||
+        !["codex", "opencode", "pi", "claude", "qwen", "dsh"].contains(&value.runtime.as_str()) ||
         value.files.iter().any(|(name, contents)| !["codex/config.toml", "pi/models.json", "pi/settings.json", "qwen/settings.json"].contains(&name.as_str()) || contents.len() > 262144) {
         return Err("Invalid gateway task configuration".into());
     }
@@ -177,6 +177,27 @@ mod tests {
         let guard = prepare(&mut resumed, dir.path()).unwrap();
         assert_eq!(fs::read_to_string(&history).unwrap(), "history");
         drop(guard);
+    }
+
+    #[test]
+    fn dsh_gateway_preserves_certified_state_and_keeps_lease_out_of_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut input = env("dsh-one");
+        input.insert(PAYLOAD_ENV.into(), serde_json::json!({"taskId":"dsh-one","binding":{"providerId":"gateway","modelId":"model"},"runtime":"dsh","files":{}}).to_string());
+        input.insert("DSH_HOME".into(), "/managed/dsh/dsh-home".into());
+        input.insert("COGNIA_DSH_SESSION_ROOT".into(), "/managed/dsh/sessions".into());
+        input.insert("COGNIA_DSH_GATEWAY_TOKEN".into(), "temporary-lease".into());
+        input.insert("COGNIA_DSH_GATEWAY_CONFIG".into(), "{\"providers\":{}}".into());
+        let root = task_home(&input, dir.path()).unwrap().unwrap();
+        let guard = prepare(&mut input, dir.path()).unwrap();
+        assert_eq!(input["DSH_HOME"], "/managed/dsh/dsh-home");
+        assert_eq!(input["COGNIA_DSH_SESSION_ROOT"], "/managed/dsh/sessions");
+        assert_eq!(input["COGNIA_DSH_GATEWAY_TOKEN"], "temporary-lease");
+        assert!(!input.contains_key(PAYLOAD_ENV));
+        assert!(!fs::read_to_string(root.join("binding.json")).unwrap().contains("temporary-lease"));
+        drop(guard);
+        delete_task("dsh-one", dir.path()).unwrap();
+        assert!(!root.exists());
     }
 
     #[test]

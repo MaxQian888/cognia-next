@@ -104,11 +104,11 @@ describe("externalCapabilities", () => {
     // `load_skill`), which every external backend receives.
     expect(supportsFeature(externalCapabilities({ backend: "claude-code" }), "skills")).toBe(true)
     expect(
-      featureBlockedReason(
+      supportsFeature(
         externalCapabilities({ backend: "claude-code", negotiated: { mcpTools: false } }),
         "skills"
       )
-    ).toMatch(/tool bridge/)
+    ).toBe(true)
   })
 
   it("offers model selection through either route the protocol provides", () => {
@@ -256,7 +256,7 @@ describe("externalCapabilities — Cognia tool projection", () => {
       toolHost: { ...host, attachable: false },
     })
     expect(featureBlockedReason(caps, "plugins")).toMatch(/tool bridge/)
-    expect(featureBlockedReason(caps, "skills")).toMatch(/tool bridge/)
+    expect(supportsFeature(caps, "skills")).toBe(true)
   })
 })
 
@@ -320,4 +320,37 @@ it("projects explicit Codex ACP capabilities without native-only controls", () =
   expect(supportsModelListing("codex")).toBe(false)
   expect(supportsModelListing("codex-app-server")).toBe(true)
   expect(supportsModelListing(undefined)).toBe(false)
+})
+
+it("uses the running host hooks fact and admits the Pi extension bridge", () => {
+  expect(canHostCogniaTools({}, "pi-rpc")).toBe(true)
+  expect(canHostCogniaTools({}, "a2a")).toBe(false)
+  expect(canHostCogniaTools({ mcpTools: false }, "opencode-v2")).toBe(false)
+  const caps = externalCapabilities({
+    backend: "pi-rpc",
+    protocol: "pi-rpc",
+    negotiated: { mcpTools: true },
+    toolHost: {
+      attachable: true,
+      running: true,
+      builtinToolCount: 1,
+      hostToolCount: 1,
+      subagentDispatch: true,
+      hookRuntimeAvailable: true,
+    },
+  })
+  expect(supportsFeature(caps, "hooks")).toBe(true)
+  expect(supportsFeature(caps, "mcp")).toBe(true)
+  expect(supportsFeature(caps, "subagentModels")).toBe(true)
+})
+
+it("retains selected skill instructions on text-only remote endpoints", () => {
+  const remote = externalCapabilities({
+    backend: "opencode-v2-service",
+    protocol: "opencode-v2",
+    negotiated: { mcpTools: false },
+  })
+  expect(supportsFeature(remote, "skills")).toBe(true)
+  expect(supportsFeature(remote, "plugins")).toBe(false)
+  expect(supportsFeature(remote, "mcp")).toBe(false)
 })

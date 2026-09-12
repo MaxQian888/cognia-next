@@ -78,6 +78,8 @@ export interface ClaudeAgentSdkSandboxV1 {
  */
 export interface ClaudeAgentSdkSessionStoreRef {
   backend: "host-sqlite"
+  /** Persisted namespace for resume after cwd changes; null selects the default namespace. */
+  workspace?: string | null
   /**
    * `eager` fsyncs each append. Costlier, but the only setting under which a
    * crash cannot lose the tail of a session.
@@ -139,9 +141,30 @@ export interface ClaudeAgentSdkOptionsV1 {
   allowDangerouslySkipPermissions?: boolean
   permissionPromptToolName?: string
   planModeInstructions?: string
+  permissionPrompts?: "host" | "none"
+  perTaskStopAffordance?: boolean
+
+  /** Current SDK thinking configuration; overrides the legacy token budget. */
+  thinking?:
+    | { type: "disabled" }
+    | { type: "adaptive"; display?: "summarized" | "omitted" }
+    | { type: "enabled"; budgetTokens?: number; display?: "summarized" | "omitted" }
+  /** Set snapshot=false when the host updates instructions between turns. */
+  systemPrompt?:
+    | string
+    | string[]
+    | { type: "custom"; prompt: string | string[]; snapshot?: boolean }
+    | {
+        type: "preset"
+        preset: "claude_code"
+        append?: string
+        excludeDynamicSections?: boolean
+        snapshot?: boolean
+      }
 
   // ---- extension surfaces ---------------------------------------------------
   plugins?: ClaudeAgentSdkPluginRef[]
+  pluginDelivery?: "argv" | "initialize"
   skills?: string[] | "all"
   toolAliases?: Record<string, string>
   toolConfig?: { askUserQuestion?: { previewFormat?: "markdown" | "html" } }
@@ -177,6 +200,105 @@ export interface ClaudeAgentSdkOptionsV1 {
 
 /** Raw CLI flags reviewed as not loading content or granting capabilities. */
 const ALLOWED_EXTRA_ARGS = new Set(["verbose", "replay-user-messages"])
+
+type Shape =
+  | "string"
+  | "boolean"
+  | "number"
+  | "record"
+  | "nullable-string"
+  | readonly Shape[]
+  | { readonly [key: string]: Shape }
+const stringArray: Shape = ["string"]
+const optionShape: Record<keyof ClaudeAgentSdkOptionsV1, Shape> = {
+  version: "number",
+  outputFormat: { type: "string", schema: "record" },
+  sessionId: "string",
+  continue: "boolean",
+  resumeSessionAt: "string",
+  resumeDropsTurn: "string",
+  persistSession: "boolean",
+  title: "string",
+  sessionStore: { backend: "string", flush: "string", workspace: "nullable-string" },
+  prewarm: { enabled: "boolean" },
+  enableFileCheckpointing: "boolean",
+  allowDangerouslySkipPermissions: "boolean",
+  permissionPromptToolName: "string",
+  planModeInstructions: "string",
+  permissionPrompts: "string",
+  perTaskStopAffordance: "boolean",
+  pluginDelivery: "string",
+  thinking: "record",
+  systemPrompt: "record",
+  skills: "record",
+  tools: "record",
+  plugins: [{ type: "string", path: "string", skipMcpDiscovery: "boolean" }],
+  toolAliases: "record",
+  toolConfig: { askUserQuestion: { previewFormat: "string" } },
+  elicitation: { enabled: "boolean" },
+  userDialog: { enabled: "boolean", kinds: stringArray },
+  includeHookEvents: "boolean",
+  agentProgressSummaries: "boolean",
+  promptSuggestions: "boolean",
+  taskBudget: { total: "number" },
+  loadTimeoutMs: "number",
+  betas: stringArray,
+  extraArgs: "record",
+  sandbox: {
+    enabled: "boolean",
+    failIfUnavailable: "boolean",
+    autoAllowBashIfSandboxed: "boolean",
+    allowUnsandboxedCommands: "boolean",
+    network: {
+      allowedDomains: stringArray,
+      deniedDomains: stringArray,
+      strictAllowlist: "boolean",
+      allowLocalBinding: "boolean",
+      allowUnixSockets: stringArray,
+      allowAllUnixSockets: "boolean",
+    },
+    filesystem: {
+      allowRead: stringArray,
+      denyRead: stringArray,
+      allowWrite: stringArray,
+      denyWrite: stringArray,
+      disabled: "boolean",
+    },
+    credentials: {
+      files: [{ path: "string", mode: "string" }],
+      envVars: [{ name: "string", mode: "string", injectHosts: stringArray }],
+      allowPlaintextInject: "boolean",
+    },
+    excludedCommands: stringArray,
+  },
+}
+
+/** Reject unknown keys at the serialized boundary, including nested descriptors. */
+function validateShape(value: unknown, shape: Shape, path: string, errors: string[]): void {
+  if (typeof shape === "string") {
+    if (shape === "nullable-string") {
+      if (value !== null && typeof value !== "string")
+        errors.push(`${path} must be a string or null`)
+      return
+    }
+    if (
+      shape === "record"
+        ? !isRecord(value)
+        : typeof value !== shape || (shape === "number" && !Number.isFinite(value))
+    ) {
+      errors.push(`${path} must be ${shape === "record" ? "an object" : `a ${shape}`}`)
+    }
+  } else if (Array.isArray(shape)) {
+    if (!Array.isArray(value)) errors.push(`${path} must be an array`)
+    else value.forEach((item, index) => validateShape(item, shape[0], `${path}[${index}]`, errors))
+  } else if (!isRecord(value)) errors.push(`${path} must be an object`)
+  else
+    for (const [key, item] of Object.entries(value)) {
+      if (item === undefined) continue
+      if (!Object.hasOwn(shape, key)) errors.push(`${path}.${key} is unsupported`)
+      else validateShape(item, (shape as Record<string, Shape>)[key], `${path}.${key}`, errors)
+    }
+}
 
 /** Result of {@link validateClaudeAgentSdkOptions}. */
 export interface ClaudeAgentSdkOptionsValidation {
@@ -310,7 +432,109 @@ export function validateClaudeAgentSdkOptions(
     return { ok: false, errors: ["claudeAgentSdk.version must be 1"], warnings }
   }
 
+  const { thinking, systemPrompt, skills, tools, ...plain } = value
+  validateShape(plain, optionShape, "claudeAgentSdk", errors)
+  const oneOf = (v: unknown, choices: unknown[], path: string) => {
+    if (v !== undefined && !choices.includes(v))
+      errors.push(`${path} must be one of ${choices.join(", ")}`)
+  }
+  if (thinking !== undefined) {
+    const kind = isRecord(thinking) ? thinking.type : undefined
+    oneOf(kind ?? null, ["disabled", "adaptive", "enabled"], "claudeAgentSdk.thinking.type")
+    validateShape(
+      thinking,
+      kind === "disabled"
+        ? { type: "string" }
+        : kind === "adaptive"
+          ? { type: "string", display: "string" }
+          : { type: "string", display: "string", budgetTokens: "number" },
+      "claudeAgentSdk.thinking",
+      errors
+    )
+    if (isRecord(thinking)) {
+      oneOf(thinking.display, ["summarized", "omitted"], "claudeAgentSdk.thinking.display")
+      if (
+        thinking.budgetTokens !== undefined &&
+        (!Number.isInteger(thinking.budgetTokens) || Number(thinking.budgetTokens) <= 0)
+      )
+        errors.push("claudeAgentSdk.thinking.budgetTokens must be a positive integer")
+    }
+  }
+  if (systemPrompt !== undefined) {
+    if (typeof systemPrompt === "string" || Array.isArray(systemPrompt)) {
+      validateShape(
+        systemPrompt,
+        typeof systemPrompt === "string" ? "string" : stringArray,
+        "claudeAgentSdk.systemPrompt",
+        errors
+      )
+    } else {
+      const kind = isRecord(systemPrompt) ? systemPrompt.type : undefined
+      oneOf(kind ?? null, ["custom", "preset"], "claudeAgentSdk.systemPrompt.type")
+      const shape =
+        kind === "custom"
+          ? { type: "string", snapshot: "boolean" }
+          : {
+              type: "string",
+              preset: "string",
+              append: "string",
+              snapshot: "boolean",
+              excludeDynamicSections: "boolean",
+            }
+      const candidate =
+        isRecord(systemPrompt) && kind === "custom"
+          ? Object.fromEntries(Object.entries(systemPrompt).filter(([key]) => key !== "prompt"))
+          : systemPrompt
+      validateShape(candidate, shape as Shape, "claudeAgentSdk.systemPrompt", errors)
+      if (isRecord(systemPrompt)) {
+        if (kind === "custom")
+          validateShape(
+            systemPrompt.prompt,
+            Array.isArray(systemPrompt.prompt) ? stringArray : "string",
+            "claudeAgentSdk.systemPrompt.prompt",
+            errors
+          )
+        else
+          oneOf(systemPrompt.preset ?? null, ["claude_code"], "claudeAgentSdk.systemPrompt.preset")
+      }
+    }
+  }
+  if (skills !== undefined && skills !== "all")
+    validateShape(skills, stringArray, "claudeAgentSdk.skills", errors)
+  if (tools !== undefined) {
+    validateShape(
+      tools,
+      Array.isArray(tools) ? stringArray : { type: "string", preset: "string" },
+      "claudeAgentSdk.tools",
+      errors
+    )
+    if (isRecord(tools)) {
+      oneOf(tools.type ?? null, ["preset"], "claudeAgentSdk.tools.type")
+      oneOf(tools.preset ?? null, ["claude_code"], "claudeAgentSdk.tools.preset")
+    }
+  }
+  oneOf(value.permissionPrompts, ["host", "none"], "claudeAgentSdk.permissionPrompts")
+  oneOf(value.pluginDelivery, ["argv", "initialize"], "claudeAgentSdk.pluginDelivery")
+  if (errors.length) return { ok: false, errors, warnings }
+
   const opts = value as unknown as ClaudeAgentSdkOptionsV1
+  oneOf(opts.sessionStore?.flush, ["batched", "eager"], "claudeAgentSdk.sessionStore.flush")
+  oneOf(
+    opts.toolConfig?.askUserQuestion?.previewFormat,
+    ["markdown", "html"],
+    "claudeAgentSdk.toolConfig.askUserQuestion.previewFormat"
+  )
+  for (const [key, item] of Object.entries(opts.toolAliases ?? {})) {
+    if (typeof item !== "string") errors.push(`claudeAgentSdk.toolAliases.${key} must be a string`)
+  }
+  for (const item of opts.sandbox?.credentials?.files ?? []) {
+    if (!item.path) errors.push("claudeAgentSdk.sandbox.credentials.files requires path")
+    oneOf(item.mode ?? null, ["deny"], "claudeAgentSdk.sandbox.credentials.files.mode")
+  }
+  for (const item of opts.sandbox?.credentials?.envVars ?? []) {
+    if (!item.name) errors.push("claudeAgentSdk.sandbox.credentials.envVars requires name")
+    oneOf(item.mode ?? null, ["deny", "mask"], "claudeAgentSdk.sandbox.credentials.envVars.mode")
+  }
 
   // ---- session-shape contradictions ------------------------------------------
   if (opts.sessionStore) {
@@ -406,6 +630,8 @@ export function validateClaudeAgentSdkOptions(
 
   // ---- escape hatch ----------------------------------------------------------
   for (const key of Object.keys(opts.extraArgs ?? {})) {
+    if (opts.extraArgs?.[key] !== null && typeof opts.extraArgs?.[key] !== "string")
+      errors.push(`claudeAgentSdk.extraArgs["${key}"] must be a string or null`)
     if (!ALLOWED_EXTRA_ARGS.has(key)) {
       errors.push(
         `claudeAgentSdk.extraArgs["${key}"] is refused: only reviewed, content-free ` +

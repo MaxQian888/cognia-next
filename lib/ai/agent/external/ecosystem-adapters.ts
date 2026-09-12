@@ -61,7 +61,7 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
         presetId: "devin",
         name: "Devin CLI",
         description:
-          "Run Devin through its native ACP server using your existing CLI login. Select models, including SWE-2, after connecting. Devin 3000.10.21 does not load Cognia-provided MCP servers in live tests.",
+          "Run Devin through its native ACP server using your existing CLI login. Select models, including SWE-2, after connecting. Cognia tools are available in each conversation alongside Devin’s native tools.",
         protocol: "acp",
         transport: "stdio",
         supportTier: "executable",
@@ -70,7 +70,7 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
         tags: ["coding", "cognition", "devin", "acp"],
         docsUrl: "https://docs.devin.ai/cli/acp/jetbrains",
         setupHint:
-          "Install Devin CLI and run `devin auth login` once. Cognia launches `devin acp` and discovers models from the session; use `acp --model swe2` to select SWE-2 at launch. Choose Accept Edits (Code) for file changes. Devin 3000.10.21 did not load Cognia-provided MCP servers in live tests; native tools work.",
+          "Install Devin CLI and run `devin auth login` once. Cognia launches `devin acp` and discovers models from the session; use `acp --model swe2` to select SWE-2 at launch. Choose Accept Edits (Code) for file changes. Cognia tools are available in each conversation alongside Devin’s native tools.",
         process: { command: "devin", args: ["acp"] },
       },
     ],

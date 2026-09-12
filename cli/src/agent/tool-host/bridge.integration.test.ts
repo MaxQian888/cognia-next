@@ -60,9 +60,22 @@ function sessionContext(overrides: Partial<SendOptions> = {}): ResolvedCliSessio
 
 /** Speak MCP JSON-RPC to a spawned bridge over its stdio. */
 function mcpClient(child: ChildProcessWithoutNullStreams) {
-  const pending = new Map<number, (value: unknown) => void>()
+  const pending = new Map<
+    number,
+    { resolve: (value: unknown) => void; reject: (reason: Error) => void }
+  >()
   let buffer = ""
+  let stderr = ""
   let id = 0
+  child.stderr.on("data", (chunk: Buffer | string) => {
+    stderr += String(chunk)
+  })
+  const fail = (error: Error) => {
+    for (const request of pending.values()) request.reject(error)
+    pending.clear()
+  }
+  child.on("error", fail)
+  child.on("exit", (code) => fail(new Error(`Bridge exited (${code}): ${stderr}`)))
   child.stdout.setEncoding("utf8")
   child.stdout.on("data", (chunk: string) => {
     buffer += chunk
@@ -72,14 +85,14 @@ function mcpClient(child: ChildProcessWithoutNullStreams) {
       if (!line.trim()) continue
       const message = JSON.parse(line) as { id?: number; result?: unknown; error?: unknown }
       if (message.id === undefined) continue
-      pending.get(message.id)?.(message.error ?? message.result)
+      pending.get(message.id)?.resolve(message.error ?? message.result)
       pending.delete(message.id)
     }
   })
   return (method: string, params?: unknown) => {
     const messageId = ++id
-    return new Promise<unknown>((resolve) => {
-      pending.set(messageId, resolve)
+    return new Promise<unknown>((resolve, reject) => {
+      pending.set(messageId, { resolve, reject })
       child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: messageId, method, params })}\n`)
     })
   }
@@ -209,7 +222,12 @@ describe("cognia-tools over a real bridge process", () => {
 describe("cognia-plugin-tools over a real bridge process", () => {
   it("advertises Cognia's manifest and executes through the CLI, not the bridge", async () => {
     const executed: string[] = []
+    const approvals: string[] = []
     const { call } = await launch("cognia-plugin-tools", {
+      gate: async (request) => {
+        approvals.push(request.toolName)
+        return { decision: "allow" }
+      },
       execHostTool: async (name) => {
         executed.push(name)
         return { result: "answered by the CLI" }
@@ -226,6 +244,22 @@ describe("cognia-plugin-tools over a real bridge process", () => {
     expect(result.content[0].text).toBe("answered by the CLI")
     // The handler lives in the CLI process; the bridge only relayed.
     expect(executed).toEqual(["ask_user"])
+    expect(approvals).toEqual(["mcp__cognia-plugin-tools__ask_user"])
+  })
+
+  it("never executes a host tool when the broker denies the call", async () => {
+    const execute = jest.fn(async () => ({ result: "must not run" }))
+    const gate = jest.fn(async () => ({ decision: "deny" as const, message: "fixture denial" }))
+    const { call } = await launch("cognia-plugin-tools", { gate, execHostTool: execute })
+    await call("initialize")
+    const result = (await call("tools/call", {
+      name: "ask_user",
+      arguments: { question: "ready?" },
+    })) as { content: { text: string }[]; isError: boolean }
+    expect(result.isError).toBe(true)
+    expect(result.content[0].text).toContain("fixture denial")
+    expect(gate).toHaveBeenCalledTimes(1)
+    expect(execute).not.toHaveBeenCalled()
   })
 
   it("surfaces a host-tool failure as a tool error the model can react to", async () => {

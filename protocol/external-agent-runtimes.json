@@ -324,8 +324,8 @@
     },
     {
       "runtimeId": "opencode-v2-service",
-      "presetIds": ["opencode-v2-preview"],
-      "displayName": "OpenCode V2 legacy preview contract",
+      "presetIds": ["opencode-v2-service"],
+      "displayName": "OpenCode V2",
       "ownership": "remote",
       "protocol": "opencode-v2",
       "transport": "sse",

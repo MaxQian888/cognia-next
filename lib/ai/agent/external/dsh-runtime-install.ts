@@ -1,3 +1,4 @@
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import {
   DSH_PLATFORMS,
   dshRuntimeChannelSchema,
@@ -121,6 +122,18 @@ export function doctorDshRuntime(
   }
   const manifest = parsed.data
 
+  if (
+    manifest.upstreamVersion !== DSH_UPSTREAM_VERSION ||
+    manifest.conformanceSuiteVersion !== DSH_CONFORMANCE_SUITE_VERSION ||
+    !findProfile(manifest, profileId)
+  ) {
+    findings.push({
+      code: "channel-malformed",
+      severity: "error",
+      detail: `Reinstall DeepSeek Harness ${DSH_UPSTREAM_VERSION}: this channel does not certify the current protocol and requested profile.`,
+    })
+  }
+
   if (manifest.lockfileDigest !== facts.lockfileDigest) {
     findings.push({
       code: "lockfile-digest-mismatch",
@@ -213,7 +226,13 @@ export interface DshLaunchOptions {
    * events, or error messages.
    */
   apiKey: string
+  /** A task-scoped Cognia route, validated by the managed launch coordinator. */
+  gateway?: { config: string; token: string; taskConfig: string; taskToken: string }
+  provider?: string
   model?: string
+  baseUrl?: string
+  reasoningEffort?: string
+  maxTokens?: number
   contextWindow?: number
   persona?: string
   /** Parent environment to draw the allowlisted values from. */
@@ -241,7 +260,11 @@ export class DshLaunchConfigurationError extends Error {}
 export function buildDshLaunchSpec(options: DshLaunchOptions): DshLaunchSpec {
   const { paths, apiKey, parentEnv, nodePath } = options
 
-  if (!apiKey) {
+  if (!hasNoLeakingPiiDeep(options.persona)) {
+    throw new DshLaunchConfigurationError("DeepSeek Harness persona blocked by PII gate")
+  }
+
+  if (!apiKey && !options.gateway) {
     throw new DshLaunchConfigurationError("Refusing to launch without a resolved DeepSeek API key.")
   }
   if (!isPathInside(paths.dshHome, paths.runtimeHome)) {
@@ -264,8 +287,19 @@ export function buildDshLaunchSpec(options: DshLaunchOptions): DshLaunchSpec {
   env.COGNIA_DSH_RUNTIME_HOME = paths.runtimeHome
   env.COGNIA_DSH_WORKSPACE = paths.workspace
   env.COGNIA_DSH_SESSION_ROOT = paths.sessionRoot
-  env.DEEPSEEK_API_KEY = apiKey
+  if (options.gateway) {
+    env.COGNIA_DSH_GATEWAY_CONFIG = options.gateway.config
+    env.COGNIA_DSH_GATEWAY_TOKEN = options.gateway.token
+    env.COGNIA_GATEWAY_TASK_CONFIG = options.gateway.taskConfig
+    env.COGNIA_GATEWAY_TOKEN = options.gateway.taskToken
+  } else {
+    env.DEEPSEEK_API_KEY = apiKey
+  }
+  if (options.provider) env.COGNIA_DSH_PROVIDER = options.provider
 
+  if (options.baseUrl) env.DEEPSEEK_BASE_URL = options.baseUrl
+  if (options.reasoningEffort) env.COGNIA_DSH_REASONING_EFFORT = options.reasoningEffort
+  if (options.maxTokens !== undefined) env.COGNIA_DSH_MAX_TOKENS = String(options.maxTokens)
   if (options.model) env.COGNIA_DSH_MODEL = options.model
   if (options.contextWindow !== undefined) {
     env.COGNIA_DSH_CONTEXT_WINDOW = String(options.contextWindow)
@@ -319,13 +353,15 @@ export function dshRuntimeCapabilities(snapshot: DshCapabilitySnapshot): string[
   // Only ACP can set a mode, and only because it can carry the question.
   if (snapshot.interactiveApproval) capabilities.push("permissions.set-mode")
   if (snapshot.sessionResume) capabilities.push("session.resume")
+  if (snapshot.transport === "acp") capabilities.push("set-model")
+  if (snapshot.mcpPassthrough) capabilities.push("mcp")
   return capabilities
 }
 
 /** Pinned upstream release this channel certifies. */
-export const DSH_UPSTREAM_VERSION = "0.1.0-rc.6"
+export const DSH_UPSTREAM_VERSION = "0.1.5-rc.1"
 export const DSH_NODE_MAJOR_REQUIRED = 26 as const
-export const DSH_CONFORMANCE_SUITE_VERSION = "1"
+export const DSH_CONFORMANCE_SUITE_VERSION = "2"
 
 /**
  * Build the channel manifest from the digests a host just computed.

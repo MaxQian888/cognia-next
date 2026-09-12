@@ -21,7 +21,12 @@
  *     text deltas are collected as they pass through.
  */
 
-import type { ExternalAgentEvent, ExternalAgentResult } from "@/types/agent/external-agent"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
+import type {
+  AcpMcpServerConfig,
+  ExternalAgentEvent,
+  ExternalAgentResult,
+} from "@/types/agent/external-agent"
 import type { ExternalAgentConfigStamp } from "@/types/agent/external-agent-config-store"
 
 import {
@@ -33,6 +38,10 @@ import {
 import { remoteDecisionId } from "./remote-run-service"
 
 export interface RemoteExecuteOptions {
+  systemPrompt?: string
+  allowedTools?: string[]
+  /** Caller-local MCP servers require a reverse tool transport the paired host does not expose. */
+  mcpServers?: AcpMcpServerConfig[]
   cogniaModel?: import("@/types/agent/external-agent").ExternalAgentCogniaModelBinding | null
   /** Which host configuration, at which revision and readiness generation. */
   stamp: ExternalAgentConfigStamp
@@ -94,6 +103,18 @@ export async function executeOnRemoteHostAgent(
       "Cognia gateway tasks require a local agent; remote gateway transport is not configured"
     )
   }
+  if (options.mcpServers?.length)
+    throw new Error(
+      "Paired-host agents cannot attach this device's MCP servers; configure tools on the target host"
+    )
+  if (
+    !hasNoLeakingPiiDeep({
+      prompt,
+      systemPrompt: options.systemPrompt,
+      allowedTools: options.allowedTools,
+    })
+  )
+    throw new Error("Remote external agent input blocked by the outbound PII gate")
   const runId = options.newRunId?.() ?? `rer_${crypto.randomUUID()}`
   let text = ""
   let externalSessionId = options.externalSessionId ?? ""
@@ -143,6 +164,8 @@ export async function executeOnRemoteHostAgent(
       prompt,
       model: options.model,
       reasoningEffort: options.reasoningEffort,
+      systemPrompt: options.systemPrompt,
+      allowedTools: options.allowedTools,
       externalSessionId: options.externalSessionId,
     })
     if (!started.started) {

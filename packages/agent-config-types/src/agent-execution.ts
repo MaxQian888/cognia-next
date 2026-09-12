@@ -511,6 +511,8 @@ export type CanonicalAgentEvent =
       requestId: string
       toolName: string
       input?: Record<string, unknown>
+      defaultToNo?: boolean
+      suppressAlwaysAllowRule?: boolean
     }
   | {
       kind: "permission-resolved"

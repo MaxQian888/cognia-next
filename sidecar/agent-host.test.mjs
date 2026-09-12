@@ -11,6 +11,7 @@ import {
   blockUnsupportedCommand,
   buildPermissionResult,
   controlPreflight,
+  guardedControlParams,
   dropDuplicateCommand,
   envelopeEmitterParams,
   persistableSuggestions,
@@ -804,4 +805,89 @@ test("the process guard logs every escape and exits only past the budget", () =>
   now += 61_000
   quiet("uncaughtException", new Error("later"))
   assert.deepEqual(exits, [1], "an error in a fresh window starts a fresh count")
+})
+
+test("plugin tool metadata is gated before SDK dispatch without scanning bridge credentials", () => {
+  assert.equal(
+    providerVisibleSendPayloadIsSafe({
+      prompt: "hello",
+      options: {
+        pluginTools: [
+          {
+            name: "safe",
+            description: "Contact private@example.com",
+            jsonSchema: { type: "object" },
+          },
+        ],
+      },
+    }),
+    false
+  )
+  assert.equal(
+    providerVisibleSendPayloadIsSafe({
+      prompt: "hello",
+      options: {
+        pluginTools: [
+          {
+            name: "safe",
+            description: "Tool",
+            jsonSchema: {
+              type: "object",
+              properties: { email: { type: "string", default: "private@example.com" } },
+            },
+          },
+        ],
+      },
+    }),
+    false
+  )
+})
+
+test("live MCP changes receive the same guarded relay and cannot reopen a disabled tool surface", () => {
+  const servers = {
+    remote: {
+      type: "http",
+      url: "https://example.com/mcp",
+      headers: { Authorization: "Bearer fixture" },
+    },
+    local: { command: "node", args: ["tool.mjs"] },
+  }
+  const result = guardedControlParams("setMcpServers", { servers })
+  for (const server of Object.values(result.servers)) {
+    assert.equal(server.type, "stdio")
+    assert.ok(server.env.COGNIA_MCP_RELAY_CONFIG)
+  }
+  assert.equal(servers.remote.type, "http")
+  assert.throws(
+    () => guardedControlParams("setMcpServers", { servers }, { toolSurface: "none" }),
+    /disabled/
+  )
+  assert.deepEqual(
+    guardedControlParams("setMcpServers", { servers: {} }, { toolSurface: "none" }),
+    { servers: {} }
+  )
+})
+
+test("provider-visible live settings are PII gated without scanning transport credentials", () => {
+  for (const method of ["applyFlagSettings", "updateSettings"])
+    assert.throws(
+      () => guardedControlParams(method, { settings: { outputStyle: "private@example.com" } }),
+      /PII gate/
+    )
+  assert.deepEqual(
+    guardedControlParams("updateSettings", { settings: { outputStyle: "concise" } }),
+    { settings: { outputStyle: "concise" } }
+  )
+})
+
+test("SDK suppressAlwaysAllowRule prevents durable grants even if a stale client sends always", () => {
+  const result = buildPermissionResult("allow_always", {
+    rich: true,
+    suppressAlwaysAllowRule: true,
+    input: { safe: true },
+    suggestions: [{ type: "setMode", mode: "acceptEdits", destination: "session" }],
+  })
+  assert.equal(result.behavior, "allow")
+  assert.equal(result.decisionClassification, "user_temporary")
+  assert.equal(result.updatedPermissions, undefined)
 })

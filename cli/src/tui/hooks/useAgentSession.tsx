@@ -42,7 +42,7 @@ import { supportsFeature, type BackendCapabilities } from "../runtime/backend-ca
 import { classifyError } from "../format/error-classify"
 import { parseRateLimitHeaders, rateLimitWarning } from "../format/rate-limits"
 import {
-  DEFAULT_PERMISSION_CHOICES,
+  permissionChoicesForRequest,
   initialChoiceIndex,
 } from "../components/overlays/PermissionOverlay"
 import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
@@ -426,15 +426,16 @@ export function useAgentSession({
           // Fire PermissionRequest + Notification so user hook scripts (and any
           // OS-level notifier they wire) know Claude is waiting on approval.
           hookRunner.onPermissionRequest(req.toolName, req.input)
+          const choices = permissionChoicesForRequest(req)
           dispatch({
             type: "OVERLAY_OPEN",
             overlay: {
               kind: "permission",
               req,
-              choices: DEFAULT_PERMISSION_CHOICES,
+              choices,
               // A catastrophic command opens on Deny, so the dangerous answer
               // is never the one a reflex Enter lands on.
-              index: initialChoiceIndex(req.toolName, req.input, DEFAULT_PERMISSION_CHOICES),
+              index: initialChoiceIndex(req.toolName, req.input, choices, req.defaultToNo),
             },
           })
         },
@@ -739,6 +740,8 @@ export function useAgentSession({
       // Capture the head request BEFORE resolving (which pops it) so a denial can
       // be attributed to its tool for the PermissionDenied hook.
       const head = gate.peek()
+      if (head?.suppressAlwaysAllowRule && decision.decision === "allow_always")
+        decision = { ...decision, decision: "allow" }
       gate.resolve(decision)
       if (decision.decision === "deny" && head) {
         hookRunner.onPermissionDenied(head.toolName, decision.message)

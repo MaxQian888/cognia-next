@@ -136,6 +136,78 @@ describe("AcpClientAdapter — prompt deadlines and host response envelopes", ()
     await adapter.disconnect()
   })
 
+  it.each([
+    { code: -32601, message: "Method not found", healthy: true },
+    { code: -32603, message: "Internal error", healthy: false },
+    { code: -32000, message: "Upstream method not found", healthy: false },
+  ])("checks liveness from the actual ping response: $code", async ({ code, message, healthy }) => {
+    const { adapter, peer, frames } = await connectedAdapter()
+    const check = adapter.healthCheck()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const request = frames().find((frame) => frame.method === "ping")
+    expect(request).toBeDefined()
+    peer.ingest(JSON.stringify({ jsonrpc: "2.0", id: request.id, error: { code, message } }))
+    expect(await check).toBe(healthy)
+    await adapter.disconnect()
+  })
+
+  it("reports an unanswered health probe as unhealthy after its deadline", async () => {
+    jest.useFakeTimers()
+    const { adapter } = await connectedAdapter()
+    try {
+      const check = adapter.healthCheck()
+      await jest.advanceTimersByTimeAsync(5000)
+      expect(await check).toBe(false)
+    } finally {
+      await adapter.disconnect()
+      jest.useRealTimers()
+    }
+  })
+
+  it("does not accept a method-not-found response after its connection has closed", async () => {
+    const { adapter, peer, frames } = await connectedAdapter()
+    const check = adapter.healthCheck()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const request = frames().find((frame) => frame.method === "ping")
+    peer.ingest(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: request.id,
+        error: { code: -32601, message: "Method not found" },
+      })
+    )
+    await adapter.disconnect()
+    expect(await check).toBe(false)
+  })
+
+  it("releases listeners, approvals, and terminals when disconnect follows a process crash", async () => {
+    const { adapter } = await connectedAdapter()
+    const listeners = [...listenerBag(adapter)]
+    const pending = callPermission(adapter, {
+      sessionId: "s",
+      kind: "execute",
+      options: [ALLOW, REJECT],
+    })
+    seedTerminal(adapter, "s", "terminal-1")
+    const exitListener = mockListen.mock.calls.find(([event]) => event === "external-agent://exit")
+    expect(exitListener).toBeDefined()
+    exitListener![1]({ payload: { agentId: "proc-1", code: 1 } })
+    expect(adapter.connectionStatus).toBe("disconnected")
+    try {
+      await adapter.disconnect()
+      for (const unsubscribe of listeners) expect(unsubscribe).toHaveBeenCalledTimes(1)
+      expect(listenerBag(adapter)).toEqual([])
+      expect((adapter as unknown as { peer?: JsonRpcPeer }).peer).toBeUndefined()
+      expect(adapter.getSessions()).toEqual([])
+      expect(mockCleanupSessionTerminals).toHaveBeenCalledWith("s")
+      await expect(pending).resolves.toEqual({ outcome: { outcome: "cancelled" } })
+      await adapter.disconnect()
+      for (const unsubscribe of listeners) expect(unsubscribe).toHaveBeenCalledTimes(1)
+    } finally {
+      await (adapter as unknown as { teardownTransport: () => Promise<void> }).teardownTransport()
+    }
+  })
+
   it("rejects unsupported prompt content without changing history, status, or listeners", async () => {
     const { adapter, frames } = await connectedAdapter()
     const session = adapter.getSession("s")!
@@ -282,6 +354,142 @@ describe("AcpClientAdapter — prompt deadlines and host response envelopes", ()
       jest.useRealTimers()
     }
   })
+})
+
+describe("AcpClientAdapter — Devin permission identity", () => {
+  function adapterWithEvents(preset = "devin") {
+    const adapter = new AcpClientAdapter()
+    ;(adapter as unknown as { _config: ExternalAgentConfig })._config = {
+      ...stdioConfig(),
+      metadata: { preset },
+    }
+    seedSession(adapter, "s", "default")
+    const emit = jest.fn<void, [ExternalAgentEvent]>()
+    ;(adapter as unknown as { emitEvent: (event: ExternalAgentEvent) => void }).emitEvent = emit
+    return { adapter, emit }
+  }
+
+  async function permissionEvent(
+    adapter: AcpClientAdapter,
+    emit: jest.Mock<void, [ExternalAgentEvent]>,
+    sessionId = "s",
+    toolCall: PermissionParams["toolCall"] = { toolCallId: "mcp_call_tool_0" }
+  ) {
+    emit.mockClear()
+    const pending = callPermission(
+      adapter,
+      { sessionId, toolCall, options: [ALLOW, REJECT] },
+      undefined,
+      901
+    )
+    const event = emit.mock.calls
+      .map(([value]) => value)
+      .find((value) => value.type === "permission_request")
+    await adapter.respondToPermission(sessionId, { requestId: "901", granted: false })
+    await pending
+    if (event?.type !== "permission_request")
+      throw new Error("Expected an ordinary pending permission request")
+    return event.request
+  }
+
+  function startTool(
+    adapter: AcpClientAdapter,
+    sessionId = "s",
+    meta: Record<string, unknown> = {}
+  ) {
+    handleUpdate(adapter, sessionId, {
+      sessionUpdate: "tool_call",
+      toolCallId: "mcp_call_tool_0",
+      status: "pending",
+      title: "Calling read from cognia-tools",
+      kind: "other",
+      rawInput: { file_path: "/work/README.md" },
+      locations: [{ path: "/work/README.md" }],
+      _meta: { "cognition.ai/toolName": "mcp__cognia-tools__read", ...meta },
+    })
+  }
+
+  it("hydrates an ID-only approval after incremental metadata patches and preserves the human title", async () => {
+    const { adapter, emit } = adapterWithEvents()
+    startTool(adapter, "s", { "cognition.ai/inferenceToolName": "mcp__cognia-tools__read" })
+    handleUpdate(adapter, "s", {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "mcp_call_tool_0",
+      status: "in_progress",
+      _meta: { "cognition.ai/eventType": "mcp_tool_call" },
+    })
+    expect(await permissionEvent(adapter, emit)).toMatchObject({
+      title: "Calling read from cognia-tools",
+      toolInfo: { name: "mcp__cognia-tools__read" },
+      rawInput: { file_path: "/work/README.md" },
+      locations: [{ path: "/work/README.md" }],
+      _meta: {
+        "cognition.ai/toolName": "mcp__cognia-tools__read",
+        "cognition.ai/inferenceToolName": "mcp__cognia-tools__read",
+        "cognition.ai/eventType": "mcp_tool_call",
+      },
+    })
+  })
+
+  it("prefers inference identity over the vendor display name without automatically approving native tools", async () => {
+    const { adapter, emit } = adapterWithEvents()
+    startTool(adapter, "s", {
+      "cognition.ai/toolName": "terminal",
+      "cognition.ai/inferenceToolName": "run_command",
+    })
+    const request = await permissionEvent(adapter, emit)
+    expect(request.toolInfo.name).toBe("run_command")
+  })
+
+  it("scopes identical tool IDs to their session and retires completed identities", async () => {
+    const { adapter, emit } = adapterWithEvents()
+    seedSession(adapter, "other", "default")
+    startTool(adapter)
+    startTool(adapter, "other", { "cognition.ai/toolName": "run_command" })
+    expect((await permissionEvent(adapter, emit, "other")).toolInfo.name).toBe("run_command")
+    expect((await permissionEvent(adapter, emit)).toolInfo.name).toBe("mcp__cognia-tools__read")
+    handleUpdate(adapter, "s", {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "mcp_call_tool_0",
+      status: "completed",
+    })
+    expect((await permissionEvent(adapter, emit)).toolInfo.name).toBe("Tool request")
+  })
+
+  it("uses current permission details ahead of cached fields", async () => {
+    const { adapter, emit } = adapterWithEvents()
+    startTool(adapter)
+    expect(
+      await permissionEvent(adapter, emit, "s", {
+        toolCallId: "mcp_call_tool_0",
+        title: "Read another file",
+        kind: "read",
+        rawInput: { file_path: "/work/other.md" },
+      })
+    ).toMatchObject({
+      title: "Read another file",
+      kind: "read",
+      rawInput: { file_path: "/work/other.md" },
+      toolInfo: { name: "mcp__cognia-tools__read" },
+    })
+  })
+
+  it.each([
+    { preset: "claude-code", meta: { "cognition.ai/toolName": "mcp__cognia-tools__read" } },
+    {
+      preset: "devin",
+      meta: { "cognition.ai/toolName": 42, "cognition.ai/inferenceToolName": " " },
+    },
+  ])(
+    "does not recognize invalid or another vendor's namespace metadata: %j",
+    async ({ preset, meta }) => {
+      const { adapter, emit } = adapterWithEvents(preset)
+      startTool(adapter, "s", meta)
+      expect((await permissionEvent(adapter, emit)).toolInfo.name).toBe(
+        "Calling read from cognia-tools"
+      )
+    }
+  )
 })
 
 describe("AcpClientAdapter — timeout cancellation failure", () => {
@@ -3374,5 +3582,204 @@ describe("AcpClientAdapter — offline ACP contracts", () => {
         content: { type: "text", text: "late" },
       })
     ).toMatchObject({ type: "message_delta", delta: { text: "late" } })
+  })
+})
+
+describe("DeepSeek Harness ACP capability boundaries", () => {
+  function harness() {
+    const adapter = new AcpClientAdapter()
+    const internal = adapter as unknown as {
+      _config: ExternalAgentConfig
+      _connectionStatus: string
+      sendRequest: jest.Mock
+    }
+    internal._config = { ...stdioConfig(), metadata: { dshProfileId: "cognia-acp" } }
+    internal._connectionStatus = "connected"
+    internal.sendRequest = jest.fn()
+    seedSession(adapter, "s", "default")
+    return { adapter, internal }
+  }
+  it("delivers generic ACP task context once, updates it on follow-up and hides broker controls", async () => {
+    const { adapter, internal } = harness()
+    internal._config = stdioConfig()
+    internal.sendRequest.mockResolvedValueOnce({ sessionId: "generic" })
+    const mcpServers = [
+      {
+        name: "cognia-tools",
+        command: "broker",
+        args: [],
+        env: [{ name: "TOKEN", value: "lease-private" }],
+      },
+    ]
+    await adapter.createSession({
+      cwd: "/work",
+      additionalDirectories: ["/docs"],
+      mcpServers,
+      instructionEnvelope: {
+        hash: "h",
+        developerInstructions: "Follow project rules",
+        skillsSummary: "Verify before reporting",
+      },
+      context: {
+        parentTask: "Inspect project",
+        custom: {
+          conversationHistory: "Previous result",
+          mcpServers,
+          chatSessionId: "control-only",
+        },
+      },
+    })
+    const creation = internal.sendRequest.mock.calls[0][1]
+    expect(creation).not.toHaveProperty("additionalDirectories")
+    expect(JSON.stringify(creation._meta)).not.toContain("lease-private")
+    internal.sendRequest.mockResolvedValue({ stopReason: "end_turn" })
+    const message = {
+      id: "m",
+      role: "user" as const,
+      content: [{ type: "text" as const, text: "Continue" }],
+      timestamp: new Date(),
+    }
+    for await (const _event of adapter.prompt("generic", message)) {
+      /* Drain. */
+    }
+    const first = internal.sendRequest.mock.calls.at(-1)?.[1].prompt
+    expect(first[0].text).toContain("Follow project rules")
+    expect(first[0].text).toContain("Verify before reporting")
+    expect(first[0].text).toContain("Previous result")
+    expect(first[0].text).not.toContain("lease-private")
+    for await (const _event of adapter.prompt("generic", message)) {
+      /* Drain. */
+    }
+    expect(internal.sendRequest.mock.calls.at(-1)?.[1].prompt).toEqual([
+      { type: "text", text: "Continue" },
+    ])
+    for await (const _event of adapter.prompt("generic", message, {
+      systemPrompt: "Updated instructions",
+    })) {
+      /* Drain. */
+    }
+    expect(internal.sendRequest.mock.calls.at(-1)?.[1].prompt[0].text).toBe(
+      "[Cognia task context]\nUpdated instructions"
+    )
+  })
+  it("updates client approval policy without unsupported session/set_mode", async () => {
+    const { adapter, internal } = harness()
+    await adapter.setSessionMode("s", "plan")
+    expect(adapter.getSession("s")?.permissionMode).toBe("plan")
+    expect(internal.sendRequest).not.toHaveBeenCalled()
+    await expect(adapter.setSessionMode("missing", "plan")).rejects.toThrow("Session not found")
+  })
+  it("passes Cognia MCP servers through and lists sessions on the current ACP runtime", async () => {
+    const { adapter, internal } = harness()
+    const mcpServers = [
+      {
+        name: "cognia",
+        command: "/usr/bin/node",
+        args: ["/bridge.mjs"],
+        env: [{ name: "COGNIA_TOOLHOST_TOKEN", value: "session-token" }],
+      },
+    ]
+    internal.sendRequest.mockResolvedValueOnce({ sessionId: "created" })
+    await adapter.createSession({ cwd: "/work", mcpServers })
+    expect(internal.sendRequest).toHaveBeenCalledWith(
+      "session/new",
+      expect.objectContaining({ cwd: "/work", mcpServers })
+    )
+    internal.sendRequest.mockResolvedValueOnce({ sessions: [] })
+    await expect(adapter.listSessions()).resolves.toEqual([])
+    expect(internal.sendRequest).toHaveBeenLastCalledWith("session/list", {})
+  })
+  it("resumes with fresh Cognia MCP credentials and uses the advertised model config option", async () => {
+    const { adapter, internal } = harness()
+    const mcpServers = [
+      {
+        name: "cognia",
+        command: "/usr/bin/node",
+        args: [],
+        env: [{ name: "COGNIA_TOOLHOST_TOKEN", value: "new-session-lease" }],
+      },
+    ]
+    const modelOption = {
+      id: "model",
+      name: "Model",
+      category: "model",
+      type: "select",
+      currentValue: "cognia/one",
+      options: [
+        { name: "One", value: "cognia/one" },
+        { name: "Two", value: "cognia/two" },
+      ],
+    }
+    internal.sendRequest.mockResolvedValueOnce({
+      sessionId: "restored",
+      configOptions: [modelOption],
+    })
+    await adapter.resumeSession("restored", { cwd: "/work", mcpServers })
+    expect(internal.sendRequest).toHaveBeenCalledWith(
+      "session/resume",
+      expect.objectContaining({ sessionId: "restored", mcpServers })
+    )
+    internal.sendRequest.mockResolvedValueOnce({
+      configOptions: [{ ...modelOption, currentValue: "cognia/two" }],
+    })
+    await adapter.setSessionModel("restored", "cognia/two")
+    expect(internal.sendRequest).toHaveBeenLastCalledWith("session/set_config_option", {
+      sessionId: "restored",
+      configId: "model",
+      value: "cognia/two",
+    })
+  })
+  it("carries DSH Cognia skills as prompt content once and keeps additional roots in the host scope", async () => {
+    const { adapter, internal } = harness()
+    internal.sendRequest.mockResolvedValueOnce({ sessionId: "context-session" })
+    await adapter.createSession({
+      cwd: "/work",
+      additionalDirectories: ["/docs"],
+      systemPrompt: "Use the selected skill",
+      instructionEnvelope: {
+        hash: "h",
+        developerInstructions: "Use the selected skill",
+        skillsSummary: "Skill: verify results",
+      },
+    })
+    expect(internal.sendRequest.mock.calls[0][1]).not.toHaveProperty("additionalDirectories")
+    expect(adapter.getSession("context-session")?.metadata?.additionalDirectories).toEqual([
+      "/docs",
+    ])
+    internal.sendRequest.mockResolvedValue({ stopReason: "end_turn" })
+    const message = {
+      id: "m",
+      role: "user" as const,
+      content: [{ type: "text" as const, text: "Do the task" }],
+      timestamp: new Date(),
+    }
+    for await (const _event of adapter.prompt("context-session", message)) {
+      /* Drain the completed turn. */
+    }
+    expect(internal.sendRequest).toHaveBeenLastCalledWith(
+      "session/prompt",
+      expect.objectContaining({
+        prompt: [
+          {
+            type: "text",
+            text: "[Cognia task context]\nUse the selected skill\n\nSkill: verify results",
+          },
+          { type: "text", text: "Do the task" },
+        ],
+      }),
+      expect.any(Number)
+    )
+    for await (const _event of adapter.prompt("context-session", message)) {
+      /* Same context is already in the conversation. */
+    }
+    expect(internal.sendRequest.mock.calls.at(-1)?.[1].prompt).toEqual([
+      { type: "text", text: "Do the task" },
+    ])
+    await expect(
+      adapter
+        .prompt("context-session", message, { systemPrompt: "Contact private@example.com" })
+        [Symbol.asyncIterator]()
+        .next()
+    ).rejects.toThrow("PII gate")
   })
 })

@@ -50,6 +50,7 @@ const SECRET_DIR_SEGMENTS = new Set([
   ".npmrc",
   ".cognia",
   ".config/gcloud",
+  ".config/cognia",
 ])
 
 /** Basenames that are themselves credential files anywhere on disk. */
@@ -66,8 +67,22 @@ const SECRET_FILE_NAMES = new Set([
   "known_hosts",
 ])
 
-/** Two-segment secret paths (`<dir>/<child>`), e.g. `~/.config/gh`. */
-const SECRET_SEGMENT_PAIRS = [[".config", "gh"]]
+/**
+ * Two-segment secret paths (`<dir>/<child>`), e.g. `~/.config/gh`. The last
+ * two segments of Rust's multi-segment rels ride this list too
+ * (`.local/share/cognia` → `share/cognia`, `AppData/Roaming/cognia` →
+ * `roaming/cognia`, `Library/Application Support/cognia` →
+ * `application support/cognia`) — over-deny on an unrelated `share/cognia`
+ * is the safe direction.
+ */
+const SECRET_SEGMENT_PAIRS = [
+  [".config", "gh"],
+  [".cargo", "credentials.toml"],
+  ["share", "cognia"],
+  ["local", "cognia"],
+  ["roaming", "cognia"],
+  ["application support", "cognia"],
+]
 
 /**
  * Case-fold on the platforms with case-insensitive filesystems. macOS was
@@ -263,8 +278,74 @@ export function bareToolName(toolName) {
     : String(toolName)
 }
 
-/** Pull the file/dir path targets from a tool-call input. */
-function collectPathTargets(bare, obj) {
+/**
+ * Qualified-name prefix for the synthetic plugin-tools MCP server. A plugin
+ * tool name is free-form (`ripgrep-tools:ripgrep_search` — colon included),
+ * so we prefix-strip rather than `__`-split.
+ */
+const PLUGIN_TOOLS_PREFIX = "mcp__cognia-plugin-tools__"
+
+/** Bare plugin tool name behind a `cognia-plugin-tools` name, else null. */
+export function barePluginToolName(toolName) {
+  const s = String(toolName)
+  return s.startsWith(PLUGIN_TOOLS_PREFIX) ? s.slice(PLUGIN_TOOLS_PREFIX.length) : null
+}
+
+/**
+ * Names the host's sandboxed-tools plugin occupies under the plugin-tools
+ * server. Their class is hardcoded in `sandboxAliases` below — a manifest
+ * `access` declaration must not re-classify (let alone downgrade) them.
+ */
+const RESERVED_PLUGIN_TOOL_NAMES = new Set([
+  "sandbox_write",
+  "sandbox_edit",
+  "sandbox_text_editor",
+  "sandbox_bash",
+])
+
+/**
+ * Build the per-dispatch plugin-tools metadata map consumed by the
+ * confinement gates. Keys are the FULL plugin tool name as sent on the wire
+ * (`ripgrep-tools:ripgrep_search`); values are `{ access, pathKeys }` —
+ * `access` is the declared filesystem class ("read"/"write"), `pathKeys`
+ * the manifest-declared path-valued params that join PATH_KEYS as
+ * confinement targets. Anything malformed is skipped — a tool that fails to
+ * declare stays opaque, the historical default.
+ *
+ * @param {unknown} pluginTools `sendOptions.pluginTools` — tolerates
+ *   non-arrays (older/foreign senders) by returning an empty map.
+ * @returns {Map<string, {access:"read"|"write", pathKeys:string[]}>}
+ */
+export function buildPluginAccessMap(pluginTools) {
+  const map = new Map()
+  if (!Array.isArray(pluginTools)) return map
+  for (const t of pluginTools) {
+    if (!t || typeof t.name !== "string") continue
+    if (t.access !== "read" && t.access !== "write") continue
+    if (RESERVED_PLUGIN_TOOL_NAMES.has(t.name)) continue
+    const pathKeys = Array.isArray(t.pathParams)
+      ? t.pathParams.filter((k) => typeof k === "string" && k.trim())
+      : []
+    map.set(t.name, { access: t.access, pathKeys })
+  }
+  return map
+}
+
+/**
+ * The plugin-tools entry for `toolName`, looked up by bare name.
+ * `pluginAccess` is a Map (or plain object) built once per dispatch by
+ * `buildPluginAccessMap`. Tools that declared no class stay unclassified —
+ * opaque to confinement, the historical default.
+ */
+function pluginAccessFor(toolName, pluginAccess) {
+  const bare = barePluginToolName(toolName)
+  if (bare == null || pluginAccess == null) return undefined
+  return typeof pluginAccess.get === "function" ? pluginAccess.get(bare) : pluginAccess[bare]
+}
+
+/** Pull the file/dir path targets from a tool-call input. `extraKeys` lets a
+ * plugin tool's manifest-declared path params join the built-in PATH_KEYS. */
+function collectPathTargets(bare, obj, extraKeys) {
   if (BASH_TOOLS.has(bare)) {
     // Default workdir is the cwd (inside the root) — only an explicit,
     // out-of-tree workdir is a target worth checking. The command string is
@@ -274,7 +355,8 @@ function collectPathTargets(bare, obj) {
     return wd ? [wd] : []
   }
   const out = []
-  for (const key of PATH_KEYS) {
+  const keys = extraKeys?.length ? [...PATH_KEYS, ...extraKeys] : PATH_KEYS
+  for (const key of keys) {
     const v = obj[key]
     if (typeof v === "string" && v.trim()) out.push(v)
   }
@@ -286,7 +368,8 @@ function collectPathTargets(bare, obj) {
   for (const key of ["edits", "files", "operations"]) {
     if (Array.isArray(obj[key])) {
       for (const entry of obj[key]) {
-        if (entry && typeof entry === "object") out.push(...collectPathTargets(bare, entry))
+        if (entry && typeof entry === "object")
+          out.push(...collectPathTargets(bare, entry, extraKeys))
       }
     }
   }
@@ -294,7 +377,7 @@ function collectPathTargets(bare, obj) {
 }
 
 /** Enforce the host-owned scope immediately before a native tool body runs. */
-export function assertToolCallWithinRoots(policy, toolName, input, cwd) {
+export function assertToolCallWithinRoots(policy, toolName, input, cwd, pluginAccess) {
   if (!policy) return
   const sandboxAliases = {
     "mcp__cognia-plugin-tools__sandbox_write": "write",
@@ -303,9 +386,25 @@ export function assertToolCallWithinRoots(policy, toolName, input, cwd) {
     "mcp__cognia-plugin-tools__sandbox_bash": "bash",
   }
   const bare = sandboxAliases[toolName] ?? bareToolName(toolName)
-  if (!WRITE_TOOLS.has(bare) && !READ_TOOLS.has(bare) && !BASH_TOOLS.has(bare)) return
-  const write = WRITE_TOOLS.has(bare) || BASH_TOOLS.has(bare)
-  for (const target of collectPathTargets(bare, input && typeof input === "object" ? input : {})) {
+  let isWrite = WRITE_TOOLS.has(bare)
+  let isRead = READ_TOOLS.has(bare)
+  let isBash = BASH_TOOLS.has(bare)
+  let pluginPathKeys
+  if (!isWrite && !isRead && !isBash) {
+    // Plugin tools opt into scope enforcement via manifest `access`; the
+    // four sandbox_* aliases above keep their hardcoded class.
+    const entry = pluginAccessFor(toolName, pluginAccess)
+    isWrite = entry?.access === "write"
+    isRead = entry?.access === "read"
+    pluginPathKeys = entry?.pathKeys
+  }
+  if (!isWrite && !isRead && !isBash) return
+  const write = isWrite || isBash
+  for (const target of collectPathTargets(
+    bare,
+    input && typeof input === "object" ? input : {},
+    pluginPathKeys
+  )) {
     const verdict = classifyPathForConfinement(
       cwd,
       policy.writableRoots ?? [],
@@ -340,18 +439,29 @@ export function combineVerdict(a, b) {
  * @param {string} toolName
  * @param {any} input
  * @param {string|undefined} cwd
+ * @param {Map<string, {access:"read"|"write", pathKeys:string[]}>|Record<string, {access:"read"|"write", pathKeys:string[]}>|undefined} [pluginAccess]
+ *   Bare plugin tool name → declared access class + path params, built from
+ *   `sendOptions.pluginTools` by `buildPluginAccessMap`. Lets a plugin tool
+ *   opt into the same read/write classification the built-in sets get.
  * @returns {"allow"|"ask"|"deny"|null}
  */
-export function classifyToolCallConfinement(policy, toolName, input, cwd) {
+export function classifyToolCallConfinement(policy, toolName, input, cwd, pluginAccess) {
   if (!policy || !policy.enabled) return null
   const roots = Array.isArray(policy.roots) ? policy.roots.filter(Boolean) : []
   if (roots.length === 0) return null
   const bare = bareToolName(toolName)
-  const isWrite = WRITE_TOOLS.has(bare) || BASH_TOOLS.has(bare)
-  const isRead = READ_TOOLS.has(bare)
+  let isWrite = WRITE_TOOLS.has(bare) || BASH_TOOLS.has(bare)
+  let isRead = READ_TOOLS.has(bare)
+  let pluginPathKeys
+  if (!isWrite && !isRead) {
+    const entry = pluginAccessFor(toolName, pluginAccess)
+    isWrite = entry?.access === "write"
+    isRead = entry?.access === "read"
+    pluginPathKeys = entry?.pathKeys
+  }
   if (!isWrite && !isRead) return null
   const obj = input && typeof input === "object" ? input : {}
-  const targets = collectPathTargets(bare, obj)
+  const targets = collectPathTargets(bare, obj, pluginPathKeys)
   if (targets.length === 0) return null
   const op = isWrite ? "write" : "read"
   // Confinement only ever ADDS restriction — it must never upgrade a no-rule

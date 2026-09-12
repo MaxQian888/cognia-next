@@ -52,3 +52,16 @@ function deriveTarget(rawInput: Record<string, unknown> | undefined): string | u
   }
   return undefined
 }
+
+/** Match only an actually mounted Cognia bridge namespace, never an agent tool title. */
+export function isCogniaProjectedTool(
+  toolName: string | undefined,
+  mountedServers: readonly string[] = ["cognia-tools", "cognia-plugin-tools"]
+): boolean {
+  if (!toolName) return false
+  return mountedServers.some(
+    (server) =>
+      (server === "cognia-tools" || server === "cognia-plugin-tools") &&
+      toolName.startsWith(`mcp__${server}__`)
+  )
+}

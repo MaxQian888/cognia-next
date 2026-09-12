@@ -21,12 +21,24 @@ type GatewayRuntimeConfig = Pick<
 
 export function cogniaGatewayRuntime(
   config: GatewayRuntimeConfig
-): "codex" | "opencode" | "pi" | "claude" | "qwen" | undefined {
-  if (!config.process?.command || config.network?.endpoint) return undefined
+): "codex" | "opencode" | "pi" | "claude" | "qwen" | "dsh" | undefined {
+  if (config.protocol === "opencode-v2") {
+    return !config.network?.endpoint || config.process?.command ? "opencode" : undefined
+  }
+  if (!config.process || config.network?.endpoint) return undefined
   const entry = findRuntimeForConfig(config)
-  if (!entry || entry.protocol !== config.protocol) return undefined
+  if (!entry) return undefined
+  // Both managed DSH profiles share one install catalog row. ACP is a second
+  // current transport of that installation, not a different runtime package.
+  if (entry.runtimeId === "deepseek-harness") {
+    return config.transport === "stdio" &&
+      (config.protocol === "dsh-sdk" || config.protocol === "acp")
+      ? "dsh"
+      : undefined
+  }
+  if (!config.process.command) return undefined
+  if (entry.protocol !== config.protocol) return undefined
   const runtime = entry.runtimeId
-  if (runtime === "opencode" && config.protocol === "opencode") return "opencode"
   if (config.transport !== "stdio") return undefined
   if (runtime === "codex-app-server" || runtime === "codex-acp") return "codex"
   if (runtime === "qwen-code") return "qwen"
@@ -72,7 +84,7 @@ export interface GatewayTaskPayload {
   taskId: string
   ownerAccountId: string | null
   binding: ExternalAgentCogniaModelBinding
-  runtime: "codex" | "opencode" | "pi" | "claude" | "qwen"
+  runtime: "codex" | "opencode" | "pi" | "claude" | "qwen" | "dsh"
   /** Fixed relative file names only; native hosts derive the state root. No secrets. */
   files: Record<string, string>
 }
@@ -114,7 +126,76 @@ export function buildGatewayTaskConfig(input: {
     if (value) env[key] = value
   }
   let selectedModel = model
-  if (runtime === "codex") {
+  if (runtime === "dsh") {
+    // Current DSH ACP config_options encodes the complete provider/model pair.
+    selectedModel = config.protocol === "acp" ? JSON.stringify(["cognia", model]) : model
+    // Preserve the certified managed launch and tool-host bridge, but rebuild
+    // the provider route from the frozen gateway lease. Runtime paths remain
+    // under the managed home; DSH sessions are globally unique UUIDs.
+    for (const key of [
+      "DSH_HOME",
+      "COGNIA_DSH_RUNTIME_HOME",
+      "COGNIA_DSH_WORKSPACE",
+      "COGNIA_DSH_SESSION_ROOT",
+      "COGNIA_DSH_MCP_SERVERS",
+      "COGNIA_DSH_PERSONA",
+    ]) {
+      const value = config.process?.env?.[key]
+      if (value) env[key] = value
+    }
+    const reasoningEffort = config.process?.env?.COGNIA_DSH_REASONING_EFFORT
+    if (meta.supportsReasoning === true && reasoningEffort)
+      env.COGNIA_DSH_REASONING_EFFORT = reasoningEffort
+    env.COGNIA_DSH_GATEWAY_TOKEN = secret
+    env.COGNIA_DSH_PROVIDER = "cognia"
+    env.COGNIA_DSH_MODEL = model
+    if (meta.contextLength) env.COGNIA_DSH_CONTEXT_WINDOW = String(meta.contextLength)
+    if (meta.maxOutputTokens) env.COGNIA_DSH_MAX_TOKENS = String(meta.maxOutputTokens)
+    env.COGNIA_DSH_GATEWAY_CONFIG = JSON.stringify({
+      providers: {
+        cognia: {
+          api: "openai-completions",
+          baseURL: endpoint,
+          apiKeyEnv: "COGNIA_DSH_GATEWAY_TOKEN",
+          displayName: "Cognia",
+          compat: {
+            supportsStore: false,
+            maxTokensField: "max_tokens",
+            supportsReasoningEffort: meta.supportsReasoning === true,
+          },
+          models: [
+            {
+              id: model,
+              name: model,
+              ...(meta.contextLength
+                ? {
+                    contextWindow: Math.min(
+                      meta.contextLength,
+                      meta.maxInputTokens ?? meta.contextLength
+                    ),
+                  }
+                : {}),
+              ...(meta.maxOutputTokens ? { maxTokens: meta.maxOutputTokens } : {}),
+              ...(meta.supportsReasoning === true
+                ? {
+                    reasoningEfforts: {
+                      off: null,
+                      minimal: "minimal",
+                      low: "low",
+                      medium: "medium",
+                      high: "high",
+                      xhigh: "xhigh",
+                      max: "max",
+                    },
+                  }
+                : {}),
+              input: meta.supportsVision ? ["text", "image"] : ["text"],
+            },
+          ],
+        },
+      },
+    })
+  } else if (runtime === "codex") {
     files["codex/config.toml"] =
       [
         `model = ${JSON.stringify(model)}`,
@@ -169,14 +250,12 @@ export function buildGatewayTaskConfig(input: {
     selectedModel = `cognia/${model}`
     env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
       model: selectedModel,
-      small_model: selectedModel,
-      enabled_providers: ["cognia"],
-      autoupdate: false,
-      provider: {
+      providers: {
         cognia: {
           name: "Cognia",
-          npm: "@ai-sdk/openai-compatible",
-          options: { baseURL: endpoint, apiKey: `{env:${GATEWAY_TOKEN_ENV}}` },
+          package: "@opencode/ai/providers/openai-compatible",
+          env: [GATEWAY_TOKEN_ENV],
+          settings: { baseURL: endpoint },
           models: {
             [model]: {
               name: model,
@@ -189,11 +268,8 @@ export function buildGatewayTaskConfig(input: {
                     },
                   }
                 : {}),
-              ...(meta.supportsReasoning !== undefined
-                ? { reasoning: meta.supportsReasoning }
-                : {}),
-              ...(meta.supportsTools !== undefined ? { tool_call: meta.supportsTools } : {}),
-              modalities: {
+              capabilities: {
+                tools: true,
                 input: meta.supportsVision ? ["text", "image"] : ["text"],
                 output: ["text"],
               },
@@ -297,7 +373,11 @@ export function buildGatewayTaskConfig(input: {
     runtime,
     files,
   } satisfies GatewayTaskPayload)
-  const args = [...(findRuntimeForConfig(config)?.launchArgs ?? [])]
+  const args = [
+    ...(runtime === "dsh"
+      ? (config.process?.args ?? [])
+      : (findRuntimeForConfig(config)?.launchArgs ?? [])),
+  ]
   if (runtime === "qwen")
     args.push("--auth-type", "openai", "--model", model, "--openai-base-url", endpoint)
   if (runtime === "codex" && findRuntimeForConfig(config)?.runtimeId === "codex-app-server") {
@@ -320,7 +400,12 @@ export function buildGatewayTaskConfig(input: {
       network: undefined,
       process: {
         ...config.process!,
-        command: findRuntimeForConfig(config)?.systemCommand ?? config.process!.command,
+        command:
+          config.protocol === "opencode-v2"
+            ? config.process?.command || "opencode"
+            : runtime === "dsh"
+              ? config.process!.command
+              : (findRuntimeForConfig(config)?.systemCommand ?? config.process!.command),
         args,
         env,
       },

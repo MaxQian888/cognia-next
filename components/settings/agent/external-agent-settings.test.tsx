@@ -280,7 +280,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     expect(within(gallery).getByTestId("preset-card-claude-code")).toBeInTheDocument()
     expect(within(gallery).getByTestId("preset-card-gemini-cli")).toBeInTheDocument()
     expect(within(gallery).getByTestId("preset-card-cursor-cli")).toBeInTheDocument()
-    expect(within(gallery).queryByTestId("preset-card-opencode-v2-preview")).not.toBeInTheDocument()
+    expect(within(gallery).getByTestId("preset-card-opencode-v2-service")).toBeInTheDocument()
   })
 
   it("renders agent brand icons in preset cards and configured-agent rows", () => {
@@ -334,7 +334,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     render(<ExternalAgentSettings />)
     expect(
       screen.getByText(
-        "Run Devin through its native ACP server using your existing CLI login. Select models, including SWE-2, after connecting. Choose Accept Edits (Code) when you want Devin to modify files. Devin 3000.10.21 did not load Cognia-provided MCP servers in live tests; native tools work."
+        "Run Devin through its native ACP server using your existing CLI login. Select models, including SWE-2, after connecting. Choose Accept Edits (Code) when you want Devin to modify files. Cognia tools are available in each conversation alongside Devin’s native tools."
       )
     ).toBeInTheDocument()
     await act(async () => {
@@ -541,16 +541,163 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     expect(screen.queryByTestId("codex-options-section")).not.toBeInTheDocument()
   })
 
-  it("shows the legacy OpenCode V2 contract as documented-only and prevents selection", async () => {
+  it.each(["deepseek-harness-readonly", "deepseek-harness-workspace", "deepseek-harness-acp"])(
+    "saves managed %s without a command and passes credentials to lifecycle",
+    async (preset) => {
+      const user = userEvent.setup()
+      render(<ExternalAgentSettings />)
+      await user.click(screen.getByTestId(`preset-pick-${preset}`))
+      const section = await screen.findByTestId("connection-section")
+      expect(within(section).getByLabelText(/^command$/i)).toBeDisabled()
+      await user.type(within(section).getByLabelText(/^api key$/i), "deepseek-key-for-keyring")
+      await user.type(within(section).getByLabelText(/^working directory$/i), "/workspace")
+      await user.click(screen.getByRole("button", { name: /^add$/i }))
+      expect(createConfigMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: expect.objectContaining({ preset, requiresManagedRuntime: true }),
+          process: {
+            command: "",
+            args: [],
+            cwd: "/workspace",
+            env: { DEEPSEEK_API_KEY: "deepseek-key-for-keyring" },
+          },
+        })
+      )
+    }
+  )
+
+  it("creates a current OpenCode service configuration using local discovery", async () => {
     const user = userEvent.setup()
     render(<ExternalAgentSettings />)
-    await act(async () => {
-      await user.click(screen.getByRole("switch", { name: /show experimental/i }))
+    await user.click(screen.getByTestId("preset-pick-opencode-v2-service"))
+    const section = await screen.findByTestId("opencode-v2-options-section")
+    expect(within(section).getByLabelText("Endpoint URL")).toHaveValue("")
+    await user.click(screen.getByRole("button", { name: /^add$/i }))
+    expect(createConfigMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        protocol: "opencode-v2",
+        transport: "sse",
+        metadata: expect.objectContaining({
+          preset: "opencode-v2-service",
+          localServiceDiscovery: true,
+        }),
+      })
+    )
+    expect(createConfigMock.mock.calls[0][0].network?.endpoint).toBe("")
+  })
+
+  it("persists an explicit current OpenCode endpoint, credentials, and workspace", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await user.click(screen.getByTestId("preset-pick-opencode-v2-service"))
+    const section = await screen.findByTestId("opencode-v2-options-section")
+    await user.type(within(section).getByLabelText("Endpoint URL"), "https://opencode.example.test")
+    await user.type(within(section).getByLabelText("API Key"), "service-token")
+    await user.type(within(section).getByLabelText("Working Directory"), "/workspace/project")
+    await user.click(screen.getByRole("button", { name: /^add$/i }))
+    expect(createConfigMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        protocol: "opencode-v2",
+        network: { endpoint: "https://opencode.example.test", apiKey: "service-token" },
+        process: { command: "", args: [], cwd: "/workspace/project" },
+      })
+    )
+  })
+
+  it.each(["file:///tmp/opencode.sock", "ws://localhost:4096", "not-a-url"])(
+    "keeps the OpenCode editor open without saving invalid endpoint %s",
+    async (endpoint) => {
+      const user = userEvent.setup()
+      render(<ExternalAgentSettings />)
+      await user.click(screen.getByTestId("preset-pick-opencode-v2-service"))
+      const section = await screen.findByTestId("opencode-v2-options-section")
+      await user.type(within(section).getByLabelText("Endpoint URL"), endpoint)
+      await user.click(screen.getByRole("button", { name: /^add$/i }))
+      expect(createConfigMock).not.toHaveBeenCalled()
+      expect(screen.getByRole("dialog", { name: "Add Agent" })).toBeInTheDocument()
+      expect(within(section).getByLabelText("Endpoint URL")).toHaveValue(endpoint)
+    }
+  )
+
+  it("persists native OpenCode Basic authentication alongside optional proxy credentials", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await user.click(screen.getByTestId("preset-pick-opencode-v2-service"))
+    const section = await screen.findByTestId("opencode-v2-options-section")
+    await user.type(within(section).getByLabelText("Endpoint URL"), "https://opencode.example.test")
+    await user.type(within(section).getByLabelText("Server password"), "fixture-password")
+    await user.type(within(section).getByLabelText("Server username"), "opencode-user")
+    await user.click(screen.getByRole("button", { name: /^add$/i }))
+    expect(createConfigMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          serverPassword: "fixture-password",
+          serverUsername: "opencode-user",
+        }),
+      })
+    )
+  })
+
+  it("clears native OpenCode Basic authentication when editing a saved endpoint", async () => {
+    const previous = { ...mockAgentManual }
+    Object.assign(mockAgentManual, {
+      protocol: "opencode-v2",
+      network: { endpoint: "https://opencode.example.test" },
+      metadata: { retained: true, serverPassword: "old-password", serverUsername: "old-user" },
     })
-    const card = await screen.findByTestId("preset-card-opencode-v2-preview")
-    expect(within(card).getByText("documented-only")).toBeInTheDocument()
-    expect(within(card).getByTestId("preset-pick-opencode-v2-preview")).toBeDisabled()
-    expect(createConfigMock).not.toHaveBeenCalled()
+    try {
+      const user = userEvent.setup()
+      render(<ExternalAgentSettings />)
+      await user.click(screen.getByTestId("agent-row-agent-2"))
+      const detail = await screen.findByTestId("agent-detail-agent-2")
+      await user.click(within(detail).getByRole("button", { name: /edit/i }))
+      const section = await screen.findByTestId("opencode-v2-options-section")
+      expect(within(section).getByLabelText("Server password")).toHaveValue("old-password")
+      expect(within(section).getByLabelText("Server username")).toHaveValue("old-user")
+      await user.clear(within(section).getByLabelText("Server password"))
+      await user.clear(within(section).getByLabelText("Server username"))
+      await user.click(screen.getByRole("button", { name: /^save$/i }))
+      expect(updateConfigMock).toHaveBeenCalledWith(
+        "agent-2",
+        expect.objectContaining({
+          metadata: { serverPassword: null, serverUsername: null },
+        })
+      )
+    } finally {
+      Object.assign(mockAgentManual, previous)
+      if (!previous.network) delete mockAgentManual.network
+    }
+  })
+
+  it("clears the saved OpenCode endpoint and workspace when returning to local discovery", async () => {
+    const previous = { ...mockAgentManual }
+    Object.assign(mockAgentManual, {
+      protocol: "opencode-v2",
+      transport: "sse",
+      network: { endpoint: "https://opencode.example.test" },
+      process: { command: "", cwd: "/workspace/old" },
+    })
+    try {
+      const user = userEvent.setup()
+      render(<ExternalAgentSettings />)
+      await user.click(screen.getByTestId("agent-row-agent-2"))
+      const detail = await screen.findByTestId("agent-detail-agent-2")
+      await user.click(within(detail).getByRole("button", { name: /edit/i }))
+      const section = await screen.findByTestId("opencode-v2-options-section")
+      await user.clear(within(section).getByLabelText("Endpoint URL"))
+      await user.clear(within(section).getByLabelText("Working Directory"))
+      await user.click(screen.getByRole("button", { name: /^save$/i }))
+      expect(updateConfigMock).toHaveBeenCalledWith(
+        "agent-2",
+        expect.objectContaining({
+          network: { endpoint: "", apiKey: undefined },
+          process: { command: "", args: [], cwd: undefined },
+        })
+      )
+    } finally {
+      Object.assign(mockAgentManual, previous)
+      if (!previous.network) delete mockAgentManual.network
+    }
   })
 
   it("restores the provider undo warning for the selected agent", async () => {

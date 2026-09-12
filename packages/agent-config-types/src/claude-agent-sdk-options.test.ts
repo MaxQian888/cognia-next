@@ -11,6 +11,95 @@ const base: ClaudeAgentSdkOptionsV1 = { version: 1 }
 const errorsOf = (v: unknown, flat = {}) => validateClaudeAgentSdkOptions(v, flat).errors.join("\n")
 
 describe("validateClaudeAgentSdkOptions", () => {
+  it("rejects unknown fields and invalid latest option subtypes before launch", () => {
+    expect(errorsOf({ ...base, unsupportedOption: true })).toMatch(/unsupportedOption/)
+    expect(errorsOf({ ...base, thinking: { type: "disabled", budgetTokens: 10 } })).toMatch(
+      /thinking/
+    )
+    expect(errorsOf({ ...base, systemPrompt: { type: "preset", preset: "wrong" } })).toMatch(
+      /systemPrompt/
+    )
+    expect(errorsOf({ ...base, permissionPrompts: "auto" })).toMatch(/permissionPrompts/)
+    expect(errorsOf({ ...base, pluginDelivery: "file" })).toMatch(/pluginDelivery/)
+    expect(errorsOf({ ...base, plugins: {} })).toMatch(/plugins/)
+  })
+
+  it("accepts current serializable SDK options without erasing explicit false values", () => {
+    const options: ClaudeAgentSdkOptionsV1 = {
+      ...base,
+      thinking: { type: "adaptive", display: "omitted" },
+      systemPrompt: { type: "custom", prompt: ["one", "two"], snapshot: false },
+      permissionPrompts: "none",
+      pluginDelivery: "initialize",
+      perTaskStopAffordance: false,
+    }
+    expect(validateClaudeAgentSdkOptions(options).ok).toBe(true)
+  })
+
+  it.each([
+    { thinking: { type: "disabled" } },
+    { thinking: { type: "enabled", budgetTokens: 2048, display: "summarized" } },
+    { systemPrompt: "plain" },
+    { systemPrompt: ["one", "two"] },
+    { systemPrompt: { type: "custom", prompt: "plain", snapshot: true } },
+    {
+      systemPrompt: {
+        type: "preset",
+        preset: "claude_code",
+        append: "context",
+        excludeDynamicSections: true,
+        snapshot: false,
+      },
+    },
+    { tools: { type: "preset", preset: "claude_code" } },
+    { sessionStore: { backend: "host-sqlite", flush: "eager" } },
+    { sessionStore: { backend: "host-sqlite", workspace: null } },
+    { sessionStore: { backend: "host-sqlite", workspace: "/workspace" } },
+    {
+      toolAliases: { Read: "read" },
+      toolConfig: { askUserQuestion: { previewFormat: "markdown" } },
+    },
+    {
+      sandbox: {
+        credentials: {
+          files: [{ path: "/private", mode: "deny" }],
+          envVars: [{ name: "TOKEN", mode: "mask", injectHosts: ["example.test"] }],
+        },
+      },
+    },
+    { title: undefined },
+  ])("validates the complete serialized shape %j", (options) => {
+    expect(validateClaudeAgentSdkOptions({ ...base, ...options })).toEqual({
+      ok: true,
+      errors: [],
+      warnings: [],
+    })
+  })
+
+  it.each([
+    { thinking: null },
+    { thinking: { type: "adaptive", display: "raw" } },
+    { thinking: { type: "enabled", budgetTokens: 0 } },
+    { systemPrompt: null },
+    { systemPrompt: [42] },
+    { systemPrompt: { type: "custom" } },
+    { systemPrompt: { type: "custom", prompt: "ok", ignored: true } },
+    { systemPrompt: { type: "preset" } },
+    { tools: { type: "custom", preset: "invalid" } },
+    { sessionStore: { backend: "host-sqlite", flush: "never" } },
+    { sessionStore: { backend: "host-sqlite", workspace: 3 } },
+    { toolAliases: { Read: 3 } },
+    { toolConfig: { askUserQuestion: { previewFormat: "raw" } } },
+    { perTaskStopAffordance: "false" },
+    { taskBudget: { total: Number.NaN } },
+    { sandbox: { credentials: { files: [{ mode: "allow" }], envVars: [{ mode: "inject" }] } } },
+    { sandbox: { network: { imaginary: true } } },
+    { extraArgs: { verbose: true } },
+    { plugins: [null] },
+    { prewarm: null },
+  ])("rejects invalid or unsupported descriptor fields %j", (options) => {
+    expect(validateClaudeAgentSdkOptions({ ...base, ...options }).ok).toBe(false)
+  })
   it("accepts an empty versioned block", () => {
     expect(validateClaudeAgentSdkOptions(base)).toEqual({ ok: true, errors: [], warnings: [] })
   })
@@ -154,7 +243,7 @@ describe("validateClaudeAgentSdkOptions", () => {
 
     it("rejects a non-object schema and an unsupported format", () => {
       expect(errorsOf({ ...base, outputFormat: { type: "json_schema", schema: "x" } })).toMatch(
-        /must be a JSON Schema object/
+        /schema must be an object/
       )
       expect(errorsOf({ ...base, outputFormat: { type: "yaml", schema: {} } })).toMatch(
         /"yaml" is unsupported/
@@ -178,7 +267,7 @@ describe("validateClaudeAgentSdkOptions", () => {
     it('accepts skills as a list or "all"', () => {
       expect(validateClaudeAgentSdkOptions({ ...base, skills: "all" }).ok).toBe(true)
       expect(validateClaudeAgentSdkOptions({ ...base, skills: ["a"] }).ok).toBe(true)
-      expect(errorsOf({ ...base, skills: "some" })).toMatch(/must be a string array or "all"/)
+      expect(errorsOf({ ...base, skills: "some" })).toMatch(/skills must be an array/)
     })
   })
 

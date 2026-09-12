@@ -12,6 +12,7 @@ import {
 } from "../native-binary"
 
 import type { ExternalAgentLaunch, NodeExternalAgentSpawnConfig } from "./node-backend"
+import { devinOwnedConfigRoot, devinOriginalConfigRoot } from "./devin-mcp-config"
 import { toolHostRuntimeDir } from "../../agent/tool-host/protocol"
 import {
   SANDBOX_SUPPORTED_PLATFORMS,
@@ -106,18 +107,47 @@ export function buildSandboxLauncherArgs(
 ): string[] {
   if (!config.cwd) throw new Error("external-agent sandbox requires a working directory")
   const taskHome = config.env?.COGNIA_GATEWAY_TASK_HOME
+  const botIsolation = config.env?.COGNIA_BOT_ISOLATION === "1"
+  const botState = config.env?.COGNIA_BOT_STATE_DIR
+  if (botIsolation && (!botState || !path.isAbsolute(botState)))
+    throw new Error("Bot isolation requires an owned state directory")
   const effectiveHome = taskHome ?? homedir
   const writable = [
     config.cwd,
-    ...(taskHome ? [taskHome] : agentStateWritableRoots(config, homedir)),
+    ...(botIsolation
+      ? [botState!]
+      : taskHome
+        ? [taskHome]
+        : agentStateWritableRoots(config, homedir)),
     toolHostRuntimeDir(),
   ]
+  const devinConfigRoot = devinOwnedConfigRoot(config)
+  if (devinConfigRoot) writable.push(devinConfigRoot)
   return [
+    ...(config.env?.COGNIA_BOT_ISOLATION === "1"
+      ? [
+          "--bot-isolation",
+          "--deny-readable",
+          homedir,
+          ...[
+            ".nvm",
+            ".local/bin",
+            ".local/share/pnpm",
+            ".local/share/devin/cli/_versions",
+            ".bun/bin",
+            ".cargo/bin",
+            ".rustup/toolchains",
+            "Library/pnpm",
+          ].flatMap((relative) => ["--readable", path.join(homedir, relative)]),
+        ]
+      : []),
     "--cwd",
     config.cwd,
     ...writable.flatMap((root) => ["--writable", root]),
-    "--readable",
-    effectiveHome,
+    ...(!botIsolation ? ["--readable", effectiveHome] : []),
+    ...(!botIsolation && devinOriginalConfigRoot(config)
+      ? ["--readable", devinOriginalConfigRoot(config)!]
+      : []),
     ...(taskHome
       ? [
           "--readable",
@@ -197,6 +227,11 @@ export async function resolveSandboxedExternalAgentLaunch(
     )
   }
   for (const root of agentStateDirectoryRoots(config, runtime.homedir)) runtime.ensureDir?.(root)
+  if (config.env?.COGNIA_BOT_ISOLATION === "1" && config.env.COGNIA_BOT_STATE_DIR) {
+    runtime.ensureDir?.(config.env.COGNIA_BOT_STATE_DIR)
+    for (const name of ["data", "cache", "state"])
+      runtime.ensureDir?.(path.join(config.env.COGNIA_BOT_STATE_DIR, name))
+  }
   runtime.ensureDir?.(toolHostRuntimeDir())
   for (const root of agentStateFileRoots(config, runtime.homedir)) runtime.ensureFile?.(root)
   return {

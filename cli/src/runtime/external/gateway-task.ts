@@ -28,7 +28,10 @@ const ESSENTIAL_ENV = new Set([
 ])
 
 export function gatewayRuntimeEnvironment(ambient: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return Object.fromEntries(Object.entries(ambient).filter(([key]) => ESSENTIAL_ENV.has(key)))
+  return {
+    NODE_ENV: ambient.NODE_ENV ?? "production",
+    ...Object.fromEntries(Object.entries(ambient).filter(([key]) => ESSENTIAL_ENV.has(key))),
+  }
 }
 
 export function deleteGatewayTask(taskId: string, home = os.homedir()): void {
@@ -77,7 +80,7 @@ export function prepareGatewayTask(
   }
   if (
     !/^[a-zA-Z0-9_-]{1,128}$/.test(payload.taskId) ||
-    !["codex", "opencode", "pi", "claude", "qwen"].includes(payload.runtime) ||
+    !["codex", "opencode", "pi", "claude", "qwen", "dsh"].includes(payload.runtime) ||
     !payload.files ||
     Object.entries(payload.files).some(
       ([name, value]) =>

@@ -133,8 +133,15 @@ describe("canonicalEventFromExternalEvent", () => {
         type: "permission_request",
         requestId: "r1",
         toolName: "Edit",
+        defaultToNo: true,
+        suppressAlwaysAllowRule: true,
       })
-    ).toMatchObject({ kind: "permission-request", requestId: "r1" })
+    ).toMatchObject({
+      kind: "permission-request",
+      requestId: "r1",
+      defaultToNo: true,
+      suppressAlwaysAllowRule: true,
+    })
     expect(canonicalEventFromExternalEvent({ type: "session_started" })).toEqual({
       kind: "lifecycle",
       phase: "started",

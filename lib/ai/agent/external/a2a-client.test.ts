@@ -4,6 +4,47 @@ import type { ExternalAgentConfig, ExternalAgentMessage } from "@/types/agent/ex
 // ── pure mapper ──────────────────────────────────────────────────────────────
 
 describe("mapA2aResult", () => {
+  it("renders current inline and structured artifacts and preserves nonterminal states", () => {
+    const circular: Record<string, unknown> = {}
+    circular.self = circular
+    const { events } = mapA2aResult(
+      {
+        message: {
+          parts: [
+            { raw: "AA==" },
+            { raw: "", filename: "empty" },
+            { data: { ok: true } },
+            { data: circular },
+            {},
+          ],
+        },
+      } as never,
+      {}
+    )
+    const rendered = JSON.stringify(events)
+    expect(rendered).toContain("[file: file (inline)]")
+    expect(rendered).toContain("[file: empty]")
+    expect(rendered).toContain("[data]")
+    expect(mapA2aResult({ status: { state: "TASK_STATE_WORKING" } } as never, {}).done).toBe(false)
+    expect(
+      mapA2aResult({ status: { state: "TASK_STATE_UNSPECIFIED" }, final: true } as never, {}).done
+    ).toBe(true)
+    expect(mapA2aResult({ status: { state: "TASK_STATE_UNSPECIFIED" } } as never, {}).done).toBe(
+      false
+    )
+    expect(
+      mapA2aResult(
+        { task: { id: "empty", status: { state: "TASK_STATE_COMPLETED" } } } as never,
+        {}
+      ).done
+    ).toBe(true)
+    expect(
+      mapA2aResult({ artifact: { parts: [{ text: "artifact" }] } } as never, {}).events
+    ).toEqual([
+      expect.objectContaining({ type: "message_delta", delta: { text: "artifact", type: "text" } }),
+    ])
+  })
+
   it("maps A2A 1.0 response wrappers, ProtoJSON enums, and discriminator-free parts", () => {
     const ctx: { contextId: string; taskId?: string } = { contextId: "c1" }
     const { events, done } = mapA2aResult(
@@ -229,6 +270,143 @@ async function collect(it: AsyncIterable<unknown>): Promise<unknown[]> {
 }
 
 describe("A2aClientAdapter", () => {
+  it("cleans local sessions and reports unavailable service health", async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(v1CardResponse(false))
+    const a = new A2aClientAdapter({ fetchImpl })
+    expect(await a.healthCheck()).toBe(false)
+    await a.connect(makeConfig())
+    expect(await a.healthCheck()).toBe(true)
+    const s = await a.createSession({ permissionMode: "plan" })
+    await a.respondToPermission()
+    await a.cancel(s.id)
+    await a.closeSession(s.id)
+    await a.disconnect()
+    expect(a.isConnected()).toBe(false)
+    fetchImpl.mockRejectedValue(new Error("offline"))
+    expect(await a.healthCheck()).toBe(false)
+  })
+
+  it("preserves current file and image parts, empty messages and API-key auth", async () => {
+    const fetchImpl = jest
+      .fn()
+      .mockResolvedValueOnce(v1CardResponse(false))
+      .mockImplementation(async () => ({
+        ok: true,
+        json: async () => ({ result: { message: { parts: [{ text: "done" }] } } }),
+      }))
+    const a = new A2aClientAdapter({ fetchImpl })
+    await a.connect({
+      ...makeConfig(),
+      network: { endpoint: "https://x", authMethod: "api-key", apiKey: "fixture" },
+    })
+    const s = await a.createSession()
+    await collect(
+      a.prompt(s.id, {
+        ...userMessage(""),
+        content: [
+          {
+            type: "image",
+            source: { type: "url", url: "https://x/image.png", mediaType: "image/png" },
+            alt: "Image",
+          },
+          { type: "image", source: { type: "base64", data: "aGVsbG8=", mediaType: "image/png" } },
+          { type: "file", path: "note.txt", content: "Note text" },
+          {
+            type: "file",
+            path: "data.bin",
+            content: "AA==",
+            encoding: "base64",
+            mimeType: "application/octet-stream",
+          },
+          { type: "file", path: "https://x/report.pdf", mimeType: "application/pdf" },
+        ],
+      })
+    )
+    expect(JSON.parse(fetchImpl.mock.calls[1][1].body).params.message.parts).toEqual([
+      { url: "https://x/image.png", filename: "Image", mediaType: "image/png" },
+      { raw: "aGVsbG8=", mediaType: "image/png" },
+      { text: "Note text" },
+      { raw: "AA==", filename: "data.bin", mediaType: "application/octet-stream" },
+      {
+        url: "https://x/report.pdf",
+        filename: "https://x/report.pdf",
+        mediaType: "application/pdf",
+      },
+    ])
+    expect(fetchImpl.mock.calls[1][1].headers["x-api-key"]).toBe("fixture")
+    await collect(a.prompt(s.id, userMessage("")))
+    expect(JSON.parse(fetchImpl.mock.calls[2][1].body).params.message.parts).toEqual([{ text: "" }])
+    const controller = new AbortController()
+    controller.abort()
+    fetchImpl.mockRejectedValue(new Error("cancelled"))
+    expect(
+      await collect(a.prompt(s.id, userMessage("cancel"), { signal: controller.signal }))
+    ).toEqual([expect.objectContaining({ type: "done", success: false, stopReason: "cancelled" })])
+  })
+
+  it("delivers session instructions, skills and safe context with per-turn overrides", async () => {
+    const fetchImpl = jest
+      .fn()
+      .mockResolvedValueOnce(v1CardResponse(false))
+      .mockImplementation(async () => ({
+        ok: true,
+        json: async () => ({
+          result: { message: { role: "ROLE_AGENT", parts: [{ text: "done" }] } },
+        }),
+      }))
+    const a = new A2aClientAdapter({ fetchImpl })
+    await a.connect(makeConfig())
+    const session = await a.createSession({
+      systemPrompt: "Session instruction",
+      briefMode: true,
+      instructionEnvelope: {
+        hash: "h",
+        developerInstructions: "Developer instruction",
+        skillsSummary: "Skill instructions",
+      },
+      context: {
+        parentTask: "Parent task",
+        custom: {
+          chatSessionId: "internal-chat",
+          mcpServers: [{ token: "private-route" }],
+          reference: "Task reference",
+        },
+      },
+    })
+    await collect(a.prompt(session.id, userMessage("first")))
+    await collect(a.prompt(session.id, userMessage("second"), { systemPrompt: "Turn instruction" }))
+    const first = JSON.parse(fetchImpl.mock.calls[1][1].body).params.message.parts
+    expect(first[0].text).toContain("Session instruction")
+    expect(first[0].text).toContain("Developer instruction")
+    expect(first[0].text).toContain("Skill instructions")
+    expect(first[0].text).toContain("Parent task")
+    expect(first[0].text).toContain("Task reference")
+    expect(first[0].text).toContain("concise")
+    expect(JSON.stringify(first)).not.toMatch(/private-route|internal-chat/)
+    const second = JSON.parse(fetchImpl.mock.calls[2][1].body).params.message.parts
+    expect(second[0].text).toContain("Turn instruction")
+    expect(second[0].text).not.toContain("Session instruction")
+    expect(second[1].text).toBe("second")
+  })
+
+  it("rejects reverse tool mounts and blocks sensitive added instructions", async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(v1CardResponse(false))
+    const a = new A2aClientAdapter({ fetchImpl })
+    await a.connect(makeConfig())
+    await expect(
+      a.createSession({ mcpServers: [{ name: "cognia", command: "node", args: [], env: [] }] })
+    ).rejects.toThrow("MCP")
+    await expect(a.createSession({ additionalDirectories: ["/extra"] })).rejects.toThrow(
+      "workspace"
+    )
+    const session = await a.createSession({ systemPrompt: "Contact person@example.com" })
+    const events = await collect(a.prompt(session.id, userMessage("hello")))
+    expect(events).toEqual([
+      expect.objectContaining({ type: "error", error: expect.stringContaining("PII") }),
+    ])
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
   it("skips unsupported interfaces and negotiates a later supported JSON-RPC interface", async () => {
     const fetchImpl = jest.fn().mockResolvedValue(
       interfacesCardResponse([
@@ -660,7 +838,7 @@ describe("A2aClientAdapter", () => {
     const a = new A2aClientAdapter({ fetchImpl })
     await a.connect(makeConfig())
     expect(a.isConnected()).toBe(true)
-    expect(a.capabilities).toBeUndefined()
+    expect(a.capabilities).toMatchObject({ streaming: false, mcpTools: false })
   })
 
   it("throws when network.endpoint is missing", async () => {

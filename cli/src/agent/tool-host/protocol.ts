@@ -99,7 +99,8 @@ export interface AuthorizeParams {
   args: unknown
 }
 
-export type AuthorizeResult = { allow: true } | { allow: false; reason: string }
+export type AuthorizeResult =
+  { allow: true; updatedArgs?: unknown } | { allow: false; reason: string }
 
 export interface ExecParams {
   name: string
@@ -115,7 +116,13 @@ export interface ReportParams {
   summary?: string
 }
 
-export type ToolHostMethod = "hello" | "authorize" | "exec" | "report"
+export interface ReviewParams {
+  name: string
+  args: unknown
+  result: unknown
+}
+
+export type ToolHostMethod = "hello" | "authorize" | "exec" | "report" | "review"
 
 export interface ToolHostRequest {
   id: number

@@ -9,6 +9,16 @@ import {
   registerSessionMcpStatus,
   type AgentMcpEvidence,
 } from "./tool-host/mcp-status"
+import { buildDeclaredCapabilityProfile } from "@/lib/ai/agent/external/capability-profile"
+import { isCapabilityUsable } from "@cognia/agent-config-types/external-agent-capability"
+import {
+  dispatchUserPromptSubmit,
+  dispatchStreamStart,
+  dispatchStreamChunk,
+  dispatchStreamEnd,
+  dispatchChatError,
+  dispatchTokenUsage,
+} from "@/lib/claude/adapter-hooks"
 import os from "node:os"
 
 import type { PermissionRequestEvent } from "@cognia/agent-config-types"
@@ -75,7 +85,7 @@ import { createIdleWatchdog } from "./idle-watchdog"
 import { isResumableLink, readExternalLink, writeExternalLink } from "./external-session-link"
 import { mintSessionId } from "./run"
 import type { AgentModelOption, AgentSession, SendTurnOptions } from "./session-runner"
-import { appendTranscript, type TranscriptFs } from "./transcript"
+import { appendTranscript, readTranscript, type TranscriptFs } from "./transcript"
 import {
   createCliContextAssembler,
   prependTextBlock,
@@ -212,6 +222,9 @@ export interface ExternalAgentSessionManager {
     }>
     listModels?: () => Promise<Array<{ id: string; name?: string }>>
   } | null
+  getAgentCapabilities?: (
+    agentId: string
+  ) => import("@/types/agent/external-agent").AcpCapabilities | undefined
   addAgent(config: ExternalAgentConfig): Promise<unknown>
   execute(
     agentId: string,
@@ -336,6 +349,7 @@ export interface ExternalAgentSessionParams {
     attempt: number
     gate?: PermissionResponder
     awaitApprovals?: () => Promise<void>
+    isTurnActive?: () => boolean
     execHostTool: (name: string, args: unknown) => Promise<{ result?: unknown; error?: string }>
     onToolCall?: (event: { name: string; input: unknown; callKey: string }) => void
     onToolResult?: (event: { callKey: string; name: string; ok: boolean; summary?: string }) => void
@@ -434,6 +448,17 @@ export function externalAgentCredentialEnv(
       ...(credential?.authToken ? { CLAUDE_CODE_OAUTH_TOKEN: credential.authToken } : {}),
       ...(credential?.apiKey ? { ANTHROPIC_API_KEY: credential.apiKey } : {}),
       ...(credential?.baseURL ? { ANTHROPIC_BASE_URL: credential.baseURL } : {}),
+    }
+  }
+  if (
+    ["deepseek-harness-readonly", "deepseek-harness-workspace", "deepseek-harness-acp"].includes(
+      presetId
+    )
+  ) {
+    const credential = config.providers.deepseek
+    return {
+      ...(credential?.apiKey ? { DEEPSEEK_API_KEY: credential.apiKey } : {}),
+      ...(credential?.baseURL ? { DEEPSEEK_BASE_URL: credential.baseURL } : {}),
     }
   }
   return {}
@@ -552,9 +577,13 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
         : `Unknown external-agent backend: ${backend}`
     )
   }
-  const supportsMcp = ["acp", "codex-app-server"].includes(
-    getPresetConfig(params.connection?.presetId ?? backend)?.protocol ?? ""
-  )
+  const protocol = getPresetConfig(params.connection?.presetId ?? backend)?.protocol ?? ""
+  let supportsMcp = canHostCogniaTools(params.connection?.capabilities?.negotiated, protocol)
+  const declaredProfile = buildDeclaredCapabilityProfile({ protocol })
+  const nativeToolEvents =
+    params.connection?.capabilities?.negotiated?.toolExecution !== false &&
+    isCapabilityUsable(declaredProfile.effective["tools.ordinary"].level) &&
+    isCapabilityUsable(declaredProfile.effective["tools.results"].level)
   let applyingMcp = false
   let sendingTurn = false
   let turnSequence = 0
@@ -588,7 +617,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
     ((broker: ToolHostBroker) =>
       buildToolHostMcpServers({ endpoint: broker.endpoint, token: broker.token }))
   const toolHostEnabled = params.disableToolHost !== true
-  const negotiated = params.connection?.capabilities?.negotiated
+  let negotiated = params.connection?.capabilities?.negotiated
 
   // The ONE Cognia resolver. Attachments are built with vision OFF because the
   // external transport carries a single text prompt: images and PDFs then take
@@ -714,6 +743,8 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       }
     }
     await manager.addAgent(config)
+    negotiated = manager.getAgentCapabilities?.(agentId) ?? negotiated
+    supportsMcp = canHostCogniaTools(negotiated, config.protocol)
     initialized = true
   }
 
@@ -738,7 +769,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
   const ensureToolHost = async (
     session: ResolvedCliSessionContext
   ): Promise<AcpMcpServerConfig[]> => {
-    if (!toolHostEnabled) {
+    if (!toolHostEnabled || !supportsMcp) {
       publish(session, false)
       return []
     }
@@ -772,22 +803,27 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
         // Read per call, not captured: the barrier belongs to whichever turn is
         // live, and the broker outlives any one of them.
         awaitApprovals: async () => activeTurnOptions?.awaitApprovals?.(),
+        isTurnActive: () => Boolean(activeTurnOptions && !activeTurnOptions.signal?.aborted),
         execHostTool,
-        onToolCall: (event) =>
-          emitTurnAction?.({
-            type: "TOOL_CALL",
-            callKey: event.callKey,
-            toolName: event.name,
-            input: (event.input ?? {}) as Record<string, unknown>,
-          }),
-        onToolResult: (event) =>
-          emitTurnAction?.({
-            type: "TOOL_RESULT",
-            callKey: event.callKey,
-            toolName: event.name,
-            result: event.summary ?? "",
-            ...(event.ok ? {} : { isError: true }),
-          }),
+        onToolCall: nativeToolEvents
+          ? undefined
+          : (event) =>
+              emitTurnAction?.({
+                type: "TOOL_CALL",
+                callKey: event.callKey,
+                toolName: event.name,
+                input: (event.input ?? {}) as Record<string, unknown>,
+              }),
+        onToolResult: nativeToolEvents
+          ? undefined
+          : (event) =>
+              emitTurnAction?.({
+                type: "TOOL_RESULT",
+                callKey: event.callKey,
+                toolName: event.name,
+                result: event.summary ?? "",
+                ...(event.ok ? {} : { isError: true }),
+              }),
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -806,11 +842,12 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
     const snapshot: ToolHostSnapshot = {
       backend,
       contextVersion: session.contextVersion,
-      attachable: toolHostEnabled && canHostCogniaTools(negotiated),
+      attachable: toolHostEnabled && canHostCogniaTools(negotiated, protocol),
       running: toolHostEnabled && running,
       builtinToolCount: visibleBuiltinTools(session.sendOptions).length,
       hostToolCount: hostTools.length,
       subagentDispatch: hostTools.includes("dispatch_agent"),
+      hookRuntimeAvailable: true,
       userMcpCount: supportsMcp ? toAcpMcpServers(session.mcpServers).length : 0,
       connections: broker?.connections() ?? 0,
     }
@@ -1018,6 +1055,14 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       if (sendingTurn) throw new Error("An agent turn is already active")
       sendingTurn = true
       try {
+        const submitted = await dispatchUserPromptSubmit(prompt, sessionId)
+        if (submitted.action === "block")
+          throw new RunAndCaptureError(
+            submitted.reason ?? "Blocked by a Cognia prompt hook",
+            "session_error"
+          )
+        if (submitted.action === "modify" && submitted.modifiedPrompt !== undefined)
+          prompt = submitted.modifiedPrompt
         await ensureAgent()
         let reasoningEffort: string | undefined
         if (resolvedPresetId === "codex-app-server") {
@@ -1128,6 +1173,14 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
           throw error
         })
 
+        // SDK gateway credentials are scoped to one process/turn. Its latest
+        // wire has no resume request, so subsequent tasks replay Cognia history.
+        const conversationHistory =
+          restarted || (protocol === "dsh-sdk" && externalSessionId?.startsWith("cognia-gateway:"))
+            ? readTranscript(home, sessionId, params.transcriptFs)
+                .map((entry) => `${entry.role}: ${entry.content}`)
+                .join("\n\n")
+            : undefined
         appendTranscript(
           home,
           sessionId,
@@ -1156,6 +1209,8 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
         // capturing it here lets a mid-turn cancel target the right session on the
         // very first turn (when `externalSessionId` is still unset).
         let observedSessionId = externalSessionId
+        let streamedText = ""
+        dispatchStreamStart(sessionId)
         let result: ExternalAgentResult
         try {
           const executionOptions: ExternalAgentExecutionOptions = {
@@ -1197,6 +1252,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
                   ...(mcpServers ??= toAcpMcpServers(session.mcpServers)),
                 ],
                 additionalDirectories: session.additionalDirectories,
+                ...(conversationHistory ? { conversationHistory } : {}),
               },
             },
             workingDirectory: session.cwd,
@@ -1218,7 +1274,12 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
               // agent's generic ask here is what keeps ONE Cognia call from
               // producing TWO user prompts. Native agent tools fall through to
               // Cognia's overlay as before.
-              if (isCogniaProjectedTool(request.toolInfo?.name)) {
+              if (
+                isCogniaProjectedTool(
+                  request.toolInfo?.name,
+                  cogniaServers.map((server) => server.name)
+                )
+              ) {
                 return captureDecisionToAcp(request, { decision: "allow" })
               }
               watchdog.pause()
@@ -1258,6 +1319,10 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
             onEvent: (event) => {
               if (activeTurnOptions !== opts || opts.signal?.aborted) return
               watchdog.bump()
+              if (event.type === "message_delta" && event.delta.type === "text") {
+                streamedText += event.delta.text
+                dispatchStreamChunk(sessionId, event.delta.text, streamedText)
+              }
               if (event.sessionId) observedSessionId = event.sessionId
               const actions = externalAgentEventToActions(event)
               if (envelopeEmitter && actions.length === 0) {
@@ -1356,6 +1421,12 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
           throw new RunAndCaptureError(message, classifyExternalFailure(message, result.errorCode))
         }
         const usage = usageFromResult(result)
+        dispatchStreamEnd(sessionId, result.finalResponse)
+        if (result.tokenUsage)
+          dispatchTokenUsage(sessionId, {
+            inputTokens: result.tokenUsage.promptTokens,
+            outputTokens: result.tokenUsage.completionTokens,
+          })
         appendTranscript(
           home,
           sessionId,
@@ -1379,6 +1450,9 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
           a2uiSurfaceOrder: [],
           ...(usage ? { usage } : {}),
         }
+      } catch (error) {
+        dispatchChatError(sessionId, error instanceof Error ? error : new Error(String(error)))
+        throw error
       } finally {
         sendingTurn = false
       }

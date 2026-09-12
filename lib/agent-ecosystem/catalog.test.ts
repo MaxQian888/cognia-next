@@ -45,6 +45,14 @@ describe("migration vendor accessors", () => {
     expect(primaryRuntimeIdForMigrationVendor("codex")).toBe("codex-acp")
   })
 
+  it("prefers the current OpenCode service while retaining historical runtime lookup", () => {
+    expect(primaryRuntimeIdForMigrationVendor("opencode")).toBe("opencode-v2-service")
+    expect(findEcosystemById("opencode")?.runtimeIds[0]).toBe("opencode-v2-service")
+    for (const id of ["opencode", "opencode-remote", "opencode-acp", "opencode-v2-service"]) {
+      expect(findEcosystemByRuntimeId(id)?.id).toBe("opencode")
+    }
+  })
+
   it("orders OpenCode's probe roots data-dir first, preserving the old fallback", () => {
     expect(probeRootKeysForMigrationVendor("opencode")).toEqual([
       "opencodeDataDir",

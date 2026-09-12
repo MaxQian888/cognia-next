@@ -50,6 +50,10 @@ const DSH_HOME_DIR: &str = "dsh-home";
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DshRuntimeFacts {
+    pub runtime_home: String,
+    pub node_path: String,
+    pub default_workspace: String,
+    pub parent_env: std::collections::HashMap<String, String>,
     /// The channel manifest as raw JSON, or `None` when nothing is installed.
     pub manifest_json: Option<String>,
     pub lockfile_digest: String,
@@ -98,7 +102,10 @@ pub fn host_data_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 /// with "Node not found") rather than as a command error — the card can then
 /// render the real remedy instead of an opaque invoke failure.
 pub fn host_node_version() -> String {
-    std::process::Command::new("node")
+    let Some(node) = crate::command_resolver::resolve_command_path("node") else {
+        return String::new();
+    };
+    std::process::Command::new(node)
         .arg("--version")
         .output()
         .ok()
@@ -203,19 +210,53 @@ pub fn platform_key() -> String {
 /// plugins, which is as much a hole in the certification as a patch file.
 pub fn find_stray_patch_layers(dsh_home: &Path) -> Vec<String> {
     let mut found = Vec::new();
-    let home_patch = dsh_home.join("cordis.patch.yml");
-    if home_patch.exists() {
-        found.push(home_patch.to_string_lossy().into_owned());
+    for name in ["cordis.patch.yml", ".env"] {
+        let candidate = dsh_home.join(name);
+        if std::fs::symlink_metadata(&candidate).is_ok() {
+            found.push(candidate.to_string_lossy().into_owned());
+        }
     }
     let profiles = dsh_home.join("profiles");
+    if let Ok(metadata) = std::fs::symlink_metadata(&profiles) {
+        if !metadata.is_dir() || metadata.file_type().is_symlink() {
+            found.push(profiles.to_string_lossy().into_owned());
+            return found;
+        }
+    }
     if let Ok(entries) = std::fs::read_dir(&profiles) {
         for entry in entries.flatten() {
-            if !entry.path().is_dir() {
+            let profile_name = entry.file_name().to_string_lossy().into_owned();
+            if profile_name == "node_modules" {
+                continue;
+            }
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_symlink() {
+                found.push(entry.path().to_string_lossy().into_owned());
+                continue;
+            }
+            if !kind.is_dir() {
                 continue;
             }
             for name in ["cordis.patch.yml", "package.json"] {
                 let candidate = entry.path().join(name);
-                if candidate.exists() {
+                let Ok(metadata) = std::fs::symlink_metadata(&candidate) else {
+                    continue;
+                };
+                let managed = name == "package.json"
+                    && metadata.is_file()
+                    && !metadata.file_type().is_symlink()
+                    && ["cognia-sdk-readonly", "cognia-sdk-workspace", "cognia-acp"]
+                        .contains(&profile_name.as_str())
+                    && std::fs::read_to_string(&candidate)
+                        .ok()
+                        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+                        == Some(serde_json::json!({
+                            "name": profile_name, "private": true, "type": "module",
+                            "dsh": { "profile": { "bundles": ["@deepseek-ai/dsh-sdk-minimal"], "patchReload": "startup" } }
+                        }));
+                if !managed {
                     found.push(candidate.to_string_lossy().into_owned());
                 }
             }
@@ -246,6 +287,21 @@ pub fn gather_facts(data_root: &Path, node_version: String) -> DshRuntimeFacts {
     let home = runtime_home(data_root);
     let manifest_json = std::fs::read_to_string(home.join(CHANNEL_MANIFEST_FILE)).ok();
     DshRuntimeFacts {
+        runtime_home: home.to_string_lossy().into_owned(),
+        node_path: crate::command_resolver::resolve_command_path("node")
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        default_workspace: std::env::current_dir()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        parent_env: ["PATH", "LANG", "LC_ALL", "TZ", "TMPDIR"]
+            .iter()
+            .filter_map(|key| {
+                std::env::var(key)
+                    .ok()
+                    .map(|value| (key.to_string(), value))
+            })
+            .collect(),
         manifest_json,
         lockfile_digest: compute_lockfile_digest(&home).unwrap_or_else(|_| "unreadable".into()),
         composition_digest: compute_composition_digest(&home)
@@ -474,6 +530,45 @@ mod tests {
     }
 
     #[test]
+    fn managed_profile_manifests_remain_healthy_after_first_launch() {
+        let tmp = tempfile::tempdir().unwrap();
+        for profile in ["cognia-sdk-readonly", "cognia-sdk-workspace", "cognia-acp"] {
+            let dir = tmp.path().join("profiles").join(profile);
+            std::fs::create_dir_all(&dir).unwrap();
+            let manifest = serde_json::json!({
+                "name": profile, "private": true, "type": "module",
+                "dsh": {"profile": {"bundles": ["@deepseek-ai/dsh-sdk-minimal"], "patchReload": "startup"}}
+            });
+            std::fs::write(dir.join("package.json"), manifest.to_string()).unwrap();
+        }
+        assert!(find_stray_patch_layers(tmp.path()).is_empty());
+        let modified = tmp.path().join("profiles/cognia-acp/package.json");
+        std::fs::write(&modified, "{}").unwrap();
+        assert_eq!(
+            find_stray_patch_layers(tmp.path()),
+            vec![modified.to_string_lossy().into_owned()]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_manifests_and_profiles_are_not_certified() {
+        let tmp = tempfile::tempdir().unwrap();
+        let profile = tmp.path().join("profiles/cognia-acp");
+        std::fs::create_dir_all(&profile).unwrap();
+        let target = tmp.path().join("approved.json");
+        std::fs::write(&target, serde_json::json!({
+            "name": "cognia-acp", "private": true, "type": "module",
+            "dsh": {"profile": {"bundles": ["@deepseek-ai/dsh-sdk-minimal"], "patchReload": "startup"}}
+        }).to_string()).unwrap();
+        std::os::unix::fs::symlink(&target, profile.join("package.json")).unwrap();
+        assert_eq!(find_stray_patch_layers(tmp.path()).len(), 1);
+        std::os::unix::fs::symlink(&profile, tmp.path().join("profiles/cognia-sdk-readonly"))
+            .unwrap();
+        assert_eq!(find_stray_patch_layers(tmp.path()).len(), 2);
+    }
+
+    #[test]
     fn facts_report_unreadable_digests_instead_of_failing() {
         // "unreadable" can never equal a certified digest, so the shared verdict
         // function reports a mismatch rather than the check blowing up.
@@ -482,6 +577,15 @@ mod tests {
         assert_eq!(facts.lockfile_digest, "unreadable");
         assert_eq!(facts.composition_digest, "unreadable");
         assert!(facts.manifest_json.is_none());
+        assert_eq!(
+            facts.runtime_home,
+            runtime_home(tmp.path()).to_string_lossy()
+        );
+        assert!(!facts.default_workspace.is_empty());
+        assert!(facts
+            .parent_env
+            .keys()
+            .all(|key| ["PATH", "LANG", "LC_ALL", "TZ", "TMPDIR"].contains(&key.as_str())));
     }
 
     #[test]

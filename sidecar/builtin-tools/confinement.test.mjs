@@ -12,6 +12,7 @@ import {
   classifyToolCallConfinement,
   combineVerdict,
   bareToolName,
+  buildPluginAccessMap,
   assertNotSecretEscape,
 } from "./confinement.mjs"
 
@@ -25,6 +26,16 @@ test("isSecretPath flags credential directories and files", () => {
   assert.equal(isSecretPath(path.join(os.homedir(), ".git-credentials")), true)
   assert.equal(isSecretPath(path.join(os.homedir(), ".npmrc")), true)
   assert.equal(isSecretPath(path.join(os.homedir(), ".config", "gh", "hosts.yml")), true)
+  // Rust-protected Cognia app-data dirs (parity with protected.rs).
+  assert.equal(isSecretPath(path.join(os.homedir(), ".config", "cognia", "x")), true)
+  assert.equal(isSecretPath(path.join(os.homedir(), ".local", "share", "cognia", "x")), true)
+  assert.equal(isSecretPath(path.join(os.homedir(), ".cargo", "credentials.toml")), true)
+  assert.equal(
+    isSecretPath(path.join(os.homedir(), "Library", "Application Support", "cognia", "x")),
+    true
+  )
+  assert.equal(isSecretPath(path.join(os.homedir(), "AppData", "Roaming", "cognia", "x")), true)
+  assert.equal(isSecretPath(path.join(os.homedir(), "AppData", "Local", "cognia", "x")), true)
 })
 
 test("isSecretPath does NOT flag .env or ordinary project files", () => {
@@ -149,6 +160,188 @@ test("bareToolName strips the mcp namespace", () => {
   assert.equal(bareToolName("mcp__cognia-tools__write"), "write")
   assert.equal(bareToolName("write"), "write")
   assert.equal(bareToolName("mcp__server__a__b"), "mcp__server__a__b")
+})
+
+test("buildPluginAccessMap filters malformed entries and reserved names", () => {
+  // The wire shape mirrors `sendOptions.pluginTools` entries.
+  const map = buildPluginAccessMap([
+    { name: "ripgrep-tools:ripgrep_search", access: "read", pathParams: ["path"] },
+    { name: "my-plugin:file_writer", access: "write" },
+    { name: "my-plugin:opaque_tool" },
+    { name: "my-plugin:bad_access", access: "exec" },
+    { name: 42, access: "read" },
+    null,
+    "not-an-object",
+    // The sandbox_* tools' class is hardcoded — a manifest entry must not
+    // re-classify (let alone downgrade) them via the map.
+    { name: "sandbox_bash", access: "read" },
+    { name: "sandbox_write", access: "read" },
+  ])
+  assert.deepEqual(map.get("ripgrep-tools:ripgrep_search"), {
+    access: "read",
+    pathKeys: ["path"],
+  })
+  assert.deepEqual(map.get("my-plugin:file_writer"), { access: "write", pathKeys: [] })
+  assert.equal(map.has("my-plugin:opaque_tool"), false)
+  assert.equal(map.has("my-plugin:bad_access"), false)
+  assert.equal(map.has("sandbox_bash"), false)
+  assert.equal(map.has("sandbox_write"), false)
+
+  // Non-array pluginTools degrades to an empty map rather than throwing —
+  // dispatch must survive a foreign/legacy sender shape.
+  for (const bad of [undefined, null, "str", { name: "x", access: "read" }, 5]) {
+    assert.equal(buildPluginAccessMap(bad).size, 0)
+  }
+})
+
+test("plugin tools classify by declared access (ripgrep_search parity)", () => {
+  const root = mkRoot()
+  const secret = path.join(root, ".ssh", "id_rsa")
+  const outside = path.join(mkRoot(), "x.ts")
+  const policy = { enabled: true, roots: [root] }
+  const pluginAccess = buildPluginAccessMap([
+    { name: "ripgrep-tools:ripgrep_search", access: "read", pathParams: ["path"] },
+    { name: "my-plugin:file_writer", access: "write" },
+    { name: "my-plugin:opaque_tool" },
+  ])
+
+  // Declared "read" → the credential-path deny applies to the plugin tool,
+  // same as the built-in grep. The qualified name keeps its colon.
+  assert.equal(
+    classifyToolCallConfinement(
+      policy,
+      "mcp__cognia-plugin-tools__ripgrep-tools:ripgrep_search",
+      { path: secret },
+      root,
+      pluginAccess
+    ),
+    "deny"
+  )
+  // In-workspace read → no opinion; read outside → still unconfined.
+  assert.equal(
+    classifyToolCallConfinement(
+      policy,
+      "mcp__cognia-plugin-tools__ripgrep-tools:ripgrep_search",
+      { path: "src" },
+      root,
+      pluginAccess
+    ),
+    null
+  )
+  assert.equal(
+    classifyToolCallConfinement(
+      policy,
+      "mcp__cognia-plugin-tools__ripgrep-tools:ripgrep_search",
+      { path: outside },
+      root,
+      pluginAccess
+    ),
+    null
+  )
+  // Declared "write" → out-of-root targets ask, like a built-in mutator.
+  assert.equal(
+    classifyToolCallConfinement(
+      policy,
+      "mcp__cognia-plugin-tools__my-plugin:file_writer",
+      { path: outside },
+      root,
+      pluginAccess
+    ),
+    "ask"
+  )
+  // No declared access → opaque, same as before (no map entry and no map at all).
+  assert.equal(
+    classifyToolCallConfinement(
+      policy,
+      "mcp__cognia-plugin-tools__my-plugin:opaque_tool",
+      { path: secret },
+      root,
+      pluginAccess
+    ),
+    null
+  )
+  assert.equal(
+    classifyToolCallConfinement(
+      policy,
+      "mcp__cognia-plugin-tools__my-plugin:opaque_tool",
+      { path: secret },
+      root
+    ),
+    null
+  )
+})
+
+test("plugin pathParams join the confinement path-key set", () => {
+  const root = mkRoot()
+  const secret = path.join(root, ".aws", "credentials")
+  const policy = { enabled: true, roots: [root] }
+  // `export_dest` is NOT a built-in PATH_KEY — only the declared pathParams
+  // make it a confinement target.
+  const pluginAccess = buildPluginAccessMap([
+    { name: "my-plugin:exporter", access: "read", pathParams: ["export_dest"] },
+  ])
+  assert.equal(
+    classifyToolCallConfinement(
+      policy,
+      "mcp__cognia-plugin-tools__my-plugin:exporter",
+      { export_dest: secret },
+      root,
+      pluginAccess
+    ),
+    "deny"
+  )
+  // Without pathParams the unconventional key is invisible — documented gap.
+  const noKeys = buildPluginAccessMap([{ name: "my-plugin:exporter", access: "read" }])
+  assert.equal(
+    classifyToolCallConfinement(
+      policy,
+      "mcp__cognia-plugin-tools__my-plugin:exporter",
+      { export_dest: secret },
+      root,
+      noKeys
+    ),
+    null
+  )
+})
+
+test("assertToolCallWithinRoots honors declared plugin access", async () => {
+  const { assertToolCallWithinRoots } = await import("./confinement.mjs")
+  const policy = { writableRoots: ["/workspace"] }
+  const pluginAccess = buildPluginAccessMap([
+    { name: "ripgrep-tools:ripgrep_search", access: "read", pathParams: ["path"] },
+  ])
+
+  // Credential-shaped targets refuse even for a "read"-class plugin tool.
+  assert.throws(
+    () =>
+      assertToolCallWithinRoots(
+        policy,
+        "mcp__cognia-plugin-tools__ripgrep-tools:ripgrep_search",
+        { path: "/workspace/.ssh/id_rsa" },
+        "/workspace",
+        pluginAccess
+      ),
+    /sandbox refused/
+  )
+  assert.doesNotThrow(() =>
+    assertToolCallWithinRoots(
+      policy,
+      "mcp__cognia-plugin-tools__ripgrep-tools:ripgrep_search",
+      { path: "src" },
+      "/workspace",
+      pluginAccess
+    )
+  )
+  // Undeclared access → the tool stays opaque to the scope gate.
+  assert.doesNotThrow(() =>
+    assertToolCallWithinRoots(
+      policy,
+      "mcp__cognia-plugin-tools__other-plugin:opaque",
+      { path: "/workspace/.ssh/id_rsa" },
+      "/workspace",
+      pluginAccess
+    )
+  )
 })
 
 test("assertNotSecretEscape throws on credential targets, passes otherwise", () => {

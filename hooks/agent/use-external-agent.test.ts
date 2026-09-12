@@ -198,6 +198,7 @@ interface FakeManager {
   executeStreaming: jest.Mock
   cancel: jest.Mock
   respondToPermission: jest.Mock
+  respondToElicitation: jest.Mock
   setSessionMode: jest.Mock
   setSessionModel: jest.Mock
   getSessionModels: jest.Mock
@@ -252,6 +253,7 @@ function makeManager(): FakeManager {
     }),
     cancel: jest.fn(async () => undefined),
     respondToPermission: jest.fn(async () => undefined),
+    respondToElicitation: jest.fn(async () => undefined),
     setSessionMode: jest.fn(async () => undefined),
     setSessionModel: jest.fn(async () => undefined),
     getSessionModels: jest.fn(() => ({ status: "ok", data: { models: [] } })),
@@ -684,6 +686,242 @@ describe("useExternalAgent core actions", () => {
       await result.current.resumeSession("s1", { systemPrompt: "p" })
     })
     expect(fakeManager.resumeSession).toHaveBeenCalledWith("a1", "s1", { systemPrompt: "p" })
+  })
+
+  function resumedInteractions(sessionId = "resumed") {
+    const permission = (id: string) => ({
+      type: "permission_request",
+      sessionId,
+      request: { id, requestId: id, sessionId, toolInfo: { id: "shell", name: "shell" } },
+    })
+    const form = (id: string) => ({
+      type: "elicitation_request",
+      sessionId,
+      request: {
+        id,
+        sessionId,
+        mode: "form",
+        message: "Choose",
+        raw: {},
+        requestedSchema: { type: "object", properties: {} },
+      },
+    })
+    return {
+      id: sessionId,
+      metadata: {
+        pendingInteractions: [permission("p1"), form("f1"), permission("p2"), form("f2")],
+      },
+    }
+  }
+
+  it("hydrates resumed interactions and advances each queue after its successful response", async () => {
+    seedAgent("a1")
+    fakeManager.resumeSession.mockResolvedValue(resumedInteractions())
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+    await act(async () => {
+      await result.current.resumeSession("resumed")
+    })
+    expect(result.current.pendingPermission?.id).toBe("p1")
+    expect(result.current.pendingElicitation?.id).toBe("f1")
+    await act(async () => {
+      await result.current.respondToPermission({ requestId: "p1", granted: true })
+    })
+    expect(fakeManager.respondToPermission).toHaveBeenCalledWith("a1", "resumed", {
+      requestId: "p1",
+      granted: true,
+    })
+    expect(result.current.pendingPermission?.id).toBe("p2")
+    expect(result.current.pendingElicitation?.id).toBe("f1")
+    await act(async () => {
+      await result.current.respondToElicitation({ requestId: "f1", action: "accept", content: {} })
+    })
+    expect(fakeManager.respondToElicitation).toHaveBeenCalledWith("a1", {
+      requestId: "f1",
+      action: "accept",
+      content: {},
+    })
+    expect(result.current.pendingElicitation?.id).toBe("f2")
+    await act(async () => {
+      await result.current.respondToPermission({ requestId: "p2", granted: false })
+      await result.current.respondToElicitation({ requestId: "f2", action: "cancel" })
+    })
+    expect(result.current.pendingPermission).toBeNull()
+    expect(result.current.pendingElicitation).toBeNull()
+  })
+
+  it("keeps a resumed interaction visible when replying fails, so the user can retry", async () => {
+    seedAgent("a1")
+    fakeManager.resumeSession.mockResolvedValue(resumedInteractions())
+    fakeManager.respondToPermission.mockRejectedValueOnce(new Error("offline"))
+    fakeManager.respondToElicitation.mockRejectedValueOnce(new Error("form offline"))
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+    await act(async () => {
+      await result.current.resumeSession("resumed")
+    })
+    await act(async () => {
+      await result.current.respondToPermission({ requestId: "p1", granted: true })
+    })
+    expect(result.current.pendingPermission?.id).toBe("p1")
+    await act(async () => {
+      await result.current.respondToElicitation({ requestId: "f1", action: "accept", content: {} })
+    })
+    expect(result.current.pendingElicitation?.id).toBe("f1")
+    await act(async () => {
+      await result.current.respondToPermission({ requestId: "p1", granted: true })
+      await result.current.respondToElicitation({ requestId: "f1", action: "accept", content: {} })
+    })
+    expect(result.current.pendingPermission?.id).toBe("p2")
+    expect(result.current.pendingElicitation?.id).toBe("f2")
+  })
+
+  it("uses the provider's authoritative queue when one reply resolves several permissions", async () => {
+    seedAgent("a1")
+    const resumed = resumedInteractions()
+    fakeManager.resumeSession.mockResolvedValue(resumed)
+    fakeManager.getSession.mockReturnValue(resumed)
+    fakeManager.respondToPermission.mockImplementation(async () => {
+      resumed.metadata.pendingInteractions = resumed.metadata.pendingInteractions.filter(
+        (event) => event.type !== "permission_request"
+      )
+    })
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+    await act(async () => {
+      await result.current.resumeSession("resumed")
+    })
+    await act(async () => {
+      await result.current.respondToPermission({ requestId: "p1", granted: false })
+    })
+    expect(result.current.pendingPermission).toBeNull()
+    expect(result.current.pendingElicitation?.id).toBe("f1")
+  })
+
+  it("filters malformed, duplicated, and cross-session metadata interactions", async () => {
+    seedAgent("a1")
+    const resumed = resumedInteractions()
+    resumed.metadata.pendingInteractions = [
+      null,
+      { type: "permission_request", request: { id: "broken" } },
+      { type: "elicitation_request", request: { id: "broken", mode: "unknown" } },
+      ...resumedInteractions("other").metadata.pendingInteractions,
+      ...resumed.metadata.pendingInteractions,
+      ...resumed.metadata.pendingInteractions,
+    ] as typeof resumed.metadata.pendingInteractions
+    fakeManager.resumeSession.mockResolvedValue(resumed)
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+    await act(async () => {
+      await result.current.resumeSession("resumed")
+    })
+    expect(result.current.pendingPermission?.id).toBe("p1")
+    expect(result.current.pendingElicitation?.id).toBe("f1")
+    await act(async () => {
+      await result.current.respondToPermission({ requestId: "p1", granted: true })
+    })
+    await act(async () => {
+      await result.current.respondToPermission({ requestId: "p2", granted: true })
+    })
+    expect(result.current.pendingPermission).toBeNull()
+  })
+
+  it("clears resumed queues on cancellation or a new session", async () => {
+    seedAgent("a1")
+    fakeManager.resumeSession.mockResolvedValue(resumedInteractions())
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+    await act(async () => {
+      await result.current.resumeSession("resumed")
+    })
+    await act(async () => {
+      await result.current.cancel()
+    })
+    expect(result.current.pendingPermission).toBeNull()
+    expect(result.current.pendingElicitation).toBeNull()
+    await act(async () => {
+      await result.current.resumeSession("resumed")
+    })
+    await act(async () => {
+      await result.current.createSession()
+    })
+    expect(result.current.pendingPermission).toBeNull()
+    expect(result.current.pendingElicitation).toBeNull()
+    await act(async () => {
+      await result.current.resumeSession("resumed")
+    })
+    act(() => {
+      result.current.setActiveAgent(null)
+    })
+    expect(result.current.pendingPermission).toBeNull()
+    expect(result.current.pendingElicitation).toBeNull()
+  })
+
+  it("preserves the existing live permission promise bridge after an empty resume", async () => {
+    seedAgent("a1")
+    const resumed = { id: "resumed", metadata: { pendingInteractions: [] } }
+    fakeManager.resumeSession.mockResolvedValue(resumed)
+    const permission = {
+      id: "live",
+      requestId: "live",
+      sessionId: "resumed",
+      toolInfo: { id: "shell", name: "shell" },
+    }
+    fakeManager.execute.mockImplementation(async (_agent, _prompt, options) => {
+      const response = await options.onPermissionRequest(permission)
+      expect(response).toEqual({ requestId: "live", granted: true })
+      return { success: true, sessionId: "resumed", finalResponse: "done" }
+    })
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+    await act(async () => {
+      await result.current.resumeSession("resumed")
+    })
+    let execution!: ReturnType<typeof result.current.execute>
+    act(() => {
+      execution = result.current.execute("work")
+    })
+    await flush()
+    expect(result.current.pendingPermission?.id).toBe("live")
+    await act(async () => {
+      await result.current.respondToPermission({ requestId: "live", granted: true })
+      await execution
+    })
+    expect(fakeManager.respondToPermission).not.toHaveBeenCalled()
+    expect(result.current.pendingPermission).toBeNull()
+  })
+
+  it("does not let an old response advance another resumed session's queue", async () => {
+    seedAgent("a1")
+    fakeManager.resumeSession
+      .mockResolvedValueOnce(resumedInteractions("first"))
+      .mockResolvedValueOnce(resumedInteractions("second"))
+    let finishReply!: () => void
+    fakeManager.respondToPermission.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishReply = resolve
+        })
+    )
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+    await act(async () => {
+      await result.current.resumeSession("first")
+    })
+    let reply!: Promise<void>
+    await act(async () => {
+      reply = result.current.respondToPermission({ requestId: "p1", granted: true })
+    })
+    await act(async () => {
+      await result.current.resumeSession("second")
+    })
+    await act(async () => {
+      finishReply()
+      await reply
+    })
+    expect(result.current.activeSession?.id).toBe("second")
+    expect(result.current.pendingPermission?.id).toBe("p1")
+    expect(result.current.pendingPermission?.sessionId).toBe("second")
   })
 
   it("locks session mutations until provider-confirmed compaction completes", async () => {

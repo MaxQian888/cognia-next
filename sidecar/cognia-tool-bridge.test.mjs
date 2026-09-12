@@ -119,14 +119,14 @@ test("host tools advertise Cognia's manifest and execute over the broker", async
   assert.deepEqual(await tools[0].run({ q: "?" }), {
     content: [{ type: "text", text: "ran ask_user" }],
   })
-  assert.deepEqual(seen, ["authorize", "exec"])
+  assert.deepEqual(seen, ["exec"])
 })
 
-test("a host tool refused by Cognia never reaches exec", async () => {
+test("a host tool surfaces the broker's execution authorization denial", async () => {
   const seen = []
   const { broker } = scriptedBroker((method) => {
     seen.push(method)
-    return method === "authorize" ? { allow: false, reason: "denied by policy" } : {}
+    return method === "exec" ? { error: "denied by policy" } : {}
   })
   const tools = buildToolSurface(
     "cognia-plugin-tools",
@@ -136,7 +136,7 @@ test("a host tool refused by Cognia never reaches exec", async () => {
   const result = await tools[0].run({})
   assert.equal(result.isError, true)
   assert.match(result.content[0].text, /denied by policy/)
-  assert.deepEqual(seen, ["authorize"])
+  assert.deepEqual(seen, ["exec"])
 })
 
 test("built-in tools are filtered to the names Cognia said are visible", () => {
@@ -196,6 +196,7 @@ test("MCP initialize advertises the tools capability and the server name", () =>
   h.send({ jsonrpc: "2.0", id: 1, method: "initialize" })
   assert.equal(h.written[0].result.serverInfo.name, "cognia-tools")
   assert.deepEqual(h.written[0].result.capabilities, { tools: {} })
+  assert.equal(h.written[0].result.protocolVersion, "2025-11-25")
 })
 
 test("MCP tools/list returns name, description and schema", () => {
@@ -331,4 +332,35 @@ test("runToolBridge handshakes with the token and builds the advertised surface"
     ["ask_user"]
   )
   assert.ok(socket.writes[0].includes('"token":"tok"'))
+})
+
+test("builtin execution applies rewritten args and host review before model output", async () => {
+  const calls = []
+  const { broker } = scriptedBroker((method, params) => {
+    calls.push({ method, params })
+    if (method === "authorize")
+      return { allow: true, updatedArgs: { file_path: "/nonexistent-cognia-fixture" } }
+    if (method === "review")
+      return { result: { content: [{ type: "text", text: "Reviewed: fixture@example.com" }] } }
+    return {}
+  })
+  const tools = buildToolSurface(
+    "cognia-tools",
+    {
+      cwd: process.cwd(),
+      enabledCategories: { coreFiles: true },
+      visibleBuiltinTools: ["read"],
+      model: "m",
+      provider: "p",
+    },
+    broker
+  )
+  const result = await tools.find((tool) => tool.name === "read").run({ file_path: "/original" })
+  assert.deepEqual(
+    calls.map((call) => call.method),
+    ["authorize", "review", "report"]
+  )
+  assert.equal(calls[1].params.args.file_path, "/nonexistent-cognia-fixture")
+  assert.match(result.content[0].text, /Reviewed/)
+  assert.doesNotMatch(JSON.stringify(result), /fixture@example.com/)
 })

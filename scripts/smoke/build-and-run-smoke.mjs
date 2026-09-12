@@ -12,15 +12,23 @@ import { createCliExternalAgentAliasPlugin } from "../build/cli-external-agent-a
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const devinAcp = process.argv.includes("--devin-acp")
+const pi = process.argv.includes("--pi")
+const dsh = process.argv.includes("--deepseek-harness") || pi || process.argv.includes("--opencode")
 const entry = path.join(
   root,
-  devinAcp ? "scripts/smoke/devin-acp-smoke.ts" : "scripts/smoke/external-cognia-parity-smoke.ts"
+  dsh
+    ? "scripts/smoke/deepseek-harness-adapter-smoke.ts"
+    : devinAcp
+      ? "scripts/smoke/devin-acp-smoke.ts"
+      : "scripts/smoke/external-cognia-parity-smoke.ts"
 )
 const outfile = path.join(
   root,
-  devinAcp
-    ? "cli/dist/smoke/devin-acp-smoke.mjs"
-    : "cli/dist/smoke/external-cognia-parity-smoke.mjs"
+  dsh
+    ? "cli/dist/smoke/deepseek-harness-adapter-smoke.mjs"
+    : devinAcp
+      ? "cli/dist/smoke/devin-acp-smoke.mjs"
+      : "cli/dist/smoke/external-cognia-parity-smoke.mjs"
 )
 
 const esbuild = await import("esbuild")
@@ -75,7 +83,7 @@ await esbuild.build({
   logLevel: "warning",
 })
 
-const smokeArgs = process.argv.slice(2)
+const smokeArgs = process.argv.slice(2).filter((arg) => arg !== "--deepseek-harness")
 if (smokeArgs.includes("--build-only")) {
   process.stdout.write(`built ${path.relative(root, outfile)}\n`)
   process.exit(0)

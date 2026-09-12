@@ -72,11 +72,13 @@ import {
   type SessionListOptions,
 } from "./protocol-adapter"
 import { AcpClientAdapter } from "./acp-client"
+import { DevinAcpAdapter } from "./devin-acp-adapter"
 import { CodexAppServerAdapter } from "./codex-app-server-client"
 import { OpenCodeClientAdapter } from "./opencode-client"
 import { OpenCodeV2ClientAdapter } from "./opencode-v2-client"
 import { A2aClientAdapter } from "./a2a-client"
 import { DshSdkClientAdapter } from "./dsh-sdk-client"
+import { prepareDshManagedLaunch } from "./dsh-managed-launch"
 import { clampThinkingLevel, PiRpcClientAdapter } from "./pi-rpc-client"
 import {
   catalogModelSurface,
@@ -92,6 +94,7 @@ import {
   type ExternalAgentSessionSurface,
 } from "./model-surface-cache"
 import { createDshRuntimeTransport, resolveDshLaunchFromConfig } from "./dsh-runtime-transport"
+import { canProjectOpenCodeV2Mcp } from "./opencode-v2-launcher"
 import { runsExternalAgentProcessesLocally } from "./agent-transport"
 import { acpToolsToAgentTools } from "./translators"
 import { detectInstalledRuntimes } from "./installed-runtimes"
@@ -320,7 +323,6 @@ export interface ExternalAgentLifecycleEvent {
 export function registerBuiltinProtocolAdapters(registry: ProtocolAdapterRegistry): void {
   registry.register("acp", () => new AcpClientAdapter())
   registry.register("codex-app-server", () => new CodexAppServerAdapter())
-  registry.register("opencode", () => new OpenCodeClientAdapter())
   registry.register("opencode-v2", () => new OpenCodeV2ClientAdapter())
   registry.register("a2a", () => new A2aClientAdapter())
   registry.register(
@@ -331,8 +333,8 @@ export function registerBuiltinProtocolAdapters(registry: ProtocolAdapterRegistr
           createDshRuntimeTransport(
             config,
             resolveDshLaunchFromConfig,
-            // The harness transport spawns the child in this process, so the
-            // question is whether THIS shell can, not whether some Host can.
+            // Managed install/facts are local-host commands. Process I/O uses
+            // the shared host bridge; paired remote installation is not exposed.
             runsExternalAgentProcessesLocally()
           ),
       })
@@ -340,6 +342,19 @@ export function registerBuiltinProtocolAdapters(registry: ProtocolAdapterRegistr
   // Pi's own RPC protocol, not ACP (ADR-0119).
   registry.register("pi-rpc", () => new PiRpcClientAdapter())
   // Future: registry.register("http", () => new HttpClientAdapter())
+}
+
+/** Keep custom protocol factories authoritative; isolate only the built-in native Devin adapter. */
+export function createConfiguredProtocolAdapter(
+  config: ExternalAgentConfig
+): ProtocolAdapter | undefined {
+  const adapter = protocolAdapterRegistry.create(config.protocol)
+  const command = config.process?.command.split(/[\\/]/).at(-1)
+  const isDevin =
+    externalAgentPresetIdOf(config) === "devin" || command === "devin" || command === "devin.exe"
+  return config.transport === "stdio" && isDevin && adapter?.constructor === AcpClientAdapter
+    ? new DevinAcpAdapter(adapter as AcpClientAdapter)
+    : adapter
 }
 
 export class ExternalAgentManager {
@@ -375,7 +390,11 @@ export class ExternalAgentManager {
     return { agentId: childId, sessionId: parsed.nativeSessionId }
   }
 
-  private async prepareGatewayExecution(agentId: string, options?: ExternalAgentExecutionOptions) {
+  private async prepareGatewayExecution(
+    agentId: string,
+    options?: ExternalAgentExecutionOptions,
+    prompt?: string
+  ) {
     const source = this.instances.get(agentId)
     if (!source) throw new Error(`Agent not found: ${agentId}`)
     let binding = normalizeCogniaModelBinding(
@@ -417,6 +436,24 @@ export class ExternalAgentManager {
       throw new Error(
         "Start a new task to switch an existing external session to the Cognia gateway"
       )
+    const freshSdkTurn = source.config.protocol === "dsh-sdk"
+    const suppliedHistory = custom?.conversationHistory
+    const storedHistory = previousId
+      ? source.sessions.get(previousId)?.metadata?.cogniaGatewayHistory
+      : undefined
+    const continuationHistory =
+      typeof suppliedHistory === "string" && suppliedHistory.trim()
+        ? suppliedHistory
+        : typeof storedHistory === "string"
+          ? storedHistory
+          : ""
+    if (freshSdkTurn && previous && !continuationHistory.trim()) {
+      throw new Error(
+        "DeepSeek Harness SDK continuation requires the preserved Cognia conversation transcript"
+      )
+    }
+    let turnResponse = ""
+    let hasTurnResponse = false
     const taskId = previous?.taskId ?? crypto.randomUUID()
     const childId = `gateway-task-${taskId}`
     const reservationKey =
@@ -468,7 +505,21 @@ export class ExternalAgentManager {
           source.sessions.set(publicId, {
             ...session,
             id: publicId,
-            metadata: { ...session.metadata, cogniaModel: binding, cogniaGatewayTask: taskId },
+            metadata: {
+              ...session.metadata,
+              cogniaModel: binding,
+              cogniaGatewayTask: taskId,
+              ...(freshSdkTurn
+                ? {
+                    cogniaGatewayHistory:
+                      hasTurnResponse && prompt !== undefined
+                        ? [continuationHistory, `User: ${prompt}`, `Assistant: ${turnResponse}`]
+                            .filter(Boolean)
+                            .join("\n\n")
+                        : continuationHistory,
+                  }
+                : {}),
+            },
           })
         }
         await this.removeAgent(childId)
@@ -492,6 +543,10 @@ export class ExternalAgentManager {
       await this.addAgent(prepared.config, { connect: false })
       childAdapter = this.adapters.get(childId)
       const mapEvent = (event: ExternalAgentEvent): ExternalAgentEvent => {
+        if (freshSdkTurn && event.type === "message_delta" && event.delta.type === "text") {
+          turnResponse += event.delta.text
+          hasTurnResponse = true
+        }
         let mapped = event.sessionId
           ? { ...event, sessionId: gatewaySessionId(taskId, event.sessionId, binding ?? undefined) }
           : event
@@ -550,14 +605,24 @@ export class ExternalAgentManager {
         taskId,
         binding,
         mapEvent,
+        recordResult: (response: string) => {
+          turnResponse = response
+          hasTurnResponse = true
+        },
         options: {
           ...options,
           cogniaModel: null,
-          sessionId: previous?.nativeSessionId,
+          sessionId: freshSdkTurn ? undefined : previous?.nativeSessionId,
           model: prepared.model,
           context: {
             ...options?.context,
-            custom: { ...custom, sessionId: previous?.nativeSessionId },
+            custom: {
+              ...custom,
+              sessionId: freshSdkTurn ? undefined : previous?.nativeSessionId,
+              ...(freshSdkTurn && continuationHistory
+                ? { conversationHistory: continuationHistory }
+                : {}),
+            },
           },
           onEvent: options?.onEvent
             ? (event: ExternalAgentEvent) => options.onEvent?.(mapEvent(event))
@@ -620,7 +685,17 @@ export class ExternalAgentManager {
   private async handleProcessExit(agentId: string): Promise<void> {
     const instance = this.instances.get(agentId)
     const adapter = this.adapters.get(agentId)
-    if (!instance || !adapter) return
+    if (!instance || !adapter) {
+      for (const [parentId, candidate] of this.adapters) {
+        if (!(candidate instanceof DevinAcpAdapter)) continue
+        const retired = await candidate.handleProcessExit(agentId)
+        if (!retired) continue
+        const parent = this.instances.get(parentId)
+        for (const sessionId of retired) parent?.sessions.delete(sessionId)
+        return
+      }
+      return
+    }
     if (this.intentionalProcessStops.has(agentId)) return
     if (adapter.connectionStatus === "connecting" || adapter.connectionStatus === "reconnecting") {
       return
@@ -778,6 +853,12 @@ export class ExternalAgentManager {
   getOpenCodeAdapter(agentId: string): OpenCodeClientAdapter | null {
     const adapter = this.adapters.get(agentId)
     return adapter instanceof OpenCodeClientAdapter ? adapter : null
+  }
+
+  /** Access the current OpenCode service client and its full native API. */
+  getOpenCodeV2Adapter(agentId: string): OpenCodeV2ClientAdapter | null {
+    const adapter = this.adapters.get(agentId)
+    return adapter instanceof OpenCodeV2ClientAdapter ? adapter : null
   }
 
   /**
@@ -2008,7 +2089,7 @@ export class ExternalAgentManager {
     const hydratedConfig = await this.enrichConfigWithDynamicReadiness(config)
 
     // Create adapter for the protocol
-    const adapter = protocolAdapterRegistry.create(hydratedConfig.protocol)
+    const adapter = createConfiguredProtocolAdapter(hydratedConfig)
     if (!adapter) {
       const isPluginProtocol =
         typeof hydratedConfig.protocol === "string" && hydratedConfig.protocol.includes(":")
@@ -2111,6 +2192,7 @@ export class ExternalAgentManager {
       this.adapters.delete(agentId)
     }
 
+    this.sessionHostFacts.delete(agentId)
     this.instances.delete(agentId)
     this.eventListeners.delete(agentId)
     this.nesSessions.delete(agentId)
@@ -2208,7 +2290,7 @@ export class ExternalAgentManager {
       if (!target.has(instance.config.protocol) || this.adapters.has(agentId)) {
         continue
       }
-      const adapter = protocolAdapterRegistry.create(instance.config.protocol)
+      const adapter = createConfiguredProtocolAdapter(instance.config)
       if (!adapter) {
         continue
       }
@@ -2326,15 +2408,16 @@ export class ExternalAgentManager {
       }
 
       try {
+        const launchConfig = await prepareDshManagedLaunch(instance.config)
         const connectTimeout = this.resolveExecutionTimeoutMs(instance)
         if (instance.config.protocol === "codex-app-server") {
           // Native connect times out its handshake and tears down the child
           // before rejecting. Racing an outer timeout would abandon that
           // owner and start a retry while its process was still initializing.
-          await adapter.connect(instance.config)
+          await adapter.connect(launchConfig)
         } else {
           await this.withTimeout(
-            adapter.connect(instance.config),
+            adapter.connect(launchConfig),
             connectTimeout,
             `Connection timed out after ${connectTimeout}ms`
           )
@@ -2627,7 +2710,9 @@ export class ExternalAgentManager {
     const sessionOptions = this.buildSessionOptions(instance, options)
 
     let session = preferredSessionId
-      ? (instance.sessions.get(preferredSessionId) ?? adapter.getSession?.(preferredSessionId))
+      ? adapter instanceof DevinAcpAdapter
+        ? adapter.getSession(preferredSessionId)
+        : (instance.sessions.get(preferredSessionId) ?? adapter.getSession?.(preferredSessionId))
       : chatSessionId
         ? adapter
             .getSessions()
@@ -3116,7 +3201,7 @@ export class ExternalAgentManager {
     prompt: string,
     options?: ExternalAgentExecutionOptions
   ): AsyncIterable<ExternalAgentEvent> {
-    const gateway = await this.prepareGatewayExecution(agentId, options)
+    const gateway = await this.prepareGatewayExecution(agentId, options, prompt)
     if (gateway) {
       try {
         // The inner manager path retains tool approvals, PII gating, hooks,
@@ -3423,10 +3508,11 @@ export class ExternalAgentManager {
     prompt: string,
     options?: ExternalAgentExecutionOptions
   ): Promise<ExternalAgentResult> {
-    const gateway = await this.prepareGatewayExecution(agentId, options)
+    const gateway = await this.prepareGatewayExecution(agentId, options, prompt)
     if (gateway) {
       try {
         const result = await this.execute(gateway.agentId, prompt, gateway.options)
+        if (result.success) gateway.recordResult(result.finalResponse)
         return {
           ...result,
           sessionId: gatewaySessionId(gateway.taskId, result.sessionId, gateway.binding),
@@ -4109,7 +4195,10 @@ export class ExternalAgentManager {
    * profile themselves via `preflightExternalAgent`, which is explicitly not
    * allowed to freeze an execution decision.
    */
-  getAgentCapabilityProfile(agentId: string): ExternalAgentCapabilityProfileV1 | undefined {
+  getAgentCapabilityProfile(
+    agentId: string,
+    chatSessionId?: string
+  ): ExternalAgentCapabilityProfileV1 | undefined {
     const instance = this.instances.get(agentId)
     if (!instance?.capabilityProfile) return instance?.capabilityProfile
     const adapter = this.adapters.get(agentId)
@@ -4118,6 +4207,14 @@ export class ExternalAgentManager {
     // for the `compaction` capability — and it arrives mid-session, after the
     // connect-time profile was built. Reading a stale profile here is how a
     // `/compact` that works reports as unavailable for the rest of the session.
+    if (adapter && chatSessionId) {
+      return this.refreshCapabilityProfile(
+        agentId,
+        instance,
+        adapter,
+        this.sessionHostFacts.get(agentId)?.get(chatSessionId) ?? this.resolveHostFacts()
+      )
+    }
     const signature = this.advertisedCommandSignature(instance)
     if (adapter && signature !== this.capabilityCommandSignatures.get(agentId)) {
       this.refreshCapabilityProfile(agentId, instance, adapter)
@@ -4131,6 +4228,26 @@ export class ExternalAgentManager {
    * Kept in the manager rather than on the instance: it is cache bookkeeping,
    * and `ExternalAgentInstance` is a contract other surfaces read.
    */
+  private sessionHostFacts = new Map<string, Map<string, ExternalAgentHostFacts>>()
+
+  /** Session-owned host evidence must never widen another conversation's profile. */
+  setSessionHostFacts(
+    agentId: string,
+    chatSessionId: string,
+    facts: ExternalAgentHostFacts | null
+  ): void {
+    if (!this.instances.has(agentId)) throw new Error(`Agent not found: ${agentId}`)
+    if (!facts) {
+      const sessions = this.sessionHostFacts.get(agentId)
+      sessions?.delete(chatSessionId)
+      if (!sessions?.size) this.sessionHostFacts.delete(agentId)
+      return
+    }
+    const sessions = this.sessionHostFacts.get(agentId) ?? new Map<string, ExternalAgentHostFacts>()
+    sessions.set(chatSessionId, { ...facts })
+    this.sessionHostFacts.set(agentId, sessions)
+  }
+
   private capabilityCommandSignatures = new Map<string, string>()
 
   private advertisedCommandSignature(instance: ExternalAgentInstance): string {
@@ -4154,8 +4271,9 @@ export class ExternalAgentManager {
   private refreshCapabilityProfile(
     agentId: string,
     instance: ExternalAgentInstance,
-    adapter: ProtocolAdapter
-  ): void {
+    adapter: ProtocolAdapter,
+    hostFacts?: ExternalAgentHostFacts
+  ): ExternalAgentCapabilityProfileV1 {
     const availableCommands = this.collectAdvertisedCommands(instance)
     const presetId = externalAgentPresetIdOf(instance.config)
     const profile = negotiateCapabilityProfile(
@@ -4169,14 +4287,21 @@ export class ExternalAgentManager {
         ...(instance.config.declaredCapabilities
           ? { userDeclared: instance.config.declaredCapabilities }
           : {}),
-        hostFacts: this.resolveHostFacts(),
+        hostFacts: hostFacts ?? this.resolveHostFacts(),
         ceilings: this.resolveHostCeilings(),
         liveFacts: liveCapabilityFacts({
-          ...(adapter.capabilities ? { negotiated: adapter.capabilities } : {}),
+          negotiated: {
+            ...adapter.capabilities,
+            ...(instance.config.protocol === "opencode-v2" &&
+            !canProjectOpenCodeV2Mcp(instance.config)
+              ? { mcpTools: false }
+              : {}),
+          },
           ...(availableCommands ? { availableCommands } : {}),
         }),
       })
     )
+    if (hostFacts) return profile
     instance.capabilityProfile = profile
     this.capabilityCommandSignatures.set(agentId, this.advertisedCommandSignature(instance))
     if (profile.drift.length > 0) {
@@ -4189,6 +4314,7 @@ export class ExternalAgentManager {
         drift: profile.drift,
       })
     }
+    return profile
   }
 
   /**
@@ -4202,9 +4328,8 @@ export class ExternalAgentManager {
    * `false`, and that difference is exactly why this is a host fact rather
    * than a protocol row.
    *
-   * The tool host is a CLI facility: the renderer projects Cognia's tools into
-   * an external agent through per-session MCP servers, not through the
-   * broker/socket bridge, so there is no broker to report as running here.
+   * Unscoped profiles remain conservative. A renderer tool host reports live
+   * facts for its owning chat only, and clears them while paused or disposed.
    */
   private resolveHostFacts(): ExternalAgentHostFacts {
     return {
@@ -4299,6 +4424,11 @@ export class ExternalAgentManager {
       let attemptedReconnect = false
       try {
         const healthy = await adapter.healthCheck()
+        if (adapter instanceof DevinAcpAdapter) {
+          for (const sessionId of instance.sessions.keys()) {
+            if (!adapter.getSession(sessionId)) instance.sessions.delete(sessionId)
+          }
+        }
         this.updateInstanceState(agentId, instance, {
           validity: {
             source: "health",

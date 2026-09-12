@@ -229,6 +229,26 @@ impl ExternalAgentProcess {
             )
         });
         let config = self.get_config();
+        // Keep the launch environment private: process inspection is not a
+        // credential transport, including structured per-session MCP configs.
+        let public_env: HashMap<_, _> = config
+            .env
+            .iter()
+            .filter(|(key, _)| {
+                let name = key.to_ascii_uppercase();
+                !["TOKEN", "PASSWORD", "SECRET", "API_KEY"]
+                    .iter()
+                    .any(|part| name.contains(part))
+                    && !matches!(
+                        name.as_str(),
+                        "OPENCODE_CONFIG_CONTENT"
+                            | "COGNIA_TOOLHOST_PI_MCP_SERVERS"
+                            | "COGNIA_DSH_MCP_SERVERS"
+                            | "COGNIA_DSH_MCP_CONFIGS"
+                            | "COGNIA_GATEWAY_TASK_CONFIG"
+                    )
+            })
+            .collect();
         serde_json::json!({
             "id": config.id,
             "pid": self.get_pid(),
@@ -236,7 +256,7 @@ impl ExternalAgentProcess {
             "command": config.command,
             "args": config.args,
             "cwd": config.cwd,
-            "env": config.env,
+            "env": public_env,
             "exitCode": exit_code,
             "exitSignal": exit_signal
         })
@@ -330,13 +350,57 @@ impl ExternalAgentProcessManager {
         // launch instead of failing with "program not found".
         let managed_gateway = config.env.contains_key(crate::gateway_task::PAYLOAD_ENV);
         let task_files = if managed_gateway {
-            let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))
+            let home = std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
                 .ok_or("Gateway task requires a host home directory")?;
             crate::gateway_task::prepare(&mut config.env, std::path::Path::new(&home))?
-        } else { None };
+        } else {
+            None
+        };
+        let devin_config = if config
+            .env
+            .contains_key(crate::devin_mcp_config::PAYLOAD_ENV)
+        {
+            let home = std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .ok_or("Devin requires a host home directory")?;
+            let original_xdg = std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from);
+            crate::devin_mcp_config::prepare(
+                &mut config,
+                std::path::Path::new(&home),
+                &std::env::temp_dir(),
+                original_xdg.as_deref(),
+            )?
+        } else {
+            None
+        };
         let mut cmd = Command::new(&program);
+        cmd.env_remove(crate::devin_mcp_config::PAYLOAD_ENV);
+        cmd.env_remove(crate::devin_mcp_config::WRAPPED_ENV);
         if managed_gateway {
-            cmd.env_clear().envs(crate::gateway_task::runtime_environment());
+            cmd.env_clear()
+                .envs(crate::gateway_task::runtime_environment());
+        }
+        if let Some(runtime_home) = config.env.get("COGNIA_DSH_RUNTIME_HOME").cloned() {
+            // The managed DSH launcher validates this home before importing
+            // plugins. Its isolated profiles must not inherit host credentials.
+            cmd.env_clear();
+            config.env.retain(|key, _| {
+                matches!(
+                    key.as_str(),
+                    "PATH"
+                        | "LANG"
+                        | "LC_ALL"
+                        | "TZ"
+                        | "TMPDIR"
+                        | "DSH_HOME"
+                        | "DEEPSEEK_API_KEY"
+                        | "DEEPSEEK_BASE_URL"
+                        | "COGNIA_GATEWAY_TASK_CONFIG"
+                        | "COGNIA_GATEWAY_TOKEN"
+                ) || key.starts_with("COGNIA_DSH_")
+            });
+            config.env.insert("HOME".to_string(), runtime_home);
         }
         cmd.args(&config.args)
             .stdin(Stdio::piped())
@@ -358,6 +422,14 @@ impl ExternalAgentProcessManager {
         // Set environment variables
         for (key, value) in &config.env {
             cmd.env(key, value);
+        }
+        if config.env.contains_key("COGNIA_DSH_RUNTIME_HOME") {
+            // The child gets the key; retained process metadata must not.
+            config.env.remove("DEEPSEEK_API_KEY");
+            config.env.remove("DEEPSEEK_BASE_URL");
+            config.env.remove("COGNIA_DSH_GATEWAY_TOKEN");
+            config.env.remove("COGNIA_DSH_MCP_SERVERS");
+            config.env.remove("COGNIA_DSH_MCP_CONFIGS");
         }
         if managed_gateway {
             // get_external_agent_info and retained process config are metadata,
@@ -526,6 +598,12 @@ impl ExternalAgentProcessManager {
                 }
             }
 
+            // MCP children can outlive an ACP process that exits or crashes.
+            // Reap this launch's group before deleting its private config.
+            if devin_config.is_some() {
+                super::proc_group::kill_process_group(supervisor_pid);
+            }
+            drop(devin_config);
             supervisor_sink.exited(&supervisor_id, code, signal);
             let _ = exit_tx.send(true);
         });
@@ -744,6 +822,202 @@ mod tests {
             env: HashMap::new(),
             cwd: None,
             framing: Default::default(),
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn process_info_omits_hosted_agent_credentials() {
+        let manager = ExternalAgentProcessManager::new();
+        let mut config = echo_config("hosted-agent-secrets");
+        config.env = HashMap::from([
+            (
+                "OPENCODE_SERVER_PASSWORD".into(),
+                "private-server-password".into(),
+            ),
+            (
+                "OPENCODE_CONFIG_CONTENT".into(),
+                r#"{"mcp":{"token":"private-mcp-token"}}"#.into(),
+            ),
+            (
+                "COGNIA_TOOLHOST_PI_MCP_SERVERS".into(),
+                "private-pi-mcp-config".into(),
+            ),
+            (
+                "COGNIA_TOOLHOST_TOKEN".into(),
+                "private-broker-token".into(),
+            ),
+            ("OPENAI_API_KEY".into(), "private-provider-key".into()),
+            ("RUNTIME_LABEL".into(), "visible-label".into()),
+        ]);
+        manager
+            .spawn(config, Arc::new(CollectorSink::default()))
+            .await
+            .unwrap();
+        let info = manager.get_info("hosted-agent-secrets").await.unwrap();
+        manager.kill("hosted-agent-secrets").await.unwrap();
+        assert!(
+            !info.to_string().contains("private-"),
+            "credentials exposed in process metadata"
+        );
+        assert_eq!(info["env"]["RUNTIME_LABEL"], "visible-label");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn dsh_process_environment_is_isolated_from_host_and_other_providers() {
+        let mgr = ExternalAgentProcessManager::new();
+        let sink = Arc::new(CollectorSink::default());
+        let mut cfg = echo_config("dsh-env-isolation");
+        cfg.command = "env".into();
+        cfg.env = HashMap::from([
+            ("COGNIA_DSH_RUNTIME_HOME".into(), "/isolated-runtime".into()),
+            ("DSH_HOME".into(), "/isolated-runtime/dsh-home".into()),
+            ("DEEPSEEK_API_KEY".into(), "fixture-only".into()),
+            (
+                "COGNIA_DSH_GATEWAY_TOKEN".into(),
+                "gateway-fixture-only".into(),
+            ),
+            (
+                "COGNIA_DSH_MCP_SERVERS".into(),
+                "broker-fixture-only".into(),
+            ),
+            ("ANTHROPIC_API_KEY".into(), "must-not-leak".into()),
+            ("HOME".into(), "/unmanaged-home".into()),
+        ]);
+        mgr.spawn(cfg, sink.clone()).await.unwrap();
+        let metadata = mgr.get_info("dsh-env-isolation").await.unwrap();
+        assert!(!metadata.to_string().contains("fixture-only"));
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            loop {
+                if sink.exited.lock().unwrap().is_some() {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let lines = sink.stdout.lock().unwrap();
+        assert!(lines.iter().any(|line| line == "HOME=/isolated-runtime"));
+        assert!(lines
+            .iter()
+            .any(|line| line == "DEEPSEEK_API_KEY=fixture-only"));
+        for line in lines.iter() {
+            let key = line.split('=').next().unwrap();
+            assert!(
+                matches!(
+                    key,
+                    "HOME"
+                        | "DSH_HOME"
+                        | "COGNIA_DSH_RUNTIME_HOME"
+                        | "DEEPSEEK_API_KEY"
+                        | "COGNIA_DSH_GATEWAY_TOKEN"
+                        | "COGNIA_DSH_MCP_SERVERS"
+                        | "PATH"
+                ),
+                "unexpected inherited key: {key}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn devin_overlay_is_private_and_removed_after_exit_or_kill() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+        for stays_alive in [false, true] {
+            let workspace = tempfile::tempdir().unwrap();
+            let launcher = workspace.path().join("cognia-external-agent-launcher");
+            // A fixture executable at the launcher boundary, not a real agent.
+            // It reports only its generated root, never copied configuration.
+            fs::write(
+                &launcher,
+                format!(
+                    "#!/bin/sh\nprintf '%s\\n' \"$XDG_CONFIG_HOME\"\n{}\n",
+                    if stays_alive {
+                        "cat"
+                    } else {
+                        "sleep 30 &\nprintf '%s' \"$!\" > descendant.pid\nexit 0"
+                    }
+                ),
+            )
+            .unwrap();
+            fs::set_permissions(&launcher, fs::Permissions::from_mode(0o700)).unwrap();
+            let manager = ExternalAgentProcessManager::new();
+            let sink = Arc::new(CollectorSink::default());
+            let config = ExternalAgentSpawnConfig {
+                id: "devin-overlay".into(),
+                command: launcher.to_string_lossy().into_owned(),
+                args: vec!["--".into(), "devin".into(), "acp".into()],
+                env: HashMap::from([
+                    (crate::devin_mcp_config::PAYLOAD_ENV.into(), "[]".into()),
+                    (crate::devin_mcp_config::WRAPPED_ENV.into(), "1".into()),
+                ]),
+                cwd: Some(workspace.path().to_string_lossy().into_owned()),
+                framing: Default::default(),
+            };
+            manager.spawn(config, sink.clone()).await.unwrap();
+            let root = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                loop {
+                    if let Some(root) = sink.stdout.lock().unwrap().first().cloned() {
+                        break std::path::PathBuf::from(root);
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+            if stays_alive {
+                assert!(root.exists());
+                assert_eq!(
+                    fs::metadata(&root).unwrap().permissions().mode() & 0o777,
+                    0o700
+                );
+                let info = manager.get_info("devin-overlay").await.unwrap();
+                assert!(!info
+                    .to_string()
+                    .contains(crate::devin_mcp_config::PAYLOAD_ENV));
+                manager.kill("devin-overlay").await.unwrap();
+            }
+            tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                while root.exists() {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+            if !stays_alive {
+                let pid: i32 = fs::read_to_string(workspace.path().join("descendant.pid"))
+                    .unwrap()
+                    .parse()
+                    .unwrap();
+                let reaped = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                    loop {
+                        // SAFETY: signal 0 only checks this fixture's recorded pid.
+                        if unsafe { libc::kill(pid, 0) } != 0 {
+                            break;
+                        }
+                        #[cfg(target_os = "linux")]
+                        if fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| {
+                            stat.split(") ")
+                                .nth(1)
+                                .is_some_and(|state| state.starts_with('Z'))
+                        }) {
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
+                })
+                .await;
+                if reaped.is_err() {
+                    // SAFETY: only the fixture-owned descendant is cleaned up.
+                    unsafe {
+                        libc::kill(pid, libc::SIGKILL);
+                    }
+                }
+                assert!(reaped.is_ok(), "Devin MCP descendant survived its leader");
+            }
         }
     }
 

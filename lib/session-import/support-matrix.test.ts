@@ -20,15 +20,15 @@ describe("external session support matrix", () => {
   })
 
   it("keeps a documented-only preset out of a source's resume candidates", () => {
-    // `opencode-v2-preview` says in its own description that current OpenCode
-    // V2 builds are not compatible with it. Listing it here would tell a user
-    // an imported OpenCode session can resume into something that cannot run.
+    // Only current native V2 and ACP remain executable.
     const matrix = buildExternalSessionSupportMatrix()
     const opencode = matrix.importSources.find((row) => row.sourceId === "opencode")
     expect(opencode?.presetIds).toEqual(
-      expect.arrayContaining(["opencode-server", "opencode-acp", "opencode-remote"])
+      expect.arrayContaining(["opencode-acp", "opencode-v2-service"])
     )
     expect(opencode?.presetIds).not.toContain("opencode-v2-preview")
+    expect(opencode?.presetIds).not.toContain("opencode-server")
+    expect(opencode?.presetIds).not.toContain("opencode-remote")
     expect(opencode?.nativeResumeCandidate).toBe(true)
   })
 

@@ -860,6 +860,68 @@ describe("CodexAppServerAdapter", () => {
       expect(lastWritten((message) => message.method === "thread/resume")).toBeUndefined()
     })
 
+    it("projects complete instructions at creation and fork, and changed instructions on subsequent turns", async () => {
+      responders["thread/fork"] = () => ({ thread: { id: "thr_fork" } })
+      const adapter = await connectedAdapter()
+      const mcpServers = [
+        {
+          name: "cognia-tools",
+          type: "http" as const,
+          url: "http://127.0.0.1:9191",
+          headers: [{ name: "Authorization", value: "lease-private" }],
+        },
+      ]
+      const source = await adapter.createSession({
+        systemPrompt: "Follow rules",
+        instructionEnvelope: {
+          hash: "h",
+          developerInstructions: "Follow rules",
+          skillsSummary: "Use verification skill",
+        },
+        context: {
+          custom: {
+            conversationHistory: "Previous result",
+            mcpServers,
+            chatSessionId: "control-only",
+          },
+        },
+        mcpServers,
+      })
+      const initial = lastWritten((m) => m.method === "thread/start")!.params as {
+        developerInstructions: string
+      }
+      expect(initial.developerInstructions).toContain("Use verification skill")
+      expect(initial.developerInstructions).toContain("Previous result")
+      expect(initial.developerInstructions).not.toContain("lease-private")
+      const forked = await adapter.forkSession(source.id, {
+        systemPrompt: "Fork skill",
+        mcpServers,
+        permissionMode: "plan",
+      })
+      expect(forked.permissionMode).toBe("plan")
+      expect(lastWritten((m) => m.method === "thread/fork")!.params).toMatchObject({
+        approvalPolicy: "never",
+        sandbox: "read-only",
+        developerInstructions: "Fork skill",
+        config: {
+          mcp_servers: { "cognia-tools": { http_headers: { Authorization: "lease-private" } } },
+        },
+      })
+      const it = adapter
+        .prompt(source.id, userMessage("Continue"), { systemPrompt: "Updated instructions" })
+        [Symbol.asyncIterator]()
+      const first = it.next()
+      feed("turn/completed", { threadId: source.id, turn: { id: "turn_1", status: "completed" } })
+      let result = await first
+      while (!result.done) result = await it.next()
+      expect(lastWritten((m) => m.method === "turn/start")!.params).toMatchObject({
+        input: [
+          { type: "text", text: "Updated instructions" },
+          { type: "text", text: "Continue" },
+        ],
+      })
+    })
+
     it("forks a thread into a new session copying source metadata", async () => {
       responders["thread/fork"] = () => ({ thread: { id: "thr_fork" } })
       const adapter = await connectedAdapter()

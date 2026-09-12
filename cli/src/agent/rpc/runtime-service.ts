@@ -1,3 +1,4 @@
+import { buildMcpServerMapResolved } from "@/lib/db/mcp-servers"
 import { randomUUID } from "node:crypto"
 
 import type {
@@ -1333,12 +1334,13 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
             error instanceof Error ? error.message : "invalid MCP server configuration"
           )
         }
+        const servers = await buildMcpServerMapResolved(configuredMcpServers)
         const applied: Record<string, unknown> = {}
         for (const session of sessions.values()) {
           session.lease.current?.invalidateOptions?.()
           if (session.lease.current?.isLive?.()) {
             applied[session.id] = await sessionControl(session.id, "setMcpServers", {
-              servers: configuredMcpServers,
+              servers,
             })
           }
         }

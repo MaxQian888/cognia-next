@@ -17,6 +17,48 @@ import {
 import { toolHostRuntimeDir } from "../../agent/tool-host/protocol"
 
 describe("external-agent sandbox launcher", () => {
+  it("requires Bot isolation and keeps ambient home out of readable and writable roots", () => {
+    const args = buildSandboxLauncherArgs(
+      {
+        id: "bot",
+        command: "devin",
+        args: ["acp"],
+        cwd: "/work/repo",
+        env: { COGNIA_BOT_ISOLATION: "1", COGNIA_BOT_STATE_DIR: "/work/state" },
+      },
+      "/home/user"
+    )
+    expect(args).toContain("--bot-isolation")
+    expect(
+      args.slice(args.indexOf("--deny-readable"), args.indexOf("--deny-readable") + 2)
+    ).toEqual(["--deny-readable", "/home/user"])
+    const readRoots = args.filter((_, index) => args[index - 1] === "--readable")
+    const writeRoots = args.filter((_, index) => args[index - 1] === "--writable")
+    expect(readRoots).not.toContain("/home/user")
+    expect(writeRoots).toContain("/work/state")
+    expect(writeRoots).not.toContain("/home/user/.local/share/devin")
+    expect(() =>
+      buildSandboxLauncherArgs(
+        { id: "bot", command: "devin", cwd: "/work", env: { COGNIA_BOT_ISOLATION: "1" } },
+        "/home/user"
+      )
+    ).toThrow("owned state")
+  })
+  it("does not trust caller-supplied XDG paths as Devin writable capabilities", () => {
+    const args = buildSandboxLauncherArgs(
+      {
+        id: "devin",
+        command: "devin",
+        args: ["acp"],
+        cwd: "/work/repo",
+        env: { XDG_CONFIG_HOME: "/untrusted/private", COGNIA_DEVIN_MCP_SERVERS: "[]" },
+      },
+      "/home/user"
+    )
+    expect(args).not.toContain("/untrusted/private")
+    expect(args).not.toContain("COGNIA_DEVIN_MCP_SERVERS")
+  })
+
   it("discovers launchers beside both single-file and split bundles", () => {
     expect(
       bundledLauncherCandidates(

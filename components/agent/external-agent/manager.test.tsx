@@ -832,6 +832,36 @@ describe("ExternalAgentManager", () => {
     )
   })
 
+  it("adds a managed DeepSeek profile with keyring-bound credentials and no executable", async () => {
+    const hook = baseHookValue()
+    mockUseExternalAgent.mockReturnValue(hook)
+    render(wrap(<ExternalAgentManager />))
+    fireEvent.click(screen.getAllByRole("button", { name: /add agent/i })[0])
+    fireEvent.click(screen.getAllByRole("combobox")[0])
+    fireEvent.click(await screen.findByRole("option", { name: /DeepSeek Harness \(read-only\)/i }))
+    fireEvent.change(screen.getByLabelText(en.externalAgent.settings.apiKey), {
+      target: { value: "deepseek-transient-key" },
+    })
+    fireEvent.change(screen.getByLabelText(en.externalAgent.settings.workingDirectory), {
+      target: { value: "/work" },
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: en.externalAgent.settings.addAgent }))
+    })
+    expect(hook.addAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        protocol: "dsh-sdk",
+        metadata: expect.objectContaining({ dshProfileId: "cognia-sdk-readonly" }),
+        process: expect.objectContaining({
+          command: "",
+          args: [],
+          cwd: "/work",
+          env: { DEEPSEEK_API_KEY: "deepseek-transient-key" },
+        }),
+      })
+    )
+  })
+
   it("adds Devin through its native ACP preset and displays login guidance", async () => {
     const hook = baseHookValue()
     mockUseExternalAgent.mockReturnValue(hook)

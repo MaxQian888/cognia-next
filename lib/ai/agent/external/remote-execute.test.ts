@@ -60,13 +60,32 @@ describe("executeOnRemoteHostAgent", () => {
       newRunId: () => "run-1",
       model: "z-ai/glm-5.3-flash",
       reasoningEffort: "high",
+      systemPrompt: "Selected skill: verify results",
+      allowedTools: ["read"],
     })
     handlers?.onTerminal("completed")
     await run
     expect(started[0]).toMatchObject({
       model: "z-ai/glm-5.3-flash",
       reasoningEffort: "high",
+      systemPrompt: "Selected skill: verify results",
+      allowedTools: ["read"],
     })
+  })
+
+  it("rejects caller-local MCP and unsafe instructions before subscribing", async () => {
+    const options = { stamp: STAMP, chatSessionId: "chat-1" }
+    await expect(
+      executeOnRemoteHostAgent("hi", {
+        ...options,
+        mcpServers: [{ type: "http", name: "local", url: "http://127.0.0.1:4444", headers: [] }],
+      })
+    ).rejects.toThrow("configure tools on the target host")
+    await expect(
+      executeOnRemoteHostAgent("hi", { ...options, systemPrompt: "Contact test@example.com" })
+    ).rejects.toThrow("PII gate")
+    expect(started).toHaveLength(0)
+    expect(subscribedRunId).toBeUndefined()
   })
 
   // The host streams from the moment it accepts, so a subscription opened

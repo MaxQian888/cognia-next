@@ -18,19 +18,12 @@ describe("preset resolution", () => {
   it.each([
     ["claude-code", "claude-code"],
     ["codex", "codex"],
-    ["opencode", "opencode-server"],
   ])("keeps %s resolving to the preset VENDOR_RUNTIME produced (%s)", (vendor, presetId) => {
     expect(primaryPresetIdForMigrationVendor(vendor)).toBe(presetId)
   })
 
   it("returns every preset an ecosystem can launch", () => {
     expect(presetIdsForEcosystem("codex")).toEqual(["codex", "codex-app-server"])
-    expect(presetIdsForEcosystem("opencode")).toEqual([
-      "opencode-server",
-      "opencode-acp",
-      "opencode-remote",
-      "opencode-v2-preview",
-    ])
   })
 
   it("expands the DeepSeek runtime's three presets", () => {
@@ -65,5 +58,24 @@ describe("display names", () => {
   it("answers null for a history-only ecosystem instead of a raw slug", () => {
     expect(displayNameForEcosystem("aider")).toBeNull()
     expect(displayNameForMigrationVendor("nope")).toBeNull()
+  })
+})
+
+describe("current OpenCode runtime resolution", () => {
+  it("connects migrated OpenCode agents through the current service preset", () => {
+    expect(primaryPresetIdForMigrationVendor("opencode")).toBe("opencode-v2-service")
+    expect(primaryPresetIdForEcosystem("opencode")).toBe("opencode-v2-service")
+  })
+
+  it("offers only executable OpenCode presets across ecosystem, migration, and session sources", () => {
+    const expected = ["opencode-v2-service", "opencode-acp"]
+    expect(presetIdsForEcosystem("opencode")).toEqual(expected)
+    expect(presetIdsForMigrationVendor("opencode")).toEqual(expected)
+    expect(presetIdsForSessionSource("opencode")).toEqual(expected)
+  })
+
+  it("labels OpenCode using the current service rather than the retired auto-spawn runtime", () => {
+    expect(displayNameForMigrationVendor("opencode")).toBe("OpenCode V2")
+    expect(displayNameForEcosystem("opencode")).toBe("OpenCode V2")
   })
 })

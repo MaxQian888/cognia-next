@@ -62,8 +62,8 @@ export type ExternalAgentProtocol =
   | "codex-app-server" // OpenAI Codex native app-server JSON-RPC (thread/turn/item)
   | "dsh-sdk" // DeepSeek Harness stdio JSON-RPC SDK runtime (observation-rich, no mid-turn approval)
   | "pi-rpc" // Pi native `pi --mode rpc` JSONL command/event protocol (NOT JSON-RPC, NOT ACP)
-  | "opencode" // OpenCode SDK/server protocol
-  | "opencode-v2" // OpenCode V2 local-service preview protocol
+  | "opencode" // Retired OpenCode V1 value retained for saved configurations
+  | "opencode-v2" // Current OpenCode V2 native API
   | "a2a" // Agent-to-Agent Protocol (Google)
   | "http" // HTTP/REST API
   | "websocket" // WebSocket

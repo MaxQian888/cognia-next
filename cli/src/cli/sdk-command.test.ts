@@ -1,3 +1,23 @@
+jest.mock("../runtime/bootstrap", () => ({
+  bootstrapSidecar: jest.fn(async () => ({ shutdown: jest.fn() })),
+}))
+jest.mock("@/lib/claude/ipc", () =>
+  Object.fromEntries(
+    [
+      "listSdkSessions",
+      "getSdkSessionInfo",
+      "getSdkSessionMessages",
+      "listSdkSubagents",
+      "getSdkSubagentMessages",
+      "renameSdkSession",
+      "tagSdkSession",
+      "deleteSdkSession",
+      "forkSdkSession",
+      "resolveSdkSettings",
+    ].map((name) => [name, jest.fn(async () => [])])
+  )
+)
+
 import { parseArgv } from "./args"
 import type { OutputSink } from "./output"
 import { sdkCommand, type SdkCommandDeps } from "./sdk-command"
@@ -93,5 +113,42 @@ describe("sdkCommand", () => {
     ).toBe(2)
     expect(state.deps.api!.subagentMessages).not.toHaveBeenCalled()
     expect(state.stderr.join("")).toMatch(/--agent/)
+  })
+})
+
+it.each([
+  ["sessions", "listSdkSessions"],
+  ["info", "getSdkSessionInfo"],
+  ["messages", "getSdkSessionMessages"],
+  ["subagents", "listSdkSubagents"],
+  ["subagent-messages", "getSdkSubagentMessages"],
+  ["rename", "renameSdkSession"],
+  ["tag", "tagSdkSession"],
+  ["delete", "deleteSdkSession"],
+  ["fork", "forkSdkSession"],
+  ["settings", "resolveSdkSettings"],
+])("passes the selected storage scope to default sdk %s", async (verb, method) => {
+  const state = setup()
+  const args = parseArgv([
+    "sdk",
+    verb,
+    "--session",
+    "session-one",
+    "--agent",
+    "agent-one",
+    "--title",
+    "Title",
+    "--confirm",
+    "--cwd",
+    "/original",
+    "--storage",
+    "host-sqlite",
+  ])
+  expect(await sdkCommand(args, { out: state.deps.out })).toBe(0)
+  const mock = jest.requireMock("@/lib/claude/ipc")[method] as jest.Mock
+  expect(mock.mock.calls.at(-1)?.at(-1)).toMatchObject({
+    cwd: "/original",
+    execution: { hostRef: "headless-agent-host" },
+    claudeAgentSdk: { version: 1, persistSession: true, sessionStore: { backend: "host-sqlite" } },
   })
 })

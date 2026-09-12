@@ -151,6 +151,33 @@ fn find_in_managed_dirs(name: &str) -> Option<PathBuf> {
     None
 }
 
+/// Per-binary env override: `COGNIA_<NAME>_PATH` (name uppercased,
+/// non-alphanumerics → `_`) pins an explicit executable path — the same
+/// convention the sidecar's ripgrep probe honors (`COGNIA_RG_PATH` in
+/// `sidecar/builtin-tools/core/rg.mjs`). Wins over managed dirs and PATH so
+/// a plugin-declared binary the host can't find any other way (VS Code's
+/// bundled rg, a nix-store path, a corporate-image location) is still
+/// usable. Only honored when the value points at an existing file.
+fn env_override_path(name: &str) -> Option<PathBuf> {
+    let key = format!(
+        "COGNIA_{}_PATH",
+        name.chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() {
+                    c.to_ascii_uppercase()
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>()
+    );
+    std::env::var_os(&key)
+        .map(PathBuf::from)
+        // `is_file` (not `exists`): a directory-valued pin would otherwise win
+        // the branch and fail at spawn, masking the managed/PATH fallbacks.
+        .filter(|p| !p.as_os_str().is_empty() && p.is_file())
+}
+
 /// Run `<program> <version_arg>` and capture the first stdout line. Returns
 /// the trimmed version string on a zero exit, else an error string.
 fn probe(program: &str, version_arg: &str) -> BinaryDetectionResult {
@@ -223,8 +250,9 @@ fn which_path(program: &str) -> Option<String> {
         })
 }
 
-/// Core detection used by the Tauri command and tests. Checks managed dirs
-/// first (an app-downloaded copy), then falls back to PATH resolution.
+/// Core detection used by the Tauri command and tests. Resolution order:
+/// an explicit `COGNIA_<NAME>_PATH` pin, then managed dirs (an
+/// app-downloaded copy), then PATH.
 pub fn detect(name: &str, version_arg: &str) -> BinaryDetectionResult {
     let key = (name.to_string(), version_arg.to_string());
     {
@@ -236,8 +264,15 @@ pub fn detect(name: &str, version_arg: &str) -> BinaryDetectionResult {
         }
     }
 
-    // Prefer an app-managed copy if one was downloaded.
-    let result = if let Some(managed) = find_in_managed_dirs(name) {
+    // An explicit `COGNIA_<NAME>_PATH` pin wins over every other source;
+    // then an app-managed copy (a download), then PATH.
+    let result = if let Some(custom) = env_override_path(name) {
+        let mut r = probe(&custom.to_string_lossy(), version_arg);
+        if r.available && r.path.is_none() {
+            r.path = Some(custom.to_string_lossy().into_owned());
+        }
+        r
+    } else if let Some(managed) = find_in_managed_dirs(name) {
         let mut r = probe(&managed.to_string_lossy(), version_arg);
         if r.available && r.path.is_none() {
             r.path = Some(managed.to_string_lossy().into_owned());
@@ -325,6 +360,50 @@ mod tests {
         // point at an existing directory (the dir holding the test binary).
         let dir = current_exe_dir().expect("current exe dir resolves under test");
         assert!(dir.is_dir());
+    }
+
+    #[test]
+    fn env_override_path_prefers_the_pinned_binary() {
+        // A unique binary name keeps the probe cache cold and the env var
+        // out of every other test's way. Point the override at rustc's real
+        // path so the probe has something runnable on every platform.
+        let rustc = which_path("rustc").expect("rustc resolvable in a Rust test env");
+        let var = "COGNIA_COGNIA_DETECT_TEST_BIN_PATH";
+        std::env::set_var(var, &rustc);
+        let result = detect("cognia-detect-test-bin", "--version");
+        std::env::remove_var(var);
+        assert!(result.available, "pinned path must probe ok: {result:?}");
+        assert!(
+            result.version.as_deref().unwrap_or_default().starts_with("rustc"),
+            "pinned binary should be rustc, got {result:?}"
+        );
+        assert!(
+            result.path.as_deref().unwrap_or_default().contains("rustc"),
+            "resolved path should be the override"
+        );
+    }
+
+    #[test]
+    fn env_override_path_ignores_missing_files() {
+        // Distinct name → distinct cache key and env var from the positive
+        // test above, so the two can run in either order / in parallel.
+        let var = "COGNIA_COGNIA_DETECT_TEST_GONE_PATH";
+        std::env::set_var(var, "/nonexistent/cognia-detect-test-gone-xyz");
+        let result = detect("cognia-detect-test-gone", "--version");
+        std::env::remove_var(var);
+        assert!(!result.available);
+    }
+
+    #[test]
+    fn env_override_path_ignores_directories() {
+        // A directory "exists" but is not spawnable — the pin must be
+        // ignored so managed/PATH fallbacks still run, not hard-fail the
+        // probe at exec time.
+        let var = "COGNIA_COGNIA_DETECT_TEST_DIR_PATH";
+        std::env::set_var(var, std::env::temp_dir());
+        let result = detect("cognia-detect-test-dir", "--version");
+        std::env::remove_var(var);
+        assert!(!result.available);
     }
 
     #[test]

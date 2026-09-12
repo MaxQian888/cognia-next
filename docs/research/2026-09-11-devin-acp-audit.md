@@ -7,14 +7,16 @@ Date: 2026-09-11. Host: macOS arm64. Installed Devin: `3000.10.21 (611c1cba)`.
 Cognia can launch the installed, authenticated Devin CLI through native `devin acp`.
 The real Cognia ACP adapter and CLI sandbox passed SWE-2 model selection, native file
 read/write, session listing, reconnect/load, retained conversation context, and cancellation.
-This is not a claim of complete Devin interoperability: the Cognia MCP tool bridge failed
-against this installed Devin build. Tauri UI-to-Rust execution was not tested live.
+The Cognia MCP bridge also passes real read, write, host-tool, and git calls. Concurrent
+conversations with identically named MCP servers return distinct per-session values,
+including after another conversation closes and after reconnect/load. Tauri UI-to-Rust
+execution was not tested live.
 
 ## Integration
 
 - Preset `devin`, product ecosystem entry, and system-owned runtime catalog entry.
 - Node and Rust launch allowlists admit `devin`; auth/config environment families include
-  `DEVIN_` and `WINDSURF_`. Existing CLI login is reused without reading or copying credentials.
+  `DEVIN_` and `WINDSURF_`. Existing CLI login is reused through the unchanged HOME/data locations.
 - Sandbox state roots: `.config/devin`, `.local/share/devin`, `.cache/devin`.
 - English and Chinese preset guidance. Settings → Agents → Devin CLI pre-fills
   command `devin`, arguments `acp`. Team runtime selectors and badges also include
@@ -74,21 +76,90 @@ Browser verification on the existing dev server: Settings → Agents → Devin p
 opened an Add Agent dialog containing `devin`, `acp`, ACP, and stdio.
 No desktop native invocation is inferred from that browser check.
 
-### MCP bridge limitation
+### MCP compatibility and session isolation
+
+Devin 3000.10.21 accepted ACP `session/new.mcpServers` but could not reliably discover
+or call those servers. A standalone sentinel sometimes initialized, while model calls
+returned `Server cognia-tools not found`; this does not establish Devin's internal cause.
+The documented native MCP config path works with the existing CLI login.
+
+`DevinAcpAdapter` now owns one ACP process per conversation. The Node and Rust process
+backends prepare a private, immutable-per-launch `XDG_CONFIG_HOME` and merge the supplied
+stdio/HTTP/SSE servers into `devin/mcp_config.json`. ACP session calls then send an empty
+MCP array, avoiding two competing registration paths. Discovery/authentication uses a
+separate process without conversation credentials.
+
+The private copy preserves existing Devin settings, rules, permissions, and legacy/current
+MCP entries. Injected names replace user-level names; conflicting higher-priority project
+entries fail before launch. Other XDG applications retain their existing config paths.
+Stdio MCP subprocesses receive the original XDG path unless explicitly overridden.
+Directory/file permissions are 0700/0600. The internal config payload is removed before
+spawn; only the host-created directory receives an extra sandbox writable grant. Failed
+spawn, exit, kill, and normal close remove the owned copy. After a Devin exit, both
+backends reap its owned process group so MCP descendants do not survive their parent. Remote process backends reject
+this local-only payload rather than silently dropping it.
+
+Devin permission requests can contain only `toolCallId`. The shared ACP adapter now merges
+that request with the matching session's cached tool event and uses Devin's canonical
+`cognition.ai/inferenceToolName` / `cognition.ai/toolName` metadata. This lets the existing
+Cognia broker remain the sole approval authority for projected tools. Unknown tools retain
+normal approval behavior. Host tools use the broker's `exec` authorization once; the bridge
+no longer sends a redundant preliminary `authorize` request.
+
+Child process exit is reconciled to only its own conversation. Manager session lookup
+rejects stale child state and can resume the saved session through a fresh process without
+closing healthy siblings. Disconnected ACP transports still tear down listeners, pending
+permissions, and terminals. Fork preserves conversation metadata without copying another
+conversation's broker credentials; callers supply fresh session-bound MCP options.
+
+ACP has no standard `ping` method. A method-not-found response from the same live peer now
+counts as responsive; timeout, disconnect, and other server errors remain unhealthy.
 
 ```sh
-rtk pnpm smoke:external-parity devin
+rtk proxy pnpm smoke:external-parity devin
+rtk proxy pnpm smoke:external-parity --devin-acp
 ```
 
-Result: FAIL. The actual outgoing `session/new` contained both `cognia-tools` and
-`cognia-plugin-tools`, with stdio commands and the expected environment variable names.
-No credential values were printed by the diagnostic. Devin reported only its existing
-configured MCP server; attempts to invoke the supplied servers returned
-`Server cognia-tools not found` / `Server cognia-plugin-tools not found`.
-This reproduced in both Ask and Code modes. The native ACP test above uses no MCP bridge.
-No user MCP configuration was rewritten as a workaround.
+Live SWE-2 MCP bridge result: PASS. `read`, `file_append`, `ask_user`, and `git_status`
+all returned successfully; `SMOKE.txt` contained exactly `cognia parity ok`. One broker
+approval was requested for `ask_user`; there was no duplicate approval and no write
+approval in Accept Edits mode. All test fixtures used existing login and isolated scratch
+workspaces; no original user MCP config was rewritten.
+
+The native/concurrency smoke also passes simultaneous same-name/different-value MCP
+calls, closing one sibling without affecting the survivor, reconnect/load with fresh MCP
+configuration, native byte-exact file copying, model/mode retention, conversation recall,
+health checks, and cancellation. Its first expanded run found a native copy without the required trailing
+newline; the prompt now explicitly specifies LF and the byte-exact assertion remains.
 
 ## Validation boundaries
+
+Current MCP follow-up validation (2026-09-11):
+
+- Session wrapper/manager: 202 tests passed, including child crash retirement, healthy
+  sibling preservation, fresh-child resume, namespaced elicitation, and safe fork metadata.
+  Wrapper focused coverage: 97.82% lines, 92.94% branches, 98.33% functions (scoped 90% gate passed).
+
+- Shared ACP: 177 tests passed, including permission identity, method-not-found health,
+  and listener/approval cleanup after process exit.
+- Bridge: 22 Node unit tests and 84 Jest broker/policy/process integration tests passed; denied host calls
+  never execute, approved calls ask once.
+- Node config/backend/sandbox: 85 tests passed; Rust Devin config/policy/sandbox/process/remote
+  checks: 11 tests passed, including an actual child/descendant exit fixture. New Node config
+  helper coverage: 99.26% lines, 92.10% branches, 92.85% functions (scoped 90% gate passed).
+- Updated setup guidance: 71 tests passed. i18n build, freshness, parity, and referenced-key
+  checks passed. ACP v1 contract gate passed (schema 1.21.0, SDK 1.4.0).
+- Final full typecheck completed with 41 diagnostics elsewhere in the shared tree and zero
+  diagnostics in this task's changed files. Repository-wide typecheck remains failing.
+- Full `pnpm test:coverage --out coverage/devin-mcp-20260911 --workers 2` was attempted.
+  Shard 1/8 exhausted the configured 4 GB V8 heap (SIGABRT). Repository-wide coverage is
+  therefore not established; this is separate from the focused regression results.
+
+No live Windows/Linux or desktop Tauri UI-to-Rust result is inferred from these macOS CLI
+and focused Rust tests. HTTP/SSE config mapping is covered by fixtures, while live SWE-2
+MCP validation used stdio.
+
+Earlier integration validation (before the MCP follow-up):
 
 - ACP/manager/codec/SDK/feature/elicitation/dynamic-MCP/JSON-RPC: 402 tests passed,
   process exited successfully without forced termination.
@@ -111,6 +182,9 @@ No user MCP configuration was rewritten as a workaround.
 
 ## Sources
 
+- [Devin native MCP configuration](https://docs.devin.ai/cli/extensibility/mcp/configuration)
+- [Devin config precedence](https://docs.devin.ai/cli/reference/configuration/global-vs-local)
+- [ACP method overview](https://agentclientprotocol.com/protocol/v1/overview)
 - [Devin custom ACP setup](https://docs.devin.ai/cli/acp/jetbrains)
 - [Devin commands and flags](https://docs.devin.ai/cli/reference/commands)
 - [Devin permissions](https://docs.devin.ai/cli/reference/permissions)

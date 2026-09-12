@@ -2,6 +2,11 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import os from "node:os"
 import path from "node:path"
 
+jest.mock("@/lib/claude/ipc", () => ({
+  ...jest.requireActual("@/lib/claude/ipc"),
+  sessionControl: jest.fn(jest.requireActual("@/lib/claude/ipc").sessionControl),
+}))
+
 jest.mock("../configured-plugin-tool-handle", () => ({
   makeConfiguredCliPluginToolHandle: jest.fn(() => jest.fn(async () => ({ result: "ok" }))),
 }))
@@ -17,6 +22,7 @@ import type { UnifiedTurnParams, UnifiedTurnResult } from "../runtime/unified-ru
 
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import { createAgentRuntimeService } from "./runtime-service"
+import * as claudeIpc from "@/lib/claude/ipc"
 import type { AgentRpcServiceContext } from "./server"
 
 const mockRegisteredPluginTools = new Map<string, PluginTool>()
@@ -615,6 +621,60 @@ describe("createAgentRuntimeService", () => {
     )
     expect(runTurn).toHaveBeenCalledTimes(1)
     await service.close()
+  })
+
+  it("projects live MCP reconfiguration into the SDK server map", async () => {
+    const control = jest
+      .mocked(claudeIpc.sessionControl)
+      .mockResolvedValueOnce({ added: ["local"] })
+    const invalidateOptions = jest.fn()
+    const service = createAgentRuntimeService({
+      config: { ...DEFAULT_RESOLVED_CONFIG, cwd: home, model: "test-model" },
+      home,
+      mintSessionId: () => "session-live",
+      createLease: () =>
+        ({ current: { isLive: () => true, invalidateOptions }, close: jest.fn() }) as never,
+    })
+    try {
+      await service.handle("session/create", {}, context as never)
+      await service.handle(
+        "mcp/configure",
+        {
+          servers: [
+            {
+              id: "mcp-1",
+              name: "local",
+              displayName: "Local",
+              transport: "stdio",
+              config: { command: "node", args: ["server.mjs"], env: { TOOL_MODE: "read" } },
+              enabled: true,
+              schemaVersion: 1,
+              revision: 1,
+              credentialVersion: 0,
+              origin: "manual",
+              trust: { state: "trusted" },
+              createdAt: 1,
+              updatedAt: 1,
+            },
+          ],
+        },
+        context as never
+      )
+      expect(control).toHaveBeenCalledWith("session-live", "setMcpServers", {
+        servers: {
+          local: {
+            type: "stdio",
+            command: "node",
+            args: ["server.mjs"],
+            env: { TOOL_MODE: "read" },
+          },
+        },
+      })
+      expect(invalidateOptions).toHaveBeenCalled()
+    } finally {
+      await service.close()
+      control.mockClear()
+    }
   })
 
   it("snapshots and restores the effective sandbox policy", async () => {

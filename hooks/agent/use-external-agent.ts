@@ -79,6 +79,60 @@ import type {
 } from "@/lib/ai/agent/external/session-capabilities"
 import type { ExternalAgentCapabilityProfileV1 } from "@cognia/agent-config-types/external-agent-capability"
 
+interface ResumedInteractions {
+  sessionId: string
+  permissions: AcpPermissionRequest[]
+  elicitations: AcpElicitationRequest[]
+}
+
+function readResumedInteractions(session: ExternalAgentSession): ResumedInteractions {
+  const result: ResumedInteractions = { sessionId: session.id, permissions: [], elicitations: [] }
+  const items = session.metadata?.pendingInteractions
+  if (!Array.isArray(items)) return result
+  for (const item of items) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue
+    if (item.sessionId !== undefined && item.sessionId !== session.id) continue
+    const request = item.request
+    if (
+      !request ||
+      typeof request !== "object" ||
+      Array.isArray(request) ||
+      typeof request.id !== "string" ||
+      !request.id
+    )
+      continue
+    if (request.sessionId !== undefined && request.sessionId !== session.id) continue
+    if (
+      item.type === "permission_request" &&
+      request.toolInfo &&
+      typeof request.toolInfo === "object" &&
+      !Array.isArray(request.toolInfo) &&
+      typeof request.toolInfo.id === "string" &&
+      typeof request.toolInfo.name === "string"
+    ) {
+      if (!result.permissions.some((existing) => existing.id === request.id))
+        result.permissions.push({ ...request, sessionId: session.id } as AcpPermissionRequest)
+    } else if (
+      item.type === "elicitation_request" &&
+      (request.mode === "form" || request.mode === "url") &&
+      typeof request.message === "string" &&
+      request.raw &&
+      typeof request.raw === "object" &&
+      !Array.isArray(request.raw) &&
+      (request.mode === "url"
+        ? typeof request.url === "string" && typeof request.elicitationId === "string"
+        : request.requestedSchema &&
+          typeof request.requestedSchema === "object" &&
+          request.requestedSchema.properties &&
+          typeof request.requestedSchema.properties === "object" &&
+          !Array.isArray(request.requestedSchema.properties))
+    ) {
+      if (!result.elicitations.some((existing) => existing.id === request.id))
+        result.elicitations.push({ ...request, sessionId: session.id } as AcpElicitationRequest)
+    }
+  }
+  return result
+}
 // ============================================================================
 // Validity projection
 // ============================================================================
@@ -447,6 +501,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
   const managerRef = useRef<ExternalAgentManagerType | null>(null)
   const permissionResolveRef = useRef<((response: AcpPermissionResponse) => void) | null>(null)
   const elicitationResolveRef = useRef<((response: AcpElicitationResponse) => void) | null>(null)
+  const resumedInteractionsRef = useRef<ResumedInteractions | null>(null)
   const executingSessionIdRef = useRef<string | null>(null)
   const activeAgentIdRef = useRef<string | null>(activeAgentId)
   const previousActiveAgentIdRef = useRef<string | null>(activeAgentId)
@@ -455,6 +510,44 @@ export function useExternalAgent(): UseExternalAgentReturn {
   const executionInProgressRef = useRef(false)
   const sessionMutationCountRef = useRef(0)
   const providerUndoAcknowledgedRef = useRef(providerUndoAcknowledged)
+
+  const clearResumedInteractions = useCallback(() => {
+    if (!resumedInteractionsRef.current) return
+    resumedInteractionsRef.current = null
+    setPendingPermission(null)
+    setPendingElicitation(null)
+  }, [])
+
+  const advanceResumedInteractions = useCallback(
+    (
+      current: ResumedInteractions,
+      type: "permission" | "elicitation",
+      requestId: string,
+      session?: ExternalAgentSession
+    ) => {
+      if (resumedInteractionsRef.current !== current) return
+      if (session && Array.isArray(session.metadata?.pendingInteractions)) {
+        const updated = readResumedInteractions(session)
+        current.permissions = updated.permissions
+        current.elicitations = updated.elicitations
+      } else if (type === "permission") {
+        current.permissions = current.permissions.filter(
+          (request) => (request.requestId ?? request.id) !== requestId
+        )
+      } else {
+        current.elicitations = current.elicitations.filter((request) => request.id !== requestId)
+      }
+      if (!current.permissions.length && !current.elicitations.length)
+        resumedInteractionsRef.current = null
+      setPendingPermission(current.permissions[0] ?? null)
+      setPendingElicitation(current.elicitations[0] ?? null)
+    },
+    []
+  )
+
+  useEffect(() => {
+    if (resumedInteractionsRef.current?.sessionId !== activeSession?.id) clearResumedInteractions()
+  }, [activeSession?.id, clearResumedInteractions])
 
   useEffect(() => {
     providerUndoAcknowledgedRef.current = providerUndoAcknowledged
@@ -1138,12 +1231,16 @@ export function useExternalAgent(): UseExternalAgentReturn {
   // Set active agent. Routed through `selectExternalAgent` so chat dispatch —
   // which reads the runtime store, not this one — follows the manager's
   // selection instead of staying on whichever agent was picked in the composer.
-  const setActiveAgent = useCallback((agentId: string | null) => {
-    selectExternalAgent(agentId)
-    setActiveSession(null)
-    executingSessionIdRef.current = null
-    setError(null)
-  }, [])
+  const setActiveAgent = useCallback(
+    (agentId: string | null) => {
+      clearResumedInteractions()
+      selectExternalAgent(agentId)
+      setActiveSession(null)
+      executingSessionIdRef.current = null
+      setError(null)
+    },
+    [clearResumedInteractions]
+  )
 
   // Create a new session
   const createSession = useCallback(
@@ -1443,6 +1540,11 @@ export function useExternalAgent(): UseExternalAgentReturn {
         const resumed = await manager.resumeSession(activeAgentId, sessionId, options)
         setActiveSession(resumed)
         executingSessionIdRef.current = resumed.id
+        const interactions = readResumedInteractions(resumed)
+        resumedInteractionsRef.current =
+          interactions.permissions.length || interactions.elicitations.length ? interactions : null
+        setPendingPermission(interactions.permissions[0] ?? null)
+        setPendingElicitation(interactions.elicitations[0] ?? null)
         return resumed
       } catch (err) {
         const unsupported = isExternalAgentSessionExtensionUnsupportedForMethod(
@@ -1676,6 +1778,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
 
   // Cancel execution
   const cancel = useCallback(async (): Promise<void> => {
+    clearResumedInteractions()
     if (abortControllerRef.current) {
       abortControllerRef.current.abort()
     }
@@ -1691,7 +1794,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
     }
 
     setIsExecuting(false)
-  }, [getManager, activeAgentId, activeSession])
+  }, [getManager, activeAgentId, activeSession, clearResumedInteractions])
 
   // Respond to permission request
   const respondToPermission = useCallback(
@@ -1704,6 +1807,8 @@ export function useExternalAgent(): UseExternalAgentReturn {
         return
       }
 
+      const resumedInteractions = resumedInteractionsRef.current
+
       if (activeAgentId && pendingRequest) {
         try {
           const manager = await getManager()
@@ -1712,16 +1817,27 @@ export function useExternalAgent(): UseExternalAgentReturn {
             throw new Error("Unable to resolve external agent session for permission response.")
           }
           await manager.respondToPermission(activeAgentId, sessionId, response)
+          if (resumedInteractions) {
+            advanceResumedInteractions(
+              resumedInteractions,
+              "permission",
+              response.requestId,
+              manager.getSession(activeAgentId, sessionId)
+            )
+            return
+          }
         } catch (err) {
           externalAgentLogger.error("Failed to respond to external agent permission", err)
           setError(getExternalAgentErrorMessage(err))
           storeRecordFailure(describeExternalAgentFailure(activeAgentId, "session", err))
+          if (resumedInteractions) return
         }
       }
 
+      if (resumedInteractions) return
       setPendingPermission(null)
     },
-    [getManager, activeAgentId, pendingPermission, storeRecordFailure]
+    [getManager, activeAgentId, pendingPermission, storeRecordFailure, advanceResumedInteractions]
   )
 
   /**
@@ -1741,20 +1857,33 @@ export function useExternalAgent(): UseExternalAgentReturn {
         return
       }
 
+      const resumedInteractions = resumedInteractionsRef.current
+
       if (activeAgentId) {
         try {
           const manager = await getManager()
           await manager.respondToElicitation(activeAgentId, response)
+          if (resumedInteractions) {
+            advanceResumedInteractions(
+              resumedInteractions,
+              "elicitation",
+              response.requestId,
+              manager.getSession(activeAgentId, resumedInteractions.sessionId)
+            )
+            return
+          }
         } catch (err) {
           externalAgentLogger.error("Failed to respond to external agent elicitation", err)
           setError(getExternalAgentErrorMessage(err))
           storeRecordFailure(describeExternalAgentFailure(activeAgentId, "session", err))
+          if (resumedInteractions) return
         }
       }
 
+      if (resumedInteractions) return
       setPendingElicitation(null)
     },
-    [getManager, activeAgentId, storeRecordFailure]
+    [getManager, activeAgentId, storeRecordFailure, advanceResumedInteractions]
   )
 
   const setSessionMode = useCallback(
