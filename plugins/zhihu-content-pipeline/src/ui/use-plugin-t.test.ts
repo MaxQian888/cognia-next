@@ -10,7 +10,7 @@ jest.mock("next-intl", () => ({ useLocale: jest.fn() }))
 const mockLocale = useLocale as jest.Mock
 
 describe("usePluginT", () => {
-  it("resolves keys in the active locale with the plugin prefix", () => {
+  it("resolves unprefixed keys in the active locale", () => {
     mockLocale.mockReturnValue("zh-CN")
     const { result } = renderHook(() => usePluginT())
     expect(result.current("review.title")).toBe("知乎流水线 — 审阅")

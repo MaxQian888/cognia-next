@@ -21,7 +21,30 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "permissions": ["session:write"],
+  "permissions": [
+    "session:write",
+    "agent:control",
+    "agent:dispatch",
+    "extension:workflow",
+    "extension:ui",
+    "commands:write"
+  ],
+  "permissionJustifications": {
+    "session:write": "Starts a Writer-character chat session seeded with the selected topic when you pick one in the /zhihu review panel.",
+    "agent:control": "Contributes the five Zhihu role characters, six inline playbook skills, and four MCP server presets.",
+    "agent:dispatch": "Contributes the 知乎写作小组 agent-team template (research → write → polish).",
+    "extension:workflow": "Contributes the save-topics workflow node and the 知乎选题候选 daily workflow template.",
+    "extension:ui": "Opens the /zhihu topic-review modal.",
+    "commands:write": "Provides the /zhihu slash command."
+  },
+  "requires": {
+    "binaries": [
+      {
+        "name": "zget",
+        "documentation": "https://www.npmjs.com/package/zget-cli"
+      }
+    ]
+  },
   "activationEvents": ["startup", "onCommand:zhihu"],
   "dexie": {
     "tables": [
@@ -30,20 +53,68 @@
       { "name": "drafts", "schema": "&id, topicId, status, createdAt" }
     ]
   },
+  "tools": [
+    {
+      "name": "zhihu_save_research",
+      "description": "保存一条知乎调研笔记到流水线数据库（可引用的事实/数据/案例/来源）。供调研员使用。",
+      "category": "zhihu",
+      "access": "write",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "topicId": { "type": "string", "description": "关联的选题 id（可选）" },
+          "kind": {
+            "type": "string",
+            "description": "笔记类型：fact | data | case | source 等"
+          },
+          "content": { "type": "string", "description": "笔记正文（提取出的事实/数据/案例）" },
+          "sourceUrl": { "type": "string", "description": "来源链接（可溯源）" }
+        },
+        "required": ["kind", "content"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "zhihu_save_draft",
+      "description": "把一篇知乎回答终稿（Markdown + 配图）存为草稿到流水线数据库。供写手/润色师在终稿确认后使用。默认仅存草稿，不发布。",
+      "category": "zhihu",
+      "access": "write",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "topicId": { "type": "string", "description": "关联的选题 id（可选）" },
+          "title": { "type": "string", "description": "回答标题/选题" },
+          "markdownBody": { "type": "string", "description": "终稿正文（Markdown）" },
+          "images": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "配图文件路径或来源链接（可选）"
+          }
+        },
+        "required": ["title", "markdownBody"],
+        "additionalProperties": false
+      }
+    }
+  ],
   "runtimeCompatibility": {
     "browser": {
-      "availability": "supported",
+      "availability": "degraded",
       "entrypoint": "src/index.ts",
-      "reason": "Characters, skills, and MCP presets load in the browser; spawning the MCP servers (zget / browser) requires the Tauri sidecar."
+      "reason": "Characters, skills, MCP presets, and the review modal load in the browser, but the daily topic workflow's terminal node (zget) and MCP server spawning need the Tauri desktop shell."
     },
     "tauri": {
       "availability": "supported",
       "entrypoint": "src/index.ts"
     },
+    "headless": {
+      "availability": "degraded",
+      "entrypoint": "src/index.ts",
+      "reason": "No renderer: the /zhihu modal, seeded-session UI handoff, and the terminal-node workflow cannot run; characters, skills, tools, and presets still contribute."
+    },
     "mobile": {
       "availability": "degraded",
       "entrypoint": "src/index.ts",
-      "reason": "Characters and skills load on mobile; spawning the MCP servers (zget / browser) needs the desktop sidecar."
+      "reason": "Characters and skills load on mobile; the terminal-node workflow and MCP server spawning (zget / browser) need the desktop sidecar."
     }
   },
   "commands": [

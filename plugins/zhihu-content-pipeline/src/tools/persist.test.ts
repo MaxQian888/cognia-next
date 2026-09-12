@@ -1,6 +1,5 @@
 import { makePersistTools } from "./persist"
 import { TABLES } from "../db/tables"
-import { PLUGIN_ID } from "../ids"
 import type { PluginDexieAPI } from "@cognia/plugin-sdk"
 function fakeDexie() {
   const tables: Record<string, Record<string, jest.Mock>> = {
@@ -19,8 +18,13 @@ describe("makePersistTools", () => {
     const tools = makePersistTools(fakeDexie().dexie)
     expect(tools.map((t) => t.name)).toEqual(["zhihu_save_research", "zhihu_save_draft"])
     for (const t of tools) {
-      expect(t.pluginId).toBe(PLUGIN_ID)
+      // pluginId is host-assigned from the activated context — the plugin must
+      // NOT set it on the registration.
+      expect(t).not.toHaveProperty("pluginId")
       expect(t.definition.name).toBe(t.name)
+      // Metadata mirrors the manifest `tools[]` rows in plugin.json.
+      expect(t.definition.category).toBe("zhihu")
+      expect(t.definition.access).toBe("write")
       expect(t.definition.parametersSchema).toHaveProperty("type", "object")
     }
   })

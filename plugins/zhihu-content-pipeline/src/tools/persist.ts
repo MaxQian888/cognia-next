@@ -4,25 +4,32 @@
  * so these `ctx.agent.registerTool` tools close over the `PluginDexieAPI`
  * handle captured in `activate()` and write through `createPipelineDb`.
  *
+ * The same rows are declared on `manifest.tools` in plugin.json (the
+ * `tools` capability's host-executed manifest contribution) so the pair is
+ * discoverable before activation; `activate()` registers these executable
+ * halves. `pluginId` is intentionally unset — the host assigns ownership
+ * from the activated context and never trusts a caller-provided value.
+ *
  * Exposed to the agent via the `cognia-plugin-tools` MCP bridge
  * (`lib/claude/build-options.ts:buildPluginToolsManifest`).
  */
 
-import type { PluginDexieAPI, PluginTool } from "@cognia/plugin-sdk"
-import { PLUGIN_ID } from "../ids"
+import { definePluginTool } from "@cognia/plugin-sdk"
+import type { PluginDexieAPI, PluginToolRegistration } from "@cognia/plugin-sdk"
 import { createPipelineDb } from "../db/tables"
 
 /** Build the two persistence tools bound to a live Dexie handle. */
-export function makePersistTools(dexie: PluginDexieAPI): PluginTool[] {
+export function makePersistTools(dexie: PluginDexieAPI): PluginToolRegistration[] {
   const db = createPipelineDb(dexie)
 
-  const saveResearch: PluginTool = {
+  const saveResearch = definePluginTool({
     name: "zhihu_save_research",
-    pluginId: PLUGIN_ID,
     definition: {
       name: "zhihu_save_research",
       description:
         "保存一条知乎调研笔记到流水线数据库（可引用的事实/数据/案例/来源）。供调研员使用。",
+      category: "zhihu",
+      access: "write",
       parametersSchema: {
         type: "object",
         properties: {
@@ -47,15 +54,16 @@ export function makePersistTools(dexie: PluginDexieAPI): PluginTool[] {
       })
       return { ok: true, id: row.id }
     },
-  }
+  })
 
-  const saveDraft: PluginTool = {
+  const saveDraft = definePluginTool({
     name: "zhihu_save_draft",
-    pluginId: PLUGIN_ID,
     definition: {
       name: "zhihu_save_draft",
       description:
         "把一篇知乎回答终稿（Markdown + 配图）存为草稿到流水线数据库。供写手/润色师在终稿确认后使用。默认仅存草稿，不发布。",
+      category: "zhihu",
+      access: "write",
       parametersSchema: {
         type: "object",
         properties: {
@@ -81,7 +89,7 @@ export function makePersistTools(dexie: PluginDexieAPI): PluginTool[] {
       })
       return { ok: true, id: row.id, status: row.status }
     },
-  }
+  })
 
   return [saveResearch, saveDraft]
 }

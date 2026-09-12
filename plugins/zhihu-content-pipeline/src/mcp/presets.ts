@@ -4,8 +4,10 @@
  * These populate the "Add server" gallery alongside the static `MCP_PRESETS`
  * (same `config` shape: stdio → { command, args, env }; `fields` let the user
  * fill secrets / arg tokens). The host can't bundle the actual executables, so
- * the user installs them once (the SetupCheck panel guides this); the plugin
- * only ships the presets, all `npx`/`uvx`-spawnable.
+ * the user installs them once; the plugin only ships the presets, all
+ * `npx`/`uvx`-spawnable. The external `zget` binary is declared in
+ * `manifest.requires.binaries` so the host can detect it and surface the
+ * install help at enable time.
  *
  * zget is deliberately NOT an MCP preset: it has no native MCP server, and a
  * built-in plugin's `ctx.pluginPath` is a `builtin://` URL (not a disk path),
