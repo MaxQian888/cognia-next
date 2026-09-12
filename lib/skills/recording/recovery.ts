@@ -23,6 +23,8 @@ export type LocalRecordingStatus =
 
 export interface LocalRecordingRow {
   id: RecordingId
+  /** The bundle this row is edits-over — `id` for first-generation rows. */
+  bundleId?: RecordingId
   status: LocalRecordingStatus
   updatedAt: number
   source?: { kind: "session" | "run" }
@@ -90,7 +92,10 @@ export function orphanedBundles(
   bundles: readonly RecoverableBundle[],
   rows: readonly LocalRecordingRow[]
 ): RecoverableBundle[] {
-  const known = new Set(rows.map((row) => row.id))
+  // A forked row keeps `bundleId` pointing at the shared capture while its own
+  // `id` is fresh — matching on `id` alone would call a still-referenced bundle
+  // an orphan.
+  const known = new Set(rows.map((row) => row.bundleId ?? row.id))
   return bundles.filter((bundle) => !known.has(bundle.recordingId))
 }
 
@@ -105,5 +110,11 @@ export function danglingRows(
   bundles: readonly RecoverableBundle[]
 ): LocalRecordingRow[] {
   const present = new Set(bundles.map((bundle) => bundle.recordingId))
-  return rows.filter((row) => !row.source && row.status !== "saved" && !present.has(row.id))
+  return rows.filter(
+    (row) =>
+      !row.source &&
+      row.status !== "saved" &&
+      row.status !== "discarded" &&
+      !present.has(row.bundleId ?? row.id)
+  )
 }

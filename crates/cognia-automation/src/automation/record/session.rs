@@ -77,6 +77,11 @@ pub struct RecordStatus {
     pub scope: Option<CaptureScope>,
     #[serde(default)]
     pub usage: Vec<LimitUsage>,
+    /// The clamped limits this session runs under. `record_start` returns this
+    /// status, so carrying the limits here is what lets the renderer rebuild a
+    /// "started" snapshot even if the `started` event never reached it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limits: Option<RecordLimits>,
 }
 
 impl RecordStatus {
@@ -89,6 +94,7 @@ impl RecordStatus {
             started_at: None,
             scope: None,
             usage: Vec::new(),
+            limits: None,
         }
     }
 }
@@ -190,6 +196,9 @@ struct ActiveSession {
     scope: CaptureScope,
     step_count: Arc<AtomicU32>,
     usage: Arc<Mutex<Vec<LimitUsage>>>,
+    /// The clamped limits, kept for `status()` — the drain loop owns the
+    /// tracker, but a status answer must be able to report them too.
+    limits: RecordLimits,
     /// `None` while paused — dropping the subscription is what synchronously
     /// stops the shared hub from queueing any further event for this recorder.
     subscription: Option<InputSubscription>,
@@ -209,6 +218,7 @@ impl ActiveSession {
             started_at: Some(self.started_at),
             scope: Some(self.scope.clone()),
             usage: self.usage.lock().clone(),
+            limits: Some(self.limits),
         }
     }
 }
@@ -345,6 +355,7 @@ impl RecorderState {
             scope: cfg.scope.scope.clone(),
             step_count,
             usage,
+            limits: manifest.limits,
             subscription: Some(subscription),
             input_monitor: cfg.input_monitor,
             ctrl: ctrl_tx,
@@ -1180,6 +1191,7 @@ mod tests {
             started_at: Some(99),
             scope: Some(CaptureScope::Desktop),
             usage: vec![],
+            limits: Some(RecordLimits::default()),
         };
         let json = serde_json::to_string(&st).unwrap();
         assert!(json.contains("\"stepCount\":2"));
@@ -1194,6 +1206,10 @@ mod tests {
         let h = Harness::start();
         assert!(h.state.is_recording());
         assert_eq!(h.state.status().phase, Some(Phase::Recording));
+        // `record_start`'s return must carry the effective limits — the
+        // renderer rebuilds its "started" snapshot from this status if the
+        // event was dropped on the way.
+        assert_eq!(h.state.status().limits, Some(RecordLimits::default()));
         assert!(journal::read_manifest(&assets::bundle_dir(h.root.path(), &h.id)).is_ok());
         assert_eq!(h.kinds(), vec!["started"]);
     }

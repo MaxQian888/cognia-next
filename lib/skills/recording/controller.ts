@@ -18,6 +18,7 @@ import { toast } from "sonner"
 import {
   checkpointRecording,
   createRecording,
+  deleteRecording,
   getRecording,
   listUnfinishedRecordings,
   setRecordingStatus,
@@ -32,6 +33,7 @@ import { deriveInputVariables, mergeInputVariables } from "./input-variables"
 import { saveRecordedSkill } from "./persist-recorded-skill"
 import {
   onRecordEvent,
+  recordDeleteBundle,
   recordListRecoverable,
   recordLoadBundle,
   recordPause,
@@ -43,7 +45,7 @@ import {
   recordStop,
   recordUndoLast,
 } from "./recorder-client"
-import { reconcileOnStartup } from "./recovery"
+import { reconcileOnStartup, type RecoveryPlan } from "./recovery"
 import { hasLiveCapture } from "./state-machine"
 import { includedSteps, selectedScreenshotIds } from "./step-model"
 import { collectRegisteredToolNames } from "./tool-catalog"
@@ -191,14 +193,31 @@ export function detachNativeEvents(): void {
   unsubscribe = null
 }
 
+/**
+ * Bring the Sheet back when a capture ended while it was hidden.
+ *
+ * Dismissing the Sheet mid-capture is a supported path — the floating strip
+ * is the surface while a recording runs. But the strip is destroyed when the
+ * session ends, so a `stopped` or `interrupted` event with the Sheet closed
+ * would otherwise leave the user with nothing: no review, no banner, and no
+ * sign the capture even stopped.
+ */
+function resurfaceSheet(): void {
+  const state = store()
+  if (state.sheetOpen || state.phase === "idle") return
+  state.dispatch({ type: "OPEN", source: "recovery" })
+}
+
 async function finishFromBundle(recordingId: RecordingId): Promise<void> {
   const bundle = await recordLoadBundle(recordingId).catch(() => null)
   const state = store()
   if (!bundle) {
     state.dispatch({ type: "INTERRUPT", reason: "nativeFailure" })
+    resurfaceSheet()
     return
   }
   applyBundle(bundle.steps, bundle.ignoredCount, recordingId, bundle.totalBytes)
+  resurfaceSheet()
 }
 
 function applyBundle(
@@ -209,14 +228,25 @@ function applyBundle(
 ): void {
   const state = store()
   state.setCapturedSteps(steps)
-  state.dispatch({ type: "STOPPED", steps, ignoredCount, bundleId })
+  // `stopped` reaches us twice on the Sheet path — as the event and as
+  // `record_stop`'s return — and an interrupt can beat a stop that was already
+  // in flight. Dispatch only where the transition exists; the steps above are
+  // in place either way, and a second `STOPPED` would only warn.
+  if (state.phase === "stopping" || state.phase === "recording" || state.phase === "paused") {
+    state.dispatch({ type: "STOPPED", steps, ignoredCount, bundleId, bundleBytes })
+  }
 
   // Variable suggestions are re-derived whenever the timeline changes, but a
   // confirmation the user already gave survives — otherwise editing one step
   // would silently un-answer every question they had already answered.
   const derived = deriveInputVariables(store().steps)
   const merged = mergeInputVariables(derived, store().inputVariables)
-  store().dispatch({ type: "SET_VARIABLES", variables: merged })
+  const after = store()
+  // `SET_VARIABLES` exists only on the review side of the line — not while a
+  // capture or an interrupt still owns the surface.
+  if (after.phase === "review" || after.phase === "generating" || after.phase === "draft") {
+    after.dispatch({ type: "SET_VARIABLES", variables: merged })
+  }
 
   if (state.recordingId) {
     void checkpointRecording(state.recordingId, {
@@ -229,11 +259,19 @@ function applyBundle(
 }
 
 async function handleInterrupt(recordingId: RecordingId, reason: InterruptReason): Promise<void> {
-  store().dispatch({ type: "INTERRUPT", reason })
+  // Read the phase BEFORE dispatching — afterwards it reads "interrupted",
+  // which is what the row would otherwise persist as `from`.
+  const from = store().phase
+  if (from !== "interrupted") {
+    store().dispatch({ type: "INTERRUPT", reason })
+  }
   await checkpointRecording(recordingId, {
     status: "interrupted",
-    interrupt: { reason, from: store().phase, at: Date.now() },
+    interrupt: { reason, from, at: Date.now() },
   }).catch(() => undefined)
+  // `appShutdown` is exempt: the process is leaving, and the next launch's
+  // startup recovery is the surface.
+  if (reason !== "appShutdown") resurfaceSheet()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -289,11 +327,32 @@ export async function startRecording(scope: CaptureScope): Promise<boolean> {
   await createRecording({ id: recordingId }).catch(() => undefined)
 
   try {
-    await recordStart({
+    const status = await recordStart({
       recordingId,
       scope,
       captureScreenshots: state.options.captureScreenshots,
     })
+    // `record_start` returns the session's own status — if the `started` event
+    // never reached this window (the listener was still registering), rebuild
+    // the same snapshot from it rather than sitting in "preflight" while the
+    // native session runs.
+    const after = store()
+    if (
+      after.phase === "preflight" &&
+      status.recording &&
+      status.recordingId &&
+      status.startedAt !== undefined &&
+      status.scope &&
+      status.limits
+    ) {
+      after.dispatch({
+        type: "NATIVE_STARTED",
+        recordingId: status.recordingId,
+        startedAt: status.startedAt,
+        scope: status.scope,
+        limits: status.limits,
+      })
+    }
     return true
   } catch (error) {
     await setRecordingStatus(recordingId, "discarded").catch(() => undefined)
@@ -331,6 +390,9 @@ export async function stopRecording(): Promise<void> {
     store().dispatch({ type: "INTERRUPT", reason: "nativeFailure" })
     toast.error(error instanceof Error ? error.message : String(error))
   }
+  // The Sheet path has it open already; the no-op case is exactly the point —
+  // this also fires when the stop was asked for from a hidden Sheet.
+  resurfaceSheet()
 }
 
 /** Read a frame, through the cache. */
@@ -383,7 +445,22 @@ export async function generate(options: GenerateOptions): Promise<boolean> {
   const state = store()
   if (!state.dispatch({ type: "GENERATE_REQUESTED" })) return false
 
-  const envelope = await buildEnvelope(options.locale)
+  // The envelope build sits between GENERATE_REQUESTED and the try — a throw
+  // there would leave the phase parked in "generating" with no legal way back.
+  let envelope: GenerationEnvelope
+  try {
+    envelope = await buildEnvelope(options.locale)
+  } catch (error) {
+    store().dispatch({
+      type: "GENERATE_FAILED",
+      error: {
+        code: "generationFailed",
+        detail: error instanceof Error ? error.message : String(error),
+        retriable: true,
+      },
+    })
+    return false
+  }
   if (!options.client) {
     store().dispatch({
       type: "GENERATE_FAILED",
@@ -492,7 +569,7 @@ export async function saveSkill(altFor: (index: number) => string): Promise<stri
       generation: state.generation,
       stepCount: state.capturedSteps.length,
       includedCount: includedSteps(state.steps).length,
-      bundleBytes: 0,
+      bundleBytes: state.bundleBytes ?? 0,
     })
     store().dispatch({ type: "SAVED", skillId })
     return skillId
@@ -559,14 +636,18 @@ export async function confirmTrialAndEnable(skillId: string): Promise<void> {
  * Nothing is auto-deleted and nothing is auto-resumed: a recording the user has
  * not seen is not ours to discard, and silently rejoining one they thought had
  * ended would be worse.
+ *
+ * Returns the plan so the caller can surface the offer — the reattach itself
+ * does not open the Sheet (startup must not pop a panel), and without a
+ * user-visible nudge the "offer" would exist only in the store.
  */
-export async function recoverOnStartup(): Promise<void> {
+export async function recoverOnStartup(): Promise<RecoveryPlan | null> {
   const [native, rows, bundles] = await Promise.all([
     recordStatus().catch(() => null),
     listUnfinishedRecordings().catch(() => []),
     recordListRecoverable().catch(() => []),
   ])
-  if (!native) return
+  if (!native) return null
 
   const plan = reconcileOnStartup(native, rows, bundles)
   const state = store()
@@ -607,6 +688,7 @@ export async function recoverOnStartup(): Promise<void> {
             phase: row.draft ? "draft" : "review",
             recordingId: row.id,
             bundleId: row.bundleId,
+            bundleBytes: row.bundleBytes || null,
             startedAt: row.createdAt,
             scope: null,
             inputVariables: row.inputVariables,
@@ -616,16 +698,17 @@ export async function recoverOnStartup(): Promise<void> {
         break
       }
       const bundle = await recordLoadBundle(plan.recordingId).catch(() => null)
-      if (!bundle) return
+      if (!bundle) break
       state.setCapturedSteps(bundle.steps)
       if (row?.edits) state.setEdits(row.edits)
       state.dispatch({
         type: "REATTACH",
         snapshot: {
           ...store(),
-          phase: "review",
+          phase: row?.draft ? "draft" : "review",
           recordingId: plan.recordingId,
           bundleId: bundle.manifest.recordingId,
+          bundleBytes: bundle.totalBytes,
           startedAt: bundle.manifest.startedAt,
           scope: bundle.manifest.scope,
           ignoredCount: bundle.ignoredCount,
@@ -638,6 +721,126 @@ export async function recoverOnStartup(): Promise<void> {
     case "none":
       break
   }
+  return plan
+}
+
+/**
+ * Pick a recoverable recording back up — the one decision the recoverable list
+ * and the startup offer both land on.
+ *
+ * Refuses while a session is in flight: `REATTACH` replaces the snapshot
+ * wholesale, and clobbering a live capture's state to show an old bundle would
+ * strand the running session behind the strip alone.
+ */
+export async function resumeRecoverable(recordingId: RecordingId): Promise<boolean> {
+  const phase = store().phase
+  if (phase !== "idle" && phase !== "setup") return false
+
+  const row = await getRecording(recordingId).catch(() => undefined)
+
+  // Session/run-sourced rows carry no bundle; the row itself is the resume.
+  if (row?.source) {
+    const state = store()
+    state.setCapturedSteps([])
+    state.setEdits(row.edits)
+    state.dispatch({
+      type: "REATTACH",
+      snapshot: {
+        ...state,
+        phase: row.draft ? "draft" : "review",
+        recordingId: row.id,
+        bundleId: row.bundleId,
+        bundleBytes: row.bundleBytes || null,
+        startedAt: row.createdAt,
+        scope: null,
+        inputVariables: row.inputVariables,
+        draft: row.draft ?? null,
+      },
+    })
+    state.dispatch({ type: "OPEN", source: "recovery" })
+    return true
+  }
+
+  const bundle = await recordLoadBundle(recordingId).catch(() => null)
+  if (!bundle) return false
+
+  // A bundle with no row (a crash can outrun the Dexie write) gets one now —
+  // the same "adopt" rule startup applies to a live session.
+  const ensured =
+    row ??
+    (await createRecording({
+      id: bundle.manifest.recordingId,
+      bundleId: bundle.manifest.recordingId,
+      status: "captured",
+    })
+      .then(async (created) => {
+        await checkpointRecording(created.id, {
+          stepCount: bundle.steps.length + bundle.ignoredCount,
+          includedCount: bundle.steps.length,
+          ignoredCount: bundle.ignoredCount,
+          bundleBytes: bundle.totalBytes,
+          ...(bundle.interrupted
+            ? {
+                interrupt: {
+                  reason: bundle.interruptReason ?? "nativeFailure",
+                  from: "recording",
+                  at: Date.now(),
+                },
+              }
+            : {}),
+        }).catch(() => undefined)
+        return created
+      })
+      .catch(() => undefined))
+
+  const state = store()
+  state.setCapturedSteps(bundle.steps)
+  if (ensured?.edits) state.setEdits(ensured.edits)
+  state.dispatch({
+    type: "REATTACH",
+    snapshot: {
+      ...state,
+      phase: ensured?.draft ? "draft" : "review",
+      recordingId,
+      bundleId: bundle.manifest.recordingId,
+      bundleBytes: bundle.totalBytes,
+      startedAt: bundle.manifest.startedAt,
+      scope: bundle.manifest.scope,
+      ignoredCount: bundle.ignoredCount,
+      inputVariables: ensured?.inputVariables ?? [],
+      draft: ensured?.draft ?? null,
+    },
+  })
+  state.dispatch({ type: "OPEN", source: "recovery" })
+  return true
+}
+
+/**
+ * Throw a recoverable recording away — the row goes with it. "Discard" is the
+ * user's explicit deletion act, the one place a bundle is destroyed on request.
+ */
+export async function discardRecoverable(recordingId: RecordingId): Promise<void> {
+  const row = await getRecording(recordingId).catch(() => undefined)
+  if (row) {
+    await deleteRecording(recordingId, { deleteBundle: true }).catch(() => undefined)
+    return
+  }
+  // No row — just the bundle.
+  await recordDeleteBundle(recordingId).catch(() => undefined)
+}
+
+/**
+ * The interrupt banner's "discard": close the flow, mark the row, and delete
+ * the bundle — otherwise a "discarded" recording would still occupy disk and
+ * resurface in the recoverable list forever.
+ */
+export async function discardInterrupted(): Promise<void> {
+  const state = store()
+  const id = state.recordingId
+  const bundleId = state.bundleId
+  state.dispatch({ type: "CLOSE" })
+  if (id) await setRecordingStatus(id, "discarded").catch(() => undefined)
+  if (bundleId) await recordDeleteBundle(bundleId).catch(() => undefined)
 }
 
 /** Category ids, for the setup and draft pickers. */

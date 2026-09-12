@@ -134,6 +134,8 @@ export interface RecorderSnapshot {
   phase: RecorderPhase
   recordingId: RecordingId | null
   bundleId: RecordingId | null
+  /** Size of the sealed bundle — known only after `stopped` lands. */
+  bundleBytes: number | null
   startedAt: number | null
   scope: CaptureScope | null
   limits: RecordLimits | null
@@ -158,6 +160,7 @@ export const INITIAL_SNAPSHOT: RecorderSnapshot = {
   phase: "idle",
   recordingId: null,
   bundleId: null,
+  bundleBytes: null,
   startedAt: null,
   scope: null,
   limits: null,
@@ -195,7 +198,13 @@ export type RecorderEvent =
   | { type: "RESUME" }
   | { type: "UNDONE"; seq: number }
   | { type: "STOP_REQUESTED" }
-  | { type: "STOPPED"; steps: RecordedStep[]; ignoredCount: number; bundleId: RecordingId }
+  | {
+      type: "STOPPED"
+      steps: RecordedStep[]
+      ignoredCount: number
+      bundleId: RecordingId
+      bundleBytes: number
+    }
   | { type: "EDIT_STEPS"; edits: StepEdits }
   | { type: "SET_VARIABLES"; variables: InputVariable[] }
   | { type: "GENERATE_REQUESTED" }
@@ -373,6 +382,7 @@ export function reduceRecorder(
         ...state,
         phase: "review",
         bundleId: event.bundleId,
+        bundleBytes: event.bundleBytes,
         ignoredCount: event.ignoredCount,
       }
 

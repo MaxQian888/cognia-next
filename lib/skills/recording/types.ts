@@ -203,6 +203,9 @@ export interface RecordStatus {
   startedAt?: number
   scope?: CaptureScope
   usage: LimitUsage[]
+  /** The clamped limits a live session runs under — present so `record_start`'s
+   * return alone can rebuild the "started" snapshot if its event was lost. */
+  limits?: RecordLimits
 }
 
 /** Base64 frame, fetched on demand. */
