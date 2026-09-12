@@ -42,6 +42,30 @@ describe("fromRawWorkspaceEntry", () => {
 })
 
 describe("fromRawWorkspaceStat", () => {
+  it("preserves file mode and symlink identity for immutable patch capture", () => {
+    expect(
+      fromRawWorkspaceStat({
+        exists: true,
+        is_dir: false,
+        size: 42,
+        mode: 0o100755,
+        is_symlink: false,
+      })
+    ).toMatchObject({ mode: 0o100755, isSymlink: false })
+    expect(
+      fromRawWorkspaceStat({
+        exists: true,
+        is_dir: false,
+        size: 3,
+        mode: 0o120777,
+        is_symlink: true,
+      })
+    ).toMatchObject({ mode: 0o120777, isSymlink: true })
+    expect(
+      fromRawWorkspaceStat({ exists: false, is_dir: false, size: 0, mode: null, is_symlink: null })
+    ).not.toHaveProperty("mode")
+  })
+
   it("converts an existing-file stat to camelCase", () => {
     expect(
       fromRawWorkspaceStat({

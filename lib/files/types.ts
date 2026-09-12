@@ -53,6 +53,10 @@ export interface WorkspaceStat {
   isDir: boolean
   size: number
   mtimeMs: number | null
+  /** Unix st_mode, including file type bits; absent on hosts without Unix modes. */
+  mode?: number
+  /** Metadata describes the path itself, not its symlink target. */
+  isSymlink?: boolean
 }
 
 /** Raw shape from the Rust `fs_stat_workspace_file` command (snake_case). */
@@ -61,6 +65,8 @@ export interface RawWorkspaceStat {
   is_dir: boolean
   size: number
   mtime_ms?: number | null
+  mode?: number | null
+  is_symlink?: boolean | null
 }
 
 export function fromRawWorkspaceStat(raw: RawWorkspaceStat): WorkspaceStat {
@@ -69,6 +75,8 @@ export function fromRawWorkspaceStat(raw: RawWorkspaceStat): WorkspaceStat {
     isDir: raw.is_dir,
     size: raw.size,
     mtimeMs: raw.mtime_ms ?? null,
+    ...(raw.mode != null ? { mode: raw.mode } : {}),
+    ...(raw.is_symlink != null ? { isSymlink: raw.is_symlink } : {}),
   }
 }
 

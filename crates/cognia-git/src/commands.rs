@@ -340,8 +340,15 @@ pub async fn git_fetch(
     repo_path: String,
     remote: Option<String>,
     prune: bool,
+    refspec: Option<String>,
 ) -> Result<(), GitError> {
-    remote::fetch(&repo_path, remote.as_deref(), prune).await
+    match refspec {
+        Some(revision) => {
+            remote::fetch_revision(&repo_path, remote.as_deref().unwrap_or("origin"), &revision)
+                .await
+        }
+        None => remote::fetch(&repo_path, remote.as_deref(), prune).await,
+    }
 }
 
 #[tauri::command]

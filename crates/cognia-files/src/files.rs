@@ -593,6 +593,12 @@ pub struct WorkspaceStat {
     pub is_dir: bool,
     pub size: u64,
     pub mtime_ms: Option<u64>,
+    /// Unix st_mode (file type plus permission bits). Omitted on other platforms.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<u32>,
+    /// lstat identity: a symlink is never silently reported as its target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_symlink: Option<bool>,
 }
 
 /// Milliseconds-since-epoch of a file's mtime, or `None` when unavailable.
@@ -1205,18 +1211,32 @@ pub fn fs_stat_workspace_file(root: String, rel_path: String) -> Result<Workspac
             root_path.display()
         ));
     }
-    match std::fs::metadata(&target) {
+    match std::fs::symlink_metadata(&target) {
         Ok(meta) => Ok(WorkspaceStat {
             exists: true,
             is_dir: meta.is_dir(),
             size: if meta.is_dir() { 0 } else { meta.len() },
             mtime_ms: mtime_ms_of(&meta),
+            mode: {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::MetadataExt;
+                    Some(meta.mode())
+                }
+                #[cfg(not(unix))]
+                {
+                    None
+                }
+            },
+            is_symlink: Some(meta.file_type().is_symlink()),
         }),
         Err(_) => Ok(WorkspaceStat {
             exists: false,
             is_dir: false,
             size: 0,
             mtime_ms: None,
+            mode: None,
+            is_symlink: None,
         }),
     }
 }
@@ -2794,6 +2814,7 @@ mod tests {
         assert!(file.exists && !file.is_dir);
         assert_eq!(file.size, 5);
         assert!(file.mtime_ms.is_some());
+        assert_eq!(file.is_symlink, Some(false));
 
         let dir = fs_stat_workspace_file(root.to_string_lossy().to_string(), "d".into()).unwrap();
         assert!(dir.exists && dir.is_dir);
@@ -2801,10 +2822,43 @@ mod tests {
         let missing =
             fs_stat_workspace_file(root.to_string_lossy().to_string(), "nope.txt".into()).unwrap();
         assert!(!missing.exists);
+        assert_eq!(missing.mode, None);
+        assert_eq!(missing.is_symlink, None);
 
         let escape =
             fs_stat_workspace_file(root.to_string_lossy().to_string(), "../../etc/hosts".into());
         assert!(escape.is_err(), "traversal must be rejected");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stat_workspace_file_preserves_executable_mode_and_symlink_identity() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let root = make_sandbox("stat-mode");
+        let file = root.join("run.sh");
+        std::fs::write(&file, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let executable =
+            fs_stat_workspace_file(root.to_string_lossy().to_string(), "run.sh".into()).unwrap();
+        assert_eq!(executable.mode.unwrap() & 0o177777, 0o100755);
+        let wire = serde_json::to_value(&executable).unwrap();
+        assert_eq!(wire["mode"], 0o100755);
+        assert_eq!(wire["is_symlink"], false);
+
+        symlink("run.sh", root.join("link.sh")).unwrap();
+        let link =
+            fs_stat_workspace_file(root.to_string_lossy().to_string(), "link.sh".into()).unwrap();
+        assert_eq!(link.is_symlink, Some(true));
+        assert_eq!(link.mode.unwrap() & 0o170000, 0o120000);
+        assert_eq!(link.size, 6);
+
+        symlink("missing.sh", root.join("dangling.sh")).unwrap();
+        let dangling =
+            fs_stat_workspace_file(root.to_string_lossy().to_string(), "dangling.sh".into())
+                .unwrap();
+        assert!(dangling.exists);
+        assert_eq!(dangling.is_symlink, Some(true));
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -19,7 +19,14 @@ jest.mock("@/lib/platform/detect", () => ({
   // `hasHostRuntime()` resolves the host PROFILE, which reads the platform, so
   // this mock has to answer consistently with the flags above. A partial mock
   // left `detectPlatform` undefined and the profile resolver threw.
-  detectPlatform: () => (isTauriMock() ? "tauri" : isCapacitorMock() ? "mobile" : "web"),
+  detectPlatform: () =>
+    (globalThis as Record<string, unknown>).__COGNIA_HEADLESS__
+      ? "headless"
+      : isTauriMock()
+        ? "tauri"
+        : isCapacitorMock()
+          ? "mobile"
+          : "web",
 }))
 
 jest.mock("@/lib/platform/web-companion", () => ({
@@ -592,6 +599,13 @@ describe("when in Tauri", () => {
   })
 
   it("network ops", async () => {
+    await gitFetch("/r", "origin", false, "a".repeat(40))
+    expect(callMock).toHaveBeenCalledWith("git_fetch", {
+      repoPath: "/r",
+      remote: "origin",
+      prune: false,
+      refspec: "a".repeat(40),
+    })
     await gitFetch("/r", "origin", true)
     expect(callMock).toHaveBeenCalledWith("git_fetch", {
       repoPath: "/r",
@@ -738,4 +752,28 @@ describe("every git command this module calls has a descriptor", () => {
   it("has no wrapper whose command is missing from the manifest", () => {
     expect(called.filter((command) => !described.has(command))).toEqual([])
   })
+})
+
+it("allows physical Git roots only inside the headless execution host, retaining paired-client checks", async () => {
+  isTauriMock.mockReturnValue(false)
+  ;(globalThis as Record<string, unknown>).__COGNIA_HEADLESS__ = true
+  try {
+    await gitFetch("/host/workspaces/bot-run", "origin", false, "a".repeat(40))
+    expect(callMock).toHaveBeenCalledWith(
+      "git_fetch",
+      expect.objectContaining({ repoPath: "/host/workspaces/bot-run" })
+    )
+    callMock.mockResolvedValueOnce("/host/workspaces/bot-run")
+    await gitCloneGuarded("https://github.com/org/repo.git", "/host/workspaces/bot-run", {
+      allowedHosts: ["github.com"],
+    })
+    expect(callMock).toHaveBeenCalledWith(
+      "git_clone_guarded",
+      expect.objectContaining({ destination: "/host/workspaces/bot-run" })
+    )
+  } finally {
+    delete (globalThis as Record<string, unknown>).__COGNIA_HEADLESS__
+  }
+  hasWebCompanionTargetMock.mockReturnValue(true)
+  await expect(gitFetch("/host/workspaces/bot-run")).rejects.toThrow("opaque workspace target")
 })

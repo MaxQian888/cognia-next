@@ -13,7 +13,7 @@
  * get the forwarded `git://status-changed` WS event instead (see events.ts).
  */
 
-import { isTauri } from "@/lib/platform/detect"
+import { isTauri, isHeadlessHost } from "@/lib/platform/detect"
 import { hasHostRuntime } from "@/lib/platform/capabilities"
 import { transport as baseTransport } from "@/lib/tauri"
 import { issueHostAdminLease } from "@/lib/tauri/admin-lease"
@@ -77,7 +77,7 @@ const pendingGitApprovals: PendingGitApproval[] = []
 function prepareGitTransportArgs(command: string, rawArgs: unknown): Record<string, unknown> {
   const args = { ...((rawArgs ?? {}) as Record<string, unknown>) }
   const repoPath = typeof args.repoPath === "string" ? args.repoPath : null
-  if (!isTauri() && repoPath && !isRemoteGitTarget(repoPath)) {
+  if (!isTauri() && !isHeadlessHost() && repoPath && !isRemoteGitTarget(repoPath)) {
     throw new Error("Remote Git requests require an opaque workspace target")
   }
   if (repoPath && isRemoteGitTarget(repoPath)) {
@@ -101,14 +101,19 @@ function prepareGitTransportArgs(command: string, rawArgs: unknown): Record<stri
         args.worktreeRelativePath = target.relativePath
         delete args.worktreePath
       }
-    } else if (!isTauri()) {
+    } else if (!isTauri() && !isHeadlessHost()) {
       throw new Error("Remote Git requests require an opaque workspace target")
     }
   }
   if (command === "git_init" && typeof args.path === "string" && isRemoteGitTarget(args.path)) {
     Object.assign(args, gitTargetArgs(args.path))
     delete args.path
-  } else if (command === "git_init" && typeof args.path === "string" && !isTauri()) {
+  } else if (
+    command === "git_init" &&
+    typeof args.path === "string" &&
+    !isTauri() &&
+    !isHeadlessHost()
+  ) {
     throw new Error("Remote Git requests require an opaque workspace target")
   }
   if (
@@ -128,7 +133,8 @@ function prepareGitTransportArgs(command: string, rawArgs: unknown): Record<stri
   } else if (
     (command === "git_clone" || command === "git_clone_guarded") &&
     typeof args.destination === "string" &&
-    !isTauri()
+    !isTauri() &&
+    !isHeadlessHost()
   ) {
     throw new Error("Remote Git requests require an opaque workspace target")
   }
@@ -612,9 +618,19 @@ export async function gitWorktreePrune(repoPath: string): Promise<void> {
   await transport.call("git_worktree_prune", { repoPath })
 }
 
-export async function gitFetch(repoPath: string, remote?: string, prune = false): Promise<void> {
+export async function gitFetch(
+  repoPath: string,
+  remote?: string,
+  prune = false,
+  refspec?: string
+): Promise<void> {
   if (!hasGitBridge()) return
-  await transport.call("git_fetch", { repoPath, remote: remote ?? null, prune })
+  await transport.call("git_fetch", {
+    repoPath,
+    remote: remote ?? null,
+    prune,
+    ...(refspec ? { refspec } : {}),
+  })
 }
 
 export async function gitPull(

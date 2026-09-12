@@ -66,6 +66,31 @@ pub async fn fetch(repo_path: &str, remote: Option<&str>, prune: bool) -> Result
     exec::run(&cwd(repo_path), args).await
 }
 
+/// Fetch one immutable commit from an existing named remote, without changing ref mappings.
+pub async fn fetch_revision(repo_path: &str, remote: &str, revision: &str) -> Result<()> {
+    if !matches!(revision.len(), 40 | 64) || !revision.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(GitError::InvalidArgument(
+            "fetch revision must be an exact commit SHA".into(),
+        ));
+    }
+    if remote.is_empty()
+        || !remote
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+        || remote.starts_with('-')
+    {
+        return Err(GitError::InvalidArgument(
+            "fetch revision requires a named remote".into(),
+        ));
+    }
+    exec::run(
+        &cwd(repo_path),
+        ["fetch", "--no-tags", "--", remote, revision],
+    )
+    .await
+}
+
 /// `git pull [--rebase] [remote] [branch]`.
 pub async fn pull(
     repo_path: &str,
@@ -301,6 +326,68 @@ mod tests {
         run_git_in(dir, &["config", "user.email", "t@e.com"]);
         run_git_in(dir, &["config", "user.name", "T"]);
         run_git_in(dir, &["config", "commit.gpgsign", "false"]);
+    }
+
+    #[tokio::test]
+    async fn fetch_revision_rejects_refspec_and_remote_injection() {
+        for revision in ["main", "HEAD:refs/heads/main", "--upload-pack=evil"] {
+            assert!(matches!(
+                fetch_revision("/missing", "origin", revision).await,
+                Err(GitError::InvalidArgument(_))
+            ));
+        }
+        for remote in ["--upload-pack=evil", "https://example.com/repo", ""] {
+            assert!(matches!(
+                fetch_revision("/missing", remote, &"a".repeat(40)).await,
+                Err(GitError::InvalidArgument(_))
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn fetch_revision_acquires_commit_reachable_only_from_pull_ref() {
+        if !git_on_path() {
+            return;
+        }
+        let tmp = TempDir::new().unwrap();
+        run_git_in(
+            tmp.path(),
+            &["init", "-q", "--bare", "-b", "main", "remote.git"],
+        );
+        run_git_in(tmp.path(), &["init", "-q", "-b", "main", "work"]);
+        let work = tmp.path().join("work");
+        let bare = tmp.path().join("remote.git");
+        cfg(&work);
+        fs::write(work.join("a.txt"), "base").unwrap();
+        run_git_in(&work, &["add", "."]);
+        run_git_in(&work, &["commit", "-q", "-m", "base"]);
+        run_git_in(&work, &["remote", "add", "origin", bare.to_str().unwrap()]);
+        run_git_in(&work, &["push", "-q", "origin", "main"]);
+        run_git_in(
+            tmp.path(),
+            &[
+                "clone",
+                "-q",
+                "--no-local",
+                bare.to_str().unwrap(),
+                "checkout",
+            ],
+        );
+        fs::write(work.join("a.txt"), "fork").unwrap();
+        run_git_in(&work, &["commit", "-qam", "fork-only"]);
+        run_git_in(&work, &["push", "-q", "origin", "HEAD:refs/pull/7/head"]);
+        let output = std::process::Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(&work)
+            .output()
+            .unwrap();
+        let sha = String::from_utf8(output.stdout).unwrap().trim().to_string();
+        let checkout = tmp.path().join("checkout");
+        fetch_revision(checkout.to_str().unwrap(), "origin", &sha)
+            .await
+            .unwrap();
+        run_git_in(&checkout, &["checkout", "--detach", &sha]);
+        assert_eq!(fs::read_to_string(checkout.join("a.txt")).unwrap(), "fork");
     }
 
     #[tokio::test]
