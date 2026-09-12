@@ -129,6 +129,13 @@ class SimpleRAG:
         # BM25 needs per-chunk lengths and the corpus mean.
         self._chunk_lens: list[int] = []
         self._avgdl: float = 0.0
+        # Optional third signal: one embedding vector per chunk, index-aligned
+        # with ``chunks``. ``None`` marks a chunk that has not been embedded
+        # (it arrived after the last embedding pass, or the pass failed) —
+        # such a chunk still retrieves, it just scores on the lexical terms.
+        self._vectors: list[list[float] | None] = []
+        #: Embedding dimension of every stored vector; 0 means "lexical only".
+        self.vector_dims: int = 0
         # BM25 tuning. The defaults are the classic values; expose them so
         # large/small repos can be retuned via Config without code changes.
         self._k1 = float(k1)
@@ -153,6 +160,8 @@ class SimpleRAG:
         background preheat) get the original "from scratch" behaviour.
         """
         self.chunks = []
+        self._vectors = []
+        self.vector_dims = 0
         self._file_to_chunks = {}
         self._file_sha = {}
         for f in project.files:
@@ -234,6 +243,7 @@ class SimpleRAG:
             tokens = _tokenize(chunk.content)
             self._tf_vectors.append(Counter(tokens))
             self._chunk_lens.append(max(1, len(tokens)))
+            self._vectors.append(None)
             indices.append(idx)
 
         self._file_to_chunks[path] = indices
@@ -258,6 +268,7 @@ class SimpleRAG:
         kept_chunks: list[Chunk] = []
         kept_tf: list[Counter] = []
         kept_lens: list[int] = []
+        kept_vectors: list[list[float] | None] = []
         # Map old chunk index -> new index so we can rewrite the
         # per-file bookkeeping for the files we kept.
         remap: dict[int, int] = {}
@@ -268,10 +279,14 @@ class SimpleRAG:
             kept_chunks.append(chunk)
             kept_tf.append(self._tf_vectors[old_idx])
             kept_lens.append(self._chunk_lens[old_idx])
+            kept_vectors.append(
+                self._vectors[old_idx] if old_idx < len(self._vectors) else None
+            )
 
         self.chunks = kept_chunks
         self._tf_vectors = kept_tf
         self._chunk_lens = kept_lens
+        self._vectors = kept_vectors
         # Rewire surviving files' chunk-index lists.
         for other_path, idxs in self._file_to_chunks.items():
             self._file_to_chunks[other_path] = [remap[i] for i in idxs if i in remap]
@@ -300,6 +315,27 @@ class SimpleRAG:
         }
         self._avgdl = sum(self._chunk_lens) / doc_count
 
+    # ---------- semantic layer ----------
+
+    def set_vectors(
+        self, vectors: list[list[float] | None], *, dims: int = 0
+    ) -> None:
+        """Attach embedding vectors, index-aligned with ``chunks``.
+
+        ``None`` entries are allowed — a chunk without a vector simply scores
+        on the lexical terms alone. ``dims`` records the embedding width so a
+        query vector from a different model is refused rather than silently
+        scoring garbage.
+        """
+        if len(vectors) != len(self.chunks):
+            raise ValueError(
+                f"vectors length {len(vectors)} != chunks length {len(self.chunks)}"
+            )
+        self._vectors = [list(v) if v is not None else None for v in vectors]
+        self.vector_dims = int(dims) or next(
+            (len(v) for v in self._vectors if v is not None), 0
+        )
+
     # ---------- retrieval ----------
 
     def retrieve(
@@ -308,13 +344,15 @@ class SimpleRAG:
         top_k: int = 5,
         *,
         min_score: float = 0.0,
+        query_vector: list[float] | None = None,
     ) -> list[Chunk]:
         """find top-k chunks most relevant to ``query``.
 
         Score is the average of TF-IDF cosine similarity and BM25, each
         normalised to ``[0, 1]`` by dividing by their respective max
-        across the corpus. The single-score view makes ``min_score``
-        meaningful regardless of corpus size.
+        across the corpus — plus a third normalised cosine term when both a
+        ``query_vector`` and stored chunk vectors exist. The single-score
+        view makes ``min_score`` meaningful regardless of corpus size.
         """
         if not self.chunks:
             return []
@@ -335,14 +373,35 @@ class SimpleRAG:
                 self._idf, self._avgdl, self._k1, self._b,
             )
 
+        # The vector pass only runs when the index actually carries vectors
+        # of the same width — a mismatched model's scores would be noise, not
+        # a signal, and a lexical-only index must not pay the divide-by-three.
+        vec_scores: list[float] | None = None
+        if (
+            query_vector
+            and self.vector_dims
+            and len(query_vector) == self.vector_dims
+            and any(v is not None for v in self._vectors)
+        ):
+            vec_scores = [0.0] * n
+            for i in range(n):
+                vec = self._vectors[i] if i < len(self._vectors) else None
+                if vec is not None:
+                    vec_scores[i] = max(0.0, _dense_cosine(query_vector, vec))
+
         max_tfidf = max(tfidf_scores) if tfidf_scores else 0.0
         max_bm25 = max(bm25_scores) if bm25_scores else 0.0
+        max_vec = max(vec_scores) if vec_scores else 0.0
 
         fused: list[tuple[float, int]] = []
+        terms = 3 if vec_scores is not None else 2
         for i in range(n):
             tfidf_n = tfidf_scores[i] / max_tfidf if max_tfidf > 0 else 0.0
             bm25_n = bm25_scores[i] / max_bm25 if max_bm25 > 0 else 0.0
-            fused.append(((tfidf_n + bm25_n) / 2.0, i))
+            total = tfidf_n + bm25_n
+            if vec_scores is not None:
+                total += vec_scores[i] / max_vec if max_vec > 0 else 0.0
+            fused.append((total / terms, i))
 
         fused.sort(reverse=True)
         results: list[Chunk] = []
@@ -431,6 +490,28 @@ def format_context(chunks: list[Chunk]) -> str:
     return "\n\n".join(blocks)
 
 
+def format_context_grouped(chunks: list[Chunk]) -> str:
+    """The file-grouped variant, for prompts that cite whole files.
+
+    Chunks keep retrieval order inside each file and files keep first-hit
+    order, with ``[lines A-B]`` markers the model quotes back when it cites
+    a range — the codemap prompt's citation contract is written against this
+    layout, not the per-chunk one above.
+    """
+    if not chunks:
+        return "(no relevant code found in this repository)"
+    by_file: dict[str, list[Chunk]] = {}
+    for chunk in chunks:
+        by_file.setdefault(chunk.file_path, []).append(chunk)
+    parts = []
+    for path, group in by_file.items():
+        body = "\n\n".join(
+            f"[lines {c.line_start}-{c.line_end}]\n{c.content}" for c in group
+        )
+        parts.append(f"## File Path: {path}\n\n{body}")
+    return ("\n\n" + "-" * 10 + "\n\n").join(parts)
+
+
 def _tokenize(text: str) -> list[str]:
     """split text into lowercase tokens, also emitting camelCase/snake_case
     sub-words. Stopwords are filtered.
@@ -444,6 +525,20 @@ def _tokenize(text: str) -> list[str]:
                 continue
             out.append(piece)
     return out
+
+
+def _dense_cosine(a: list[float], b: list[float]) -> float:
+    """Cosine similarity over plain float lists — no numpy on this box."""
+    dot = 0.0
+    na = 0.0
+    nb = 0.0
+    for x, y in zip(a, b):
+        dot += x * y
+        na += x * x
+        nb += y * y
+    if na == 0.0 or nb == 0.0:
+        return 0.0
+    return dot / math.sqrt(na * nb)
 
 
 def _cosine_similarity(vec_a: Counter, vec_b: Counter, idf: dict[str, float]) -> float:

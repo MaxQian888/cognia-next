@@ -56,6 +56,7 @@ describe("cognia-repowiki manifest", () => {
       expect.arrayContaining([
         "python:execute",
         "agent:control",
+        "ai:embed",
         "filesystem:read",
         "filesystem:write",
         "git:read",

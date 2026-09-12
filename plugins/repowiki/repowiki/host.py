@@ -87,6 +87,17 @@ class HostBridge:
 
         return await cognia.ctx.workspace.release(handle)
 
+    async def embed(self, texts: list[str], options: dict[str, Any] | None = None) -> list[list[float]]:
+        """``ctx.ai.embed`` — one matrix of floats, or a host error.
+
+        Embedding is an opt-in capability of the host's provider, not a
+        guarantee: a caller that cannot afford ``None``-shaped failure should
+        treat the raised error as "stay lexical" rather than retry.
+        """
+        import cognia
+
+        return await cognia.ctx.ai.embed(texts, options or {})
+
 
 _host: HostBridge = HostBridge()
 
@@ -125,6 +136,10 @@ class HostPaths:
     @property
     def index_db(self) -> Path:
         return self._require() / "indexes.db"
+
+    @property
+    def wiki_db(self) -> Path:
+        return self._require() / "wiki.db"
 
     @property
     def repos_dir(self) -> Path:
@@ -200,7 +215,7 @@ class LLMClient:
 
         try:
             result = await get_host().agent_run(prompt, options)
-        except Exception as exc:  # noqa: BLE001 — normalized to LLMError below
+        except Exception as exc:
             logger.error("agent run failed: %s", exc)
             raise LLMError(f"{type(exc).__name__}: {exc}", cause=exc) from exc
 

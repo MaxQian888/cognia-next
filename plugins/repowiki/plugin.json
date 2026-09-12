@@ -41,7 +41,15 @@
       "icon": "BookOpen",
       "description": "Answer from the repository's generated wiki, with citations.",
       "systemPrompt": "You are answering questions about a repository that has a generated wiki.\nAlways ground an answer in the wiki or the code: call repowiki_search first, then repowiki_get_page for a page the search points at. Cite file paths and line numbers from the search results rather than recalling them. If the wiki has no answer, say so and name what you searched for — do not fill the gap from memory. Call repowiki_map when the question is 'where do I start'.",
-      "tools": ["repowiki_search", "repowiki_get_page", "repowiki_map", "repowiki_list"],
+      "tools": [
+        "repowiki_search",
+        "repowiki_get_page",
+        "repowiki_map",
+        "repowiki_list",
+        "repowiki_ask",
+        "repowiki_deep_research",
+        "repowiki_codemap"
+      ],
       "outputFormat": "markdown",
       "permissionMode": "plan"
     }
@@ -67,7 +75,8 @@
         "panel.freshnessUnknown": "Freshness unknown",
         "panel.freshnessUnknownReason": "Freshness unknown: {reason}",
         "panel.rescan": "Rescan",
-        "panel.partialScan": "Partial scan"
+        "panel.partialScan": "Partial scan",
+        "panel.snapshot": "Snapshot"
       },
       "zh-CN": {
         "panel.reader": "仓库百科",
@@ -79,13 +88,15 @@
         "panel.freshnessUnknown": "无法判断是否最新",
         "panel.freshnessUnknownReason": "无法判断是否最新：{reason}",
         "panel.rescan": "重新扫描",
-        "panel.partialScan": "扫描不完整"
+        "panel.partialScan": "扫描不完整",
+        "panel.snapshot": "快照"
       }
     }
   },
   "permissions": [
     "python:execute",
     "agent:control",
+    "ai:embed",
     "filesystem:read",
     "filesystem:write",
     "git:read",
@@ -138,6 +149,12 @@
         "type": "boolean",
         "title": "Search the generated pages too",
         "description": "Index the wiki's own prose alongside the code, so a question about the architecture page hits the page.",
+        "default": true
+      },
+      "rag_semantic": {
+        "type": "boolean",
+        "title": "Semantic search",
+        "description": "Embed chunks and queries through the host's embedding provider (ctx.ai.embed), so paraphrased questions find code they do not name. Falls back to lexical search when no provider answers.",
         "default": true
       }
     }

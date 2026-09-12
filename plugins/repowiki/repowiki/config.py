@@ -65,6 +65,11 @@ class Config:
     # When true, also feed the generated wiki markdown into the chat index
     # so questions about the architecture page hit the page directly.
     rag_index_wiki: bool = True
+    # When true, chunks also get `ctx.ai.embed` vectors and queries are
+    # embedded too — the third score in the fusion next to TF-IDF and BM25.
+    # Embeddings unavailable (no provider, permission declined) degrade to
+    # the purely lexical index, not an error.
+    rag_semantic: bool = True
 
     @classmethod
     def from_host(cls, values: dict | None = None) -> Config:

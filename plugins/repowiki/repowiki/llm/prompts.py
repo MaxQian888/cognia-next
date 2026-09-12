@@ -288,6 +288,194 @@ def missing_required_keys(data: object, required: list[str]) -> list[str]:
     return [k for k in required if k not in data or data[k] in (None, "", [])]
 
 
+def build_query_expansion_prompt(question: str, language: str = "en") -> list[dict]:
+    """Rewrite a natural-language question into lexical search terms.
+
+    The retriever is BM25/TF-IDF — it finds identifiers, not intent. One
+    cheap call maps "how are plugins isolated" onto the names the code
+    actually uses ("plugin_id", "sandbox", "permission"), which is the
+    closest this index gets to a semantic query without embeddings.
+    """
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You rewrite natural-language code questions into search terms for a "
+                "lexical code index. Output ONLY the terms — identifiers, filenames, "
+                "concepts — one per line, at most 12 lines. No numbering, no "
+                "commentary, no full sentences."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "Expand this question into code search terms (keep the key phrases "
+                f"too, the index matches on them):\n\n{question}"
+            ),
+        },
+    ]
+
+
+def build_deep_research_prompt(
+    question: str,
+    context_chunks: str,
+    iteration: int,
+    total: int,
+    language: str = "en",
+    prior_rounds: list[str] | None = None,
+) -> list[dict]:
+    """One iteration of multi-round research, à la DeepWiki-Open's DeepResearch.
+
+    Round 1 plans and sketches first findings; middle rounds dig one
+    unexplored aspect deeper each; the final round synthesizes everything
+    into a definitive answer. Prior rounds ride along so the model builds
+    on them instead of repeating itself.
+    """
+    if iteration == 1:
+        directive = (
+            "This is round 1 of a multi-round investigation. Start with "
+            "'## Research Plan', outline what the question needs examined, give "
+            "first findings grounded in the code below, and end with "
+            "'## Next Steps' naming the one aspect worth digging into next. "
+            "Do NOT conclude yet."
+        )
+    elif iteration >= total:
+        directive = (
+            "This is the final round. Synthesize every previous round into a "
+            "definitive answer. Start with '## Final Conclusion', answer the "
+            "original question completely, cite the files that matter, and "
+            "close with what a reader should look at first."
+        )
+    else:
+        directive = (
+            f"This is round {iteration} of {total}. Pick the single most "
+            "important aspect the previous rounds left open and dig into it "
+            f"in the code below. Start with '## Research Update {iteration}'. "
+            "New findings only; never repeat what a previous round already "
+            "established."
+        )
+
+    messages: list[dict] = [
+        {
+            "role": "system",
+            "content": (
+                "You are an expert code analyst conducting a focused, multi-round "
+                "investigation of a codebase. Stay strictly on the question's topic — "
+                "no drifting to adjacent subjects. Answer from the code shown, cite "
+                "files and line numbers, and never fabricate paths. "
+                f"{_lang_instruction(language)}"
+            ),
+        }
+    ]
+    if prior_rounds:
+        digest = "\n\n".join(
+            f"### Round {index + 1}\n{text}" for index, text in enumerate(prior_rounds)
+        )
+        messages.append(
+            {
+                "role": "user",
+                "content": f"## Findings so far\n{digest}",
+            }
+        )
+        messages.append({"role": "assistant", "content": "Understood — continuing from there."})
+    messages.append(
+        {
+            "role": "user",
+            "content": (
+                f"## Relevant Code\n{context_chunks}\n\n"
+                f"## Question under research\n{question}\n\n"
+                f"{directive}"
+            ),
+        }
+    )
+    return messages
+
+
+def build_codemap_skeleton_prompt(
+    question: str, context_chunks: str, language: str = "en"
+) -> list[dict]:
+    """Phase 1 of a codemap: the step-by-step skeleton with verbatim citations.
+
+    The grounding rules — real file paths only, line ranges from the
+    ``[lines A-B]`` markers, snippets copied character-for-character — are
+    what keep a generated guide honest; the caller re-verifies every
+    snippet against the chunks it sent before believing it.
+    """
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You build codemaps: step-by-step guides that answer a how-it-works "
+                "question about a codebase, where every step is grounded in real "
+                "source code. " + _lang_instruction(language)
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Using ONLY the code below, produce a codemap answering the question. "
+                "Numbered sections, each with ordered sub-steps; every sub-step cites "
+                "the chunk it comes from.\n\n"
+                "## Rules\n"
+                "- Cite only files that appear as a '## File Path: <path>' header below.\n"
+                "- Use the [lines A-B] markers to fill start_line/end_line.\n"
+                "- 'snippet' MUST be copied verbatim — an exact substring of that file's "
+                "context. Do not paraphrase.\n"
+                "- 'code' is a short illustrative example; keep it minimal.\n"
+                "- If the context cannot support a step, drop the step — fewer true "
+                "steps beat fabricated ones.\n\n"
+                f"## Code\n{context_chunks}\n\n"
+                f"## Question\n{question}\n\n"
+                "Output ONLY one JSON object — no fences, no commentary:\n"
+                "{\n"
+                '  "title": "<short guide title>",\n'
+                '  "summary": "<1-3 sentence intro>",\n'
+                '  "sections": [{\n'
+                '    "id": "1", "title": "<section title>",\n'
+                '    "guide": "", "diagram": "",\n'
+                '    "steps": [{\n'
+                '      "id": "1a", "label": "<step title>", "code": "<example>",\n'
+                '      "citation": {"file_path": "<path>", "start_line": 1,\n'
+                '        "end_line": 5, "snippet": "<verbatim substring>"}\n'
+                "    }]\n"
+                "  }]\n"
+                "}\n"
+                "Leave 'guide' and 'diagram' as empty strings."
+            ),
+        },
+    ]
+
+
+def build_codemap_enrich_prompt(
+    skeleton_json: str, context_chunks: str, language: str = "en"
+) -> list[dict]:
+    """Phase 2: fill each section's prose guide and Mermaid diagram.
+
+    Everything else — ids, steps, citations — is carried over untouched, so
+    the model cannot quietly re-ground a step it did not verify in phase 1.
+    """
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You enrich codemap skeletons: for each section write 'guide' "
+                "(2-4 sentences of prose) and 'diagram' (a Mermaid source string "
+                "illustrating that section's flow — e.g. 'flowchart TD'). Keep every "
+                "other field exactly as given; add or remove nothing. "
+                + _lang_instruction(language)
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"## Skeleton\n{skeleton_json}\n\n"
+                f"## Code (for reference)\n{context_chunks}\n\n"
+                "Output ONLY the complete updated JSON object. No fences, no commentary."
+            ),
+        },
+    ]
+
+
 def build_repair_prompt(
     original_messages: list[dict],
     raw_response: str,

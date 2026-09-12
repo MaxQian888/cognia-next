@@ -17,6 +17,7 @@ means wiping the chat index does not cost the wiki cache.
 from __future__ import annotations
 
 import json
+from array import array
 from collections import Counter
 from pathlib import Path
 
@@ -32,7 +33,11 @@ from repowiki.host import PATHS
 # execution, and this row is written by a sandboxed plugin into a file on
 # disk — exactly the shape where "it is only our own data" stops being true
 # the moment anything else can write it.
-SCHEMA_VERSION = 2
+#
+# v3: chunk rows carry a `vector` BLOB (little-endian float32) and the meta
+# row records the embedding width. Older rows are dropped, not reinterpreted
+# — a rebuilt index re-embeds at scan time anyway.
+SCHEMA_VERSION = 3
 
 
 def _load_json_blob(blob, default):
@@ -88,6 +93,7 @@ class RagStore:
                 kind       TEXT    NOT NULL,
                 length     INTEGER NOT NULL,
                 tf_blob    BLOB    NOT NULL,
+                vector     BLOB,
                 PRIMARY KEY (project_id, chunk_id)
             );
             CREATE TABLE IF NOT EXISTS rag_meta (
@@ -100,7 +106,8 @@ class RagStore:
                 max_chunk_lines    INTEGER NOT NULL,
                 soft_chunk_lines   INTEGER NOT NULL,
                 overlap_lines      INTEGER NOT NULL,
-                idf_blob       BLOB    NOT NULL
+                idf_blob       BLOB    NOT NULL,
+                vector_dims    INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS rag_chunks_by_project
                 ON rag_chunks (project_id, chunk_id);
@@ -170,11 +177,13 @@ class RagStore:
             ],
         )
 
-        # Chunks + TF vectors (one row per chunk; tf serialized as JSON).
+        # Chunks + TF vectors (one row per chunk; tf serialized as JSON) and,
+        # when the semantic pass ran, the embedding as a float32 blob.
         chunk_rows = []
         for idx, chunk in enumerate(rag.chunks):
             tf = rag._tf_vectors[idx]
             length = rag._chunk_lens[idx]
+            vector = rag._vectors[idx] if idx < len(rag._vectors) else None
             chunk_rows.append(
                 (
                     project_id,
@@ -186,13 +195,14 @@ class RagStore:
                     chunk.kind,
                     length,
                     json.dumps(dict(tf), ensure_ascii=False),
+                    array("f", vector).tobytes() if vector else None,
                 )
             )
         if chunk_rows:
             await self._db.executemany(
                 "INSERT INTO rag_chunks "
-                "(project_id, chunk_id, path, line_start, line_end, content, kind, length, tf_blob) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "(project_id, chunk_id, path, line_start, line_end, content, kind, length, tf_blob, vector) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 chunk_rows,
             )
 
@@ -203,8 +213,8 @@ class RagStore:
         await self._db.execute(
             "INSERT INTO rag_meta "
             "(project_id, schema_version, doc_count, avgdl, k1, b, "
-            " max_chunk_lines, soft_chunk_lines, overlap_lines, idf_blob) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " max_chunk_lines, soft_chunk_lines, overlap_lines, idf_blob, vector_dims) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 project_id,
                 SCHEMA_VERSION,
@@ -216,6 +226,7 @@ class RagStore:
                 rag.soft_chunk_lines,
                 rag.overlap_lines,
                 idf_blob,
+                rag.vector_dims,
             ),
         )
         await self._db.commit()
@@ -232,7 +243,7 @@ class RagStore:
             return None
         cur = await self._db.execute(
             "SELECT schema_version, avgdl, k1, b, max_chunk_lines, "
-            "soft_chunk_lines, overlap_lines, idf_blob "
+            "soft_chunk_lines, overlap_lines, idf_blob, vector_dims "
             "FROM rag_meta WHERE project_id = ?",
             (project_id,),
         )
@@ -243,6 +254,7 @@ class RagStore:
         (
             schema_version, avgdl, k1, b,
             max_chunk_lines, soft_chunk_lines, overlap_lines, idf_blob,
+            vector_dims,
         ) = meta
         if schema_version != SCHEMA_VERSION:
             # Stale layout; drop and force the caller to rebuild.
@@ -257,18 +269,19 @@ class RagStore:
         )
         rag._idf = _load_json_blob(idf_blob, {})
         rag._avgdl = float(avgdl)
+        rag.vector_dims = int(vector_dims or 0)
 
         # Chunks come back in chunk_id order so the in-memory list stays
         # aligned with the TF vector list (same invariant the in-memory
         # SimpleRAG relies on).
         cur = await self._db.execute(
-            "SELECT chunk_id, path, line_start, line_end, content, kind, length, tf_blob "
+            "SELECT chunk_id, path, line_start, line_end, content, kind, length, tf_blob, vector "
             "FROM rag_chunks WHERE project_id = ? ORDER BY chunk_id",
             (project_id,),
         )
         chunks_rows = await cur.fetchall()
         file_chunks: dict[str, list[int]] = {}
-        for idx, (_cid, path, line_start, line_end, content, kind, length, tf_blob) in enumerate(chunks_rows):
+        for idx, (_cid, path, line_start, line_end, content, kind, length, tf_blob, vector) in enumerate(chunks_rows):
             rag.chunks.append(
                 Chunk(
                     file_path=path,
@@ -281,6 +294,12 @@ class RagStore:
             tf = Counter(json.loads(tf_blob))
             rag._tf_vectors.append(tf)
             rag._chunk_lens.append(length)
+            if vector:
+                restored = array("f")
+                restored.frombytes(bytes(vector))
+                rag._vectors.append(list(restored))
+            else:
+                rag._vectors.append(None)
             file_chunks.setdefault(path, []).append(idx)
 
         rag._file_to_chunks = file_chunks

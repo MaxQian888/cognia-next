@@ -82,6 +82,7 @@ DEFAULT_LABELS: dict[str, str] = {
     "panel.freshnessUnknownReason": "Freshness unknown: {reason}",
     "panel.rescan": "Rescan",
     "panel.partialScan": "Partial scan",
+    "panel.snapshot": "Snapshot",
 }
 
 
@@ -94,6 +95,7 @@ def build_panel(
     staleness: dict[str, Any] | None = None,
     warnings: list[str] | None = None,
     projects: list[dict[str, Any]] | None = None,
+    live: bool = True,
     labels: Mapping[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Return the component list for the reader surface.
@@ -112,7 +114,10 @@ def build_panel(
     known = bool((staleness or {}).get("known"))
     stale = known and bool((staleness or {}).get("stale"))
     unknown = staleness is not None and not known
-    show_rescan = stale or unknown
+    # A rehydrated wiki is a snapshot: it reads fine, but the checkout behind
+    # it was released, so rescan is the way back to live files — offered even
+    # when nothing reports stale.
+    show_rescan = stale or unknown or not live
     # Why the check could not be answered goes in the banner, not on the badge.
     # A hover has no touch equivalent and A2UI has no tooltip field, so a
     # reason attached to the Badge would be a string nothing ever renders —
@@ -136,7 +141,7 @@ def build_panel(
         {
             "id": "header",
             "component": "Row",
-            "children": _header_children(projects, show_rescan),
+            "children": _header_children(projects, show_rescan, live, stale or unknown),
             "gap": 8,
             "align": "center",
         },
@@ -191,7 +196,16 @@ def build_panel(
                 "action": ACTION_SELECT_PROJECT,
             }
         )
-    if show_rescan:
+    if not live:
+        components.append(
+            {
+                "id": "snapshot",
+                "component": "Badge",
+                "text": text["panel.snapshot"],
+                "variant": "secondary",
+            }
+        )
+    if stale or unknown:
         changed_count = int((staleness or {}).get("changedCount") or 0)
         components.append(
             {
@@ -207,6 +221,7 @@ def build_panel(
                 "variant": "destructive" if stale else "secondary",
             }
         )
+    if show_rescan:
         components.append(
             {
                 "id": "rescan",
@@ -232,16 +247,26 @@ def build_panel(
     return components
 
 
-def _header_children(projects: list[dict[str, Any]], show_rescan: bool) -> list[str]:
-    """Title, then the repository picker, then the staleness pair.
+def _header_children(
+    projects: list[dict[str, Any]],
+    show_rescan: bool,
+    live: bool,
+    has_freshness_badge: bool,
+) -> list[str]:
+    """Title, then the repository picker, then the state badges and rescan.
 
     Warnings are deliberately not here: an Alert wedged into a header Row next
     to a title is unreadable, so it sits between the header and the body where
-    a banner belongs.
+    a banner belongs. The freshness badge is separate from rescan: a snapshot
+    that checks out current earns no badge, only the way back to live files.
     """
     children = ["title"]
     if projects:
         children.append("project-picker")
+    if not live:
+        children.append("snapshot")
+    if has_freshness_badge:
+        children.append("stale")
     if show_rescan:
-        children.extend(["stale", "rescan"])
+        children.append("rescan")
     return children

@@ -13,6 +13,7 @@ Everything host-facing goes through :mod:`repowiki.host`; nothing here imports
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -25,7 +26,13 @@ from repowiki.core.models import ProjectContext
 from repowiki.core.rag import SimpleRAG
 from repowiki.core.rag_store import RagStore
 from repowiki.core.wiki_builder import Wiki, WikiBuilder
-from repowiki.host import LLMClient, WorkspaceHandle, acquire_workspace, changed_since
+from repowiki.host import (
+    LLMClient,
+    WorkspaceHandle,
+    acquire_workspace,
+    changed_since,
+    get_host,
+)
 from repowiki.ingest.git_diff import changed_paths_since
 from repowiki.ingest.local import ingest_handle
 from repowiki.project import project_id_for, repo_map
@@ -40,7 +47,21 @@ class ScanResult:
     project_id: str
     wiki: Wiki
     handle: WorkspaceHandle
-    project: ProjectContext
+    #: ``None`` for a scan rehydrated from the wiki store: file contents were
+    #: never resurrected, so consumers that need them must say so instead of
+    #: pretending. The wiki, the repo map, and the handle's durable fields all
+    #: survive.
+    project: ProjectContext | None
+    #: The source the user typed ("owner/repo", URL, or local path). Persisted
+    #: so a rescan of a URL-ingested repository re-acquires it — the clone's
+    #: ``handle.root`` does not outlive its release.
+    source: str = ""
+    #: The full PageRank reading order, computed once at scan time. Before this
+    #: field existed, ``reading_order`` rebuilt the dependency graph on every
+    #: call to re-rank it.
+    map_entries: list[dict[str, Any]] = field(default_factory=list)
+    file_count: int = 0
+    scanned_at: float = 0.0
     rankings: list[tuple[str, float]] = field(default_factory=list)
     #: Modules the incremental pass skipped, by name.
     skipped_modules: list[str] = field(default_factory=list)
@@ -55,7 +76,9 @@ class ScanResult:
             "projectName": self.wiki.project_name,
             "root": self.handle.root,
             "origin": self.handle.origin,
-            "fileCount": len(self.project.files),
+            "source": self.source,
+            "live": self.project is not None,
+            "fileCount": len(self.project.files) if self.project is not None else self.file_count,
             "pageCount": len(self.wiki.pages),
             "pages": [
                 {"id": page.id, "title": page.title, "parentId": page.parent_id}
@@ -138,6 +161,7 @@ async def scan(
     config: Config | None = None,
     since: str = "",
     on_progress: ProgressFn | None = None,
+    path_filter: Callable[[str], bool] | None = None,
 ) -> ScanResult:
     """Acquire, ingest, analyse, build. The whole scan."""
     cfg = config or Config()
@@ -154,6 +178,16 @@ async def scan(
         warnings.append(
             f"The host withheld {handle.skipped_sensitive} credential file(s)"
         )
+
+    if path_filter:
+        before = len(handle.paths)
+        handle.paths = [path for path in handle.paths if path_filter(path)]
+        dropped = before - len(handle.paths)
+        if not handle.paths:
+            raise ValueError("Include/exclude rules filtered out every file")
+        if dropped:
+            report(f"Filters excluded {dropped} file(s)")
+            warnings.append(f"Include/exclude rules filtered out {dropped} file(s)")
 
     report("Reading files")
     project = ingest_handle(handle, max_file_size=cfg.max_file_size, max_files=cfg.max_files)
@@ -198,6 +232,15 @@ async def scan(
         wiki=wiki,
         handle=handle,
         project=project,
+        source=source,
+        # Ranked once, here: `reading_order` slices this list, and the wiki
+        # store persists it so a rehydrated scan answers without the files.
+        map_entries=[
+            entry.to_dict()
+            for entry in repo_map(project.files, root=handle.root, top=max(1, len(project.files)))
+        ],
+        file_count=len(project.files),
+        scanned_at=time.time(),
         rankings=rankings,
         skipped_modules=list(analyzer.skipped_modules),
         errors=list(analyzer.errors),
@@ -214,6 +257,7 @@ async def build_index(
     *,
     config: Config | None = None,
     reuse: bool = True,
+    on_progress: ProgressFn | None = None,
 ) -> SimpleRAG:
     """Return a retrieval index for the scan, reusing the saved one when valid.
 
@@ -227,6 +271,14 @@ async def build_index(
     try:
         rag = await store.load(result.project_id) if reuse else None
         if rag is None:
+            if result.project is None:
+                # A rehydrated scan has no file contents to chunk. The index
+                # is built at scan time and persisted, so reaching here means
+                # the snapshot predates that — the honest answer is a rescan.
+                raise ValueError(
+                    f"No persisted index for '{result.project_id}'; "
+                    "run repowiki_scan to rebuild it"
+                )
             rag = SimpleRAG(
                 k1=cfg.rag_bm25_k1,
                 b=cfg.rag_bm25_b,
@@ -235,11 +287,21 @@ async def build_index(
                 overlap_lines=cfg.rag_chunk_overlap_lines,
             )
             rag.index(result.project)
-        else:
+        elif result.project is not None:
+            # Never run this on a rehydrated scan: content-less files would
+            # hash to nothing and `sync_project` would read that as "every
+            # file was deleted" and wipe the persisted index.
             rag.sync_project(result.project)
 
         if cfg.rag_index_wiki:
             rag.index_wiki_pages(result.wiki.pages)
+
+        if cfg.rag_semantic:
+            embedded = await _embed_missing(rag, on_progress=on_progress)
+            if embedded:
+                logger.info(
+                    "embedded %d chunk(s) for %s", embedded, result.project_id
+                )
 
         await store.save(result.project_id, rag)
     finally:
@@ -247,6 +309,59 @@ async def build_index(
     return rag
 
 
+async def _embed_missing(
+    rag: SimpleRAG,
+    *,
+    batch: int = 64,
+    on_progress: ProgressFn | None = None,
+) -> int:
+    """Vectorise every chunk that lacks one; the count actually embedded.
+
+    Embeddings come from the host's provider — an opt-in capability, so a
+    failure mid-pass keeps whatever landed and leaves the rest ``None``,
+    which retrieval reads as "lexical only for these chunks". What must not
+    happen is an exception reaching the caller: a plugin without an
+    embedding provider still deserves its index.
+    """
+    pending = [i for i, v in enumerate(rag._vectors) if v is None]
+    if not pending:
+        return 0
+    try:
+        host = get_host()
+    except Exception as exc:  # noqa: BLE001 — no host means no embedding, not a bug
+        logger.warning("chunk embedding skipped: %s", exc)
+        return 0
+
+    done = 0
+    for start in range(0, len(pending), batch):
+        group = pending[start : start + batch]
+        try:
+            vectors = await host.embed([rag.chunks[i].content for i in group])
+        except Exception as exc:  # noqa: BLE001 — stay lexical for the rest
+            logger.warning("chunk embedding failed at %d/%d: %s", start, len(pending), exc)
+            break
+        if not isinstance(vectors, list):
+            logger.warning("chunk embedding returned %s, not a list", type(vectors).__name__)
+            break
+        dims = rag.vector_dims
+        for idx, vec in zip(group, vectors):
+            if not vec:
+                continue
+            vec = list(vec)
+            if dims and len(vec) != dims:
+                # A mid-run model switch would corrupt every score; keep the
+                # chunk lexical rather than mix widths.
+                continue
+            if not dims:
+                dims = len(vec)
+                rag.vector_dims = dims
+            rag._vectors[idx] = vec
+            done += 1
+        if on_progress:
+            on_progress(f"Embedded {min(start + batch, len(pending))}/{len(pending)} chunks")
+    return done
+
+
 def reading_order(result: ScanResult, *, top: int = 25) -> list[dict[str, Any]]:
     """The map the panel opens on: most-depended-upon files first."""
-    return [entry.to_dict() for entry in repo_map(result.project.files, root=result.handle.root, top=top)]
+    return result.map_entries[:top]

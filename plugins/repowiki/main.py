@@ -15,17 +15,28 @@ trade; the durable copies are the analyzer cache and the RAG snapshot on disk.
 
 from __future__ import annotations
 
+import json
 import logging
-
-import cognia
-from cognia import get_config, hook, progress, tool
+import re
 
 from repowiki.config import Config
-from repowiki.core.rag import format_context
+from repowiki.core.rag import format_context, format_context_grouped
+from repowiki.core.rag_store import RagStore
+from repowiki.core.wiki_builder import SidebarItem, WikiPage
+from repowiki.core.wiki_store import WikiStore
 from repowiki.export.html import export_html
 from repowiki.export.json_export import export_json
 from repowiki.export.markdown import export_markdown
-from repowiki.host import configure_paths, release_workspace
+from repowiki.host import LLMClient, configure_paths, get_host, release_workspace
+from repowiki.ingest.filters import build_path_filter
+from repowiki.llm.prompts import (
+    build_chat_prompt,
+    build_codemap_enrich_prompt,
+    build_codemap_skeleton_prompt,
+    build_deep_research_prompt,
+    build_query_expansion_prompt,
+    extract_json,
+)
 from repowiki.panel import (
     ACTION_OPEN_CITATION,
     ACTION_OPEN_PAGE,
@@ -37,11 +48,14 @@ from repowiki.panel import (
 from repowiki.pipeline import ScanResult, build_index, reading_order, scan, staleness
 from repowiki.project import project_id_for
 
+import cognia
+from cognia import get_config, hook, progress, tool
+
 logger = logging.getLogger(__name__)
 
-#: project_id -> the most recent scan. Bounded by how many repositories the
-#: user actually opens, which is small; a scan holds file contents, so this is
-#: not something to let grow without a reason.
+#: project_id -> the most recent scan. Entries restored from the wiki store
+#: hold no file contents (``project=None``) — only live scans do, which is
+#: what keeps this bounded by repositories rather than by bytes.
 _SCANS: dict[str, ScanResult] = {}
 _INDEXES: dict[str, object] = {}
 
@@ -104,14 +118,36 @@ async def on_startup() -> None:
     """Point storage at the plugin's own data directory.
 
     Asked for rather than guessed: ``ctx.fs.getDataDir()`` is the same
-    directory ``ctx.fs`` is jailed to, so the two SQLite files land beside
+    directory ``ctx.fs`` is jailed to, so the SQLite files land beside
     whatever else this plugin writes and are reclaimed when it is uninstalled.
     Nothing in the package has a default path any more, so a missing call here
     fails loudly at the first cache write instead of leaving a stray file in
     the user's home directory.
     """
     configure_paths(await cognia.ctx.fs.getDataDir())
+    await _rehydrate_scans()
     await _resolve_locale_and_labels()
+
+
+async def _rehydrate_scans() -> None:
+    """Restore wikis persisted by earlier sessions.
+
+    A rehydrated scan carries ``project=None``: file contents are not
+    resurrected. Reads, search, ask and the panel all answer from the
+    snapshot plus the persisted RAG index; a rescan is the only path that
+    brings live file contents back.
+    """
+    store = WikiStore()
+    try:
+        await store.init()
+        restored = await store.load_all()
+    except Exception as exc:  # noqa: BLE001 — a bad store must not block startup
+        logger.warning("wiki store unavailable (%s); starting empty", exc)
+        return
+    finally:
+        await store.close()
+    for result in restored:
+        _SCANS.setdefault(result.project_id, result)
 
 
 def on_config_updated(config: dict) -> None:
@@ -143,6 +179,28 @@ def _require_scan(project_id: str) -> ScanResult:
     return result
 
 
+def _resolve_project_id(project_id: str | None) -> str:
+    """The project a read tool targets when the caller did not say.
+
+    An explicit id is validated; an omitted one resolves to the only wiki
+    there is, or fails listing the candidates — guessing between several
+    repositories' wikis would answer a question about the wrong code and
+    read like a right answer.
+    """
+    pid = (project_id or "").strip()
+    if pid:
+        _require_scan(pid)
+        return pid
+    if len(_SCANS) == 1:
+        return next(iter(_SCANS))
+    if not _SCANS:
+        raise ValueError("No wikis yet — run repowiki_scan first")
+    raise ValueError(
+        "projectId is required when several wikis exist — "
+        f"known: {', '.join(sorted(_SCANS))}"
+    )
+
+
 @tool(
     name="repowiki_scan",
     description=(
@@ -161,9 +219,36 @@ def _require_scan(project_id: str) -> ScanResult:
             "required": False,
             "description": "Git ref; only re-analyse modules changed since it",
         },
+        "includedDirs": {
+            "type": "array",
+            "required": False,
+            "description": "Scan only these dirs (names or repo-relative prefixes)",
+        },
+        "includedFiles": {
+            "type": "array",
+            "required": False,
+            "description": "Scan only files matching these globs",
+        },
+        "excludedDirs": {
+            "type": "array",
+            "required": False,
+            "description": "Skip these dirs (e.g. vendor, generated)",
+        },
+        "excludedFiles": {
+            "type": "array",
+            "required": False,
+            "description": "Skip files matching these globs (e.g. *.min.js)",
+        },
     },
 )
-async def repowiki_scan(source: str, since: str = "") -> dict:
+async def repowiki_scan(
+    source: str,
+    since: str = "",
+    includedDirs: list | None = None,
+    includedFiles: list | None = None,
+    excludedDirs: list | None = None,
+    excludedFiles: list | None = None,
+) -> dict:
     cfg = _config()
     steps = {"done": 0}
 
@@ -174,10 +259,225 @@ async def repowiki_scan(source: str, since: str = "") -> dict:
         steps["done"] += 1
         progress(message=message)
 
-    result = await scan(source, config=cfg, since=since, on_progress=report)
+    path_filter = build_path_filter(
+        included_dirs=includedDirs,
+        included_files=includedFiles,
+        excluded_dirs=excludedDirs,
+        excluded_files=excludedFiles,
+    )
+    result = await scan(
+        source, config=cfg, since=since, on_progress=report, path_filter=path_filter
+    )
     _SCANS[result.project_id] = result
     _INDEXES.pop(result.project_id, None)
+    _FRESHNESS.pop(result.project_id, None)
+
+    # The scan is the only moment file contents exist, so it is also the only
+    # moment the durable copies can be written: the wiki snapshot and the RAG
+    # index are what a later session's rehydrated scan answers from. A store
+    # that fails must not fail the scan — the wiki still works in-session.
+    try:
+        store = WikiStore()
+        await store.init()
+        try:
+            await store.save(result)
+        finally:
+            await store.close()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("wiki snapshot save failed for %s: %s", result.project_id, exc)
+    try:
+        _INDEXES[result.project_id] = await build_index(
+            result, config=cfg, on_progress=report
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("search index build failed for %s: %s", result.project_id, exc)
+        _INDEXES.pop(result.project_id, None)
     return result.to_summary()
+
+
+async def _ensure_index(result: ScanResult, cfg: Config):
+    """The retrieval index for a scan — built at scan time, then reused."""
+    rag = _INDEXES.get(result.project_id)
+    if rag is None:
+        rag = await build_index(result, config=cfg)
+        _INDEXES[result.project_id] = rag
+    return rag
+
+
+def _citations(chunks) -> list[dict]:
+    return [
+        {
+            "path": chunk.file_path,
+            "startLine": chunk.line_start,
+            "endLine": chunk.line_end,
+            "kind": chunk.kind,
+        }
+        for chunk in chunks
+    ]
+
+
+def _freshness_caveat(freshness: dict | None) -> str:
+    """The blockquote a grounded answer owes the reader when the wiki lies.
+
+    Shared by the panel's side conversation and `repowiki_ask`: a model
+    answering from a stale wiki without saying so is the same defect as a
+    badge that never appears, wherever the answer happens.
+    """
+    if not freshness:
+        return ""
+    if freshness.get("stale"):
+        return (
+            f"> This wiki is out of date: {freshness.get('changedCount', 0)} file(s) "
+            "changed since it was built. Say so when an answer depends on code "
+            "that may have moved."
+        )
+    if not freshness.get("known"):
+        return (
+            "> Whether this wiki is current could not be determined "
+            f"({freshness.get('reason') or 'no reason reported'})."
+        )
+    return ""
+
+
+async def _embed_query(text: str, cfg: Config) -> list[float] | None:
+    """The query as an embedding vector, or None when semantics are off.
+
+    ``None`` is the everyday answer — embedding provider not configured,
+    permission declined, host offline — and callers must not care: retrieval
+    simply scores on the lexical terms alone.
+    """
+    if not cfg.rag_semantic:
+        return None
+    try:
+        vectors = await get_host().embed([text])
+    except Exception as exc:  # noqa: BLE001 — lexical fallback, not a failure
+        logger.warning("query embedding unavailable: %s", exc)
+        return None
+    if not vectors or not vectors[0]:
+        return None
+    return list(vectors[0])
+
+
+async def _expand_query(question: str, llm: LLMClient) -> str:
+    """Code-side terms for a natural-language question, or "".
+
+    The index is lexical — BM25/TF-IDF matches identifiers, not intent. One
+    cheap call maps "how are plugins isolated" onto the vocabulary the code
+    actually uses, which is the closest this retriever gets to semantic
+    recall without embeddings. Every failure mode folds into "" because the
+    raw question still retrieves on its own.
+    """
+    try:
+        raw = await llm.complete(
+            build_query_expansion_prompt(question), max_tokens=256, temperature=0
+        )
+    except Exception as exc:  # noqa: BLE001 — expansion is a bonus, not a gate
+        logger.warning("query expansion failed: %s", exc)
+        return ""
+    terms = [line.strip(" -•\t") for line in raw.splitlines() if line.strip()]
+    return " ".join(terms[:12])
+
+
+def _merge_chunks(primary: list, extra: list, limit: int) -> list:
+    """Two retrieval passes, deduplicated, primary hits ranked first."""
+    seen = {(c.file_path, c.line_start) for c in primary}
+    merged = list(primary)
+    for chunk in extra:
+        if (chunk.file_path, chunk.line_start) not in seen:
+            merged.append(chunk)
+            seen.add((chunk.file_path, chunk.line_start))
+    return merged[:limit]
+
+
+def _verify_codemap_citations(codemap: dict, chunks: list) -> int:
+    """Drop citations whose snippet is not verbatim in the retrieved code.
+
+    The skeleton prompt demands character-for-character snippets; this is
+    where that contract is enforced. A citation that fails still reads as
+    grounded while pointing at nothing — worse than no citation — and the
+    step itself survives: the claim may be right even when the quote is not.
+    """
+    by_file: dict[str, list[str]] = {}
+    for chunk in chunks:
+        by_file.setdefault(chunk.file_path, []).append(chunk.content)
+    dropped = 0
+    for section in codemap.get("sections") or []:
+        if not isinstance(section, dict):
+            continue
+        for step in section.get("steps") or []:
+            if not isinstance(step, dict):
+                continue
+            citation = step.get("citation")
+            if not isinstance(citation, dict):
+                continue
+            path = str(citation.get("file_path") or "")
+            snippet = str(citation.get("snippet") or "")
+            if snippet and any(snippet in text for text in by_file.get(path, [])):
+                for key in ("start_line", "end_line"):
+                    try:
+                        citation[key] = int(citation.get(key) or 0)
+                    except (TypeError, ValueError):
+                        citation[key] = 0
+            else:
+                step["citation"] = None
+                dropped += 1
+    return dropped
+
+
+def _add_codemap_page(result: ScanResult, question: str, codemap: dict) -> str:
+    """Fold a codemap into the wiki as a page and sidebar entry.
+
+    Citations render as ``path#L`` links — the panel's Markdown component
+    parses exactly that shape into ``openFile`` calls, so a step's source is
+    one click away instead of prose the reader has to hunt down.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "-", question.lower()).strip("-")[:48] or "codemap"
+    page_id = f"codemap-{slug}"
+    if result.wiki.get_page(page_id) is not None:
+        page_id = f"{page_id}-{len(result.wiki.pages)}"
+    title = str(codemap.get("title") or question)[:120]
+
+    lines = [f"# {title}", "", str(codemap.get("summary") or ""), ""]
+    for section in codemap.get("sections") or []:
+        if not isinstance(section, dict):
+            continue
+        lines += [f"## {section.get('title') or 'Section'}", ""]
+        if guide := str(section.get("guide") or "").strip():
+            lines += [guide, ""]
+        if diagram := str(section.get("diagram") or "").strip():
+            lines += ["```mermaid", diagram, "```", ""]
+        for step in section.get("steps") or []:
+            if not isinstance(step, dict):
+                continue
+            citation = step.get("citation")
+            if isinstance(citation, dict) and citation.get("file_path"):
+                path = str(citation["file_path"])
+                line_no = int(citation.get("start_line") or 1)
+                ref = f" ([`{path}:L{line_no}`]({path}#L{line_no}))"
+            else:
+                ref = ""
+            lines.append(f"{step.get('id') or '-'} **{step.get('label') or 'step'}**{ref}")
+            if code := str(step.get("code") or "").strip():
+                lines += ["```", code, "```"]
+            lines.append("")
+
+    result.wiki.pages.append(
+        WikiPage(
+            id=page_id,
+            title=title,
+            parent_id="codemaps",
+            order=len(result.wiki.pages),
+            content="\n".join(lines),
+        )
+    )
+    group = next(
+        (item for item in result.wiki.sidebar if item.page_id == "codemaps"), None
+    )
+    if group is None:
+        group = SidebarItem(title="Codemaps", page_id="codemaps", children=[])
+        result.wiki.sidebar.append(group)
+    group.children.append(SidebarItem(title=title, page_id=page_id))
+    return page_id
 
 
 @tool(
@@ -187,11 +487,16 @@ async def repowiki_scan(source: str, since: str = "") -> dict:
         "calls. This is the reading order: what to open first."
     ),
     parameters={
-        "projectId": {"type": "string", "required": True},
+        "projectId": {
+            "type": "string",
+            "required": False,
+            "description": "Defaults to the only scanned repository",
+        },
         "top": {"type": "number", "required": False, "description": "How many files (default 25)"},
     },
 )
-def repowiki_map(projectId: str, top: float = 25) -> dict:
+def repowiki_map(projectId: str = "", top: float = 25) -> dict:
+    projectId = _resolve_project_id(projectId)
     result = _require_scan(projectId)
     return {"projectId": projectId, "entries": reading_order(result, top=max(1, int(top)))}
 
@@ -200,11 +505,16 @@ def repowiki_map(projectId: str, top: float = 25) -> dict:
     name="repowiki_get_page",
     description="Read one page of a generated wiki, as markdown.",
     parameters={
-        "projectId": {"type": "string", "required": True},
+        "projectId": {
+            "type": "string",
+            "required": False,
+            "description": "Defaults to the only scanned repository",
+        },
         "pageId": {"type": "string", "required": True, "description": "Page id, e.g. 'index'"},
     },
 )
 def repowiki_get_page(projectId: str, pageId: str) -> dict:
+    projectId = _resolve_project_id(projectId)
     result = _require_scan(projectId)
     page = result.wiki.get_page(pageId)
     if page is None:
@@ -222,41 +532,302 @@ def repowiki_get_page(projectId: str, pageId: str) -> dict:
 @tool(
     name="repowiki_search",
     description=(
-        "Search a scanned repository's code and wiki pages. Hybrid TF-IDF + "
-        "BM25 retrieval, no embedding call. Returns cited excerpts."
+        "Search a scanned repository's code and wiki pages. Hybrid lexical + "
+        "embedding retrieval — the semantic layer engages when the host "
+        "provides embeddings. Returns cited excerpts."
     ),
     parameters={
-        "projectId": {"type": "string", "required": True},
+        "projectId": {
+            "type": "string",
+            "required": False,
+            "description": "Defaults to the only scanned repository",
+        },
         "query": {"type": "string", "required": True},
         "topK": {"type": "number", "required": False},
     },
 )
-async def repowiki_search(projectId: str, query: str, topK: float = 0) -> dict:
+async def repowiki_search(projectId: str = "", query: str = "", topK: float = 0) -> dict:
+    projectId = _resolve_project_id(projectId)
     result = _require_scan(projectId)
     cfg = _config()
-    rag = _INDEXES.get(projectId)
-    if rag is None:
-        rag = await build_index(result, config=cfg)
-        _INDEXES[projectId] = rag
+    rag = await _ensure_index(result, cfg)
 
     chunks = rag.retrieve(
         query,
         top_k=int(topK) or cfg.rag_top_k,
         min_score=cfg.rag_min_score,
+        query_vector=await _embed_query(query, cfg),
     )
     return {
         "projectId": projectId,
         "query": query,
         "context": format_context(chunks),
-        "citations": [
-            {
-                "path": chunk.file_path,
-                "startLine": chunk.line_start,
-                "endLine": chunk.line_end,
-                "kind": chunk.kind,
-            }
-            for chunk in chunks
-        ],
+        "citations": _citations(chunks),
+    }
+
+
+@tool(
+    name="repowiki_ask",
+    description=(
+        "Ask a question about a scanned repository and get a cited answer in "
+        "one call: retrieves the relevant excerpts, then answers grounded in "
+        "them. The single-shot counterpart of the 'Ask the wiki' panel."
+    ),
+    parameters={
+        "projectId": {
+            "type": "string",
+            "required": False,
+            "description": "Defaults to the only scanned repository",
+        },
+        "question": {"type": "string", "required": True},
+        "topK": {
+            "type": "number",
+            "required": False,
+            "description": "How many excerpts to ground on (default from settings)",
+        },
+        "history": {
+            "type": "array",
+            "required": False,
+            "description": "Prior turns as [{role, content}] for follow-ups",
+        },
+    },
+)
+async def repowiki_ask(
+    projectId: str = "",
+    question: str = "",
+    topK: float = 0,
+    history: list | None = None,
+) -> dict:
+    projectId = _resolve_project_id(projectId)
+    result = _require_scan(projectId)
+    cfg = _config()
+    rag = await _ensure_index(result, cfg)
+    llm = LLMClient(model=cfg.model)
+    limit = int(topK) or cfg.rag_top_k
+    query_vector = await _embed_query(question, cfg)
+    chunks = rag.retrieve(
+        question,
+        top_k=limit,
+        min_score=cfg.rag_min_score,
+        query_vector=query_vector,
+    )
+    # A natural-language question still misses identifiers it does not
+    # literally name — embeddings help recall, they do not spell-check. One
+    # cheap expansion pass adds the code-vocabulary hits on top.
+    expanded = await _expand_query(question, llm)
+    if expanded:
+        chunks = _merge_chunks(
+            chunks,
+            rag.retrieve(
+                f"{question} {expanded}",
+                top_k=cfg.rag_top_k,
+                min_score=cfg.rag_min_score,
+                query_vector=query_vector,
+            ),
+            limit=limit * 2,
+        )
+
+    # The caveat goes into the context, not the answer: the model has to own
+    # the admission, the way the panel's side conversation does.
+    freshness = await _refresh_freshness(projectId)
+    context = format_context(chunks)
+    caveat = _freshness_caveat(freshness)
+    if caveat:
+        context = f"{caveat}\n\n{context}"
+
+    answer = await llm.complete(
+        build_chat_prompt(
+            question,
+            context,
+            language=cfg.language,
+            history=history if isinstance(history, list) else None,
+        )
+    )
+    return {
+        "projectId": projectId,
+        "question": question,
+        "answer": answer,
+        "citations": _citations(chunks),
+        "usage": {
+            "inputTokens": llm.total_input_tokens,
+            "outputTokens": llm.total_output_tokens,
+        },
+        "freshness": freshness,
+    }
+
+
+@tool(
+    name="repowiki_deep_research",
+    description=(
+        "Multi-round investigation of one question: plans, digs deeper each "
+        "round into what the previous round left open, then synthesizes a "
+        "final cited conclusion. The expensive sibling of repowiki_ask — use "
+        "it for 'how does X actually work end to end' questions."
+    ),
+    parameters={
+        "projectId": {
+            "type": "string",
+            "required": False,
+            "description": "Defaults to the only scanned repository",
+        },
+        "question": {"type": "string", "required": True},
+        "iterations": {
+            "type": "number",
+            "required": False,
+            "description": "Research rounds, 2-5 (default 3)",
+        },
+    },
+)
+async def repowiki_deep_research(
+    projectId: str = "",
+    question: str = "",
+    iterations: float = 3,
+) -> dict:
+    projectId = _resolve_project_id(projectId)
+    result = _require_scan(projectId)
+    cfg = _config()
+    rag = await _ensure_index(result, cfg)
+    total = max(2, min(5, int(iterations)))
+
+    chunks = rag.retrieve(
+        question,
+        top_k=cfg.rag_top_k * 2,
+        min_score=cfg.rag_min_score,
+        query_vector=await _embed_query(question, cfg),
+    )
+    freshness = await _refresh_freshness(projectId)
+    context = format_context_grouped(chunks)
+    caveat = _freshness_caveat(freshness)
+    if caveat:
+        context = f"{caveat}\n\n{context}"
+
+    llm = LLMClient(model=cfg.model)
+    rounds: list[str] = []
+    for iteration in range(1, total + 1):
+        progress(message=f"Deep research round {iteration}/{total}")
+        rounds.append(
+            await llm.complete(
+                build_deep_research_prompt(
+                    question, context, iteration, total, cfg.language, rounds
+                )
+            )
+        )
+
+    return {
+        "projectId": projectId,
+        "question": question,
+        "iterations": total,
+        "rounds": rounds,
+        "answer": rounds[-1],
+        "citations": _citations(chunks),
+        "usage": {
+            "inputTokens": llm.total_input_tokens,
+            "outputTokens": llm.total_output_tokens,
+        },
+        "freshness": freshness,
+    }
+
+
+@tool(
+    name="repowiki_codemap",
+    description=(
+        "Build a step-by-step guide answering a how-to question — 'how does "
+        "auth work', 'how do I add a provider'. Every step cites a verbatim "
+        "code snippet, unverifiable citations are dropped, and the result "
+        "becomes a durable wiki page under 'Codemaps'."
+    ),
+    parameters={
+        "projectId": {
+            "type": "string",
+            "required": False,
+            "description": "Defaults to the only scanned repository",
+        },
+        "question": {"type": "string", "required": True},
+        "topK": {
+            "type": "number",
+            "required": False,
+            "description": "How many excerpts to ground on (default 2x settings)",
+        },
+    },
+)
+async def repowiki_codemap(
+    projectId: str = "",
+    question: str = "",
+    topK: float = 0,
+) -> dict:
+    projectId = _resolve_project_id(projectId)
+    result = _require_scan(projectId)
+    cfg = _config()
+    rag = await _ensure_index(result, cfg)
+    chunks = rag.retrieve(
+        question,
+        top_k=int(topK) or cfg.rag_top_k * 2,
+        min_score=cfg.rag_min_score,
+        query_vector=await _embed_query(question, cfg),
+    )
+    context = format_context_grouped(chunks)
+    llm = LLMClient(model=cfg.model)
+
+    progress(message="Codemap: drafting the step skeleton")
+    skeleton_raw = await llm.complete(
+        build_codemap_skeleton_prompt(question, context, cfg.language)
+    )
+    skeleton = extract_json(skeleton_raw)
+    if (
+        not isinstance(skeleton, dict)
+        or not isinstance(skeleton.get("sections"), list)
+        or not skeleton["sections"]
+    ):
+        raise ValueError("The model did not return a usable codemap skeleton")
+    dropped = _verify_codemap_citations(skeleton, chunks)
+
+    progress(message="Codemap: writing guides and diagrams")
+    enriched_raw = await llm.complete(
+        build_codemap_enrich_prompt(
+            json.dumps(skeleton, ensure_ascii=False), context, cfg.language
+        )
+    )
+    codemap = extract_json(enriched_raw)
+    if not isinstance(codemap, dict) or not isinstance(codemap.get("sections"), list):
+        # Enrichment is decoration; the verified skeleton is the substance.
+        codemap = skeleton
+    else:
+        # The enrich prompt is told to carry citations over untouched — verify
+        # anyway, because "was told to" is not verification.
+        dropped += _verify_codemap_citations(codemap, chunks)
+
+    freshness = await _refresh_freshness(projectId)
+    page_id = _add_codemap_page(result, question, codemap)
+    try:
+        store = WikiStore()
+        await store.init()
+        try:
+            await store.save(result)
+        finally:
+            await store.close()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("codemap page save failed for %s: %s", projectId, exc)
+    # A panel already open on this project jumps straight to the new page.
+    for surface_id, state in _PANEL_STATE.items():
+        if state.get("projectId") == projectId:
+            state["pageId"] = page_id
+            try:
+                await _push_panel(surface_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("panel refresh failed for %s: %s", surface_id, exc)
+
+    return {
+        "projectId": projectId,
+        "question": question,
+        "codemap": codemap,
+        "pageId": page_id,
+        "droppedCitations": dropped,
+        "citations": _citations(chunks),
+        "usage": {
+            "inputTokens": llm.total_input_tokens,
+            "outputTokens": llm.total_output_tokens,
+        },
+        "freshness": freshness,
     }
 
 
@@ -267,7 +838,11 @@ async def repowiki_search(projectId: str, query: str, topK: float = 0) -> dict:
         "HTML file. The HTML makes no external request and runs no script."
     ),
     parameters={
-        "projectId": {"type": "string", "required": True},
+        "projectId": {
+            "type": "string",
+            "required": False,
+            "description": "Defaults to the only scanned repository",
+        },
         "format": {
             "type": "string",
             "required": True,
@@ -280,7 +855,8 @@ async def repowiki_search(projectId: str, query: str, topK: float = 0) -> dict:
         },
     },
 )
-def repowiki_export(projectId: str, format: str, outputPath: str) -> dict:
+def repowiki_export(projectId: str = "", format: str = "", outputPath: str = "") -> dict:
+    projectId = _resolve_project_id(projectId)
     result = _require_scan(projectId)
     kind = format.strip().lower()
     if kind in ("markdown", "md"):
@@ -296,7 +872,10 @@ def repowiki_export(projectId: str, format: str, outputPath: str) -> dict:
 
 @tool(
     name="repowiki_list",
-    description="List the repositories scanned in this session and their page counts.",
+    description=(
+        "List the repositories with a wiki — scanned this session or "
+        "rehydrated from a previous one — and their page counts."
+    ),
 )
 def repowiki_list() -> dict:
     return {
@@ -307,10 +886,51 @@ def repowiki_list() -> dict:
                 "root": result.handle.root,
                 "origin": result.handle.origin,
                 "pageCount": len(result.wiki.pages),
+                "source": result.source,
+                "scannedAt": result.scanned_at,
+                # A rehydrated wiki answers reads and search but holds no file
+                # contents — rescan is the way back to a live checkout.
+                "live": result.project is not None,
             }
             for pid, result in sorted(_SCANS.items())
         ]
     }
+
+
+@tool(
+    name="repowiki_delete",
+    description=(
+        "Delete a scanned repository's wiki snapshot and search index. "
+        "Releases the checkout when this plugin still holds an ephemeral clone."
+    ),
+    parameters={"projectId": {"type": "string", "required": True}},
+)
+async def repowiki_delete(projectId: str) -> dict:
+    result = _SCANS.pop(projectId, None)
+    _INDEXES.pop(projectId, None)
+    _FRESHNESS.pop(projectId, None)
+
+    if result is not None and result.handle.ephemeral:
+        try:
+            await release_workspace(result.handle)
+        except Exception as exc:  # noqa: BLE001 — delete must not fail on cleanup
+            logger.info("release_workspace failed for %s: %s", projectId, exc)
+
+    # The analyzer cache is content-keyed and shared across projects, so a
+    # delete cannot attribute rows — it is deliberately left alone.
+    store = WikiStore()
+    await store.init()
+    try:
+        await store.delete(projectId)
+    finally:
+        await store.close()
+    rag_store = RagStore()
+    await rag_store.init()
+    try:
+        await rag_store.delete_project(projectId)
+    finally:
+        await rag_store.close()
+    return {"projectId": projectId, "deleted": result is not None}
 
 
 @tool(
@@ -410,6 +1030,7 @@ async def _push_panel(surfaceId: str, *, create: bool = False) -> dict:
             for pid, scan_result in sorted(_SCANS.items())
         ],
         staleness=_FRESHNESS.get(state["projectId"]) if result else None,
+        live=result.project is not None if result else True,
         labels=_LABELS,
     )
 
@@ -484,20 +1105,16 @@ def repowiki_panel_context(resource: dict | None = None) -> dict:
     # A model answering from a wiki that no longer matches the code, without
     # saying so, is the same defect as a badge that never appears. The panel
     # already computed this; reading the cache costs nothing.
-    freshness = _FRESHNESS.get(project_id)
-    if freshness and freshness.get("stale"):
-        lines.insert(
-            1,
-            f"> This wiki is out of date: {freshness.get('changedCount', 0)} file(s) "
-            "changed since it was built. Say so when an answer depends on code "
-            "that may have moved.",
+    prefix: list[str] = []
+    if result.project is None:
+        prefix.append(
+            "> This wiki was restored from a saved snapshot — file contents "
+            "are not loaded; run repowiki_scan on the source to rescan."
         )
-    elif freshness and not freshness.get("known"):
-        lines.insert(
-            1,
-            "> Whether this wiki is current could not be determined "
-            f"({freshness.get('reason') or 'no reason reported'}).",
-        )
+    caveat = _freshness_caveat(_FRESHNESS.get(project_id))
+    if caveat:
+        prefix.append(caveat)
+    lines[1:1] = prefix
     return {"text": "\n".join(lines), "projectId": project_id}
 
 
@@ -530,7 +1147,10 @@ async def repowiki_panel_action(payload):
     elif action == ACTION_RESCAN:
         result = _SCANS.get(state["projectId"])
         if result:
-            await repowiki_scan(result.handle.root)
+            # `source`, not `handle.root`: a URL-ingested repo's clone path
+            # does not outlive its release, so re-scanning it means
+            # re-acquiring the source, not pointing at a deleted directory.
+            await repowiki_scan(result.source or result.handle.root)
             await _refresh_freshness(state["projectId"])
             await _push_panel(surface_id)
     elif action == ACTION_OPEN_CITATION:

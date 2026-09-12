@@ -47,17 +47,41 @@ upgrade in place.
 
 ## Tools
 
-| Tool                     | What it does                                                                          |
-| ------------------------ | ------------------------------------------------------------------------------------- |
-| `repowiki_scan`          | Acquire, ingest, analyse, build. `since` re-analyses only modules with changed files. |
-| `repowiki_map`           | Files ranked by dependency PageRank. No model calls.                                  |
-| `repowiki_get_page`      | One page, as markdown.                                                                |
-| `repowiki_search`        | Hybrid TF-IDF + BM25 over code and pages. Returns cited excerpts.                     |
-| `repowiki_export`        | Write the wiki to disk.                                                               |
-| `repowiki_list`          | Repositories scanned this session.                                                    |
-| `repowiki_project_id`    | Resolve a source to its stable id without scanning.                                   |
-| `repowiki_build_panel`   | Build the reader panel's surface. Called by the host when the panel is shown.         |
-| `repowiki_panel_context` | Grounding text for the side conversation. Called by the host at send time.            |
+| Tool                     | What it does                                                                                                                                           |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `repowiki_scan`          | Acquire, ingest, analyse, build. `since` re-analyses only modules with changed files. `included*`/`excluded*` dirs and file globs narrow what is read. |
+| `repowiki_map`           | Files ranked by dependency PageRank. No model calls.                                                                                                   |
+| `repowiki_get_page`      | One page, as markdown.                                                                                                                                 |
+| `repowiki_search`        | Hybrid TF-IDF + BM25 + embeddings (via `ctx.ai.embed`, when the host provides them) over code and pages. Returns cited excerpts.                       |
+| `repowiki_ask`           | One-shot grounded Q&A: expands the question into code terms, retrieves excerpts, then answers with citations.                                          |
+| `repowiki_deep_research` | Multi-round investigation: plan → deepen → synthesize, 2–5 model rounds, cited.                                                                        |
+| `repowiki_codemap`       | A step-by-step guide to a how-it-works question; citations are verified verbatim, then it becomes a durable wiki page.                                 |
+| `repowiki_export`        | Write the wiki to disk.                                                                                                                                |
+| `repowiki_list`          | Repositories with a wiki — scanned this session or rehydrated.                                                                                         |
+| `repowiki_delete`        | Drop a repository's wiki snapshot and search index.                                                                                                    |
+| `repowiki_project_id`    | Resolve a source to its stable id without scanning.                                                                                                    |
+| `repowiki_build_panel`   | Build the reader panel's surface. Called by the host when the panel is shown.                                                                          |
+| `repowiki_panel_context` | Grounding text for the side conversation. Called by the host at send time.                                                                             |
+
+`projectId` is optional on every read tool — omitted, it resolves to the only
+wiki there is, and between several it fails naming them rather than guessing.
+
+## Persistence
+
+A scan writes two durable copies beside the analyzer cache: the assembled wiki
+snapshot (`wiki.db`) and the retrieval index (`indexes.db`, which has always
+been persisted). After a host restart `repowiki_list`, `repowiki_get_page`,
+`repowiki_map`, the panels and `repowiki_ask` all keep working off those
+snapshots; search answers from the persisted index. What is _not_ resurrected
+is file contents — a rehydrated scan's `project` is empty, so `repowiki_list`
+marks it `live: false` and only `repowiki_scan` (which re-acquires the source,
+including re-cloning a URL-ingested repo) brings the live checkout back.
+
+The index also persists per-chunk embedding vectors when `rag_semantic` is on
+and the host answers `ctx.ai.embed`: a scan embeds chunks in batches, a query
+embeds itself once, and the fused score is the third term beside TF-IDF and
+BM25. No provider, declined permission, or a mid-run dimension change all land
+in the same place — the lexical index alone.
 
 ## Panels
 
@@ -90,7 +114,7 @@ saying so is the same defect as a badge that never appears.
 pnpm plugin:repowiki:test
 ```
 
-238 tests. Upstream shipped 164; the rest came from rewriting the suites the
+283 tests. Upstream shipped 164; the rest came from rewriting the suites the
 layer swap invalidated rather than deleting them — the properties they pinned
 (project-id determinism, the "empty changed-set means re-analyse everything"
 contract, the PageRank ranking) all survive the port, only their transports

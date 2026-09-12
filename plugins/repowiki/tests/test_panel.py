@@ -10,10 +10,10 @@ from __future__ import annotations
 
 from repowiki.panel import (
     ACTION_OPEN_CITATION,
-    DEFAULT_LABELS,
     ACTION_OPEN_PAGE,
     ACTION_RESCAN,
     ACTION_SELECT_PROJECT,
+    DEFAULT_LABELS,
     build_panel,
     surface_id_for,
 )
@@ -202,6 +202,31 @@ def test_the_freshness_reason_is_labelled_even_though_the_reason_is_not():
         _panel(staleness=UNKNOWN, labels={"panel.freshnessUnknownReason": "无法判断：{reason}"})
     )
     assert components["warnings"]["message"] == "无法判断：no bridge"
+
+
+def test_a_snapshot_wiki_says_so_and_offers_the_way_back_to_live():
+    # A rehydrated wiki reads fine but holds no file contents — the badge is
+    # the difference between "current" and "a saved picture of it".
+    components = _by_id(_panel(live=False, staleness=FRESH))
+    assert components["snapshot"]["text"] == "Snapshot"
+    assert components["snapshot"]["variant"] == "secondary"
+    assert components["rescan"]["action"] == ACTION_RESCAN
+    # A snapshot that checks out current earns no freshness badge.
+    assert "stale" not in components
+    assert components["header"]["children"] == ["title", "snapshot", "rescan"]
+
+
+def test_a_live_wiki_earns_no_snapshot_badge():
+    components = _by_id(_panel(live=True, staleness=FRESH))
+    assert "snapshot" not in components
+    assert "rescan" not in components
+
+
+def test_a_snapshot_and_stale_is_two_badges_not_one_confused_one():
+    components = _by_id(_panel(live=False, staleness=STALE))
+    assert components["snapshot"]["text"] == "Snapshot"
+    assert "3 changed" in components["stale"]["text"]
+    assert components["header"]["children"] == ["title", "snapshot", "stale", "rescan"]
 
 
 def test_a_translated_label_replaces_the_english_default():
