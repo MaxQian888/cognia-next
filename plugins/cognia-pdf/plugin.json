@@ -4,13 +4,20 @@
   "version": "0.1.0",
   "description": "Plugin-owned native PDF inspection, form filling, page extraction, preview, validation, and export.",
   "type": "frontend",
-  "capabilities": ["tools", "importers", "exporters"],
+  "capabilities": ["tools", "importers"],
   "main": "src/index.ts",
   "author": { "name": "cognia-next" },
   "license": "MIT",
   "minAppVersion": "0.1.0",
   "engines": { "cognia": ">=0.1.0" },
-  "permissions": ["artifact:read", "artifact:write", "filesystem:read", "filesystem:write"],
+  "permissions": [
+    "artifact:read",
+    "artifact:write",
+    "filesystem:read",
+    "filesystem:write",
+    "media:image:read",
+    "database:write"
+  ],
   "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": { "availability": "supported", "entrypoint": "src/index.ts" },

@@ -3,6 +3,8 @@ import type { PdfInspection } from "./pdf-engine"
 export const PDF_ARTIFACT_KIND = "cognia-pdf/document"
 export const PDF_SCHEMA_VERSION = 1 as const
 export const PDF_MIME = "application/pdf"
+/** Hard cap for imported/attached PDFs — bytes live base64'd inside a JSON artifact. */
+export const PDF_MAX_BYTES = 50 * 1024 * 1024
 
 export interface PdfArtifactDocument {
   schemaVersion: typeof PDF_SCHEMA_VERSION
