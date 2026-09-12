@@ -177,7 +177,7 @@ function formatProps(props: Record<string, string>): string {
  * component name as the resolution anchor, otherwise nothing (the agent falls
  * back to grepping by selector / outerHTML, the zero-config default).
  */
-function resolutionDirective(sel: BrowserSelection): string | null {
+function resolutionDirective(sel: ElementSelectionCore): string | null {
   if (sel.sourceHint) {
     const { path, line } = sel.sourceHint
     return `Likely source: ${path}:${line} — start there.`
@@ -188,7 +188,7 @@ function resolutionDirective(sel: BrowserSelection): string | null {
   return null
 }
 
-function formatReferenceFrame(sel: BrowserSelection): string[] {
+function formatReferenceFrame(sel: ElementSelectionCore): string[] {
   if (!sel.viewport && !sel.contentArea && !sel.parentLayout) return []
   const lines = ["", "### Reference Frame"]
   if (sel.viewport) lines.push(`- Viewport: \`${sel.viewport.width}×${sel.viewport.height}px\``)

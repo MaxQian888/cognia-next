@@ -27,7 +27,6 @@ import { toast } from "sonner"
 import {
   armArtifactPicker,
   canPickArtifactElements,
-  disarmArtifactPicker,
   subscribeToArtifactPickers,
   type ArtifactPickModifiers,
 } from "@/lib/artifacts/element-pick-registry"
@@ -209,14 +208,18 @@ export function useArtifactElementSelection({
   // re-runs against the new controller.
   useEffect(() => {
     if (!artifactId || !selectMode) return undefined
-    armArtifactPicker(artifactId, {
+    // `hasPicker` is a dependency so a preview that mounts (or remounts) after
+    // this effect ran re-arms against the NEW controller instead of leaving the
+    // toggle lit over a picker nobody installed.
+    const disarm = armArtifactPicker(artifactId, {
       originLabel: ARTIFACT_PICK_ORIGIN,
       onPick: handlePick,
       // Escape inside the preview is the same gesture as pressing the toggle.
       onCancel: () => setSelectModeRequested(false),
     })
-    return () => disarmArtifactPicker(artifactId)
-  }, [artifactId, handlePick, selectMode])
+    // Disarm exactly what was armed — see `armArtifactPicker`.
+    return disarm ?? undefined
+  }, [artifactId, handlePick, hasPicker, selectMode])
 
   const toggleSelectMode = useCallback(() => {
     setSelectModeRequested((on) => !on)

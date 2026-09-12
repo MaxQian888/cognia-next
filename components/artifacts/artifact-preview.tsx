@@ -61,6 +61,21 @@ import { getArtifactRuntimeAdapter } from "./runtime-adapters"
 interface ArtifactPreviewProps {
   artifact: Artifact
   className?: string
+  /**
+   * Offer this mount as the element picker's target. Default false.
+   *
+   * The registry is keyed by artifact id, but the SAME artifact is previewed by
+   * several surfaces at once — the dock, the inline preview in the message
+   * stream (`components/chat/message-parts/artifact-part.tsx`, open by default
+   * as soon as the message scrolls into view), the canvas preview pane, and
+   * anything a plugin mounts. Registering from all of them would let the dock's
+   * toolbar arm whichever happened to mount last, putting the highlight in the
+   * message stream while the dock sat inert.
+   *
+   * So the pick target is claimed explicitly, and only the surface that also
+   * renders the toggle claims it.
+   */
+  pickable?: boolean
 }
 
 /**
@@ -148,7 +163,7 @@ function RuntimeHealthBadge({ state }: { state: ArtifactRuntimeHealth }) {
   )
 }
 
-export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
+export function ArtifactPreview({ artifact, className, pickable }: ArtifactPreviewProps) {
   const t = useTranslations("artifactPreview")
   const iframeRef = useRef<HTMLIFrameElement>(null)
   // Mirrors `error` for the capturer, which is a long-lived closure and would
@@ -300,6 +315,7 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
   }, [needsIframe, needsRuntime])
 
   useEffect(() => {
+    if (!pickable) return undefined
     const controller: ArtifactPickController = {
       arm: (request) => {
         pickRequestRef.current = request
@@ -311,7 +327,7 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
       },
     }
     return registerArtifactPicker(artifact.id, controller)
-  }, [applyPicker, artifact.id])
+  }, [applyPicker, artifact.id, pickable])
 
   // A picker must never outlive the component: its listeners are capture-phase
   // and swallow clicks, so a leaked one makes the artifact uninteractive.
@@ -874,6 +890,11 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
     return (
       <PreviewErrorBoundary errorMessage={t("previewFailed")}>
         <div
+          // Registered like every other renderer-transport branch. Without this
+          // the notebook has no pick root, so the toolbar's toggle — enabled,
+          // because `jupyter` is previewable and a controller is registered —
+          // would flip to "Stop selecting" and do nothing at all.
+          ref={registerRendererNode}
           className={cn("relative h-full w-full min-w-0 overflow-hidden bg-background", className)}
         >
           <RuntimeHealthBadge state={runtimeHealth} />

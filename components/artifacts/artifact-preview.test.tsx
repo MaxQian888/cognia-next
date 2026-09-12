@@ -10,6 +10,12 @@ import {
   hasArtifactFrameCapturer,
   __resetArtifactFrameCapturersForTests,
 } from "@/lib/artifacts/frame-capture-registry"
+import {
+  __resetArtifactPickersForTests,
+  armArtifactPicker,
+  canPickArtifactElements,
+} from "@/lib/artifacts/element-pick-registry"
+import { PICKER_NODE_ATTRIBUTE } from "@/lib/artifacts/runtime/element-pick"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -480,5 +486,62 @@ describe("ArtifactPreview", () => {
       await waitFor(() => expect(screen.getByTestId("artifact-renderer-code")).toBeInTheDocument())
       expect(useArtifactStore.getState().artifacts["canvas-doc-1"]).toBeUndefined()
     })
+  })
+})
+
+describe("ArtifactPreview element picking", () => {
+  beforeEach(() => {
+    __resetArtifactPickersForTests()
+  })
+
+  it("does not claim the pick slot unless asked", () => {
+    // The same artifact is previewed by the dock, the message stream, the
+    // canvas pane and anything a plugin mounts. If every mount registered, the
+    // dock's toolbar would arm whichever happened to mount last.
+    render(<ArtifactPreview artifact={dummy({ type: "chart" })} />)
+    expect(canPickArtifactElements("a1")).toBe(false)
+  })
+
+  it("claims it when the host renders the toggle", () => {
+    render(<ArtifactPreview pickable artifact={dummy({ type: "chart" })} />)
+    expect(canPickArtifactElements("a1")).toBe(true)
+  })
+
+  it("gives a jupyter notebook a pick root, so the toggle is not a lie", async () => {
+    // `jupyter` is previewable, so the toolbar shows an ENABLED toggle for it.
+    // Its render branch was the only renderer-transport one with no registered
+    // node, so arming installed nothing at all: highlight never appeared,
+    // clicks never picked, and Escape could not cancel.
+    render(<ArtifactPreview pickable artifact={dummy({ type: "jupyter", content: "{}" })} />)
+
+    const armed = armArtifactPicker("a1", { onPick: jest.fn() })
+    expect(armed).toEqual(expect.any(Function))
+    await waitFor(() =>
+      expect(document.querySelectorAll(`[${PICKER_NODE_ATTRIBUTE}]`).length).toBeGreaterThan(0)
+    )
+    armed!()
+    expect(document.querySelectorAll(`[${PICKER_NODE_ATTRIBUTE}]`)).toHaveLength(0)
+  })
+
+  it("installs a picker for the other renderer transports too", async () => {
+    render(<ArtifactPreview pickable artifact={dummy({ type: "chart" })} />)
+    const armed = armArtifactPicker("a1", { onPick: jest.fn() })!
+    await waitFor(() =>
+      expect(document.querySelectorAll(`[${PICKER_NODE_ATTRIBUTE}]`).length).toBeGreaterThan(0)
+    )
+    armed()
+  })
+
+  it("releases the picker when the preview unmounts", async () => {
+    const view = render(<ArtifactPreview pickable artifact={dummy({ type: "chart" })} />)
+    armArtifactPicker("a1", { onPick: jest.fn() })
+    await waitFor(() =>
+      expect(document.querySelectorAll(`[${PICKER_NODE_ATTRIBUTE}]`).length).toBeGreaterThan(0)
+    )
+    view.unmount()
+    // A leaked picker swallows clicks in the capture phase — the artifact
+    // would stay uninteractive with no visible cause.
+    expect(document.querySelectorAll(`[${PICKER_NODE_ATTRIBUTE}]`)).toHaveLength(0)
+    expect(canPickArtifactElements("a1")).toBe(false)
   })
 })

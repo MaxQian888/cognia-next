@@ -18,7 +18,7 @@
  * filter, so this queue can only ever contain this artifact's rows.
  */
 
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
@@ -29,6 +29,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { useClientLiveQuery } from "@/hooks/data/use-client-live-query"
 import { useSelectionToChat } from "@/hooks/browser/use-selection-to-chat"
 import {
+  deleteExpiredBrowserAnnotations,
   listActionableAnnotations,
   transitionBrowserAnnotation,
   type BrowserAnnotationIntent,
@@ -61,6 +62,13 @@ export function ArtifactAnnotations({
   const [intent, setIntent] = useState<BrowserAnnotationIntent>("change")
   const [severity, setSeverity] = useState<BrowserAnnotationSeverity>("suggestion")
   const [busy, setBusy] = useState(false)
+
+  // The 30-day sweep used to run only when the embedded browser pane mounted.
+  // Now that artifact annotations share the table, a user who never opens the
+  // browser would accumulate rows that nothing ever expires.
+  useEffect(() => {
+    void deleteExpiredBrowserAnnotations(new Date().getTime())
+  }, [])
 
   const annotations =
     useClientLiveQuery(

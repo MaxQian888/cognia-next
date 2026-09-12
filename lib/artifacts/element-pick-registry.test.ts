@@ -4,6 +4,7 @@ import {
   canPickArtifactElements,
   disarmArtifactPicker,
   registerArtifactPicker,
+  subscribeToArtifactPickers,
   type ArtifactPickController,
 } from "./element-pick-registry"
 
@@ -32,12 +33,43 @@ describe("element pick registry", () => {
     registerArtifactPicker("a1", ctl)
     const request = { onPick: jest.fn(), originLabel: "artifact preview" }
 
-    expect(armArtifactPicker("a1", request)).toBe(true)
+    expect(armArtifactPicker("a1", request)).toEqual(expect.any(Function))
     expect(ctl.arm).toHaveBeenCalledWith(request)
   })
 
-  it("reports false when no preview is mounted, so a toggle cannot stick on", () => {
-    expect(armArtifactPicker("missing", { onPick: jest.fn() })).toBe(false)
+  it("reports null when no preview is mounted, so a toggle cannot stick on", () => {
+    expect(armArtifactPicker("missing", { onPick: jest.fn() })).toBeNull()
+  })
+
+  it("disarms the controller it ARMED, not whatever is registered later", () => {
+    // The same artifact is previewed by more than one mount (the dock, and the
+    // inline preview in the message stream). Disarming by id alone would leave
+    // the armed picker installed — and it swallows clicks in the capture
+    // phase, so the artifact stays uninteractive with the toggle reading off.
+    const armed = controller()
+    registerArtifactPicker("a1", armed)
+    const release = armArtifactPicker("a1", { onPick: jest.fn() })!
+
+    const later = controller()
+    registerArtifactPicker("a1", later)
+    release()
+
+    expect(armed.disarm).toHaveBeenCalledTimes(1)
+    expect(later.disarm).not.toHaveBeenCalled()
+  })
+
+  it("notifies subscribers when a preview registers and when it goes", () => {
+    const listener = jest.fn()
+    const unsubscribe = subscribeToArtifactPickers(listener)
+
+    const dispose = registerArtifactPicker("a1", controller())
+    expect(listener).toHaveBeenCalledTimes(1)
+    dispose()
+    expect(listener).toHaveBeenCalledTimes(2)
+
+    unsubscribe()
+    registerArtifactPicker("a2", controller())
+    expect(listener).toHaveBeenCalledTimes(2)
   })
 
   it("disarming an artifact with no preview is a no-op, not a throw", () => {

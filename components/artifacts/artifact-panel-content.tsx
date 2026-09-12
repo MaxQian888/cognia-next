@@ -584,7 +584,7 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
           </ResizablePanel>
           <ResizableHandle withHandle />
           <ResizablePanel id="artifact-split-preview" defaultSize="50%" minSize="25%">
-            <ArtifactPreview artifact={activeArtifact} className="h-full" />
+            <ArtifactPreview pickable artifact={activeArtifact} className="h-full" />
           </ResizablePanel>
         </ResizablePanelGroup>
       )
@@ -592,7 +592,7 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
     if (viewMode === "code" || !isPreviewable) {
       return renderCode()
     }
-    return <ArtifactPreview artifact={activeArtifact} className="h-full" />
+    return <ArtifactPreview pickable artifact={activeArtifact} className="h-full" />
   }
 
   if (activeArtifact) {

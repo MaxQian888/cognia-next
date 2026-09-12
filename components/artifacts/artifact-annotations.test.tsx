@@ -22,9 +22,11 @@ jest.mock("@/hooks/browser/use-selection-to-chat", () => ({
 
 const mockListActionable = jest.fn()
 const mockTransition = jest.fn().mockResolvedValue(true)
+const mockDeleteExpired = jest.fn().mockResolvedValue(0)
 jest.mock("@/lib/db/browser-annotations", () => ({
   listActionableAnnotations: (...args: unknown[]) => mockListActionable(...args),
   transitionBrowserAnnotation: (...args: unknown[]) => mockTransition(...args),
+  deleteExpiredBrowserAnnotations: (...args: unknown[]) => mockDeleteExpired(...args),
 }))
 
 let liveRows: unknown[] = []
@@ -168,6 +170,14 @@ describe("ArtifactAnnotations", () => {
     await waitFor(() => expect(mockTransition).toHaveBeenCalledTimes(1))
     expect(mockTransition.mock.calls[0][1]).toBe("resolved")
     expect(mockTransition.mock.calls[0][3]).toBe("human")
+  })
+
+  it("sweeps expired rows — the browser pane was the only thing doing it", () => {
+    // Artifact annotations share the table, so a user who never opens the
+    // embedded browser would otherwise accumulate rows nothing ever expires.
+    renderIt()
+    expect(mockDeleteExpired).toHaveBeenCalledTimes(1)
+    expect(typeof mockDeleteExpired.mock.calls[0][0]).toBe("number")
   })
 
   it("does not query at all without a conversation", () => {

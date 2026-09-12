@@ -96,14 +96,25 @@ export function canPickArtifactElements(artifactId: string | null | undefined): 
 }
 
 /**
- * Arm the picker. Returns false when no preview is mounted, so the caller can
- * say why nothing happened rather than leaving a toggle stuck on.
+ * Arm the picker, returning a disposer bound to the controller that was armed,
+ * or null when no preview is mounted.
+ *
+ * The disposer is bound on purpose. `disarmArtifactPicker(artifactId)` disarms
+ * whatever is registered *now*, which is not necessarily what was armed: the
+ * same artifact can be previewed by more than one mount (the dock, and the
+ * inline preview in the message stream), and a remount replaces the entry. A
+ * caller that armed A and later disarmed B would leave A's picker installed —
+ * and that picker swallows clicks in the capture phase, so the artifact stays
+ * uninteractive with the toggle reading "off".
  */
-export function armArtifactPicker(artifactId: string, request: ArtifactPickRequest): boolean {
+export function armArtifactPicker(
+  artifactId: string,
+  request: ArtifactPickRequest
+): (() => void) | null {
   const controller = controllers.get(artifactId)
-  if (!controller) return false
+  if (!controller) return null
   controller.arm(request)
-  return true
+  return () => controller.disarm()
 }
 
 /**

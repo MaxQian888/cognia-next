@@ -101,8 +101,13 @@ export function annotationMatchesScope(
   scope: AnnotationScopeFilter
 ): boolean {
   const target = resolveAnnotationTarget(annotation)
-  if (scope.kind !== target.kind) return false
-  return target.kind === "artifact" ? target.artifactId === scope.artifactId : true
+  // Narrow on SCOPE, not on target: narrowing `target.kind` tells the compiler
+  // nothing about `scope`, so `scope.artifactId` would not exist on the `web`
+  // arm of the union.
+  if (scope.kind === "artifact") {
+    return target.kind === "artifact" && target.artifactId === scope.artifactId
+  }
+  return target.kind === "web"
 }
 
 function sanitizeAnnotation(annotation: BrowserAnnotationRow): BrowserAnnotationRow {
