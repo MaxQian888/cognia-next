@@ -1,6 +1,14 @@
 import type { AttentionItem } from "@/lib/attention/types"
 import type { FleetSession } from "@/lib/fleet/types"
-import { attentionOwner, fleetSessionOwner, ownerRoute, sameOwner, taskIdentity } from "./owner"
+import {
+  attentionOwner,
+  fleetSessionOwner,
+  ownerRoute,
+  ownerSource,
+  sameOwner,
+  taskIdentity,
+} from "./owner"
+import type { FleetOwnerRef } from "./types"
 
 function session(overrides: Partial<FleetSession> = {}): FleetSession {
   return {
@@ -33,6 +41,12 @@ function session(overrides: Partial<FleetSession> = {}): FleetSession {
 }
 
 describe("fleetSessionOwner", () => {
+  it.each([
+    [{ agentTeamId: "team" }, { kind: "team", teamId: "team" }],
+    [{ agentTeamRunId: "run" }, { kind: "team", runId: "run" }],
+  ])("keeps partially known team identity instead of falling back to chat", (fields, expected) => {
+    expect(fleetSessionOwner(session({ agent: "cognia", ...fields }))).toEqual(expected)
+  })
   it("routes an external CLI to its own session", () => {
     const owner = fleetSessionOwner(session({ agent: "codex", transcriptPath: "/t.jsonl" }))
     expect(owner).toEqual({
@@ -68,6 +82,42 @@ describe("fleetSessionOwner", () => {
 describe("attentionOwner", () => {
   const base = { title: "t", openedAt: 1, stale: false } as const
 
+  it.each(["chat", "team", "run", "fleet"] as const)(
+    "does not invent an owner for a %s item missing its source identity",
+    (source) => {
+      expect(
+        attentionOwner({ ...base, id: "orphan", kind: "tool-approval", source } as AttentionItem)
+      ).toBeNull()
+    }
+  )
+
+  it.each([
+    [
+      { source: "team", teamId: "t" },
+      { kind: "team", teamId: "t" },
+    ],
+    [
+      { source: "team", runId: "r" },
+      { kind: "team", runId: "r" },
+    ],
+    [
+      { source: "team", teamId: "t", runId: "r" },
+      { kind: "team", teamId: "t", runId: "r" },
+    ],
+    [
+      { source: "run", runId: "r" },
+      { kind: "run", runId: "r" },
+    ],
+    [
+      { source: "run", runId: "r", interrupt: { id: "i" } },
+      { kind: "run", runId: "r", interruptId: "i" },
+    ],
+  ])("preserves the ids required to open and clear an attention owner", (fields, expected) => {
+    expect(
+      attentionOwner({ ...base, id: "pending", kind: "run-approval", ...fields } as AttentionItem)
+    ).toEqual(expected)
+  })
+
   it("keys a chat approval by session and request", () => {
     const item = {
       ...base,
@@ -85,6 +135,52 @@ describe("attentionOwner", () => {
     expect(attentionOwner(item)).toBeNull()
   })
 
+  it.each([undefined, "chat-7"])("preserves a plan gate with session %s", (sessionId) => {
+    const item = {
+      ...base,
+      id: "team:agent-plan:plan-step",
+      source: "team",
+      kind: "hitl-gate",
+      gate: {
+        key: { scope: "agent-plan", id: "plan-step" },
+        gateType: "plan_step",
+        title: "Review plan",
+        planId: "plan-1",
+        sessionId,
+        openedAt: 1,
+        status: "open",
+      },
+    } as AttentionItem
+    const owner = attentionOwner(item)
+    expect(owner).toEqual({
+      kind: "gate",
+      gateKey: item.gate!.key,
+      ...(sessionId ? { sessionId } : {}),
+    })
+    expect(ownerRoute(owner!)).toBe("/")
+  })
+
+  it("opens the global approval host for budget gates, not a fabricated team", () => {
+    const item = {
+      ...base,
+      id: "team:cost-budget:global:daily",
+      source: "team",
+      kind: "hitl-gate",
+      runId: "global:daily",
+      gate: {
+        key: { scope: "cost-budget", id: "global:daily" },
+        gateType: "budget",
+        title: "Daily budget",
+        runId: "global:daily",
+        openedAt: 1,
+        status: "open",
+      },
+    } as AttentionItem
+    const owner = attentionOwner(item)
+    expect(owner?.kind).toBe("gate")
+    expect(ownerRoute(owner!)).toBe("/")
+  })
+
   it("reuses the fleet owner for a fleet item, so it merges with its session row", () => {
     const fleetSession = session({ agent: "opencode", sessionId: "oc" })
     const item = {
@@ -99,6 +195,33 @@ describe("attentionOwner", () => {
 })
 
 describe("taskIdentity", () => {
+  it.each([
+    { kind: "run", runId: "" },
+    { kind: "external", agent: "codex", sessionId: "" },
+    { kind: "gate", gateKey: { scope: "plan", id: "" } },
+  ] satisfies FleetOwnerRef[])("does not merge owners missing a required identity: %j", (owner) => {
+    expect(taskIdentity(owner)).toBeNull()
+    expect(sameOwner(owner, owner)).toBe(false)
+  })
+
+  it.each([
+    { kind: "chat", sessionId: "s" },
+    { kind: "team", teamId: "t" },
+    { kind: "team", runId: "r" },
+    { kind: "run", runId: "r" },
+    { kind: "gate", gateKey: { scope: "plan", id: "g" } },
+    { kind: "external", agent: "codex", sessionId: "s" },
+  ] satisfies FleetOwnerRef[])("classifies and recognizes each owner kind: %j", (owner) => {
+    expect(ownerSource(owner)).toBe(owner.kind)
+    expect(sameOwner(owner, { ...owner })).toBe(true)
+    expect(sameOwner(owner, { kind: "chat", sessionId: "different" })).toBe(false)
+  })
+  it("keeps gate keys distinct even when their scopes and ids contain separators", () => {
+    expect(taskIdentity({ kind: "gate", gateKey: { scope: "a:b", id: "c" } })).not.toBe(
+      taskIdentity({ kind: "gate", gateKey: { scope: "a", id: "b:c" } })
+    )
+    expect(taskIdentity({ kind: "gate", gateKey: { scope: "", id: "c" } })).toBeNull()
+  })
   it("is null when nothing discriminating is known", () => {
     expect(taskIdentity({ kind: "team" })).toBeNull()
     expect(taskIdentity({ kind: "chat", sessionId: "" })).toBeNull()

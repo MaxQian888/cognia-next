@@ -57,6 +57,46 @@ function project(
 }
 
 describe("projectIslandState privacy", () => {
+  it("bounds display metadata and omits permission command bodies", () => {
+    const row = project([
+      session({
+        hostRef: "host-".repeat(20),
+        terminal: { app: "iterm", label: "Terminal ".repeat(10) },
+        pendingPermission: {
+          requestId: "p",
+          toolName: null,
+          detail: "secret command",
+          requestedAt: NOW,
+        },
+        pendingQuestionRequest: { requestId: "q", requestedAt: NOW },
+        pendingQuestions: [
+          {
+            question: "Question ".repeat(40),
+            header: "Heading ".repeat(10),
+            options: ["Option ".repeat(20)],
+            multiSelect: true,
+          },
+        ],
+      }),
+    ]).rows[0]
+    expect(row.hostRef!.length).toBeLessThanOrEqual(32)
+    expect(row.terminal!.label.length).toBeLessThanOrEqual(24)
+    expect(row.permission).toEqual({ requestId: "p", toolName: null, requestedAt: NOW })
+    expect(row.question!.questions[0]).toMatchObject({ multiSelect: true })
+    expect(row.question!.questions[0].question.length).toBeLessThanOrEqual(200)
+    expect(row.question!.questions[0].header!.length).toBeLessThanOrEqual(24)
+    expect(row.question!.questions[0].options[0].length).toBeLessThanOrEqual(48)
+    expect(JSON.stringify(row)).not.toContain("secret command")
+  })
+
+  it("uses safe fallbacks when a session has no title, activity, or terminal label", () => {
+    const row = project([
+      session({ projectName: null, activity: null, terminal: { app: "iterm", label: "" } }),
+    ]).rows[0]
+    expect(row.title).toBe("s1")
+    expect(row.summary).toBe("")
+    expect(row.terminal).toEqual({ app: "iterm", label: "iterm" })
+  })
   it("keeps prompts, paths and command arguments out of the projection", () => {
     const state = project([session()])
     const serialized = JSON.stringify(state)
@@ -74,6 +114,98 @@ describe("projectIslandState privacy", () => {
 })
 
 describe("projectIslandState capabilities", () => {
+  it("requires both a transcript capability and a path before offering Open transcript", () => {
+    const capabilities = { ...session().capabilities, openTranscript: true, sendMessage: true }
+    const available = project([session({ capabilities, transcriptPath: "/transcript" })]).rows[0]
+    expect(available.capabilities).toMatchObject({ openTranscript: true, reply: true })
+    expect(project([session({ capabilities })]).rows[0].capabilities.openTranscript).toBe(false)
+  })
+
+  it("keeps questions display-only without a parked handle and suppresses empty requests", () => {
+    const question = { question: "Where?", options: ["Local"], multiSelect: false }
+    const displayOnly = project([session({ pendingQuestions: [question] })]).rows[0]
+    expect(displayOnly.capabilities.questionResponse).toBe(false)
+    expect(displayOnly.question).toBeUndefined()
+    const empty = project([
+      session({ pendingQuestionRequest: { requestId: "q", requestedAt: NOW } }),
+    ]).rows[0]
+    expect(empty.capabilities.questionResponse).toBe(false)
+    expect(empty.question).toBeUndefined()
+    const waiting = project([
+      session({
+        status: "waiting-input",
+        pendingQuestionRequest: { requestId: "q", requestedAt: NOW },
+        pendingQuestions: [question],
+      }),
+    ]).rows[0]
+    expect(waiting.statusKey).toBe("awaitingInput")
+  })
+  const question = {
+    question: "Choose a destination",
+    options: ["Local", "Remote"],
+    multiSelect: false,
+  }
+
+  it("offers inline answers only when every question and option fits the projection", () => {
+    const pending = { requestId: "q1", requestedAt: NOW }
+    const complete = project([
+      session({ pendingQuestionRequest: pending, pendingQuestions: Array(4).fill(question) }),
+    ]).rows[0]
+    expect(complete.capabilities.questionResponse).toBe(true)
+
+    for (const questions of [
+      Array(5).fill(question),
+      [{ ...question, options: Array.from({ length: 9 }, (_, index) => `Option ${index}`) }],
+      [{ ...question, options: [] }],
+    ]) {
+      const row = project([
+        session({ pendingQuestionRequest: pending, pendingQuestions: questions }),
+      ]).rows[0]
+      expect(row.capabilities.questionResponse).toBe(false)
+      expect(row.capabilities.focusTerminal).toBe(true)
+    }
+  })
+
+  it.each(["ended", "detached"] as const)(
+    "does not offer gate decisions or runtime controls for a %s session",
+    (status) => {
+      const row = project([
+        session({
+          status,
+          pendingPermission: { requestId: "p1", toolName: "Bash", requestedAt: NOW, detail: null },
+          pendingQuestionRequest: { requestId: "q1", requestedAt: NOW },
+          pendingQuestions: [question],
+          capabilities: { ...session().capabilities, sendMessage: true },
+        }),
+      ]).rows[0]
+      expect(row.capabilities).toMatchObject({
+        permissionDecision: false,
+        questionResponse: false,
+        reply: false,
+        interrupt: false,
+        focusTerminal: true,
+      })
+    }
+  )
+
+  it("does not route Cognia questions or replies through external Fleet controls", () => {
+    const row = project([
+      session({
+        agent: "cognia",
+        pendingPermission: { requestId: "p1", toolName: "Bash", requestedAt: NOW, detail: null },
+        pendingQuestionRequest: { requestId: "q1", requestedAt: NOW },
+        pendingQuestions: [question],
+        capabilities: { ...session().capabilities, sendMessage: true },
+      }),
+    ]).rows[0]
+    expect(row.capabilities).toMatchObject({
+      openOwner: true,
+      permissionDecision: false,
+      questionResponse: false,
+      reply: false,
+    })
+  })
+
   it("never offers interrupt for a cognia session", () => {
     const state = project([
       session({
@@ -149,6 +281,66 @@ describe("projectIslandState merging", () => {
   })
 })
 
+describe("non-Squad approval gates", () => {
+  it("keeps every plan gate visible separately from its chat and sibling gates", () => {
+    const attention = ["step-a", "step-b"].map((id) => ({
+      id: `team:agent-plan:${id}`,
+      source: "team" as const,
+      kind: "hitl-gate" as const,
+      title: "Review plan",
+      openedAt: NOW,
+      stale: false,
+      gate: {
+        key: { scope: "agent-plan", id },
+        gateType: "plan_step" as const,
+        title: "Review plan",
+        planId: "plan-1",
+        sessionId: "chat-1",
+        openedAt: NOW,
+        status: "open" as const,
+      },
+    }))
+    const state = project([session({ agent: "cognia", sessionId: "chat-1" })], attention)
+    expect(state.rows).toHaveLength(3)
+    expect(state.attentionCount).toBe(2)
+    expect(state.rows.filter((row) => row.source === "gate")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "gate:agent-plan:step-a",
+          capabilities: expect.objectContaining({ openOwner: true, dismissStale: false }),
+        }),
+        expect.objectContaining({ id: "gate:agent-plan:step-b" }),
+      ])
+    )
+  })
+
+  it("offers stale gate dismissal only for an interrupted gate", () => {
+    for (const status of ["open", "interrupted"] as const) {
+      const row = project(
+        [],
+        [
+          {
+            id: "team:agent-plan:step-a",
+            source: "team",
+            kind: "hitl-gate",
+            title: "Review plan",
+            openedAt: NOW,
+            stale: true,
+            gate: {
+              key: { scope: "agent-plan", id: "step-a" },
+              gateType: "plan_step",
+              title: "Review plan",
+              openedAt: NOW,
+              status,
+            },
+          },
+        ]
+      ).rows[0]
+      expect(row.capabilities.dismissStale).toBe(status === "interrupted")
+    }
+  })
+})
+
 describe("stale dismissal", () => {
   function staleItem(over: Record<string, unknown>): AttentionItem {
     return {
@@ -158,6 +350,33 @@ describe("stale dismissal", () => {
       ...over,
     } as AttentionItem
   }
+
+  it("permits clearing stale teams and non-handoff runs only with their clearing identity", () => {
+    const state = project(
+      [],
+      [
+        staleItem({ id: "team:t", source: "team", kind: "hitl-gate", teamId: "t" }),
+        staleItem({ id: "team:r", source: "team", kind: "hitl-gate", runId: "r" }),
+        staleItem({
+          id: "run:r",
+          source: "run",
+          kind: "run-approval",
+          runId: "r",
+          interrupt: { id: "i", type: "approval" },
+        }),
+        staleItem({ id: "run:missing", source: "run", kind: "run-approval", runId: "missing" }),
+      ]
+    )
+    expect(
+      state.rows
+        .filter((row) => row.capabilities.dismissStale)
+        .map((row) => row.id)
+        .sort()
+    ).toEqual(["run:r", "team::r", "team:t:"])
+    expect(state.rows.find((row) => row.id === "run:missing")!.capabilities.dismissStale).toBe(
+      false
+    )
+  })
 
   it("offers Dismiss only when the clearing call has the id it needs", () => {
     const withRequest = project(
@@ -214,6 +433,62 @@ describe("stale dismissal", () => {
 })
 
 describe("projectIslandState lifecycle", () => {
+  it("ignores observations with missing source identity instead of inventing a target", () => {
+    const missing = {
+      id: "orphan",
+      source: "chat",
+      kind: "tool-approval",
+      title: "",
+      openedAt: NOW,
+      stale: false,
+    } as AttentionItem
+    const invalidGate = {
+      ...missing,
+      source: "team",
+      kind: "hitl-gate",
+      gate: { key: { scope: "plan", id: "" }, status: "open" },
+    } as AttentionItem
+    expect(project([session({ sessionId: "" })], [missing, invalidGate]).rows).toEqual([])
+  })
+
+  it.each(["working", "idle"] as const)(
+    "marks a %s task failed without forwarding its error body",
+    (status) => {
+      const row = project([
+        session({ status, lastError: { kind: "turn", at: NOW, detail: "sensitive failure" } }),
+      ]).rows[0]
+      expect(row.status).toBe("failed")
+      expect(row.summary).toBe("")
+      expect(JSON.stringify(row)).not.toContain("sensitive failure")
+    }
+  )
+
+  it("uses the current clock by default and a source label for unnamed attention", () => {
+    const clock = jest.spyOn(Date, "now").mockReturnValue(NOW)
+    try {
+      const state = projectIslandState({
+        fleet: snapshot([]),
+        attention: [
+          {
+            id: "chat:q",
+            source: "chat",
+            kind: "tool-approval",
+            sessionId: "s",
+            title: "",
+            openedAt: NOW,
+            stale: false,
+          } as AttentionItem,
+        ],
+        detailVisibility: "summary-only",
+        epoch: 1,
+        revision: 1,
+      })
+      expect(state.generatedAt).toBe(NOW)
+      expect(state.rows[0]).toMatchObject({ title: "chat", capabilities: { detail: false } })
+    } finally {
+      clock.mockRestore()
+    }
+  })
   it("keeps a finished session for the linger window and drops it after", () => {
     const justEnded = session({ status: "ended", lastEventAt: NOW - 1_000 })
     expect(project([justEnded]).rows).toHaveLength(1)
@@ -295,6 +570,16 @@ describe("sortIslandRows", () => {
     ])
     expect(sorted[0].id).toBe("new")
   })
+
+  it("uses update times for unknown wait ages and stable ids to break exact ties", () => {
+    const rows = [
+      row({ id: "b", status: "blocked", priority: 0, updatedAt: 10 }),
+      row({ id: "a", status: "blocked", priority: 0, updatedAt: 10 }),
+      row({ id: "recent", status: "blocked", priority: 0, updatedAt: 20 }),
+    ]
+    expect(sortIslandRows(rows).map((row) => row.id)).toEqual(["a", "b", "recent"])
+    expect(rows[0].id).toBe("b")
+  })
 })
 
 describe("projectIslandState cognia sources", () => {
@@ -353,6 +638,49 @@ describe("projectIslandState cognia sources", () => {
 })
 
 describe("mergeRows liveness and clearing ids", () => {
+  it("preserves a run's interrupt identity when merging a detached session with its stale wait", () => {
+    const detached = session({ agent: "cognia", executionRunId: "r", status: "detached" })
+    const item = {
+      id: "run:r",
+      source: "run",
+      kind: "run-approval",
+      title: "Approval",
+      runId: "r",
+      openedAt: NOW,
+      stale: true,
+      interrupt: { id: "i", type: "approval" },
+    } as AttentionItem
+    const row = project([detached], [item]).rows[0]
+    expect(row.owner).toMatchObject({ kind: "run", runId: "r", interruptId: "i" })
+    expect(row).toMatchObject({ status: "stale", capabilities: { dismissStale: true } })
+  })
+
+  it("merges duplicate session observations while preserving their usable controls and oldest wait", () => {
+    const basic = session({ status: "waiting-input", activity: null })
+    const capable = session({
+      status: "waiting-permission",
+      lastEventAt: NOW - 500,
+      pendingPermission: { requestId: "p", toolName: "Bash", detail: null, requestedAt: NOW },
+      pendingQuestionRequest: { requestId: "q", requestedAt: NOW },
+      pendingQuestions: [{ question: "Continue?", options: ["Yes"], multiSelect: false }],
+      transcriptPath: "/transcript",
+      capabilities: { ...session().capabilities, sendMessage: true, openTranscript: true },
+    })
+    const state = project([basic, capable])
+    expect(state.rows).toHaveLength(1)
+    expect(state.rows[0]).toMatchObject({
+      waitingSince: basic.lastEventAt,
+      updatedAt: capable.lastEventAt,
+      permission: { requestId: "p" },
+      question: { requestId: "q" },
+      capabilities: {
+        permissionDecision: true,
+        questionResponse: true,
+        reply: true,
+        openTranscript: true,
+      },
+    })
+  })
   it("lets a live session outrank a stale attention entry and keeps the request id", () => {
     const live = session({ agent: "cognia", sessionId: "s", status: "working" })
     const lingering = {

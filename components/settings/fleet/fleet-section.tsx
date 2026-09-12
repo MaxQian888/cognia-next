@@ -27,7 +27,7 @@
  * 5. Island overlay — the Dynamic-Island-style status window (+ display picker).
  */
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -92,6 +92,11 @@ import { ExecutionWorkersCard } from "./execution-workers-card"
 
 const log = createLogger("settings.fleet")
 
+type IslandSettingsFailure =
+  | { action: "open" | "close" }
+  | { action: "fullscreen"; value: boolean }
+  | { action: "monitor"; value: string }
+
 export function FleetSection() {
   const t = useTranslations("settings.fleet")
   // Liveness rides the same snapshot stream the island uses — no second poll.
@@ -124,6 +129,9 @@ export function FleetSection() {
   const [islandMonitors, setIslandMonitors] = useState<IslandMonitorInfo[]>([])
   const [islandHideOnFullscreen, setIslandHideOnFullscreen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [islandFailure, setIslandFailure] = useState<IslandSettingsFailure | null>(null)
+  const mountedRef = useRef(false)
+  const statusVersionRef = useRef(0)
 
   // Read the status sources without touching React state — the caller applies
   // the result after its own alive-check, so the async read and the state write
@@ -188,7 +196,9 @@ export function FleetSection() {
   }, [])
 
   const refresh = useCallback(async () => {
-    applyStatus(await fetchStatus())
+    const version = ++statusVersionRef.current
+    const status = await fetchStatus()
+    if (mountedRef.current && version === statusVersionRef.current) applyStatus(status)
   }, [fetchStatus, applyStatus])
 
   // Island preferences live in their own persisted store rather than in
@@ -200,23 +210,38 @@ export function FleetSection() {
 
   useEffect(() => {
     let alive = true
+    mountedRef.current = true
     // Fetch first, then apply — the state write follows the await, so it runs
     // in a microtask (no synchronous render cascade).
-    void (async () => {
-      const status = await fetchStatus()
-      if (alive) applyStatus(status)
-    })()
+    void refresh()
     // Another writer (hooks editor, external tool) touched settings.json —
     // re-derive the install state instead of trusting our last write.
     let unlisten: (() => void) | undefined
     void subscribeClaudeSettings(() => void refresh()).then((fn) => {
-      unlisten = fn
+      if (alive) unlisten = fn
+      else fn()
     })
     return () => {
       alive = false
+      mountedRef.current = false
+      statusVersionRef.current += 1
       unlisten?.()
     }
-  }, [fetchStatus, applyStatus, refresh])
+  }, [refresh])
+
+  // Tray actions and monitor changes happen outside this settings renderer.
+  // Reconcile when it returns to the foreground, without background polling.
+  useEffect(() => {
+    const foreground = () => {
+      if (!busy && document.visibilityState === "visible") void refresh()
+    }
+    window.addEventListener("focus", foreground)
+    document.addEventListener("visibilitychange", foreground)
+    return () => {
+      window.removeEventListener("focus", foreground)
+      document.removeEventListener("visibilitychange", foreground)
+    }
+  }, [busy, refresh])
 
   const toggleMonitor = useCallback(
     async (next: boolean) => {
@@ -338,9 +363,15 @@ export function FleetSection() {
     async (next: boolean) => {
       if (busy) return
       setBusy(true)
+      statusVersionRef.current += 1
       try {
         const ok = next ? await openIslandWindow() : await closeIslandWindow()
-        if (ok) setIslandOpen(next)
+        if (!ok) throw new Error("island visibility change failed")
+        setIslandOpen(next)
+        setIslandFailure(null)
+      } catch (error) {
+        log.error("island_toggle_failed", { next, error: String(error) })
+        setIslandFailure({ action: next ? "open" : "close" })
       } finally {
         setBusy(false)
       }
@@ -360,11 +391,17 @@ export function FleetSection() {
     async (next: boolean) => {
       if (busy) return
       setBusy(true)
+      statusVersionRef.current += 1
       setIslandHideOnFullscreen(next)
       try {
         const ok = await islandSetHideOnFullscreen(next)
-        if (!ok) setIslandHideOnFullscreen(!next)
-        else toast.success(t("saved"))
+        if (!ok) throw new Error("island fullscreen preference change failed")
+        setIslandFailure(null)
+        toast.success(t("saved"))
+      } catch (error) {
+        log.error("island_fullscreen_toggle_failed", { next, error: String(error) })
+        setIslandHideOnFullscreen(!next)
+        setIslandFailure({ action: "fullscreen", value: next })
       } finally {
         setBusy(false)
       }
@@ -380,15 +417,37 @@ export function FleetSection() {
     async (value: string) => {
       if (busy) return
       setBusy(true)
+      statusVersionRef.current += 1
       try {
         const ok = await islandSetMonitor(value === "primary" ? null : value)
-        if (ok) await refresh()
+        if (!ok) throw new Error("island monitor change failed")
+        await refresh()
+        setIslandFailure(null)
+      } catch (error) {
+        log.error("island_monitor_change_failed", { error: String(error) })
+        setIslandFailure({ action: "monitor", value })
       } finally {
         setBusy(false)
       }
     },
     [busy, refresh]
   )
+
+  const retryIslandSetting = () => {
+    if (!islandFailure) return
+    switch (islandFailure.action) {
+      case "open":
+      case "close":
+        void toggleIsland(islandFailure.action === "open")
+        break
+      case "fullscreen":
+        void toggleIslandHideOnFullscreen(islandFailure.value)
+        break
+      case "monitor":
+        void changeIslandMonitor(islandFailure.value)
+        break
+    }
+  }
 
   /**
    * Copy every input the island's placement math reads to the clipboard.
@@ -651,6 +710,18 @@ export function FleetSection() {
             data-testid="fleet-opencode-switch"
           />
         </div>
+
+        {islandFailure ? (
+          <div
+            role="alert"
+            className="flex items-center justify-between gap-3 text-xs text-destructive"
+          >
+            <p>{t(`island.errors.${islandFailure.action}`)}</p>
+            <Button variant="outline" size="sm" disabled={busy} onClick={retryIslandSetting}>
+              {t("island.retry")}
+            </Button>
+          </div>
+        ) : null}
 
         <div className="flex items-start justify-between gap-3" data-testid="fleet-island-row">
           <div className="space-y-0.5">

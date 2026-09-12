@@ -11,6 +11,7 @@ jest.mock("@/lib/island/client", () => ({
 
 import { useIslandDetail } from "./use-island-detail"
 import type { IslandDetailResponse } from "@/lib/island/types"
+import { ISLAND_ACTION_TIMEOUT_MS } from "@/lib/island/types"
 
 let reply: (response: IslandDetailResponse) => void = () => {}
 
@@ -49,6 +50,129 @@ beforeEach(() => {
       return () => {}
     })
 })
+
+afterEach(() => {
+  jest.useRealTimers()
+})
+
+it("waits for the response listener before sending", async () => {
+  let finishRegistration!: (off: () => void) => void
+  onResponseMock.mockImplementation((handler: typeof reply) => {
+    reply = handler
+    return new Promise((resolve) => {
+      finishRegistration = resolve
+    })
+  })
+  requestDetailMock.mockImplementation(async ({ requestId, rowId }) => {
+    reply({ requestId, rowId, revision: 4, detail: DETAIL })
+    return true
+  })
+  render(<Probe rowId="r1" />)
+  await act(async () => {})
+  expect(requestDetailMock).not.toHaveBeenCalled()
+  await act(async () => finishRegistration(() => {}))
+  expect(screen.getByTestId("out").textContent).toBe("r1:/w:-")
+})
+
+it.each([false, "rejected"])("surfaces unavailable when sending fails: %s", async (failure) => {
+  if (failure === false) requestDetailMock.mockResolvedValue(false)
+  else requestDetailMock.mockRejectedValue(new Error("disconnected"))
+  render(<Probe rowId="r1" />)
+  await act(async () => {})
+  expect(screen.getByTestId("out").textContent).toBe("r1:-:unavailable")
+})
+
+it("times out a missing response and ignores a late answer", async () => {
+  jest.useFakeTimers({ doNotFake: ["queueMicrotask"] })
+  render(<Probe rowId="r1" />)
+  await act(async () => {})
+  const { requestId } = requestDetailMock.mock.calls[0][0]
+  await act(async () => jest.advanceTimersByTime(ISLAND_ACTION_TIMEOUT_MS))
+  expect(screen.getByTestId("out").textContent).toBe("r1:-:unavailable")
+  await act(async () => reply({ requestId, rowId: "r1", revision: 4, detail: DETAIL }))
+  expect(screen.getByTestId("out").textContent).toBe("r1:-:unavailable")
+})
+
+it("reports failed listener registration without sending", async () => {
+  onResponseMock.mockRejectedValue(new Error("listener unavailable"))
+  render(<Probe rowId="r1" />)
+  await act(async () => {})
+  expect(requestDetailMock).not.toHaveBeenCalled()
+  expect(screen.getByTestId("out").textContent).toBe("r1:-:unavailable")
+})
+
+it.each(["timeout", "unmount"])(
+  "does not send after late listener setup following %s",
+  async (end) => {
+    jest.useFakeTimers({ doNotFake: ["queueMicrotask"] })
+    let finishRegistration!: (off: () => void) => void
+    const unsubscribe = jest.fn()
+    onResponseMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishRegistration = resolve
+        })
+    )
+    const { unmount } = render(<Probe rowId="r1" />)
+    if (end === "timeout") {
+      await act(async () => jest.advanceTimersByTime(ISLAND_ACTION_TIMEOUT_MS))
+      expect(screen.getByTestId("out").textContent).toBe("r1:-:unavailable")
+    } else unmount()
+    await act(async () => finishRegistration(unsubscribe))
+    expect(requestDetailMock).not.toHaveBeenCalled()
+    if (end === "timeout") unmount()
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+    expect(jest.getTimerCount()).toBe(0)
+  }
+)
+
+it("ignores a retired row listener and releases its outstanding timer", async () => {
+  jest.useFakeTimers({ doNotFake: ["queueMicrotask"] })
+  const { rerender, unmount } = render(<Probe rowId="r1" />)
+  await act(async () => {})
+  const retiredReply = reply
+  const first = requestDetailMock.mock.calls[0][0]
+  rerender(<Probe rowId="r2" />)
+  await act(async () => {})
+  expect(jest.getTimerCount()).toBe(1)
+  await act(async () => retiredReply({ ...first, detail: DETAIL }))
+  expect(screen.getByTestId("out").textContent).toBe("-:-:-")
+  unmount()
+  expect(jest.getTimerCount()).toBe(0)
+})
+
+it("rejects a response whose row does not match the requested row", async () => {
+  render(<Probe rowId="r1" />)
+  await act(async () => {})
+  const first = requestDetailMock.mock.calls[0][0]
+  await act(async () => reply({ ...first, rowId: "r2", detail: DETAIL }))
+  expect(screen.getByTestId("out").textContent).toBe("-:-:-")
+})
+
+it("uses unavailable when an empty response has no refusal reason", async () => {
+  render(<Probe rowId="r1" />)
+  await act(async () => {})
+  const first = requestDetailMock.mock.calls[0][0]
+  await act(async () => reply({ ...first, detail: null }))
+  expect(screen.getByTestId("out").textContent).toBe("r1:-:unavailable")
+})
+
+it.each([null, "r2"])(
+  "discards cached detail when the pin leaves for %s and returns",
+  async (away) => {
+    const { rerender } = render(<Probe rowId="r1" />)
+    await act(async () => {})
+    const { requestId } = requestDetailMock.mock.calls[0][0]
+    await act(async () => reply({ requestId, rowId: "r1", revision: 4, detail: DETAIL }))
+    rerender(<Probe rowId={away} />)
+    rerender(<Probe rowId="r1" />)
+    await act(async () => {})
+    expect(screen.getByTestId("out").textContent).toBe("-:-:-")
+    const fresh = requestDetailMock.mock.calls.at(-1)![0]
+    await act(async () => reply({ ...fresh, detail: { ...DETAIL, cwd: "/fresh" } }))
+    expect(screen.getByTestId("out").textContent).toBe("r1:/fresh:-")
+  }
+)
 
 it("requests nothing while no row is pinned", async () => {
   render(<Probe rowId={null} />)
@@ -98,6 +222,30 @@ it("surfaces a refusal reason instead of an empty panel", async () => {
 })
 
 describe("request cadence", () => {
+  it("refreshes a settled row when its own stamp changes", async () => {
+    const { rerender } = render(<Probe rowId="r1" stamp={1} />)
+    await act(async () => {})
+    const first = requestDetailMock.mock.calls[0][0]
+    await act(async () => reply({ ...first, detail: DETAIL }))
+    rerender(<Probe rowId="r1" revision={8} stamp={2} />)
+    await act(async () => {})
+    expect(requestDetailMock).toHaveBeenCalledTimes(2)
+    expect(requestDetailMock.mock.calls[1][0]).toMatchObject({ rowId: "r1", revision: 8 })
+  })
+
+  it("recovers a queued update after the previous request times out", async () => {
+    jest.useFakeTimers({ doNotFake: ["queueMicrotask"] })
+    const { rerender } = render(<Probe rowId="r1" stamp={1} />)
+    await act(async () => {})
+    rerender(<Probe rowId="r1" stamp={2} />)
+    await act(async () => jest.advanceTimersByTime(ISLAND_ACTION_TIMEOUT_MS))
+    expect(requestDetailMock).toHaveBeenCalledTimes(2)
+    const fresh = requestDetailMock.mock.calls[1][0]
+    await act(async () => reply({ ...fresh, detail: DETAIL }))
+    expect(screen.getByTestId("out").textContent).toBe("r1:/w:-")
+    expect(jest.getTimerCount()).toBe(0)
+  })
+
   it("does not re-request when only the revision moves", async () => {
     // The main window bumps the revision on every fleet event; re-requesting
     // per event invalidated the reply in flight and left a pinned row loading.

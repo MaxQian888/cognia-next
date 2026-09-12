@@ -47,6 +47,7 @@ function nextRequestId(): string {
 
 export function useIslandActions(): UseIslandActionsResult {
   const [statuses, setStatuses] = useState<Record<string, IslandActionStatus>>({})
+  const listenerReady = useRef<Promise<boolean> | null>(null)
   const inflight = useRef(
     new Map<
       string,
@@ -65,18 +66,29 @@ export function useIslandActions(): UseIslandActionsResult {
 
   useEffect(() => {
     let alive = true
-    const offs: Array<() => void> = []
+    let unlisten: (() => void) | undefined
     const pending = inflight.current
-    void onIslandActionResult((result: IslandActionResult) => {
+    listenerReady.current = onIslandActionResult((result: IslandActionResult) => {
       if (!alive) return
       settle(
         result.requestId,
         result.outcome === "completed" ? null : (result.reason ?? "callFailed")
       )
-    }).then((off) => (alive ? offs.push(off) : off()))
+    }).then(
+      (off) => {
+        if (!alive) {
+          off()
+          return false
+        }
+        unlisten = off
+        return true
+      },
+      () => false
+    )
     return () => {
       alive = false
-      offs.forEach((off) => off())
+      listenerReady.current = null
+      unlisten?.()
       for (const entry of pending.values()) {
         clearTimeout(entry.timer)
         entry.resolve(false)
@@ -87,6 +99,8 @@ export function useIslandActions(): UseIslandActionsResult {
 
   const dispatch = useCallback(
     (intent: IslandActionRequest): Promise<boolean> => {
+      const ready = listenerReady.current
+      if (!ready) return Promise.resolve(false)
       const slot = `${intent.rowId}:${intent.kind}`
       // Repeat-submission guard. One control cannot fire twice while its first
       // attempt is still outstanding.
@@ -98,9 +112,20 @@ export function useIslandActions(): UseIslandActionsResult {
         const timer = setTimeout(() => settle(requestId, "timeout"), ISLAND_ACTION_TIMEOUT_MS)
         inflight.current.set(requestId, { slot, timer, resolve })
         setStatuses((prev) => ({ ...prev, [slot]: { pending: true, error: null } }))
-        void requestIslandAction({ ...intent, requestId } as IslandActionIntent).then((sent) => {
-          if (!sent) settle(requestId, "callFailed")
-        })
+        // Subscribe before sending: the main window can answer immediately.
+        // The timer above bounds setup too, and cleanup/timeout removes the
+        // request so a late listener cannot dispatch an abandoned action.
+        void ready
+          .then(async (listening) => {
+            if (!inflight.current.has(requestId)) return
+            if (!listening) {
+              settle(requestId, "callFailed")
+              return
+            }
+            const sent = await requestIslandAction({ ...intent, requestId } as IslandActionIntent)
+            if (!sent) settle(requestId, "callFailed")
+          })
+          .catch(() => settle(requestId, "callFailed"))
       })
     },
     [settle]

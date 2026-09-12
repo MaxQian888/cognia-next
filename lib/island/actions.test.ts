@@ -78,6 +78,65 @@ function intent(over: Partial<IslandActionIntent> & { kind: string }): IslandAct
 beforeEach(() => jest.clearAllMocks())
 
 describe("executeIslandAction validation", () => {
+  it.each([
+    ["permission-decision", "permissionDecision"],
+    ["reply", "reply"],
+    ["focus-terminal", "focusTerminal"],
+    ["open-transcript", "openTranscript"],
+    ["dismiss-stale", "dismissStale"],
+  ] as const)("rejects %s after its capability is withdrawn", async (kind, capability) => {
+    const changed = row({ capabilities: { ...row().capabilities, [capability]: false } })
+    const result = await executeIslandAction(
+      intent({ kind, text: "hello", permissionRequestId: "p1", behavior: "allow" }),
+      state([changed]),
+      deps()
+    )
+    expect(result).toMatchObject({ outcome: "rejected", reason: "notPermitted" })
+    for (const transport of [respond, sendMessage, focusTerminal, revealTranscript]) {
+      expect(transport).not.toHaveBeenCalled()
+    }
+  })
+
+  it.each(["reply", "interrupt", "focus-terminal", "open-transcript"] as const)(
+    "never sends %s to an external adapter for an internal owner",
+    async (kind) => {
+      const internal = row({ owner: { kind: "chat", sessionId: "chat-1" } })
+      const result = await executeIslandAction(
+        intent({ kind, text: "hello" }),
+        state([internal]),
+        deps()
+      )
+      expect(result).toMatchObject({ outcome: "rejected", reason: "notPermitted" })
+      for (const transport of [sendMessage, interrupt, focusTerminal, revealTranscript]) {
+        expect(transport).not.toHaveBeenCalled()
+      }
+    }
+  )
+
+  it.each(["question-response", "question-reject"] as const)(
+    "rejects %s if its parked question disappeared",
+    async (kind) => {
+      const result = await executeIslandAction(
+        intent({ kind, questionRequestId: "q1", selections: [[0]] }),
+        state([row({ question: undefined })]),
+        deps()
+      )
+      expect(result).toMatchObject({ outcome: "rejected", reason: "requestChanged" })
+      expect(questionRespond).not.toHaveBeenCalled()
+      expect(questionReject).not.toHaveBeenCalled()
+    }
+  )
+
+  it("does not route an external owner even if a stale snapshot advertised navigation", async () => {
+    const d = deps()
+    const result = await executeIslandAction(
+      intent({ kind: "open-owner" }),
+      state([row({ capabilities: { ...row().capabilities, openOwner: true } })]),
+      d
+    )
+    expect(result).toMatchObject({ outcome: "rejected", reason: "noRoute" })
+    expect(d.navigate).not.toHaveBeenCalled()
+  })
   it("rejects an intent built against a revision the main window has not reached", async () => {
     const result = await executeIslandAction(
       intent({ kind: "interrupt", revision: 99 }),
@@ -119,9 +178,92 @@ describe("executeIslandAction validation", () => {
     expect(result).toMatchObject({ outcome: "rejected", reason: "requestChanged" })
     expect(respond).not.toHaveBeenCalled()
   })
+
+  it.each(["question-response", "question-reject"] as const)(
+    "rejects %s when the current projection cannot answer the complete request",
+    async (kind) => {
+      const unavailable = row({
+        capabilities: { ...row().capabilities, questionResponse: false },
+      })
+      const result = await executeIslandAction(
+        intent({ kind, questionRequestId: "q1", selections: [[0]] }),
+        state([unavailable]),
+        deps()
+      )
+      expect(result).toMatchObject({ outcome: "rejected", reason: "notPermitted" })
+      expect(questionRespond).not.toHaveBeenCalled()
+      expect(questionReject).not.toHaveBeenCalled()
+    }
+  )
 })
 
 describe("executeIslandAction execution", () => {
+  it.each([
+    "question-response",
+    "question-reject",
+    "reply",
+    "focus-terminal",
+    "open-transcript",
+    "dismiss-stale",
+  ] as const)(
+    "reports failed rather than completed when %s is refused by its adapter",
+    async (kind) => {
+      questionRespond.mockResolvedValue(false)
+      questionReject.mockResolvedValue(false)
+      sendMessage.mockResolvedValue(null)
+      focusTerminal.mockResolvedValue(false)
+      revealTranscript.mockResolvedValue(false)
+      const d = { ...deps(), dismissStale: jest.fn(async () => false) }
+      const result = await executeIslandAction(
+        intent({ kind, questionRequestId: "q1", selections: [[0]], text: "hello" }),
+        state([row({ capabilities: { ...row().capabilities, dismissStale: true } })]),
+        d
+      )
+      expect(result).toMatchObject({ outcome: "failed", reason: "callFailed" })
+    }
+  )
+
+  it("rejects a current question and interrupts its session when the adapters confirm", async () => {
+    questionReject.mockResolvedValue(true)
+    interrupt.mockResolvedValue({ ok: true })
+    expect(
+      await executeIslandAction(
+        intent({ kind: "question-reject", questionRequestId: "q1" }),
+        state(),
+        deps()
+      )
+    ).toMatchObject({ outcome: "completed" })
+    expect(questionReject).toHaveBeenCalledWith("q1")
+    expect(
+      await executeIslandAction(intent({ kind: "interrupt", revision: 4 }), state(), deps())
+    ).toMatchObject({ outcome: "completed", revision: 5 })
+    expect(interrupt).toHaveBeenCalledWith("opencode", "oc")
+  })
+
+  it("waits for the main window to become visible before acknowledging navigation", async () => {
+    let finishFocus!: () => void
+    const focusMainWindow = jest.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishFocus = resolve
+        })
+    )
+    const d = { ...deps(), focusMainWindow }
+    const completed = jest.fn()
+    const current = row({
+      owner: { kind: "chat", sessionId: "s" },
+      capabilities: { ...row().capabilities, openOwner: true },
+    })
+    const result = executeIslandAction(intent({ kind: "open-owner" }), state([current]), d).then(
+      completed
+    )
+    expect(d.navigate).toHaveBeenCalledWith("/", current.owner)
+    expect(focusMainWindow).toHaveBeenCalledTimes(1)
+    expect(completed).not.toHaveBeenCalled()
+    finishFocus()
+    await result
+    expect(completed).toHaveBeenCalledWith(expect.objectContaining({ outcome: "completed" }))
+  })
   it("answers a permission and reports completion", async () => {
     respond.mockResolvedValue(true)
     const result = await executeIslandAction(
@@ -217,7 +359,7 @@ describe("executeIslandAction execution", () => {
       state([chatRow]),
       d
     )
-    expect(d.navigate).toHaveBeenCalledWith("/")
+    expect(d.navigate).toHaveBeenCalledWith("/", chatRow.owner)
     expect(result.outcome).toBe("completed")
 
     // An external agent's owner is a terminal, so `openOwner` is never true and

@@ -25,6 +25,7 @@ import {
 } from "@/lib/tauri/fleet"
 import { ownerRoute } from "./owner"
 import type {
+  FleetOwnerRef,
   IslandActionIntent,
   IslandActionResult,
   IslandRowProjection,
@@ -42,8 +43,8 @@ export type IslandActionReason =
   | "emptyInput"
 
 export interface IslandActionDeps {
-  /** Navigate the main window. Supplied by the initializer's router. */
-  navigate(path: string): void
+  /** Select the owner context and navigate the main window. */
+  navigate(path: string, owner: FleetOwnerRef): void
   /** Bring the main window forward after an owner navigation. */
   focusMainWindow?(): void | Promise<void>
   /** Clear a stale pending item. Supplied by the initializer. */
@@ -90,7 +91,7 @@ export async function executeIslandAction(
       if (!row.capabilities.openOwner) return reject(intent, revision, "notPermitted")
       const route = ownerRoute(row.owner)
       if (!route) return reject(intent, revision, "noRoute")
-      deps.navigate(route)
+      deps.navigate(route, row.owner)
       await deps.focusMainWindow?.()
       return ok(intent, revision)
     }

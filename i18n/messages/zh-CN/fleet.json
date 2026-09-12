@@ -52,14 +52,16 @@
       "chat": "打开所属对话",
       "external": "打开所属会话",
       "run": "打开运行控制台",
-      "team": "打开团队工作区"
+      "team": "打开团队工作区",
+      "gate": "打开审批"
     },
     "openTranscript": "在文件管理器中显示记录",
     "source": {
       "chat": "对话",
       "external": "外部代理",
       "run": "运行",
-      "team": "团队"
+      "team": "团队",
+      "gate": "审批"
     },
     "state": {
       "awaitingApproval": "等待你处理",
@@ -75,7 +77,8 @@
     "summary": "{count} 个任务",
     "summaryWaiting": "{count} 个任务 · {waiting} 个待处理",
     "toggle": "展开或收起任务列表",
-    "waitingFor": "已等待 {duration}"
+    "waitingFor": "已等待 {duration}",
+    "collapse": "收起任务列表"
   },
   "permission": {
     "allow": "允许",

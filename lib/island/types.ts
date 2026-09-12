@@ -55,8 +55,8 @@ export function mergeIslandPreferences(raw: unknown): IslandPreferencesV1 {
 
 /* -- Owner --------------------------------------------------------------- */
 
-/** Which of the four task planes a row belongs to. */
-export type IslandSource = "chat" | "team" | "run" | "external"
+/** Which task or approval surface a row belongs to. */
+export type IslandSource = "chat" | "team" | "run" | "external" | "gate"
 
 /**
  * The surface that actually owns a task, meaning where "open" must land, and
@@ -69,13 +69,14 @@ export type FleetOwnerRef =
   | { kind: "chat"; sessionId: string; requestId?: string }
   | { kind: "team"; teamId?: string; runId?: string }
   | { kind: "run"; runId: string; interruptId?: string }
+  | { kind: "gate"; gateKey: { scope: string; id: string }; sessionId?: string }
   | { kind: "external"; agent: FleetAgent; sessionId: string; transcriptPath?: string }
 
 /* -- Rows ---------------------------------------------------------------- */
 
 /**
  * Coarse presentation status. Deliberately NOT `FleetStatus`. The island ranks
- * "does a human have to do something" above every runtime nuance, and the four
+ * "does a human have to do something" above every runtime nuance, and the
  * sources do not share a status vocabulary.
  */
 export type IslandRowStatus = "blocked" | "failed" | "working" | "done" | "idle" | "stale"

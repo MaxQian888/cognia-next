@@ -46,6 +46,36 @@ it("asks the main window to seed it on mount", async () => {
   expect(screen.getByTestId("out").textContent).toBe("0:0")
 })
 
+it("waits for the state listener before requesting the initial snapshot", async () => {
+  let ready!: (off: () => void) => void
+  onStateMock.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        ready = resolve
+      })
+  )
+  render(<Probe />)
+  expect(requestStateMock).not.toHaveBeenCalled()
+  await act(async () => ready(() => {}))
+  expect(requestStateMock).toHaveBeenCalledTimes(1)
+})
+
+it("cleans up a late listener without seeding an unmounted overlay", async () => {
+  let ready!: (off: () => void) => void
+  const off = jest.fn()
+  onStateMock.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        ready = resolve
+      })
+  )
+  const { unmount } = render(<Probe />)
+  unmount()
+  await act(async () => ready(off))
+  expect(off).toHaveBeenCalledTimes(1)
+  expect(requestStateMock).not.toHaveBeenCalled()
+})
+
 it("takes a newer revision and discards an out-of-order older one", async () => {
   render(<Probe />)
   await act(async () => {})

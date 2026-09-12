@@ -59,7 +59,7 @@ describe("IslandQuestionActions", () => {
     render(<IslandQuestionActions request={request()} questions={[SINGLE]} />)
     fireEvent.click(screen.getByTestId("question-reject"))
     await waitFor(() => expect(rejectMock).toHaveBeenCalledWith("q-1"))
-    expect(screen.getByTestId("question-rejected")).toBeInTheDocument()
+    expect(await screen.findByTestId("question-rejected")).toBeInTheDocument()
   })
 
   it("keeps submit disabled until every question is answered", () => {

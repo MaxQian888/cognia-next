@@ -3,7 +3,7 @@
  */
 
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { FleetSection } from "./fleet-section"
 
 jest.mock("next-intl", () => ({
@@ -141,6 +141,12 @@ jest.mock("@/lib/claude/settings", () => ({
 
 const mockFleetSnapshot = {
   sessions: [],
+  runtimeCapabilities: [] as Array<{
+    agent: string
+    sendMessage: boolean
+    interrupt: boolean
+    answersQuestions: boolean
+  }>,
   hosts: [
     {
       hostRef: "device:worker-a",
@@ -178,6 +184,7 @@ function hooksStatus(
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockFleetSnapshot.runtimeCapabilities = []
   mockSubscribe.mockResolvedValue(() => {})
   mockFleet.fleetMonitorStatus.mockResolvedValue({ enabled: false, port: null, configPath: null })
   mockFleet.fleetCodexStatus.mockResolvedValue({
@@ -470,11 +477,78 @@ describe("FleetSection", () => {
     expect(screen.getByTestId("fleet-opencode-badge-opencodeUnavailable")).toBeInTheDocument()
   })
 
+  it.each([
+    [true, true, true, "proven"],
+    [false, true, true, "degraded"],
+    [true, false, true, "degraded"],
+    [true, true, false, "degraded"],
+  ] as const)(
+    "requires all OpenCode capabilities before reporting proven (%s/%s/%s)",
+    async (sendMessage, interrupt, answersQuestions, expected) => {
+      mockFleet.fleetOpencodeStatus.mockResolvedValue({ status: "installed", pluginPath: "/p" })
+      mockFleetSnapshot.runtimeCapabilities = [
+        { agent: "opencode", sendMessage, interrupt, answersQuestions },
+      ]
+      await renderLoaded()
+      expect(screen.getByTestId(`fleet-opencode-capabilities-${expected}`)).toHaveTextContent(
+        `capabilities.${expected}`
+      )
+    }
+  )
+
   it("surfaces an OpenCode install failure as an error toast", async () => {
     mockFleet.fleetOpencodeInstall.mockRejectedValue(new Error("opencode missing"))
     await renderLoaded()
     fireEvent.click(screen.getByTestId("fleet-opencode-switch"))
     await waitFor(() => expect(toastError).toHaveBeenCalled())
+  })
+
+  it("disables queue repair when the OpenCode outbox location is unavailable", async () => {
+    mockFleet.fleetOpencodeOutboxStatus.mockResolvedValue({
+      health: "unavailable",
+      path: null,
+      error: "home unavailable",
+    })
+    await renderLoaded()
+    expect(screen.getByTestId("fleet-opencode-outbox-warning")).toHaveTextContent(
+      "opencode.outbox.unavailable"
+    )
+    expect(screen.getByRole("button", { name: "opencode.outbox.repair" })).toBeDisabled()
+  })
+
+  it("repairs a corrupt OpenCode queue and removes the recovered warning", async () => {
+    mockFleet.fleetOpencodeOutboxStatus.mockResolvedValue({
+      health: "corrupt",
+      path: "/tmp/outbox.json",
+      error: "invalid JSON",
+    })
+    await renderLoaded()
+    fireEvent.click(screen.getByRole("button", { name: "opencode.outbox.repair" }))
+    await waitFor(() =>
+      expect(screen.queryByTestId("fleet-opencode-outbox-warning")).not.toBeInTheDocument()
+    )
+    expect(mockFleet.fleetOpencodeOutboxRepair).toHaveBeenCalledTimes(1)
+    expect(toastSuccess).toHaveBeenCalledWith("opencode.outbox.repaired")
+  })
+
+  it("retains the queue warning and enables retry after repair fails", async () => {
+    mockFleet.fleetOpencodeOutboxStatus.mockResolvedValue({
+      health: "corrupt",
+      path: "/tmp/outbox.json",
+      error: "invalid JSON",
+    })
+    mockFleet.fleetOpencodeOutboxRepair.mockRejectedValueOnce(new Error("permission denied"))
+    await renderLoaded()
+    fireEvent.click(screen.getByRole("button", { name: "opencode.outbox.repair" }))
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith('error:{"detail":"Error: permission denied"}')
+    )
+    expect(screen.getByTestId("fleet-opencode-outbox-warning")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "opencode.outbox.repair" })).not.toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: "opencode.outbox.repair" }))
+    await waitFor(() =>
+      expect(screen.queryByTestId("fleet-opencode-outbox-warning")).not.toBeInTheDocument()
+    )
   })
 
   it("opens and closes the island window", async () => {
@@ -488,6 +562,120 @@ describe("FleetSection", () => {
     )
     fireEvent.click(screen.getByTestId("fleet-island-switch"))
     await waitFor(() => expect(mockFleet.closeIslandWindow).toHaveBeenCalled())
+  })
+
+  it.each([true, false])(
+    "keeps a failed island toggle visible and retries next=%s",
+    async (next) => {
+      mockFleet.isIslandWindowOpen.mockResolvedValue(!next)
+      const action = next ? mockFleet.openIslandWindow : mockFleet.closeIslandWindow
+      action.mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+      await renderLoaded()
+      fireEvent.click(screen.getByTestId("fleet-island-switch"))
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        next ? "island.errors.open" : "island.errors.close"
+      )
+      expect(screen.getByTestId("fleet-island-switch")).toHaveAttribute(
+        "aria-checked",
+        String(!next)
+      )
+      fireEvent.click(screen.getByRole("button", { name: "island.retry" }))
+      await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument())
+      expect(action).toHaveBeenCalledTimes(2)
+      expect(screen.getByTestId("fleet-island-switch")).toHaveAttribute(
+        "aria-checked",
+        String(next)
+      )
+    }
+  )
+
+  it("refreshes external island state on focus and becoming visible, then removes listeners", async () => {
+    const { unmount } = await renderLoaded()
+    mockFleet.isIslandWindowOpen.mockResolvedValue(true)
+    fireEvent(window, new Event("focus"))
+    await waitFor(() =>
+      expect(screen.getByTestId("fleet-island-switch")).toHaveAttribute("aria-checked", "true")
+    )
+    mockFleet.isIslandWindowOpen.mockResolvedValue(false)
+    fireEvent(document, new Event("visibilitychange"))
+    await waitFor(() =>
+      expect(screen.getByTestId("fleet-island-switch")).toHaveAttribute("aria-checked", "false")
+    )
+    unmount()
+    const calls = mockFleet.isIslandWindowOpen.mock.calls.length
+    fireEvent(window, new Event("focus"))
+    fireEvent(document, new Event("visibilitychange"))
+    expect(mockFleet.isIslandWindowOpen).toHaveBeenCalledTimes(calls)
+  })
+
+  it("ignores a focus refresh started before a newer island mutation", async () => {
+    await renderLoaded()
+    let resolveStatus!: (open: boolean) => void
+    mockFleet.isIslandWindowOpen.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveStatus = resolve
+        })
+    )
+    fireEvent(window, new Event("focus"))
+    mockFleet.openIslandWindow.mockResolvedValue(true)
+    fireEvent.click(screen.getByTestId("fleet-island-switch"))
+    await waitFor(() =>
+      expect(screen.getByTestId("fleet-island-switch")).toHaveAttribute("aria-checked", "true")
+    )
+    await act(async () => resolveStatus(false))
+    expect(screen.getByTestId("fleet-island-switch")).toHaveAttribute("aria-checked", "true")
+  })
+
+  it("skips foreground refreshes while hidden or applying a preference", async () => {
+    await renderLoaded()
+    const reads = mockFleet.isIslandWindowOpen.mock.calls.length
+    const visibility = jest.spyOn(document, "visibilityState", "get").mockReturnValue("hidden")
+    fireEvent(document, new Event("visibilitychange"))
+    expect(mockFleet.isIslandWindowOpen).toHaveBeenCalledTimes(reads)
+    visibility.mockRestore()
+    let resolveOpen!: (ok: boolean) => void
+    mockFleet.openIslandWindow.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveOpen = resolve
+        })
+    )
+    fireEvent.click(screen.getByTestId("fleet-island-switch"))
+    fireEvent(window, new Event("focus"))
+    expect(mockFleet.isIslandWindowOpen).toHaveBeenCalledTimes(reads)
+    await act(async () => resolveOpen(true))
+    expect(screen.getByTestId("fleet-island-switch")).not.toBeDisabled()
+  })
+
+  it("releases a settings subscription that resolves after unmount", async () => {
+    const unsubscribe = jest.fn()
+    let resolveSubscription!: (unlisten: () => void) => void
+    mockSubscribe.mockImplementationOnce(
+      () =>
+        new Promise<() => void>((resolve) => {
+          resolveSubscription = resolve
+        })
+    )
+    const { unmount } = await renderLoaded()
+    unmount()
+    await act(async () => resolveSubscription(unsubscribe))
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+  })
+
+  it("discards an unfinished foreground read after unmount", async () => {
+    const { unmount } = await renderLoaded()
+    let resolveStatus!: (open: boolean) => void
+    mockFleet.isIslandWindowOpen.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveStatus = resolve
+        })
+    )
+    fireEvent(window, new Event("focus"))
+    unmount()
+    await act(async () => resolveStatus(true))
+    expect(screen.queryByTestId("fleet-section")).not.toBeInTheDocument()
   })
 
   describe("hide under full-screen apps", () => {
@@ -529,6 +717,14 @@ describe("FleetSection", () => {
         expect(
           screen.getByTestId("fleet-island-fullscreen-switch").getAttribute("aria-checked")
         ).toBe("false")
+      )
+      expect(screen.getByRole("alert")).toHaveTextContent("island.errors.fullscreen")
+      mockFleet.islandSetHideOnFullscreen.mockResolvedValue(true)
+      fireEvent.click(screen.getByRole("button", { name: "island.retry" }))
+      await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument())
+      expect(screen.getByTestId("fleet-island-fullscreen-switch")).toHaveAttribute(
+        "aria-checked",
+        "true"
       )
     })
   })
@@ -572,6 +768,42 @@ describe("FleetSection", () => {
     fireEvent.change(select, { target: { value: "primary" } })
     await waitFor(() => expect(mockFleet.islandSetMonitor).toHaveBeenCalledWith(null))
   })
+
+  it.each([false, true])(
+    "retains the selected display after failure and retries (reject=%s)",
+    async (reject) => {
+      mockFleet.islandListMonitors.mockResolvedValue([
+        {
+          name: "Built-in Display",
+          index: 0,
+          isPrimary: true,
+          selected: false,
+          width: 1512,
+          height: 982,
+        },
+        {
+          name: "External",
+          index: 1,
+          isPrimary: false,
+          selected: false,
+          width: 1920,
+          height: 1080,
+        },
+      ])
+      if (reject) mockFleet.islandSetMonitor.mockRejectedValueOnce(new Error("display unavailable"))
+      else mockFleet.islandSetMonitor.mockResolvedValueOnce(false)
+      await renderLoaded()
+      const select = screen.getByTestId("fleet-island-monitor-select")
+      fireEvent.change(select, { target: { value: "External" } })
+      expect(await screen.findByRole("alert")).toHaveTextContent("island.errors.monitor")
+      expect(select).toHaveValue("primary")
+      mockFleet.islandSetMonitor.mockResolvedValue(true)
+      fireEvent.click(screen.getByRole("button", { name: "island.retry" }))
+      await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument())
+      expect(mockFleet.islandSetMonitor).toHaveBeenLastCalledWith("External")
+      expect(select).not.toBeDisabled()
+    }
+  )
 
   describe("island detail visibility", () => {
     it("defaults to the most private policy and persists a change", async () => {

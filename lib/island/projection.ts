@@ -114,15 +114,27 @@ function sessionCapabilities(
   owner: FleetOwnerRef,
   detailVisibility: IslandDetailVisibility
 ): IslandRowCapabilities {
-  const live = session.status !== "ended"
+  const live = session.status !== "ended" && session.status !== "detached"
   const external = session.agent !== "cognia"
+  const questions = session.pendingQuestions ?? []
+  // Never consume a parked request using only the visible prefix of its
+  // questions/options. The terminal remains available for larger requests.
+  const completeQuestions =
+    questions.length > 0 &&
+    questions.length <= MAX_QUESTIONS &&
+    questions.every(
+      (question) => question.options.length > 0 && question.options.length <= MAX_OPTIONS
+    )
   return {
     openOwner: ownerRoute(owner) !== null,
     permissionDecision:
-      Boolean(session.pendingPermission) && session.capabilities.approvePermission,
+      external &&
+      live &&
+      Boolean(session.pendingPermission) &&
+      session.capabilities.approvePermission,
     questionResponse:
-      Boolean(session.pendingQuestionRequest) && (session.pendingQuestions?.length ?? 0) > 0,
-    reply: session.capabilities.sendMessage && live,
+      external && live && Boolean(session.pendingQuestionRequest) && completeQuestions,
+    reply: external && session.capabilities.sendMessage && live,
     interrupt: external && session.capabilities.interrupt && live,
     focusTerminal: external && session.capabilities.focusTerminal,
     openTranscript:
@@ -208,6 +220,8 @@ function rowFromSession(
  */
 function canDismissStale(item: AttentionItem, owner: FleetOwnerRef): boolean {
   switch (owner.kind) {
+    case "gate":
+      return item.gate?.status === "interrupted"
     case "chat":
       return Boolean(owner.requestId)
     case "team":

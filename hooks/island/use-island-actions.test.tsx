@@ -118,3 +118,114 @@ it("settles immediately when the emit itself could not be delivered", async () =
   })
   expect(screen.getByTestId("out").textContent).toBe("false:callFailed")
 })
+
+function delayedListener() {
+  let resolve!: (off: () => void) => void
+  let reject!: (error: Error) => void
+  const ready = new Promise<() => void>((done, fail) => {
+    resolve = done
+    reject = fail
+  })
+  const off = jest.fn()
+  onResultMock.mockImplementation((handler: (result: IslandActionResult) => void) => {
+    reply = handler
+    return ready
+  })
+  return { resolve: () => resolve(off), reject, off }
+}
+
+it("waits for the result listener before sending and accepts an immediate receipt", async () => {
+  const listener = delayedListener()
+  requestActionMock.mockImplementation(async ({ requestId }: { requestId: string }) => {
+    reply({ requestId, revision: 3, outcome: "completed" })
+    return true
+  })
+  await mount()
+  let completion!: Promise<boolean>
+  await act(async () => {
+    completion = api().dispatch({ kind: "interrupt", revision: 3, rowId: "row" })
+    expect(await api().dispatch({ kind: "interrupt", revision: 3, rowId: "row" })).toBe(false)
+  })
+  expect(requestActionMock).not.toHaveBeenCalled()
+  await act(async () => listener.resolve())
+  expect(await completion).toBe(true)
+  expect(requestActionMock).toHaveBeenCalledTimes(1)
+  expect(onResultMock).toHaveBeenCalledTimes(1)
+  expect(screen.getByTestId("out").textContent).toBe("false:-")
+})
+
+it("reports listener setup failure without emitting an action", async () => {
+  const listener = delayedListener()
+  await mount()
+  let completion!: Promise<boolean>
+  await act(async () => {
+    completion = api().dispatch({ kind: "interrupt", revision: 3, rowId: "row" })
+  })
+  await act(async () => listener.reject(new Error("listener unavailable")))
+  expect(await completion).toBe(false)
+  expect(requestActionMock).not.toHaveBeenCalled()
+  expect(screen.getByTestId("out").textContent).toBe("false:callFailed")
+})
+
+it("includes listener setup in the timeout and never sends the expired request", async () => {
+  const listener = delayedListener()
+  await mount()
+  let completion!: Promise<boolean>
+  await act(async () => {
+    completion = api().dispatch({ kind: "interrupt", revision: 3, rowId: "row" })
+  })
+  await act(async () => jest.advanceTimersByTime(ISLAND_ACTION_TIMEOUT_MS))
+  expect(await completion).toBe(false)
+  expect(screen.getByTestId("out").textContent).toBe("false:timeout")
+  await act(async () => listener.resolve())
+  expect(requestActionMock).not.toHaveBeenCalled()
+})
+
+it("cancels an action and releases a listener that finishes registering after unmount", async () => {
+  const listener = delayedListener()
+  const view = render(<Probe />)
+  let completion!: Promise<boolean>
+  await act(async () => {
+    completion = api().dispatch({ kind: "interrupt", revision: 3, rowId: "row" })
+  })
+  const staleApi = api()
+  view.unmount()
+  expect(await completion).toBe(false)
+  await act(async () => listener.resolve())
+  expect(listener.off).toHaveBeenCalledTimes(1)
+  expect(requestActionMock).not.toHaveBeenCalled()
+  expect(await staleApi.dispatch({ kind: "interrupt", revision: 3, rowId: "row" })).toBe(false)
+})
+
+it("reports a rejected emission promise and ignores a late receipt", async () => {
+  requestActionMock.mockRejectedValue(new Error("emit failed"))
+  await mount()
+  let completion!: Promise<boolean>
+  await act(async () => {
+    completion = api().dispatch({ kind: "interrupt", revision: 3, rowId: "row" })
+  })
+  expect(await completion).toBe(false)
+  expect(screen.getByTestId("out").textContent).toBe("false:callFailed")
+  const { requestId } = requestActionMock.mock.calls[0][0]
+  await act(async () => reply({ requestId, revision: 3, outcome: "completed" }))
+  expect(screen.getByTestId("out").textContent).toBe("false:callFailed")
+})
+
+it("uses a fallback reason for failed receipts and ignores callbacks after unmount", async () => {
+  const off = jest.fn()
+  onResultMock.mockImplementation(async (handler: typeof reply) => {
+    reply = handler
+    return off
+  })
+  const view = render(<Probe />)
+  await act(async () => {})
+  await act(async () => {
+    void api().dispatch({ kind: "interrupt", revision: 3, rowId: "row" })
+  })
+  const { requestId } = requestActionMock.mock.calls[0][0]
+  await act(async () => reply({ requestId, revision: 3, outcome: "failed" }))
+  expect(screen.getByTestId("out").textContent).toBe("false:callFailed")
+  view.unmount()
+  reply({ requestId, revision: 3, outcome: "completed" })
+  expect(off).toHaveBeenCalledTimes(1)
+})

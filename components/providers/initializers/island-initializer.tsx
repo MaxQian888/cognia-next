@@ -49,6 +49,7 @@ import type {
 import { isTauri } from "@/lib/tauri"
 import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
 import { useChatStore } from "@/stores/chat/chat-store"
+import { useUIStore } from "@/stores/ui/ui-store"
 
 export function IslandInitializer() {
   const router = useRouter()
@@ -112,11 +113,22 @@ export function IslandInitializer() {
   /**
    * Clear a pending item whose waiter is gone.
    *
-   * Only the three sources that own a clearing path are reachable here, and
+   * Only sources that own a clearing path are reachable here, and
    * the projection only sets `dismissStale` for those, so a refusal below is a
    * belt-and-braces check rather than the primary gate.
    */
   const dismissStale = useCallback(async (row: IslandRowProjection): Promise<boolean> => {
+    if (row.owner.kind === "gate") {
+      if (!row.stale) return false
+      const { gateKey } = row.owner
+      const store = usePendingGatesStore.getState()
+      const gate = store.gates.find(
+        (candidate) => candidate.key.scope === gateKey.scope && candidate.key.id === gateKey.id
+      )
+      if (!gate || gate.status !== "interrupted") return false
+      store.close(gate.key)
+      return true
+    }
     if (row.owner.kind === "chat" && row.owner.requestId) {
       useChatStore.getState().clearApproval(row.owner.requestId, row.owner.sessionId)
       return true
@@ -141,13 +153,16 @@ export function IslandInitializer() {
     return false
   }, [])
 
-  const deps = useRef<IslandActionDeps>({
-    navigate: () => {},
-    dismissStale: async () => false,
-  })
+  const deps = useRef<IslandActionDeps | null>(null)
   useEffect(() => {
     deps.current = {
-      navigate: (path: string) => router.push(path),
+      navigate: (path, owner) => {
+        if ((owner.kind === "chat" || owner.kind === "gate") && owner.sessionId) {
+          useChatStore.getState().setActiveSession(owner.sessionId)
+          useUIStore.getState().setSelectedGuild({ kind: "dm" })
+        }
+        router.push(path)
+      },
       async focusMainWindow() {
         if (!isTauri()) return
         try {
@@ -237,7 +252,8 @@ export function IslandInitializer() {
     void onIslandActionIntent((intent: IslandActionIntent) => {
       if (!alive) return
       const current = latest.current
-      if (!current) {
+      const liveDeps = deps.current
+      if (!current || !liveDeps) {
         void sendIslandActionResult({
           requestId: intent.requestId,
           revision: 0,
@@ -246,7 +262,7 @@ export function IslandInitializer() {
         })
         return
       }
-      void executeIslandAction(intent, current, deps.current)
+      void executeIslandAction(intent, current, liveDeps)
         .then((result) => sendIslandActionResult(result))
         .catch(() =>
           sendIslandActionResult({

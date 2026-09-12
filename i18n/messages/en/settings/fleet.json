@@ -60,7 +60,14 @@
       "label": "Show on display",
       "option": "{name} ({width}×{height})",
       "primary": "Primary display"
-    }
+    },
+    "errors": {
+      "open": "Could not open the island. Try again.",
+      "close": "Could not close the island. Try again.",
+      "fullscreen": "Could not save the full-screen preference. Try again.",
+      "monitor": "Could not move the island to this display. Try again."
+    },
+    "retry": "Retry"
   },
   "liveness": {
     "dropping": "Events dropped",

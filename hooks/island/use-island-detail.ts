@@ -12,7 +12,7 @@
 import { useEffect, useRef, useState } from "react"
 
 import { onIslandDetailResponse, requestIslandDetail } from "@/lib/island/client"
-import type { IslandRowDetail } from "@/lib/island/types"
+import { ISLAND_ACTION_TIMEOUT_MS, type IslandRowDetail } from "@/lib/island/types"
 
 export interface IslandDetailSlot {
   rowId: string | null
@@ -40,71 +40,91 @@ export function useIslandDetail(
   revision: number,
   stamp: number = 0
 ): IslandDetailSlot {
-  const [slot, setSlot] = useState<IslandDetailSlot>(EMPTY_SLOT)
-  const pending = useRef<string | null>(null)
-  const pendingRow = useRef<string | null>(null)
+  const [state, setState] = useState({ pin: rowId, slot: EMPTY_SLOT })
+  // Reset during render so reopening the same pin cannot commit a frame of
+  // private detail retained from an earlier reveal.
+  if (state.pin !== rowId) setState({ pin: rowId, slot: EMPTY_SLOT })
   const revisionRef = useRef(revision)
+  const stampRef = useRef(stamp)
+  const refresh = useRef<(() => void) | null>(null)
   // Kept fresh in an effect (declared before the request effect, so it runs
   // first) rather than during render, which the ref rule forbids.
   useEffect(() => {
     revisionRef.current = revision
-  }, [revision])
-  // The row wanted once the in-flight request answers, if it changed meanwhile.
-  const followUp = useRef<string | null>(null)
-
-  const issue = (target: string) => {
-    counter += 1
-    const requestId = `island-detail-${Date.now().toString(36)}-${counter}`
-    pending.current = requestId
-    pendingRow.current = target
-    void requestIslandDetail({ requestId, revision: revisionRef.current, rowId: target })
-  }
+    stampRef.current = stamp
+  }, [revision, stamp])
 
   useEffect(() => {
+    if (!rowId) return
     let alive = true
-    const offs: Array<() => void> = []
-    void onIslandDetailResponse((response) => {
-      if (!alive || response.requestId !== pending.current) return
-      pending.current = null
-      pendingRow.current = null
-      setSlot({
-        rowId: response.rowId,
+    let pending: { requestId: string; timer: ReturnType<typeof setTimeout> } | null = null
+    let lastStamp = stampRef.current
+    let followUp = false
+    let off: (() => void) | undefined
+
+    function settle(requestId: string, slot: IslandDetailSlot) {
+      if (!alive || pending?.requestId !== requestId) return
+      clearTimeout(pending.timer)
+      pending = null
+      setState({ pin: rowId, slot })
+      if (followUp) {
+        followUp = false
+        issue()
+      }
+    }
+
+    const ready = onIslandDetailResponse((response) => {
+      if (response.rowId !== rowId) return
+      settle(response.requestId, {
+        rowId,
         detail: response.detail,
         error: response.detail ? null : (response.reason ?? "unavailable"),
       })
-      const next = followUp.current
-      followUp.current = null
-      if (next) issue(next)
-    }).then((off) => (alive ? offs.push(off) : off()))
+    }).then((unsubscribe) => {
+      if (alive) off = unsubscribe
+      else unsubscribe()
+    })
+
+    function issue() {
+      counter += 1
+      const requestId = `island-detail-${Date.now().toString(36)}-${counter}`
+      const fail = () => settle(requestId, { rowId, detail: null, error: "unavailable" })
+      // Bound listener setup, emission, and the response wait together.
+      pending = { requestId, timer: setTimeout(fail, ISLAND_ACTION_TIMEOUT_MS) }
+      void ready
+        .then(async () => {
+          if (!alive || pending?.requestId !== requestId) return
+          const sent = await requestIslandDetail({
+            requestId,
+            revision: revisionRef.current,
+            rowId: rowId!,
+          })
+          if (!sent) fail()
+        })
+        .catch(fail)
+    }
+
+    refresh.current = () => {
+      if (lastStamp === stampRef.current) return
+      lastStamp = stampRef.current
+      if (pending) followUp = true
+      else issue()
+    }
+    issue()
     return () => {
       alive = false
-      pending.current = null
-      pendingRow.current = null
-      followUp.current = null
-      offs.forEach((off) => off())
+      refresh.current = null
+      if (pending) clearTimeout(pending.timer)
+      pending = null
+      off?.()
     }
-  }, [])
+  }, [rowId])
 
   useEffect(() => {
-    // No pin, no request. The read below already reports `EMPTY_SLOT` for a
-    // row that is not pinned, so there is nothing to clear here.
-    if (!rowId) {
-      pending.current = null
-      pendingRow.current = null
-      followUp.current = null
-      return
-    }
-    if (pending.current && pendingRow.current === rowId) {
-      // Coalesce: one request in flight for this row, at most one queued
-      // behind it. A different row supersedes the in-flight request instead.
-      followUp.current = rowId
-      return
-    }
-    followUp.current = null
-    issue(rowId)
+    refresh.current?.()
     // `stamp` is a deliberate re-request trigger; `revision` deliberately is not.
   }, [rowId, stamp])
 
   // A slot for a row that is no longer pinned is not this row's detail.
-  return slot.rowId === rowId ? slot : EMPTY_SLOT
+  return state.pin === rowId ? state.slot : EMPTY_SLOT
 }

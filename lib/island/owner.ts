@@ -42,6 +42,15 @@ export function fleetSessionOwner(session: FleetSession): FleetOwnerRef {
 
 /** Owner of a pending item from the Control Center aggregation. */
 export function attentionOwner(item: AttentionItem): FleetOwnerRef | null {
+  // Legacy aggregation calls these "team" rows, but plan and budget gates
+  // belong to the root-mounted approval host and may have no run at all.
+  if (item.kind === "hitl-gate" && item.gate) {
+    return {
+      kind: "gate",
+      gateKey: { ...item.gate.key },
+      ...(item.gate.sessionId ? { sessionId: item.gate.sessionId } : {}),
+    }
+  }
   switch (item.source) {
     case "chat":
       return item.sessionId
@@ -68,7 +77,7 @@ export function attentionOwner(item: AttentionItem): FleetOwnerRef | null {
   }
 }
 
-/** Which of the four planes an owner belongs to. */
+/** Which task or approval surface an owner belongs to. */
 export function ownerSource(owner: FleetOwnerRef): IslandSource {
   return owner.kind
 }
@@ -91,6 +100,10 @@ export function taskIdentity(owner: FleetOwnerRef): string | null {
     }
     case "run":
       return owner.runId ? `run:${owner.runId}` : null
+    case "gate":
+      return owner.gateKey.scope && owner.gateKey.id
+        ? `gate:${encodeURIComponent(owner.gateKey.scope)}:${encodeURIComponent(owner.gateKey.id)}`
+        : null
     case "external":
       return owner.sessionId ? `external:${owner.agent}:${owner.sessionId}` : null
   }
@@ -107,6 +120,7 @@ export function taskIdentity(owner: FleetOwnerRef): string | null {
 export function ownerRoute(owner: FleetOwnerRef): string | null {
   switch (owner.kind) {
     case "chat":
+    case "gate":
       return "/"
     case "team":
       return owner.teamId ? `/squads?id=${encodeURIComponent(owner.teamId)}` : "/squads"

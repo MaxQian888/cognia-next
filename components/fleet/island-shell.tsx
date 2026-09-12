@@ -106,6 +106,9 @@ export function IslandShell() {
   const state = useIslandState()
   const { statusOf, dispatch } = useIslandActions()
   const [hovering, setHovering] = useState(false)
+  const [focused, setFocused] = useState(false)
+  const [manuallyCollapsed, setManuallyCollapsed] = useState(false)
+  const [dismissedAttention, setDismissedAttention] = useState<string[]>([])
   const [pinnedOpen, setPinnedOpen] = useState(false)
   const [tucked, setTucked] = useState(false)
   const [topInset, setTopInset] = useState(0)
@@ -118,12 +121,25 @@ export function IslandShell() {
   // Measured separately from the card: the card's height is the animated
   // value, so measuring it would feed the animation back into itself.
   const contentRef = useRef<HTMLDivElement | null>(null)
+  const pillRef = useRef<HTMLButtonElement | null>(null)
   const geometryRef = useRef<IslandGeometry>({ topInset: 0, notchWidth: 0, fullscreen: false })
 
   const rows = state.rows
   const waiting = state.attentionCount
   const empty = rows.length === 0
   const top = rows[0]
+  const updateHover = useCallback((inside: boolean) => {
+    setHovering(inside)
+    if (inside) setManuallyCollapsed(false)
+  }, [])
+
+  useEffect(() => {
+    // Native window deactivation may retain document.activeElement and never
+    // emit a DOM focusout. It must not keep the overlay expanded forever.
+    const onBlur = () => setFocused(false)
+    window.addEventListener("blur", onBlur)
+    return () => window.removeEventListener("blur", onBlur)
+  }, [])
 
   // Display geometry for the island's screen. `topInset` is the notch height
   // and `fullscreen` says the island should yield this display to a full-screen
@@ -163,7 +179,7 @@ export function IslandShell() {
         // enter and leave transitions, which also self-heals a `hovering` stuck
         // true by a missed mouseleave.
         listen<IslandHover>(FLEET_ISLAND_HOVER_EVENT, (e) => {
-          if (alive) setHovering(e.payload?.hovering === true)
+          if (alive) updateHover(e.payload?.hovering === true)
         }),
       ])
       if (!alive) {
@@ -176,7 +192,7 @@ export function IslandShell() {
       alive = false
       unlistens.forEach(safeUnlisten)
     }
-  }, [applyGeometry])
+  }, [applyGeometry, updateHover])
 
   const compactRows = rows.length >= ISLAND_COMPACT_THRESHOLD
   const legendSegments = useMemo(() => {
@@ -195,7 +211,14 @@ export function IslandShell() {
   // An answerable pending item forces the island open so its controls are never
   // hidden behind the collapsed pill. Derived during render from the pushed
   // projection: no effect, no setState-to-mirror-a-prop.
-  const forceExpanded = rows.some(isActionable)
+  const attentionKeys = rows
+    .filter(isActionable)
+    .map((row) =>
+      JSON.stringify([state.epoch, row.id, row.permission?.requestId, row.question?.requestId])
+    )
+  // Collapse acknowledges only the current gates. A new request must still
+  // surface, while unrelated progress updates must not reopen the same gate.
+  const forceExpanded = attentionKeys.some((key) => !dismissedAttention.includes(key))
 
   // A pin outlives its purpose once the list empties: the user pinned something
   // that no longer exists, and a stale pin blocked auto-tuck forever.
@@ -207,7 +230,17 @@ export function IslandShell() {
   if (pinnedRowId && !rows.some((row) => row.id === pinnedRowId)) {
     setPinnedRowId(null)
   }
-  const expanded = ((hovering || pinnedOpen) && !empty) || forceExpanded
+  const expanded =
+    ((((hovering || focused) && !manuallyCollapsed) || pinnedOpen) && !empty) || forceExpanded
+  if (!expanded && pinnedRowId) setPinnedRowId(null)
+
+  const collapse = () => {
+    setPinnedRowId(null)
+    setPinnedOpen(false)
+    setManuallyCollapsed(true)
+    setDismissedAttention(attentionKeys)
+    pillRef.current?.focus({ preventScroll: true })
+  }
 
   // Which row, if any, may receive detail right now. `click-to-reveal` needs an
   // explicit pin. `hover` lets an expanded island reveal its top row. Under
@@ -246,7 +279,7 @@ export function IslandShell() {
   // cancels the pending tuck and slides the pill back out immediately. The reset
   // is a render-time state adjustment, React's "adjusting state when props
   // change" pattern. The effect only ever arms and disarms the tuck timer.
-  const shouldTuck = waiting === 0 && !hovering && !pinnedOpen && !forceExpanded
+  const shouldTuck = waiting === 0 && !hovering && !focused && !pinnedOpen && !forceExpanded
   if (tucked && !shouldTuck) {
     setTucked(false)
   }
@@ -258,7 +291,7 @@ export function IslandShell() {
   // deliberately not a way back in here, because slamming to the top of a
   // full-screen app is how you reach that app's own menu bar. A pin the user
   // placed before going full-screen still wins.
-  const hiddenEntirely = fullscreen && waiting === 0 && !pinnedOpen && !forceExpanded
+  const hiddenEntirely = fullscreen && waiting === 0 && !pinnedOpen && !focused && !forceExpanded
   useEffect(() => {
     if (!shouldTuck) return undefined
     const timer = setTimeout(() => setTucked(true), ISLAND_TUCK_DELAY_MS)
@@ -284,13 +317,13 @@ export function IslandShell() {
   useEffect(() => {
     if (!expanded) return undefined
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return
-      setPinnedRowId(null)
-      setPinnedOpen(false)
+      // An editor inside the island may handle Escape itself first.
+      if (event.key !== "Escape" || event.defaultPrevented) return
+      collapse()
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [expanded])
+  })
 
   // Measure the content, drive the card's animated height, and report the
   // window size, all in one layout effect because they must agree.
@@ -364,7 +397,7 @@ export function IslandShell() {
     // for the duration, but ONLY when the pointer is not on the island: a task
     // ending while the user hovers the list also shrinks it, and going
     // click-through there would eat the click they are about to make.
-    const surplusIsDead = !hovering && !pinnedOpen
+    const surplusIsDead = !hovering && !focused && !pinnedOpen
     if (surplusIsDead) void islandSetTucked(true)
     const restore = () => {
       if (surplusIsDead) void islandSetTucked(clickThroughRef.current)
@@ -383,6 +416,7 @@ export function IslandShell() {
     expanded,
     hiddenEntirely,
     hovering,
+    focused,
     pinnedOpen,
     rows.length,
     contentKey,
@@ -391,7 +425,13 @@ export function IslandShell() {
     applyGeometry,
   ])
 
-  const toggle = useCallback(() => setPinnedOpen((v) => !v), [])
+  const toggle = () => {
+    if (pinnedOpen || forceExpanded) collapse()
+    else {
+      setManuallyCollapsed(false)
+      setPinnedOpen(true)
+    }
+  }
 
   if (hiddenEntirely) {
     // Nothing painted at all. The window is a click-through sliver until
@@ -408,8 +448,14 @@ export function IslandShell() {
       className="w-full"
       data-fullscreen={fullscreen ? "true" : "false"}
       style={{ minHeight: ISLAND_PILL_HEIGHT + topInset }}
-      onMouseEnter={() => setHovering(true)}
-      onMouseLeave={() => setHovering(false)}
+      onMouseEnter={() => updateHover(true)}
+      onMouseLeave={() => updateHover(false)}
+      onFocusCapture={() => setFocused(true)}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setFocused(false)
+        }
+      }}
     >
       {/*
        * Clip container: starts at the window's top edge, which IS the display's
@@ -498,10 +544,12 @@ export function IslandShell() {
 
           <div ref={contentRef} data-testid="island-content">
             <button
+              ref={pillRef}
               type="button"
               data-testid="island-pill"
               onClick={toggle}
               aria-expanded={expanded}
+              aria-controls="island-task-body"
               aria-label={t("toggle")}
               className={cn(
                 "flex h-11 w-full items-center gap-2 px-4 text-xs text-white/80 transition-opacity duration-200",
@@ -572,13 +620,24 @@ export function IslandShell() {
              */}
             {rows.length > 0 ? (
               <div
+                id="island-task-body"
                 data-testid="island-body"
                 aria-hidden={!expanded}
+                inert={!expanded}
                 className={cn(
                   "transition-opacity duration-200 ease-out motion-reduce:transition-none",
                   expanded ? "opacity-100" : "pointer-events-none opacity-0"
                 )}
               >
+                <div className="flex justify-end px-4 pb-1">
+                  <button
+                    type="button"
+                    onClick={collapse}
+                    className="rounded px-2 py-1 text-[10px] text-white/60 hover:bg-white/10 focus-visible:outline focus-visible:outline-white/70"
+                  >
+                    {t("collapse")}
+                  </button>
+                </div>
                 {rows.length >= 2 && legendSegments.length > 0 ? (
                   <div
                     data-testid="island-legend"

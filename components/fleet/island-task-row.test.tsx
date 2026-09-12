@@ -132,7 +132,7 @@ describe("intent dispatch", () => {
     })
   })
 
-  it("routes a permission decision through an intent, never a direct command", () => {
+  it("routes a permission decision through an intent, never a direct command", async () => {
     const dispatch = renderRow({
       status: "blocked",
       permission: { requestId: "p1", toolName: "Bash", requestedAt: 9_995 },
@@ -146,6 +146,7 @@ describe("intent dispatch", () => {
       rowId: "external:opencode:oc",
       revision: 9,
     })
+    expect(await screen.findByTestId("permission-answered")).toBeInTheDocument()
   })
 
   it("disables a control while its action is outstanding", () => {

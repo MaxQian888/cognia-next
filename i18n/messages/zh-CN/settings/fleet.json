@@ -60,7 +60,14 @@
       "label": "显示在哪个屏幕",
       "option": "{name}（{width}×{height}）",
       "primary": "主显示器"
-    }
+    },
+    "errors": {
+      "open": "无法打开灵动岛，请重试。",
+      "close": "无法关闭灵动岛，请重试。",
+      "fullscreen": "无法保存全屏显示偏好，请重试。",
+      "monitor": "无法将灵动岛移至此显示器，请重试。"
+    },
+    "retry": "重试"
   },
   "liveness": {
     "dropping": "事件被丢弃",

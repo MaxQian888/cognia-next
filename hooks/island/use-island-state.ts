@@ -33,8 +33,15 @@ export function useIslandState(): IslandState {
       epochRef.current = next.epoch
       revisionRef.current = next.revision
       setState(next)
-    }).then((off) => (alive ? offs.push(off) : off()))
-    void requestIslandState()
+    }).then((off) => {
+      if (!alive) {
+        off()
+        return
+      }
+      offs.push(off)
+      // A quiet fleet may send only this reply, so subscribe before asking.
+      void requestIslandState()
+    })
     return () => {
       alive = false
       offs.forEach((off) => off())

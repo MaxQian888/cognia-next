@@ -52,14 +52,16 @@
       "chat": "Open the chat that owns this",
       "external": "Open the owning session",
       "run": "Open the run cockpit",
-      "team": "Open the team workspace"
+      "team": "Open the team workspace",
+      "gate": "Open approval"
     },
     "openTranscript": "Reveal transcript",
     "source": {
       "chat": "Chat",
       "external": "Agent",
       "run": "Run",
-      "team": "Team"
+      "team": "Team",
+      "gate": "Approval"
     },
     "state": {
       "awaitingApproval": "Waiting for you",
@@ -75,7 +77,8 @@
     "summary": "{count, plural, one {# task} other {# tasks}}",
     "summaryWaiting": "{count, plural, one {# task} other {# tasks}} · {waiting} waiting",
     "toggle": "Toggle task list",
-    "waitingFor": "waiting {duration}"
+    "waitingFor": "waiting {duration}",
+    "collapse": "Collapse task list"
   },
   "permission": {
     "allow": "Allow",

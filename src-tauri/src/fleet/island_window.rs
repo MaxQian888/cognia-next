@@ -35,8 +35,10 @@
 //! covered by `tauri-smoke`.
 
 use crate::fleet::island_space::{self, Rect};
+use crate::fs_atomic::{atomic_write_with_mtime_check, rotate_backups, AtomicWritePlan};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Runtime, WebviewWindow};
@@ -118,13 +120,13 @@ pub(crate) fn fold_notch_metrics(cached: NotchMetrics, sampled: NotchMetrics) ->
     }
 }
 
-/// Stable identity for the notch cache. `Monitor::name` when the OS provides
-/// one, else a synthetic key from the display's geometry — good enough to
-/// distinguish concurrently-connected displays, which is all the cache needs.
+/// Stable identity for physical notch metrics. Include scale so changing a
+/// display's scaling cannot reuse a larger physical inset from its old mode.
+/// Prefer the display name, else use its geometry to distinguish displays.
 fn monitor_cache_key(monitor: &tauri::Monitor) -> String {
     if let Some(name) = monitor.name() {
         if !name.is_empty() {
-            return name.clone();
+            return format!("{name} @{}", monitor.scale_factor());
         }
     }
     let p = monitor.position();
@@ -196,24 +198,70 @@ fn island_config_path() -> Option<std::path::PathBuf> {
 
 fn load_island_config() -> IslandConfig {
     island_config_path()
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .and_then(|path| read_island_config(&path).ok())
         .unwrap_or_default()
 }
 
-fn save_island_config(cfg: &IslandConfig) -> Result<(), String> {
+fn read_island_config(path: &Path) -> Result<IslandConfig, String> {
+    match std::fs::read(path) {
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|error| error.to_string()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(IslandConfig::default()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+// Tray and async IPC writers share the entire read-modify-publish transaction.
+// Readers need no lock because publication is an atomic rename.
+static ISLAND_CONFIG_WRITE_LOCK: Mutex<()> = Mutex::new(());
+
+fn update_island_config(update: impl FnOnce(&mut IslandConfig)) -> Result<(), String> {
     let path = island_config_path().ok_or_else(|| "cannot resolve cognia home".to_string())?;
+    update_island_config_at(&path, update)
+}
+
+fn update_island_config_at(
+    path: &Path,
+    update: impl FnOnce(&mut IslandConfig),
+) -> Result<(), String> {
+    let _guard = ISLAND_CONFIG_WRITE_LOCK
+        .lock()
+        .map_err(|error| error.to_string())?;
+    let expected_mtime = std::fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .ok();
+    let mut cfg = read_island_config(path)?;
+    let previous = cfg.clone();
+    update(&mut cfg);
+    if cfg == previous {
+        return Ok(());
+    }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    let json = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
-    std::fs::write(&path, json).map_err(|e| e.to_string())
+    let json = serde_json::to_vec_pretty(&cfg).map_err(|e| e.to_string())?;
+    atomic_write_with_mtime_check(
+        &AtomicWritePlan {
+            path: path.to_path_buf(),
+            expected_mtime,
+            tmp_suffix: "tmp".into(),
+            backup_suffix: "bak".into(),
+        },
+        &json,
+    )
+    .map_err(|error| error.to_string())?;
+    rotate_backups(path, 1);
+    Ok(())
 }
 
 /// Collapsed pill footprint (logical px) used when the renderer passes no
 /// explicit size. The renderer resizes via `island_resize` on expand/collapse.
 const DEFAULT_ISLAND_WIDTH: f64 = 420.0;
 const DEFAULT_ISLAND_HEIGHT: f64 = 44.0;
+
+// Keep the renderer's logical request, rather than the last clamped native
+// size: returning to a larger display must restore the full content footprint.
+static ISLAND_CONTENT_SIZE: Mutex<(f64, f64)> =
+    Mutex::new((DEFAULT_ISLAND_WIDTH, DEFAULT_ISLAND_HEIGHT));
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -311,6 +359,16 @@ fn resolve_island_position(anchor: (f64, f64, f64), win_w: f64) -> (f64, f64) {
 fn clamp_island_size(width: f64, height: f64, area_logical: (f64, f64)) -> (f64, f64) {
     let (area_w, area_h) = area_logical;
     (width.min(area_w).max(1.0), height.min(area_h).max(1.0))
+}
+
+fn island_physical_size(anchor: IslandAnchor, requested: (f64, f64)) -> (u32, u32) {
+    let (width, height) = clamp_island_size(requested.0, requested.1, anchor.content_max_logical());
+    (
+        (width * anchor.scale).round().max(1.0) as u32,
+        ((height + anchor.top_inset_logical()) * anchor.scale)
+            .round()
+            .max(1.0) as u32,
+    )
 }
 
 /// The monitor the island should live on: `preferred` when that monitor is
@@ -559,7 +617,7 @@ fn spawn_hover_monitor<R: Runtime>(app: &AppHandle<R>) {
         let mut was_inside = false;
         // `None` until the first sample, so the renderer always receives an
         // initial geometry push shortly after mount even if nothing changes.
-        let mut last_geometry: Option<(IslandGeometry, (f64, f64, f64))> = None;
+        let mut last_geometry: Option<IslandAnchor> = None;
         let mut tick: u32 = 0;
         loop {
             let Some(window) = app.get_webview_window(ISLAND_LABEL) else {
@@ -589,10 +647,10 @@ fn spawn_hover_monitor<R: Runtime>(app: &AppHandle<R>) {
             // change happened to call `island_resize`.
             if tick.is_multiple_of(GEOMETRY_SAMPLE_EVERY_TICKS) {
                 let anchor = island_anchor(&app);
-                let sample = (anchor.geometry(), (anchor.x, anchor.y, anchor.w));
-                if last_geometry.as_ref() != Some(&sample) {
-                    last_geometry = Some(sample);
-                    let _ = reposition_island_with(&app, &window, anchor);
+                if last_geometry != Some(anchor)
+                    && reposition_island_with(&app, &window, anchor).is_ok()
+                {
+                    last_geometry = Some(anchor);
                 }
             }
             tick = tick.wrapping_add(1);
@@ -630,8 +688,8 @@ fn emit_island_geometry<R: Runtime>(app: &AppHandle<R>, anchor: &IslandAnchor) {
     let _ = app.emit_to(ISLAND_LABEL, ISLAND_GEOMETRY_EVENT, anchor.geometry());
 }
 
-/// Recompute the top-center placement from the CURRENT preferred monitor and
-/// the window's actual physical size, and apply it. Shared by re-show and the
+/// Recompute size and top-center placement from the CURRENT preferred monitor
+/// and retained logical content request. Shared by re-show and the
 /// set-monitor command, so every path lands the strip in the same spot; both
 /// also notify the renderer (the notch inset may have changed with the
 /// monitor, and the renderer answers with a fresh `island_resize`).
@@ -650,11 +708,20 @@ fn reposition_island_with<R: Runtime>(
     window: &tauri::WebviewWindow<R>,
     anchor: IslandAnchor,
 ) -> Result<(), String> {
-    let size = window.inner_size().map_err(|e| e.to_string())?;
-    let (x, y) = resolve_island_position((anchor.x, anchor.y, anchor.w), size.width as f64);
+    let requested = *ISLAND_CONTENT_SIZE
+        .lock()
+        .map_err(|error| error.to_string())?;
+    let (width, height) = island_physical_size(anchor, requested);
+    let size = tauri::PhysicalSize::new(width, height);
+    let (x, y) = resolve_island_position((anchor.x, anchor.y, anchor.w), width as f64);
     window
         .set_position(PhysicalPosition::new(x, y))
         .map_err(|e| e.to_string())?;
+    if window.inner_size().map_err(|error| error.to_string())? != size {
+        // Apply the target's physical footprint after moving, so the old
+        // display's logical dimensions cannot enlarge it beyond the new area.
+        window.set_size(size).map_err(|error| error.to_string())?;
+    }
     emit_island_geometry(app, &anchor);
     Ok(())
 }
@@ -697,7 +764,10 @@ fn open_island_window_claimed<R: Runtime>(
     }
 
     let anchor = island_anchor(app);
-    let (x, y) = resolve_island_position((anchor.x, anchor.y, anchor.w), opts.width * anchor.scale);
+    *ISLAND_CONTENT_SIZE
+        .lock()
+        .map_err(|error| error.to_string())? = (opts.width, opts.height);
+    let (width, height) = island_physical_size(anchor, (opts.width, opts.height));
 
     let window = tauri::WebviewWindowBuilder::new(
         app,
@@ -717,7 +787,7 @@ fn open_island_window_claimed<R: Runtime>(
     // The window includes the notch strip; the renderer pads its card's
     // content below the inset (it learns the value from `island_resize`'s
     // return) while the card's body covers the strip itself.
-    .inner_size(opts.width, opts.height + anchor.top_inset_logical())
+    .inner_size(width as f64 / anchor.scale, height as f64 / anchor.scale)
     .build()
     .map_err(|error| {
         crate::pet_window::cancel_overlay_panel_reveal(role);
@@ -727,10 +797,10 @@ fn open_island_window_claimed<R: Runtime>(
     // Strip the app menu bar on Windows/Linux (same fix as the pet overlay).
     let _ = window.remove_menu();
 
-    if let Err(error) = window.set_position(PhysicalPosition::new(x, y)) {
+    if let Err(error) = reposition_island_with(app, &window, anchor) {
         crate::pet_window::cancel_overlay_panel_reveal(role);
         let _ = window.close();
-        return Err(error.to_string());
+        return Err(error);
     }
 
     // Non-activating NSPanel: float over all Spaces + full-screen apps, never
@@ -834,12 +904,7 @@ pub(crate) fn close_island_window_inner<R: Runtime>(app: &AppHandle<R>) -> Resul
 /// Record the island's shown/hidden intent. Best-effort: failing to persist the
 /// preference must never fail the window operation the user actually asked for.
 fn set_island_open_flag(open: bool) {
-    let mut cfg = load_island_config();
-    if cfg.open == open {
-        return;
-    }
-    cfg.open = open;
-    if let Err(e) = save_island_config(&cfg) {
+    if let Err(e) = update_island_config(|cfg| cfg.open = open) {
         log::warn!("island: persisting open={open} failed: {e}");
     }
 }
@@ -916,19 +981,13 @@ pub async fn island_resize(
     height: f64,
 ) -> Result<IslandGeometry, String> {
     let anchor = island_anchor(&app);
-    let inset_logical = anchor.top_inset_logical();
     let Some(window) = app.get_webview_window(ISLAND_LABEL) else {
         return Ok(anchor.geometry());
     };
-    let (width, height) = clamp_island_size(width, height, anchor.content_max_logical());
-    window
-        .set_size(tauri::LogicalSize::new(width, height + inset_logical))
-        .map_err(|e| e.to_string())?;
-
-    let (x, y) = resolve_island_position((anchor.x, anchor.y, anchor.w), width * anchor.scale);
-    window
-        .set_position(PhysicalPosition::new(x, y))
-        .map_err(|e| e.to_string())?;
+    *ISLAND_CONTENT_SIZE
+        .lock()
+        .map_err(|error| error.to_string())? = (width, height);
+    reposition_island_with(&app, &window, anchor)?;
     Ok(anchor.geometry())
 }
 
@@ -1119,11 +1178,7 @@ pub async fn island_get_hide_on_fullscreen() -> bool {
 /// flipped must take effect while they are still looking at the switch.
 #[tauri::command]
 pub async fn island_set_hide_on_fullscreen(app: AppHandle, hide: bool) -> Result<(), String> {
-    let mut cfg = load_island_config();
-    if cfg.hide_on_fullscreen != hide {
-        cfg.hide_on_fullscreen = hide;
-        save_island_config(&cfg)?;
-    }
+    update_island_config(|cfg| cfg.hide_on_fullscreen = hide)?;
     if let Some(window) = app.get_webview_window(ISLAND_LABEL) {
         reposition_island(&app, &window)?;
     }
@@ -1134,9 +1189,7 @@ pub async fn island_set_hide_on_fullscreen(app: AppHandle, hide: bool) -> Result
 /// live island there immediately.
 #[tauri::command]
 pub async fn island_set_monitor(app: AppHandle, monitor: Option<String>) -> Result<(), String> {
-    let mut cfg = load_island_config();
-    cfg.monitor = monitor;
-    save_island_config(&cfg)?;
+    update_island_config(|cfg| cfg.monitor = monitor)?;
     if let Some(window) = app.get_webview_window(ISLAND_LABEL) {
         reposition_island(&app, &window)?;
     }
@@ -1146,6 +1199,121 @@ pub async fn island_set_monitor(app: AppHandle, monitor: Option<String>) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn concurrent_config_mutations_preserve_each_preference() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("island-window.json");
+        let barrier = std::sync::Barrier::new(3);
+        std::thread::scope(|scope| {
+            for field in 0..3 {
+                let path = &path;
+                let barrier = &barrier;
+                scope.spawn(move || {
+                    barrier.wait();
+                    update_island_config_at(path, |cfg| {
+                        // Overlap each writer's read-modify-write interval.
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                        match field {
+                            0 => cfg.open = true,
+                            1 => cfg.monitor = Some("External".into()),
+                            _ => cfg.hide_on_fullscreen = true,
+                        }
+                    })
+                    .unwrap();
+                });
+            }
+        });
+        assert_eq!(
+            read_island_config(&path).unwrap(),
+            IslandConfig {
+                open: true,
+                monitor: Some("External".into()),
+                hide_on_fullscreen: true,
+            }
+        );
+    }
+
+    #[test]
+    fn invalid_existing_config_is_preserved_instead_of_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("island-window.json");
+        std::fs::write(&path, "invalid JSON").unwrap();
+        assert!(update_island_config_at(&path, |cfg| cfg.open = true).is_err());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "invalid JSON");
+    }
+
+    #[test]
+    fn failed_atomic_publish_keeps_the_previous_config_readable() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("island-window.json");
+        update_island_config_at(&path, |cfg| cfg.open = true).unwrap();
+        std::fs::create_dir(path.with_extension("json.tmp")).unwrap();
+        assert!(update_island_config_at(&path, |cfg| cfg.open = false).is_err());
+        assert!(read_island_config(&path).unwrap().open);
+    }
+
+    #[test]
+    fn unchanged_config_does_not_write_and_backups_are_bounded() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested/island-window.json");
+        update_island_config_at(&path, |cfg| cfg.open = false).unwrap();
+        assert!(!path.exists());
+        for open in [true, false, true, false] {
+            update_island_config_at(&path, |cfg| cfg.open = open).unwrap();
+        }
+        assert_eq!(
+            std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
+            2
+        );
+        assert_eq!(read_island_config(&path).unwrap(), IslandConfig::default());
+    }
+
+    #[test]
+    fn geometry_change_detection_includes_height_and_scale() {
+        let original = IslandAnchor::fallback();
+        assert_ne!(
+            original,
+            IslandAnchor {
+                h: 720.0,
+                ..original
+            }
+        );
+        assert_ne!(
+            original,
+            IslandAnchor {
+                scale: 2.0,
+                ..original
+            }
+        );
+    }
+
+    #[test]
+    fn native_size_clamps_to_shorter_display_and_restores_requested_size() {
+        let requested = (560.0, 900.0);
+        let large = IslandAnchor::fallback();
+        let short = IslandAnchor { h: 600.0, ..large };
+        assert_eq!(island_physical_size(large, requested), (560, 900));
+        assert_eq!(island_physical_size(short, requested), (560, 600));
+        assert_eq!(island_physical_size(large, requested), (560, 900));
+    }
+
+    #[test]
+    fn native_size_uses_target_dpi_and_accounts_for_the_notch() {
+        let retina = IslandAnchor {
+            w: 3024.0,
+            h: 1964.0,
+            scale: 2.0,
+            top_inset: 74.0,
+            ..IslandAnchor::fallback()
+        };
+        assert_eq!(island_physical_size(retina, (560.0, 300.0)), (1120, 674));
+        assert_eq!(island_physical_size(retina, (4000.0, 4000.0)), (3024, 1964));
+        assert_eq!(
+            island_physical_size(IslandAnchor::fallback(), (560.0, 300.0)),
+            (560, 300)
+        );
+    }
 
     #[test]
     fn centers_horizontally_and_hugs_the_anchor_top() {
