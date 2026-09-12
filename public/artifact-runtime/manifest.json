@@ -1,8 +1,11 @@
 {
-  "schema": 1,
+  "schema": 2,
   "reactVersion": "19.2.8",
   "babelVersion": "8.0.4",
-  "shellEntrySha": "646c14daa950d08a44a1f0c9165bdaef12166241bda0bcfb48e2f8397eca3797",
+  "shellSources": {
+    "lib/artifacts/runtime/artifact-shell-entry.ts": "b15648d6da60c48396b38c3ffff8e821014c378c5835f03a11f8cbbfcaceab94",
+    "lib/artifacts/runtime/element-pick.ts": "09bc657d0642049dbbede9321af41319551a0e049508aae88930e9524575e934"
+  },
   "files": {
     "react-runtime.js": {
       "bytes": 192680,
@@ -13,8 +16,8 @@
       "sha256": "a8b723044ca8e3f526ff7e4b269797d10eaf0e742087d4ba4e49e953d0adefd7"
     },
     "artifact-shell.js": {
-      "bytes": 3680,
-      "sha256": "93c68e8b0742cc75f3167bcd04aa00a8e81889298ed136f5c64bf4b0c0118bf4"
+      "bytes": 12321,
+      "sha256": "5737ad8d0e73b945ee5c0a251652fb67dba4803a25de88b961b5c518239ca22d"
     }
   }
 }

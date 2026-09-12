@@ -23,6 +23,18 @@
  *    an artifact's own failure message cannot inject markup.
  */
 
+/**
+ * The shell's half of the element picker.
+ *
+ * Only the `allow-scripts` frames (React artifacts, and the opt-in interactive
+ * HTML mode) need it. Their document is opaque-origin, so the host cannot reach
+ * `contentDocument` and install the picker itself the way it does for the
+ * `allow-same-origin` html/svg frames — postMessage is the only channel there
+ * is. The picker LOGIC is not duplicated for that: `element-pick.ts` is
+ * imported relatively so esbuild inlines the same module into this bundle.
+ */
+import { PICKER_NODE_ATTRIBUTE, installElementPicker } from "./element-pick"
+
 /** Strings the host hands the frame; the frame never hard-codes user-facing text. */
 export interface ArtifactShellMessages {
   noComponentFound: string
@@ -43,6 +55,7 @@ export type ArtifactShellInboundMessage =
   | { type: "run-scripts"; scripts: ArtifactShellScript[] }
   | { type: "artifact-preview-parent-context"; themeVariables?: Record<string, string> }
   | { type: "capture-snapshot"; requestId: string }
+  | { type: "artifact-set-select-mode"; on: boolean; originLabel?: string }
 
 interface ArtifactRoot {
   render(node: unknown): void
@@ -136,6 +149,8 @@ export function installArtifactShellRuntime(scope: ArtifactShellScope): () => vo
   let messages = DEFAULT_MESSAGES
   let root: ArtifactRoot | null = null
   let announcedReady = false
+  /** The armed picker's disposer, or null when select mode is off. */
+  let disposePicker: (() => void) | null = null
   const objectUrls: string[] = []
 
   const post = (message: unknown) => {
@@ -260,6 +275,27 @@ export function installArtifactShellRuntime(scope: ArtifactShellScope): () => vo
         )
         return
       }
+      if (data.type === "artifact-set-select-mode") {
+        // Idempotent in both directions: the host re-sends `on` after every
+        // re-render (the document it was armed on may have been replaced) and
+        // disarms on unmount. Disposing first means a stale picker can never
+        // outlive its document and leave the artifact swallowing every click.
+        disposePicker?.()
+        disposePicker = null
+        if (!data.on) return
+        disposePicker = installElementPicker(doc, {
+          originLabel: data.originLabel,
+          onPick: (selection, modifiers) => {
+            post({ type: "artifact-element-selected", selection, modifiers })
+          },
+          onCancel: () => {
+            disposePicker?.()
+            disposePicker = null
+            post({ type: "artifact-element-pick-cancelled" })
+          },
+        })
+        return
+      }
       if (data.type === "capture-snapshot") {
         // Rasterising happens in the PARENT, not here. html2canvas clones the
         // document into a child iframe and reads it back, and a sandboxed
@@ -267,7 +303,15 @@ export function installArtifactShellRuntime(scope: ArtifactShellScope): () => vo
         // OWN about:blank child. Verified, not assumed. What the frame CAN do
         // is hand out a static snapshot of what it drew, which the parent then
         // renders in the same-origin capture frame it already uses for `html`.
-        const snapshot = `<!DOCTYPE html>${doc.documentElement.outerHTML}`
+        // The picker's highlight and label live in THIS document, so an
+        // export taken while select mode is armed would bake them into the
+        // PNG/PDF. Clone, strip, serialize — never mutate the live document,
+        // which would make the highlight flicker mid-pick.
+        const clone = doc.documentElement.cloneNode(true) as Element
+        for (const node of Array.from(clone.querySelectorAll(`[${PICKER_NODE_ATTRIBUTE}]`))) {
+          node.remove()
+        }
+        const snapshot = `<!DOCTYPE html>${clone.outerHTML}`
         post({
           type: "artifact-capture-result",
           requestId: data.requestId,
@@ -309,6 +353,8 @@ export function installArtifactShellRuntime(scope: ArtifactShellScope): () => vo
   post({ type: "artifact-shell-ready" })
 
   return () => {
+    disposePicker?.()
+    disposePicker = null
     for (const url of objectUrls.splice(0)) {
       try {
         scope.URL.revokeObjectURL(url)

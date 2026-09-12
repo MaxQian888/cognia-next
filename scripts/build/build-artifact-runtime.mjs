@@ -47,13 +47,46 @@ export const ARTIFACT_SHELL_FILE = "artifact-shell.js"
 export const MANIFEST_FILE = "manifest.json"
 
 /**
- * The shell bundle's own source. It has to be hashed into the manifest because
- * the freshness check otherwise only watches react/babel versions and the
- * OUTPUT hashes, so editing this file left the committed bundle stale and the
+ * Bumped to 2 when the sentinel moved from a single `shellEntrySha` to the
+ * recorded `shellSources` set, so every manifest written by the old scheme is
+ * stale exactly once and rebuilds itself into the new one.
+ */
+export const MANIFEST_SCHEMA = 2
+
+/**
+ * The shell bundle's entry source.
+ *
+ * Its hash alone is NOT the freshness sentinel — see `shellSources` in the
+ * manifest. The freshness check used to watch only react/babel versions and the
+ * OUTPUT hashes, so editing this file left the committed bundle stale while the
  * build cheerfully reported "already fresh". That is not hypothetical: the
  * capture-snapshot handler was written, tested, and silently not shipped.
+ *
+ * Hashing this one file fixed that instance and left the shape of the bug in
+ * place — the sentinel was a hand-maintained allowlist of exactly one path, so
+ * the first time the shell imported a second module the same silent staleness
+ * would return. It now records the whole input set esbuild actually read
+ * (`metafile.inputs`), which is self-healing: a new import can only appear by
+ * editing a file already in the set, so that edit forces the rebuild that
+ * records the new member.
  */
 export const ARTIFACT_SHELL_SOURCE = "lib/artifacts/runtime/artifact-shell-entry.ts"
+
+/**
+ * Hash every source esbuild reported reading for the shell bundle.
+ *
+ * Paths come from the metafile relative to ROOT. A file that has since been
+ * deleted hashes as `null`, which can never equal a recorded hash — so a
+ * removed module forces a rebuild rather than being quietly skipped.
+ */
+export function hashSources(paths, readSource) {
+  const out = {}
+  for (const rel of [...paths].sort()) {
+    const bytes = readSource(rel)
+    out[rel] = bytes ? sha256(bytes) : null
+  }
+  return out
+}
 
 /**
  * Entry source for the React bundle. `import * as ns` then unwrapping
@@ -158,10 +191,21 @@ export function sha256(bytes) {
  */
 export function isManifestFresh(manifest, expected, readFile) {
   if (!manifest || typeof manifest !== "object") return false
-  if (manifest.schema !== expected.schema) return false
+  if (manifest.schema !== MANIFEST_SCHEMA) return false
   if (manifest.reactVersion !== expected.reactVersion) return false
   if (manifest.babelVersion !== expected.babelVersion) return false
-  if (manifest.shellEntrySha !== expected.shellEntrySha) return false
+  // Every source the shell bundle was built from must still hash the same.
+  // Recorded rather than derived, because the check runs BEFORE the build that
+  // would reveal the input set.
+  const sources = manifest.shellSources
+  if (!sources || typeof sources !== "object") return false
+  const names = Object.keys(sources)
+  if (names.length === 0) return false
+  for (const rel of names) {
+    const bytes = expected.readSource(rel)
+    if (!bytes) return false
+    if (sha256(bytes) !== sources[rel]) return false
+  }
   const files = manifest.files
   if (!files || typeof files !== "object") return false
   for (const name of [REACT_RUNTIME_FILE, JSX_TRANSFORM_FILE, ARTIFACT_SHELL_FILE]) {
@@ -175,17 +219,26 @@ export function isManifestFresh(manifest, expected, readFile) {
   return true
 }
 
-export function buildManifest({ reactVersion, babelVersion, shellEntrySha, outputs }) {
+export function buildManifest({ reactVersion, babelVersion, shellSources, outputs }) {
   const files = {}
   for (const [name, bytes] of Object.entries(outputs)) {
     files[name] = { bytes: bytes.length, sha256: sha256(bytes) }
   }
-  return { schema: 1, reactVersion, babelVersion, shellEntrySha, files }
+  return { schema: MANIFEST_SCHEMA, reactVersion, babelVersion, shellSources, files }
 }
 
 function readJson(file) {
   try {
     return JSON.parse(fs.readFileSync(file, "utf8"))
+  } catch {
+    return null
+  }
+}
+
+/** Read a repo-relative source file, or null when it is gone. */
+function readSource(rel) {
+  try {
+    return fs.readFileSync(path.resolve(ROOT, rel))
   } catch {
     return null
   }
@@ -209,18 +262,14 @@ async function main() {
     return
   }
 
-  let shellEntrySha
-  try {
-    shellEntrySha = sha256(fs.readFileSync(path.resolve(ROOT, ARTIFACT_SHELL_SOURCE)))
-  } catch {
+  if (!readSource(ARTIFACT_SHELL_SOURCE)) {
     console.log("[artifact-runtime] skip: shell entry source missing")
     return
   }
   const expected = {
-    schema: 1,
     reactVersion: reactPkg.version,
     babelVersion: babelPkg.version,
-    shellEntrySha,
+    readSource,
   }
   if (isManifestFresh(readJson(MANIFEST_PATH), expected, readOutput)) {
     console.log(`[artifact-runtime] skip: ${OUT_DIR} already fresh`)
@@ -235,10 +284,14 @@ async function main() {
     return
   }
 
-  const bundle = async (contents, loader = "js") => {
+  /** Sources esbuild reported reading for the shell bundle, relative to ROOT. */
+  let shellInputs = []
+
+  const bundle = async (contents, loader = "js", collectInputs = false) => {
     const result = await esbuild.build({
       stdin: { contents, resolveDir: ROOT, loader, sourcefile: `artifact-runtime-entry.${loader}` },
       bundle: true,
+      metafile: collectInputs,
       format: "iife",
       platform: "browser",
       target: ["es2022"],
@@ -249,20 +302,32 @@ async function main() {
       define: { "process.env.NODE_ENV": '"production"' },
       write: false,
     })
+    if (collectInputs) {
+      // `<stdin>` is the synthetic entry, not a file on disk — everything else
+      // is a real path the bundle depends on.
+      shellInputs = Object.keys(result.metafile?.inputs ?? {}).filter(
+        (name) => !name.startsWith("<") && readSource(name)
+      )
+    }
     return Buffer.from(result.outputFiles[0].contents)
   }
 
   const outputs = {
     [REACT_RUNTIME_FILE]: await bundle(REACT_RUNTIME_ENTRY),
     [JSX_TRANSFORM_FILE]: await bundle(JSX_TRANSFORM_ENTRY),
-    [ARTIFACT_SHELL_FILE]: await bundle(ARTIFACT_SHELL_ENTRY, "ts"),
+    [ARTIFACT_SHELL_FILE]: await bundle(ARTIFACT_SHELL_ENTRY, "ts", true),
   }
 
   fs.mkdirSync(OUT_DIR, { recursive: true })
   for (const [name, bytes] of Object.entries(outputs)) {
     fs.writeFileSync(path.join(OUT_DIR, name), bytes)
   }
-  const manifest = buildManifest({ ...expected, outputs })
+  const manifest = buildManifest({
+    reactVersion: reactPkg.version,
+    babelVersion: babelPkg.version,
+    shellSources: hashSources(shellInputs, readSource),
+    outputs,
+  })
   fs.writeFileSync(MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`)
 
   for (const [name, bytes] of Object.entries(outputs)) {
