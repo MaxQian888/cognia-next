@@ -3791,6 +3791,33 @@
       "noDescription": "暂无描述"
     }
   },
+  "annotations": {
+    "add": "加入队列",
+    "intent": {
+      "approve": "认可",
+      "change": "修改",
+      "fix": "修复",
+      "label": "标注意图",
+      "question": "问题"
+    },
+    "queued": "已加入 {count} 条标注",
+    "remove": "移除标注",
+    "resolve": "解决标注",
+    "send": "发送 {count} 条",
+    "sent": "已向聊天发送 {count} 条标注",
+    "severity": {
+      "blocking": "阻塞",
+      "important": "重要",
+      "label": "标注严重程度",
+      "suggestion": "建议"
+    },
+    "status": {
+      "acknowledged": "已确认",
+      "dismissed": "已忽略",
+      "pending": "待处理",
+      "resolved": "已解决"
+    }
+  },
   "artifactCreateButton": {
     "asChart": "作为图表",
     "asCode": "作为代码",
@@ -3905,6 +3932,9 @@
       "hint": "在预览中点击元素即可引用它；按住 {modifier} 可直接发送到对话。",
       "label": "选取元素",
       "labelActive": "结束选取",
+      "queueEmpty": "先选取一个元素，再开始写评审备注。",
+      "queueLabel": "评审备注",
+      "queuePlaceholder": "这个元素需要改什么？",
       "staged": "已暂存 {element}，将随下一条消息发送",
       "unavailable": "请先打开预览再选取元素"
     },
@@ -5004,33 +5034,6 @@
       "driving": "智能体操作中",
       "human": "你在操作",
       "lastAction": "最近操作：{action}"
-    },
-    "annotation": {
-      "add": "加入队列",
-      "intent": {
-        "approve": "认可",
-        "change": "修改",
-        "fix": "修复",
-        "label": "标注意图",
-        "question": "问题"
-      },
-      "queued": "已加入 {count} 条标注",
-      "remove": "移除标注",
-      "resolve": "解决标注",
-      "send": "发送 {count} 条",
-      "sent": "已向聊天发送 {count} 条标注",
-      "severity": {
-        "blocking": "阻塞",
-        "important": "重要",
-        "label": "标注严重程度",
-        "suggestion": "建议"
-      },
-      "status": {
-        "acknowledged": "已确认",
-        "dismissed": "已忽略",
-        "pending": "待处理",
-        "resolved": "已解决"
-      }
     },
     "backend": {
       "embedded": "内置预览",

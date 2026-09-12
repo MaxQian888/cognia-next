@@ -52,6 +52,9 @@
     "hint": "Click an element in the preview to reference it. Hold {modifier} to send it straight to chat.",
     "label": "Select element",
     "labelActive": "Stop selecting",
+    "queueEmpty": "Pick an element to start a review note.",
+    "queueLabel": "Review notes",
+    "queuePlaceholder": "What should change about this element?",
     "staged": "Staged {element} for the next message",
     "unavailable": "Open the preview to select an element"
   },

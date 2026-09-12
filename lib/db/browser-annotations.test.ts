@@ -4,9 +4,12 @@ import {
   deleteBrowserAnnotation,
   deleteExpiredBrowserAnnotations,
   getBrowserAnnotation,
+  listActionableAnnotations,
   listBrowserAnnotations,
   listActionableBrowserAnnotations,
+  listPendingAnnotations,
   listPendingBrowserAnnotations,
+  resolveAnnotationTarget,
   saveBrowserAnnotation,
   transitionBrowserAnnotation,
   type BrowserAnnotationRow,
@@ -61,7 +64,13 @@ it("round-trips and lists annotations by base URL and status", async () => {
     annotation("other", { baseUrl: "http://localhost:4000", status: "acknowledged" })
   )
 
-  expect(await getBrowserAnnotation("first")).toEqual(annotation("first"))
+  // The stored row gains its normalised target: the field is optional on the
+  // type so plugin authors stay source-compatible, but what lands in the table
+  // is always explicit about what the annotation is ABOUT.
+  expect(await getBrowserAnnotation("first")).toEqual({
+    ...annotation("first"),
+    target: { kind: "web", baseUrl: "http://localhost:3000" },
+  })
   expect((await listBrowserAnnotations("http://localhost:3000")).map(({ id }) => id)).toEqual([
     "first",
     "later",
@@ -140,4 +149,104 @@ it("lists pending annotations by session and expires old rows", async () => {
   ])
   expect(await deleteExpiredBrowserAnnotations(now)).toBe(2)
   expect(await getBrowserAnnotation("fresh")).toBeDefined()
+})
+
+describe("annotation scoping", () => {
+  /** An artifact element carries no page, so it has no `pageUrl` at all. */
+  const elementSelection = {
+    tagName: "button",
+    selector: "#card > button",
+    domPath: "div.card > button",
+    id: null,
+    classes: "primary",
+    rect: { x: 0, y: 0, width: 100, height: 40 },
+    outerHTML: '<button class="primary">Go</button>',
+    text: "Go",
+    originLabel: "artifact preview",
+  }
+
+  it("keeps an artifact annotation out of the browser's queue", async () => {
+    // The defect this scoping exists to prevent: the browser pane binds
+    // `listActionableBrowserAnnotations` to a live query and opens its
+    // inspection rail whenever the queue is non-empty — which resizes the
+    // native webview. An artifact annotation must not do that.
+    await saveBrowserAnnotation(annotation("web-row", { sessionId: "s1" }))
+    await saveBrowserAnnotation(
+      annotation("artifact-row", {
+        sessionId: "s1",
+        baseUrl: undefined,
+        target: { kind: "artifact", artifactId: "a1" },
+        selection: elementSelection,
+      })
+    )
+
+    expect((await listActionableBrowserAnnotations("s1")).map((row) => row.id)).toEqual(["web-row"])
+    expect((await listPendingBrowserAnnotations("s1")).map((row) => row.id)).toEqual(["web-row"])
+  })
+
+  it("keeps a browser annotation out of an artifact's queue", async () => {
+    await saveBrowserAnnotation(annotation("web-row", { sessionId: "s1" }))
+    await saveBrowserAnnotation(
+      annotation("artifact-row", {
+        sessionId: "s1",
+        baseUrl: undefined,
+        target: { kind: "artifact", artifactId: "a1" },
+        selection: elementSelection,
+      })
+    )
+
+    const rows = await listActionableAnnotations("s1", { kind: "artifact", artifactId: "a1" })
+    expect(rows.map((row) => row.id)).toEqual(["artifact-row"])
+  })
+
+  it("keeps two artifacts' queues apart", async () => {
+    for (const artifactId of ["a1", "a2"]) {
+      await saveBrowserAnnotation(
+        annotation(`row-${artifactId}`, {
+          sessionId: "s1",
+          baseUrl: undefined,
+          target: { kind: "artifact", artifactId },
+          selection: elementSelection,
+        })
+      )
+    }
+    const rows = await listPendingAnnotations("s1", { kind: "artifact", artifactId: "a2" })
+    expect(rows.map((row) => row.id)).toEqual(["row-a2"])
+  })
+
+  it("treats a row written without a target as the web annotation it was", async () => {
+    // Every writer before this field existed was the browser; that is a fact
+    // about the table's history, not a default.
+    await saveBrowserAnnotation(annotation("legacy", { sessionId: "s1" }))
+    const saved = await getBrowserAnnotation("legacy")
+    expect(resolveAnnotationTarget(saved!)).toEqual({
+      kind: "web",
+      baseUrl: "http://localhost:3000",
+    })
+    expect((await listActionableBrowserAnnotations("s1")).map((row) => row.id)).toEqual(["legacy"])
+  })
+
+  it("normalises the target on write, so a stored row is always explicit", async () => {
+    await saveBrowserAnnotation(annotation("w", { sessionId: "s1" }))
+    expect((await getBrowserAnnotation("w"))?.target).toEqual({
+      kind: "web",
+      baseUrl: "http://localhost:3000",
+    })
+  })
+
+  it("stores an element selection that has no page URL without inventing one", async () => {
+    // Reading `pageUrl` unconditionally used to write the string "undefined",
+    // which reached the model's prompt as `Page: undefined`.
+    await saveBrowserAnnotation(
+      annotation("el", {
+        sessionId: "s1",
+        baseUrl: undefined,
+        target: { kind: "artifact", artifactId: "a1" },
+        selection: elementSelection,
+      })
+    )
+    const saved = await getBrowserAnnotation("el")
+    expect(saved?.selection).not.toHaveProperty("pageUrl")
+    expect(saved?.selection.outerHTML).toBe('<button class="primary">Go</button>')
+  })
 })

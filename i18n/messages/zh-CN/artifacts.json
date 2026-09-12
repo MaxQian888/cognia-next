@@ -52,6 +52,9 @@
     "hint": "在预览中点击元素即可引用它；按住 {modifier} 可直接发送到对话。",
     "label": "选取元素",
     "labelActive": "结束选取",
+    "queueEmpty": "先选取一个元素，再开始写评审备注。",
+    "queueLabel": "评审备注",
+    "queuePlaceholder": "这个元素需要改什么？",
     "staged": "已暂存 {element}，将随下一条消息发送",
     "unavailable": "请先打开预览再选取元素"
   },

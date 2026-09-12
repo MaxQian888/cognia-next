@@ -14,10 +14,12 @@ import {
   screenshotToFile,
 } from "@/lib/browser/protocol"
 import { buildSendContent, type SubmittedFile } from "@/lib/chat/attachments/dispatch"
+import type { ElementSelectionCore } from "@/types/element-selection"
 import { useChatStore } from "@/stores/chat/chat-store"
 import {
   saveBrowserAnnotation,
   transitionBrowserAnnotation,
+  type AnnotationTarget,
   type BrowserAnnotationIntent,
   type BrowserAnnotationRow,
   type BrowserAnnotationSeverity,
@@ -144,13 +146,22 @@ export function useSelectionToChat() {
     [send, interruptAndSteer]
   )
 
+  /**
+   * Persist one review annotation.
+   *
+   * Takes either a page (`baseUrl`) or an explicit `target`, because the queue
+   * is shared with the artifact preview and an artifact element was never on a
+   * page. Passing `baseUrl` keeps the browser's call sites — and the published
+   * plugin surface — reading exactly as they did.
+   */
   const queueAnnotation = useCallback(
     async (
-      selection: BrowserSelection,
+      selection: BrowserSelection | ElementSelectionCore,
       comment: string,
       options: {
         sessionId?: string
-        baseUrl: string
+        baseUrl?: string
+        target?: AnnotationTarget
         intent?: BrowserAnnotationIntent
         severity?: BrowserAnnotationSeverity
       }
@@ -158,11 +169,18 @@ export function useSelectionToChat() {
       if (!comment.trim()) return undefined
       const targetSessionId = options.sessionId ?? useChatStore.getState().activeSessionId
       if (!targetSessionId) return undefined
+      const target: AnnotationTarget = options.target ?? {
+        kind: "web",
+        baseUrl: options.baseUrl ?? "",
+      }
       const now = new Date().getTime()
       const annotation: BrowserAnnotationRow = {
         id: crypto.randomUUID(),
         sessionId: targetSessionId,
-        baseUrl: options.baseUrl,
+        // Only a web annotation carries one; absent is the honest answer for
+        // anything else, and it keeps the `baseUrl` indexes meaning one thing.
+        ...(target.kind === "web" ? { baseUrl: target.baseUrl } : {}),
+        target,
         selection,
         comment: comment.trim(),
         intent: options.intent ?? "change",

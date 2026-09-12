@@ -3,14 +3,12 @@
 import {
   CameraIcon,
   BracesIcon,
-  CheckIcon,
   ExternalLinkIcon,
   Loader2Icon,
   MonitorXIcon,
   MousePointerSquareDashedIcon,
   SearchIcon,
   SendIcon,
-  Trash2Icon,
   XIcon,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
@@ -46,6 +44,8 @@ import { BrowserWebFallback } from "@/components/browser/browser-web-fallback"
 import { BrowserZoomControl, MAX_ZOOM, MIN_ZOOM } from "@/components/browser/browser-zoom-control"
 import { RemoteBrowserPreview } from "@/components/browser/remote-browser-preview"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
+import { AnnotationIntentControls } from "@/components/annotations/annotation-intent-controls"
+import { AnnotationQueueList } from "@/components/annotations/annotation-queue-list"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
@@ -153,6 +153,10 @@ export function BrowserPreviewPane({
   onRequestReveal?: () => boolean
 }) {
   const t = useTranslations("browser")
+  // The annotation vocabulary is shared with the artifact preview, so it lives
+  // in its own namespace rather than under `browser.*` — one of its own values
+  // ("Browser Adjust") is what makes the rest of that namespace browser-only.
+  const tAnnotations = useTranslations("annotations")
   const tCdp = useTranslations("browserCdp")
   const normalizedInitialUrl = initialUrl ? normalizePreviewUrl(initialUrl) : null
   const reservedRef = useRef<HTMLDivElement>(null)
@@ -588,7 +592,7 @@ export function BrowserPreviewPane({
         detailLevel,
       })
       if (ok) {
-        toast.success(t("annotation.sent", { count: pendingAnnotations.length }))
+        toast.success(tAnnotations("sent", { count: pendingAnnotations.length }))
       } else {
         toast.error(t("comment.noSession"))
       }
@@ -597,7 +601,15 @@ export function BrowserPreviewPane({
     } finally {
       setSending(false)
     }
-  }, [pendingAnnotations, effectiveSessionId, getRect, sendAnnotations, t, detailLevel])
+  }, [
+    pendingAnnotations,
+    effectiveSessionId,
+    getRect,
+    sendAnnotations,
+    t,
+    tAnnotations,
+    detailLevel,
+  ])
 
   const transitionQueuedAnnotation = useCallback(
     async (id: string, status: "resolved" | "dismissed") => {
@@ -1065,38 +1077,12 @@ export function BrowserPreviewPane({
                     <p className="mt-1 text-xs text-muted-foreground">{t("adjust.accepted")}</p>
                   )}
                   <div className="mt-2 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1">
-                      <NativeSelect
-                        value={annotationIntent}
-                        onChange={(event) =>
-                          setAnnotationIntent(event.target.value as BrowserAnnotationIntent)
-                        }
-                        aria-label={t("annotation.intent.label")}
-                        size="sm"
-                        className="h-7 text-xs"
-                      >
-                        {(["fix", "change", "question", "approve"] as const).map((intent) => (
-                          <NativeSelectOption key={intent} value={intent}>
-                            {t(`annotation.intent.${intent}`)}
-                          </NativeSelectOption>
-                        ))}
-                      </NativeSelect>
-                      <NativeSelect
-                        value={annotationSeverity}
-                        onChange={(event) =>
-                          setAnnotationSeverity(event.target.value as BrowserAnnotationSeverity)
-                        }
-                        aria-label={t("annotation.severity.label")}
-                        size="sm"
-                        className="h-7 text-xs"
-                      >
-                        {(["blocking", "important", "suggestion"] as const).map((severity) => (
-                          <NativeSelectOption key={severity} value={severity}>
-                            {t(`annotation.severity.${severity}`)}
-                          </NativeSelectOption>
-                        ))}
-                      </NativeSelect>
-                    </div>
+                    <AnnotationIntentControls
+                      intent={annotationIntent}
+                      onIntentChange={setAnnotationIntent}
+                      severity={annotationSeverity}
+                      onSeverityChange={setAnnotationSeverity}
+                    />
                     <div className="flex items-center gap-1.5">
                       <Button
                         size="sm"
@@ -1104,7 +1090,7 @@ export function BrowserPreviewPane({
                         disabled={sending || (!comment.trim() && !adjustmentFeedback)}
                         onClick={() => void onQueue()}
                       >
-                        {t("annotation.add")}
+                        {tAnnotations("add")}
                       </Button>
                       <Button
                         size="sm"
@@ -1120,55 +1106,13 @@ export function BrowserPreviewPane({
               )}
 
               {annotationQueue.length > 0 && (
-                <div className="border-t bg-muted/30 p-3">
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <span className="text-xs font-medium">
-                      {t("annotation.queued", { count: annotationQueue.length })}
-                    </span>
-                    <Button
-                      size="sm"
-                      disabled={sending || pendingAnnotations.length === 0}
-                      onClick={() => void onSendQueue()}
-                    >
-                      <SendIcon className="size-3.5" />
-                      {t("annotation.send", { count: pendingAnnotations.length })}
-                    </Button>
-                  </div>
-                  <div className="space-y-1">
-                    {annotationQueue.map((annotation, index) => (
-                      <div key={annotation.id} className="flex items-center gap-2 text-xs">
-                        <span className="min-w-0 flex-1 truncate">
-                          {index + 1}. {annotation.comment}
-                        </span>
-                        <Badge variant="outline" className="text-[10px]">
-                          {t(`annotation.status.${annotation.status}`)}
-                        </Badge>
-                        <Badge variant="outline" className="text-[10px]">
-                          {t(`annotation.intent.${annotation.intent}`)} ·{" "}
-                          {t(`annotation.severity.${annotation.severity}`)}
-                        </Badge>
-                        <TooltipIconButton
-                          tooltip={t("annotation.resolve")}
-                          aria-label={t("annotation.resolve")}
-                          size="icon-xs"
-                          onClick={() => void transitionQueuedAnnotation(annotation.id, "resolved")}
-                        >
-                          <CheckIcon />
-                        </TooltipIconButton>
-                        <TooltipIconButton
-                          tooltip={t("annotation.remove")}
-                          aria-label={t("annotation.remove")}
-                          size="icon-xs"
-                          onClick={() =>
-                            void transitionQueuedAnnotation(annotation.id, "dismissed")
-                          }
-                        >
-                          <Trash2Icon />
-                        </TooltipIconButton>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <AnnotationQueueList
+                  annotations={annotationQueue}
+                  pendingCount={pendingAnnotations.length}
+                  busy={sending}
+                  onSend={() => void onSendQueue()}
+                  onTransition={(id, status) => void transitionQueuedAnnotation(id, status)}
+                />
               )}
             </ScrollArea>
           </aside>

@@ -12,10 +12,12 @@
 
 import dynamic from "next/dynamic"
 import { useTranslations } from "next-intl"
+import { useChatStore } from "@/stores/chat"
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { editor as MonacoEditorNS } from "monaco-editor"
 import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
 import {
+  ClipboardListIcon,
   Maximize2,
   Minimize2,
   MoreHorizontal,
@@ -71,6 +73,8 @@ import { ArtifactList } from "./artifact-list"
 import { ArtifactReviewView } from "./artifact-review-view"
 import { SelectionCommentButton } from "./selection-comment-button"
 import { useArtifactElementSelection } from "@/hooks/artifacts/use-artifact-element-selection"
+import { ArtifactAnnotations } from "./artifact-annotations"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useSelectionToChat } from "@/hooks/browser/use-selection-to-chat"
 import { formatContextSelectionsForLLM } from "@/lib/artifacts/format-selection-context"
 import { locateElementRange } from "@/hooks/artifacts/use-artifact-element-selection"
@@ -146,6 +150,8 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
   // preview tabs rather than beside `SelectionCommentButton`, which serves the
   // source-text modes.
   const previewVisible = viewMode === "preview" || viewMode === "split"
+  // The review queue is keyed per conversation, like every other annotation.
+  const activeSessionId = useChatStore((state) => state.activeSessionId)
   const tElementPick = useTranslations("artifacts.elementPick")
   /**
    * The modifier named in the hint. `⌘` on Apple platforms, `Ctrl` elsewhere —
@@ -437,7 +443,33 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
 
     return (
       <>
-        {activeArtifact && previewVisible && renderElementPickToggle()}
+        {activeArtifact && previewVisible && (
+          <>
+            {renderElementPickToggle()}
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 gap-1 px-2 text-xs"
+                  aria-label={tElementPick("queueLabel")}
+                  title={tElementPick("queueLabel")}
+                  data-testid="artifact-annotations-trigger"
+                >
+                  <ClipboardListIcon className="h-4 w-4" aria-hidden="true" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-96 p-0">
+                <ArtifactAnnotations
+                  artifactId={activeArtifact.id}
+                  sessionId={activeSessionId}
+                  lastPicked={elementSelection.lastPicked}
+                  onQueued={elementSelection.clearLastPicked}
+                />
+              </PopoverContent>
+            </Popover>
+          </>
+        )}
         {activeArtifact &&
           (viewMode === "code" || viewMode === "review" || viewMode === "split") && (
             <SelectionCommentButton artifact={activeArtifact} className="h-8 px-2 text-xs" />

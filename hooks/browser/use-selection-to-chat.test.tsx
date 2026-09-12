@@ -42,6 +42,10 @@ jest.mock("@/lib/chat/attachments/dispatch", () => ({
 jest.mock("@/lib/db/browser-annotations", () => ({
   saveBrowserAnnotation: (...args: unknown[]) => mockSaveAnnotation(...args),
   transitionBrowserAnnotation: (...args: unknown[]) => mockTransitionAnnotation(...args),
+  // Used by the batch formatter to headline the batch by surface. Mirrors the
+  // real normalisation: a row with no target is the web annotation it was.
+  resolveAnnotationTarget: (row: { target?: unknown; baseUrl?: string }) =>
+    row.target ?? { kind: "web", baseUrl: row.baseUrl ?? "" },
 }))
 
 import { buildSendContent } from "@/lib/chat/attachments/dispatch"
@@ -313,5 +317,43 @@ describe("without a chat runtime provider", () => {
     const { result } = renderHook(() => useSelectionToChat())
     await expect(result.current.sendText("hello")).rejects.toThrow(/ClaudeChatRuntimeProvider/)
     expect(mockSend).not.toHaveBeenCalled()
+  })
+})
+
+describe("queueing against a non-web target", () => {
+  it("records an artifact target and writes no baseUrl", async () => {
+    // An artifact element was never on a page, so inventing a `baseUrl` for it
+    // would put a fictitious URL in the row and then in the model's prompt.
+    const { result } = renderHook(() => useSelectionToChat())
+    await result.current.queueAnnotation(
+      {
+        selector: "#card > button",
+        domPath: "div.card > button",
+        tagName: "button",
+        id: null,
+        classes: null,
+        rect: { x: 0, y: 0, width: 1, height: 1 },
+        outerHTML: "<button></button>",
+        text: "Go",
+      },
+      "make it blue",
+      { sessionId: "s1", target: { kind: "artifact", artifactId: "a1" }, intent: "fix" }
+    )
+
+    const written = mockSaveAnnotation.mock.calls.at(-1)?.[0]
+    expect(written.target).toEqual({ kind: "artifact", artifactId: "a1" })
+    expect(written).not.toHaveProperty("baseUrl")
+    expect(written.intent).toBe("fix")
+  })
+
+  it("still accepts a plain baseUrl, so the browser call sites are unchanged", async () => {
+    const { result } = renderHook(() => useSelectionToChat())
+    await result.current.queueAnnotation(SELECTION, "tighten", {
+      sessionId: "s1",
+      baseUrl: "https://example.test",
+    })
+    const written = mockSaveAnnotation.mock.calls.at(-1)?.[0]
+    expect(written.baseUrl).toBe("https://example.test")
+    expect(written.target).toEqual({ kind: "web", baseUrl: "https://example.test" })
   })
 })

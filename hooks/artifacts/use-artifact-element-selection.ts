@@ -93,6 +93,14 @@ export interface UseArtifactElementSelection {
   toggleSelectMode: () => void
   /** How many elements this session has staged, for the toolbar's badge. */
   pickedCount: number
+  /**
+   * The most recent pick, so it can be promoted into a durable review
+   * annotation. Staging into the composer is the ephemeral path — it is
+   * consumed by the next message — while the annotation queue outlives the
+   * turn and carries intent, severity and an outcome.
+   */
+  lastPicked: ElementSelectionCore | null
+  clearLastPicked: () => void
 }
 
 export interface UseArtifactElementSelectionOptions {
@@ -130,6 +138,7 @@ export function useArtifactElementSelection({
 
   const [selectModeRequested, setSelectModeRequested] = useState(false)
   const [pickedCount, setPickedCount] = useState(0)
+  const [lastPicked, setLastPicked] = useState<ElementSelectionCore | null>(null)
 
   /**
    * Select mode is DERIVED, not reset.
@@ -152,6 +161,7 @@ export function useArtifactElementSelection({
     setSyncedArtifactId(artifactId)
     setSelectModeRequested(false)
     setPickedCount(0)
+    setLastPicked(null)
   }
 
   // The picker is armed against a live preview, so everything it needs is read
@@ -184,6 +194,7 @@ export function useArtifactElementSelection({
         element,
       })
       setPickedCount((count) => count + 1)
+      setLastPicked(element)
       toast.success(
         t("staged", {
           element: element.componentName ? `<${element.componentName}>` : element.tagName,
@@ -211,5 +222,7 @@ export function useArtifactElementSelection({
     setSelectModeRequested((on) => !on)
   }, [])
 
-  return { available, selectMode, toggleSelectMode, pickedCount }
+  const clearLastPicked = useCallback(() => setLastPicked(null), [])
+
+  return { available, selectMode, toggleSelectMode, pickedCount, lastPicked, clearLastPicked }
 }

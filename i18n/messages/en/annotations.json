@@ -1,0 +1,27 @@
+{
+  "add": "Add to queue",
+  "intent": {
+    "approve": "Approve",
+    "change": "Change",
+    "fix": "Fix",
+    "label": "Annotation intent",
+    "question": "Question"
+  },
+  "queued": "{count, plural, one {# annotation queued} other {# annotations queued}}",
+  "remove": "Remove annotation",
+  "resolve": "Resolve annotation",
+  "send": "Send {count}",
+  "sent": "Sent {count, plural, one {# annotation} other {# annotations}} to chat",
+  "severity": {
+    "blocking": "Blocking",
+    "important": "Important",
+    "label": "Annotation severity",
+    "suggestion": "Suggestion"
+  },
+  "status": {
+    "acknowledged": "Acknowledged",
+    "dismissed": "Dismissed",
+    "pending": "Pending",
+    "resolved": "Resolved"
+  }
+}

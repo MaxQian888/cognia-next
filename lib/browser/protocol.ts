@@ -6,6 +6,14 @@
  * attribute is a separate field.
  */
 import type { SubmittedFile } from "@/lib/chat/attachments/dispatch"
+import type {
+  ContentArea,
+  ElementRect,
+  ElementSelectionCore,
+  ElementSourceHint,
+  ParentLayout,
+  ViewportSize,
+} from "@/types/element-selection"
 
 export const BROWSER_EVENTS = {
   /** Emitted when the user clicks an element in select mode. */
@@ -24,37 +32,17 @@ export const BROWSER_EVENTS = {
   network: "browser://network",
 } as const
 
-export interface ElementRect {
-  x: number
-  y: number
-  width: number
-  height: number
-}
+/**
+ * The element-describing shapes now live in `types/element-selection.ts`,
+ * shared with the artifact preview's picker. Re-exported here so the many
+ * existing importers of `@/lib/browser/protocol` keep working — this module is
+ * still the browser subsystem's front door.
+ */
+export type { ContentArea, ElementRect, ParentLayout, ViewportSize }
 
 export interface BrowserProxyError {
   paneId: string
   code: string
-}
-
-export interface ViewportSize {
-  width: number
-  height: number
-}
-
-export interface ContentArea {
-  selector: string
-  left: number
-  right: number
-  width: number
-  centerX: number
-}
-
-export interface ParentLayout {
-  display: "flex" | "grid"
-  selector: string
-  flexDirection?: string
-  gridTemplateColumns?: string
-  gap?: string
 }
 
 /**
@@ -63,56 +51,29 @@ export interface ParentLayout {
  * DOM (the react-dev-inspector convention); read verbatim from the node, so it
  * survives React 19 which dropped the fiber `_debugSource`.
  */
-export interface SourceHint {
-  path: string
-  line: number
-  column?: number
-}
+export type SourceHint = ElementSourceHint
 
-export interface BrowserSelection {
+/**
+ * One element the user pointed at IN A PAGE.
+ *
+ * Every field describing the element itself now lives on
+ * {@link ElementSelectionCore} (`types/element-selection.ts`), shared with the
+ * artifact preview's picker — the DOM does not become a different thing because
+ * of what is hosting it. What stays here is exactly what only a browser has:
+ * the pane it came from, and the page it was on.
+ *
+ * The split is purely additive and the published field set is unchanged, which
+ * matters because `packages/plugin-sdk/src/api/browser.ts` re-exports this type
+ * to plugin authors (ADR-0155/0156).
+ */
+export interface BrowserSelection extends ElementSelectionCore {
   paneId: string
-  selector: string
-  domPath: string
-  tagName: string
-  /** The element's `id` attribute, or null. */
-  id: string | null
-  classes: string | null
-  rect: ElementRect
-  outerHTML: string
-  text: string
   pageUrl: string
   pageTitle: string
-  viewport?: ViewportSize
-  contentArea?: ContentArea
-  parentLayout?: ParentLayout
-  nearbyText?: string
-  computedStyles?: Record<string, string>
-  accessibility?: { role: string; name: string }
-  devicePixelRatio?: number
-  timestamp?: string
-  // --- Component-aware enrichment (tier 1, React only) --------------------
-  // Read from the DOM node's React fiber at pick time; absent on non-React
-  // pages (the payload then degrades to the DOM-only fields above).
-  /** Nearest owning component's display name, e.g. `"SubmitButton"`. */
-  componentName?: string | null
-  /** Outermost→innermost component chain, e.g. `"App > CheckoutForm > SubmitButton"`. */
-  componentStack?: string | null
-  /** Shallow, truncated `memoizedProps` of the owning component (primitives only). */
-  props?: Record<string, string> | null
-  /** Framework the enrichment came from, or null when undetected. */
-  framework?: "react" | null
-  /** Exact source location when the dev build emits inspector attributes (tier 2). */
-  sourceHint?: SourceHint | null
   /** What the user targeted. Area selections intentionally carry empty element fields. */
   kind?: "element" | "area" | "text"
   /** Exact text represented by the browser's current Range. */
   selectedText?: string
-  /** Explicit disclosure when per-element detail was reduced for a large batch. */
-  detailReduced?: {
-    selectionCount: number
-    outerHTMLLimit: number
-    reason: "multi-selection-budget"
-  }
 }
 
 export type OutputDetailLevel = "compact" | "standard" | "detailed" | "forensic"
@@ -272,7 +233,7 @@ function formatReferenceFrame(sel: BrowserSelection): string[] {
  * closing directive points it straight at the source (see {@link resolutionDirective}).
  */
 export function formatSelectionComment(
-  sel: BrowserSelection,
+  sel: ElementSelectionCore,
   comment: string,
   level: OutputDetailLevel = "standard"
 ): string {
@@ -284,7 +245,12 @@ export function formatSelectionComment(
         : sel.selector
     return `${comment.trim()} — ${sel.tagName} (${source})`
   }
-  const lines: string[] = [comment.trim(), "", "— Selected element (in-app browser) —"]
+  // The surface names ITSELF. The heading used to hard-code "in-app browser",
+  // which was true while the browser was the only thing that could be pointed
+  // at; an artifact element announced under that banner would tell the model to
+  // go looking for a web page that does not exist.
+  const origin = sel.originLabel ?? "in-app browser"
+  const lines: string[] = [comment.trim(), "", `— Selected element (${origin}) —`]
   lines.push(`Selector: ${sel.selector}`)
   if (sel.domPath) lines.push(`Path: ${sel.domPath}`)
   if (sel.componentName) lines.push(`Component: <${sel.componentName}>`)
@@ -313,7 +279,10 @@ export function formatSelectionComment(
     ].filter(Boolean)
     if (environment.length) lines.push(`Environment: ${environment.join(", ")}`)
   }
-  lines.push(`Page: ${sel.pageUrl}`)
+  // Only a page selection has a URL; an artifact element was never on one.
+  if ("pageUrl" in sel && typeof sel.pageUrl === "string" && sel.pageUrl) {
+    lines.push(`Page: ${sel.pageUrl}`)
+  }
   if (sel.outerHTML) {
     lines.push("HTML:", "```html", sel.outerHTML, "```")
   }
@@ -332,7 +301,9 @@ export function formatSelectionsComment(
   if (selections.length === 0) return comment.trim()
   if (selections.length === 1) return formatSelectionComment(selections[0], comment, level)
 
-  const lines = [comment.trim(), "", `— Selected targets (in-app browser): ${selections.length} —`]
+  // Same rule as the single-selection heading above: the surface names itself.
+  const origin = selections[0]?.originLabel ?? "in-app browser"
+  const lines = [comment.trim(), "", `— Selected targets (${origin}): ${selections.length} —`]
   selections.forEach((selection, index) => {
     const label =
       selection.kind === "area" ? "Area" : selection.kind === "text" ? "Text range" : "Element"
