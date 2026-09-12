@@ -18,10 +18,12 @@ import type { PluginBotPolicyV1, PluginBotTriggerDef } from "@/types/plugin/plug
 
 import { interpolateEnvelopeTemplate } from "./envelope"
 import { evaluateBotLoopGuard, type BotLoopVerdict } from "./provenance"
+import { botConditionMismatch } from "./conditions"
 
 /** One armed trigger belonging to one installation. */
 export interface BotTriggerBinding {
   installationId: string
+  config?: Record<string, unknown>
   trigger: PluginBotTriggerDef
   /** The already-resolved ceiling, for the self-trigger opt-in. */
   policy?: PluginBotPolicyV1
@@ -62,12 +64,8 @@ export interface BotRouteQuery {
 export function triggerMatches(binding: BotTriggerBinding, query: BotRouteQuery): boolean {
   const trigger = binding.trigger
 
-  if (binding.adapterId && query.adapterId && binding.adapterId !== query.adapterId) return false
-  if (
-    binding.integrationAccountId &&
-    query.integrationAccountId &&
-    binding.integrationAccountId !== query.integrationAccountId
-  ) {
+  if (binding.adapterId && binding.adapterId !== query.adapterId) return false
+  if (binding.integrationAccountId && binding.integrationAccountId !== query.integrationAccountId) {
     return false
   }
 
@@ -95,6 +93,7 @@ export interface RoutedBotDelivery {
   envelope: BotEventEnvelopeV1
   /** At most one delivery per key runs at a time. */
   concurrencyKey?: string
+  holdConcurrencyWhileWaiting?: boolean
   /** Hold the delivery until this instant, for a debounced trigger. */
   notBefore?: number
 }
@@ -103,7 +102,7 @@ export interface RoutedBotDelivery {
 export interface RejectedBotDelivery {
   installationId: string
   triggerId: string
-  reason: Extract<BotLoopVerdict, { allowed: false }>["reason"]
+  reason: Extract<BotLoopVerdict, { allowed: false }>["reason"] | `condition:${string}`
 }
 
 export interface BotRouteResult {
@@ -149,6 +148,16 @@ export function routeBotEvent(input: RouteBotEventInput): BotRouteResult {
       installationId: binding.installationId,
       allowSelfTriggering: binding.policy?.allowSelfTriggering,
     })
+
+    const mismatch = botConditionMismatch(binding.trigger.conditions, envelope, binding.config)
+    if (mismatch) {
+      rejected.push({
+        installationId: binding.installationId,
+        triggerId: binding.trigger.id,
+        reason: `condition:${mismatch}`,
+      })
+      continue
+    }
     if (!verdict.allowed) {
       rejected.push({
         installationId: binding.installationId,
@@ -179,6 +188,9 @@ export function routeBotEvent(input: RouteBotEventInput): BotRouteResult {
       triggerId: binding.trigger.id,
       envelope,
       ...(concurrencyKey ? { concurrencyKey } : {}),
+      ...(binding.trigger.holdConcurrencyWhileWaiting !== undefined
+        ? { holdConcurrencyWhileWaiting: binding.trigger.holdConcurrencyWhileWaiting }
+        : {}),
       ...(debounce && debounce > 0 ? { notBefore: now + debounce } : {}),
     })
   }

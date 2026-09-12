@@ -74,6 +74,11 @@ export function resolveInstallationStatus(input: {
   credentialBindings?: Record<string, BotCredentialBinding>
 }): BotInstallationStatus {
   if (input.requested === "disabled") return "disabled"
+  // Runtime readiness may fail independently of credential slots (for example
+  // an old host without the isolated agent launcher). Preserve that diagnosis
+  // until the caller explicitly re-evaluates setup or enables the installation.
+  if (input.requested === "needs_setup" && input.requiredCredentials === undefined)
+    return "needs_setup"
   return unboundCredentialSlots(input.requiredCredentials, input.credentialBindings).length > 0
     ? "needs_setup"
     : "enabled"
@@ -165,6 +170,10 @@ export async function updateBotInstallation(
     })
   }
   await db.botInstallations.put(merged)
+  if (merged.status !== "enabled") {
+    const { cancelLiveBotInstallation } = await import("@/lib/bot/runtime/run")
+    cancelLiveBotInstallation(id)
+  }
   await syncSchedules(merged)
   return merged
 }

@@ -20,6 +20,7 @@
  * it. See `lib/bot/console/bot-rows.ts`.
  */
 
+import { useBotHostRead } from "./use-bot-host-read"
 import { useMemo } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
@@ -61,9 +62,11 @@ export interface UseBotInstallationsResult {
   summary: BotConsoleSummary
   /** True until the first read resolves. Distinct from "no Bots installed". */
   loading: boolean
+  failed?: boolean
 }
 
 export function useBotInstallations(): UseBotInstallationsResult {
+  const host = useBotHostRead<{ rows: BotConsoleRow[] }>("installations")
   const pluginKey = usePluginStore((state) => enabledPluginKey(state.plugins))
 
   const rows = useLiveQuery(async () => {
@@ -76,16 +79,24 @@ export function useBotInstallations(): UseBotInstallationsResult {
     ])
     const counts = countDeadLettersByInstallation(deadLetters)
     const resolved = await Promise.all(
-      installations.map(async (installation) => ({
-        installation,
-        resolved: await resolveInstalledBot(installation),
-        deadLetters: counts[installation.id] ?? 0,
-      }))
+      installations
+        .filter((installation) => !installation.syncedFromHost)
+        .map(async (installation) => ({
+          installation,
+          resolved: await resolveInstalledBot(installation),
+          deadLetters: counts[installation.id] ?? 0,
+        }))
     )
     return buildBotRows(resolved)
   }, [pluginKey])
 
-  const summary = useMemo(() => summarizeBotRows(rows ?? []), [rows])
+  const available = host.remote ? host.data?.rows : rows
+  const summary = useMemo(() => summarizeBotRows(available ?? []), [available])
 
-  return { rows: rows ?? [], summary, loading: rows === undefined }
+  return {
+    rows: available ?? [],
+    failed: host.failed,
+    summary,
+    loading: host.remote ? host.loading : rows === undefined,
+  }
 }

@@ -248,5 +248,18 @@
   "waitingReasons": {
     "waiting_review": "Waiting for review",
     "recovery_required": "Recovery required"
+  },
+  "botApproval": {
+    "title": "Review Bot publication",
+    "detailUnavailable": "Approval details are unavailable. Refresh this run before approving.",
+    "model": "Model",
+    "session": "Agent session",
+    "baseSha": "Approved target SHA",
+    "headSha": "Workspace HEAD",
+    "agentReported": "Test results below are reported by the agent. Inspect the command evidence before approving.",
+    "report": "Test and review report",
+    "publication": "Exact publication contents",
+    "result": "Recorded result",
+    "fileMode": "File mode"
   }
 }

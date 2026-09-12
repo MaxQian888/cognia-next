@@ -28,7 +28,7 @@ import { isRunnableBot, resolveInstalledBot } from "@/lib/bot/installed-bot"
 import type { PluginBotPolicyV1 } from "@/types/plugin/plugin-bot"
 
 import { resolveBotInstallationCwd } from "./resolve-cwd"
-import { runBotDelivery, type BotRunOutcome } from "./run"
+import { botRunId, cancelLiveBotRun, runBotDelivery, type BotRunOutcome } from "./run"
 
 /** How often the loop looks for due deliveries. */
 export const BOT_RUNNER_INTERVAL_MS = 2_000
@@ -55,6 +55,8 @@ export interface BotDeliveryRunnerOptions {
    */
   resolveCwd?: (installationId: string) => Promise<string | undefined> | string | undefined
   now?: () => number
+  /** Internal host shutdown cancellation. */
+  signal?: AbortSignal
 }
 
 export interface BotDeliveryAttempt {
@@ -90,26 +92,13 @@ export async function drainBotDeliveries(
   options: BotDeliveryRunnerOptions
 ): Promise<BotDeliveryAttempt[]> {
   const now = options.now ?? Date.now
-  const due = await listDueBotDeliveries(options.batch ?? BOT_RUNNER_BATCH, now())
-
-  // At most one delivery per concurrency key per pass, and the rest of the
-  // batch runs in parallel. The serialisation check reads the database BEFORE
-  // the claim, so two siblings started together would both see nothing in
-  // flight and both run. Dropping the siblings here keeps that check sound
-  // without giving up concurrency between unrelated Bots: they are still due,
-  // and the next pass takes them once the leader settles.
-  const leaders: BotEventDeliveryRow[] = []
-  const claimedKeys = new Set<string>()
-  for (const delivery of due) {
-    if (delivery.concurrencyKey) {
-      if (claimedKeys.has(delivery.concurrencyKey)) continue
-      claimedKeys.add(delivery.concurrencyKey)
-    }
-    leaders.push(delivery)
-  }
+  // Select runnable, distinct keys BEFORE applying the batch limit. Otherwise
+  // a busy repository's pending prefix can indefinitely starve its monitor.
+  // The claim still checks concurrency atomically against competing passes.
+  const due = await listDueBotDeliveries(options.batch ?? BOT_RUNNER_BATCH, now(), true)
 
   return Promise.all(
-    leaders.map(async (delivery) => ({
+    due.map(async (delivery) => ({
       deliveryId: delivery.id,
       outcome: await attemptDelivery(delivery, options, now),
     }))
@@ -144,7 +133,7 @@ async function attemptDelivery(
   // Serialisation is checked BEFORE the claim. Claiming first would make this
   // delivery look in-flight to its own sibling check.
   if (delivery.concurrencyKey) {
-    const active = await countActiveBotDeliveriesForKey(delivery.concurrencyKey, now())
+    const active = await countActiveBotDeliveriesForKey(delivery.concurrencyKey, now(), delivery.id)
     if (active > 0) return { status: "skipped", reason: "serialised" }
   }
 
@@ -168,18 +157,28 @@ async function attemptDelivery(
   }
 
   const cwd = await (options.resolveCwd ?? resolveBotInstallationCwd)(installation.id)
+  // The run driver settles an already-owned claim even if shutdown happened
+  // during workspace resolution; skipping here would strand the live lease.
+  const cancel = () => cancelLiveBotRun(botRunId(claimed.id))
+  options.signal?.addEventListener("abort", cancel, { once: true })
   const heartbeat = setInterval(() => {
-    void renewBotDeliveryLease(claimed.id, options.owner, now())
+    void (async () => {
+      const latest = await getBotInstallation(installation.id)
+      if (!latest || latest.status !== "enabled" || !(await resolveInstalledBot(latest))) cancel()
+      if (!(await renewBotDeliveryLease(claimed.id, options.owner, now()))) cancel()
+    })().catch(cancel)
   }, 30_000)
   try {
     return await runBotDelivery({
       delivery: claimed,
       resolved,
       now,
+      signal: options.signal,
       ...(cwd ? { cwd } : {}),
     })
   } finally {
     clearInterval(heartbeat)
+    options.signal?.removeEventListener("abort", cancel)
   }
 }
 
@@ -190,19 +189,27 @@ export interface BotDeliveryRunnerHandle {
 /**
  * Start the loop. Returns a handle whose `stop` is idempotent.
  *
- * The interval restarts AFTER each pass rather than firing on a fixed cadence,
- * so a slow pass cannot stack passes on top of each other.
+ * Bounded overlapping passes let monitoring continue during long executions.
+ * Delivery leases still prevent an overlapping pass from executing the same work.
  */
 export function startBotDeliveryRunner(options: BotDeliveryRunnerOptions): BotDeliveryRunnerHandle {
   const intervalMs = options.intervalMs ?? BOT_RUNNER_INTERVAL_MS
   let stopped = false
   let timer: ReturnType<typeof setTimeout> | undefined
   let lastPrune = (options.now ?? Date.now)()
+  const controller = new AbortController()
+  const passes = new Set<Promise<unknown>>()
 
   const tick = async () => {
     if (stopped) return
     try {
-      await drainBotDeliveries(options)
+      // A long external execution must not suspend polling for every Bot.
+      // Claims fence overlapping passes; bound outstanding passes as well.
+      if (passes.size < (options.batch ?? BOT_RUNNER_BATCH)) {
+        const pass = drainBotDeliveries({ ...options, signal: controller.signal })
+        passes.add(pass)
+        void pass.catch(() => undefined).finally(() => passes.delete(pass))
+      }
       const now = (options.now ?? Date.now)()
       if (now - lastPrune >= BOT_RUNNER_PRUNE_INTERVAL_MS) {
         lastPrune = now
@@ -220,6 +227,7 @@ export function startBotDeliveryRunner(options: BotDeliveryRunnerOptions): BotDe
   return {
     stop() {
       stopped = true
+      controller.abort()
       if (timer) clearTimeout(timer)
       timer = undefined
     },

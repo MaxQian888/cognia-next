@@ -68,6 +68,154 @@ beforeEach(async () => {
 }, 15_000)
 
 describe("drainBotDeliveries", () => {
+  it("cancels an owned claim if host shutdown happens during workspace resolution", async () => {
+    const handler = jest.fn()
+    await seedInstallation(handler)
+    await enqueueBotDelivery({ envelope: envelope(), now: NOW })
+    const controller = new AbortController()
+    const result = await drainBotDeliveries({
+      owner: "host",
+      signal: controller.signal,
+      resolveCwd: () => {
+        controller.abort()
+        return undefined
+      },
+    })
+    expect(result[0].outcome.status).toBe("cancelled")
+    expect(handler).not.toHaveBeenCalled()
+    expect((await getDb().botEventDeliveries.get("bdl_1"))?.status).toBe("dismissed")
+  })
+
+  it("lets only one overlapping pass execute the same delivery", async () => {
+    const handler = jest.fn()
+    await seedInstallation(handler)
+    await enqueueBotDelivery({ envelope: envelope(), now: NOW })
+    const results = await Promise.all([
+      drainBotDeliveries({ owner: "host-a", now, organizationPolicy: {} }),
+      drainBotDeliveries({ owner: "host-b", now }),
+    ])
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect(results.flat().filter((item) => item.outcome.status === "completed")).toHaveLength(1)
+  })
+
+  it.each(["disabled", "lease-lost"] as const)(
+    "renews a long execution, then aborts it when %s",
+    async (reason) => {
+      let started!: () => void
+      const ready = new Promise<void>((resolve) => {
+        started = resolve
+      })
+      await seedInstallation(
+        jest.fn(
+          (ctx) =>
+            new Promise((resolve) => {
+              ctx.signal.addEventListener("abort", () => resolve({ summary: "stopped" }), {
+                once: true,
+              })
+              started()
+            })
+        )
+      )
+      await enqueueBotDelivery({ envelope: envelope(), now: NOW })
+      jest.useFakeTimers({ doNotFake: ["setImmediate", "nextTick", "queueMicrotask"] })
+      let clock = NOW
+      try {
+        const pass = drainBotDeliveries({ owner: "host", now: () => clock })
+        await ready
+        clock += 30_000
+        await jest.advanceTimersByTimeAsync(30_000)
+        expect((await getDb().botEventDeliveries.get("bdl_1"))?.leaseExpiresAt).toBe(
+          clock + 120_000
+        )
+        if (reason === "disabled")
+          await getDb().botInstallations.update("boti_1", { status: "disabled" })
+        else await getDb().botEventDeliveries.update("bdl_1", { leaseOwner: "another-host" })
+        clock += 30_000
+        await jest.advanceTimersByTimeAsync(30_000)
+        expect((await pass)[0].outcome.status).toBe("cancelled")
+        if (reason === "lease-lost") {
+          expect(await getDb().botEventDeliveries.get("bdl_1")).toMatchObject({
+            leaseOwner: "another-host",
+            status: "running",
+          })
+        }
+      } finally {
+        jest.useRealTimers()
+      }
+    }
+  )
+
+  it("continues monitoring behind a full batch of work blocked by a repository lease", async () => {
+    const handler = jest.fn()
+    await seedInstallation(handler)
+    for (let index = 0; index < 8; index++) {
+      await enqueueBotDelivery({
+        envelope: envelope({ eventId: `event-${index}`, deliveryId: `delivery-${index}` }),
+        concurrencyKey: "repo",
+        now: NOW - 10 + index,
+      })
+    }
+    await claimBotDelivery("delivery-0", "busy-host", NOW)
+    await enqueueBotDelivery({
+      envelope: envelope({ eventId: "poll", deliveryId: "poll" }),
+      concurrencyKey: "monitor",
+      now: NOW,
+    })
+    const attempts = await drainBotDeliveries({ owner: "host", now, batch: 5 })
+    expect(attempts).toEqual([
+      expect.objectContaining({
+        deliveryId: "poll",
+        outcome: { status: "completed", runId: "run_bot_poll" },
+      }),
+    ])
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect((await getDb().botEventDeliveries.get("delivery-1"))?.status).toBe("pending")
+  })
+  it("allows other isolated work while approval is parked without concurrent execution", async () => {
+    const { parkBotDelivery } = await import("@/lib/db/bot-event-deliveries")
+    await seedInstallation()
+    await enqueueBotDelivery({
+      envelope: envelope(),
+      concurrencyKey: "repo",
+      holdConcurrencyWhileWaiting: false,
+      now: NOW,
+    })
+    await parkBotDelivery("bdl_1", NOW + 1000, "approval", NOW)
+    await enqueueBotDelivery({
+      envelope: envelope({ eventId: "bev_2", deliveryId: "bdl_2" }),
+      concurrencyKey: "repo",
+      holdConcurrencyWhileWaiting: false,
+      now: NOW,
+    })
+    const attempts = await drainBotDeliveries({ owner: "host", now })
+    expect(attempts[0].deliveryId).toBe("bdl_2")
+    expect(attempts[0].outcome.status).toBe("completed")
+    expect((await getDb().botEventDeliveries.get("bdl_1"))?.status).toBe("parked")
+  })
+  it("resumes its own parked concurrency key without self-deadlocking", async () => {
+    const { parkBotDelivery } = await import("@/lib/db/bot-event-deliveries")
+    const handler = jest.fn().mockResolvedValue({ summary: "approved" })
+    await seedInstallation(handler)
+    await enqueueBotDelivery({ envelope: envelope(), concurrencyKey: "repo", now: NOW })
+    await parkBotDelivery("bdl_1", NOW, "approval", NOW)
+    expect((await drainBotDeliveries({ owner: "host", now }))[0].outcome.status).toBe("completed")
+    expect(handler).toHaveBeenCalledTimes(1)
+  })
+
+  it("atomically fences same-key claims from competing hosts", async () => {
+    await seedInstallation()
+    await enqueueBotDelivery({ envelope: envelope(), concurrencyKey: "repo", now: NOW })
+    await enqueueBotDelivery({
+      envelope: envelope({ eventId: "bev_2", deliveryId: "bdl_2" }),
+      concurrencyKey: "repo",
+      now: NOW,
+    })
+    const claims = await Promise.all([
+      claimBotDelivery("bdl_1", "one", NOW),
+      claimBotDelivery("bdl_2", "two", NOW),
+    ])
+    expect(claims.filter(Boolean)).toHaveLength(1)
+  })
   it("does nothing when nothing is due", async () => {
     expect(await drainBotDeliveries({ owner: "host-a", now })).toEqual([])
   })
@@ -131,7 +279,7 @@ describe("drainBotDeliveries", () => {
     await markBotDeliveryRunning("bdl_1", "run_x", NOW)
 
     const attempts = await drainBotDeliveries({ owner: "host-a", now })
-    expect(attempts.map((a) => a.outcome)).toEqual([{ status: "skipped", reason: "serialised" }])
+    expect(attempts).toEqual([])
     expect(handler).not.toHaveBeenCalled()
   })
 
@@ -310,6 +458,70 @@ describe("drainBotDeliveries", () => {
 })
 
 describe("startBotDeliveryRunner", () => {
+  it("bounds overlapping passes and aborts an active handler on shutdown", async () => {
+    let started!: () => void
+    const ready = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const handler = jest.fn(
+      (ctx) =>
+        new Promise((resolve) => {
+          ctx.signal.addEventListener("abort", () => resolve({ summary: "stopped" }), {
+            once: true,
+          })
+          started()
+        })
+    )
+    await seedInstallation(handler)
+    await enqueueBotDelivery({ envelope: envelope(), now: NOW })
+    await enqueueBotDelivery({
+      envelope: envelope({ eventId: "second", deliveryId: "second" }),
+      now: NOW,
+    })
+    jest.useFakeTimers({ doNotFake: ["setImmediate", "nextTick", "queueMicrotask"] })
+    const handle = startBotDeliveryRunner({ owner: "host", intervalMs: 5, batch: 1, now })
+    try {
+      await jest.advanceTimersByTimeAsync(5)
+      await ready
+      await jest.advanceTimersByTimeAsync(20)
+      expect(handler).toHaveBeenCalledTimes(1)
+      handle.stop()
+      await jest.advanceTimersByTimeAsync(20)
+      expect(handler.mock.calls[0][0].signal.aborted).toBe(true)
+      expect(handler).toHaveBeenCalledTimes(1)
+    } finally {
+      handle.stop()
+      jest.useRealTimers()
+    }
+  })
+
+  it("prunes settled deliveries hourly and survives a failed prune", async () => {
+    jest.useFakeTimers()
+    let clock = NOW
+    const prune = jest
+      .spyOn(getDb().botEventDeliveries, "bulkDelete")
+      .mockRejectedValueOnce(new Error("temporary storage failure"))
+    await enqueueBotDelivery({ envelope: envelope(), now: NOW - 30 * 24 * 60 * 60_000 })
+    await getDb().botEventDeliveries.update("bdl_1", {
+      status: "succeeded",
+      updatedAt: NOW - 30 * 24 * 60 * 60_000,
+      settledAt: NOW - 30 * 24 * 60 * 60_000,
+    })
+    const handle = startBotDeliveryRunner({ owner: "host", intervalMs: 5, now: () => clock })
+    try {
+      clock += 60 * 60_000
+      await jest.advanceTimersByTimeAsync(5)
+      expect(prune).toHaveBeenCalledTimes(1)
+      clock += 60 * 60_000
+      await jest.advanceTimersByTimeAsync(5)
+      expect(prune).toHaveBeenCalledTimes(2)
+    } finally {
+      handle.stop()
+      prune.mockRestore()
+      jest.useRealTimers()
+    }
+  })
+
   it("stops cleanly and idempotently", () => {
     const handle = startBotDeliveryRunner({ owner: "host-a", intervalMs: 10_000, now })
     handle.stop()

@@ -53,6 +53,8 @@ import type {
 } from "@/types/execution/run"
 import { ExecutionStatusPill } from "./agent-run-status-pill"
 import { SquadReviewForm, isRenderableSquadReview } from "./squad-review-form"
+import { DiffViewer } from "@/components/source-control/diff-viewer"
+import type { BotWorkspaceSnapshot } from "@/lib/plugin/workspace/bot-run"
 
 /** Verbs the pane offers, in the order they are shown. */
 const CONTROL_ORDER: readonly RunControlAction[] = [
@@ -86,9 +88,14 @@ export interface RunDetailPaneProps {
 
 export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
   const t = useTranslations("agentRuns")
-  const { run, detail, interrupts, journalAvailable, isLoading } = useExecutionRunDetail(row.runId)
+  const { run, detail, interrupts, journalAvailable, isLoading, botResult } = useExecutionRunDetail(
+    row.runId
+  )
   const [outcome, setOutcome] = useState<RunControlOutcome | null>(null)
   const [steerText, setSteerText] = useState("")
+  const controlRow = run?.latestSnapshot
+    ? { ...row, allowedActions: run.latestSnapshot.allowedActions }
+    : row
 
   const busy = actions.pendingRowId === row.rowId
   const duration = row.endedAt ? formatDuration(row.endedAt - row.startedAt) : undefined
@@ -102,9 +109,10 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
     steerMessage?: string,
     reviewDecision?: SquadReviewDecision
   ) => {
-    const result = await actions.dispatch(row, action, {
+    const result = await actions.dispatch(controlRow, action, {
       ...(steerMessage ? { steerMessage } : {}),
       ...(reviewDecision ? { reviewDecision } : {}),
+      ...((action === "approve" || action === "deny") && run ? { reviewedRun: run } : {}),
     })
     setOutcome(result)
     // A steer that was not accepted leaves the text in the box: the message is
@@ -121,6 +129,12 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
       interrupt.status === "pending" &&
       interrupt.id === run?.latestSnapshot?.pendingInterrupt?.id &&
       isRenderableSquadReview(interrupt)
+  )
+  const pendingBotApproval = interrupts.find(
+    (interrupt) =>
+      interrupt.type === "bot_approval" &&
+      interrupt.status === "pending" &&
+      interrupt.id === run?.latestSnapshot?.pendingInterrupt?.id
   )
 
   return (
@@ -140,10 +154,12 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
       )}
 
       <ControlBar
-        row={row}
+        row={controlRow}
         actions={actions}
         busy={busy}
-        hideDecisionVerbs={pendingReview !== undefined}
+        hideDecisionVerbs={
+          pendingReview !== undefined || row.kind === "bot" || pendingBotApproval !== undefined
+        }
         onDispatch={(action) => void dispatch(action)}
       />
 
@@ -155,7 +171,37 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
         />
       )}
 
-      {actions.can(row, "steer") && (
+      {pendingBotApproval && (
+        <section className="space-y-3 rounded-md border p-3" aria-label={t("botApproval.title")}>
+          <h3 className="text-sm font-medium">{pendingBotApproval.title}</h3>
+          {pendingBotApproval.approvalDetail ? (
+            <>
+              <BotApprovalDetail detail={pendingBotApproval.approvalDetail} />
+              <div className="flex gap-2">
+                {(["approve", "deny"] as const)
+                  .filter((action) => actions.can(controlRow, action))
+                  .map((action) => (
+                    <Button
+                      key={action}
+                      size="sm"
+                      variant={action === "deny" ? "destructive" : "outline"}
+                      disabled={busy}
+                      onClick={() => void dispatch(action)}
+                    >
+                      {t(`actions.${action}`)}
+                    </Button>
+                  ))}
+              </div>
+            </>
+          ) : (
+            <p role="status" className="text-sm text-muted-foreground">
+              {t("botApproval.detailUnavailable")}
+            </p>
+          )}
+        </section>
+      )}
+
+      {actions.can(controlRow, "steer") && (
         <form
           className="flex gap-2"
           onSubmit={(event) => {
@@ -208,7 +254,7 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
           </TabsTrigger>
           <TabsTrigger value="artifacts">
             {t("tabs.artifacts")}
-            <SectionCount value={detail.artifacts.length} />
+            <SectionCount value={detail.artifacts.length + (botResult ? 1 : 0)} />
           </TabsTrigger>
           <TabsTrigger value="approvals">
             {t("tabs.approvals")}
@@ -390,8 +436,30 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
         </TabsContent>
 
         <TabsContent value="artifacts" className="pt-2">
-          <EmptyOr empty={detail.artifacts.length === 0} label={t("detail.noArtifacts")}>
+          <EmptyOr
+            empty={detail.artifacts.length === 0 && !botResult}
+            label={t("detail.noArtifacts")}
+          >
             <ul className="space-y-1">
+              {botResult && (
+                <li className="rounded border px-2 py-1 text-xs">
+                  {botResult.summary && (
+                    <p className="whitespace-pre-wrap break-words">{botResult.summary}</p>
+                  )}
+                  {botResult.output &&
+                  typeof botResult.output === "object" &&
+                  !Array.isArray(botResult.output) ? (
+                    <BotApprovalDetail
+                      detail={botResult.output as Record<string, unknown>}
+                      context="result"
+                    />
+                  ) : botResult.output !== undefined ? (
+                    <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words">
+                      {JSON.stringify(botResult.output, null, 2)}
+                    </pre>
+                  ) : null}
+                </li>
+              )}
               {detail.artifacts.map((artifact) => (
                 <li key={artifact.id} className="rounded border px-2 py-1 text-xs">
                   <span className="truncate">{artifact.title}</span>
@@ -406,10 +474,7 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
             <EmptyOr empty={interrupts.length === 0} label={t("detail.noApprovals")}>
               <ul className="space-y-1">
                 {interrupts.map((interrupt) => (
-                  <li
-                    key={interrupt.id}
-                    className="flex items-center gap-2 rounded border px-2 py-1 text-xs"
-                  >
+                  <li key={interrupt.id} className="rounded border px-2 py-1 text-xs">
                     <Badge variant="outline" className="shrink-0 text-[10px]">
                       {t(`approvals.${interrupt.status}`)}
                     </Badge>
@@ -417,6 +482,9 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
                     <span className="shrink-0 text-muted-foreground">
                       {formatRelativeTime(new Date(interrupt.createdAt))}
                     </span>
+                    {interrupt.type === "bot_approval" && interrupt.approvalDetail && (
+                      <BotApprovalDetail detail={interrupt.approvalDetail} />
+                    )}
                   </li>
                 ))}
               </ul>
@@ -424,6 +492,94 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
           </Unavailable>
         </TabsContent>
       </Tabs>
+    </div>
+  )
+}
+
+function BotApprovalDetail({
+  detail,
+  context = "approval",
+}: {
+  detail: Record<string, unknown>
+  context?: "approval" | "result"
+}) {
+  const t = useTranslations("agentRuns")
+  const candidate = detail.snapshot as Partial<BotWorkspaceSnapshot> | undefined
+  const snapshot =
+    candidate &&
+    typeof candidate.id === "string" &&
+    Array.isArray(candidate.files) &&
+    candidate.files.every(
+      (file) =>
+        file &&
+        typeof file.path === "string" &&
+        (file.oldContent === null || typeof file.oldContent === "string") &&
+        (file.newContent === null || typeof file.newContent === "string")
+    )
+      ? candidate
+      : undefined
+  return (
+    <div className="space-y-3 py-2">
+      {typeof detail.model === "string" && (
+        <InspectRow label={t("botApproval.model")} value={detail.model} />
+      )}
+      {typeof detail.sessionId === "string" && (
+        <InspectRow label={t("botApproval.session")} value={detail.sessionId} />
+      )}
+      {snapshot && (
+        <>
+          <InspectRow label={t("botApproval.baseSha")} value={snapshot.baseSha} />
+          <InspectRow label={t("botApproval.headSha")} value={snapshot.headSha} />
+          {snapshot.files!.map((file) => (
+            <div key={file.path} className="space-y-1">
+              <p className="break-all font-mono text-xs">{file.path}</p>
+              {typeof file.mode === "string" && (
+                <InspectRow label={t("botApproval.fileMode")} value={file.mode} />
+              )}
+              <div className="h-80 overflow-hidden rounded border">
+                <DiffViewer
+                  staged={false}
+                  readOnly
+                  diff={{
+                    path: file.path,
+                    oldContent: file.oldContent ?? "",
+                    newContent: file.newContent ?? "",
+                    hunks: [],
+                    isBinary: false,
+                  }}
+                />
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+      {detail.testEvidence === "agent-reported" && (
+        <p className="text-xs text-amber-700 dark:text-amber-400">
+          {t("botApproval.agentReported")}
+        </p>
+      )}
+      {detail.report !== undefined && (
+        <div>
+          <h4 className="text-xs font-medium">{t("botApproval.report")}</h4>
+          <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-2 text-xs">
+            {JSON.stringify(detail.report, null, 2)}
+          </pre>
+        </div>
+      )}
+      <div>
+        <h4 className="text-xs font-medium">
+          {t(context === "result" ? "botApproval.result" : "botApproval.publication")}
+        </h4>
+        <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-2 text-xs">
+          {JSON.stringify(
+            Object.fromEntries(
+              Object.entries(detail).filter(([key]) => !["snapshot", "report"].includes(key))
+            ),
+            null,
+            2
+          )}
+        </pre>
+      </div>
     </div>
   )
 }

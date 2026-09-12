@@ -60,6 +60,7 @@ export function botWriteIdempotencyKey(
       return `bot-arm:${String(payload.installationId)}:${String(payload.triggerId)}:${payload.armed ? 1 : 0}`
     case BOT_WRITE_COMMANDS.replayDelivery:
       return `bot-replay:${String(payload.deliveryId)}`
+    case BOT_WRITE_COMMANDS.mutateInstallation:
     case BOT_WRITE_COMMANDS.runManual:
       // Minted once, here, not derived. Two manual runs ARE two runs, and a
       // derived key would fold the second press onto the first.

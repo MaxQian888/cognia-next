@@ -1151,6 +1151,93 @@ describe("security scan control", () => {
 })
 
 describe("bot run control", () => {
+  beforeEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+  })
+
+  it.each(["approve", "deny"] as const)(
+    "settles a parked Bot %s through the shared decision gate",
+    async (action) => {
+      const installed = installExecutionRunControlHandlers()
+      await createExecutionRun({
+        id: "parked-bot",
+        kind: "bot",
+        sourceId: "installation",
+        title: "Publish fix",
+        status: "waiting",
+        currentRevision: 0,
+        initiator: { remoteUserId: "operator" },
+        startedAt: 1,
+        updatedAt: 1,
+      })
+      await getDb().executionRunInterrupts.put({
+        id: "decision",
+        runId: "parked-bot",
+        type: "bot_approval",
+        title: "Publish exact result",
+        status: "pending",
+        createdAt: 1,
+        expiresAt: Date.now() + 60_000,
+        approvalDetail: {
+          approvedActions: [{ actionId: "reviewPr", input: { body: "Exact review" } }],
+        },
+      })
+      const result = await executeRunControlCommand({
+        runId: "parked-bot",
+        action,
+        interruptId: "decision",
+        expectedRevision: 0,
+        idempotencyKey: `decide-${action}`,
+        actor: { remoteUserId: "operator" },
+      })
+      expect(result.accepted).toBe(true)
+      expect(await getDb().executionRunInterrupts.get("decision")).toMatchObject({
+        status: action === "approve" ? "approved" : "denied",
+        resolvedBy: { remoteUserId: "operator" },
+        approvalDetail: {
+          approvedActions: [{ actionId: "reviewPr", input: { body: "Exact review" } }],
+        },
+      })
+      installed.dispose()
+    }
+  )
+
+  it("refuses approval after expiry without reviving a Bot handler", async () => {
+    const installed = installExecutionRunControlHandlers()
+    await createExecutionRun({
+      id: "parked-bot",
+      kind: "bot",
+      sourceId: "installation",
+      title: "Publish fix",
+      status: "waiting",
+      currentRevision: 0,
+      initiator: { remoteUserId: "operator" },
+      startedAt: 1,
+      updatedAt: 1,
+    })
+    await getDb().executionRunInterrupts.put({
+      id: "expired",
+      runId: "parked-bot",
+      type: "bot_approval",
+      title: "Expired result",
+      status: "pending",
+      createdAt: 1,
+      expiresAt: 2,
+    })
+    const result = await executeRunControlCommand({
+      runId: "parked-bot",
+      action: "approve",
+      interruptId: "expired",
+      expectedRevision: 0,
+      idempotencyKey: "expired-approve",
+      actor: { remoteUserId: "operator" },
+    })
+    expect(result).toMatchObject({ accepted: false, reason: "interrupt_expired" })
+    expect((await getDb().executionRunInterrupts.get("expired"))?.status).toBe("expired")
+    installed.dispose()
+  })
+
   it("stops a live Bot run", async () => {
     const { __resetLiveBotRunsForTesting } = await import("@/lib/bot/runtime/run")
     __resetLiveBotRunsForTesting()

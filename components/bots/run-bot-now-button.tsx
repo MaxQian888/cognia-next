@@ -20,10 +20,13 @@
  */
 
 import { useTranslations } from "next-intl"
+import { useState } from "react"
 import { PlayIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
+import { AdapterForm, type JsonSchema } from "@/components/settings/connections/forms/adapter-form"
 import { useBotControlActions, useBotWriteReadiness } from "@/hooks/bots/use-bot-control-writes"
 import { BOT_WRITE_COMMANDS } from "@/lib/bot/control-writes"
 import type { BotConsoleRow } from "@/lib/bot/console/bot-rows"
@@ -32,11 +35,13 @@ export function RunBotNowButton({ row }: { row: BotConsoleRow }) {
   const t = useTranslations("bots")
   const readiness = useBotWriteReadiness(BOT_WRITE_COMMANDS.runManual)
   const actions = useBotControlActions()
+  const [selected, setSelected] = useState("")
 
   // A manual run needs somewhere to attribute itself. A definition with no
   // manual trigger has not asked to be startable by hand, and starting its
   // schedule instead would run work under a payload it never expects.
-  const manual = row.triggers.find((trigger) => trigger.kind === "manual")
+  const manuals = row.triggers.filter((trigger) => trigger.kind === "manual")
+  const manual = manuals.find((trigger) => trigger.id === selected) ?? manuals[0]
   const blocked = row.orphaned
     ? t("run.blockedOrphan")
     : !manual
@@ -49,16 +54,39 @@ export function RunBotNowButton({ row }: { row: BotConsoleRow }) {
 
   return (
     <div className="flex flex-wrap items-center gap-2" data-testid="bot-run-now-row">
-      <Button
-        size="sm"
-        variant="outline"
-        disabled={blocked !== null || busy}
-        onClick={() => void actions.runNow(row.id, manual?.id)}
-        data-testid="bot-run-now"
-      >
-        {busy ? <Spinner className="size-3.5" /> : <PlayIcon className="size-3.5" aria-hidden />}
-        {t("run.label")}
-      </Button>
+      {manuals.length > 1 && (
+        <NativeSelect
+          aria-label={t("run.trigger")}
+          value={manual?.id}
+          onChange={(event) => setSelected(event.target.value)}
+        >
+          {manuals.map((trigger) => (
+            <NativeSelectOption key={trigger.id} value={trigger.id}>
+              {trigger.label ?? trigger.id}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      )}
+      {manual?.inputSchema ? (
+        <AdapterForm
+          key={`${row.id}:${manual.id}`}
+          schema={manual.inputSchema as JsonSchema}
+          disabled={blocked !== null || busy}
+          submitLabel={t("run.label")}
+          onSubmit={(values) => actions.runNow(row.id, manual.id, values)}
+        />
+      ) : (
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={blocked !== null || busy}
+          onClick={() => void actions.runNow(row.id, manual?.id)}
+          data-testid="bot-run-now"
+        >
+          {busy ? <Spinner className="size-3.5" /> : <PlayIcon className="size-3.5" aria-hidden />}
+          {t("run.label")}
+        </Button>
+      )}
       {blocked ? (
         <p
           className="min-w-0 flex-1 text-[11px] leading-snug text-muted-foreground"

@@ -65,6 +65,21 @@ function resolved(
 }
 
 describe("triggerDetail", () => {
+  it("projects health and manual input forms without creating a second configuration model", () => {
+    const raw = installation({
+      activatedAt: 2,
+      monitor: { lastError: "offline", lastSuccessAt: 3 },
+    })
+    const inputSchema = { type: "object" }
+    const row = buildBotRow({
+      installation: raw,
+      resolved: resolved(raw, { triggers: [{ ...MANUAL, inputSchema }] }),
+    })
+    expect(row.monitor).toEqual(raw.monitor)
+    expect(row.activatedAt).toBe(2)
+    expect(row.triggers[0].inputSchema).toEqual(inputSchema)
+    expect(botRowNeedsAttention(row)).toBe(true)
+  })
   it("gives back the literal each kind carries, and nothing for the ones that carry none", () => {
     expect(triggerDetail({ id: "c", kind: "schedule", cron: "0 9 * * *" })).toBe("0 9 * * *")
     expect(

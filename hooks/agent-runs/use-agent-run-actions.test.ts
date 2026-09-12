@@ -78,6 +78,36 @@ function storedRun(
   }
 }
 
+describe("reviewed approval identity", () => {
+  it("sends the remote revision and approval that was actually inspected", async () => {
+    hostProfile = "mobile-companion"
+    getExecutionRun.mockResolvedValue(storedRun())
+    transportCall.mockResolvedValue({ accepted: true, currentRevision: 44 })
+    const reviewed = storedRun({ currentRevision: 43 }, ["approve", "deny"])
+    reviewed.latestSnapshot!.pendingInterrupt = { id: "reviewed-approval", title: "Exact patch" }
+    const { result } = renderHook(() => useRunControlActions())
+    await act(async () => {
+      await result.current.dispatch(row(), "approve", { reviewedRun: reviewed })
+    })
+    expect(transportCall).toHaveBeenLastCalledWith(
+      "execution_run_control",
+      expect.objectContaining({ expectedRevision: 43, interruptId: "reviewed-approval" })
+    )
+    hostProfile = "desktop"
+  })
+
+  it("rejects another run's review snapshot", async () => {
+    const { result } = renderHook(() => useRunControlActions())
+    let outcome
+    await act(async () => {
+      outcome = await result.current.dispatch(row(), "approve", {
+        reviewedRun: storedRun({ id: "other" }),
+      })
+    })
+    expect(outcome).toMatchObject({ accepted: false, reason: "invalid_command" })
+  })
+})
+
 beforeEach(() => {
   getExecutionRun.mockReset()
   executeRunControlCommand.mockReset()

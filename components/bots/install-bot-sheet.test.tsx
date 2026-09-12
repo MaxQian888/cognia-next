@@ -8,7 +8,11 @@ import type { InstallBotFromCatalogInput } from "@/lib/bot/control-writes"
 
 const install = jest.fn(async (_input: InstallBotFromCatalogInput) => "boti_new")
 let readiness = { availability: { state: "available", reason: "local-host" }, can: true }
-let catalog: { entries: BotCatalogEntry[]; loading: boolean } = { entries: [], loading: false }
+let catalog: { entries: BotCatalogEntry[]; loading: boolean; failed?: boolean; remote?: boolean } =
+  {
+    entries: [],
+    loading: false,
+  }
 let activeProjectId: string | null = null
 
 jest.mock("@/hooks/bots/use-bot-lifecycle-actions", () => ({
@@ -162,4 +166,21 @@ describe("InstallBotSheet", () => {
       "This browser cannot run Bots"
     )
   })
+})
+
+it("shows a host catalog failure instead of an empty catalog", () => {
+  catalog = { entries: [], loading: false, failed: true }
+  render(<InstallBotSheet open onOpenChange={() => {}} />)
+  expect(screen.getByRole("alert")).toBeInTheDocument()
+})
+
+it("does not bind a paired installation to a client-only active project", async () => {
+  activeProjectId = "client-only-project"
+  catalog = { entries: [entry()], loading: false, remote: true }
+  const user = userEvent.setup()
+  render(<InstallBotSheet open onOpenChange={jest.fn()} />)
+  await user.click(screen.getByLabelText("Install for"))
+  await user.click(await screen.findByRole("option", { name: "Workspace" }))
+  expect(screen.getByTestId("bot-install-acme:digest")).toBeDisabled()
+  expect(install).not.toHaveBeenCalled()
 })

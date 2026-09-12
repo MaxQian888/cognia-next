@@ -32,6 +32,8 @@ import {
   semanticRunEvent,
 } from "@/lib/db/execution-runs"
 import { getDb } from "@/lib/db/schema"
+import { completeBotRunStep } from "@/lib/db/bot-run-steps"
+import { expireRunInterruptFromSource } from "@/lib/execution/run-control"
 import { writeBotTriggerState } from "@/lib/db/bot-installations"
 import { projectBotComposition } from "@/lib/bot/composition/project-bot-composition"
 import { defaultsFromConfigSchema, resolveBotConfig } from "@/lib/bot/config/resolve-effective"
@@ -55,6 +57,17 @@ export function botRunId(deliveryId: string): string {
 
 /** Live runs, so a control command can stop one. */
 const liveRuns = new Map<string, AbortController>()
+const liveInstallations = new Map<string, string>()
+
+export function cancelLiveBotInstallation(installationId: string): void {
+  for (const [runId, owner] of liveInstallations) {
+    if (owner === installationId) cancelLiveBotRun(runId)
+  }
+}
+
+export function getLiveBotRunSignal(runId: string): AbortSignal | undefined {
+  return liveRuns.get(runId)?.signal
+}
 
 /** Abort a running Bot run. Returns false when it is not running here. */
 export function cancelLiveBotRun(runId: string): boolean {
@@ -64,9 +77,32 @@ export function cancelLiveBotRun(runId: string): boolean {
   return true
 }
 
+/** Cancel either executing or parked local work without discarding its artifacts. */
+export async function cancelBotRun(runId: string): Promise<boolean> {
+  const db = getDb()
+  const run = await getExecutionRun(runId)
+  if (!run || run.kind !== "bot" || ["completed", "cancelled"].includes(run.status)) return false
+  const deliveries = await db.botEventDeliveries.where("runId").equals(runId).toArray()
+  const owned = deliveries.filter((row) => !row.syncedFromHost)
+  if (owned.length === 0) return false
+  cancelLiveBotRun(runId)
+  for (const delivery of owned) await dismissBotDelivery(delivery.id, "cancelled")
+  const interrupts = await db.executionRunInterrupts.where("runId").equals(runId).toArray()
+  for (const interrupt of interrupts) await expireRunInterruptFromSource(runId, interrupt.id)
+  if (run.status !== "failed") {
+    await runEventJournal.append(
+      runId,
+      semanticRunEvent("run.cancelled", {}, { ts: Date.now(), sourceEventId: `cancel:${runId}` })
+    )
+  }
+  await settleRun(runId, "cancelled", Date.now())
+  return true
+}
+
 /** Test-only: drop every live registration. */
 export function __resetLiveBotRunsForTesting(): void {
   liveRuns.clear()
+  liveInstallations.clear()
 }
 
 export type BotRunOutcome =
@@ -86,6 +122,7 @@ export interface RunBotDeliveryInput {
   executors?: Partial<Record<PluginBotExecutor, BotExecutorFn>>
   now?: () => number
   stepDeps?: BotStepDeps
+  signal?: AbortSignal
 }
 
 async function settleRun(runId: string, status: ExecutionRunStatus, ts: number): Promise<void> {
@@ -133,6 +170,7 @@ async function persistTimedTriggerState(
     if (typeof shaped.cursor === "string") patch.cursor = shaped.cursor
     if (typeof shaped.edgeValue === "boolean") patch.lastEdgeValue = shaped.edgeValue
   }
+
   await writeBotTriggerState(resolved.installation.id, triggerId, patch, ts).catch(() => undefined)
 }
 
@@ -143,6 +181,11 @@ export async function runBotDelivery(input: RunBotDeliveryInput): Promise<BotRun
   const ts = now()
 
   const existing = await getExecutionRun(runId)
+  if (existing && ["completed", "failed", "cancelled"].includes(existing.status)) {
+    const error = "The previous execution is terminal; use Retry to create a new run"
+    await dismissBotDelivery(delivery.id, error, ts)
+    return { status: "unavailable", runId, error }
+  }
   if (!existing) {
     await createExecutionRun({
       id: runId,
@@ -175,20 +218,39 @@ export async function runBotDelivery(input: RunBotDeliveryInput): Promise<BotRun
     })
   }
 
+  if (existing) {
+    await getDb().executionRuns.update(runId, {
+      status: "running",
+      updatedAt: ts,
+      endedAt: undefined,
+    })
+  }
   await markBotDeliveryRunning(delivery.id, runId, ts)
   await runEventJournal
     .append(
       runId,
       semanticRunEvent(
-        "run.started",
+        existing ? "run.resumed" : "run.started",
         { botId: resolved.definition.id, eventType: delivery.type },
-        { ts, sourceEventId: `run.started:${delivery.id}` }
+        {
+          ts,
+          sourceEventId: existing
+            ? `run.resumed:${delivery.id}:${existing.currentRevision}`
+            : `run.started:${delivery.id}`,
+        }
       )
     )
     .catch(() => undefined)
 
   const controller = new AbortController()
   liveRuns.set(runId, controller)
+  liveInstallations.set(runId, resolved.installation.id)
+  const abort = () => controller.abort()
+  input.signal?.addEventListener("abort", abort, { once: true })
+  if (input.signal?.aborted) controller.abort()
+  const executionTimer = resolved.policy.maxRunDurationMs
+    ? setTimeout(abort, resolved.policy.maxRunDurationMs)
+    : undefined
 
   const config = resolveBotConfig({
     installation: resolved.installation.config,
@@ -245,11 +307,34 @@ export async function runBotDelivery(input: RunBotDeliveryInput): Promise<BotRun
   const executor =
     input.executors?.[resolved.definition.executor] ?? BOT_EXECUTORS[resolved.definition.executor]
 
+  async function stillOwnsDelivery(): Promise<boolean> {
+    const current = await getDb().botEventDeliveries.get(delivery.id)
+    return Boolean(
+      current &&
+      current.status === "running" &&
+      current.leaseOwner === delivery.leaseOwner &&
+      (current.leaseExpiresAt === undefined || current.leaseExpiresAt > now())
+    )
+  }
+
   try {
+    if (controller.signal.aborted) throw new BotRunCancelledError(runId)
     const result = (await executor(ctx)) ?? undefined
+    if (controller.signal.aborted || !(await stillOwnsDelivery()))
+      throw new BotRunCancelledError(runId)
     const endedAt = now()
+    if (result) await completeBotRunStep(runId, "__host:result", result, endedAt)
     await persistTimedTriggerState(resolved, delivery.triggerId, result, endedAt)
-    await settleRun(runId, "completed", endedAt)
+    if ((result?.output as { status?: string } | undefined)?.status === "blocked") {
+      const error = result?.summary ?? "Bot result requires attention"
+      await runEventJournal.append(
+        runId,
+        semanticRunEvent("run.failed", { error }, { ts: endedAt })
+      )
+      await settleRun(runId, "failed", endedAt)
+      await dismissBotDelivery(delivery.id, error, endedAt)
+      return { status: "unavailable", runId, error }
+    }
     await runEventJournal
       .append(
         runId,
@@ -260,6 +345,7 @@ export async function runBotDelivery(input: RunBotDeliveryInput): Promise<BotRun
         )
       )
       .catch(() => undefined)
+    await settleRun(runId, "completed", endedAt)
     await completeBotDelivery(delivery.id, endedAt)
 
     // A settled run is itself an event. Off by default at the router: the loop
@@ -282,14 +368,17 @@ export async function runBotDelivery(input: RunBotDeliveryInput): Promise<BotRun
     return { status: "completed", runId, ...(result ? { result } : {}) }
   } catch (error) {
     const endedAt = now()
+    // A stopped lease holder must not settle a delivery now owned by another
+    // attempt, or undo a cancellation already committed by the control gate.
+    if (!(await stillOwnsDelivery())) return { status: "cancelled", runId }
     if (error instanceof BotRunCancelledError || controller.signal.aborted) {
-      await settleRun(runId, "cancelled", endedAt)
       await runEventJournal
         .append(
           runId,
           semanticRunEvent("run.cancelled", {}, { ts: endedAt, sourceEventId: `cancel:${runId}` })
         )
         .catch(() => undefined)
+      await settleRun(runId, "cancelled", endedAt)
       await dismissBotDelivery(delivery.id, "cancelled", endedAt)
       return { status: "cancelled", runId }
     }
@@ -319,10 +408,38 @@ export async function runBotDelivery(input: RunBotDeliveryInput): Promise<BotRun
     }
 
     const message = error instanceof Error ? error.message : String(error)
-    await settleRun(runId, "failed", endedAt)
+    if (!(error instanceof BotExecutorUnavailableError)) {
+      const next = await failBotDelivery(delivery.id, error, endedAt)
+      if (next?.status === "pending") {
+        // The attempt failed, but its durable task still owns a scheduled
+        // retry. A terminal run event is immutable and cannot be resumed.
+        await runEventJournal.append(
+          runId,
+          semanticRunEvent(
+            "step.failed",
+            {
+              stepId: `delivery-attempt:${next.attempts}`,
+              error: message,
+            },
+            { ts: endedAt }
+          )
+        )
+        await runEventJournal.append(
+          runId,
+          semanticRunEvent(
+            "run.waiting",
+            { retryAt: next.nextAttemptAt, error: message },
+            { ts: endedAt }
+          )
+        )
+        await markRunWaiting(runId, endedAt)
+        return { status: "failed", runId, error: message }
+      }
+    }
     await runEventJournal
       .append(runId, semanticRunEvent("run.failed", { error: message }, { ts: endedAt }))
       .catch(() => undefined)
+    await settleRun(runId, "failed", endedAt)
 
     if (error instanceof BotExecutorUnavailableError) {
       // Nothing ran, and nothing will. Dismissing keeps the attempt budget for
@@ -331,9 +448,13 @@ export async function runBotDelivery(input: RunBotDeliveryInput): Promise<BotRun
       return { status: "unavailable", runId, error: message }
     }
 
-    await failBotDelivery(delivery.id, error, endedAt)
     return { status: "failed", runId, error: message }
   } finally {
-    liveRuns.delete(runId)
+    if (liveRuns.get(runId) === controller) {
+      liveRuns.delete(runId)
+      liveInstallations.delete(runId)
+    }
+    if (executionTimer) clearTimeout(executionTimer)
+    input.signal?.removeEventListener("abort", abort)
   }
 }

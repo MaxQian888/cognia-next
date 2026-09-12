@@ -56,6 +56,22 @@ beforeEach(async () => {
 })
 
 describe("setBotTriggerArmedLocally", () => {
+  it("keeps the first activation watermark across disable and rearm", async () => {
+    const row = await install()
+    const first = await setBotTriggerArmedLocally({
+      installationId: row.id,
+      triggerId: "nightly",
+      armed: true,
+    })
+    expect(first.activatedAt).toBeGreaterThan(NOW)
+    await setBotTriggerArmedLocally({ installationId: row.id, triggerId: "nightly", armed: false })
+    const again = await setBotTriggerArmedLocally({
+      installationId: row.id,
+      triggerId: "nightly",
+      armed: true,
+    })
+    expect(again.activatedAt).toBe(first.activatedAt)
+  })
   it("writes an absolute value, so a replayed relay command cannot flip it back", () => {
     // arm, disarm, arm replayed in order lands on armed. Three toggles would
     // land on disarmed, which is why this is "set" and not "toggle".

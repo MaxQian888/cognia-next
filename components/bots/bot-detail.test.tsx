@@ -31,6 +31,23 @@ function row(over: Partial<BotConsoleRow> = {}): BotConsoleRow {
 }
 
 describe("BotDetail", () => {
+  it("distinguishes no synchronization from a failed or successful synchronization", () => {
+    const polling = row({ triggers: [{ id: "poll", kind: "poll", armed: true, everyMs: 60000 }] })
+    const { rerender } = render(<BotDetail row={polling} />)
+    expect(screen.getByText("No successful sync yet")).toBeInTheDocument()
+    rerender(
+      <BotDetail
+        row={{
+          ...polling,
+          activatedAt: 10,
+          monitor: { lastSuccessAt: 20, lastError: "GitHub rate limit", retryAt: 30 },
+        }}
+      />
+    )
+    expect(screen.getByText("GitHub rate limit")).toBeInTheDocument()
+    rerender(<BotDetail row={{ ...polling, monitor: { lastSuccessAt: 20, lastError: null } }} />)
+    expect(screen.getByText("Up to date")).toBeInTheDocument()
+  })
   it("explains an empty pane rather than rendering a blank one", () => {
     render(<BotDetail row={null} />)
     expect(screen.getByTestId("bot-detail-empty")).toBeInTheDocument()

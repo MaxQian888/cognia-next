@@ -2,10 +2,8 @@
  * Installing, configuring, binding and uninstalling: the writes that create
  * and shape an installation rather than drive one.
  *
- * Separate from the three controls in `local.ts` because they answer a
- * different availability question. Arming a trigger and replaying a delivery
- * can travel to a paired Host, and these cannot, so they are gated on
- * `resolveBotLifecycleWriteAvailability` rather than the per-command route.
+ * Paired clients send these through the existing host control bridge. The
+ * local entry points keep the host ownership gate and the same domain writes.
  *
  * Every one of them goes through the domain's own mutators, never Dexie. Those
  * mutators re-derive the installation status and reconcile the scheduler rows,
@@ -43,7 +41,13 @@ import type { PluginBotCredentialSlot } from "@/types/plugin/plugin-bot"
 
 import type { BotCatalogEntry } from "@/lib/bot/console/catalog"
 import { BotControlTargetMissingError } from "./local"
-import { resolveBotLifecycleWriteAvailability } from "./route"
+import {
+  BOT_WRITE_COMMANDS,
+  resolveBotWriteRoute,
+  resolveBotLifecycleWriteAvailability,
+} from "./route"
+import { transport } from "@/lib/tauri"
+import type { BotLifecycleMutation } from "./lifecycle-host"
 
 export class BotLifecycleUnavailableError extends Error {
   readonly code = "bot_lifecycle_unavailable"
@@ -87,6 +91,9 @@ export class BotNotInstallableError extends Error {
 }
 
 function assertAvailable(): void {
+  if (resolveBotWriteRoute(BOT_WRITE_COMMANDS.mutateInstallation) !== "local") {
+    throw new BotLifecycleUnavailableError({ state: "unsupported", reason: "requires-companion" })
+  }
   const availability = resolveBotLifecycleWriteAvailability()
   if (availability.state !== "available") throw new BotLifecycleUnavailableError(availability)
 }
@@ -126,12 +133,14 @@ export interface InstallBotFromCatalogInput {
  * updates underneath produces `version_drift`, which the detail pane reports,
  * rather than a silent change to an armed Bot.
  */
-export async function installBotFromCatalog(
-  input: InstallBotFromCatalogInput
+export async function installBotFromCatalogLocally(
+  input: InstallBotFromCatalogInput,
+  id?: string
 ): Promise<BotInstallationRow> {
   assertAvailable()
   if (input.entry.unresolvedHandler) throw new BotNotInstallableError(input.entry.definitionId)
   return installBot({
+    ...(id ? { id } : {}),
     definitionId: input.entry.definitionId,
     definitionSource: input.entry.source,
     pinnedVersion: input.entry.version,
@@ -149,13 +158,15 @@ export async function installBotFromCatalog(
  * merge would make a cleared value indistinguishable from an untouched one, so
  * a user could never unset anything.
  */
-export async function updateBotConfig(
+export async function updateBotConfigLocally(
   installationId: string,
   config: Record<string, unknown>
 ): Promise<BotInstallationRow> {
   assertAvailable()
   const installation = await getBotInstallation(installationId)
   if (!installation) throw new BotControlTargetMissingError("installation", installationId)
+  if (installation.syncedFromHost)
+    throw new BotLifecycleUnavailableError({ state: "unsupported", reason: "requires-companion" })
   const requiredCredentials = await requiredSlotsFor(installation)
   const updated = await updateBotInstallation(installationId, { config, requiredCredentials })
   if (!updated) throw new BotControlTargetMissingError("installation", installationId)
@@ -171,7 +182,7 @@ export async function updateBotConfig(
  * deliberately not copied off the account either: it rotates, and a copy would
  * go stale while continuing to look bound.
  */
-export async function bindBotCredential(
+export async function bindBotCredentialLocally(
   installationId: string,
   slotId: string,
   binding: Pick<BotCredentialBinding, "integrationAccountId" | "adapterId"> | null
@@ -179,6 +190,8 @@ export async function bindBotCredential(
   assertAvailable()
   const installation = await getBotInstallation(installationId)
   if (!installation) throw new BotControlTargetMissingError("installation", installationId)
+  if (installation.syncedFromHost)
+    throw new BotLifecycleUnavailableError({ state: "unsupported", reason: "requires-companion" })
 
   const next = { ...installation.credentialBindings }
   if (binding && (binding.integrationAccountId || binding.adapterId)) {
@@ -211,13 +224,15 @@ export async function bindBotCredential(
  * `needs_setup` instead when a required slot is still unbound, so this can
  * never switch a half-configured Bot on.
  */
-export async function setBotInstallationEnabled(
+export async function setBotInstallationEnabledLocally(
   installationId: string,
   enabled: boolean
 ): Promise<BotInstallationRow> {
   assertAvailable()
   const installation = await getBotInstallation(installationId)
   if (!installation) throw new BotControlTargetMissingError("installation", installationId)
+  if (installation.syncedFromHost)
+    throw new BotLifecycleUnavailableError({ state: "unsupported", reason: "requires-companion" })
   const requiredCredentials = await requiredSlotsFor(installation)
   const updated = await updateBotInstallation(installationId, {
     status: enabled ? "enabled" : "disabled",
@@ -234,9 +249,98 @@ export async function setBotInstallationEnabled(
  * left to do, and gating it on a definition that no longer exists would strand
  * the row along with whatever scheduler tasks it still owns.
  */
-export async function uninstallBotInstallation(installationId: string): Promise<void> {
+export async function uninstallBotInstallationLocally(installationId: string): Promise<void> {
   assertAvailable()
   const installation = await getBotInstallation(installationId)
   if (!installation) throw new BotControlTargetMissingError("installation", installationId)
+  if (installation.syncedFromHost)
+    throw new BotLifecycleUnavailableError({ state: "unsupported", reason: "requires-companion" })
   await uninstallBot(installationId)
+}
+
+/** The host is authoritative; do not optimistically install into the companion mirror. */
+async function relayLifecycle(input: BotLifecycleMutation): Promise<BotInstallationRow> {
+  const availability = resolveBotLifecycleWriteAvailability()
+  if (availability.state !== "available") throw new BotLifecycleUnavailableError(availability)
+  return transport.call<BotInstallationRow>(BOT_WRITE_COMMANDS.mutateInstallation, input, {
+    idempotencyKey: input.operationId,
+  })
+}
+
+export async function installBotFromCatalog(
+  input: InstallBotFromCatalogInput
+): Promise<BotInstallationRow> {
+  if (resolveBotWriteRoute(BOT_WRITE_COMMANDS.mutateInstallation) === "local")
+    return installBotFromCatalogLocally(input)
+  return relayLifecycle({
+    operation: "install",
+    operationId: crypto.randomUUID(),
+    definitionId: input.entry.definitionId,
+    version: input.entry.version,
+    scope: input.scope,
+    config: input.config,
+    credentialBindings: input.credentialBindings
+      ? Object.fromEntries(
+          Object.entries(input.credentialBindings).map(([slot, binding]) => {
+            if (binding.integrationAccountId && !binding.adapterId)
+              return [slot, { integrationAccountId: binding.integrationAccountId }]
+            if (binding.adapterId && !binding.integrationAccountId)
+              return [slot, { adapterId: binding.adapterId }]
+            throw new Error("Bot credential binding must identify one account or adapter")
+          })
+        )
+      : undefined,
+  })
+}
+export async function updateBotConfig(
+  installationId: string,
+  config: Record<string, unknown>
+): Promise<BotInstallationRow> {
+  if (resolveBotWriteRoute(BOT_WRITE_COMMANDS.mutateInstallation) === "local")
+    return updateBotConfigLocally(installationId, config)
+  return relayLifecycle({
+    operation: "config",
+    operationId: crypto.randomUUID(),
+    installationId,
+    config,
+  })
+}
+export async function bindBotCredential(
+  installationId: string,
+  slotId: string,
+  binding: Pick<BotCredentialBinding, "integrationAccountId" | "adapterId"> | null
+): Promise<BotInstallationRow> {
+  if (resolveBotWriteRoute(BOT_WRITE_COMMANDS.mutateInstallation) === "local")
+    return bindBotCredentialLocally(installationId, slotId, binding)
+  if (binding?.integrationAccountId && binding.adapterId)
+    throw new Error("Bot credential binding must identify one account or adapter")
+  return relayLifecycle({
+    operation: "bind",
+    operationId: crypto.randomUUID(),
+    installationId,
+    slotId,
+    binding: binding?.integrationAccountId
+      ? { integrationAccountId: binding.integrationAccountId }
+      : binding?.adapterId
+        ? { adapterId: binding.adapterId }
+        : null,
+  })
+}
+export async function setBotInstallationEnabled(
+  installationId: string,
+  enabled: boolean
+): Promise<BotInstallationRow> {
+  if (resolveBotWriteRoute(BOT_WRITE_COMMANDS.mutateInstallation) === "local")
+    return setBotInstallationEnabledLocally(installationId, enabled)
+  return relayLifecycle({
+    operation: "set_enabled",
+    operationId: crypto.randomUUID(),
+    installationId,
+    enabled,
+  })
+}
+export async function uninstallBotInstallation(installationId: string): Promise<void> {
+  if (resolveBotWriteRoute(BOT_WRITE_COMMANDS.mutateInstallation) === "local")
+    return uninstallBotInstallationLocally(installationId)
+  await relayLifecycle({ operation: "uninstall", operationId: crypto.randomUUID(), installationId })
 }

@@ -72,6 +72,14 @@ function isAbandonedAttempt(row: BotEventDeliveryRow, now: number): boolean {
   return (row.leaseExpiresAt ?? 0) <= now
 }
 
+function holdsConcurrency(row: BotEventDeliveryRow, now: number): boolean {
+  return (
+    isLocallyOwned(row) &&
+    ((row.status === "parked" && row.holdConcurrencyWhileWaiting !== false) ||
+      (isMidAttempt(row.status) && !isAbandonedAttempt(row, now)))
+  )
+}
+
 /**
  * The row an abandoned attempt becomes: one attempt spent, backed off, and
  * dead-lettered once the budget is gone.
@@ -122,6 +130,7 @@ export interface EnqueueBotDeliveryInput {
   /** Hold the delivery until this instant, for a debounced trigger. */
   notBefore?: number
   concurrencyKey?: string
+  holdConcurrencyWhileWaiting?: boolean
   now?: number
 }
 
@@ -159,6 +168,9 @@ export async function enqueueBotDelivery(
     updatedAt: now,
     ...(input.notBefore ? { notBefore: input.notBefore } : {}),
     ...(input.concurrencyKey ? { concurrencyKey: input.concurrencyKey } : {}),
+    ...(input.holdConcurrencyWhileWaiting !== undefined
+      ? { holdConcurrencyWhileWaiting: input.holdConcurrencyWhileWaiting }
+      : {}),
     ...(envelope.correlation ? { correlation: envelope.correlation } : {}),
   }
 
@@ -182,9 +194,20 @@ export async function enqueueBotDelivery(
  */
 export async function listDueBotDeliveries(
   limit = 20,
-  now = Date.now()
+  now = Date.now(),
+  runnableOnly = false
 ): Promise<BotEventDeliveryRow[]> {
   const rows = await getDb().botEventDeliveries.toArray()
+  const heldKeys = new Map<string, Set<string>>()
+  if (runnableOnly) {
+    for (const row of rows) {
+      if (!row.concurrencyKey || !holdsConcurrency(row, now)) continue
+      const ids = heldKeys.get(row.concurrencyKey) ?? new Set<string>()
+      ids.add(row.id)
+      heldKeys.set(row.concurrencyKey, ids)
+    }
+  }
+  const selectedKeys = new Set<string>()
   return rows
     .filter((row) => {
       if (!isLocallyOwned(row)) return false
@@ -195,6 +218,14 @@ export async function listDueBotDeliveries(
       return isAbandonedAttempt(row, now)
     })
     .sort((a, b) => a.nextAttemptAt - b.nextAttemptAt || a.receivedAt - b.receivedAt)
+    .filter((row) => {
+      if (!runnableOnly || !row.concurrencyKey) return true
+      const holders = heldKeys.get(row.concurrencyKey)
+      if (holders && (holders.size > 1 || !holders.has(row.id))) return false
+      if (selectedKeys.has(row.concurrencyKey)) return false
+      selectedKeys.add(row.concurrencyKey)
+      return true
+    })
     .slice(0, limit)
 }
 
@@ -220,10 +251,14 @@ export async function claimBotDelivery(
     // the attempt its holder had reached, and letting a second runner take a
     // row somebody is executing is the same double-run the lease exists to stop.
     const heldByOther =
-      (row.status === "leased" || row.status === "running") &&
-      row.leaseOwner !== owner &&
-      (row.leaseExpiresAt ?? 0) > now
+      (row.status === "leased" || row.status === "running") && (row.leaseExpiresAt ?? 0) > now
     if (heldByOther) return undefined
+    if (
+      row.concurrencyKey &&
+      (await countActiveBotDeliveriesForKey(row.concurrencyKey, now, row.id)) > 0
+    ) {
+      return undefined
+    }
 
     const claimed: BotEventDeliveryRow = {
       ...row,
@@ -469,7 +504,8 @@ export async function recoverStaleBotDeliveries(input: {
 /** In-flight deliveries sharing a concurrency key, for serialisation. */
 export async function countActiveBotDeliveriesForKey(
   concurrencyKey: string,
-  now = Date.now()
+  now = Date.now(),
+  excludeId?: string
 ): Promise<number> {
   const rows = await getDb()
     .botEventDeliveries.where("concurrencyKey")
@@ -479,14 +515,7 @@ export async function countActiveBotDeliveriesForKey(
   // unconditionally is what used to retire a concurrency key permanently: one
   // crash left a row nothing could clear, and every later delivery on that key
   // was skipped as serialised forever after.
-  return rows.filter(
-    (row) =>
-      isLocallyOwned(row) &&
-      // A parked run holds its key unconditionally. It is bounded by its own
-      // re-entry, and letting a sibling start while a human is answering is
-      // exactly what the key exists to prevent.
-      (row.status === "parked" || (!isAbandonedAttempt(row, now) && isMidAttempt(row.status)))
-  ).length
+  return rows.filter((row) => row.id !== excludeId && holdsConcurrency(row, now)).length
 }
 
 /** One delivery by id. A primary-key read, so a control write can check state. */

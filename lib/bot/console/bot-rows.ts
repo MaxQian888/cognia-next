@@ -49,6 +49,7 @@ export interface BotTriggerSummary {
   detail?: string
   /** Present for `poll` and `derivedState`. The caller formats it. */
   everyMs?: number
+  inputSchema?: Record<string, unknown>
 }
 
 /**
@@ -122,6 +123,8 @@ export interface BotConsoleRow {
    * as a default.
    */
   config: Record<string, unknown>
+  monitor?: BotInstallationRow["monitor"]
+  activatedAt?: number
   /** Dead-lettered deliveries waiting for a person to replay or dismiss them. */
   deadLetters: number
   updatedAt: number
@@ -172,6 +175,9 @@ export function summarizeTrigger(
     ...(trigger.labelKey ? { labelKey: trigger.labelKey } : {}),
     ...(detail ? { detail } : {}),
     ...(everyMs !== undefined ? { everyMs } : {}),
+    ...(trigger.kind === "manual" && trigger.inputSchema
+      ? { inputSchema: trigger.inputSchema }
+      : {}),
   }
 }
 
@@ -222,6 +228,8 @@ export function buildBotRow(input: BotRowInput): BotConsoleRow {
     ...(resolved ? { policy: resolved.policyResolution } : {}),
     ...(definition?.configSchema ? { configSchema: definition.configSchema } : {}),
     config: installation.config,
+    ...(installation.monitor ? { monitor: installation.monitor } : {}),
+    ...(installation.activatedAt !== undefined ? { activatedAt: installation.activatedAt } : {}),
     deadLetters: input.deadLetters ?? 0,
     updatedAt: installation.updatedAt,
   }
@@ -269,6 +277,7 @@ export interface BotConsoleSummary {
  * so it does not raise attention either, but it does stop counting as armed.
  */
 export function botRowNeedsAttention(row: BotConsoleRow): boolean {
+  if (row.monitor?.lastError) return true
   if (row.status === "needs_setup") return true
   if (row.deadLetters > 0) return true
   return row.problems.some((problem) => problem.kind === "handler_missing")

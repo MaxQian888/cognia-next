@@ -1,4 +1,11 @@
 /** @jest-environment jsdom */
+let mockHost: {
+  remote: boolean
+  data?: Record<string, unknown>
+  loading?: boolean
+  failed?: boolean
+} = { remote: false }
+jest.mock("./use-bot-host-read", () => ({ useBotHostRead: () => mockHost }))
 
 import { renderHook } from "@testing-library/react"
 
@@ -78,6 +85,7 @@ function installation(definitionId: string): BotInstallationRow {
 }
 
 beforeEach(() => {
+  mockHost = { remote: false }
   liveValue = undefined
   lastRead = undefined
   plugins = {}
@@ -89,11 +97,11 @@ beforeEach(() => {
 describe("useBotCatalog", () => {
   it("reports loading until the first read resolves, apart from an empty catalogue", () => {
     const { result, rerender } = renderHook(() => useBotCatalog())
-    expect(result.current).toEqual({ entries: [], loading: true })
+    expect(result.current).toMatchObject({ entries: [], loading: true })
 
     liveValue = []
     rerender()
-    expect(result.current).toEqual({ entries: [], loading: false })
+    expect(result.current).toMatchObject({ entries: [], loading: false })
   })
 
   it("re-runs when the set of enabled plugins changes, not only when Dexie does", async () => {
@@ -129,4 +137,12 @@ describe("useBotCatalog", () => {
     await lastRead?.()
     expect(listBotDefinitions).toHaveBeenCalledWith({})
   })
+})
+
+it("uses the host catalog instead of local plugin definitions when paired", () => {
+  const entries = [{ definitionId: "host:bot", name: "Host Bot" }]
+  mockHost = { remote: true, loading: false, data: { entries } }
+  const { result } = renderHook(() => useBotCatalog())
+  expect(result.current.entries).toEqual(entries)
+  expect(result.current.remote).toBe(true)
 })

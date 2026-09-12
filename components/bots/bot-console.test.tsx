@@ -7,9 +7,10 @@ import type { BotConsoleRow, BotConsoleSummary } from "@/lib/bot/console/bot-row
 let rows: BotConsoleRow[] = []
 let summary: BotConsoleSummary = { total: 0, armed: 0, needsAttention: 0, deadLetters: 0 }
 let loading = false
+let failed = false
 
 jest.mock("@/hooks/bots/use-bot-installations", () => ({
-  useBotInstallations: () => ({ rows, summary, loading }),
+  useBotInstallations: () => ({ rows, summary, loading, failed }),
   // Also read by `use-bot-catalog`, which the install sheet pulls in.
   enabledPluginKey: () => "",
 }))
@@ -49,6 +50,7 @@ function row(over: Partial<BotConsoleRow> = {}): BotConsoleRow {
 }
 
 beforeEach(() => {
+  failed = false
   rows = [row()]
   summary = { total: 1, armed: 1, needsAttention: 0, deadLetters: 0 }
   loading = false
@@ -121,4 +123,10 @@ describe("the install entry point", () => {
     rerender(<BotConsole onSelect={jest.fn()} installParam={null} />)
     expect(screen.getByTestId("install-bot-sheet-stub")).toBeInTheDocument()
   })
+})
+
+it("shows a host read failure instead of claiming no installations", () => {
+  failed = true
+  render(<BotConsole onSelect={() => {}} />)
+  expect(screen.getByRole("alert")).toBeInTheDocument()
 })

@@ -146,10 +146,11 @@ function CatalogRow({ entry, busy, canInstall, onInstall }: CatalogRowProps) {
 
 export function InstallBotSheet({ open, onOpenChange, onInstalled }: InstallBotSheetProps) {
   const t = useTranslations("bots")
-  const { entries, loading } = useBotCatalog()
+  const { entries, loading, failed, remote } = useBotCatalog()
   const readiness = useBotLifecycleReadiness()
   const actions = useBotLifecycleActions()
-  const activeWorkspaceId = useProjectStore((state) => state.activeProjectId)
+  const clientWorkspaceId = useProjectStore((state) => state.activeProjectId)
+  const activeWorkspaceId = remote ? null : clientWorkspaceId
   const [search, setSearch] = useState("")
   const [scopeKind, setScopeKind] = useState<BotScopeKind>("account")
 
@@ -229,7 +230,11 @@ export function InstallBotSheet({ open, onOpenChange, onInstalled }: InstallBotS
         ) : null}
 
         <div className="min-h-0 flex-1 overflow-y-auto">
-          {loading ? (
+          {failed ? (
+            <p role="alert" className="text-sm text-destructive">
+              {t("syncFailed")}
+            </p>
+          ) : loading ? (
             <div className="flex flex-col gap-1.5" data-testid="bot-catalog-loading">
               <Skeleton className="h-14 w-full" />
               <Skeleton className="h-14 w-full" />

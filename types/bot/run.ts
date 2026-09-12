@@ -50,6 +50,8 @@ export interface BotApprovalRequestV1 {
 }
 
 export interface BotApprovalDecisionV1 {
+  /** The persisted decision authorizing this exact proposal. */
+  approvalId?: string
   outcome: "approved" | "denied" | "expired" | "cancelled"
   decidedAt: number
   /**

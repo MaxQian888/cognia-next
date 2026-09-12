@@ -42,7 +42,7 @@ import { useHostProfile } from "@/hooks/use-host-profile"
 import { transport } from "@/lib/tauri/transport-instance"
 import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import type { UnifiedExecutionRow } from "@/lib/execution/monitor-model"
-import type { RunControlAction, SquadReviewDecision } from "@/types/execution/run"
+import type { ExecutionRun, RunControlAction, SquadReviewDecision } from "@/types/execution/run"
 
 /**
  * Everything the cockpit needs to explain what happened.
@@ -70,6 +70,8 @@ export interface RunControlOutcome {
 }
 
 export interface RunControlDispatchOptions {
+  /** Exact run revision and interrupt the user inspected; used only for approve/deny. */
+  reviewedRun?: ExecutionRun
   /** Required for `steer`; ignored otherwise. Never journalled. */
   steerMessage?: string
   /**
@@ -155,7 +157,14 @@ export function useRunControlActions(): RunControlActions {
       }
       setPendingRowId(row.rowId)
       try {
-        const run = await getExecutionRun(row.runId)
+        const reviewing = action === "approve" || action === "deny"
+        if (reviewing && options.reviewedRun && options.reviewedRun.id !== row.runId) {
+          return { accepted: false, reason: "invalid_command" }
+        }
+        // A fresh local mirror may name a different approval; bind a decision to the
+        // exact details the person saw, including remote authoritative snapshots.
+        const run =
+          reviewing && options.reviewedRun ? options.reviewedRun : await getExecutionRun(row.runId)
         if (!run) return { accepted: false, reason: "run_not_found" }
 
         const snapshot = run.latestSnapshot

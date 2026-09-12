@@ -46,6 +46,7 @@ export const BOT_WRITE_COMMANDS = Object.freeze({
   setTriggerArmed: "bot_trigger_set_armed",
   runManual: "bot_run_manual",
   replayDelivery: "bot_delivery_replay",
+  mutateInstallation: "bot_installation_mutate",
 } as const)
 
 export type BotWriteCommand = (typeof BOT_WRITE_COMMANDS)[keyof typeof BOT_WRITE_COMMANDS]
@@ -146,41 +147,11 @@ export function canEnqueueBotWrite(availability: OperationAvailability): boolean
   return ENQUEUEABLE_STATES.has(availability.state)
 }
 
-/**
- * Whether this shell may install, configure, bind or uninstall a Bot.
- *
- * A separate question from the three relayed controls above, and the answer is
- * binary rather than three-way, because none of these writes has a remote leg.
- * Arming a trigger and replaying a delivery are small, idempotent and worth
- * carrying to a paired Host. An install is a new row with a config blob and a
- * set of credential bindings, and nothing carries one across the wire this
- * round.
- *
- * That makes the honest answer on a companion "not from here" rather than a
- * silent local write. A phone that installed a Bot into its own mirror would
- * see it appear, and the next pull from the Host would delete it again, with
- * nothing anywhere saying why. A disabled control with a reason beside it is
- * the better failure.
- *
- * The ordering is still the shared one: a desktop driving a remote Cognia is a
- * companion for this purpose even though its static `always-on` baseline says
- * otherwise, and that is exactly the trap `resolveWritePlaneRoute` exists for.
- */
+/** Lifecycle writes use the host configuration route and require an online response. */
 export function resolveBotLifecycleWriteAvailability(): OperationAvailability {
-  const route = resolveWritePlaneRoute({
-    isRemoteHostActive: deps.isRemoteHostActive,
-    hasLocalExecutor: deps.hasLocalDatabase,
-    targetKind: () => deps.getRuntimeSnapshot().target?.kind,
-  })
-  if (route === "local") return { state: "available", reason: "local-host" }
-  // "remote" is a real destination for the three controls and not for these:
-  // the operation exists, this route cannot carry it.
-  return route === "remote"
-    ? { state: "unsupported", reason: "operation-unavailable" }
-    : { state: "unsupported", reason: "requires-companion" }
+  return resolveBotWriteAvailability(BOT_WRITE_COMMANDS.mutateInstallation)
 }
 
-/** True when the installation lifecycle may be driven from this shell. */
 export function canWriteBotLifecycle(): boolean {
   return resolveBotLifecycleWriteAvailability().state === "available"
 }

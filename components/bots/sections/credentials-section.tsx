@@ -171,7 +171,14 @@ export function BotCredentialsSection({ row }: { row: BotConsoleRow }) {
   const t = useTranslations("bots")
   const readiness = useBotLifecycleReadiness()
   const actions = useBotLifecycleActions()
-  const { forSlot } = useCredentialCandidates()
+  const { forSlot, failed } = useCredentialCandidates()
+
+  if (failed)
+    return (
+      <p role="alert" className="text-sm text-destructive">
+        {t("syncFailed")}
+      </p>
+    )
 
   if (row.credentials.length === 0) {
     return (

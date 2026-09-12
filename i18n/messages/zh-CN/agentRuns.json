@@ -248,5 +248,18 @@
   "waitingReasons": {
     "waiting_review": "等待审核",
     "recovery_required": "需要恢复"
+  },
+  "botApproval": {
+    "title": "审核 Bot 发布内容",
+    "detailUnavailable": "审批详情不可用，请刷新此运行后再审批。",
+    "model": "模型",
+    "session": "Agent 会话",
+    "baseSha": "审批目标 SHA",
+    "headSha": "工作区 HEAD",
+    "agentReported": "以下测试结果由 Agent 报告，请审批前检查实际命令证据。",
+    "report": "测试与审查报告",
+    "publication": "完整发布内容",
+    "result": "已保存的结果",
+    "fileMode": "文件权限模式"
   }
 }

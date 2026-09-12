@@ -525,6 +525,9 @@ export interface ExecutionRunInterrupt {
   title: string
   toolName?: string
   requestDigest?: string
+  /** Immutable Bot publication proposal; rendered as data, never executed. */
+  approvalDetail?: Record<string, unknown>
+  approvalMessage?: string
   expiresAt: number
   createdAt: number
   resolvedAt?: number

@@ -154,8 +154,8 @@ describe("resolveBotLifecycleWriteAvailability", () => {
       getRuntimeSnapshot: (() => ({ target: { kind: "companion" } })) as never,
     })
     expect(resolveBotLifecycleWriteAvailability()).toEqual({
-      state: "unsupported",
-      reason: "operation-unavailable",
+      state: "incompatible",
+      reason: "host-manifest-missing",
     })
   })
 
@@ -165,8 +165,8 @@ describe("resolveBotLifecycleWriteAvailability", () => {
       getRuntimeSnapshot: (() => ({ target: { kind: "companion" } })) as never,
     })
     expect(resolveBotLifecycleWriteAvailability()).toEqual({
-      state: "unsupported",
-      reason: "operation-unavailable",
+      state: "offline",
+      reason: "connection-offline",
     })
   })
 
@@ -178,4 +178,18 @@ describe("resolveBotLifecycleWriteAvailability", () => {
     })
     expect(canWriteBotLifecycle()).toBe(false)
   })
+})
+
+it("permits lifecycle writes when the paired host advertises the new operation", () => {
+  setup({
+    isRemoteHostActive: () => true,
+    activeHostFeatureManifest: () =>
+      ({
+        schemaVersion: 2,
+        features: { "bots.control": { version: 1, operations: ["bot_installation_mutate"] } },
+        operations: [{ name: "bot_installation_mutate", healthy: true }],
+      }) as never,
+  })
+  expect(resolveBotWriteRoute(BOT_WRITE_COMMANDS.mutateInstallation)).toBe("remote")
+  expect(canWriteBotLifecycle()).toBe(true)
 })

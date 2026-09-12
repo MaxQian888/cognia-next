@@ -130,6 +130,27 @@ export function BotDetail({ row, onUninstalled }: BotDetailProps) {
                 {row.id}
               </FactRow>
               <FactRow label={t("overview.updated")}>{relative(row.updatedAt)}</FactRow>
+              {row.triggers.some((trigger) => trigger.kind === "poll") && (
+                <>
+                  <FactRow label={t("monitor.activated")}>
+                    {row.activatedAt ? relative(row.activatedAt) : t("monitor.notStarted")}
+                  </FactRow>
+                  <FactRow label={t("monitor.lastSuccess")}>
+                    {row.monitor?.lastSuccessAt
+                      ? relative(row.monitor.lastSuccessAt)
+                      : t("monitor.neverSynced")}
+                  </FactRow>
+                  <FactRow label={t("monitor.health")}>
+                    {row.monitor?.lastError ??
+                      (row.monitor?.lastSuccessAt
+                        ? t("monitor.healthy")
+                        : t("monitor.awaitingSync"))}
+                  </FactRow>
+                  {row.monitor?.retryAt ? (
+                    <FactRow label={t("monitor.retryAt")}>{relative(row.monitor.retryAt)}</FactRow>
+                  ) : null}
+                </>
+              )}
             </FactList>
           </ConsoleSection>
 

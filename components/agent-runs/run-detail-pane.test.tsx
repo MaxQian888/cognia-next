@@ -5,6 +5,14 @@ import { RunDetailPane } from "./run-detail-pane"
 import type { RunControlActions } from "@/hooks/agent-runs/use-agent-run-actions"
 import type { UnifiedExecutionRow } from "@/lib/execution/monitor-model"
 import type { RunDetailProjection } from "@/lib/execution/run-detail-model"
+jest.mock("@/components/source-control/diff-viewer", () => ({
+  DiffViewer: ({ diff }: { diff: { oldContent: string; newContent: string } }) => (
+    <pre data-testid="approval-diff">
+      {diff.oldContent}
+      {diff.newContent}
+    </pre>
+  ),
+}))
 
 jest.mock("next-intl", () => ({
   useTranslations: (namespace?: string) => (key: string, values?: Record<string, unknown>) => {
@@ -84,6 +92,132 @@ beforeEach(() => {
 })
 
 describe("RunDetailPane", () => {
+  it("shows retained blocked Bot patches and command evidence without an approval", async () => {
+    detailState = {
+      ...detailState,
+      botResult: {
+        summary: "Fork publication is blocked; patch retained",
+        output: {
+          status: "blocked",
+          model: "swe-2-medium",
+          testEvidence: "agent-reported",
+          report: { tests: [{ command: "pnpm test", exitCode: 0 }] },
+          snapshot: {
+            id: "retained",
+            baseSha: "base",
+            headSha: "head",
+            files: [{ path: "run.sh", oldContent: "exit 1", newContent: "exit 0", mode: "100755" }],
+          },
+        },
+      },
+    }
+    render(<RunDetailPane row={row({ kind: "bot" })} actions={makeActions()} />)
+    await userEvent.setup().click(screen.getByRole("tab", { name: /tabs\.artifacts/ }))
+    expect(screen.getByText("Fork publication is blocked; patch retained")).toBeInTheDocument()
+    expect(screen.getByTestId("approval-diff")).toHaveTextContent("exit 0")
+    expect(screen.getByText("100755")).toBeInTheDocument()
+    expect(screen.getByText("botApproval.agentReported")).toBeInTheDocument()
+    expect(screen.getByText(/pnpm test/)).toBeInTheDocument()
+    expect(screen.queryByText("detail.noArtifacts")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "actions.approve" })).not.toBeInTheDocument()
+  })
+
+  it("renders scalar Bot results without assuming a patch schema", async () => {
+    detailState = { ...detailState, botResult: { summary: "Diagnostic", output: ["pending", 2] } }
+    render(<RunDetailPane row={row({ kind: "bot" })} actions={makeActions()} />)
+    await userEvent.setup().click(screen.getByRole("tab", { name: /tabs\.artifacts/ }))
+    expect(screen.getByText(/"pending"/)).toBeInTheDocument()
+  })
+
+  it("shows immutable Bot contents with adjacent decisions through the shared control path", async () => {
+    const interrupt = {
+      id: "approval",
+      type: "bot_approval",
+      status: "pending",
+      title: "Publish repair",
+      createdAt: Date.now(),
+      approvalDetail: {
+        snapshot: {
+          id: "snapshot",
+          baseSha: "base-sha",
+          headSha: "head-sha",
+          files: [{ path: "a.ts", oldContent: "old code", newContent: "new code" }],
+        },
+        model: "swe-2-medium",
+        sessionId: "session-1",
+        testEvidence: "agent-reported",
+        report: { tests: [{ command: "pnpm test", exitCode: 0 }] },
+        approvedActions: [{ actionId: "createComment", input: { body: "Exact review text" } }],
+      },
+    }
+    detailState.interrupts = [interrupt]
+    detailState.run = {
+      id: "run-1",
+      currentRevision: 12,
+      latestSnapshot: {
+        pendingInterrupt: { id: "approval" },
+        allowedActions: ["approve", "deny", "stop"],
+      },
+    }
+    const actions = makeActions()
+    render(<RunDetailPane row={row({ kind: "bot", allowedActions: ["stop"] })} actions={actions} />)
+    const region = screen.getByRole("region", { name: "botApproval.title" })
+    expect(within(region).getByTestId("approval-diff")).toHaveTextContent("old codenew code")
+    expect(within(region).getByText("swe-2-medium")).toBeVisible()
+    expect(within(region).getByText(/Exact review text/)).toBeVisible()
+    expect(within(region).getByText("botApproval.agentReported")).toBeVisible()
+    fireEvent.click(within(region).getByRole("button", { name: "actions.approve" }))
+    await waitFor(() =>
+      expect(actions.dispatch).toHaveBeenCalledWith(expect.anything(), "approve", {
+        reviewedRun: detailState.run,
+      })
+    )
+  })
+
+  it("hides bare Bot approval verbs when concrete detail is unavailable", () => {
+    detailState.interrupts = [
+      {
+        id: "approval",
+        type: "bot_approval",
+        status: "pending",
+        title: "Pending",
+        createdAt: Date.now(),
+      },
+    ]
+    detailState.run = {
+      id: "run-1",
+      currentRevision: 12,
+      latestSnapshot: {
+        pendingInterrupt: { id: "approval" },
+        allowedActions: ["approve", "deny", "stop"],
+      },
+    }
+    render(
+      <RunDetailPane
+        row={row({ kind: "bot", allowedActions: ["approve", "deny", "stop"] })}
+        actions={makeActions()}
+      />
+    )
+    expect(screen.queryByRole("button", { name: "actions.approve" })).not.toBeInTheDocument()
+    expect(screen.getByText("botApproval.detailUnavailable")).toBeVisible()
+    expect(screen.getByRole("button", { name: "actions.stop" })).toBeVisible()
+  })
+
+  it("keeps historical Bot publication detail readable in approvals", async () => {
+    detailState.interrupts = [
+      {
+        id: "old",
+        type: "bot_approval",
+        status: "approved",
+        title: "Earlier publication",
+        createdAt: Date.now(),
+        approvalDetail: { approvedActions: [{ input: { body: "Historical exact comment" } }] },
+      },
+    ]
+    render(<RunDetailPane row={row({ kind: "bot" })} actions={makeActions()} />)
+    await userEvent.click(screen.getByRole("tab", { name: /tabs.approvals/ }))
+    expect(screen.getByText(/Historical exact comment/)).toBeVisible()
+  })
   it("links a mirrored run to its conversation without requiring an IM binding", () => {
     render(<RunDetailPane row={row({ sessionId: "chat-a" })} actions={makeActions()} />)
     expect(screen.getByRole("link", { name: "actions.openConversation" })).toHaveAttribute(
@@ -331,6 +465,7 @@ describe("RunDetailPane", () => {
     await userEvent.setup().click(screen.getByTestId("squad-review-form"))
     expect(dispatch).toHaveBeenCalledWith(expect.anything(), "approve", {
       reviewDecision: { kind: "budget_extension", extraTokens: 5000 },
+      reviewedRun: detailState.run,
     })
   })
 

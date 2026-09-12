@@ -127,6 +127,8 @@ export type BotInstallationStatus = "enabled" | "disabled" | "needs_setup"
 
 export interface BotInstallationRow {
   id: string
+  activatedAt?: number
+  monitor?: import("@/types/bot/api").BotMonitorState
   /** Namespaced plugin id (`<pluginId>:<botId>`) or a `botDefinitions` id. */
   definitionId: string
   definitionSource: BotDefinitionSource
@@ -233,6 +235,7 @@ export interface BotEventDeliveryRow {
    * racing on one branch.
    */
   concurrencyKey?: string
+  holdConcurrencyWhileWaiting?: boolean
   /** Correlation key a run parked in `waitForEvent` matches on. */
   correlation?: string
   /** Held until this instant by the trigger's debounce. */

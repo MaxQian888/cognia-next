@@ -23,7 +23,7 @@ import { getBotRunStep } from "@/lib/db/bot-run-steps"
 import { findBotDeliveryByCorrelation } from "@/lib/db/bot-event-deliveries"
 import { getDb } from "@/lib/db/schema"
 import { runEventJournal, semanticRunEvent } from "@/lib/db/execution-runs"
-import { createRunInterrupt } from "@/lib/execution/run-control"
+import { createRunInterrupt, expireRunInterruptFromSource } from "@/lib/execution/run-control"
 import { getActionReviewChannelAdapter } from "@/lib/policy/action-review/registry"
 import type { BotEventEnvelopeV1 } from "@/types/bot/event"
 import type {
@@ -109,6 +109,12 @@ export interface BotStepDeps {
 
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
+function assertPublicStepName(name: string): void {
+  if (!name.trim() || name.startsWith("__host:")) {
+    throw new Error("Bot step name is empty or reserved for the host")
+  }
+}
+
 function assertLive(signal: AbortSignal, runId: string): void {
   if (signal.aborted) throw new BotRunCancelledError(runId)
 }
@@ -156,6 +162,7 @@ export function createBotStepApi(input: {
   }
 
   async function run<T>(name: string, fn: () => Promise<T> | T): Promise<T> {
+    assertPublicStepName(name)
     assertLive(signal, runId)
     const begun = await beginBotRunStep(runId, name, now())
     if (begun.memoized) return begun.value as T
@@ -178,7 +185,21 @@ export function createBotStepApi(input: {
     name: string,
     request: BotApprovalRequestV1
   ): Promise<BotApprovalDecisionV1> {
+    assertPublicStepName(name)
     assertLive(signal, runId)
+    const prior = await getDb().executionRunInterrupts.get(botApprovalInterruptId(runId, name))
+    if (
+      prior &&
+      (JSON.stringify(prior.approvalDetail) !== JSON.stringify(request.detail) ||
+        prior.title !== request.title ||
+        prior.approvalMessage !== request.message)
+    ) {
+      await getDb().executionRunInterrupts.update(prior.id, {
+        status: "expired",
+        resolvedAt: now(),
+      })
+      throw new Error("Approval content changed; prepare a new result and approval step")
+    }
     const begun = await beginBotRunStep(runId, name, now())
     if (begun.memoized) return begun.value as BotApprovalDecisionV1
 
@@ -196,6 +217,8 @@ export function createBotStepApi(input: {
       type: adapter.interruptType ?? "bot_approval",
       status: "pending",
       title: request.title,
+      ...(request.detail ? { approvalDetail: structuredClone(request.detail) } : {}),
+      ...(request.message ? { approvalMessage: request.message } : {}),
       expiresAt,
       createdAt: now(),
       ...(input.projectId ? { projectId: input.projectId } : {}),
@@ -231,6 +254,7 @@ export function createBotStepApi(input: {
     const settled = row && row.status !== "pending" ? decisionFromInterrupt(row) : null
     if (settled) return settled
     if (now() >= expiresAt) {
+      await expireRunInterruptFromSource(runId, interruptId, now())
       // Nobody answered. An expiry is not a quiet approval, and the outcome
       // union exists so a handler cannot accidentally treat it as one.
       return { outcome: "expired", decidedAt: now() }
@@ -240,6 +264,7 @@ export function createBotStepApi(input: {
 
   function decisionFromInterrupt(row: ExecutionRunInterrupt): BotApprovalDecisionV1 {
     return {
+      approvalId: row.id,
       outcome:
         row.status === "approved" ? "approved" : row.status === "denied" ? "denied" : "expired",
       decidedAt: row.resolvedAt ?? now(),
@@ -271,6 +296,7 @@ export function createBotStepApi(input: {
     name: string,
     waitInput: BotWaitForEventInput
   ): Promise<BotEventEnvelopeV1 | null> {
+    assertPublicStepName(name)
     assertLive(signal, runId)
     const begun = await beginBotRunStep(runId, name, now())
     if (begun.memoized) return begun.value as BotEventEnvelopeV1 | null

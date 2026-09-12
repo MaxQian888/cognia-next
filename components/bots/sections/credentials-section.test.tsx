@@ -10,6 +10,7 @@ const bindCredential = jest.fn(
   async (_installationId: string, _slotId: string, _candidate: BotCredentialCandidate | null) =>
     undefined
 )
+let failed = false
 let readiness = { availability: { state: "available", reason: "local-host" }, can: true }
 let candidates: BotCredentialCandidate[] = []
 
@@ -25,7 +26,7 @@ jest.mock("@/hooks/bots/use-bot-lifecycle-actions", () => ({
   }),
 }))
 jest.mock("@/hooks/bots/use-credential-candidates", () => ({
-  useCredentialCandidates: () => ({ forSlot: () => candidates, loading: false }),
+  useCredentialCandidates: () => ({ forSlot: () => candidates, loading: false, failed }),
 }))
 
 import { BotCredentialsSection } from "./credentials-section"
@@ -42,6 +43,7 @@ function candidate(over: Partial<BotCredentialCandidate> = {}): BotCredentialCan
 }
 
 beforeEach(() => {
+  failed = false
   bindCredential.mockClear()
   readiness = { availability: { state: "available", reason: "local-host" }, can: true }
   candidates = [candidate()]
@@ -174,4 +176,10 @@ describe("binding a credential", () => {
     await user.click(screen.getByTestId("bot-credential-select-token"))
     expect(await screen.findByRole("option", { name: /switched off/ })).toBeInTheDocument()
   })
+})
+
+it("shows a host read failure instead of empty credential choices", () => {
+  failed = true
+  render(<BotCredentialsSection row={row()} />)
+  expect(screen.getByRole("alert")).toBeInTheDocument()
 })

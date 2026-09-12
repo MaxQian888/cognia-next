@@ -11,6 +11,7 @@
  */
 
 import { enqueueBotDelivery } from "@/lib/db/bot-event-deliveries"
+import { defaultsFromConfigSchema } from "@/lib/bot/config/resolve-effective"
 import { isBotTriggerArmed, listBotInstallations } from "@/lib/db/bot-installations"
 import type { BotEventDeliveryRow } from "@/lib/db/bot-types"
 import { resolveInstalledBot, isRunnableBot, type InstalledBot } from "@/lib/bot/installed-bot"
@@ -56,6 +57,10 @@ export function bindingsForInstalledBot(resolved: InstalledBot): BotTriggerBindi
     .filter((trigger) => isBotTriggerArmed(resolved.installation, trigger))
     .map((trigger) => ({
       installationId: resolved.installation.id,
+      config: {
+        ...defaultsFromConfigSchema(resolved.definition.configSchema),
+        ...resolved.installation.config,
+      },
       trigger,
       policy: resolved.policy,
       ...(adapterId ? { adapterId } : {}),
@@ -119,6 +124,9 @@ export async function dispatchBotEvent(
         now,
         ...(delivery.notBefore ? { notBefore: delivery.notBefore } : {}),
         ...(delivery.concurrencyKey ? { concurrencyKey: delivery.concurrencyKey } : {}),
+        ...(delivery.holdConcurrencyWhileWaiting !== undefined
+          ? { holdConcurrencyWhileWaiting: delivery.holdConcurrencyWhileWaiting }
+          : {}),
       })
     )
   }
@@ -180,6 +188,9 @@ export async function dispatchManualBotRun(
   return enqueueBotDelivery({
     envelope,
     ...(concurrencyKey ? { concurrencyKey } : {}),
+    ...(trigger.holdConcurrencyWhileWaiting !== undefined
+      ? { holdConcurrencyWhileWaiting: trigger.holdConcurrencyWhileWaiting }
+      : {}),
     ...(input.now !== undefined ? { now: input.now } : {}),
   })
 }

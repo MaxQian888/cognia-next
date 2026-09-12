@@ -102,6 +102,88 @@ async function waitForInterrupt(interruptId: string) {
 }
 
 describe("botApprovalInterruptId", () => {
+  it.each(["title", "message"] as const)("invalidates changed approval %s", async (field) => {
+    const request = { title: "Publish", message: "Exact review text" }
+    await expect(parkingApi().waitForApproval("publish", request)).rejects.toBeInstanceOf(
+      BotRunParkedError
+    )
+    await expect(
+      parkingApi().waitForApproval("publish", { ...request, [field]: "Changed text" })
+    ).rejects.toThrow("content changed")
+  })
+
+  it.each(["denied", "expired"] as const)(
+    "retains a %s decision without actor metadata",
+    async (status) => {
+      await expect(
+        parkingApi().waitForApproval("publish", { title: "Publish" })
+      ).rejects.toBeInstanceOf(BotRunParkedError)
+      const id = botApprovalInterruptId(RUN_ID, "publish")
+      await getDb().executionRunInterrupts.update(id, { status, resolvedBy: {} })
+      expect(await parkingApi().waitForApproval("publish", { title: "Publish" })).toEqual({
+        approvalId: id,
+        outcome: status,
+        decidedAt: NOW,
+        decidedBy: {},
+      })
+    }
+  )
+
+  it("uses the default blocking timer and expires a project approval", async () => {
+    const steps = createBotStepApi({
+      runId: RUN_ID,
+      projectId: "project-1",
+      signal: new AbortController().signal,
+      deps: { waitMode: "block", pollIntervalMs: 1 },
+    })
+    const result = await steps.waitForApproval("timed", { title: "Publish", timeoutMs: 5 })
+    expect(result.outcome).toBe("expired")
+    expect(
+      await getDb().executionRunInterrupts.get(botApprovalInterruptId(RUN_ID, "timed"))
+    ).toMatchObject({
+      projectId: "project-1",
+      status: "expired",
+    })
+  })
+
+  it("preserves non-Error step failures in durable recovery evidence", async () => {
+    await expect(
+      api().run("implementation", () => Promise.reject("provider stopped"))
+    ).rejects.toBe("provider stopped")
+    expect(await getBotRunStep(RUN_ID, "implementation")).toMatchObject({
+      status: "failed",
+      error: "provider stopped",
+    })
+  })
+
+  it("persists immutable concrete contents with a seven-day deadline", async () => {
+    const request = { title: "Publish", detail: { snapshot: { id: "sha", diff: "+change" } } }
+    await expect(parkingApi().waitForApproval("publish", request)).rejects.toBeInstanceOf(
+      BotRunParkedError
+    )
+    const saved = await getDb().executionRunInterrupts.get(
+      botApprovalInterruptId(RUN_ID, "publish")
+    )
+    expect(saved?.approvalDetail).toEqual(request.detail)
+    expect(saved?.expiresAt).toBe(NOW + 7 * 24 * 60 * 60_000)
+    await expect(
+      parkingApi().waitForApproval("publish", {
+        ...request,
+        detail: { snapshot: { id: "changed" } },
+      })
+    ).rejects.toThrow("content changed")
+    expect((await getDb().executionRunInterrupts.get(saved!.id))?.status).toBe("expired")
+  })
+
+  it("reserves host checkpoint names across every public step operation", async () => {
+    await expect(api().run("__host:workspace", () => ({}))).rejects.toThrow("reserved")
+    await expect(api().waitForApproval("__host:publish", { title: "x" })).rejects.toThrow(
+      "reserved"
+    )
+    await expect(api().waitForEvent("__host:session", { key: "x", timeoutMs: 1 })).rejects.toThrow(
+      "reserved"
+    )
+  })
   it("is derived, so a re-entry finds the same pending decision", () => {
     expect(botApprovalInterruptId("run_1", "send")).toBe(botApprovalInterruptId("run_1", "send"))
     expect(botApprovalInterruptId("run_1", "send")).not.toBe(

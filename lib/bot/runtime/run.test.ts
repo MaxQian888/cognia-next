@@ -13,7 +13,15 @@ import type { BotEventEnvelopeV1 } from "@/types/bot/event"
 
 import { BotExecutorUnavailableError } from "./executors/types"
 import { BotRunParkedError } from "./step"
-import { __resetLiveBotRunsForTesting, botRunId, cancelLiveBotRun, runBotDelivery } from "./run"
+import {
+  __resetLiveBotRunsForTesting,
+  botRunId,
+  cancelBotRun,
+  cancelLiveBotInstallation,
+  cancelLiveBotRun,
+  getLiveBotRunSignal,
+  runBotDelivery,
+} from "./run"
 
 const NOW = 1_700_000_000_000
 const now = () => NOW
@@ -85,6 +93,179 @@ describe("botRunId", () => {
 })
 
 describe("runBotDelivery", () => {
+  it("does not dispatch work after its host has stopped", async () => {
+    const { delivery, resolved } = await seed()
+    const host = new AbortController()
+    host.abort()
+    const handler = jest.fn()
+    const outcome = await runBotDelivery({
+      delivery,
+      resolved,
+      now,
+      signal: host.signal,
+      executors: { handler },
+    })
+    expect(outcome.status).toBe("cancelled")
+    expect(handler).not.toHaveBeenCalled()
+    expect((await getDb().botEventDeliveries.get(delivery.id))?.attempts).toBe(0)
+  })
+
+  it("cancels execution at the policy deadline and releases its timer", async () => {
+    const { delivery, resolved } = await seed()
+    resolved.policy.maxRunDurationMs = 25
+    const outcome = await runBotDelivery({
+      delivery,
+      resolved,
+      now,
+      executors: {
+        handler: (ctx) =>
+          new Promise((resolve) => {
+            ctx.signal.addEventListener("abort", () => resolve({ summary: "aborted" }), {
+              once: true,
+            })
+          }),
+      },
+    })
+    expect(outcome.status).toBe("cancelled")
+    expect((await getDb().botEventDeliveries.get(delivery.id))?.status).toBe("dismissed")
+    expect(getLiveBotRunSignal(outcome.runId)).toBeUndefined()
+  })
+
+  it("does not consume execution time while approval is parked", async () => {
+    const { delivery, resolved } = await seed()
+    resolved.policy.maxRunDurationMs = 25
+    let signal: AbortSignal | undefined
+    const outcome = await runBotDelivery({
+      delivery,
+      resolved,
+      now,
+      executors: {
+        handler: async (ctx) => {
+          signal = ctx.signal
+          throw new BotRunParkedError(ctx.runId, "publish", NOW + 60_000)
+        },
+      },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    expect(outcome.status).toBe("parked")
+    expect(signal?.aborted).toBe(false)
+    expect((await getDb().botEventDeliveries.get(delivery.id))?.attempts).toBe(0)
+  })
+
+  it("keeps permanent failures terminal and refuses silent redispatch", async () => {
+    const { delivery, resolved } = await seed()
+    const handler = jest.fn(() => {
+      throw new Error("403 forbidden")
+    })
+    const outcome = await runBotDelivery({ delivery, resolved, now, executors: { handler } })
+    expect(outcome.status).toBe("failed")
+    expect((await getDb().botEventDeliveries.get(delivery.id))?.status).toBe("deadletter")
+    const before = await getExecutionRun(outcome.runId)
+    const retry = await runBotDelivery({ delivery, resolved, now, executors: { handler } })
+    expect(retry.status).toBe("unavailable")
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect(await getExecutionRun(outcome.runId)).toEqual(before)
+  })
+
+  it("preserves progress and verified actor attribution in the shared run journal", async () => {
+    const { delivery, resolved } = await seed()
+    delivery.envelope.actor = { kind: "human", principalId: "principal", accountId: "account" }
+    resolved.installation.projectId = "project"
+    await runBotDelivery({
+      delivery,
+      resolved,
+      now,
+      cwd: "/fixture",
+      executors: {
+        handler: async (ctx) => {
+          ctx.log("info", "Fetched current revision")
+          ctx.log("error", "Verification requires attention", { command: "test" })
+          ctx.progress({ message: "Inspecting diff" })
+          // A durable step gives asynchronous journal appends time to settle.
+          await ctx.step.run("report", () => ({ ok: true }))
+          return { summary: "ready" }
+        },
+      },
+    })
+    const run = await getExecutionRun(botRunId(delivery.id))
+    expect(run?.projectId).toBe("project")
+    expect(run?.initiator).toEqual({ principalId: "principal", accountId: "account" })
+    const events = await runEventJournal.replay(botRunId(delivery.id))
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "step.progress" }),
+        expect.objectContaining({ type: "step.failed" }),
+        expect.objectContaining({ type: "run.completed" }),
+      ])
+    )
+  })
+
+  it("does not cancel mirrored or non-Bot work through the Bot API", async () => {
+    const { delivery, resolved } = await seed()
+    await runBotDelivery({
+      delivery,
+      resolved,
+      now,
+      executors: {
+        handler: async () => {
+          throw new BotRunParkedError(botRunId(delivery.id), "publish", NOW + 100)
+        },
+      },
+    })
+    await getDb().botEventDeliveries.update(delivery.id, { syncedFromHost: true })
+    expect(await cancelBotRun(botRunId(delivery.id))).toBe(false)
+    expect((await getExecutionRun(botRunId(delivery.id)))?.status).toBe("waiting")
+    await getDb().executionRuns.update(botRunId(delivery.id), { kind: "agent-turn" })
+    expect(await cancelBotRun(botRunId(delivery.id))).toBe(false)
+  })
+  it("retains blocked result artifacts and exposes actionable failure without replaying", async () => {
+    const { delivery, resolved } = await seed()
+    const result = {
+      summary: "Fork cannot publish",
+      output: { status: "blocked", snapshot: { diff: "+patch" } },
+    }
+    expect(
+      (
+        await runBotDelivery({
+          delivery,
+          resolved,
+          now,
+          executors: { handler: async () => result },
+        })
+      ).status
+    ).toBe("unavailable")
+    expect((await getBotRunStep(botRunId(delivery.id), "__host:result"))?.output).toEqual(result)
+    expect((await getExecutionRun(botRunId(delivery.id)))?.latestSnapshot?.status).toBe("failed")
+  })
+  it("cancels an installation's active execution and keeps its host signal authoritative", async () => {
+    const { delivery, resolved } = await seed()
+    const outcome = await runBotDelivery({
+      delivery,
+      resolved,
+      now,
+      executors: {
+        handler: async (ctx) => {
+          expect(getLiveBotRunSignal(ctx.runId)?.aborted).toBe(false)
+          cancelLiveBotInstallation(resolved.installation.id)
+          expect(getLiveBotRunSignal(ctx.runId)?.aborted).toBe(true)
+          return { summary: "must not become success" }
+        },
+      },
+    })
+    expect(outcome.status).toBe("cancelled")
+    expect(getLiveBotRunSignal(outcome.runId)).toBeUndefined()
+  })
+  it("rejects cancellation of missing and settled runs", async () => {
+    expect(await cancelBotRun("missing")).toBe(false)
+    const { delivery, resolved } = await seed()
+    const result = await runBotDelivery({
+      delivery,
+      resolved,
+      now,
+      executors: { handler: async () => ({}) },
+    })
+    expect(await cancelBotRun(result.runId)).toBe(false)
+  })
   it("creates a bot ExecutionRun and settles it completed", async () => {
     const { delivery, resolved } = await seed()
     const executor = jest.fn().mockResolvedValue({ summary: "posted" })
@@ -149,7 +330,7 @@ describe("runBotDelivery", () => {
     const row = await getDb().botEventDeliveries.get(delivery.id)
     expect(row?.status).toBe("pending")
     expect(row?.attempts).toBe(1)
-    expect((await getExecutionRun(botRunId(delivery.id)))?.status).toBe("failed")
+    expect((await getExecutionRun(botRunId(delivery.id)))?.status).toBe("waiting")
   })
 
   it("dismisses rather than retries when nothing could run at all", async () => {
@@ -228,6 +409,7 @@ describe("runBotDelivery", () => {
 
     // The whole point of deriving the run id from the delivery.
     expect(work).toHaveBeenCalledTimes(1)
+    expect((await getExecutionRun(botRunId(delivery.id)))?.latestSnapshot?.status).toBe("completed")
   })
 
   it("writes a run.started event once, however many attempts there are", async () => {

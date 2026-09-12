@@ -188,7 +188,8 @@
   "run": {
     "blockedNoTrigger": "这个 Bot 没有声明手动触发器，手动运行无处归属。",
     "blockedOrphan": "已经没有定义可以运行了。",
-    "label": "立即运行"
+    "label": "立即运行",
+    "trigger": "手动操作"
   },
   "runs": {
     "description": "这个 Bot 产生的全部运行，与 /agent-runs 用的是同一个面板。",
@@ -294,5 +295,16 @@
     "replayed": "投递已重新排队",
     "started": "运行已启动",
     "unavailable": "这项改动无法从这里进行"
-  }
+  },
+  "monitor": {
+    "activated": "监控开始时间",
+    "notStarted": "尚未启用触发器",
+    "lastSuccess": "最近成功同步",
+    "neverSynced": "尚未成功同步",
+    "health": "同步状态",
+    "healthy": "已同步",
+    "awaitingSync": "等待首次同步",
+    "retryAt": "下次重试"
+  },
+  "syncFailed": "无法从主机读取 Bot 配置，请重新连接后重试。"
 }

@@ -103,6 +103,17 @@ describe("useBotWriteReadiness", () => {
 })
 
 describe("useBotControlActions", () => {
+  it("routes explicit backfill input through the existing manual write", async () => {
+    const { result } = renderHook(() => useBotControlActions())
+    await act(async () => result.current.runNow("installation", "backfill", { numbers: "12,34" }))
+    expect(runBotManually).toHaveBeenCalledWith(
+      expect.objectContaining({
+        installationId: "installation",
+        triggerId: "backfill",
+        input: { numbers: "12,34" },
+      })
+    )
+  })
   it("routes an arm through the facade and reports it", async () => {
     const { result } = renderHook(() => useBotControlActions())
     await act(() => result.current.setTriggerArmed("boti_1", "n", true))

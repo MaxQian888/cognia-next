@@ -6,7 +6,7 @@ import type { PluginBotDef } from "@/types/plugin/plugin-bot"
 
 import type { BotCatalogEntry } from "@/lib/bot/console/catalog"
 import { getBotInstallation, installBot, listBotInstallations } from "@/lib/db/bot-installations"
-import { __resetDbForTesting } from "@/lib/db/schema"
+import { getDb, __resetDbForTesting } from "@/lib/db/schema"
 import { __resetBotsForTesting, registerBot } from "@/lib/plugin/registries/bot-registry"
 
 import {
@@ -21,6 +21,12 @@ import {
 } from "./lifecycle"
 import { BotControlTargetMissingError } from "./local"
 import { __setBotWriteRouteDepsForTests } from "./route"
+
+const mockRelay = jest.fn()
+jest.mock("@/lib/tauri", () => ({
+  ...jest.requireActual("@/lib/tauri"),
+  transport: { call: (...args: unknown[]) => mockRelay(...args) },
+}))
 
 const NOW = 1_700_000_000_000
 
@@ -112,7 +118,7 @@ describe("the availability gate", () => {
     })
     return expect(
       installBotFromCatalog({ entry: entry(), scope: { kind: "account" } })
-    ).rejects.toMatchObject({ availability: { reason: "operation-unavailable" } })
+    ).rejects.toMatchObject({ availability: { reason: "host-manifest-missing" } })
   })
 })
 
@@ -391,4 +397,56 @@ describe("uninstallBotInstallation", () => {
       BotControlTargetMissingError
     )
   })
+})
+
+it("relays installation configuration to a supporting host with stable per-operation identity", async () => {
+  restoreRoute?.()
+  restoreRoute = __setBotWriteRouteDepsForTests({
+    isRemoteHostActive: () => true,
+    hasLocalDatabase: () => true,
+    activeHostFeatureManifest: () =>
+      ({
+        schemaVersion: 2,
+        features: { "bots.control": { version: 1, operations: ["bot_installation_mutate"] } },
+        operations: [{ name: "bot_installation_mutate", healthy: true }],
+      }) as never,
+  })
+  const before = await listBotInstallations()
+  mockRelay.mockResolvedValue({ id: "host-install", status: "needs_setup", credentialBindings: {} })
+  const result = await installBotFromCatalog({
+    entry: entry(),
+    scope: { kind: "account" },
+    config: { repository: "owner/repo" },
+  })
+  expect(result.id).toBe("host-install")
+  const [command, payload, options] = mockRelay.mock.calls[0]
+  expect(command).toBe("bot_installation_mutate")
+  expect(payload).toMatchObject({
+    operation: "install",
+    definitionId: "acme:digest",
+    version: "1.0.0",
+    config: { repository: "owner/repo" },
+  })
+  expect(options.idempotencyKey).toBe(payload.operationId)
+  expect(payload).not.toHaveProperty("entry")
+  expect(await listBotInstallations()).toEqual(before)
+})
+
+it("refuses local configuration mutations against a synced host mirror after disconnect", async () => {
+  register()
+  const mirrored = await installBot({
+    definitionId: "acme:digest",
+    definitionSource: "plugin",
+    pinnedVersion: "1.0.0",
+    scope: { kind: "account" },
+  })
+  await getDb().botInstallations.update(mirrored.id, { syncedFromHost: true })
+  for (const operation of [
+    () => updateBotConfig(mirrored.id, {}),
+    () => bindBotCredential(mirrored.id, "slot", null),
+    () => setBotInstallationEnabled(mirrored.id, false),
+    () => uninstallBotInstallation(mirrored.id),
+  ])
+    await expect(operation()).rejects.toMatchObject({ code: "bot_lifecycle_unavailable" })
+  expect(await getBotInstallation(mirrored.id)).toMatchObject({ syncedFromHost: true })
 })

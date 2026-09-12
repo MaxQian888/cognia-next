@@ -77,7 +77,11 @@ export interface BotControlActions {
   /** Ids of the writes currently in flight, so one row can show its own spinner. */
   pending: ReadonlySet<string>
   setTriggerArmed: (installationId: string, triggerId: string, armed: boolean) => Promise<void>
-  runNow: (installationId: string, triggerId?: string) => Promise<void>
+  runNow: (
+    installationId: string,
+    triggerId?: string,
+    input?: Record<string, unknown>
+  ) => Promise<void>
   replayDelivery: (deliveryId: string) => Promise<void>
 }
 
@@ -140,12 +144,13 @@ export function useBotControlActions(): BotControlActions {
   )
 
   const runNow = useCallback(
-    async (installationId: string, triggerId?: string) => {
+    async (installationId: string, triggerId?: string, input?: Record<string, unknown>) => {
       await withPending(`run:${installationId}`, async () => {
         try {
           const result = await runBotManually({
             installationId,
             ...(triggerId ? { triggerId } : {}),
+            ...(input ? { input } : {}),
             // Minted per press. Two presses are two runs, and only a fresh key
             // can tell that from a retry of one.
             idempotencyKey: crypto.randomUUID(),

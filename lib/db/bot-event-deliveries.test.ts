@@ -116,6 +116,27 @@ describe("botEventDeliveries", () => {
     expect((await listDueBotDeliveries(10, NOW + 5_000)).map((r) => r.id)).toEqual(["del_1"])
   })
 
+  it("applies runnable batch limits after selecting distinct unblocked keys", async () => {
+    for (let index = 0; index < 6; index++) {
+      await enqueueBotDelivery({
+        envelope: envelope({ eventId: `evt_${index}`, deliveryId: `del_${index}` }),
+        concurrencyKey: index < 5 ? "busy" : "monitor",
+        now: NOW + index,
+      })
+    }
+    expect((await listDueBotDeliveries(2, NOW + 10, true)).map((row) => row.id)).toEqual([
+      "del_0",
+      "del_5",
+    ])
+    await claimBotDelivery("del_0", "runner", NOW + 10)
+    expect((await listDueBotDeliveries(2, NOW + 10, true)).map((row) => row.id)).toEqual(["del_5"])
+    await parkBotDelivery("del_0", NOW + 10, "approval", NOW + 10)
+    expect((await listDueBotDeliveries(2, NOW + 10, true)).map((row) => row.id)).toEqual([
+      "del_5",
+      "del_0",
+    ])
+  })
+
   it("claims a due delivery and refuses a second claimant while the lease lives", async () => {
     await enqueueBotDelivery({ envelope: envelope(), now: NOW })
 
@@ -126,10 +147,10 @@ describe("botEventDeliveries", () => {
     expect(await claimBotDelivery("del_1", "runner-b", NOW + 1)).toBeUndefined()
   })
 
-  it("lets the same owner re-claim, so a retrying runner is not locked out", async () => {
+  it("rejects same-owner reclaims while the lease is live to prevent overlapping passes", async () => {
     await enqueueBotDelivery({ envelope: envelope(), now: NOW })
     await claimBotDelivery("del_1", "runner-a", NOW)
-    expect(await claimBotDelivery("del_1", "runner-a", NOW + 1)).toBeDefined()
+    expect(await claimBotDelivery("del_1", "runner-a", NOW + 1)).toBeUndefined()
   })
 
   it("treats an expired lease as due again", async () => {

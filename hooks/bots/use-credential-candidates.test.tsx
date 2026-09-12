@@ -1,4 +1,11 @@
 /** @jest-environment jsdom */
+let mockHost: {
+  remote: boolean
+  data?: Record<string, unknown>
+  loading?: boolean
+  failed?: boolean
+} = { remote: false }
+jest.mock("./use-bot-host-read", () => ({ useBotHostRead: () => mockHost }))
 
 import { renderHook } from "@testing-library/react"
 
@@ -41,6 +48,7 @@ const ADAPTER = {
 } as AdapterInstanceRow
 
 beforeEach(() => {
+  mockHost = { remote: false }
   liveValue = undefined
   lastRead = undefined
   listAllIntegrationAccounts.mockClear().mockResolvedValue([])
@@ -73,4 +81,13 @@ describe("useCredentialCandidates", () => {
     expect(result.current.loading).toBe(true)
     expect(result.current.forSlot({ id: "gh" })).toEqual([])
   })
+})
+
+it("uses sanitized host credential choices when paired", () => {
+  const candidates = [
+    { value: "host-account", kind: "integration-account", label: "GitHub", disabled: false },
+  ]
+  mockHost = { remote: true, loading: false, data: { groups: { github: candidates } } }
+  const { result } = renderHook(() => useCredentialCandidates())
+  expect(result.current.forSlot({ id: "github", integration: "github" })).toEqual(candidates)
 })

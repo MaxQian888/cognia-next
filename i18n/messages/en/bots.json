@@ -188,7 +188,8 @@
   "run": {
     "blockedNoTrigger": "This Bot declares no manual trigger, so there is nothing to attribute a hand-started run to.",
     "blockedOrphan": "There is no definition left to run.",
-    "label": "Run now"
+    "label": "Run now",
+    "trigger": "Manual action"
   },
   "runs": {
     "description": "Every run this Bot has produced, from the same cockpit as /agent-runs.",
@@ -294,5 +295,16 @@
     "replayed": "Delivery queued again",
     "started": "Run started",
     "unavailable": "That change cannot be made from here"
-  }
+  },
+  "monitor": {
+    "activated": "Monitoring started",
+    "notStarted": "Not armed yet",
+    "lastSuccess": "Last successful sync",
+    "neverSynced": "No successful sync yet",
+    "health": "Synchronization",
+    "healthy": "Up to date",
+    "awaitingSync": "Awaiting first sync",
+    "retryAt": "Next retry"
+  },
+  "syncFailed": "Unable to read Bot setup from the host. Reconnect and try again."
 }

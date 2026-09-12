@@ -65,6 +65,7 @@ export async function setBotTriggerArmedLocally(
   if (!trigger) throw new BotControlTargetMissingError("trigger", input.triggerId)
 
   const next = await updateBotInstallation(input.installationId, {
+    ...(input.armed && installation.activatedAt === undefined ? { activatedAt: Date.now() } : {}),
     triggerOverrides: { ...(installation.triggerOverrides ?? {}), [input.triggerId]: input.armed },
     // Re-evaluated so a Bot that was `needs_setup` does not silently become
     // `enabled` just because a trigger moved. `updateBotInstallation` only

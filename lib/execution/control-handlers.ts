@@ -587,12 +587,14 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
    */
   const bot: RunControlHandler = async (command) => {
     if (command.action === "open_details") return
+    // The shared gate validates ownership, revision, expiry and the pending
+    // interrupt, then persists the decision. A parked handler observes it on
+    // re-entry; it does not need a live process to accept human approval.
+    if (command.action === "approve" || command.action === "deny") return
     if (command.action !== "stop") throw new UnsupportedForKindError(command.action, "bot")
-    const { cancelLiveBotRun } = await import("@/lib/bot/runtime/run")
-    if (!cancelLiveBotRun(command.runId)) {
-      // Honest: the run may be alive on another Host, and saying "stopped"
-      // here would be a claim this process cannot make.
-      throw new Error("Bot run is not active in this process")
+    const { cancelBotRun } = await import("@/lib/bot/runtime/run")
+    if (!(await cancelBotRun(command.runId))) {
+      throw new Error("Bot run is not owned by this host")
     }
   }
 

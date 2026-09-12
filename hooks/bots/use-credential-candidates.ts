@@ -12,6 +12,7 @@
  * no registry overlay in the way, unlike the definitions.
  */
 
+import { useBotHostRead } from "./use-bot-host-read"
 import { useCallback } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
@@ -27,9 +28,11 @@ export interface UseCredentialCandidatesResult {
   /** Candidates for one slot. Stable across renders for the same sources. */
   forSlot: (slot: Pick<PluginBotCredentialSlot, "id" | "integration">) => BotCredentialCandidate[]
   loading: boolean
+  failed?: boolean
 }
 
 export function useCredentialCandidates(): UseCredentialCandidatesResult {
+  const host = useBotHostRead<{ groups: Record<string, BotCredentialCandidate[]> }>("credentials")
   const sources = useLiveQuery(async () => {
     const [accounts, adapters] = await Promise.all([
       listAllIntegrationAccounts(),
@@ -40,13 +43,19 @@ export function useCredentialCandidates(): UseCredentialCandidatesResult {
 
   const forSlot = useCallback(
     (slot: Pick<PluginBotCredentialSlot, "id" | "integration">) =>
-      buildCredentialCandidates({
-        slot,
-        accounts: sources?.accounts ?? [],
-        adapters: sources?.adapters ?? [],
-      }),
-    [sources]
+      host.remote
+        ? (host.data?.groups[slot.integration ?? ""] ?? [])
+        : buildCredentialCandidates({
+            slot,
+            accounts: sources?.accounts ?? [],
+            adapters: sources?.adapters ?? [],
+          }),
+    [sources, host.remote, host.data]
   )
 
-  return { forSlot, loading: sources === undefined }
+  return {
+    forSlot,
+    failed: host.failed,
+    loading: host.remote ? host.loading : sources === undefined,
+  }
 }

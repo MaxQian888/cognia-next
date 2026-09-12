@@ -5,7 +5,9 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { BotWriteReadiness } from "@/hooks/bots/use-bot-control-writes"
 import type { BotConsoleRow } from "@/lib/bot/console/bot-rows"
 
-const runNow = jest.fn(async (_installationId: string, _triggerId?: string) => undefined)
+const runNow = jest.fn(
+  async (_installationId: string, _triggerId?: string, _input?: unknown) => undefined
+)
 let readiness: BotWriteReadiness = {
   route: "local",
   availability: { state: "available", reason: "local-host" },
@@ -17,7 +19,7 @@ jest.mock("@/hooks/bots/use-bot-control-writes", () => ({
   useBotWriteReadiness: () => readiness,
   useBotControlActions: () => ({
     pending,
-    runNow: (installationId: string, triggerId?: string) => runNow(installationId, triggerId),
+    runNow: (...args: [string, string?, unknown?]) => runNow(...args),
     setTriggerArmed: jest.fn(),
     replayDelivery: jest.fn(),
   }),
@@ -59,6 +61,34 @@ beforeEach(() => {
 })
 
 describe("RunBotNowButton", () => {
+  it("uses the shared schema form for explicit historical item selection", async () => {
+    render(
+      <RunBotNowButton
+        row={row({
+          triggers: [
+            { id: "run", kind: "manual", armed: true },
+            {
+              id: "backfill",
+              kind: "manual",
+              armed: true,
+              label: "Backfill",
+              inputSchema: {
+                type: "object",
+                properties: { numbers: { type: "string", title: "Item numbers" } },
+                required: ["numbers"],
+              },
+            },
+          ],
+        })}
+      />
+    )
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "backfill" } })
+    fireEvent.change(screen.getByLabelText(/Item numbers/), { target: { value: "12,34" } })
+    fireEvent.click(screen.getByRole("button", { name: "Run now" }))
+    await waitFor(() =>
+      expect(runNow).toHaveBeenCalledWith("boti_1", "backfill", { numbers: "12,34" })
+    )
+  })
   it("starts the run under the definition's own manual trigger", async () => {
     render(<RunBotNowButton row={row()} />)
     fireEvent.click(screen.getByTestId("bot-run-now"))

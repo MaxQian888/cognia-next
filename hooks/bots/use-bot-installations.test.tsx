@@ -1,4 +1,11 @@
 /** @jest-environment jsdom */
+let mockHost: {
+  remote: boolean
+  data?: Record<string, unknown>
+  loading?: boolean
+  failed?: boolean
+} = { remote: false }
+jest.mock("./use-bot-host-read", () => ({ useBotHostRead: () => mockHost }))
 
 import { renderHook } from "@testing-library/react"
 
@@ -60,6 +67,7 @@ function installation(over: Partial<BotInstallationRow> = {}): BotInstallationRo
 }
 
 beforeEach(() => {
+  mockHost = { remote: false }
   liveValue = undefined
   liveDeps = []
   lastRead = undefined
@@ -149,4 +157,22 @@ describe("useBotInstallations", () => {
       deadLetters: 2,
     })
   })
+})
+
+it("uses authoritative host configuration rows when paired", () => {
+  const rows = [
+    {
+      id: "host-bot",
+      status: "needs_setup",
+      problems: [],
+      orphaned: false,
+      armedTriggers: 0,
+      deadLetters: 0,
+      config: { repository: "owner/repo" },
+    },
+  ]
+  mockHost = { remote: true, loading: false, data: { rows } }
+  const { result } = renderHook(() => useBotInstallations())
+  expect(result.current.rows).toEqual(rows)
+  expect(result.current.summary.total).toBe(1)
 })

@@ -15,6 +15,7 @@
  * what keeps the install counts consistent with the list they annotate.
  */
 
+import { useBotHostRead } from "./use-bot-host-read"
 import { useMemo } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
@@ -30,9 +31,12 @@ export interface UseBotCatalogResult {
   entries: BotCatalogEntry[]
   /** True until the first read resolves. Distinct from "nothing to install". */
   loading: boolean
+  failed?: boolean
+  remote?: boolean
 }
 
 export function useBotCatalog(options: { workspaceId?: string } = {}): UseBotCatalogResult {
+  const host = useBotHostRead<{ entries: BotCatalogEntry[] }>("catalog")
   const pluginKey = usePluginStore((state) => enabledPluginKey(state.plugins))
   const workspaceId = options.workspaceId
 
@@ -44,5 +48,14 @@ export function useBotCatalog(options: { workspaceId?: string } = {}): UseBotCat
     return buildBotCatalog({ registry: listBotEntries(), local, installations })
   }, [pluginKey, workspaceId])
 
-  return useMemo(() => ({ entries: entries ?? [], loading: entries === undefined }), [entries])
+  const available = host.remote ? host.data?.entries : entries
+  return useMemo(
+    () => ({
+      entries: available ?? [],
+      failed: host.failed,
+      remote: host.remote,
+      loading: host.remote ? host.loading : entries === undefined,
+    }),
+    [available, host.remote, host.loading, host.failed, entries]
+  )
 }

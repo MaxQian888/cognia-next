@@ -1,9 +1,23 @@
-import { renderHook } from "@testing-library/react"
+import { renderHook, waitFor, act } from "@testing-library/react"
 
 import { useExecutionRunDetail } from "./use-execution-run-detail"
 import type { ExecutionRun, RunEvent } from "@/types/execution/run"
 
+let mockPairing = 0
+jest.mock("@/lib/tauri/transport-companion", () => ({
+  getCompanionConfigGeneration: () => mockPairing,
+}))
 let sources: unknown
+let mockProfile = "desktop"
+let mockTarget: { call: jest.Mock } | null = null
+const mockRead = jest.fn()
+jest.mock("@/hooks/use-host-profile", () => ({ useHostProfile: () => mockProfile }))
+jest.mock("@/lib/tauri", () => ({ transport: { call: (...args: unknown[]) => mockRead(...args) } }))
+jest.mock("@/lib/tauri/transport-routing", () => ({
+  getActiveRemoteTransport: () => mockTarget,
+  subscribeActiveRemoteTransport: () => () => {},
+}))
+jest.mock("@/lib/execution/run-detail-source", () => ({ readExecutionRunDetailSources: jest.fn() }))
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => sources,
 }))
@@ -65,7 +79,11 @@ function changeEvent(path: string): RunEvent {
 }
 
 beforeEach(() => {
+  mockPairing = 0
   sources = undefined
+  mockProfile = "desktop"
+  mockTarget = null
+  mockRead.mockReset()
 })
 
 describe("useExecutionRunDetail", () => {
@@ -127,4 +145,77 @@ describe("useExecutionRunDetail", () => {
     expect(result.current.isLoading).toBe(false)
     expect(result.current.journalAvailable).toBe(true)
   })
+  it("reads exact approval details from the selected host without local interrupt sync", async () => {
+    mockProfile = "cloud-companion"
+    sources = { run: run({ kind: "bot" }), events: [], interrupts: [] }
+    const approval = {
+      id: "approval",
+      runId: "run-1",
+      status: "pending",
+      approvalDetail: { snapshot: { id: "sha", diff: "exact diff" } },
+    }
+    mockRead.mockResolvedValue({
+      run: run({ kind: "bot" }),
+      events: [],
+      interrupts: [approval],
+      botResult: { status: "completed", output: { review: "review" } },
+    })
+    const { result } = renderHook(() => useExecutionRunDetail("run-1"))
+    await waitFor(() => expect(result.current.interrupts).toEqual([approval]))
+    expect(mockRead).toHaveBeenCalledWith("execution_run_detail", { runId: "run-1" })
+    expect(result.current.botResult).toEqual({ status: "completed", output: { review: "review" } })
+    expect(result.current.journalAvailable).toBe(true)
+  })
+
+  it("does not display stale approvals from another host or failed host reads", async () => {
+    sources = { run: run(), events: [], interrupts: [{ id: "local-stale" }] }
+    const first = {
+      call: jest
+        .fn()
+        .mockResolvedValue({ run: run(), events: [], interrupts: [{ id: "host-one" }] }),
+    }
+    mockTarget = first
+    const { result, rerender } = renderHook(() => useExecutionRunDetail("run-1"))
+    await waitFor(() => expect(result.current.interrupts).toEqual([{ id: "host-one" }]))
+    mockTarget = { call: jest.fn().mockRejectedValue(new Error("offline")) }
+    rerender()
+    expect(result.current.interrupts).toEqual([])
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.journalAvailable).toBe(false)
+  })
+
+  it("drops an old response after a selected run changes", async () => {
+    mockProfile = "mobile-companion"
+    let resolveOld!: (value: unknown) => void
+    mockRead
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOld = resolve
+          })
+      )
+      .mockResolvedValueOnce({ run: run({ id: "run-2" }), events: [], interrupts: [{ id: "new" }] })
+    const { result, rerender } = renderHook(({ id }) => useExecutionRunDetail(id), {
+      initialProps: { id: "run-1" },
+    })
+    rerender({ id: "run-2" })
+    await waitFor(() => expect(result.current.interrupts).toEqual([{ id: "new" }]))
+    await act(async () => resolveOld({ run: run(), events: [], interrupts: [{ id: "old" }] }))
+    expect(result.current.interrupts).toEqual([{ id: "new" }])
+  })
+})
+
+it("clears approval artifacts when a companion pairing changes without replacing transport", async () => {
+  mockProfile = "cloud-companion"
+  mockRead
+    .mockResolvedValueOnce({ run: run(), events: [], interrupts: [{ id: "old-approval" }] })
+    .mockRejectedValue(new Error("new pairing offline"))
+  const { result } = renderHook(() => useExecutionRunDetail("run-1"))
+  await waitFor(() => expect(result.current.interrupts).toHaveLength(1))
+  act(() => {
+    mockPairing += 1
+    window.dispatchEvent(new Event("cognia:companion-config-changed"))
+  })
+  expect(result.current.interrupts).toEqual([])
+  await waitFor(() => expect(result.current.isLoading).toBe(false))
 })

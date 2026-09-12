@@ -55,7 +55,7 @@ export function BotConsole({
   onDeselect,
 }: BotConsoleProps) {
   const t = useTranslations("bots")
-  const { rows, summary, loading } = useBotInstallations()
+  const { rows, summary, loading, failed } = useBotInstallations()
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState<BotStatusFilter>("all")
   const [installOpen, setInstallOpen] = useState(() => Boolean(installParam))
@@ -123,7 +123,7 @@ export function BotConsole({
             selectedId={selected?.id ?? null}
             search={search}
             statusFilter={statusFilter}
-            loading={loading}
+            loading={loading || failed}
             onSearchChange={setSearch}
             onStatusFilterChange={setStatusFilter}
             onSelect={onSelect}
@@ -138,6 +138,11 @@ export function BotConsole({
     >
       <div className="flex h-full min-h-0 flex-col">
         <BotRuntimeNotice />
+        {failed && (
+          <p role="alert" className="p-3 text-sm text-destructive">
+            {t("syncFailed")}
+          </p>
+        )}
         <div className="min-h-0 flex-1">
           <BotDetail row={selected} {...(onDeselect ? { onUninstalled: onDeselect } : {})} />
         </div>
