@@ -60,6 +60,26 @@ describe("<MeRow />", () => {
     )
   })
 
+  it("gives the onClick variant the same inset as the href variant", () => {
+    // The button variant merges the Item's classes with the Button's own,
+    // and a `p-0` there won: the row rendered flush against the group edge
+    // while the link row under it was inset (seen on /me/storage's Manage
+    // group, 2026-09-12).
+    const { container } = render(
+      <>
+        <MeRow label="Link" href="/me/backup" />
+        <MeRow label="Action" onClick={() => undefined} />
+      </>
+    )
+    const link = container.querySelector("a")!
+    const button = container.querySelector("button")!
+    expect(button.className).not.toMatch(/\bp-0\b/)
+    for (const cls of ["px-3", "py-2.5"]) {
+      expect(link.className.split(" ")).toContain(cls)
+      expect(button.className.split(" ")).toContain(cls)
+    }
+  })
+
   it("renders an inert div when disabled, even if href or onClick are provided", () => {
     render(
       <MeRow

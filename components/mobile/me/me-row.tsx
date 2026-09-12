@@ -134,7 +134,11 @@ export function MeRow({
           variant="ghost"
           onClick={onClick}
           aria-label={ariaLabel ?? label}
-          className="h-auto w-full justify-start rounded-none p-0 text-left font-normal"
+          // Same padding + gap the `Item` carries, restated here because the
+          // Slot merge keeps both class lists and the Button's own `p-0`
+          // used to win: every onClick row on /me sat flush against the
+          // group edge while the href rows beside it were inset.
+          className="h-auto w-full justify-start gap-2.5 rounded-none px-3 py-2.5 text-left font-normal whitespace-normal"
         >
           {inner}
         </Button>
