@@ -1,13 +1,18 @@
 {
   "advanced": "高级目录",
   "backAria": "返回我的",
+  "backToList": "目录",
   "capabilities": {
     "reasoning": "推理",
     "structuredOutput": "结构化输出",
     "tools": "工具调用"
   },
+  "capabilitiesLabel": "能力",
   "closeDetails": "关闭模型详情",
   "conflict": "正在激活较新的目录版本，当前版本仍可继续使用。",
+  "contextWindow": "上下文",
+  "countSummary": "显示 {shown}/{total}",
+  "creator": "创建者",
   "deprecated": "此模型不再推荐用于新配置。已有会话会继续使用已冻结的 offering。",
   "description": "查看规范模型及其全部提供方 offering，并始终显示实际路由的上游 ID。",
   "emptyDescription": "请尝试更宽泛的关键词、开启高级目录，或调整能力筛选。",
@@ -21,6 +26,7 @@
     "retired": "已退役"
   },
   "loading": "正在加载最后一个有效的模型目录…",
+  "maxOutput": "最大输出",
   "modalities": {
     "all": "全部模态",
     "embedding": "向量嵌入",
