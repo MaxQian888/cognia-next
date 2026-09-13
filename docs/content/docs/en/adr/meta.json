@@ -177,6 +177,7 @@
     "0175-the-rpc-face-has-one-grammar-one-error-and-one-version",
     "0176-every-clone-shares-one-object-cache",
     "0177-a-room-is-one-conversation-shape",
-    "0178-pointing-at-a-rendered-element"
+    "0178-pointing-at-a-rendered-element",
+    "0179-the-schedule-answers-one-question"
   ]
 }
