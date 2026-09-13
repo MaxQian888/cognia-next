@@ -75,10 +75,44 @@ export function createVisualization(
 }
 
 export function parseVisualization(content: string): VisualizationSpec {
-  const parsed = JSON.parse(content) as VisualizationSpec
-  if (parsed.schemaVersion !== 1 || !VISUALIZATION_PROFILES.includes(parsed.profile))
+  const parsed = JSON.parse(content) as unknown
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
     throw new Error("Unsupported Cognia visualization schema.")
-  return parsed
+  const spec = parsed as Partial<VisualizationSpec>
+  if (
+    spec.schemaVersion !== VISUALIZATION_SCHEMA_VERSION ||
+    !VISUALIZATION_PROFILES.includes(spec.profile as VisualizationProfile)
+  )
+    throw new Error("Unsupported Cognia visualization schema.")
+  if (!Array.isArray(spec.data)) throw new Error("Cognia visualization data must be an array.")
+  return {
+    ...spec,
+    title: typeof spec.title === "string" ? spec.title : "",
+    schemaVersion: VISUALIZATION_SCHEMA_VERSION,
+    profile: spec.profile as VisualizationProfile,
+    data: spec.data.map((datum): VisualizationDatum => {
+      const raw = datum && typeof datum === "object" ? (datum as VisualizationDatum) : null
+      return {
+        label: typeof raw?.label === "string" ? raw.label : "",
+        value: typeof raw?.value === "number" ? raw.value : Number.NaN,
+        ...(raw?.group !== undefined ? { group: String(raw.group) } : {}),
+        ...(raw?.x !== undefined ? { x: Number(raw.x) } : {}),
+        ...(raw?.y !== undefined ? { y: Number(raw.y) } : {}),
+        ...(raw?.source !== undefined ? { source: String(raw.source) } : {}),
+        ...(raw?.target !== undefined ? { target: String(raw.target) } : {}),
+        ...(raw?.start !== undefined ? { start: String(raw.start) } : {}),
+        ...(raw?.end !== undefined ? { end: String(raw.end) } : {}),
+      }
+    }),
+    palette:
+      Array.isArray(spec.palette) && spec.palette.length
+        ? spec.palette.map((color) => String(color))
+        : ["#2563eb", "#7c3aed", "#059669", "#d97706", "#dc2626"],
+    accessibility: {
+      summary: typeof spec.accessibility?.summary === "string" ? spec.accessibility.summary : "",
+      showDataTable: spec.accessibility?.showDataTable ?? true,
+    },
+  }
 }
 
 export function validateVisualization(spec: VisualizationSpec) {

@@ -1,5 +1,6 @@
 import {
   createVisualization,
+  parseVisualization,
   recommendProfile,
   validateVisualization,
   VISUALIZATION_PROFILES,
@@ -26,4 +27,28 @@ it("requires graph endpoints and accessible summaries", () => {
   expect(validateVisualization(spec)).toEqual(
     expect.arrayContaining([expect.objectContaining({ code: "graph.edge" })])
   )
+})
+
+it("parseVisualization normalizes shape so validation reports findings, not crashes", () => {
+  const spec = parseVisualization(
+    JSON.stringify({
+      schemaVersion: 1,
+      profile: "bar",
+      data: [{ label: 7, value: "ten" }, null],
+    })
+  )
+  expect(spec.palette.length).toBeGreaterThan(0)
+  expect(spec.accessibility.showDataTable).toBe(true)
+  const codes = validateVisualization(spec).map((finding) => finding.code)
+  expect(codes).toEqual(expect.arrayContaining(["data.label", "data.value", "a11y.summary"]))
+})
+
+it("parseVisualization rejects malformed payloads with clean errors", () => {
+  expect(() => parseVisualization('{"schemaVersion":1,"profile":"bar"}')).toThrow(
+    "data must be an array"
+  )
+  expect(() => parseVisualization('{"schemaVersion":2,"profile":"bar","data":[]}')).toThrow(
+    "Unsupported Cognia visualization schema"
+  )
+  expect(() => parseVisualization("[1,2]")).toThrow("Unsupported Cognia visualization schema")
 })

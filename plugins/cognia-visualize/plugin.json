@@ -15,7 +15,15 @@
   "runtimeCompatibility": {
     "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
     "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
-    "headless": { "availability": "supported", "entrypoint": "src/index.ts" },
-    "mobile": { "availability": "supported", "entrypoint": "src/index.ts" }
+    "headless": {
+      "availability": "degraded",
+      "entrypoint": "src/index.ts",
+      "reason": "Authoring, validation, listing, and JSON export are available; the artifact preview panel and file save pickers require a UI shell."
+    },
+    "mobile": {
+      "availability": "degraded",
+      "entrypoint": "src/index.ts",
+      "reason": "Authoring, preview, and report export are available; native save dialogs depend on the connected shell."
+    }
   }
 }

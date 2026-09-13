@@ -1,4 +1,4 @@
-import type { PluginTool } from "@cognia/plugin-sdk"
+import { definePluginTool, type PluginTool } from "@cognia/plugin-sdk"
 import type { VisualizationSpec } from "./model"
 import { createVisualizeRuntime, type VisualizePluginContext } from "./runtime"
 
@@ -6,6 +6,7 @@ export const VISUALIZE_TOOL_NAMES = [
   "visualize_recommend",
   "visualize_create",
   "visualize_inspect",
+  "visualize_list",
   "visualize_update",
   "visualize_validate",
   "visualize_preview",
@@ -60,95 +61,116 @@ const specSchema = {
 export function createVisualizeTools(ctx: VisualizePluginContext): PluginTool[] {
   const runtime = createVisualizeRuntime(ctx)
   return [
-    tool(
-      VISUALIZE_TOOL_NAMES[0],
-      "Recommend one of 22 visualization profiles for an analytical intent.",
-      {
-        type: "object",
-        properties: { intent: { type: "string", minLength: 1 } },
-        required: ["intent"],
-        additionalProperties: false,
+    definePluginTool({
+      name: VISUALIZE_TOOL_NAMES[0],
+      definition: {
+        name: VISUALIZE_TOOL_NAMES[0],
+        description: "Recommend one of 22 visualization profiles for an analytical intent.",
+        parametersSchema: {
+          type: "object",
+          properties: { intent: { type: "string", minLength: 1 } },
+          required: ["intent"],
+          additionalProperties: false,
+        },
       },
-      (args) => runtime.recommend((args as { intent: string }).intent)
-    ),
-    tool(
-      VISUALIZE_TOOL_NAMES[1],
-      "Create a plugin-owned accessible visualization artifact.",
-      specSchema,
-      (args, tc) =>
+      execute: async (args) => runtime.recommend((args as { intent: string }).intent),
+    }),
+    definePluginTool({
+      name: VISUALIZE_TOOL_NAMES[1],
+      definition: {
+        name: VISUALIZE_TOOL_NAMES[1],
+        description: "Create a plugin-owned accessible visualization artifact.",
+        parametersSchema: specSchema,
+      },
+      execute: async (args, tc) =>
         runtime.create({
           ...(args as Parameters<typeof runtime.create>[0]),
           sessionId: tc.sessionId,
           messageId: tc.messageId,
-        })
-    ),
-    tool(
-      VISUALIZE_TOOL_NAMES[2],
-      "Inspect the visualization spec and validation findings.",
-      artifactOnly,
-      (args) => runtime.inspect((args as { artifactId: string }).artifactId)
-    ),
-    tool(
-      VISUALIZE_TOOL_NAMES[3],
-      "Replace a visualization spec with optimistic version checking.",
-      {
-        type: "object",
-        properties: {
-          artifactId,
-          expectedVersion: { type: "integer", minimum: 1 },
-          spec: specSchema,
-          changeDescription: { type: "string" },
-        },
-        required: ["artifactId", "expectedVersion", "spec"],
-        additionalProperties: false,
+        }),
+    }),
+    definePluginTool({
+      name: VISUALIZE_TOOL_NAMES[2],
+      definition: {
+        name: VISUALIZE_TOOL_NAMES[2],
+        description: "Inspect the visualization spec and validation findings.",
+        parametersSchema: artifactOnly,
       },
-      (args) =>
+      execute: async (args) => runtime.inspect((args as { artifactId: string }).artifactId),
+    }),
+    definePluginTool({
+      name: VISUALIZE_TOOL_NAMES[3],
+      definition: {
+        name: VISUALIZE_TOOL_NAMES[3],
+        description: "List this plugin's visualization artifacts, optionally scoped to a session.",
+        parametersSchema: {
+          type: "object",
+          properties: { sessionId: { type: "string" } },
+          additionalProperties: false,
+        },
+      },
+      execute: async (args) => runtime.list(args as { sessionId?: string }),
+    }),
+    definePluginTool({
+      name: VISUALIZE_TOOL_NAMES[4],
+      definition: {
+        name: VISUALIZE_TOOL_NAMES[4],
+        description: "Replace a visualization spec with optimistic version checking.",
+        parametersSchema: {
+          type: "object",
+          properties: {
+            artifactId,
+            expectedVersion: { type: "integer", minimum: 1 },
+            spec: specSchema,
+            changeDescription: { type: "string" },
+          },
+          required: ["artifactId", "expectedVersion", "spec"],
+          additionalProperties: false,
+        },
+      },
+      execute: async (args) =>
         runtime.update(
           args as { artifactId: string; expectedVersion: number; spec: VisualizationSpec }
-        )
-    ),
-    tool(
-      VISUALIZE_TOOL_NAMES[4],
-      "Validate data, profile requirements, and accessibility fallback.",
-      artifactOnly,
-      (args) => runtime.validate((args as { artifactId: string }).artifactId)
-    ),
-    tool(
-      VISUALIZE_TOOL_NAMES[5],
-      "Open the plugin-owned responsive visualization preview.",
-      artifactOnly,
-      (args) => runtime.preview((args as { artifactId: string }).artifactId)
-    ),
-    tool(
-      VISUALIZE_TOOL_NAMES[6],
-      "Export the validated visualization as SVG, HTML, or JSON.",
-      {
-        type: "object",
-        properties: {
-          artifactId,
-          format: { enum: ["svg", "html", "json"] },
-          suggestedName: { type: "string" },
-        },
-        required: ["artifactId", "format"],
-        additionalProperties: false,
+        ),
+    }),
+    definePluginTool({
+      name: VISUALIZE_TOOL_NAMES[5],
+      definition: {
+        name: VISUALIZE_TOOL_NAMES[5],
+        description: "Validate data, profile requirements, and accessibility fallback.",
+        parametersSchema: artifactOnly,
       },
-      (args) =>
+      execute: async (args) => runtime.validate((args as { artifactId: string }).artifactId),
+    }),
+    definePluginTool({
+      name: VISUALIZE_TOOL_NAMES[6],
+      definition: {
+        name: VISUALIZE_TOOL_NAMES[6],
+        description: "Open the plugin-owned responsive visualization preview.",
+        parametersSchema: artifactOnly,
+      },
+      execute: async (args) => runtime.preview((args as { artifactId: string }).artifactId),
+    }),
+    definePluginTool({
+      name: VISUALIZE_TOOL_NAMES[7],
+      definition: {
+        name: VISUALIZE_TOOL_NAMES[7],
+        description: "Export the validated visualization as SVG, HTML, or JSON.",
+        parametersSchema: {
+          type: "object",
+          properties: {
+            artifactId,
+            format: { enum: ["svg", "html", "json"] },
+            suggestedName: { type: "string" },
+          },
+          required: ["artifactId", "format"],
+          additionalProperties: false,
+        },
+      },
+      execute: async (args) =>
         runtime.export(
           args as { artifactId: string; format: "svg" | "html" | "json"; suggestedName?: string }
-        )
-    ),
+        ),
+    }),
   ]
-}
-function tool(
-  name: string,
-  description: string,
-  parametersSchema: Record<string, unknown>,
-  execute: (...args: Parameters<PluginTool["execute"]>) => unknown | Promise<unknown>
-): PluginTool {
-  return {
-    name,
-    pluginId: "cognia-visualize",
-    definition: { name, description, parametersSchema },
-    execute: async (...args) => execute(...args),
-  }
 }

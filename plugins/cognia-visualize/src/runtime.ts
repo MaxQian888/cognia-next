@@ -1,6 +1,10 @@
 import type { FullPluginContext } from "@cognia/plugin-sdk/context"
-import type { PluginArtifactAPI, PluginFilesAPI } from "@cognia/plugin-sdk"
-import { exportVisualizationHtml, exportVisualizationSvg } from "./export"
+import type { PluginArtifactAPI, PluginFilesAPI, PluginI18nAPI } from "@cognia/plugin-sdk"
+import {
+  exportVisualizationHtml,
+  exportVisualizationSvg,
+  type VisualizationExportLabels,
+} from "./export"
 import {
   createVisualization,
   parseVisualization,
@@ -10,10 +14,12 @@ import {
   VISUALIZATION_SCHEMA_VERSION,
   type VisualizationSpec,
 } from "./model"
+import { VISUALIZATION_COLUMNS } from "./chart"
 
 export type VisualizePluginContext = Pick<FullPluginContext, "pluginId"> & {
   artifact: PluginArtifactAPI
   files: PluginFilesAPI
+  i18n: Pick<PluginI18nAPI, "t" | "getCurrentLocale">
 }
 
 export function createVisualizeRuntime(ctx: VisualizePluginContext) {
@@ -24,12 +30,20 @@ export function createVisualizeRuntime(ctx: VisualizePluginContext) {
       throw new Error(`Artifact is not a Cognia visualization: ${artifactId}`)
     return { artifact, spec: parseVisualization(artifact.content) }
   }
+  const exportLabels = (): VisualizationExportLabels => ({
+    columns: Object.fromEntries(
+      VISUALIZATION_COLUMNS.map((key) => [key, ctx.i18n.t(`visualize.preview.col.${key}`)])
+    ),
+    dataHeading: ctx.i18n.t("visualize.preview.data"),
+    emptyReport: ctx.i18n.t("visualize.report.empty"),
+  })
   return {
     recommend: (intent: string) => ({ ok: true as const, ...recommendProfile(intent) }),
     create: async (
       input: Parameters<typeof createVisualization>[0] & { sessionId?: string; messageId?: string }
     ) => {
-      const spec = createVisualization(input)
+      const { sessionId, messageId, ...specInput } = input
+      const spec = createVisualization(specInput)
       const artifactId = await ctx.artifact.createArtifact({
         title: spec.title,
         content: JSON.stringify(spec),
@@ -37,8 +51,8 @@ export function createVisualizeRuntime(ctx: VisualizePluginContext) {
         language: "json",
         kind: VISUALIZATION_ARTIFACT_KIND,
         schemaVersion: VISUALIZATION_SCHEMA_VERSION,
-        sessionId: input.sessionId,
-        messageId: input.messageId,
+        sessionId,
+        messageId,
         metadata: {
           sourceOrigin: "tool",
           userInitiated: true,
@@ -47,6 +61,23 @@ export function createVisualizeRuntime(ctx: VisualizePluginContext) {
       })
       ctx.artifact.openArtifact(artifactId)
       return { ok: true as const, artifactId, findings: validateVisualization(spec) }
+    },
+    list: (input: { sessionId?: string }) => {
+      const artifacts = ctx.artifact.listArtifacts(
+        input.sessionId ? { sessionId: input.sessionId } : undefined
+      )
+      return {
+        ok: true as const,
+        artifacts: artifacts
+          .filter((artifact) => artifact.metadata?.plugin?.kind === VISUALIZATION_ARTIFACT_KIND)
+          .map((artifact) => ({
+            artifactId: artifact.id,
+            title: artifact.title,
+            version: artifact.version,
+            updatedAt: artifact.updatedAt,
+            sessionId: artifact.sessionId,
+          })),
+      }
     },
     inspect: (artifactId: string) => {
       const { artifact, spec } = read(artifactId)
@@ -67,6 +98,7 @@ export function createVisualizeRuntime(ctx: VisualizePluginContext) {
       read(input.artifactId)
       const spec = createVisualization(input.spec)
       const artifact = ctx.artifact.updateArtifact(input.artifactId, {
+        title: spec.title,
         content: JSON.stringify(spec),
         expectedVersion: input.expectedVersion,
         changeDescription: input.changeDescription ?? "Update visualization",
@@ -102,7 +134,11 @@ export function createVisualizeRuntime(ctx: VisualizePluginContext) {
         input.format === "svg"
           ? exportVisualizationSvg(spec)
           : input.format === "html"
-            ? exportVisualizationHtml(spec)
+            ? exportVisualizationHtml(
+                spec,
+                exportLabels(),
+                ctx.i18n.getCurrentLocale() === "zh-CN" ? "zh-CN" : "en"
+              )
             : new TextEncoder().encode(JSON.stringify(spec, null, 2))
       const mimeType =
         input.format === "svg"
