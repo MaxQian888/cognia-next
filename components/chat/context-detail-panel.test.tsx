@@ -113,6 +113,27 @@ describe("ContextDetailPanel", () => {
     ).toBeNull()
   })
 
+  it("lists a zero-token inventory without painting context occupancy", () => {
+    const data = breakdown({
+      groups: [
+        {
+          id: "systemTools",
+          key: "systemTools",
+          tokens: 0,
+          fraction: 0,
+          deferred: false,
+          items: [{ label: "Read", tokens: 0 }],
+          itemCount: 1,
+        },
+      ],
+    })
+    render(<Panel data={data} />)
+    expect(screen.getByTestId("context-group-systemTools")).toBeInTheDocument()
+    expect(screen.getByTestId("context-segment-bar").querySelectorAll("[data-group]")).toHaveLength(
+      0
+    )
+  })
+
   it("keeps sub-percent slices readable instead of rounding them to 0%", () => {
     const tiny = breakdown({
       groups: [

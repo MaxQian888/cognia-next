@@ -770,6 +770,7 @@
     "terminalSpawnDenied": "Terminal blocked by a plugin",
     "terminalSpawnError": "Couldn't open terminal: {message}",
     "workspace": "Workspace",
-    "workspaceUntitled": "Untitled workspace"
+    "workspaceUntitled": "Untitled workspace",
+    "navigationMenu": "Navigation"
   }
 }

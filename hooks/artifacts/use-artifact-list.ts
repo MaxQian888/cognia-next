@@ -17,10 +17,16 @@ import type { Artifact, ArtifactType, ArtifactRuntimeHealth, ArtifactWorkspaceSc
 
 interface UseArtifactListOptions {
   sessionId?: string
+  lockSessionScope?: boolean
   onArtifactClick?: (artifact: Artifact) => void
 }
 
-export function useArtifactList({ sessionId, onArtifactClick }: UseArtifactListOptions) {
+export function useArtifactList({
+  sessionId,
+  onArtifactClick,
+  lockSessionScope = false,
+}: UseArtifactListOptions) {
+  const getSessionArtifacts = useArtifactStore((state) => state.getSessionArtifacts)
   const activeArtifactId = useActiveArtifactId()
   const artifacts = useArtifactStore((state) => state.artifacts)
   const deleteArtifact = useArtifactStore((state) => state.deleteArtifact)
@@ -38,15 +44,18 @@ export function useArtifactList({ sessionId, onArtifactClick }: UseArtifactListO
   const currentSessionId = sessionId || activeChatSessionId || undefined
 
   useEffect(() => {
-    if (currentSessionId && artifactWorkspace.scope === "session") {
+    if (!lockSessionScope && currentSessionId && artifactWorkspace.scope === "session") {
       setArtifactWorkspaceScope("session", currentSessionId)
     }
-  }, [artifactWorkspace.scope, currentSessionId, setArtifactWorkspaceScope])
+  }, [artifactWorkspace.scope, currentSessionId, setArtifactWorkspaceScope, lockSessionScope])
 
   // `artifacts` and `artifactWorkspace` are subscribed store slices, so this
   // recomputes whenever the backing collection or any workspace filter changes.
-  const sessionArtifacts =
-    !currentSessionId && artifactWorkspace.scope === "session"
+  const sessionArtifacts = lockSessionScope
+    ? currentSessionId
+      ? getSessionArtifacts(currentSessionId)
+      : []
+    : !currentSessionId && artifactWorkspace.scope === "session"
       ? []
       : getArtifactsForWorkspace({ sessionId: currentSessionId })
 
@@ -137,7 +146,7 @@ export function useArtifactList({ sessionId, onArtifactClick }: UseArtifactListO
     // State
     activeArtifactId,
     searchQuery: artifactWorkspace.searchQuery,
-    scope: artifactWorkspace.scope,
+    scope: lockSessionScope ? "session" : artifactWorkspace.scope,
     typeFilter: artifactWorkspace.typeFilter,
     runtimeFilter: artifactWorkspace.runtimeFilter,
     selectedIds,
@@ -145,7 +154,9 @@ export function useArtifactList({ sessionId, onArtifactClick }: UseArtifactListO
     pendingDelete,
     sessionArtifacts,
     /** Whether the store holds any artifact at all, in any session. */
-    hasAnyArtifacts: Object.keys(artifacts).length > 0,
+    hasAnyArtifacts: lockSessionScope
+      ? sessionArtifacts.length > 0
+      : Object.keys(artifacts).length > 0,
     // Actions
     setSearchQuery,
     setScope,

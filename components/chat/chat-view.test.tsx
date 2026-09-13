@@ -36,6 +36,7 @@ jest.mock("@/components/agent/plan/plan-approval-dock", () => ({
   },
 }))
 
+const mockComposerFocus = jest.fn()
 const mockComposerProps: Array<Record<string, unknown>> = []
 jest.mock("./composer", () => {
   const react = jest.requireActual<typeof import("react")>("react")
@@ -46,7 +47,11 @@ jest.mock("./composer", () => {
       ref: React.Ref<unknown>
     ) {
       mockComposerProps.push(props)
-      react.useImperativeHandle(ref, () => ({ insertMention: () => {}, focus: () => {} }), [])
+      react.useImperativeHandle(
+        ref,
+        () => ({ insertMention: () => {}, focus: mockComposerFocus }),
+        []
+      )
       return react.createElement("div", { "data-testid": "composer" })
     }),
   }
@@ -1260,6 +1265,30 @@ describe("ChatPane", () => {
       )
       expect(surfaceSwap.length).toBeGreaterThan(0)
       for (const p of surfaceSwap) expect(p.mode).toBe("popLayout")
+    })
+
+    it("does not steal focus from a summary while the history transition finishes", () => {
+      storeState.messages = [loadedMessage]
+      storeState.messagesLoading = false
+      animatePresenceProps.length = 0
+      render(<ChatPane {...makeProps()} />)
+      const swap = animatePresenceProps.findLast(
+        (props) => props.initial === false && typeof props.onExitComplete === "function"
+      )!
+      const finish = swap.onExitComplete as () => void
+      const summary = document.createElement("div")
+      summary.setAttribute("role", "dialog")
+      const action = document.createElement("button")
+      summary.append(action)
+      document.body.append(summary)
+      action.focus()
+      mockComposerFocus.mockClear()
+      act(finish)
+      expect(document.activeElement).toBe(action)
+      expect(mockComposerFocus).not.toHaveBeenCalled()
+      summary.remove()
+      act(finish)
+      expect(mockComposerFocus).toHaveBeenCalledTimes(1)
     })
 
     it("mounts every surface inside one positioned stage that owns the pane height", () => {

@@ -49,6 +49,7 @@ import { useChatViewportStore } from "@/stores/chat/chat-viewport-store"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { ResourceWorkbenchChatPanel } from "@/components/context-workbench/resource-workbench-chat-panel"
+import { SessionOverviewPanelHost } from "@/components/context-workbench/session-overview-panel"
 import { ContextMetadataPanel } from "@/components/context-workbench/context-metadata-panel"
 import { ContextCommentsPanel } from "@/components/context-workbench/context-comments-panel"
 import { ContextCapabilityUnavailable } from "@/components/context-workbench/context-capability-unavailable"
@@ -451,7 +452,6 @@ export function useSessionSurfacePanels({
   session,
   sessionProject,
   sessionMessages,
-  messageCount,
   workspaceLayout,
   workspaceAvailable,
   unresolvedCommentCount,
@@ -657,32 +657,7 @@ export function useSessionSurfacePanels({
         order: 50,
         appliesTo: (resource) => resource.kind === "session",
         retention: "stateful",
-        renderer: () =>
-          session ? (
-            <ContextMetadataPanel
-              title={tWorkbench("metadata.sessionTitle")}
-              fields={[
-                {
-                  label: tWorkbench("metadata.model"),
-                  value: session.model ?? tWorkbench("metadata.unknown"),
-                },
-                {
-                  label: tWorkbench("metadata.provider"),
-                  value: session.providerOverride ?? tWorkbench("metadata.unknown"),
-                },
-                {
-                  label: tWorkbench("metadata.workingDir"),
-                  value: session.workingDir ?? tWorkbench("metadata.unknown"),
-                },
-                { label: tWorkbench("metadata.messageCount"), value: messageCount },
-                {
-                  label: tWorkbench("metadata.createdAt"),
-                  value: new Date(session.createdAt).toLocaleString(),
-                },
-                { label: tWorkbench("metadata.sessionId"), value: session.id },
-              ]}
-            />
-          ) : null,
+        renderer: SessionOverviewPanelHost,
       },
       {
         id: "memory",
@@ -742,7 +717,6 @@ export function useSessionSurfacePanels({
       activeSessionId,
       onWidthHint,
       pendingRunLearningCount,
-      messageCount,
       requestedUrl,
       requestId,
       revealBrowserPanel,

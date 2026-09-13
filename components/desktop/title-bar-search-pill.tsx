@@ -4,11 +4,8 @@
  * The title bar's command-palette pill: app name + active conversation, a
  * streaming dot while a turn is in flight, and the ⌘K hint.
  *
- * One shape on every route. It briefly had a narrow icon+shortcut variant for
- * the case where a projected chat header carried the conversation title beside
- * it, but that made the top bar redraw itself whenever the chat column came and
- * went — the shell reading as flickering rather than tidy. The bar's own
- * segments are constant now; only the outlets' contents vary.
+ * Chat headers already show the conversation title. Their compact variant
+ * retains search and run indicators without repeating that title in a pill.
  *
  * It used to be a private component inside `title-bar.tsx`. It moved out when
  * the bar became customizable — `title-bar-zone.tsx` mounts segments by id, so
@@ -36,6 +33,7 @@ export function TitleBarSearchPill({
   kbdHint,
   onClick,
   className,
+  compact = false,
 }: {
   appName: string
   separator: string
@@ -43,6 +41,7 @@ export function TitleBarSearchPill({
   kbdHint: string
   onClick: () => void
   className?: string
+  compact?: boolean
 }) {
   // The other strings arrive as props so the bar can keep this leaf render
   // stable; this one is local because only the leaf knows the count.
@@ -67,10 +66,14 @@ export function TitleBarSearchPill({
       type="button"
       onClick={onClick}
       data-testid="title-bar-search-pill"
+      data-compact={compact || undefined}
       aria-label={placeholder}
+      title={compact ? `${placeholder} (${kbdHint})` : undefined}
       className={cn(
-        "group flex h-6 min-w-[180px] max-w-[480px] flex-1 items-center gap-2",
-        "rounded-md border border-border bg-background/60 px-2 text-xs",
+        "group flex items-center gap-2 rounded-md text-xs",
+        compact
+          ? "h-7 min-w-7 shrink-0 justify-center px-1.5"
+          : "h-6 min-w-[180px] max-w-[480px] flex-1 border border-border bg-background/60 px-2",
         "text-muted-foreground transition-colors hover:bg-background hover:text-foreground",
         className
       )}
@@ -84,9 +87,11 @@ export function TitleBarSearchPill({
       ) : (
         <SearchIcon aria-hidden className="size-3 shrink-0" />
       )}
-      <span className="truncate font-medium tracking-tight" data-testid="title-bar-title">
-        {title}
-      </span>
+      {!compact && (
+        <span className="truncate font-medium tracking-tight" data-testid="title-bar-title">
+          {title}
+        </span>
+      )}
       {run.activeElsewhere ? (
         <span
           data-testid="title-bar-background-count"
@@ -97,12 +102,17 @@ export function TitleBarSearchPill({
           {run.active}
         </span>
       ) : null}
-      <span
-        aria-hidden
-        className={cn("hidden text-[10px] opacity-60 sm:inline", !run.activeElsewhere && "ml-auto")}
-      >
-        {kbdHint}
-      </span>
+      {!compact && (
+        <span
+          aria-hidden
+          className={cn(
+            "hidden text-[10px] opacity-60 sm:inline",
+            !run.activeElsewhere && "ml-auto"
+          )}
+        >
+          {kbdHint}
+        </span>
+      )}
     </button>
   )
 }

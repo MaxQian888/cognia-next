@@ -21,7 +21,7 @@ import {
 } from "@/lib/ai/agent/execution/host-environment"
 import { getSessionContextUsage } from "@/lib/claude/ipc"
 import type { SdkContextUsage } from "@cognia/agent-config-types"
-import { useChatStore } from "@/stores/chat"
+import { useChatStore, useSessionStatus } from "@/stores/chat"
 
 /** Statuses during which a turn is in flight (no fresh context to read yet). */
 function isBusy(status: string | undefined): boolean {
@@ -32,7 +32,7 @@ export function useSdkContextUsage(
   sessionId: string | null,
   providerId?: string
 ): { snapshot: SdkContextUsage | null; refresh: () => void } {
-  const status = useChatStore((s) => s.status)
+  const status = useSessionStatus(sessionId)
   const runtimeScope = useChatStore((s) => {
     const execution = sessionId ? s.lastSendBySession?.[sessionId]?.options.execution : undefined
     return execution ? `${execution.hostRef}:${execution.runtimeAdapter}` : ""

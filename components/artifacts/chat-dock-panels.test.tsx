@@ -115,6 +115,10 @@ jest.mock("@/components/context-workbench/context-metadata-panel", () => ({
   ),
 }))
 
+jest.mock("@/components/context-workbench/session-overview-panel", () => ({
+  SessionOverviewPanelHost: () => <div data-testid="overview" />,
+}))
+
 jest.mock("@/components/context-workbench/context-capability-unavailable", () => ({
   ContextCapabilityUnavailable: ({ capability }: { capability: string }) => (
     <div data-testid="unavailable" data-capability={capability} />
@@ -714,9 +718,7 @@ describe("useSessionSurfacePanels", () => {
     expect(
       renderPanel(panelById(panels, "comments"), SESSION_RESOURCE).container
     ).toBeEmptyDOMElement()
-    expect(
-      renderPanel(panelById(panels, "metadata"), SESSION_RESOURCE).container
-    ).toBeEmptyDOMElement()
+    expect(panelById(panels, "metadata").renderer).toBeDefined()
   })
 
   it("reports the session's settings, naming what it does not know", () => {
@@ -732,9 +734,9 @@ describe("useSessionSurfacePanels", () => {
       })
     )
     renderPanel(panelById(panels, "metadata"), SESSION_RESOURCE)
-    const values = screen.getByTestId("metadata-values").textContent ?? ""
-    expect(values.match(/contextWorkbench\.metadata\.unknown/g)).toHaveLength(3)
-    expect(values).toContain("s1")
+    expect(screen.getByTestId("overview")).toBeInTheDocument()
+    const next = collect(useSessionSurfacePanels, sessionInput())
+    expect(panelById(next, "metadata").renderer).toBe(panelById(panels, "metadata").renderer)
   })
 
   it("lists the sources behind the conversation", () => {

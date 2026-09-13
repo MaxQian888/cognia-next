@@ -48,6 +48,9 @@ import { useContextCommentBadge } from "@/hooks/context-workbench/use-context-co
 import { useProjectStore } from "@/stores/project/project-store"
 import type { UIMessage } from "ai"
 import { useLiveQuery } from "dexie-react-hooks"
+import { useClientLiveQuery } from "@/hooks/data/use-client-live-query"
+import { SessionOverviewContext } from "@/components/context-workbench/session-overview-panel"
+import { getSession } from "@/lib/db/sessions"
 import { countPendingSessionRunLearningProposals } from "@/lib/db/run-retrospectives"
 
 /**
@@ -231,10 +234,14 @@ export function ArtifactContextWorkbench({
   railOnly?: boolean
 }) {
   const workbenchInstanceId = useContextWorkbenchInstanceId(ARTIFACT_DOCK_WORKBENCH_HOST_KEY)
-  // Desktop only: the workbench header renders into the title bar's end
-  // outlet (`title-bar-outlets.tsx`). The mobile drawer keeps its own header,
-  // and a rail-only dock has no header to project.
-  const headerOutlet = useTitleBarProjection("end", { active: !mobile && !railOnly })
+  const showSingleArtifactTab = useContextWorkbenchStore(
+    (state) => state.navigationStyle !== "rail"
+  )
+  // Named tabs need the panel's full width. Compact icon mode can share the
+  // shell title bar; mobile and collapsed docks never project a header.
+  const headerOutlet = useTitleBarProjection("end", {
+    active: !mobile && !railOnly && !showSingleArtifactTab,
+  })
   const artifact = useArtifactStore((state) => state.artifacts[artifactId])
   const unresolvedCommentCount = useContextCommentBadge("artifact", artifactId)
   const pendingReview = useArtifactStore((state) => state.pendingReviews[artifactId] ?? null)
@@ -284,7 +291,7 @@ export function ArtifactContextWorkbench({
   const hostLayout = mobile?.panelMode ?? "desktop"
   // Only claim the header's leading slot when there are tabs to put in it; an
   // element that renders null would still displace the panel's group tabs.
-  const hasArtifactTabs = useOpenArtifactTabs().length > 0
+  const hasArtifactTabs = useOpenArtifactTabs(showSingleArtifactTab).length > 0
   // DockWorkspace only distinguishes touch from pointer density.
   const workspaceLayout = hostLayout === "mobile" ? "mobile" : "desktop"
   const pendingRunLearningCount = useLiveQuery(
@@ -393,7 +400,11 @@ export function ArtifactContextWorkbench({
       sessionScopeKey={sessionScopeKey}
       // The drawer needs the tabs as much as the dock does — without them a
       // phone has no way to move between open artifacts at all.
-      headerLeading={hasArtifactTabs ? <ArtifactTabStrip className="flex-1" /> : undefined}
+      headerLeading={
+        hasArtifactTabs ? (
+          <ArtifactTabStrip showSingle={showSingleArtifactTab} className="min-w-0 flex-1" />
+        ) : undefined
+      }
       onEnsureVisible={() => mobile.onOpenChange(true)}
       snapPoint={mobileSnapPoint}
       onSnapPointChange={setMobileSnapPoint}
@@ -412,7 +423,11 @@ export function ArtifactContextWorkbench({
       onModeWidthHint={dockWidthHint}
       resolvedMode={resolvedDockMode}
       onResetLayout={resetDockLayout}
-      headerLeading={hasArtifactTabs ? <ArtifactTabStrip className="flex-1" /> : undefined}
+      headerLeading={
+        hasArtifactTabs ? (
+          <ArtifactTabStrip showSingle={showSingleArtifactTab} className="min-w-0 flex-1" />
+        ) : undefined
+      }
       placement="chat-dock"
       manageOwnWidth={false}
       className="w-full"
@@ -434,16 +449,23 @@ export function SessionContextWorkbench({
   railOnly?: boolean
 }) {
   const workbenchInstanceId = useContextWorkbenchInstanceId(ARTIFACT_DOCK_WORKBENCH_HOST_KEY)
-  // Desktop only: the workbench header renders into the title bar's end
-  // outlet (`title-bar-outlets.tsx`). The mobile drawer keeps its own header,
-  // and a rail-only dock has no header to project.
-  const headerOutlet = useTitleBarProjection("end", { active: !mobile && !railOnly })
-  const activeSessionId = useChatStore((state) => state.activeSessionId)
-  // The conversation's *record* (model, working dir, timestamps) lives in
-  // `sessionStore`; `chatStore.sessions` is the per-session message slice.
-  const session = useSessionStore((state) =>
-    activeSessionId ? (state.sessions.find((s) => s.id === activeSessionId) ?? null) : null
+  const showSingleArtifactTab = useContextWorkbenchStore(
+    (state) => state.navigationStyle !== "rail"
   )
+  // Named tabs need the panel's full width. Compact icon mode can share the
+  // shell title bar; mobile and collapsed docks never project a header.
+  const headerOutlet = useTitleBarProjection("end", {
+    active: !mobile && !railOnly && !showSingleArtifactTab,
+  })
+  const activeSessionId = useChatStore((state) => state.activeSessionId)
+  // Query the same persisted record as the chat. The plugin session adapter is
+  // lazy and may never load in an ordinary conversation.
+  const sessionRecord = useClientLiveQuery(
+    () => (activeSessionId ? getSession(activeSessionId) : Promise.resolve(undefined)),
+    [activeSessionId],
+    undefined
+  )
+  const session = sessionRecord?.id === activeSessionId ? sessionRecord : null
   const sessionProject = useProjectStore((state) =>
     session?.projectId
       ? state.projects.find((project) => project.id === session.projectId)
@@ -475,7 +497,7 @@ export function SessionContextWorkbench({
   // active artifact" is an ordinary state — closing the last artifact you were
   // reading, or coming back to a conversation whose active tab was evicted. The
   // strip used to vanish entirely there, stranding every other open artifact.
-  const hasArtifactTabs = useOpenArtifactTabs().length > 0
+  const hasArtifactTabs = useOpenArtifactTabs(showSingleArtifactTab).length > 0
   const pendingRunLearningCount = useLiveQuery(
     () =>
       activeSessionId
@@ -517,36 +539,62 @@ export function SessionContextWorkbench({
     [activeSessionId, workspaceAvailable]
   )
 
-  return mobile ? (
-    <ContextWorkbenchMobileDrawer
-      open={mobile.open}
-      onOpenChange={mobile.onOpenChange}
-      workbenchInstanceId={workbenchInstanceId}
-      resource={resource}
-      panels={panels}
-      headerLeading={hasArtifactTabs ? <ArtifactTabStrip className="flex-1" /> : undefined}
-      onEnsureVisible={() => mobile.onOpenChange(true)}
-      snapPoint={mobileSnapPoint}
-      onSnapPointChange={setMobileSnapPoint}
-    />
-  ) : (
-    <ContextWorkbench
-      workbenchInstanceId={workbenchInstanceId}
-      resource={resource}
-      panels={panels}
-      headerLeading={hasArtifactTabs ? <ArtifactTabStrip className="flex-1" /> : undefined}
-      onCollapse={() => setDockCollapsed(true)}
-      onEnsureVisible={() => setDockCollapsed(false)}
-      railOnly={railOnly}
-      headerOutlet={headerOutlet}
-      attentionActivity={unreadArtifact ? SESSION_ATTENTION_ACTIVITY : undefined}
-      onModeWidthHint={dockWidthHint}
-      resolvedMode={resolvedDockMode}
-      onResetLayout={resetDockLayout}
-      placement="chat-dock"
-      manageOwnWidth={false}
-      className="w-full"
-    />
+  return (
+    <SessionOverviewContext.Provider
+      value={
+        session
+          ? {
+              session,
+              messages: sessionMessages,
+              messageCount,
+              onNavigate: (panelId) => {
+                useContextWorkbenchStore.getState().navigatePanel(scopeKey, panelId, "wide")
+                dockWidthHint("wide", panelId)
+              },
+            }
+          : null
+      }
+    >
+      {mobile ? (
+        <ContextWorkbenchMobileDrawer
+          open={mobile.open}
+          onOpenChange={mobile.onOpenChange}
+          workbenchInstanceId={workbenchInstanceId}
+          resource={resource}
+          panels={panels}
+          headerLeading={
+            hasArtifactTabs ? (
+              <ArtifactTabStrip showSingle={showSingleArtifactTab} className="min-w-0 flex-1" />
+            ) : undefined
+          }
+          onEnsureVisible={() => mobile.onOpenChange(true)}
+          snapPoint={mobileSnapPoint}
+          onSnapPointChange={setMobileSnapPoint}
+        />
+      ) : (
+        <ContextWorkbench
+          workbenchInstanceId={workbenchInstanceId}
+          resource={resource}
+          panels={panels}
+          headerLeading={
+            hasArtifactTabs ? (
+              <ArtifactTabStrip showSingle={showSingleArtifactTab} className="min-w-0 flex-1" />
+            ) : undefined
+          }
+          onCollapse={() => setDockCollapsed(true)}
+          onEnsureVisible={() => setDockCollapsed(false)}
+          railOnly={railOnly}
+          headerOutlet={headerOutlet}
+          attentionActivity={unreadArtifact ? SESSION_ATTENTION_ACTIVITY : undefined}
+          onModeWidthHint={dockWidthHint}
+          resolvedMode={resolvedDockMode}
+          onResetLayout={resetDockLayout}
+          placement="chat-dock"
+          manageOwnWidth={false}
+          className="w-full"
+        />
+      )}
+    </SessionOverviewContext.Provider>
   )
 }
 

@@ -61,6 +61,29 @@ describe("buildSdkContextBreakdown — categories path", () => {
     expect(out.groups.find((g) => g.id === "skills")).toBeUndefined()
   })
 
+  it("retains zero-token capabilities when the host reports their inventory", () => {
+    const out = buildSdkContextBreakdown({
+      ...base,
+      categories: [
+        { name: "System tools", tokens: 0 },
+        { name: "System tools (deferred)", tokens: 0 },
+        { name: "MCP tools", tokens: 0 },
+        { name: "Skills", tokens: 0 },
+      ],
+      systemTools: [{ name: "Read", tokens: 0 }],
+      deferredBuiltinTools: [{ name: "Write", tokens: 0 }],
+      mcpTools: [{ name: "Search", serverName: "docs", tokens: 0 }],
+      skills: { totalSkills: 2, includedSkills: 0, tokens: 0, skillFrontmatter: [] },
+    })
+    expect(out.groups.map((group) => [group.key, group.itemCount])).toEqual([
+      ["systemTools", 1],
+      ["systemTools:deferred", 1],
+      ["mcp", 1],
+      ["skills", 2],
+    ])
+    expect(out.groups.every((group) => group.tokens === 0 && group.fraction === 0)).toBe(true)
+  })
+
   it("computes each group's share of the whole window", () => {
     const out = buildSdkContextBreakdown(usage)
     expect(out.groups[0].fraction).toBeCloseTo(0.4)
@@ -115,6 +138,34 @@ describe("buildSdkContextBreakdown — derived path (no categories)", () => {
 
   it("omits free space for a full window", () => {
     expect(buildSdkContextBreakdown({ ...base, totalTokens: 100_000 }).free).toBeNull()
+  })
+
+  it("retains skill and deferred tool inventories without counting deferred occupancy", () => {
+    const out = buildSdkContextBreakdown({
+      ...base,
+      totalTokens: 100,
+      systemTools: [{ name: "Read", tokens: 0 }],
+      mcpTools: [{ name: "Search", serverName: "docs", tokens: 0 }],
+      deferredBuiltinTools: [{ name: "Write", tokens: 50 }],
+      skills: {
+        totalSkills: 1,
+        includedSkills: 1,
+        tokens: 20,
+        skillFrontmatter: [{ name: "review", source: "project", tokens: 20 }],
+      },
+    })
+    expect(out.groups.find((group) => group.key === "skills")).toMatchObject({
+      tokens: 20,
+      itemCount: 1,
+    })
+    expect(out.groups.find((group) => group.key === "systemTools:deferred")).toMatchObject({
+      tokens: 50,
+      deferred: true,
+      items: [{ label: "Write", tokens: 50 }],
+    })
+    expect(out.groups.find((group) => group.key === "messages")?.tokens).toBe(80)
+    expect(out.groups.find((group) => group.key === "mcp")?.itemCount).toBe(1)
+    expect(out.groups.find((group) => group.key === "systemTools")?.itemCount).toBe(1)
   })
 })
 

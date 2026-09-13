@@ -31,7 +31,7 @@ import { CANVAS_LAYOUT_DEFAULTS, useCanvasLayoutStore } from "@/stores/canvas/ca
 import { mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
 import { magnetAsPercent, snapPanelSize } from "@/lib/ui/panel-snap"
 import { WORKBENCH_RAIL_WIDTH_PX } from "@/types/shell/workbench-rail"
-import { useWorkbenchRailPersistent } from "@/components/shell/use-workbench-rail-layout"
+import { useEffectiveWorkbenchRailPersistent as useWorkbenchRailPersistent } from "@/components/shell/use-workbench-rail-layout"
 import { CanvasActionsProvider } from "./canvas-actions-context"
 import { CanvasDocumentRail } from "./canvas-document-rail"
 import { CanvasSidePanels } from "./canvas-side-panels"

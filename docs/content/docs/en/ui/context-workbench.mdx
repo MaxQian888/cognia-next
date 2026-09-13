@@ -20,10 +20,39 @@ Each host computes capabilities from the current resource and platform. A native
 
 ## Navigation and layout
 
-- Activity buttons group related panels. Arrow keys, Home, and End move through both activities and grouped tabs with standard tab/tabpanel semantics.
+- Labeled tabs use a row across the right panel’s full width and show open panels by name. Use **Open panel** (`+`) to find another panel and the close button to dismiss a tab. The layout keeps the existing panel navigation and resource scope.
+- Switch between **Labeled tabs** and **Compact icon rail** in the workbench; the choice is remembered. Tab mode collapses the entire right column, even when the saved icon-rail preference keeps icons visible in compact mode.
+- Compact activity buttons group related panels. Arrow keys, Home, and End move through activities and grouped tabs with standard tab/tabpanel semantics.
 - `narrow` uses the host's normal 360px width. `wide` uses about half of the host, clamped to 640–960px. `focus` is an accessible full-screen presentation that restores focus on Escape.
 - Mobile renders a full-width Sheet and intentionally omits desktop-only width and focus controls.
 - Pinning protects the selected panel from automatic reveals. Diagnostics, proposals, selection changes, and plugin requests update pending indicators until the user navigates explicitly or unpins.
+
+## Task overview
+
+Click **Task summary** in the top-right toolbar to open a compact floating card in a 280px reserved area. The card has margins, rounded corners and a shadow, and grows with its content rather than filling the window height.
+On desktop it reserves space beside the conversation, narrowing the chat instead
+of covering messages. Closing it restores the chat width. The summary and full
+workbench share the right-side space: **View details** replaces the summary with
+the existing workbench and preserves the saved workspace width. Small screens
+use a drawer instead of squeezing the chat.
+
+Capabilities start collapsed and results appear only when available. The
+conversation title remains plain text. Search and navigation controls are grouped in the top-right toolbar; history,
+workspace selection and navigation shortcuts remain available in **Navigation**.
+
+The full overview includes open questions and subtasks, configured skills,
+runtime capability snapshots, and technical details. Both presentations reuse
+the same session state and capability/result components.
+
+The overview keeps the existing `metadata` panel ID, so saved layouts and panel
+shortcuts continue to work. Artifact properties remain a separate resource view.
+Technical session fields remain available under **Technical details**.
+
+Configured skills describe the next send; only a supported host snapshot can
+confirm loaded or deferred runtime capabilities. Missing snapshots are shown as
+unavailable. The results list is locked to the current conversation; input
+citations are not counted as generated results. Open a result in its existing
+artifact or workspace view to inspect or edit it.
 
 ## Split view
 

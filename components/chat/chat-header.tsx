@@ -5,13 +5,7 @@ import { createPortal } from "react-dom"
 import { cn } from "@/lib/utils"
 import { useTitleBarProjection } from "@/components/shell/title-bar-outlets"
 import { useTranslations } from "next-intl"
-import {
-  Columns2Icon,
-  ExternalLinkIcon,
-  PanelLeftCloseIcon,
-  PanelLeftOpenIcon,
-  Settings2Icon,
-} from "lucide-react"
+import { Columns2Icon, ExternalLinkIcon, PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
@@ -21,11 +15,10 @@ import { useCharacter } from "@/lib/data-hooks/context"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
 import { PlanModeTasksSheet } from "@/components/chat/plan-mode-tasks-sheet"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { SessionSummaryPopover } from "@/components/context-workbench/session-summary-popover"
 import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
 import { BranchLineageChip } from "@/components/chat/branch-lineage-chip"
 import { ImportedOriginChip } from "@/components/chat/imported-origin-chip"
-import { SessionEnvironmentChip } from "@/components/chat/session-environment-chip"
-import { SharedSessionPanel } from "@/components/chat/shared-session-panel"
 import { BranchChildrenChip } from "@/components/chat/branch-children-chip"
 import { MentionBacklinksChip } from "@/components/chat/mention-backlinks-chip"
 import { RoomParticipantsChip } from "@/components/chat/room-participants-chip"
@@ -34,6 +27,7 @@ import { dispatchSessionToCodexApp } from "@/lib/chat/dispatch-to-codex-app"
 import { PlatformConversationHeader } from "@/components/inbox/platform-conversation-context"
 import { PlatformBadge } from "@/components/inbox/platform-badge"
 import { isTauri } from "@/lib/tauri"
+import { useChatStore } from "@/stores/chat"
 import { useUIStore } from "@/stores/ui"
 import type { ChatSession } from "@cognia/agent-config-types"
 
@@ -52,22 +46,14 @@ interface Props {
 }
 
 /**
- * Chat header — one 36px line: who you are talking to, what it is costing, and
- * two controls.
+ * One title-bar row. A right-side toolbar action opens a lightweight summary;
+ * environment, sharing and settings live there, keeping the two pane toggles
+ * as the default header's only other controls. Contextual lineage, team and
+ * plugin controls still appear when this conversation needs them.
  *
- * It carried six icon buttons and a two-line title. Everything that was not
- * touched per turn moved to where it belongs: the browser-dock opener into the
- * artifact dock's own menu, the agent-flow density switch to the settings sheet
- * that already had a copy of it, and Insights to a row in the same sheet. The
- * conversation-list toggle stays first so it remains reachable after collapse.
- *
- * What stays is either ambient status that self-hides (plan-mode tasks, the
- * `chat.header` plugin slot) or the single owner of a frequent action: session
- * settings and the two pane toggles. Session *shape* and session *status* —
- * the preset pill, the live cost, the no-credential badge — moved to the
- * composer's status line: this row is title-bar chrome now, and those answer
- * "what will this run as / what has it cost", which is the input box's
- * question.
+ * The summary mounts its data readers only when opened and never expands the
+ * dock until the user follows a result or chooses View details. Runtime and
+ * cost controls remain on the composer's status line.
  */
 export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
   const t = useTranslations("chat.header")
@@ -99,6 +85,42 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
   // columns and the conversation title belongs on it. Anywhere else — the
   // mobile shell, a host outside the projection scope — it draws its own row.
   const outlet = useTitleBarProjection("center")
+  const activeSessionId = useChatStore((state) => state.activeSessionId)
+  const ownsSummary = !outlet || !activeSessionId || activeSessionId === session.id
+  const summaryOutlet = useTitleBarProjection("actions", { active: ownsSummary })
+  const summaryControl = (
+    <>
+      {onSplitView && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className={HEADER_ICON_BUTTON}
+          aria-label={tConcurrent("splitView")}
+          onClick={onSplitView}
+        >
+          <Columns2Icon className="size-4" />
+        </Button>
+      )}
+
+      {onExitSplit && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className={HEADER_ICON_BUTTON}
+          aria-label={tConcurrent("exitSplit")}
+          onClick={onExitSplit}
+        >
+          <Columns2Icon className="size-4" />
+        </Button>
+      )}
+
+      <SessionSummaryPopover
+        key={session.id}
+        session={session}
+        onManage={() => setSettingsOpen(true)}
+      />
+    </>
+  )
 
   const content = (
     <>
@@ -149,16 +171,11 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
           target={sessionBacklinkTarget(session.id)}
           excludeSessionId={session.id}
         />
-        <SessionEnvironmentChip
-          executionContext={session.executionContext}
-          onManage={() => setSettingsOpen(true)}
-        />
         {/* Self-hides unless this conversation has more than one participant.
             The fifth question in this row, and the one the header could not
             answer at all: a team of agents, a shared session and an IM group
             all looked exactly like a conversation with one counterpart. */}
         <RoomParticipantsChip session={session} />
-        <SharedSessionPanel session={session} />
       </div>
 
       {/* Plan-mode tasks for a non-team chat. Self-hides (returns null) when the
@@ -188,39 +205,11 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
         </Button>
       ) : null}
 
-      {onSplitView && (
-        <Button
-          variant="ghost"
-          size="icon"
-          className={HEADER_ICON_BUTTON}
-          aria-label={tConcurrent("splitView")}
-          onClick={onSplitView}
-        >
-          <Columns2Icon className="size-4" />
-        </Button>
-      )}
-
-      {onExitSplit && (
-        <Button
-          variant="ghost"
-          size="icon"
-          className={HEADER_ICON_BUTTON}
-          aria-label={tConcurrent("exitSplit")}
-          onClick={onExitSplit}
-        >
-          <Columns2Icon className="size-4" />
-        </Button>
-      )}
-
-      <Button
-        variant="ghost"
-        size="icon"
-        className={HEADER_ICON_BUTTON}
-        aria-label={t("ariaSettings")}
-        onClick={() => setSettingsOpen(true)}
-      >
-        <Settings2Icon className="size-4" />
-      </Button>
+      {ownsSummary
+        ? summaryOutlet
+          ? createPortal(summaryControl, summaryOutlet)
+          : summaryControl
+        : null}
 
       {/* Inline only, for the same reason as the conversation-list toggle
           above: the bar's `secondarySidebarToggle` drives the same dock.

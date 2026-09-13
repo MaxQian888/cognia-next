@@ -42,16 +42,22 @@ import { getArtifactTypeIcon } from "./artifact-icons"
  * at all: passing an element that renders `null` would still read as "the host
  * occupied this slot" and needlessly displace the panel's own tabs.
  */
-export function useOpenArtifactTabs(): string[] {
+export function useOpenArtifactTabs(showSingle = false): string[] {
   const openArtifactIds = useOpenArtifactIds()
   const artifacts = useArtifactStore((state) => state.artifacts)
   const tabs = openArtifactIds.filter((id: string) => artifacts[id])
-  return tabs.length < 2 ? EMPTY_TABS : tabs
+  return tabs.length < (showSingle ? 1 : 2) ? EMPTY_TABS : tabs
 }
 
 const EMPTY_TABS: string[] = []
 
-export function ArtifactTabStrip({ className }: { className?: string }) {
+export function ArtifactTabStrip({
+  className,
+  showSingle = false,
+}: {
+  className?: string
+  showSingle?: boolean
+}) {
   const t = useTranslations("artifacts")
   const tJump = useTranslations("chat.jump")
   const artifacts = useArtifactStore((state) => state.artifacts)
@@ -59,7 +65,7 @@ export function ArtifactTabStrip({ className }: { className?: string }) {
   const setActiveArtifact = useArtifactStore((state) => state.setActiveArtifact)
   const closeArtifact = useArtifactStore((state) => state.closeArtifact)
   const reorderOpenArtifact = useArtifactStore((state) => state.reorderOpenArtifact)
-  const tabs = useOpenArtifactTabs()
+  const tabs = useOpenArtifactTabs(showSingle)
   const [draggedId, setDraggedId] = useState<string | null>(null)
   // Which turn the conversation is scrolled to, so a tab can point back at the
   // message that produced it. Published per *turn change*, not per scroll
@@ -123,6 +129,7 @@ export function ArtifactTabStrip({ className }: { className?: string }) {
                 }}
                 className={cn(
                   "group relative flex min-w-0 shrink items-center gap-1 rounded-md pr-0.5 pl-1.5",
+                  showSingle && "shrink-0",
                   !active && "hover:bg-accent/50",
                   // A ring rather than a fill: "selected" is already spending the
                   // background, and these two are independent — the tab you are

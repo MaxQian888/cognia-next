@@ -3,11 +3,14 @@
  */
 
 let mockStatus = "idle"
+let mockSessionStatus = "idle"
 let mockRuntime = "claude-agent-sdk"
 jest.mock("@/stores/chat", () => ({
+  useSessionStatus: (sessionId: string | null) => (sessionId === "s1" ? mockSessionStatus : "idle"),
   useChatStore: (sel: (s: unknown) => unknown) =>
     sel({
       status: mockStatus,
+      sessions: { s1: { status: mockSessionStatus } },
       lastSendBySession: {
         s1: { options: { execution: { hostRef: "desktop-sidecar", runtimeAdapter: mockRuntime } } },
       },
@@ -35,6 +38,7 @@ const SNAP = { totalTokens: 10, maxTokens: 100, percentage: 0.1 }
 beforeEach(() => {
   jest.clearAllMocks()
   mockStatus = "idle"
+  mockSessionStatus = "idle"
   mockRuntime = "claude-agent-sdk"
   mockHostProfile.mockReturnValue("desktop")
 })
@@ -100,13 +104,26 @@ describe("useSdkContextUsage", () => {
 
   it("refreshes once after a turn completes (busy → idle)", async () => {
     getSessionContextUsage.mockResolvedValue(SNAP)
-    mockStatus = "streaming"
+    mockSessionStatus = "streaming"
     const { rerender } = renderHook(() => useSdkContextUsage("s1"))
     await waitFor(() => expect(getSessionContextUsage).toHaveBeenCalled())
     getSessionContextUsage.mockClear()
-    mockStatus = "idle"
+    mockSessionStatus = "idle"
     rerender()
     await waitFor(() => expect(getSessionContextUsage).toHaveBeenCalledWith("s1"))
+  })
+
+  it("ignores completion in another session while its own session remains idle", async () => {
+    getSessionContextUsage.mockResolvedValue(SNAP)
+    mockStatus = "streaming"
+    const { rerender } = renderHook(() => useSdkContextUsage("s1"))
+    await waitFor(() => expect(getSessionContextUsage).toHaveBeenCalledTimes(1))
+    mockStatus = "idle"
+    rerender()
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(getSessionContextUsage).toHaveBeenCalledTimes(1)
   })
 
   it("exposes a manual refresh", async () => {

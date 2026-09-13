@@ -111,29 +111,28 @@ describe("TitleBarSearchPill", () => {
   })
 })
 
-// The pill briefly had a compact (icon + shortcut) variant the bar asked for
-// while a chat header projected beside it. It is gone: the bar's segments are
-// constant on every route now, so the top row does not reshape itself as the
-// chat column comes and goes (`components/desktop/title-bar.tsx`).
-describe("TitleBarSearchPill — one shape on every route", () => {
-  it("keeps the label, the shortcut and the placeholder name beside a projected chat header", () => {
+describe("compact search beside the conversation title", () => {
+  it("omits duplicate title and shortcut text while retaining accessible search and run state", () => {
     labelRef.value = "Refactor the parser"
-    focusedOnly("idle")
+    chatRef.sessions = { a: { status: "streaming" }, b: { status: "streaming" } }
     render(
       <TitleBarSearchPill
         appName="Cognia"
         separator=" — "
-        placeholder="Search or jump to…"
+        placeholder="Search"
         kbdHint="⌘K"
         onClick={onClick}
+        compact
       />
     )
-    const pill = screen.getByTestId("title-bar-search-pill")
-    expect(pill).not.toHaveAttribute("data-compact")
-    expect(screen.getByTestId("title-bar-title")).toHaveTextContent("Cognia — Refactor the parser")
-    expect(pill).toHaveTextContent("⌘K")
-    expect(pill).toHaveAccessibleName("Search or jump to…")
-    fireEvent.click(pill)
+    const button = screen.getByRole("button", { name: "Search" })
+    expect(button).toHaveAttribute("data-compact", "true")
+    expect(button).toHaveAttribute("title", "Search (⌘K)")
+    expect(screen.queryByTestId("title-bar-title")).not.toBeInTheDocument()
+    expect(screen.queryByText("⌘K")).not.toBeInTheDocument()
+    expect(screen.getByTestId("title-bar-streaming-dot")).toBeInTheDocument()
+    expect(screen.getByTestId("title-bar-background-count")).toBeInTheDocument()
+    fireEvent.click(button)
     expect(onClick).toHaveBeenCalledTimes(1)
   })
 })

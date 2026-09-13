@@ -147,3 +147,49 @@ describe("useArtifactList", () => {
     expect(result.current.pendingDelete).toBeNull()
   })
 })
+
+describe("locked session overview", () => {
+  it("ignores recent scope and global filters without changing the workspace", () => {
+    const store = useArtifactStore.getState()
+    store.createArtifact({
+      sessionId: "s1",
+      messageId: "m",
+      type: "code",
+      title: "Current",
+      content: "x",
+    })
+    store.createArtifact({
+      sessionId: "s2",
+      messageId: "m",
+      type: "code",
+      title: "Other",
+      content: "y",
+    })
+    store.setArtifactWorkspaceScope("recent")
+    store.setArtifactWorkspaceFilters({ searchQuery: "no-match" })
+    const { result, rerender } = renderHook(
+      ({ sessionId }) => useArtifactList({ sessionId, lockSessionScope: true }),
+      { initialProps: { sessionId: "s1" } }
+    )
+    expect(result.current.sessionArtifacts.map((artifact) => artifact.title)).toEqual(["Current"])
+    expect(result.current.scope).toBe("session")
+    expect(useArtifactStore.getState().artifactWorkspace.scope).toBe("recent")
+    rerender({ sessionId: "s2" })
+    expect(result.current.sessionArtifacts.map((artifact) => artifact.title)).toEqual(["Other"])
+    rerender({ sessionId: "empty" })
+    expect(result.current.hasAnyArtifacts).toBe(false)
+  })
+})
+
+it("returns no rows without a session and supports the existing scope navigation", () => {
+  useChatStore.setState({ activeSessionId: null })
+  const locked = renderHook(() => useArtifactList({ lockSessionScope: true }))
+  expect(locked.result.current.sessionArtifacts).toEqual([])
+  locked.unmount()
+  const { result } = renderHook(() => useArtifactList({}))
+  expect(result.current.sessionArtifacts).toEqual([])
+  act(() => result.current.setScope("recent"))
+  expect(useArtifactStore.getState().artifactWorkspace.scope).toBe("recent")
+  act(() => result.current.setScope("session"))
+  expect(useArtifactStore.getState().artifactWorkspace.sessionId).toBeNull()
+})

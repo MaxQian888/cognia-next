@@ -6,9 +6,11 @@ import { act, renderHook } from "@testing-library/react"
 
 import {
   useWorkbenchRailLayout,
+  useEffectiveWorkbenchRailPersistent,
   useWorkbenchRailPersistent,
   workbenchRailLayoutOf,
 } from "./use-workbench-rail-layout"
+import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { CONTEXT_ACTIVITY_RAIL_ORDER } from "@/types/context-workbench"
 import {
@@ -226,5 +228,18 @@ describe("useWorkbenchRailLayout — partial and repeat writes", () => {
     })
     expect(lastSaved().hidden).toEqual(["ai"])
     expect(lastSaved().order).toEqual([...CONTEXT_ACTIVITY_RAIL_ORDER])
+  })
+})
+
+describe("useEffectiveWorkbenchRailPersistent", () => {
+  it("closes tab mode completely and restores the saved rail preference on switching back", () => {
+    useSettingsStore.setState({ settings: { workbenchRailPersistent: true } as never })
+    useContextWorkbenchStore.setState({ navigationStyle: "tabs" })
+    const { result } = renderHook(() => useEffectiveWorkbenchRailPersistent())
+    expect(result.current).toBe(false)
+    act(() => useContextWorkbenchStore.setState({ navigationStyle: "rail" }))
+    expect(result.current).toBe(true)
+    act(() => useSettingsStore.setState({ settings: { workbenchRailPersistent: false } as never }))
+    expect(result.current).toBe(false)
   })
 })

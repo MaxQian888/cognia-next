@@ -4,6 +4,13 @@
 
 import { render, screen, fireEvent, act } from "@testing-library/react"
 import { useEffect } from "react"
+import {
+  TitleBarOutletsProvider,
+  TitleBarProjectionScope,
+  useTitleBarOutletRef,
+} from "@/components/shell/title-bar-outlets"
+import { useClientLiveQuery } from "@/hooks/data/use-client-live-query"
+import { getSession } from "@/lib/db/sessions"
 
 let workspaceAvailable = true
 
@@ -155,6 +162,28 @@ jest.mock("@/stores/chat/session-store", () => ({
     selector({ sessions: mockSessionRecord ? [mockSessionRecord] : [] }),
 }))
 
+jest.mock("@/lib/db/sessions", () => ({ getSession: jest.fn(async () => undefined) }))
+jest.mock("@/hooks/data/use-client-live-query", () => ({
+  useClientLiveQuery: jest.fn(() => mockSessionRecord),
+}))
+jest.mock("@/components/context-workbench/session-overview-panel", () => {
+  const React = jest.requireActual("react")
+  const SessionOverviewContext = React.createContext(null)
+  return {
+    SessionOverviewContext,
+    SessionOverviewPanelHost: () => {
+      const props = React.useContext(SessionOverviewContext)
+      return props ? (
+        <div data-testid="session-overview-panel">
+          {props.session.model} {props.session.providerOverride} {props.session.workingDir}{" "}
+          {props.messageCount} {props.session.id}
+          <button onClick={() => props.onNavigate("run-context")}>Open run context</button>
+        </div>
+      ) : null
+    },
+  }
+})
+
 let mockProjects: Array<{ id: string; roots: Array<{ id: string; path: string }> }> = []
 jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: (
@@ -218,7 +247,11 @@ beforeEach(() => {
       artifacts: {},
       pendingReviews: {},
     })
-    useContextWorkbenchStore.setState({ layouts: {}, sessionOverrides: {} })
+    useContextWorkbenchStore.setState({
+      layouts: {},
+      sessionOverrides: {},
+      navigationStyle: "rail",
+    })
   })
 })
 
@@ -597,10 +630,15 @@ describe("ArtifactDock — converged workbench shell", () => {
         useContextWorkbenchStore.getState().navigatePanel(SESSION_SCOPE, "metadata", "narrow")
       })
 
-      expect(screen.getByText("claude-opus-5")).toBeInTheDocument()
-      expect(screen.getByText("anthropic")).toBeInTheDocument()
-      expect(screen.getByText("/repo")).toBeInTheDocument()
-      expect(screen.getByText("sess-1")).toBeInTheDocument()
+      const overview = screen.getByTestId("session-overview-panel")
+      expect(overview).toHaveTextContent("claude-opus-5")
+      expect(overview).toHaveTextContent("anthropic")
+      expect(overview).toHaveTextContent("/repo")
+      expect(overview).toHaveTextContent("sess-1")
+      fireEvent.click(screen.getByRole("button", { name: "Open run context" }))
+      expect(useContextWorkbenchStore.getState().layouts[SESSION_SCOPE].activePanelId).toBe(
+        "run-context"
+      )
     })
 
     it("opens a searchable source explorer for the active conversation", () => {
@@ -700,6 +738,40 @@ describe("ArtifactDock — converged workbench shell", () => {
         screen.queryByRole("button", { name: "projectOverview.panelTitle" })
       ).not.toBeInTheDocument()
     })
+  })
+
+  it("uses the full panel width for labels and projects only compact navigation", () => {
+    function HeaderOutlet() {
+      const ref = useTitleBarOutletRef("end")
+      return <div ref={ref} data-testid="title-outlet" />
+    }
+    useContextWorkbenchStore.setState({ navigationStyle: "tabs" })
+    render(
+      <TitleBarOutletsProvider>
+        <HeaderOutlet />
+        <TitleBarProjectionScope enabled>
+          <ArtifactDock />
+        </TitleBarProjectionScope>
+      </TitleBarOutletsProvider>
+    )
+    const tabs = screen.getByTestId("context-workbench-panel-tabs")
+    expect(screen.getByTestId("context-workbench")).toContainElement(tabs)
+    expect(screen.getByTestId("title-outlet")).toBeEmptyDOMElement()
+    act(() => useContextWorkbenchStore.setState({ navigationStyle: "rail" }))
+    expect(screen.getByTestId("title-outlet")).not.toBeEmptyDOMElement()
+  })
+
+  it("labels a single artifact in tab mode and preserves the compact rail presentation", () => {
+    activateArtifact()
+    act(() => useArtifactStore.setState({ openArtifactIdsBySession: { "sess-1": ["artifact-1"] } }))
+    act(() => useContextWorkbenchStore.setState({ navigationStyle: "tabs" }))
+    render(<ArtifactDock />)
+    expect(screen.getByTestId("artifact-tab-strip")).toBeInTheDocument()
+    expect(screen.getByTestId("context-workbench-panel-tabs")).toBeInTheDocument()
+    expect(screen.queryByTestId("context-workbench-activity-rail")).not.toBeInTheDocument()
+    act(() => useContextWorkbenchStore.setState({ navigationStyle: "rail" }))
+    expect(screen.queryByTestId("artifact-tab-strip")).not.toBeInTheDocument()
+    expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
   })
 
   it("keeps the artifact tabs on the session surface when no artifact is active", () => {
@@ -1220,4 +1292,28 @@ describe("ArtifactDock — the header tab strip", () => {
     )
     expect(screen.getByTestId("artifact-tab-strip")).toBeInTheDocument()
   })
+})
+
+it("does not expose the old live record while the new session query resolves", () => {
+  mockSessionRecord = { id: "sess-old", model: "old-model", createdAt: 0, updatedAt: 0 }
+  const view = render(<SessionContextWorkbench />)
+  act(() =>
+    useContextWorkbenchStore
+      .getState()
+      .navigatePanel("test-workbench::session:sess-1", "metadata", "narrow")
+  )
+  expect(screen.queryByTestId("session-overview-panel")).not.toBeInTheDocument()
+  mockSessionRecord = { id: "sess-1", model: "new-model", createdAt: 0, updatedAt: 0 }
+  view.rerender(<SessionContextWorkbench />)
+  expect(screen.getByTestId("session-overview-panel")).toHaveTextContent("new-model")
+  expect(screen.queryByText("old-model")).not.toBeInTheDocument()
+})
+
+it("queries the persisted session by the bound ID without loading the plugin adapter", async () => {
+  render(<SessionContextWorkbench />)
+  const calls = (useClientLiveQuery as jest.Mock).mock.calls
+  const [query, dependencies] = calls.at(-1) as [() => Promise<unknown>, unknown[]]
+  expect(dependencies).toEqual(["sess-1"])
+  await query()
+  expect(getSession).toHaveBeenCalledWith("sess-1")
 })

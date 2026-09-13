@@ -83,7 +83,7 @@ export interface ContextGroup {
 }
 
 export interface ContextBreakdown {
-  /** Occupied groups, largest first. Never includes `free`. */
+  /** Occupied or inventoried groups, largest first. Never includes `free`. */
   groups: ContextGroup[]
   /** The unused remainder, when it can be computed. */
   free: ContextGroup | null
@@ -251,9 +251,12 @@ export function buildSdkContextBreakdown(usage: SdkContextUsage): ContextBreakdo
   if (usage.categories?.length) {
     for (const category of usage.categories) {
       const tokens = category.tokens ?? 0
-      if (tokens <= 0) continue
       const id = classifyCategory(category.name)
       const deferred = Boolean(category.isDeferred) || DEFERRED_SUFFIX.test(category.name)
+      const items = deferred ? deferredItemsFor(usage, id) : itemsFor(usage, id)
+      const count = deferred ? null : declaredCount(usage, id)
+      // Zero schema tokens do not mean an explicitly reported tool is absent.
+      if (tokens <= 0 && items.length === 0 && !count) continue
       const rawName = category.name.replace(DEFERRED_SUFFIX, "").trim()
       if (id === "free") {
         free = makeGroup("free", tokens, maxTokens, { key: uniqueKey("free") })
@@ -267,8 +270,8 @@ export function buildSdkContextBreakdown(usage: SdkContextUsage): ContextBreakdo
           // Deferred rows describe tools that are NOT in the window, so the
           // loaded item lists never attach to them — only the SDK's own
           // deferred inventory does.
-          items: deferred ? deferredItemsFor(usage, id) : itemsFor(usage, id),
-          count: deferred ? null : declaredCount(usage, id),
+          items,
+          count,
         })
       )
     }
@@ -280,16 +283,29 @@ export function buildSdkContextBreakdown(usage: SdkContextUsage): ContextBreakdo
       ["memory", sumTokens(usage.memoryFiles)],
       ["agents", sumTokens(usage.agents)],
       ["commands", usage.slashCommands?.tokens ?? 0],
+      ["skills", usage.skills?.tokens ?? 0],
     ]
     let attributed = 0
     for (const [id, tokens] of derived) {
-      if (tokens <= 0) continue
+      const items = itemsFor(usage, id)
+      const count = declaredCount(usage, id)
+      if (tokens <= 0 && items.length === 0 && !count) continue
       attributed += tokens
       groups.push(
         makeGroup(id, tokens, maxTokens, {
           key: uniqueKey(id),
-          items: itemsFor(usage, id),
-          count: declaredCount(usage, id),
+          items,
+          count,
+        })
+      )
+    }
+    const deferredTools = deferredItemsFor(usage, "systemTools")
+    if (deferredTools.length > 0) {
+      groups.push(
+        makeGroup("systemTools", sumTokens(deferredTools), maxTokens, {
+          key: uniqueKey("systemTools:deferred"),
+          deferred: true,
+          items: deferredTools,
         })
       )
     }

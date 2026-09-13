@@ -8,7 +8,7 @@
  * plus a 44 / 36 / 40px header per column) and the web shell had the three
  * stepped headers and no bar at all. Now `TitleBar` (`components/desktop/`)
  * renders one bar on both platforms and exposes three portal outlets — one per
- * structural zone — and each column's header renders its content *into* the
+ * structural zone — plus an independent actions outlet in the right chrome. Each column's header renders its content *into* the
  * outlet above it instead of drawing its own row:
  *
  *   ┌────────────┬────────────────────────────┬──────────────┐  ← TitleBar, 40px
@@ -52,9 +52,9 @@ import {
   type ReactNode,
 } from "react"
 
-export type TitleBarZone = "start" | "center" | "end"
+export type TitleBarZone = "start" | "center" | "end" | "actions"
 
-export const TITLE_BAR_ZONES: readonly TitleBarZone[] = ["start", "center", "end"]
+export const TITLE_BAR_ZONES: readonly TitleBarZone[] = ["start", "center", "end", "actions"]
 
 type OutletElements = Record<TitleBarZone, HTMLElement | null>
 type ProjectionCounts = Record<TitleBarZone, number>
@@ -67,8 +67,8 @@ interface TitleBarOutletsContextValue {
   registerProjection: (zone: TitleBarZone) => () => void
 }
 
-const EMPTY_OUTLETS: OutletElements = { start: null, center: null, end: null }
-const ZERO_PROJECTIONS: ProjectionCounts = { start: 0, center: 0, end: 0 }
+const EMPTY_OUTLETS: OutletElements = { start: null, center: null, end: null, actions: null }
+const ZERO_PROJECTIONS: ProjectionCounts = { start: 0, center: 0, end: 0, actions: 0 }
 
 const TitleBarOutletsContext = createContext<TitleBarOutletsContextValue | null>(null)
 const TitleBarProjectionScopeContext = createContext(false)
@@ -129,8 +129,13 @@ export function useTitleBarProjectionState(): Record<TitleBarZone, boolean> {
   const ctx = useContext(TitleBarOutletsContext)
   const counts = ctx?.projections ?? ZERO_PROJECTIONS
   return useMemo(
-    () => ({ start: counts.start > 0, center: counts.center > 0, end: counts.end > 0 }),
-    [counts.start, counts.center, counts.end]
+    () => ({
+      start: counts.start > 0,
+      center: counts.center > 0,
+      end: counts.end > 0,
+      actions: counts.actions > 0,
+    }),
+    [counts.start, counts.center, counts.end, counts.actions]
   )
 }
 

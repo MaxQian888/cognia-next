@@ -14,17 +14,25 @@ function Bar() {
   const start = useTitleBarOutletRef("start")
   const center = useTitleBarOutletRef("center")
   const end = useTitleBarOutletRef("end")
+  const actions = useTitleBarOutletRef("actions")
   const projected = useTitleBarProjectionState()
   return (
     <div data-testid="bar" data-projected={JSON.stringify(projected)}>
       <div ref={start} data-testid="outlet-start" />
       <div ref={center} data-testid="outlet-center" />
       <div ref={end} data-testid="outlet-end" />
+      <div ref={actions} data-testid="outlet-actions" />
     </div>
   )
 }
 
-function ColumnHeader({ zone, active }: { zone: "start" | "center" | "end"; active?: boolean }) {
+function ColumnHeader({
+  zone,
+  active,
+}: {
+  zone: "start" | "center" | "end" | "actions"
+  active?: boolean
+}) {
   const outlet = useTitleBarProjection(zone, { active })
   const content = <span data-testid={`header-${zone}`}>{zone} header</span>
   return outlet ? createPortal(content, outlet) : <header data-testid="inline">{content}</header>
@@ -47,8 +55,21 @@ function Shell({ children }: { children: ReactNode }) {
 }
 
 describe("title-bar outlets", () => {
-  it("names the three structural zones", () => {
-    expect(TITLE_BAR_ZONES).toEqual(["start", "center", "end"])
+  it("projects actions without reserving the dock outlet", () => {
+    render(
+      <Shell>
+        <TitleBarProjectionScope enabled>
+          <ColumnHeader zone="actions" />
+        </TitleBarProjectionScope>
+      </Shell>
+    )
+    expect(screen.getByTestId("outlet-actions")).toContainElement(
+      screen.getByTestId("header-actions")
+    )
+    expect(projectedState()).toEqual({ start: false, center: false, end: false, actions: true })
+  })
+  it("names the structural and independent action zones", () => {
+    expect(TITLE_BAR_ZONES).toEqual(["start", "center", "end", "actions"])
   })
 
   it("draws inline when there is no provider at all (the mobile shell)", () => {
@@ -79,7 +100,7 @@ describe("title-bar outlets", () => {
     expect(screen.getByTestId("outlet-center")).toContainElement(
       screen.getByTestId("header-center")
     )
-    expect(projectedState()).toEqual({ start: false, center: true, end: false })
+    expect(projectedState()).toEqual({ start: false, center: true, end: false, actions: false })
   })
 
   it("lets a nested scope switch projection back off (the rail's mobile Sheet)", () => {
@@ -164,6 +185,11 @@ describe("title-bar outlets", () => {
       state: useTitleBarProjectionState(),
     }))
     act(() => result.current.ref(document.createElement("div")))
-    expect(result.current.state).toEqual({ start: false, center: false, end: false })
+    expect(result.current.state).toEqual({
+      start: false,
+      center: false,
+      end: false,
+      actions: false,
+    })
   })
 })

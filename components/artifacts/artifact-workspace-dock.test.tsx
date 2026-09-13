@@ -1,6 +1,7 @@
 /**
  * @jest-environment jsdom
  */
+import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 
 import { render, screen, act, waitFor } from "@testing-library/react"
 
@@ -192,8 +193,10 @@ import {
   ArtifactWorkspaceDock,
   DOCK_RESIZE_DURATION_MS,
   DOCK_RESIZE_EASE,
+  SUMMARY_DOCK_WIDTH_PX,
   dockCapForChatFloor,
 } from "./artifact-workspace-dock"
+import { SHELL_DOCK_TIMING_CLASS } from "@/lib/ui/shell-dock-motion"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
@@ -251,6 +254,20 @@ describe("ArtifactWorkspaceDock", () => {
     expect(screen.getByTestId("chat")).toBeInTheDocument()
     expect(screen.getByTestId("dock")).toBeInTheDocument()
     expect(screen.queryByTestId("sheet-panel")).not.toBeInTheDocument()
+  })
+
+  it("fully closes labeled tabs despite a saved persistent icon rail preference", () => {
+    useContextWorkbenchStore.setState({ navigationStyle: "tabs" })
+    useArtifactDockLayoutStore.getState().setDockCollapsed(true)
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+    expect(screen.getByTestId("chat")).toBeInTheDocument()
+    expect(screen.queryByTestId("dock")).not.toBeInTheDocument()
+    act(() => useContextWorkbenchStore.setState({ navigationStyle: "rail" }))
+    expect(screen.getByTestId("dock")).toHaveAttribute("data-rail-only", "true")
   })
 
   it("drops the panel body behind a collapsed dock, but only after it has retracted", async () => {
@@ -1264,4 +1281,70 @@ describe("dock motion tokens", () => {
     expect(snapshotRules).not.toContain("object-fit:cover")
     expect(snapshotRules).not.toContain("mix-blend-mode:normal")
   })
+})
+
+beforeEach(() => {
+  useContextWorkbenchStore.setState({ navigationStyle: "rail" })
+})
+
+it("desktop reserves a fixed compact summary region and unmounts the full workspace", () => {
+  render(
+    <ArtifactWorkspaceDock>
+      <div data-testid="chat" />
+    </ArtifactWorkspaceDock>
+  )
+  const summary = screen.getByTestId("session-summary-dock")
+  // The column stays mounted at zero width so opening it is a transition
+  // rather than a one-frame appearance; `inert` + `aria-hidden` are what keep a
+  // zero-width column out of the tab order and the a11y tree, which `hidden`
+  // used to do at the cost of any animation at all.
+  expect(summary).toHaveClass("w-0", "overflow-hidden")
+  expect(summary).toHaveAttribute("inert")
+  expect(summary).toHaveAttribute("aria-hidden", "true")
+  act(() => useArtifactDockLayoutStore.getState().requestDockSize(43))
+  act(() => useArtifactDockLayoutStore.getState().openSummary(SESSION))
+  expect(summary).toBeVisible()
+  expect(summary).toHaveClass("w-[280px]", "shrink-0")
+  expect(summary).not.toHaveAttribute("inert")
+  expect(summary).not.toHaveClass("border-l", "bg-background")
+  // Armed for exactly one open/collapse, on the shell's shared clock.
+  expect(summary.className).toContain("transition-[width]")
+  expect(summary.className).toContain(SHELL_DOCK_TIMING_CLASS)
+  // The literal above cannot interpolate the constant the fit check uses.
+  expect(summary.className).toContain(`w-[${SUMMARY_DOCK_WIDTH_PX}px]`)
+  // The card is held at its final width behind the clip, so it slides out from
+  // the window edge instead of being squeezed into view.
+  const host = screen.getByTestId("session-summary-dock-inner")
+  expect(host).toHaveClass("w-[280px]", "p-3")
+  expect(screen.queryByTestId("dock")).not.toBeInTheDocument()
+  expect(screen.getByTestId("resizable-panel-artifact-dock")).toHaveAttribute("data-max", "0%")
+  expect(useArtifactDockLayoutStore.getState().dockSize).toBe(43)
+  act(() => useArtifactDockLayoutStore.getState().closeSummary())
+  expect(summary).toHaveClass("w-0")
+  expect(summary).toHaveAttribute("inert")
+  expect(useArtifactDockLayoutStore.getState().dockSize).toBe(43)
+})
+it("uses the drawer host when the desktop workspace cannot retain a readable chat", () => {
+  const rectangle = jest.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+    width: 600,
+    height: 600,
+    x: 0,
+    y: 0,
+    top: 0,
+    left: 0,
+    right: 600,
+    bottom: 600,
+    toJSON: () => ({}),
+  })
+  render(
+    <ArtifactWorkspaceDock>
+      <div data-testid="chat" />
+    </ArtifactWorkspaceDock>
+  )
+  act(() => useArtifactDockLayoutStore.getState().openSummary(SESSION))
+  // Below the fit threshold the column never opens, so the popover falls back
+  // to its drawer host rather than portalling into a column that is not there.
+  expect(screen.getByTestId("session-summary-dock")).toHaveClass("w-0")
+  expect(screen.getByTestId("session-summary-dock")).toHaveAttribute("inert")
+  rectangle.mockRestore()
 })

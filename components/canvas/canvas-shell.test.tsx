@@ -1,6 +1,7 @@
 /**
  * Tests for CanvasShell — desktop resizable layout + mobile Sheet fallback.
  */
+import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 
 import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
@@ -335,4 +336,8 @@ describe("CanvasShell", () => {
       expect(wrapper).toHaveStyle({ opacity: "0" })
     })
   })
+})
+
+beforeEach(() => {
+  useContextWorkbenchStore.setState({ navigationStyle: "rail" })
 })

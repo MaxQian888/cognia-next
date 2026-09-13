@@ -24,6 +24,7 @@ import {
   type WorkbenchRailCatalogItem,
 } from "@/lib/shell/workbench-rail"
 import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
+import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import {
   DEFAULT_WORKBENCH_RAIL_LAYOUT,
@@ -88,6 +89,13 @@ export function useWorkbenchRailPersistent(): boolean {
   return useSettingsStore(
     (s) => s.settings?.workbenchRailPersistent ?? DEFAULT_WORKBENCH_RAIL_PERSISTENT
   )
+}
+
+/** A labeled-tab workspace closes completely; the saved rail preference stays intact. */
+export function useEffectiveWorkbenchRailPersistent(): boolean {
+  const persistent = useWorkbenchRailPersistent()
+  const navigationStyle = useContextWorkbenchStore((state) => state.navigationStyle)
+  return persistent && navigationStyle === "rail"
 }
 
 /**

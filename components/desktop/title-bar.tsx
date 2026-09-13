@@ -228,14 +228,9 @@ export function TitleBar() {
   // centre is exactly the chat column. Measured, not derived: both columns
   // animate, and the bar has to track them frame for frame.
   //
-  // What projection does NOT do any more is change the bar's own segments. The
-  // search pill used to go compact and the two sidebar toggles used to drop out
-  // while the chat header was up, which meant the top row was one shape inside
-  // a conversation and a different one everywhere else — on the team workspace,
-  // on /workflows, on the welcome screen. A shell bar that redraws itself as
-  // you navigate reads as flickering, so the segments are constant now and only
-  // the outlets' contents vary. The chat header drops its own duplicates of the
-  // two toggles instead (`components/chat/chat-header.tsx`).
+  // The conversation header supplies the task title. In that surface, search
+  // becomes compact and secondary navigation moves into a menu; sidebar and
+  // workspace actions remain available through their existing components.
   //
   // `projected.start` still folds the Windows/Linux menubar into the hamburger:
   // that one is spatial, not cosmetic — the menus would otherwise sit over the
@@ -244,6 +239,7 @@ export function TitleBar() {
   const startOutletRef = useTitleBarOutletRef("start")
   const centerOutletRef = useTitleBarOutletRef("center")
   const endOutletRef = useTitleBarOutletRef("end")
+  const actionsOutletRef = useTitleBarOutletRef("actions")
   const measuredRailPx = useShellColumnsStore((s) => s.widths.rail)
   const sidebarPx = useShellColumnsStore((s) => s.widths.sidebar)
   const dockPx = useShellColumnsStore((s) => s.widths.dock)
@@ -378,16 +374,6 @@ export function TitleBar() {
   const centreDeficitPx = barPx > 0 ? Math.max(0, centreFloorPx - centreUnclampedPx) : 0
   const endOutletPx = Math.max(0, columnEndPx - centreDeficitPx)
   const startOutletPx = Math.max(0, columnStartPx - Math.max(0, centreDeficitPx - columnEndPx))
-  // While the centre is being *held* at that floor there is no slack to centre
-  // anything in, and the counterweight below would only take the room back off
-  // the projected chat header. It stands down for exactly that case — which is
-  // the deficit having actually been taken off an outlet, not the raw centre
-  // width. A bar with nothing projected beside it (or one narrow enough that
-  // the chrome alone puts the centre under half) has no outlet to reclaim from,
-  // so shaving nothing while dropping the counterweight would only shove the
-  // cluster off-centre — the very thing the counterweight exists to prevent.
-  const reclaimedFromOutletsPx = Math.min(centreDeficitPx, columnStartPx + columnEndPx)
-  const centreHasSlack = barPx === 0 || reclaimedFromOutletsPx === 0
   // With the conversation rail's header in the bar the Windows/Linux menubar
   // would sit over that column and push its header off its own rail, so the
   // menus fold into the hamburger whenever the start zone is projected — the
@@ -1381,41 +1367,19 @@ export function TitleBar() {
           data-tauri-drag-region
           className="flex flex-1 items-center justify-center gap-1 px-2 min-w-0"
         >
-          {/* With the chat header projected the zone reads left to right as
-              the chat column does: the header (title, chips, actions) at the
-              column's leading edge, then the bar's own segments in their usual
-              order — route history, workspace pill, the VS Code-style search /
-              palette pill, command centre. Nothing is dropped; the header
-              simply goes first. */}
+          {/* The task title leads. Search and navigation stay compact while a
+              conversation header owns the center outlet. */}
           <div
             ref={centerOutletRef}
             data-testid="title-bar-outlet-center"
             hidden={!projected.center}
             className="flex h-full min-w-0 flex-1 items-center"
           />
-          <TitleBarZone items={bar.zones.center} ctx={itemCtx} />
+          {!projected.center && <TitleBarZone items={bar.zones.center} ctx={itemCtx} />}
           <PluginExtensionSlot
             point="toolbar.center"
             className="ml-2 flex items-center gap-1 empty:hidden"
           />
-          {/* Counterweight to the outlet. The outlet is `flex-1`, so with a
-              header projected it swallows every pixel of slack and shoves the
-              segments against the bar's trailing chrome — the search pill sat
-              centred on every route *except* inside a conversation. Mirroring
-              the outlet's flex weight on the far side keeps the cluster centred
-              in the chat column either way. Rendered only while the outlet is,
-              so the un-projected bar keeps the exact layout it had — and only
-              while the centre is above its floor (`centreHasSlack`): an equal
-              share of *no* slack is not centring, it is taking half of what is
-              left off the conversation title. */}
-          {projected.center && centreHasSlack ? (
-            <div
-              aria-hidden
-              data-tauri-drag-region
-              data-testid="title-bar-center-counterweight"
-              className="h-full min-w-0 flex-1"
-            />
-          ) : null}
         </div>
 
         {/* Artifact-dock header lands here, sized to the dock below. */}
@@ -1427,13 +1391,25 @@ export function TitleBar() {
           style={{ width: endOutletPx }}
         />
 
-        <div ref={rightChromeRef} className="flex items-center">
+        <div
+          ref={rightChromeRef}
+          data-testid="title-bar-right-chrome"
+          className="flex items-center"
+        >
+          {projected.center && <TitleBarZone items={bar.zones.center} ctx={itemCtx} compact />}
           <PluginExtensionSlot
             point="toolbar.right"
             className="flex items-center gap-1 px-1 empty:hidden"
           />
 
           <TitleBarZone items={bar.zones.end} ctx={itemCtx} />
+
+          <div
+            ref={actionsOutletRef}
+            data-testid="title-bar-outlet-actions"
+            hidden={!projected.actions}
+            className="flex h-full shrink-0 items-center"
+          />
 
           {windowChrome ? (
             <div className="flex items-center">

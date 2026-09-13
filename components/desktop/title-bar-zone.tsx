@@ -13,7 +13,10 @@
  * min/max/close cluster, and the `toolbar.*` plugin extension slots.
  */
 
-import { SparklesIcon } from "lucide-react"
+import { useTranslations } from "next-intl"
+import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { EllipsisIcon, SparklesIcon } from "lucide-react"
 
 import { AccountBarButton } from "@/components/account/account-bar-button"
 import { TitleBarCommandCenterMenu } from "@/components/desktop/title-bar-command-center-menu"
@@ -54,20 +57,66 @@ function minWidthClass(minWidth: BarItemMinWidth | undefined, inline = false): s
 export function TitleBarZone({
   items,
   ctx,
+  compact = false,
 }: {
   items: BarCatalogItem[]
   ctx: TitleBarItemContext
+  compact?: boolean
 }) {
+  const t = useTranslations("desktop")
+  const visible = compact ? items.filter((item) => item.id === "search") : items
+  const folded = compact ? items.filter((item) => item.id !== "search") : []
   return (
     <>
-      {items.map((item) => (
-        <TitleBarSegment key={item.id} item={item} ctx={ctx} />
+      {visible.map((item) => (
+        <TitleBarSegment key={item.id} item={item} ctx={ctx} compact={compact} />
       ))}
+      {folded.length > 0 && (
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="size-7 shrink-0 text-muted-foreground"
+              aria-label={t("titleBar.navigationMenu")}
+              title={t("titleBar.navigationMenu")}
+              data-testid="title-bar-navigation-menu"
+            >
+              <EllipsisIcon className="size-4" aria-hidden />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="end"
+            className="w-64 space-y-3"
+            aria-label={t("titleBar.navigationMenu")}
+          >
+            {folded.map((item) => (
+              <div key={item.id} className="space-y-1">
+                <p className="text-xs text-muted-foreground">
+                  {t(`barCustomize.items.${item.i18nKey}`)}
+                </p>
+                <div className="flex min-w-0 items-center gap-1">
+                  <TitleBarSegment item={{ ...item, minWidth: undefined }} ctx={ctx} />
+                </div>
+              </div>
+            ))}
+          </PopoverContent>
+        </Popover>
+      )}
     </>
   )
 }
 
-function TitleBarSegment({ item, ctx }: { item: BarCatalogItem; ctx: TitleBarItemContext }) {
+function TitleBarSegment({
+  item,
+  ctx,
+  compact = false,
+}: {
+  item: BarCatalogItem
+  ctx: TitleBarItemContext
+  compact?: boolean
+}) {
   switch (item.id) {
     case "appIcon":
       return (
@@ -84,6 +133,7 @@ function TitleBarSegment({ item, ctx }: { item: BarCatalogItem; ctx: TitleBarIte
     case "search":
       return (
         <TitleBarSearchPill
+          compact={compact}
           appName={ctx.appName}
           separator={ctx.separator}
           placeholder={ctx.searchPlaceholder}

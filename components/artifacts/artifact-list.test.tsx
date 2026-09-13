@@ -406,3 +406,26 @@ describe("ArtifactList", () => {
     expect(screen.queryByTestId("artifact-list-generating")).not.toBeInTheDocument()
   })
 })
+
+it("hides shared search and scope controls in a locked session overview", () => {
+  const store = useArtifactStore.getState()
+  store.createArtifact({
+    sessionId: "s1",
+    messageId: "m",
+    type: "code",
+    title: "Current output",
+    content: "x",
+  })
+  store.createArtifact({
+    sessionId: "s2",
+    messageId: "m",
+    type: "code",
+    title: "Other output",
+    content: "y",
+  })
+  store.setArtifactWorkspaceScope("recent")
+  render(<ArtifactList sessionId="s1" lockSessionScope />)
+  expect(screen.getByText("Current output")).toBeVisible()
+  expect(screen.queryByText("Other output")).not.toBeInTheDocument()
+  expect(screen.queryByRole("search")).not.toBeInTheDocument()
+})

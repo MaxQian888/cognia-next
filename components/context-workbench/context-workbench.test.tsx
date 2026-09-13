@@ -1,3 +1,8 @@
+import {
+  revealActiveWorkbenchPanel,
+  isPluginContextPanelVisible,
+  setActiveWorkbenchMode,
+} from "@/lib/context-workbench/active-context"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { act, fireEvent, render, screen, within } from "@testing-library/react"
@@ -100,6 +105,12 @@ const messages = {
       ai: "AI",
       gated: "Gated",
     },
+    navigation: {
+      tabs: "Tabs",
+      compactRail: "Compact rail",
+      openPanel: "Open panel",
+      closePanel: "Close {name}",
+    },
     activityRailLabel: "Activities",
     aiLoading: "Loading",
   },
@@ -115,7 +126,7 @@ function renderWorkbench(panels: ContextPanelDefinition[]) {
 
 describe("ContextWorkbench", () => {
   beforeEach(() => {
-    useContextWorkbenchStore.setState({ layouts: {} })
+    useContextWorkbenchStore.setState({ layouts: {}, navigationStyle: "rail" })
     // The rail order/hidden set now comes from settings; start every test on
     // the shipped default.
     useSettingsStore.setState({ settings: {} as never })
@@ -1303,7 +1314,7 @@ describe("ContextWorkbench — customizable activity rail", () => {
     ).map((button) => button.getAttribute("aria-label"))
 
   beforeEach(() => {
-    useContextWorkbenchStore.setState({ layouts: {} })
+    useContextWorkbenchStore.setState({ layouts: {}, navigationStyle: "rail" })
     useSettingsStore.setState({ settings: {} as never })
     mockResourceSession = null
   })
@@ -1544,7 +1555,7 @@ describe("ContextWorkbench — host-driven rail-only (persistent minibar)", () =
   }
 
   beforeEach(() => {
-    useContextWorkbenchStore.setState({ layouts: {} })
+    useContextWorkbenchStore.setState({ layouts: {}, navigationStyle: "rail" })
     useSettingsStore.setState({ settings: {} as never })
     mockResourceSession = null
   })
@@ -1757,7 +1768,7 @@ describe("ContextWorkbench — vertical split", () => {
   ]
 
   beforeEach(() => {
-    useContextWorkbenchStore.setState({ layouts: {} })
+    useContextWorkbenchStore.setState({ layouts: {}, navigationStyle: "rail" })
     useSettingsStore.setState({ settings: {} as never })
     mockResourceSession = null
     instanceSeq = 0
@@ -2011,6 +2022,14 @@ describe("ContextWorkbench — vertical split", () => {
     expect(useContextWorkbenchStore.getState().layouts[SCOPE]?.splitRatio).toBe(65)
   })
 
+  it("keeps split panes visible while switching from rail to labeled tabs", () => {
+    renderSplit()
+    openSplit()
+    act(() => useContextWorkbenchStore.getState().setNavigationStyle("tabs"))
+    expect(screen.getByTestId("context-workbench-panel-tabs")).toHaveAttribute("role", "group")
+    expect(screen.getByTestId("panel-comments")).toBeInTheDocument()
+    expect(screen.getByTestId("panel-review")).toBeInTheDocument()
+  })
   it("resizes the split from the keyboard", () => {
     renderSplit()
     openSplit()
@@ -2026,12 +2045,16 @@ describe("ContextWorkbench — vertical split", () => {
     fireEvent.keyDown(separator, { key: "Home" })
     expect(ratio()).toBe(20)
     expect(separator).toHaveAttribute("aria-valuenow", "20")
+    fireEvent.doubleClick(separator)
+    expect(ratio()).toBe(50)
   })
 
   it("keeps a crashing second pane from taking the first one down", () => {
     const consoleError = jest.spyOn(console, "error").mockImplementation(() => undefined)
+    let broken = true
     const Boom = () => {
-      throw new Error("boom")
+      if (broken) throw new Error("boom")
+      return <div>Recovered panel</div>
     }
     renderSplit([PANELS[0]!, { ...PANELS[1]!, renderer: Boom }])
     openSplit()
@@ -2046,6 +2069,9 @@ describe("ContextWorkbench — vertical split", () => {
     // resolves from the real message catalogue.
     expect(secondary.textContent).not.toContain("review:")
     expect(within(secondary).getByRole("button")).toBeInTheDocument()
+    broken = false
+    fireEvent.click(within(secondary).getByRole("button"))
+    expect(secondary.textContent).toContain("Recovered panel")
     consoleError.mockRestore()
   })
 
@@ -2080,7 +2106,7 @@ describe("ContextWorkbench — panel history chevrons", () => {
   ]
 
   beforeEach(() => {
-    useContextWorkbenchStore.setState({ layouts: {} })
+    useContextWorkbenchStore.setState({ layouts: {}, navigationStyle: "rail" })
     useSettingsStore.setState({ settings: {} as never })
     resetPanelHistoryForTesting()
   })
@@ -2167,7 +2193,7 @@ describe("ContextWorkbench — header projection", () => {
   ]
 
   beforeEach(() => {
-    useContextWorkbenchStore.setState({ layouts: {} })
+    useContextWorkbenchStore.setState({ layouts: {}, navigationStyle: "rail" })
     useSettingsStore.setState({ settings: {} as never })
   })
 
@@ -2258,5 +2284,177 @@ describe("ContextWorkbench — header projection", () => {
     // the one control on the takeover that did nothing.
     fireEvent.click(screen.getByRole("button", { name: "Focus mode" }))
     expect(screen.getByTestId("context-workbench")).toHaveAttribute("data-mode", "narrow")
+  })
+})
+
+describe("Workbench labeled tabs", () => {
+  beforeEach(() => {
+    useContextWorkbenchStore.setState({ layouts: {}, navigationStyle: "tabs" })
+    useSettingsStore.setState({ settings: {} as never })
+    mockResourceSession = null
+  })
+  const panels: ContextPanelDefinition[] = [
+    {
+      id: "comments",
+      order: 0,
+      activity: "comments",
+      labelKey: "contextWorkbench.panels.comments",
+      label: "Comments",
+      appliesTo: () => true,
+      renderer: () => <div>Comments body</div>,
+    },
+    {
+      id: "ai",
+      order: 1,
+      activity: "ai",
+      labelKey: "contextWorkbench.panels.ai",
+      label: "AI",
+      appliesTo: () => true,
+      renderer: () => <div>AI body</div>,
+    },
+  ]
+  it("opens, closes and reopens labeled panels through the existing navigation store", () => {
+    renderWorkbench(panels)
+    expect(screen.queryByTestId("context-workbench-activity-rail")).not.toBeInTheDocument()
+    expect(screen.getByTestId("context-workbench-panel-tabs")).toBeInTheDocument()
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Open panel" }), {
+      button: 0,
+      ctrlKey: false,
+    })
+    fireEvent.click(screen.getByRole("menuitem", { name: "contextWorkbench.panels.ai" }))
+    expect(screen.getByRole("tab", { name: "contextWorkbench.panels.ai" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Close contextWorkbench.panels.ai" }))
+    expect(
+      screen.queryByRole("tab", { name: "contextWorkbench.panels.ai" })
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "contextWorkbench.panels.comments" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
+    act(() => useContextWorkbenchStore.getState().navigatePanel("window-a::canvas:doc-1", "ai"))
+    expect(screen.getByRole("tab", { name: "contextWorkbench.panels.ai" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
+  })
+  it("supports keyboard panel navigation, pinning and middle click dismissal", () => {
+    renderWorkbench(panels)
+    act(() => useContextWorkbenchStore.getState().navigatePanel("window-a::canvas:doc-1", "ai"))
+    fireEvent.keyDown(screen.getByRole("tab", { name: "contextWorkbench.panels.ai" }), {
+      key: "Home",
+    })
+    expect(screen.getByRole("tab", { name: "contextWorkbench.panels.comments" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Open panel" }), {
+      button: 0,
+      ctrlKey: false,
+    })
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pin panel" }))
+    expect(useContextWorkbenchStore.getState().layouts["window-a::canvas:doc-1"].userPinned).toBe(
+      true
+    )
+    fireEvent.keyDown(screen.getByRole("button", { name: "Close contextWorkbench.panels.ai" }), {
+      key: "ArrowRight",
+    })
+    expect(screen.getByRole("tab", { name: "contextWorkbench.panels.comments" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Open panel" }), {
+      button: 0,
+      ctrlKey: false,
+    })
+    fireEvent.click(screen.getByRole("menuitem", { name: "Unpin panel" }))
+    expect(useContextWorkbenchStore.getState().layouts["window-a::canvas:doc-1"].userPinned).toBe(
+      false
+    )
+    fireEvent(
+      screen.getByRole("tab", { name: "contextWorkbench.panels.ai" }),
+      new MouseEvent("auxclick", { bubbles: true, button: 1 })
+    )
+    expect(
+      screen.queryByRole("tab", { name: "contextWorkbench.panels.ai" })
+    ).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Close contextWorkbench.panels.comments" }))
+    expect(useContextWorkbenchStore.getState().layouts["window-a::canvas:doc-1"].mode).toBe(
+      "collapsed"
+    )
+  })
+  it("closes mobile tabs through the drawer host and shows pending panels", () => {
+    const onCollapse = jest.fn()
+    render(
+      <ContextWorkbench
+        workbenchInstanceId="mobile-tabs"
+        resource={resource}
+        panels={[{ ...panels[0], icon: RadarIcon }]}
+        placement="mobile-sheet"
+        onCollapse={onCollapse}
+      />
+    )
+    act(() => {
+      useContextWorkbenchStore.getState().setUserPinned("mobile-tabs::canvas:doc-1", true)
+      useContextWorkbenchStore.getState().smartReveal("mobile-tabs::canvas:doc-1", "comments")
+    })
+    expect(
+      useContextWorkbenchStore.getState().layouts["mobile-tabs::canvas:doc-1"].pendingPanelIds
+    ).toEqual(["comments"])
+    fireEvent(screen.getByRole("tab"), new MouseEvent("auxclick", { bubbles: true, button: 2 }))
+    expect(onCollapse).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Close" }))
+    expect(onCollapse).toHaveBeenCalled()
+  })
+  it("keeps external panel reveal, visibility and close wired to the host in tabs mode", () => {
+    const onEnsureVisible = jest.fn()
+    const onCollapse = jest.fn()
+    render(
+      <ContextWorkbench
+        workbenchInstanceId="external-tabs"
+        resource={resource}
+        panels={[{ ...panels[0], id: "acme:comments", pluginId: "acme" }]}
+        onEnsureVisible={onEnsureVisible}
+        onCollapse={onCollapse}
+      />
+    )
+    act(() => {
+      revealActiveWorkbenchPanel("acme:comments")
+    })
+    expect(onEnsureVisible).toHaveBeenCalled()
+    expect(isPluginContextPanelVisible("acme", "comments")).toBe(true)
+    act(() => {
+      setActiveWorkbenchMode("acme", "collapsed")
+    })
+    expect(onCollapse).toHaveBeenCalled()
+  })
+  it("offers width and focus controls from the tabs layout menu", () => {
+    renderWorkbench(panels)
+    for (const [name, mode] of [
+      ["Wide", "wide"],
+      ["Narrow", "narrow"],
+      ["Focus", "focus"],
+    ]) {
+      fireEvent.keyDown(screen.getByTestId("context-workbench-layout-menu"), { key: "Enter" })
+      fireEvent.click(screen.getByRole("menuitem", { name: new RegExp(`^${name}`) }))
+      expect(useContextWorkbenchStore.getState().layouts["window-a::canvas:doc-1"].mode).toBe(mode)
+    }
+    fireEvent.keyDown(window, { key: "Escape" })
+    expect(useContextWorkbenchStore.getState().layouts["window-a::canvas:doc-1"].mode).toBe(
+      "narrow"
+    )
+  })
+  it("switches to the compact rail without changing the active panel", () => {
+    renderWorkbench(panels)
+    fireEvent.click(screen.getByRole("button", { name: "Compact icon rail" }))
+    expect(useContextWorkbenchStore.getState().navigationStyle).toBe("rail")
+    expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Labeled tabs" }))
+    expect(screen.getByRole("tab", { name: "contextWorkbench.panels.comments" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
   })
 })

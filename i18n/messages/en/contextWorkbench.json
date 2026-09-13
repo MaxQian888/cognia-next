@@ -155,7 +155,7 @@
     "runtimeStatus": "Runtime",
     "saveState": "Save state",
     "sessionId": "Conversation ID",
-    "sessionTitle": "Conversation",
+    "sessionTitle": "Task overview",
     "unknown": "Unknown",
     "updatedAt": "Updated",
     "version": "Version",
@@ -352,5 +352,76 @@
       "title": "Workspace is not available"
     }
   },
-  "webviewPanelPending": "This panel's webview has not loaded yet."
+  "webviewPanelPending": "This panel's webview has not loaded yet.",
+  "taskOverview": {
+    "currentState": "Current task",
+    "description": "Status, capabilities, and results for this conversation.",
+    "untitled": "Untitled task",
+    "manage": "Manage task",
+    "execution": "Execution mode",
+    "openItems": "Open questions and subtasks",
+    "openContext": "Open run context",
+    "noOpenItems": "No open questions or subtasks recorded.",
+    "openItemsMore": "{count} more in the run context",
+    "technicalDetails": "Technical details",
+    "statuses": {
+      "idle": "Idle",
+      "streaming": "Working",
+      "awaiting_approval": "Waiting for you",
+      "error": "Failed"
+    },
+    "statusHints": {
+      "streaming": "Working through the current turn.",
+      "awaiting_approval": "Respond to the pending request in the conversation to continue.",
+      "error": "The last turn stopped before it finished."
+    },
+    "capabilities": {
+      "title": "Capabilities",
+      "manage": "Manage capabilities",
+      "configured": "Skills configured for the next send",
+      "configuredHint": "Character skills and attachments follow session disable settings. Configuration does not confirm runtime loading.",
+      "noneConfigured": "No character skills or next-message skill attachments configured.",
+      "disabled": "Disabled",
+      "unresolved": "Unavailable or still loading",
+      "nextMessage": "Next message",
+      "character": "Character",
+      "runtime": "Runtime capability snapshot",
+      "refresh": "Refresh snapshot",
+      "runtimeHint": "The latest host snapshot distinguishes loaded and deferred capabilities. Entries may change after the next turn.",
+      "snapshotUnavailable": "No runtime snapshot is available yet. Start a turn on a supported connected host, then refresh.",
+      "inventoryUnavailable": "The host snapshot does not report capability details.",
+      "configuredCount": "{count} configured skills",
+      "runtimeCount": "{count} runtime entries"
+    },
+    "results": {
+      "title": "Key results",
+      "artifacts": "Artifacts",
+      "files": "Changed files",
+      "unavailable": "File tracking is not available for this session yet.",
+      "loading": "Loading recorded changes…",
+      "failed": "Could not load recorded changes. Cached results may be out of date.",
+      "retry": "Retry",
+      "emptyFiles": "No file changes have been recorded.",
+      "fileCount": "{count} recorded file changes",
+      "openWorkspace": "Open workspace",
+      "outputs": "Output files",
+      "sharedLinks": "Links shared by assistant",
+      "sharedLinksDescription": "Links mentioned in replies; creation and external status are not verified."
+    },
+    "summaryTitle": "Task summary",
+    "viewDetails": "View details",
+    "rows": {
+      "sharing": "Sharing",
+      "mode": "Mode",
+      "runtime": "Agent",
+      "environment": "Environment",
+      "directory": "Directory"
+    }
+  },
+  "navigation": {
+    "tabs": "Labeled tabs",
+    "compactRail": "Compact icon rail",
+    "openPanel": "Open panel",
+    "closePanel": "Close {name}"
+  }
 }

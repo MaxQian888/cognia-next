@@ -770,6 +770,7 @@
     "terminalSpawnDenied": "终端被插件拦截",
     "terminalSpawnError": "无法打开终端：{message}",
     "workspace": "工作区",
-    "workspaceUntitled": "未命名工作区"
+    "workspaceUntitled": "未命名工作区",
+    "navigationMenu": "导航"
   }
 }

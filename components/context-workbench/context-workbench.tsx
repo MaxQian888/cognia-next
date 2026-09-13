@@ -19,6 +19,9 @@ import {
 } from "react"
 import { useTranslations } from "next-intl"
 import {
+  PlusIcon,
+  PanelsTopLeftIcon,
+  PanelLeftIcon,
   FocusIcon,
   PanelRightCloseIcon,
   PanelRightIcon,
@@ -502,7 +505,7 @@ function SortableActivityButton({
   }
 
   const panel = group.find((candidate) => candidate.id === activePanelId) ?? group[0]
-  const Icon = panel.icon
+  const Icon = panel.icon ?? PanelRightIcon
   const badge =
     group.reduce((total, candidate) => total + (candidate.getBadge?.(resource) ?? 0), 0) +
     group.filter((candidate) => pendingPanelIds.includes(candidate.id)).length
@@ -578,6 +581,7 @@ export function ContextWorkbench({
 }: ContextWorkbenchProps) {
   const sectionRef = useRef<HTMLElement | null>(null)
   const bodyRef = useRef<HTMLDivElement | null>(null)
+  const panelTabsRef = useRef<HTMLDivElement | null>(null)
   const previousFocusRef = useRef<HTMLElement | null>(null)
   const lifecyclePanelsRef = useRef(new Map<string, Set<string>>())
   /**
@@ -615,6 +619,16 @@ export function ContextWorkbench({
   const panelHistory = usePanelHistory(scopeKey)
   const persistedLayout = useContextWorkbenchStore((state) => state.layouts[scopeKey])
   const layout = persistedLayout ?? FALLBACK_CONTEXT_WORKBENCH_LAYOUT
+  const navigationStyle = useContextWorkbenchStore((state) => state.navigationStyle)
+  const setNavigationStyle = useContextWorkbenchStore((state) => state.setNavigationStyle)
+  const closePanelTab = useContextWorkbenchStore((state) => state.closePanelTab)
+  const useTabs = navigationStyle !== "rail"
+  useEffect(() => {
+    if (useTabs)
+      panelTabsRef.current
+        ?.querySelector<HTMLElement>('[aria-selected="true"]')
+        ?.scrollIntoView?.({ block: "nearest", inline: "nearest" })
+  }, [useTabs, layout.activePanelId])
   const navigatePanel = useContextWorkbenchStore((state) => state.navigatePanel)
   const reconcilePanels = useContextWorkbenchStore((state) => state.reconcilePanels)
   const markPanelActivated = useContextWorkbenchStore((state) => state.markPanelActivated)
@@ -1325,6 +1339,7 @@ export function ContextWorkbench({
 
   const handleGroupTabKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (!["ArrowRight", "ArrowLeft", "Home", "End"].includes(event.key)) return
+    if (!(event.target as HTMLElement).hasAttribute("data-workbench-group-tab")) return
     const tabs = Array.from(
       event.currentTarget.querySelectorAll<HTMLButtonElement>("[data-workbench-group-tab]")
     )
@@ -1369,6 +1384,19 @@ export function ContextWorkbench({
   // The header row — either drawn above the panel body or, when the host hands
   // over `headerOutlet`, rendered into the shell's title bar so the workbench
   // sits under a single 40px row (`components/shell/title-bar-outlets.tsx`).
+  const openPanels = layout.activatedPanelIds
+    .map((id) => resolvedPanels.find((panel) => panel.id === id))
+    .filter((panel): panel is ContextPanelDefinition => Boolean(panel))
+  if (activePanel && !openPanels.some((panel) => panel.id === activePanel.id)) {
+    openPanels.push(activePanel)
+  }
+  const dismissPanel = (panel: ContextPanelDefinition) => {
+    if (openPanels.length <= 1) {
+      handleCollapse()
+      return
+    }
+    closePanelTab(scopeKey, panel.id)
+  }
   const headerContent = (
     <>
       {/* Panel history back/forward — hidden on mobile and when
@@ -1377,7 +1405,7 @@ export function ContextWorkbench({
                 disabled pair on a fresh panel is a second set of chevrons
                 beside the title bar's route history, same glyphs with a
                 different meaning, on every idle screen. */}
-      {panelHistory.canGoBack || panelHistory.canGoForward ? (
+      {!useTabs && (panelHistory.canGoBack || panelHistory.canGoForward) ? (
         <div
           className="hidden shrink-0 items-center @[12rem]/wb-header:flex"
           data-testid="panel-history-nav"
@@ -1409,7 +1437,131 @@ export function ContextWorkbench({
         </div>
       ) : null}
       {headerLeading}
-      {activeGroup.length > 1 && headerLeading ? (
+      {useTabs ? (
+        <>
+          <div
+            role={splitActive ? "group" : "tablist"}
+            aria-label={t("contextWorkbench.navigation.tabs")}
+            data-testid="context-workbench-panel-tabs"
+            ref={panelTabsRef}
+            className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
+            onKeyDown={handleGroupTabKeyDown}
+          >
+            {openPanels.map((panel) => {
+              const Icon = panel.icon ?? PanelRightIcon
+              const selected = panel.id === layout.activePanelId
+              return (
+                <div
+                  key={panel.id}
+                  className={cn(
+                    "group flex shrink-0 items-center rounded-md",
+                    selected && "bg-secondary"
+                  )}
+                >
+                  <button
+                    type="button"
+                    role={splitActive ? undefined : "tab"}
+                    tabIndex={splitActive || selected ? 0 : -1}
+                    aria-selected={splitActive ? undefined : selected}
+                    aria-pressed={
+                      splitActive ? selected || secondaryPanelId === panel.id : undefined
+                    }
+                    aria-controls={`context-workbench-panel-${panel.id}`}
+                    data-workbench-group-tab
+                    className="flex min-w-0 items-center gap-1.5 py-2 pl-2 text-xs outline-offset-[-2px]"
+                    onClick={() => handleActivate(panel)}
+                    onAuxClick={(event) => {
+                      if (event.button === 1) dismissPanel(panel)
+                    }}
+                    title={getPanelLabel(panel)}
+                  >
+                    <Icon className="size-3.5 shrink-0" />
+                    <span className="max-w-36 truncate">{getPanelLabel(panel)}</span>
+                    {layout.pendingPanelIds.includes(panel.id) ? (
+                      <span className="size-1.5 rounded-full bg-primary" />
+                    ) : null}
+                  </button>
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    className="mx-0.5 size-6 shrink-0"
+                    aria-label={t("contextWorkbench.navigation.closePanel", {
+                      name: getPanelLabel(panel),
+                    })}
+                    onClick={() => dismissPanel(panel)}
+                  >
+                    <XIcon className="size-3" />
+                  </Button>
+                </div>
+              )
+            })}
+          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                className="shrink-0"
+                aria-label={t("contextWorkbench.navigation.openPanel")}
+              >
+                <PlusIcon className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="max-h-80 overflow-y-auto">
+              {resolvedPanels.map((panel) => {
+                const Icon = panel.icon ?? PanelRightIcon
+                return (
+                  <DropdownMenuItem key={panel.id} onSelect={() => handleActivate(panel)}>
+                    <Icon className="size-4" />
+                    {getPanelLabel(panel)}
+                  </DropdownMenuItem>
+                )
+              })}
+              <DropdownMenuItem onSelect={() => setUserPinned(scopeKey, !layout.userPinned)}>
+                <PinIcon className="size-4" />
+                {t(
+                  layout.userPinned
+                    ? "contextWorkbench.actions.unpin"
+                    : "contextWorkbench.actions.pin"
+                )}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setCustomizeRailOpen(true)}>
+                <SlidersHorizontalIcon className="size-4" />
+                {t("desktop.shellLayout.title")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="ghost"
+            className="shrink-0"
+            aria-label={t(
+              railIsHorizontal
+                ? "contextWorkbench.actions.close"
+                : "contextWorkbench.actions.collapse"
+            )}
+            onClick={handleCollapse}
+          >
+            <XIcon className="size-4" />
+          </Button>
+        </>
+      ) : null}
+      <Button
+        type="button"
+        size="icon-sm"
+        variant="ghost"
+        className="shrink-0"
+        aria-label={t(
+          useTabs ? "contextWorkbench.navigation.compactRail" : "contextWorkbench.navigation.tabs"
+        )}
+        onClick={() => setNavigationStyle(useTabs ? "rail" : "tabs")}
+      >
+        {useTabs ? <PanelLeftIcon className="size-4" /> : <PanelsTopLeftIcon className="size-4" />}
+      </Button>
+      {!useTabs && activeGroup.length > 1 && headerLeading ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             {/* Once the artifact tabs claim the header this is the only
@@ -1450,7 +1602,7 @@ export function ContextWorkbench({
           </DropdownMenuContent>
         </DropdownMenu>
       ) : null}
-      {activeGroup.length > 1 && !headerLeading ? (
+      {!useTabs && activeGroup.length > 1 && !headerLeading ? (
         <div
           // A `role="tab"` outside a tablist is invalid, and a tablist
           // cannot describe two visible panes with one selection — so
@@ -1489,7 +1641,7 @@ export function ContextWorkbench({
           ))}
         </div>
       ) : null}
-      {headerLeading ? null : activeGroup.length > 1 ? null : <div className="flex-1" />}
+      {useTabs || headerLeading || activeGroup.length > 1 ? null : <div className="flex-1" />}
       <PluginExtensionSlot
         point="panel.header"
         className="flex shrink-0 items-center gap-1"
@@ -1500,7 +1652,12 @@ export function ContextWorkbench({
           {/* Inline above ~20rem of header; below that the same actions
                     live in the menu beside this, so neither form is ever the
                     only route to them. */}
-          <div className="hidden shrink-0 items-center gap-1 @[20rem]/wb-header:flex">
+          <div
+            className={cn(
+              "hidden shrink-0 items-center gap-1",
+              !useTabs && "@[20rem]/wb-header:flex"
+            )}
+          >
             <Button
               type="button"
               size="icon-sm"
@@ -1557,21 +1714,21 @@ export function ContextWorkbench({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem
-                className="@[20rem]/wb-header:hidden"
+                className={cn(!useTabs && "@[20rem]/wb-header:hidden")}
                 onSelect={() => selectMode("narrow")}
               >
                 <PanelRightIcon className="size-4" />
                 {t("contextWorkbench.actions.narrow")}
               </DropdownMenuItem>
               <DropdownMenuItem
-                className="@[20rem]/wb-header:hidden"
+                className={cn(!useTabs && "@[20rem]/wb-header:hidden")}
                 onSelect={() => selectMode("wide")}
               >
                 <Rows3Icon className="size-4" />
                 {t("contextWorkbench.actions.wide")}
               </DropdownMenuItem>
               <DropdownMenuItem
-                className="@[20rem]/wb-header:hidden"
+                className={cn(!useTabs && "@[20rem]/wb-header:hidden")}
                 onSelect={() => selectMode("focus")}
               >
                 <FocusIcon className="size-4" />
@@ -1646,7 +1803,7 @@ export function ContextWorkbench({
           className="@container/wb-header flex h-full min-w-0 flex-1 items-center gap-1 px-2"
           // The activity rail keeps its column inside the dock, so the projected
           // row starts where the header used to: past it.
-          style={{ paddingLeft: WORKBENCH_RAIL_WIDTH_PX + 8 }}
+          style={{ paddingLeft: useTabs ? 8 : WORKBENCH_RAIL_WIDTH_PX + 8 }}
         >
           {headerContent}
         </div>,
@@ -1729,100 +1886,101 @@ export function ContextWorkbench({
             }
           />
         ) : null}
-        <TooltipProvider delayDuration={300}>
-          <nav
-            className={cn(
-              "flex shrink-0 items-center gap-1 bg-muted/30",
-              railIsHorizontal
-                ? // Tall enough to hold a 44px touch target with breathing room;
-                  // `h-12` clipped the padded buttons.
-                  "h-14 w-full overflow-x-auto border-b px-2"
-                : "flex-col border-r py-2"
-            )}
-            // Inline width rather than `w-12`: the rail is now also what a
-            // collapsed host shrinks *to*, so its width has to be the same
-            // number the host hands its panel as `collapsedSize`. A Tailwind
-            // class and a JS constant would be two sources for one measurement.
-            style={railIsHorizontal ? undefined : { width: WORKBENCH_RAIL_WIDTH_PX }}
-            aria-label={t("contextWorkbench.activityRailLabel")}
-            data-rail-only={bodyHidden || undefined}
-            data-testid="context-workbench-activity-rail"
-            onKeyDown={handleActivityKeyDown}
-          >
-            <DndContext
-              sensors={railDragSensors}
-              collisionDetection={closestCenter}
-              onDragEnd={handleRailDragEnd}
+        {!useTabs || bodyHidden ? (
+          <TooltipProvider delayDuration={300}>
+            <nav
+              className={cn(
+                "flex shrink-0 items-center gap-1 bg-muted/30",
+                railIsHorizontal
+                  ? // Tall enough to hold a 44px touch target with breathing room;
+                    // `h-12` clipped the padded buttons.
+                    "h-14 w-full overflow-x-auto border-b px-2"
+                  : "flex-col border-r py-2"
+              )}
+              // Inline width rather than `w-12`: the rail is now also what a
+              // collapsed host shrinks *to*, so its width has to be the same
+              // number the host hands its panel as `collapsedSize`. A Tailwind
+              // class and a JS constant would be two sources for one measurement.
+              style={railIsHorizontal ? undefined : { width: WORKBENCH_RAIL_WIDTH_PX }}
+              aria-label={t("contextWorkbench.activityRailLabel")}
+              data-rail-only={bodyHidden || undefined}
+              data-testid="context-workbench-activity-rail"
+              onKeyDown={handleActivityKeyDown}
             >
-              <SortableContext
-                items={activityGroups.map(([activity]) => activity)}
-                strategy={
-                  railIsHorizontal ? horizontalListSortingStrategy : verticalListSortingStrategy
-                }
+              <DndContext
+                sensors={railDragSensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleRailDragEnd}
               >
-                {activityGroups.map(([activity, group]) => (
-                  <SortableActivityButton
-                    key={activity}
-                    activity={activity}
-                    group={group}
-                    activePanelId={layout.activePanelId}
-                    resource={resource}
-                    pendingPanelIds={layout.pendingPanelIds}
-                    activeActivity={activePanel?.activity}
-                    attentionActivity={attentionActivity}
-                    scopeKey={scopeKey}
-                    touchTarget={railIsHorizontal}
-                    onActivate={handleActivate}
-                    getPanelLabel={getPanelLabel}
-                  />
-                ))}
-              </SortableContext>
-            </DndContext>
-            {/* Pinning suppresses automatic reveals, which is impossible to
+                <SortableContext
+                  items={activityGroups.map(([activity]) => activity)}
+                  strategy={
+                    railIsHorizontal ? horizontalListSortingStrategy : verticalListSortingStrategy
+                  }
+                >
+                  {activityGroups.map(([activity, group]) => (
+                    <SortableActivityButton
+                      key={activity}
+                      activity={activity}
+                      group={group}
+                      activePanelId={layout.activePanelId}
+                      resource={resource}
+                      pendingPanelIds={layout.pendingPanelIds}
+                      activeActivity={activePanel?.activity}
+                      attentionActivity={attentionActivity}
+                      scopeKey={scopeKey}
+                      touchTarget={railIsHorizontal}
+                      onActivate={handleActivate}
+                      getPanelLabel={getPanelLabel}
+                    />
+                  ))}
+                </SortableContext>
+              </DndContext>
+              {/* Pinning suppresses automatic reveals, which is impossible to
                 guess from a bare pin glyph — these two were the only rail
                 buttons without a tooltip to explain them. */}
-            <div className={cn("flex gap-1", railIsHorizontal ? "ml-auto" : "mt-auto flex-col")}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant={layout.userPinned ? "secondary" : "ghost"}
-                    aria-label={
-                      layout.userPinned
-                        ? t("contextWorkbench.actions.unpin")
-                        : t("contextWorkbench.actions.pin")
-                    }
-                    aria-pressed={layout.userPinned}
-                    className={cn(railIsHorizontal && "touch-target")}
-                    onClick={() => setUserPinned(scopeKey, !layout.userPinned)}
-                  >
-                    <PinIcon className={cn("size-4", layout.userPinned && "fill-current")} />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side={railIsHorizontal ? "bottom" : "left"}>
-                  {t("contextWorkbench.actions.pinHint")}
-                </TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label={t("desktop.shellLayout.title")}
-                    data-testid="context-workbench-customize-rail"
-                    className={cn(railIsHorizontal && "touch-target")}
-                    onClick={() => setCustomizeRailOpen(true)}
-                  >
-                    <SlidersHorizontalIcon className="size-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side={railIsHorizontal ? "bottom" : "left"}>
-                  {t("desktop.shellLayout.title")}
-                </TooltipContent>
-              </Tooltip>
-              {/* Flips with the surface. On a persistent rail the panel body is
+              <div className={cn("flex gap-1", railIsHorizontal ? "ml-auto" : "mt-auto flex-col")}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant={layout.userPinned ? "secondary" : "ghost"}
+                      aria-label={
+                        layout.userPinned
+                          ? t("contextWorkbench.actions.unpin")
+                          : t("contextWorkbench.actions.pin")
+                      }
+                      aria-pressed={layout.userPinned}
+                      className={cn(railIsHorizontal && "touch-target")}
+                      onClick={() => setUserPinned(scopeKey, !layout.userPinned)}
+                    >
+                      <PinIcon className={cn("size-4", layout.userPinned && "fill-current")} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side={railIsHorizontal ? "bottom" : "left"}>
+                    {t("contextWorkbench.actions.pinHint")}
+                  </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label={t("desktop.shellLayout.title")}
+                      data-testid="context-workbench-customize-rail"
+                      className={cn(railIsHorizontal && "touch-target")}
+                      onClick={() => setCustomizeRailOpen(true)}
+                    >
+                      <SlidersHorizontalIcon className="size-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side={railIsHorizontal ? "bottom" : "left"}>
+                    {t("desktop.shellLayout.title")}
+                  </TooltipContent>
+                </Tooltip>
+                {/* Flips with the surface. On a persistent rail the panel body is
                   already shut, so a second "collapse" would be inert — the one
                   action left is to put it back.
 
@@ -1831,45 +1989,46 @@ export function ContextWorkbench({
                   claim "Collapse workbench" over a right-edge panel glyph, on a
                   sheet that has no right edge and does not collapse — the only
                   exit affordance on the platform, describing something else. */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label={t(
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label={t(
+                        railIsHorizontal
+                          ? "contextWorkbench.actions.close"
+                          : bodyHidden
+                            ? "contextWorkbench.actions.expand"
+                            : "contextWorkbench.actions.collapse"
+                      )}
+                      data-testid="context-workbench-collapse-toggle"
+                      className={cn(railIsHorizontal && "touch-target")}
+                      onClick={bodyHidden ? handleExpand : handleCollapse}
+                    >
+                      {railIsHorizontal ? (
+                        <XIcon className="size-4" />
+                      ) : bodyHidden ? (
+                        <PanelRightOpenIcon className="size-4" />
+                      ) : (
+                        <PanelRightCloseIcon className="size-4" />
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side={railIsHorizontal ? "bottom" : "left"}>
+                    {t(
                       railIsHorizontal
                         ? "contextWorkbench.actions.close"
                         : bodyHidden
                           ? "contextWorkbench.actions.expand"
                           : "contextWorkbench.actions.collapse"
                     )}
-                    data-testid="context-workbench-collapse-toggle"
-                    className={cn(railIsHorizontal && "touch-target")}
-                    onClick={bodyHidden ? handleExpand : handleCollapse}
-                  >
-                    {railIsHorizontal ? (
-                      <XIcon className="size-4" />
-                    ) : bodyHidden ? (
-                      <PanelRightOpenIcon className="size-4" />
-                    ) : (
-                      <PanelRightCloseIcon className="size-4" />
-                    )}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side={railIsHorizontal ? "bottom" : "left"}>
-                  {t(
-                    railIsHorizontal
-                      ? "contextWorkbench.actions.close"
-                      : bodyHidden
-                        ? "contextWorkbench.actions.expand"
-                        : "contextWorkbench.actions.collapse"
-                  )}
-                </TooltipContent>
-              </Tooltip>
-            </div>
-          </nav>
-        </TooltipProvider>
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+            </nav>
+          </TooltipProvider>
+        ) : null}
 
         {!bodyHidden ? (
           <div className="flex min-w-0 flex-1 flex-col" inert={false}>

@@ -69,6 +69,9 @@ export interface ContextWorkbenchLayout {
 }
 
 export interface ContextWorkbenchState {
+  navigationStyle: "tabs" | "rail"
+  setNavigationStyle: (style: "tabs" | "rail") => void
+  closePanelTab: (scopeKey: string, panelId: string) => void
   layouts: Record<string, ContextWorkbenchLayout>
   sessionOverrides: Record<string, string>
   activatePanel: (
@@ -368,6 +371,31 @@ function stateCreator(
   }
 
   return {
+    navigationStyle: "tabs",
+    setNavigationStyle: (navigationStyle) => set(() => ({ navigationStyle })),
+    closePanelTab: (scopeKey, panelId) =>
+      set((state) => ({
+        layouts: updateLayout(state.layouts, scopeKey, (layout) => {
+          const remaining = layout.activatedPanelIds.filter((id) => id !== panelId)
+          const nextPanelId =
+            layout.activePanelId === panelId
+              ? layout.splitPanelId && remaining.includes(layout.splitPanelId)
+                ? layout.splitPanelId
+                : (remaining.at(-1) ?? null)
+              : layout.activePanelId
+          return {
+            ...layout,
+            activatedPanelIds: remaining,
+            pendingPanelIds: layout.pendingPanelIds.filter((id) => id !== panelId),
+            activePanelId: nextPanelId,
+            width: nextPanelId ? (layout.panelWidths[nextPanelId] ?? layout.width) : layout.width,
+            splitPanelId:
+              layout.splitPanelId === panelId || layout.activePanelId === panelId
+                ? null
+                : layout.splitPanelId,
+          }
+        }),
+      })),
     layouts: {},
     sessionOverrides: {},
     activatePanel: reveal,
@@ -565,12 +593,14 @@ export const useContextWorkbenchStore = create<ContextWorkbenchState>()(
     partialize: (state) => ({
       layouts: withoutTakeoverModes(pruneContextWorkbenchLayouts(state.layouts)),
       sessionOverrides: state.sessionOverrides,
+      navigationStyle: state.navigationStyle,
     }),
     merge: (persisted, current) => {
       const persistedState = persisted as Partial<ContextWorkbenchState>
       return {
         ...current,
         ...persistedState,
+        navigationStyle: persistedState.navigationStyle === "rail" ? "rail" : "tabs",
         layouts: withoutTakeoverModes(pruneContextWorkbenchLayouts(persistedState.layouts ?? {})),
         sessionOverrides: persistedState.sessionOverrides ?? {},
       }

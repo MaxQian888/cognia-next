@@ -73,6 +73,8 @@ function GeneratingArtifactRow({ pending }: { pending: StreamingArtifact }) {
 
 interface ArtifactListProps {
   sessionId?: string
+  /** Compact session overview: ignore global filters and hide scope controls. */
+  lockSessionScope?: boolean
   className?: string
   maxHeight?: string
   onArtifactClick?: (artifact: Artifact) => void
@@ -125,6 +127,7 @@ function ListEmptyState({
 
 export function ArtifactList({
   sessionId,
+  lockSessionScope = false,
   className,
   maxHeight = "400px",
   onArtifactClick,
@@ -153,7 +156,7 @@ export function ArtifactList({
     scope,
     setScope,
     hasAnyArtifacts,
-  } = useArtifactList({ sessionId, onArtifactClick })
+  } = useArtifactList({ sessionId, onArtifactClick, lockSessionScope })
   const pending = useStreamingArtifact(sessionId)
 
   // The full-height empty state replaces the filter row, so it is only correct
@@ -192,96 +195,98 @@ export function ArtifactList({
           the end. They collapse to icon-only triggers below 380px instead.
           Container query, not a viewport breakpoint: the dock's width is
           user-dragged and has nothing to do with the window's. */}
-      <div
-        className="flex shrink-0 items-center gap-2 p-2 border-b"
-        role="search"
-        aria-label={tArtifacts("search")}
-      >
-        <div className="relative min-w-0 flex-1">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <Input
-            placeholder={tArtifacts("search")}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="h-8 pl-7 text-xs"
-            aria-label={tArtifacts("search")}
-          />
-        </div>
-        {/* Scope. The store has always maintained a cross-session MRU list and
+      {!lockSessionScope && (
+        <div
+          className="flex shrink-0 items-center gap-2 p-2 border-b"
+          role="search"
+          aria-label={tArtifacts("search")}
+        >
+          <div className="relative min-w-0 flex-1">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <Input
+              placeholder={tArtifacts("search")}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-8 pl-7 text-xs"
+              aria-label={tArtifacts("search")}
+            />
+          </div>
+          {/* Scope. The store has always maintained a cross-session MRU list and
             had a `recent` branch to read it with, but no control ever selected
             that branch — the capability was complete and unreachable. */}
-        <Select value={scope} onValueChange={setScope}>
-          <SelectTrigger
-            data-testid="scope-filter-select"
-            aria-label={tArtifacts("scopeLabel")}
-            className={cn(COMPACT_FILTER_TRIGGER, "@[380px]/artifact-list:w-[110px]")}
-          >
-            <Clock className="h-3 w-3 @[380px]/artifact-list:mr-1" />
-            <span className="hidden @[380px]/artifact-list:contents">
-              <SelectValue />
-            </span>
-            {scope !== "session" && <FilterActiveDot />}
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="session">{tArtifacts("scopes.session")}</SelectItem>
-            <SelectItem value="recent">{tArtifacts("scopes.recent")}</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={typeFilter} onValueChange={setTypeFilter}>
-          <SelectTrigger
-            data-testid="type-filter-select"
-            aria-label={tArtifacts("allTypes")}
-            className={cn(COMPACT_FILTER_TRIGGER, "@[380px]/artifact-list:w-[120px]")}
-          >
-            <Filter className="h-3 w-3 @[380px]/artifact-list:mr-1" />
-            <span className="hidden @[380px]/artifact-list:contents">
-              <SelectValue />
-            </span>
-            {typeFilter !== "all" && <FilterActiveDot />}
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">{tArtifacts("allTypes")}</SelectItem>
-            {ARTIFACT_TYPES.map((type) => (
-              <SelectItem key={type} value={type}>
-                {t(`types.${TYPE_LABEL_KEYS[type]}`)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={runtimeFilter} onValueChange={setRuntimeFilter}>
-          <SelectTrigger
-            data-testid="runtime-filter-select"
-            aria-label={tArtifacts("allRuntimeStates")}
-            className={cn(COMPACT_FILTER_TRIGGER, "@[380px]/artifact-list:w-[140px]")}
-          >
-            <Eye className="h-3 w-3 @[380px]/artifact-list:mr-1" />
-            <span className="hidden @[380px]/artifact-list:contents">
-              <SelectValue />
-            </span>
-            {runtimeFilter !== "all" && <FilterActiveDot />}
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">{tArtifacts("allRuntimeStates")}</SelectItem>
-            <SelectItem value="ready">{tArtifacts("runtimeStates.ready")}</SelectItem>
-            {/* No `loading` option. It is deliberately never persisted — it
+          <Select value={scope} onValueChange={setScope}>
+            <SelectTrigger
+              data-testid="scope-filter-select"
+              aria-label={tArtifacts("scopeLabel")}
+              className={cn(COMPACT_FILTER_TRIGGER, "@[380px]/artifact-list:w-[110px]")}
+            >
+              <Clock className="h-3 w-3 @[380px]/artifact-list:mr-1" />
+              <span className="hidden @[380px]/artifact-list:contents">
+                <SelectValue />
+              </span>
+              {scope !== "session" && <FilterActiveDot />}
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="session">{tArtifacts("scopes.session")}</SelectItem>
+              <SelectItem value="recent">{tArtifacts("scopes.recent")}</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={typeFilter} onValueChange={setTypeFilter}>
+            <SelectTrigger
+              data-testid="type-filter-select"
+              aria-label={tArtifacts("allTypes")}
+              className={cn(COMPACT_FILTER_TRIGGER, "@[380px]/artifact-list:w-[120px]")}
+            >
+              <Filter className="h-3 w-3 @[380px]/artifact-list:mr-1" />
+              <span className="hidden @[380px]/artifact-list:contents">
+                <SelectValue />
+              </span>
+              {typeFilter !== "all" && <FilterActiveDot />}
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{tArtifacts("allTypes")}</SelectItem>
+              {ARTIFACT_TYPES.map((type) => (
+                <SelectItem key={type} value={type}>
+                  {t(`types.${TYPE_LABEL_KEYS[type]}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={runtimeFilter} onValueChange={setRuntimeFilter}>
+            <SelectTrigger
+              data-testid="runtime-filter-select"
+              aria-label={tArtifacts("allRuntimeStates")}
+              className={cn(COMPACT_FILTER_TRIGGER, "@[380px]/artifact-list:w-[140px]")}
+            >
+              <Eye className="h-3 w-3 @[380px]/artifact-list:mr-1" />
+              <span className="hidden @[380px]/artifact-list:contents">
+                <SelectValue />
+              </span>
+              {runtimeFilter !== "all" && <FilterActiveDot />}
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{tArtifacts("allRuntimeStates")}</SelectItem>
+              <SelectItem value="ready">{tArtifacts("runtimeStates.ready")}</SelectItem>
+              {/* No `loading` option. It is deliberately never persisted — it
                 describes the preview currently on screen, not the artifact —
                 so filtering by it could only ever return an empty list. The
                 `runtimeStates.loading` message stays in the bundle for the
                 in-preview badge, which does show the live state. */}
-            <SelectItem value="error">{tArtifacts("runtimeStates.error")}</SelectItem>
-            <SelectItem value="unsupported">{tArtifacts("runtimeStates.unsupported")}</SelectItem>
-          </SelectContent>
-        </Select>
-        <Button
-          variant={batchMode ? "secondary" : "ghost"}
-          size="icon"
-          className="h-8 w-8 shrink-0"
-          onClick={toggleBatchMode}
-        >
-          <CheckSquare className="h-3.5 w-3.5" />
-          <span className="sr-only">{tArtifacts("batchSelect")}</span>
-        </Button>
-      </div>
+              <SelectItem value="error">{tArtifacts("runtimeStates.error")}</SelectItem>
+              <SelectItem value="unsupported">{tArtifacts("runtimeStates.unsupported")}</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button
+            variant={batchMode ? "secondary" : "ghost"}
+            size="icon"
+            className="h-8 w-8 shrink-0"
+            onClick={toggleBatchMode}
+          >
+            <CheckSquare className="h-3.5 w-3.5" />
+            <span className="sr-only">{tArtifacts("batchSelect")}</span>
+          </Button>
+        </div>
+      )}
 
       {/* Batch Actions */}
       {batchMode && selectedIds.size > 0 && (

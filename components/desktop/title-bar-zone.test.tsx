@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 
 // Each segment has its own suite; stub them so this one asserts the id →
 // component mapping, the ordering, and the responsive breakpoint classes.
@@ -17,8 +17,21 @@ jest.mock("@/components/desktop/title-bar-workspace", () => ({
   ),
 }))
 jest.mock("@/components/desktop/title-bar-search-pill", () => ({
-  TitleBarSearchPill: ({ appName, onClick }: { appName: string; onClick: () => void }) => (
-    <button type="button" data-testid="seg-search" onClick={onClick}>
+  TitleBarSearchPill: ({
+    appName,
+    onClick,
+    compact,
+  }: {
+    appName: string
+    onClick: () => void
+    compact?: boolean
+  }) => (
+    <button
+      type="button"
+      data-testid="seg-search"
+      data-compact={compact || undefined}
+      onClick={onClick}
+    >
       {appName}
     </button>
   ),
@@ -133,4 +146,25 @@ describe("TitleBarZone", () => {
     const { container } = render(<TitleBarZone items={[ghost]} ctx={ctx} />)
     expect(container).toBeEmptyDOMElement()
   })
+})
+
+it("folds secondary chat navigation while preserving its existing controls and hidden preferences", () => {
+  render(
+    <TitleBarZone
+      items={pick("search", "navArrows", "workspace", "commandCenter")}
+      ctx={ctx}
+      compact
+    />
+  )
+  expect(screen.getByTestId("seg-search")).toHaveAttribute("data-compact", "true")
+  expect(screen.queryByTestId("seg-workspace")).not.toBeInTheDocument()
+  fireEvent.click(screen.getByTestId("title-bar-navigation-menu"))
+  expect(screen.getByTestId("seg-navArrows")).toBeInTheDocument()
+  expect(screen.getByTestId("seg-workspace")).not.toHaveClass("hidden")
+  expect(screen.getByTestId("seg-commandCenter")).not.toHaveClass("hidden")
+  expect(screen.queryByTestId("seg-accountTop")).not.toBeInTheDocument()
+})
+it("does not add an empty navigation menu when the user keeps only search", () => {
+  render(<TitleBarZone items={pick("search")} ctx={ctx} compact />)
+  expect(screen.queryByTestId("title-bar-navigation-menu")).not.toBeInTheDocument()
 })

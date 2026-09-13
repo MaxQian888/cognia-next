@@ -843,7 +843,13 @@ export function ChatPane({
             // Skip on mobile viewports: programmatic focus opens the virtual
             // keyboard, which is disruptive when switching sessions from the nav
             // sheet (the left drawer on mobile).
-            if (hasHistory && !isMobile) internalComposerRef.current?.focus()
+            // History can finish loading after the user has opened a summary
+            // or focused another control. A delayed autofocus must not dismiss
+            // that popover or steal an in-progress interaction.
+            const focused = document.activeElement
+            if (hasHistory && !isMobile && (!focused || focused === document.body)) {
+              internalComposerRef.current?.focus()
+            }
           }}
         >
           {showHistorySurface || !hasHistory ? (

@@ -161,7 +161,7 @@ export function SegmentBar({ groups }: { groups: ContextGroup[] }) {
       aria-hidden
     >
       {groups
-        .filter((group) => !group.deferred)
+        .filter((group) => !group.deferred && group.fraction > 0)
         .map((group) => (
           <div
             key={group.key}

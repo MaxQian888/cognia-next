@@ -1,3 +1,16 @@
+// Summary internals have dedicated suites; keep the header test on opening,
+// settings delegation and title-bar projection without runtime providers.
+jest.mock("@/components/agent/composition/composition-chip", () => ({
+  CompositionChip: () => null,
+}))
+jest.mock("@/components/agent/mode/runtime-selector", () => ({ AgentRuntimeSelector: () => null }))
+jest.mock("@/components/context-workbench/session-capabilities-section", () => ({
+  SessionCapabilitiesSection: () => null,
+}))
+jest.mock("@/components/context-workbench/session-results-section", () => ({
+  SessionResultsSection: () => null,
+}))
+
 // Coverage for chat-header after the data-hooks refactor — verifies that the
 // header reads presets / character / skills via DataAdapter and that the
 // settings popover's Save button calls `updateSession` through the adapter.
@@ -95,6 +108,7 @@ jest.mock("@/stores/ui", () => ({
 
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import type { ReactNode } from "react"
+import { useChatStore } from "@/stores/chat"
 import { ChatHeader } from "./chat-header"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { useCredentialStatus } from "@/hooks/chat/use-credential-status"
@@ -449,7 +463,8 @@ describe("ChatHeader", () => {
       </DataAdapterProvider>
     )
 
-    fireEvent.click(screen.getByRole("button", { name: /session settings/i }))
+    fireEvent.click(screen.getByRole("button", { name: "Task summary" }))
+    fireEvent.click(screen.getByRole("button", { name: "Manage task" }))
     const save = await screen.findByRole("button", { name: /save/i })
     await act(async () => {
       fireEvent.click(save)
@@ -478,7 +493,8 @@ describe("ChatHeader", () => {
       </DataAdapterProvider>
     )
 
-    fireEvent.click(screen.getByRole("button", { name: /session settings/i }))
+    fireEvent.click(screen.getByRole("button", { name: "Task summary" }))
+    fireEvent.click(screen.getByRole("button", { name: "Manage task" }))
     const input = (await screen.findByLabelText(/working/i)) as HTMLInputElement
     fireEvent.change(input, { target: { value: "/new" } })
     expect(input.value).toBe("/new")
@@ -520,7 +536,8 @@ describe("ChatHeader", () => {
         <ChatHeader session={mkSession()} />
       </DataAdapterProvider>
     )
-    fireEvent.click(screen.getByRole("button", { name: /session settings/i }))
+    fireEvent.click(screen.getByRole("button", { name: "Task summary" }))
+    fireEvent.click(screen.getByRole("button", { name: "Manage task" }))
     // Preset section renders only when usePresets() resolves to at least one row.
     // Look for the Select trigger — it carries a stable id.
     await waitFor(() => {
@@ -563,7 +580,13 @@ describe("ChatHeader", () => {
 describe("ChatHeader — title-bar projection", () => {
   function CenterOutlet() {
     const ref = useTitleBarOutletRef("center")
-    return <div ref={ref} data-testid="center-outlet" />
+    const actionsRef = useTitleBarOutletRef("actions")
+    return (
+      <>
+        <div ref={ref} data-testid="center-outlet" />
+        <div ref={actionsRef} data-testid="actions-outlet" />
+      </>
+    )
   }
 
   beforeEach(() => {
@@ -579,7 +602,7 @@ describe("ChatHeader — title-bar projection", () => {
         <TitleBarOutletsProvider>
           <CenterOutlet />
           <TitleBarProjectionScope enabled>
-            <ChatHeader session={mkSession({ title: "Projected" })} />
+            <ChatHeader session={mkSession({ title: "Projected" })} onSplitView={jest.fn()} />
           </TitleBarProjectionScope>
         </TitleBarOutletsProvider>
       </Wrapper>
@@ -589,11 +612,54 @@ describe("ChatHeader — title-bar projection", () => {
     const outlet = screen.getByTestId("center-outlet")
     expect(outlet).toContainElement(screen.getByTestId("chat-header"))
     expect(outlet).toHaveTextContent("Projected")
+    const summaryButton = screen.getByRole("button", { name: "Task summary" })
+    expect(outlet).not.toContainElement(summaryButton)
+    expect(screen.getByTestId("actions-outlet")).toContainElement(summaryButton)
+    const splitButton = screen.getByRole("button", { name: /^split view$/i })
+    expect(screen.getByTestId("actions-outlet")).toContainElement(splitButton)
+    expect(outlet).not.toContainElement(splitButton)
+    expect(screen.getByText("Projected").closest("button")).toBeNull()
     // The bar keeps its own `primarySidebarToggle` / `secondarySidebarToggle`
     // segments on every route, so the projected row drops its duplicates of
     // both rather than parking two controls for one action side by side.
     expect(screen.queryByTestId("chat-sidebar-toggle")).toBeNull()
     expect(screen.queryByTestId("chat-artifact-dock-toggle")).toBeNull()
+  })
+
+  it("shows only the focused conversation summary in the global right toolbar", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    useChatStore.setState({ activeSessionId: "first" })
+    const { unmount } = render(
+      <Wrapper>
+        <TitleBarOutletsProvider>
+          <CenterOutlet />
+          <TitleBarProjectionScope enabled>
+            <ChatHeader
+              session={mkSession({ id: "first", title: "First" })}
+              onSplitView={jest.fn()}
+            />
+            <ChatHeader
+              session={mkSession({ id: "second", title: "Second" })}
+              onExitSplit={jest.fn()}
+            />
+          </TitleBarProjectionScope>
+        </TitleBarOutletsProvider>
+      </Wrapper>
+    )
+    expect(screen.getAllByRole("button", { name: "Task summary" })).toHaveLength(1)
+    expect(screen.getByRole("button", { name: /^split view$/i })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /exit split view/i })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Task summary" }))
+    expect(screen.getByRole("dialog", { name: "Task summary" })).toBeVisible()
+    act(() => useChatStore.setState({ activeSessionId: "second" }))
+    expect(screen.getByTestId("actions-outlet")).toContainElement(
+      screen.getByRole("button", { name: /exit split view/i })
+    )
+    expect(screen.queryByRole("button", { name: /^split view$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("dialog", { name: "Task summary" })).not.toBeInTheDocument()
+    expect(screen.getAllByRole("button", { name: "Task summary" })).toHaveLength(1)
+    unmount()
+    useChatStore.setState({ activeSessionId: null })
   })
 
   it("draws its own row when the outlet exists but nothing enabled projection", () => {

@@ -161,10 +161,19 @@ const chatStateRef = {
 }
 jest.mock("@/stores/chat/chat-store", () => ({
   useChatStore: Object.assign(
-    (selector: (s: { activeSessionId: string | null; status: string }) => unknown) =>
+    (
+      selector: (s: {
+        activeSessionId: string | null
+        status: string
+        sessions: Record<string, { status: string }>
+      }) => unknown
+    ) =>
       selector({
         activeSessionId: chatStateRef.activeSessionId,
         status: chatStateRef.status,
+        sessions: chatStateRef.activeSessionId
+          ? { [chatStateRef.activeSessionId]: { status: chatStateRef.status } }
+          : {},
       }),
     { getState: () => ({ clear: chatClear, setActiveSession }) }
   ),
@@ -425,18 +434,18 @@ test("outside Tauri it is a plain application bar: no window controls, no menuba
   setPlatform("Win32")
   render(<TitleBar />)
   await waitFor(() => expect(screen.getByTestId("title-bar")).toBeInTheDocument())
-  expect(screen.getByTestId("title-bar")).toHaveClass("h-10")
+  expect(screen.getByTestId("title-bar")).toHaveClass("h-[var(--chrome-h)]")
   expect(screen.queryByLabelText("desktop.titleBar.minimize")).toBeNull()
   expect(screen.queryByLabelText("desktop.titleBar.close")).toBeNull()
   expect(screen.queryByText("desktop.menu.file.label")).toBeNull()
   expect(screen.queryByTestId("title-bar-hamburger")).toBeNull()
 })
 
-test("is 40px tall, matching the column headers it hosts", async () => {
+test("uses the shared chrome height, matching the column headers it hosts", async () => {
   isTauriMock.mockReturnValue(true)
   setPlatform("Win32")
   render(<TitleBar />)
-  await waitFor(() => expect(screen.getByTestId("title-bar")).toHaveClass("h-10"))
+  await waitFor(() => expect(screen.getByTestId("title-bar")).toHaveClass("h-[var(--chrome-h)]"))
 })
 
 test("renders the brand text in Tauri", async () => {
@@ -980,6 +989,7 @@ test("clicking the search pill asks the palette to open — on every platform, i
 test("streaming dot replaces the search icon when chat is streaming", async () => {
   isTauriMock.mockReturnValue(true)
   setPlatform("Win32")
+  chatStateRef.activeSessionId = "streaming-session"
   chatStateRef.status = "streaming"
   render(<TitleBar />)
   await waitFor(() => expect(screen.getByTestId("title-bar-streaming-dot")).toBeInTheDocument())
@@ -1827,7 +1837,7 @@ describe("the Win/Linux right-click system menu", () => {
 // Column-header projection (components/shell/title-bar-outlets.tsx)
 // ---------------------------------------------------------------------------
 
-function ProjectedHeader({ zone }: { zone: "start" | "center" | "end" }) {
+function ProjectedHeader({ zone }: { zone: "start" | "center" | "end" | "actions" }) {
   const outlet = useTitleBarProjection(zone)
   const content = <span data-testid={`projected-${zone}`}>{zone}</span>
   return outlet ? (
@@ -1837,7 +1847,7 @@ function ProjectedHeader({ zone }: { zone: "start" | "center" | "end" }) {
   )
 }
 
-function renderProjecting(zones: Array<"start" | "center" | "end">) {
+function renderProjecting(zones: Array<"start" | "center" | "end" | "actions">) {
   return render(
     <TitleBarOutletsProvider>
       <TitleBar />
@@ -1874,6 +1884,17 @@ describe("column-header projection", () => {
         sidebarHostsNav: false,
       })
     )
+  })
+
+  test("keeps task actions in right chrome independently of the closed dock", async () => {
+    renderProjecting(["actions"])
+    const actions = await screen.findByTestId("title-bar-outlet-actions")
+    expect(actions).not.toHaveAttribute("hidden")
+    expect(actions).toContainElement(screen.getByTestId("projected-actions"))
+    expect(screen.getByTestId("title-bar-outlet-end")).toHaveAttribute("hidden")
+    expect(actions.parentElement).toContainElement(screen.getByTestId("title-bar-toggle-panel"))
+    act(() => useShellColumnsStore.setState({ widths: { rail: 0, sidebar: 0, dock: 512 } }))
+    expect(actions).toContainElement(screen.getByTestId("projected-actions"))
   })
 
   test("outlets stay hidden and empty until something projects", async () => {
@@ -1930,24 +1951,20 @@ describe("column-header projection", () => {
     expect(start).toHaveStyle({ width: "288px" })
   })
 
-  test("with the chat header in the centre, the header leads and the bar's segments are unchanged", async () => {
+  test("with the chat header in the centre, secondary navigation folds without losing actions", async () => {
     isTauriMock.mockReturnValue(true)
     setPlatform("Win32")
     renderProjecting(["center"])
     const center = await screen.findByTestId("title-bar-outlet-center")
     await waitFor(() => expect(center).toContainElement(screen.getByTestId("projected-center")))
-    // Nothing is dropped — route history, the workspace pill and the VS Code-
-    // style search pill all stay — they follow the header, which keeps the
-    // chat column's leading edge.
-    const nav = screen.getByTestId("title-bar-nav-arrows")
     const search = screen.getByTestId("title-bar-search-pill")
-    expect(screen.getByTestId("title-bar-workspace-seg")).toBeInTheDocument()
-    expect(center.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(center.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    // The pill keeps its full "app · conversation" shape — the bar's segments
-    // do not change with the outlet, or the top row would be one shape inside a
-    // conversation and another everywhere else.
-    expect(search).not.toHaveAttribute("data-compact")
+    expect(search).toHaveAttribute("data-compact", "true")
+    expect(screen.queryByTestId("title-bar-title")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("title-bar-workspace-seg")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("title-bar-navigation-menu"))
+    expect(screen.getByTestId("title-bar-workspace-seg")).toBeInTheDocument()
+    expect(screen.getByTestId("title-bar-nav-arrows")).toBeInTheDocument()
     // Every end-zone toggle stays. The projected chat header drops its own
     // copies of the two the bar owns (`components/chat/chat-header.tsx`).
     expect(screen.getByTestId("title-bar-toggle-sidebar")).toBeInTheDocument()
@@ -1958,26 +1975,17 @@ describe("column-header projection", () => {
     expect(screen.getByTestId("title-bar-outlet-end")).toHaveAttribute("hidden")
   })
 
-  test("a projected centre header is counterweighted so the segments stay centred", async () => {
+  test("chat title occupies center while compact navigation lives in measured right chrome", async () => {
     isTauriMock.mockReturnValue(true)
     setPlatform("Win32")
     renderProjecting(["center"])
     const center = await screen.findByTestId("title-bar-outlet-center")
     await waitFor(() => expect(center).toContainElement(screen.getByTestId("projected-center")))
-
-    // The outlet is `flex-1`; without an equal flex child after the segments it
-    // eats all the slack and the search pill ends up against the trailing
-    // chrome instead of in the middle of the chat column.
-    const counterweight = screen.getByTestId("title-bar-center-counterweight")
-    expect(counterweight.className).toContain("flex-1")
-    expect(center.className).toContain("flex-1")
-    // It sits after every segment, and carries none of them.
-    const search = screen.getByTestId("title-bar-search-pill")
-    expect(search.compareDocumentPosition(counterweight) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING
-    )
-    expect(counterweight).toBeEmptyDOMElement()
-    expect(counterweight).toHaveAttribute("aria-hidden", "true")
+    const rightChrome = screen.getByTestId("title-bar-right-chrome")
+    expect(rightChrome).toContainElement(screen.getByTestId("title-bar-search-pill"))
+    expect(rightChrome).toContainElement(screen.getByTestId("title-bar-navigation-menu"))
+    expect(center.parentElement).not.toContainElement(screen.getByTestId("title-bar-search-pill"))
+    expect(screen.queryByTestId("title-bar-center-counterweight")).not.toBeInTheDocument()
   })
 
   test("with nothing projected the centre zone has no counterweight", async () => {
@@ -2028,7 +2036,7 @@ describe("column-header projection", () => {
     }
   })
 
-  test("keeps the counterweight when the floor has no outlet to reclaim from", async () => {
+  test("keeps chat controls on the right even when the title column has no spare width", async () => {
     isTauriMock.mockReturnValue(true)
     // macOS reserves 80px for the traffic lights, so a small window puts the
     // centre under half the bar on padding alone — with no projected column
@@ -2042,14 +2050,14 @@ describe("column-header projection", () => {
       // no gain: the floor is only worth enforcing when an outlet is actually
       // giving room up.
       await waitFor(() =>
-        expect(screen.getByTestId("title-bar-center-counterweight")).toBeInTheDocument()
+        expect(screen.queryByTestId("title-bar-center-counterweight")).not.toBeInTheDocument()
       )
     } finally {
       restore()
     }
   })
 
-  test("a dock the bar can afford is still tracked exactly, counterweight and all", async () => {
+  test("a dock the bar can afford is still tracked exactly without stealing title space", async () => {
     isTauriMock.mockReturnValue(true)
     setPlatform("Win32")
     const restore = stubMeasuredWidths({ "title-bar": 1200 })
@@ -2058,7 +2066,7 @@ describe("column-header projection", () => {
       renderProjecting(["center", "end"])
       const end = await screen.findByTestId("title-bar-outlet-end")
       await waitFor(() => expect(end).toHaveStyle({ width: "300px" }))
-      expect(screen.getByTestId("title-bar-center-counterweight")).toBeInTheDocument()
+      expect(screen.queryByTestId("title-bar-center-counterweight")).not.toBeInTheDocument()
     } finally {
       restore()
     }

@@ -661,3 +661,65 @@ describe("context workbench layout store", () => {
     })
   })
 })
+
+describe("browser tab navigation preferences", () => {
+  it("keeps the visible secondary foregrounded when closing primary despite a newer hidden tab", () => {
+    const store = createContextWorkbenchStoreForTesting()
+    store.getState().navigatePanel("a", "one", "wide")
+    store.getState().navigatePanel("a", "two", "wide")
+    store.getState().setWidth("a", 480, "two")
+    store.getState().navigatePanel("a", "three", "wide")
+    store.getState().navigatePanel("a", "one", "wide")
+    store.getState().activateSplit("a", "two")
+    store.getState().closePanelTab("a", "one")
+    expect(store.getState().layouts.a).toMatchObject({
+      activePanelId: "two",
+      splitPanelId: null,
+      width: 480,
+      activatedPanelIds: ["two", "three"],
+    })
+  })
+  it("persists the navigation style and defaults older layouts to tabs", () => {
+    const options = useContextWorkbenchStore.persist.getOptions()
+    const state = createContextWorkbenchStoreForTesting().getState()
+    const written = options.partialize?.({ ...state, navigationStyle: "rail" })
+    expect(options.merge?.(written, state).navigationStyle).toBe("rail")
+    expect(options.merge?.({ layouts: {} }, state).navigationStyle).toBe("tabs")
+  })
+  it("restores remembered width and removes a closed split or pending indicator", () => {
+    const store = createContextWorkbenchStoreForTesting()
+    store.getState().navigatePanel("a", "one", "wide")
+    store.getState().setWidth("a", 480, "one")
+    store.getState().navigatePanel("a", "two", "wide")
+    store.getState().setWidth("a", 640, "two")
+    store.getState().activateSplit("a", "one")
+    store.getState().setUserPinned("a", true)
+    store.getState().smartReveal("a", "two")
+    store.getState().closePanelTab("a", "two")
+    expect(store.getState().layouts.a).toMatchObject({
+      activePanelId: "one",
+      width: 480,
+      splitPanelId: null,
+      pendingPanelIds: [],
+    })
+  })
+  it("defaults to labeled tabs and stores the compact preference", () => {
+    const store = createContextWorkbenchStoreForTesting()
+    expect(store.getState().navigationStyle).toBe("tabs")
+    store.getState().setNavigationStyle("rail")
+    expect(store.getState().navigationStyle).toBe("rail")
+  })
+  it("closes an inactive tab without disturbing selection and restores a neighbor for the active tab", () => {
+    const store = createContextWorkbenchStoreForTesting()
+    store.getState().navigatePanel("a", "one")
+    store.getState().navigatePanel("a", "two")
+    store.getState().navigatePanel("a", "three")
+    store.getState().closePanelTab("a", "two")
+    expect(store.getState().layouts.a.activePanelId).toBe("three")
+    store.getState().closePanelTab("a", "three")
+    expect(store.getState().layouts.a.activePanelId).toBe("one")
+    expect(store.getState().layouts.a.activatedPanelIds).toEqual(["one"])
+    store.getState().closePanelTab("a", "one")
+    expect(store.getState().layouts.a.activePanelId).toBeNull()
+  })
+})

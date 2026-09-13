@@ -3,6 +3,7 @@
  */
 import "fake-indexeddb/auto"
 import "@testing-library/jest-dom"
+import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { WorkflowEditorCanvas } from "./canvas"
@@ -643,4 +644,8 @@ describe("WorkflowEditorCanvas — natural-language authoring entry points", () 
       expect(screen.getByTestId("right-sidebar")).toBeInTheDocument()
     })
   })
+})
+
+beforeEach(() => {
+  useContextWorkbenchStore.setState({ navigationStyle: "rail" })
 })

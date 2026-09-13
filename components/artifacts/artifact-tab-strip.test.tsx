@@ -55,6 +55,15 @@ beforeEach(() => {
 })
 
 describe("ArtifactTabStrip", () => {
+  it("names a single open resource in tabs mode and closing it returns to the session", () => {
+    const [only] = seed(["Only"])
+    render(<ArtifactTabStrip showSingle />)
+    expect(screen.getByRole("tab", { name: /Only/ })).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId(`artifact-tab-close-${only.id}`))
+    expect(activeTab()).toBeNull()
+    expect(openTabs()).toEqual([])
+    expect(screen.queryByTestId("artifact-tab-strip")).not.toBeInTheDocument()
+  })
   it("stays out of the way until a second artifact is open", () => {
     seed(["Only"])
     const { container } = render(<ArtifactTabStrip />)

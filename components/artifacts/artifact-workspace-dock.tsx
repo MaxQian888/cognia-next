@@ -17,7 +17,9 @@
  * Cmd/Ctrl+J toggles it (see `useArtifactDockShortcuts`).
  */
 
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react"
+import { useTranslations } from "next-intl"
+import { SessionSummaryDockContext } from "@/components/context-workbench/session-summary-popover"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react"
 import type { PanelImperativeHandle } from "react-resizable-panels"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { onBrowserUrlReveal } from "@/lib/browser/open-url-request"
@@ -26,11 +28,14 @@ import {
   SHELL_DOCK_CLEANUP_SLACK_MS,
   SHELL_DOCK_DURATION_MS,
   SHELL_DOCK_EASE,
+  SHELL_DOCK_TIMING_CLASS,
 } from "@/lib/ui/shell-dock-motion"
+import { useEdgePanelTransition } from "@/hooks/shell/use-edge-panel-transition"
 import { magnetAsPercent, snapPanelSize } from "@/lib/ui/panel-snap"
 import { cn } from "@/lib/utils"
 import { WORKBENCH_RAIL_WIDTH_PX } from "@/types/shell/workbench-rail"
-import { useWorkbenchRailPersistent } from "@/components/shell/use-workbench-rail-layout"
+import { useEffectiveWorkbenchRailPersistent as useWorkbenchRailPersistent } from "@/components/shell/use-workbench-rail-layout"
+import { useElementWidth } from "@/hooks/use-element-width"
 import { useReportShellColumn } from "@/hooks/shell/use-report-shell-column"
 import { useBreakpoint } from "@/hooks/ui"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
@@ -298,6 +303,7 @@ export function ArtifactWorkspaceDock({ children }: { children: ReactNode }) {
   useDockAttentionSignal()
   useSideBrowserReveal()
   const breakpoint = useBreakpoint()
+  const [summaryHost, setSummaryHost] = useState<HTMLDivElement | null>(null)
 
   // Tablet takes the Sheet, not a side-by-side dock, and that is deliberate
   // rather than an oversight in the breakpoint table.
@@ -317,7 +323,13 @@ export function ArtifactWorkspaceDock({ children }: { children: ReactNode }) {
     return <ArtifactWorkspaceDockNarrow>{children}</ArtifactWorkspaceDockNarrow>
   }
 
-  return <ArtifactWorkspaceDockDesktop>{children}</ArtifactWorkspaceDockDesktop>
+  return (
+    <SessionSummaryDockContext.Provider value={summaryHost}>
+      <ArtifactWorkspaceDockDesktop summaryHostRef={setSummaryHost}>
+        {children}
+      </ArtifactWorkspaceDockDesktop>
+    </SessionSummaryDockContext.Provider>
+  )
 }
 
 function ArtifactWorkspaceDockNarrow({ children }: { children: ReactNode }) {
@@ -338,7 +350,39 @@ function ArtifactWorkspaceDockNarrow({ children }: { children: ReactNode }) {
   )
 }
 
-function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
+/**
+ * Width of the reserved summary column.
+ *
+ * The Tailwind literal `w-[280px]` on the `<aside>` cannot interpolate a
+ * TypeScript constant, so the number appears twice; `artifact-workspace-dock.test.tsx`
+ * pins the pair the same way `shell-dock-motion.test.ts` pins its timing class.
+ */
+export const SUMMARY_DOCK_WIDTH_PX = 280
+
+function ArtifactWorkspaceDockDesktop({
+  children,
+  summaryHostRef,
+}: {
+  children: ReactNode
+  summaryHostRef: (element: HTMLDivElement | null) => void
+}) {
+  const t = useTranslations("contextWorkbench.taskOverview")
+  const workspaceElementRef = useRef<HTMLDivElement | null>(null)
+  const workspaceWidth = useElementWidth(workspaceElementRef)
+  const summaryFits = workspaceWidth === 0 || workspaceWidth >= CHAT_MIN_PX + SUMMARY_DOCK_WIDTH_PX
+  const summaryRequested = useArtifactDockLayoutStore((state) => state.summarySessionId !== null)
+  const summaryOpen = summaryRequested && summaryFits
+  const summaryPanelRef = useRef<HTMLDivElement | null>(null)
+  const summaryMoving = useEdgePanelTransition(summaryOpen, { element: summaryPanelRef })
+  const attachSummaryPanel = useCallback((element: HTMLDivElement | null) => {
+    summaryPanelRef.current = element
+  }, [])
+  const attachSummaryHost = useCallback(
+    (element: HTMLDivElement | null) => {
+      summaryHostRef(element)
+    },
+    [summaryHostRef]
+  )
   const dockSize = useArtifactDockLayoutStore((s) => s.dockSize)
   const dockCollapsed = useArtifactDockLayoutStore((s) => s.dockCollapsed)
   const dockProfile = useArtifactDockLayoutStore((s) => s.dockProfile)
@@ -347,15 +391,17 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
   const setDockSize = useArtifactDockLayoutStore((s) => s.setDockSize)
   const requestDockSize = useArtifactDockLayoutStore((s) => s.requestDockSize)
   const setDockCollapsed = useArtifactDockLayoutStore((s) => s.setDockCollapsed)
-  const railPersistent = useWorkbenchRailPersistent()
+  const railPreference = useWorkbenchRailPersistent()
+  const railPersistent = railPreference && !summaryOpen
   const dockPanelRef = useRef<PanelImperativeHandle | null>(null)
   const dockPanelElementRef = useRef<HTMLDivElement | null>(null)
   // The title bar hosts this dock's header and sizes its end outlet to the
   // dock's rendered width (`title-bar-outlets.tsx`), including mid-resize and
   // mid-collapse — so the panel reports what it measures rather than the
   // percentage the layout store holds.
-  useReportShellColumn("dock", dockPanelElementRef)
+  useReportShellColumn("dock", summaryOpen ? summaryPanelRef : dockPanelElementRef)
   const previousDockCollapsedRef = useRef(dockCollapsed)
+  const previousSummaryOpenRef = useRef(summaryOpen)
   const previousDockSizeRequestRef = useRef(dockSizeRequest)
   /**
    * The width the animation effects below should resize *to*, held in a ref so
@@ -468,7 +514,12 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
   // Match the conversation sidebar: animate only collapse/expand, then remove
   // the transition so manual divider dragging remains immediate.
   useEffect(() => {
-    if (previousDockCollapsedRef.current === dockCollapsed) return
+    if (
+      previousDockCollapsedRef.current === dockCollapsed &&
+      previousSummaryOpenRef.current === summaryOpen
+    )
+      return
+    previousSummaryOpenRef.current = summaryOpen
     previousDockCollapsedRef.current = dockCollapsed
 
     const panel = dockPanelRef.current
@@ -480,7 +531,7 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
       if (dockCollapsed) panel.collapse()
       else panel.resize(`${target}%`)
     })
-  }, [dockCollapsed])
+  }, [dockCollapsed, summaryOpen])
 
   // A width preset (the workbench narrow/wide buttons) asked for a specific
   // size. Keyed on the request token rather than `dockSize`, because a drag
@@ -541,6 +592,7 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
     <div
       className="flex w-full flex-1 min-h-0 overflow-hidden"
       data-testid="artifact-workspace-dock"
+      ref={workspaceElementRef}
     >
       <WorkspaceRevealOpener />
       <ResizablePanelGroup
@@ -631,16 +683,45 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
           panelRef={dockPanelRef}
           elementRef={dockPanelElementRef}
           defaultSize={dockCollapsed ? collapsedSize : `${dockSize}%`}
-          minSize={dockMinSize}
-          maxSize={dockMaxSize}
+          minSize={summaryOpen ? "0%" : dockMinSize}
+          maxSize={summaryOpen ? "0%" : dockMaxSize}
           collapsible
           collapsedSize={collapsedSize}
         >
           <div data-testid="artifact-dock-wrapper" className="h-full min-w-0 overflow-hidden">
-            {dockContentMounted ? <ArtifactDock railOnly={!dockBodyMounted} /> : null}
+            {!summaryOpen && dockContentMounted ? (
+              <ArtifactDock railOnly={!dockBodyMounted} />
+            ) : null}
           </div>
         </ResizablePanel>
       </ResizablePanelGroup>
+      {/* The summary column is an edge panel like every other one in the shell,
+          so it moves on the shared clock rather than appearing at its full
+          width in a single frame. The dock beside it already animates to zero
+          over `SHELL_DOCK_DURATION_MS`; a column that snapped in instantly
+          squeezed the conversation for the length of that animation and then
+          released it. Per the shell rule: animate the space, and hold the
+          content at its final width behind the clip so the card slides in from
+          the window edge instead of being compressed into view. */}
+      <aside
+        id="session-summary-dock"
+        aria-label={t("summaryTitle")}
+        data-testid="session-summary-dock"
+        aria-hidden={!summaryOpen}
+        inert={!summaryOpen}
+        ref={attachSummaryPanel}
+        className={cn(
+          "h-full shrink-0 overflow-hidden",
+          summaryOpen ? "w-[280px]" : "w-0",
+          summaryMoving && `transition-[width] ${SHELL_DOCK_TIMING_CLASS}`
+        )}
+      >
+        <div
+          ref={summaryFits ? attachSummaryHost : undefined}
+          className="h-full w-[280px] p-3"
+          data-testid="session-summary-dock-inner"
+        />
+      </aside>
     </div>
   )
 }
