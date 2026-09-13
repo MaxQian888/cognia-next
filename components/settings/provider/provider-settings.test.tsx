@@ -518,17 +518,14 @@ jest.mock("./provider-onboarding-banner", () => ({
 jest.mock("./provider-comparison-view", () => ({
   ProviderComparisonView: ({
     onBack,
-    initialSelectedModelKeys,
+    selectedModelKeys,
     onSelectedModelKeysChange,
   }: {
     onBack: () => void
-    initialSelectedModelKeys?: readonly string[]
-    onSelectedModelKeysChange?: (keys: string[]) => void
+    selectedModelKeys: readonly string[]
+    onSelectedModelKeysChange: (keys: string[]) => void
   }) => (
-    <div
-      data-testid="provider-comparison-view"
-      data-initial-keys={(initialSelectedModelKeys ?? []).join(",")}
-    >
+    <div data-testid="provider-comparison-view" data-selected-keys={selectedModelKeys.join(",")}>
       <button data-testid="mock-compare-back" onClick={onBack}>
         back
       </button>
@@ -1483,6 +1480,12 @@ describe("ProviderSettings (cognia-next slim port)", () => {
       selectedProviderId: "deepseek",
       uiPreferences: { comparisonModelKeys: ["anthropic:claude-4-7-sonnet"] },
     })
+    // The pane is optimistic only for the duration of the write; afterwards it
+    // reads the store. Mirror the write into the mocked preferences so the
+    // released override resolves to what was just set, as it does in the app.
+    mockSetProviderUIPreferences.mockImplementation((patch: Record<string, unknown>) => {
+      Object.assign(mockHookState.uiPreferences as Record<string, unknown>, patch)
+    })
     render(<ProviderSettings />)
     fireEvent.click(screen.getByTestId("provider-onboarding-banner"))
     expect(mockSetSelectedProviderId).toHaveBeenCalledWith("openai")
@@ -1490,14 +1493,21 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     // The comparison view is `next/dynamic`; the loader shim resolves it async.
     const pane = await screen.findByTestId("provider-comparison-view")
     // Persisted selection is restored …
-    expect(pane).toHaveAttribute("data-initial-keys", "anthropic:claude-4-7-sonnet")
+    expect(pane).toHaveAttribute("data-selected-keys", "anthropic:claude-4-7-sonnet")
+    // … opening it is a workspace switch, so it survives a reload like Routing does …
+    expect(mockSetProviderUIPreferences).toHaveBeenCalledWith({ workspace: "compare" })
     // … the detail panel is gone while comparing …
     expect(screen.queryByTestId("provider-detail-panel")).not.toBeInTheDocument()
-    // … a new selection is persisted to the UI preferences …
+    // … a new selection is persisted to the UI preferences and reflected
+    // straight back into the pane (optimistically, before the write lands) …
     fireEvent.click(screen.getByTestId("mock-compare-select"))
     expect(mockSetProviderUIPreferences).toHaveBeenCalledWith({
       comparisonModelKeys: ["openai:gpt-4o"],
     })
+    expect(screen.getByTestId("provider-comparison-view")).toHaveAttribute(
+      "data-selected-keys",
+      "openai:gpt-4o"
+    )
     // … and Back (or picking a provider) restores the detail panel.
     fireEvent.click(screen.getByTestId("mock-compare-back"))
     expect(screen.queryByTestId("provider-comparison-view")).not.toBeInTheDocument()

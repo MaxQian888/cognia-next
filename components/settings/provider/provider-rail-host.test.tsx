@@ -17,6 +17,7 @@ jest.mock("@/components/settings/common/settings-master-detail", () => ({
 function renderHost(over: Partial<ProviderRailHostProps> = {}) {
   const props: ProviderRailHostProps = {
     rail: <div data-testid="the-rail" />,
+    detail: <div data-testid="the-detail" />,
     railWidth: 360,
     railResize: {
       dragging: false,
@@ -26,8 +27,8 @@ function renderHost(over: Partial<ProviderRailHostProps> = {}) {
       onKeyDown: jest.fn(),
       onDoubleClick: jest.fn(),
     },
-    sheetOpen: false,
-    onSheetOpenChange: jest.fn(),
+    stackedView: "list",
+    onShowList: jest.fn(),
     onAdd: jest.fn(),
     ...over,
   }
@@ -40,10 +41,11 @@ beforeEach(() => {
 
 describe("ProviderRailHost", () => {
   describe("split pane", () => {
-    it("puts the rail in a resizable column", () => {
+    it("puts the rail in a resizable column beside the detail", () => {
       renderHost()
       expect(screen.getByTestId("provider-rail")).toContainElement(screen.getByTestId("the-rail"))
       expect(screen.getByTestId("provider-rail-resize-handle")).toBeInTheDocument()
+      expect(screen.getByTestId("the-detail")).toBeInTheDocument()
     })
 
     // The handle reports the stored PREFERENCE. The rendered track is
@@ -57,10 +59,11 @@ describe("ProviderRailHost", () => {
       expect(handle).toHaveAttribute("aria-valuemax", "480")
     })
 
-    it("offers no drawer, so there is no second copy of the rail", () => {
-      renderHost()
-      expect(screen.queryByTestId("provider-rail-drawer-trigger")).not.toBeInTheDocument()
+    it("ignores the stacked view: both columns stay live", () => {
+      renderHost({ stackedView: "detail" })
       expect(screen.getAllByTestId("the-rail")).toHaveLength(1)
+      expect(screen.getByTestId("the-detail")).toBeInTheDocument()
+      expect(screen.queryByTestId("provider-rail-bar")).not.toBeInTheDocument()
     })
   })
 
@@ -69,54 +72,50 @@ describe("ProviderRailHost", () => {
       density = "stacked"
     })
 
-    it("replaces the column with a top bar and no resize handle", () => {
-      renderHost()
-      expect(screen.getByTestId("provider-rail-bar")).toBeInTheDocument()
-      expect(screen.queryByTestId("provider-rail")).not.toBeInTheDocument()
+    // The rail's rows carry `id="provider-<id>"` which the onboarding banner
+    // scrolls to with getElementById; a second CSS-hidden copy would break it.
+    it("shows the list as the whole page, with the detail unmounted", () => {
+      renderHost({ stackedView: "list" })
+      const rail = screen.getByTestId("provider-rail")
+      expect(rail).toHaveAttribute("data-stacked-view", "list")
+      expect(rail).toHaveClass("row-span-2")
+      expect(screen.getAllByTestId("the-rail")).toHaveLength(1)
+      expect(screen.queryByTestId("the-detail")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("provider-rail-bar")).not.toBeInTheDocument()
       expect(screen.queryByTestId("provider-rail-resize-handle")).not.toBeInTheDocument()
     })
 
-    // The rail lives ONLY inside the closed drawer here. Rendering a
-    // CSS-hidden second copy would duplicate every `id="provider-<id>"` the
-    // onboarding banner scrolls to with getElementById.
-    it("keeps the rail out of the document until the drawer opens", () => {
-      renderHost()
+    it("pushes the detail in under a bar and takes the list out", () => {
+      renderHost({ stackedView: "detail", selectedName: "OpenAI" })
+      expect(screen.getByTestId("provider-rail-bar")).toHaveAttribute("data-stacked-view", "detail")
+      expect(screen.getByTestId("the-detail")).toBeInTheDocument()
       expect(screen.queryByTestId("the-rail")).not.toBeInTheDocument()
-    })
-
-    it("shows exactly one rail once the drawer is open", () => {
-      renderHost({ sheetOpen: true })
-      expect(screen.getAllByTestId("the-rail")).toHaveLength(1)
-    })
-
-    it("names the selected provider on the bar", () => {
-      renderHost({ selectedName: "OpenAI" })
       expect(screen.getByTestId("provider-rail-title")).toHaveTextContent("OpenAI")
     })
 
-    it("omits the title when nothing is selected", () => {
-      renderHost()
+    it("omits the title when nothing is named", () => {
+      renderHost({ stackedView: "detail" })
       expect(screen.queryByTestId("provider-rail-title")).not.toBeInTheDocument()
     })
 
-    it("opens the drawer from the bar", async () => {
-      const onSheetOpenChange = jest.fn()
+    it("returns to the list from the bar's back button", async () => {
+      const onShowList = jest.fn()
       const user = userEvent.setup()
-      renderHost({ onSheetOpenChange })
-      await user.click(screen.getByTestId("provider-rail-drawer-trigger"))
-      expect(onSheetOpenChange).toHaveBeenCalledWith(true)
+      renderHost({ stackedView: "detail", onShowList })
+      await user.click(screen.getByTestId("provider-rail-back"))
+      expect(onShowList).toHaveBeenCalledTimes(1)
     })
 
-    // Adding is on the bar itself. Having to open the drawer first would be a
+    // Adding is on the bar itself. Going back to the list first would be a
     // tap of pure ceremony.
-    it("adds a provider without opening the drawer", async () => {
+    it("adds a provider from the detail bar without leaving it", async () => {
       const onAdd = jest.fn()
-      const onSheetOpenChange = jest.fn()
+      const onShowList = jest.fn()
       const user = userEvent.setup()
-      renderHost({ onAdd, onSheetOpenChange })
+      renderHost({ stackedView: "detail", onAdd, onShowList })
       await user.click(screen.getByTestId("provider-rail-drawer-add"))
       expect(onAdd).toHaveBeenCalledTimes(1)
-      expect(onSheetOpenChange).not.toHaveBeenCalled()
+      expect(onShowList).not.toHaveBeenCalled()
     })
   })
 })

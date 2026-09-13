@@ -1,32 +1,34 @@
 "use client"
 
 /**
- * ProviderComparisonView — global side-by-side model comparison panel.
+ * ProviderComparisonView — side-by-side model comparison, up to four models.
+ *
+ * The selection is owned by the caller (persisted as
+ * `ProviderUIPreferences.comparisonModelKeys`), because it is fed from two
+ * places: the compare column on every provider's Models tab, and the
+ * "Add model" picker here. Local state would mean the two disagree.
  *
  * Layout:
- *  1. Header: title + back button
- *  2. Model selector: popover with checkboxes grouped by provider (max 4)
- *  3. Comparison table: rows = attributes, columns = selected models
- *  4. Recommendation: best-value model based on average price
- *  5. Empty state: guidance text when no models selected
+ *  1. Header: back, title, `n / 4`
+ *  2. Toolbar: add-model picker, "only differences" toggle
+ *  3. Table: attributes × models, grouped in sections. First column and the
+ *     header row stay pinned while the table scrolls either way. The best
+ *     value in a numeric row is marked; rows where every model agrees can be
+ *     hidden.
+ *  4. Best-value banner (lowest average price among the selection)
+ *  5. Empty state pointing at both ways to add a model
  */
 
 import React, { useMemo, useState } from "react"
-import { ArrowLeft, Check, X, ChevronDown, Layers } from "lucide-react"
+import { ArrowLeft, Check, X, ChevronDown, GitCompareArrows, Plus, Trophy } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { ProviderIcon } from "@/components/providers/ai/provider-icon"
+import { cn } from "@/lib/utils"
 import { useSettingsStore } from "@/stores"
 import { useModelsDevCatalog } from "@/hooks/settings/use-models-dev-catalog"
 import { mergePricing } from "@cognia/provider-core/providers/model-discovery"
@@ -38,24 +40,22 @@ import type {
   BuiltInProviderCatalogEntry,
   BuiltInProviderModelEntry,
 } from "@cognia/provider-types/built-in-provider-catalog"
+import {
+  COMPARISON_MAX_MODELS,
+  comparisonModelKey,
+  formatTokenCount,
+  formatUsdPerMillion,
+} from "./model-format"
+
+export { comparisonModelKey }
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
 
 export interface ProviderComparisonViewProps {
   onBack: () => void
-  /**
-   * Selection to restore on mount, as `${providerId}:${modelId}` keys
-   * (`ProviderUIPreferences.comparisonModelKeys`). Unknown keys are dropped.
-   */
-  initialSelectedModelKeys?: readonly string[]
-  /** Fired with the new key list whenever the selection changes. */
-  onSelectedModelKeysChange?: (keys: string[]) => void
-}
-
-/** Stable selection key — model ids collide across providers (`gpt-4o` on
- *  OpenAI, Azure and OpenRouter), so the provider must be part of the key. */
-export function comparisonModelKey(providerId: string, modelId: string): string {
-  return `${providerId}:${modelId}`
+  /** `${providerId}:${modelId}` keys. Unknown keys are ignored, not dropped. */
+  selectedModelKeys: readonly string[]
+  onSelectedModelKeysChange: (keys: string[]) => void
 }
 
 interface ModelOption {
@@ -65,18 +65,12 @@ interface ModelOption {
   modelName: string
   providerId: string
   providerName: string
+  providerEnabled: boolean
   entry: BuiltInProviderModelEntry
   catalogEntry: BuiltInProviderCatalogEntry
 }
 
 /* ── Helpers ─────────────────────────────────────────────────────────────── */
-
-function formatContext(tokens: number, notAvailable = "—"): string {
-  if (tokens === 0) return notAvailable
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(0)}M`
-  if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}K`
-  return String(tokens)
-}
 
 /**
  * Numeric per-1M pricing fields, keyed off the catalog's own pricing shape —
@@ -93,7 +87,7 @@ function formatLatency(ms: number | undefined): string {
   return `${ms}ms`
 }
 
-function estimateCostPer1K(entry: BuiltInProviderModelEntry): number | null {
+export function estimateCostPer1K(entry: BuiltInProviderModelEntry): number | null {
   if (!entry.pricing) return null
   // Assume 1K calls with avg 500 input tokens + 200 output tokens each
   const inputCost = (500 / 1_000_000) * entry.pricing.promptPer1M
@@ -130,11 +124,81 @@ function enrichComparisonEntry(
   }
 }
 
-/* ── CapabilityCell ──────────────────────────────────────────────────────── */
+/* ── Row model ───────────────────────────────────────────────────────────── */
 
-function CapabilityCell({ supported }: { supported: boolean }) {
+type SectionId = "limits" | "capabilities" | "pricing" | "performance"
+
+/**
+ * One attribute row. `best` says which direction wins for a numeric row so
+ * the winner can be marked; `optional` rows render only when at least one
+ * selected model has a value (the cache / batch / audio price tiers).
+ */
+interface RowDef {
+  id: string
+  section: SectionId
+  labelKey: string
+  kind: "number" | "boolean" | "text"
+  best?: "high" | "low"
+  optional?: boolean
+  value: (model: ModelOption, ctx: RowContext) => number | boolean | string | null
+  format: (value: number | boolean | string | null) => React.ReactNode
+}
+
+interface RowContext {
+  latencyFor: (model: ModelOption) => number | undefined
+  formatPrice: (n: number) => string
+  notAvailable: string
+}
+
+const SECTION_ORDER: SectionId[] = ["limits", "capabilities", "pricing", "performance"]
+
+/** Stands in for a missing value when deciding whether a row differs. */
+const NULL_SENTINEL = "\u0000missing"
+
+/** A row's values across the selection, plus what to highlight. */
+export interface ComparedRow {
+  def: RowDef
+  values: Array<number | boolean | string | null>
+  /** Not every model agrees. */
+  differs: boolean
+  /** Column index of the winning value for a numeric row, if any. */
+  bestIndex: number | null
+}
+
+/**
+ * Pure: derive the rendered rows for a selection. Exported so the "only
+ * differences" and "best in row" semantics are pinned without a DOM.
+ */
+export function compareRows(
+  defs: readonly RowDef[],
+  models: readonly ModelOption[],
+  ctx: RowContext
+): ComparedRow[] {
+  const rows: ComparedRow[] = []
+  for (const def of defs) {
+    const values = models.map((m) => def.value(m, ctx))
+    if (def.optional && values.every((v) => v === null)) continue
+    const distinct = new Set(values.map((v) => (v === null ? NULL_SENTINEL : String(v))))
+    let bestIndex: number | null = null
+    if (def.kind === "number" && def.best) {
+      let bestValue: number | null = null
+      values.forEach((v, i) => {
+        if (typeof v !== "number") return
+        if (bestValue === null || (def.best === "high" ? v > bestValue : v < bestValue)) {
+          bestValue = v
+          bestIndex = i
+        }
+      })
+      // A tie is not a winner.
+      if (bestIndex !== null && values.filter((v) => v === bestValue).length > 1) bestIndex = null
+    }
+    rows.push({ def, values, differs: distinct.size > 1, bestIndex })
+  }
+  return rows
+}
+
+function CapabilityMark({ supported }: { supported: boolean }) {
   const t = useTranslations("providers")
-
   return supported ? (
     <Check
       className="mx-auto h-4 w-4 text-emerald-500"
@@ -150,21 +214,109 @@ function CapabilityCell({ supported }: { supported: boolean }) {
   )
 }
 
-/* ── Main component ──────────────────────────────────────────────────────── */
+function buildRowDefs(ctx: RowContext): RowDef[] {
+  const tokens = (v: number | boolean | string | null) =>
+    typeof v === "number" && v > 0 ? formatTokenCount(v) : "—"
+  const price = (v: number | boolean | string | null) =>
+    typeof v === "number" ? ctx.formatPrice(v) : "—"
+  const priceRow = (
+    id: string,
+    labelKey: string,
+    field: NumericPricingField,
+    optional: boolean
+  ): RowDef => ({
+    id,
+    section: "pricing",
+    labelKey,
+    kind: "number",
+    best: "low",
+    optional,
+    value: (m) => {
+      const v = m.entry.pricing?.[field]
+      return typeof v === "number" ? v : null
+    },
+    format: price,
+  })
+  const capRow = (
+    id: string,
+    labelKey: string,
+    pick: (e: BuiltInProviderModelEntry) => boolean | undefined
+  ): RowDef => ({
+    id,
+    section: "capabilities",
+    labelKey,
+    kind: "boolean",
+    value: (m) => Boolean(pick(m.entry)),
+    format: (v) => <CapabilityMark supported={Boolean(v)} />,
+  })
 
-const MAX_MODELS = 4
+  return [
+    {
+      id: "context",
+      section: "limits",
+      labelKey: "comparison.contextWindow",
+      kind: "number",
+      best: "high",
+      value: (m) => (m.entry.contextLength > 0 ? m.entry.contextLength : null),
+      format: tokens,
+    },
+    {
+      id: "maxOutput",
+      section: "limits",
+      labelKey: "comparison.maxOutput",
+      kind: "number",
+      best: "high",
+      value: (m) => m.entry.maxOutputTokens ?? null,
+      format: tokens,
+    },
+    capRow("textGeneration", "comparison.textGeneration", () => true),
+    capRow("vision", "comparison.vision", (e) => e.supportsVision),
+    capRow("functionCalling", "comparison.functionCalling", (e) => e.supportsTools),
+    capRow("streaming", "comparison.streaming", (e) => e.supportsStreaming),
+    capRow("reasoning", "comparison.reasoning", (e) => e.supportsReasoning),
+    capRow("audio", "comparison.audio", (e) => e.supportsAudio),
+    capRow("video", "comparison.video", (e) => e.supportsVideo),
+    capRow("imageGeneration", "comparison.imageGeneration", (e) => e.supportsImageGeneration),
+    capRow("embedding", "comparison.embedding", (e) => e.supportsEmbedding),
+    priceRow("inputPrice", "comparison.inputPrice", "promptPer1M", false),
+    priceRow("outputPrice", "comparison.outputPrice", "completionPer1M", false),
+    priceRow("cacheRead", "comparison.cacheReadPrice", "cachedInputPer1M", true),
+    priceRow("cacheWrite", "comparison.cacheWritePrice", "cacheCreationPer1M", true),
+    priceRow("batchInput", "comparison.batchInputPrice", "batchInputPer1M", true),
+    priceRow("batchOutput", "comparison.batchOutputPrice", "batchOutputPer1M", true),
+    priceRow("audioInput", "comparison.audioInputPrice", "audioInputPer1M", true),
+    priceRow("audioOutput", "comparison.audioOutputPrice", "audioOutputPer1M", true),
+    {
+      id: "estCost",
+      section: "pricing",
+      labelKey: "comparison.estCostPer1K",
+      kind: "number",
+      best: "low",
+      value: (m) => estimateCostPer1K(m.entry),
+      format: (v) => (typeof v === "number" ? `$${v.toFixed(3)}` : ctx.notAvailable),
+    },
+    {
+      id: "latency",
+      section: "performance",
+      labelKey: "comparison.avgLatency",
+      kind: "number",
+      best: "low",
+      value: (m) => ctx.latencyFor(m) ?? null,
+      format: (v) => formatLatency(typeof v === "number" ? v : undefined),
+    },
+  ]
+}
+
+/* ── Main component ──────────────────────────────────────────────────────── */
 
 export function ProviderComparisonView({
   onBack,
-  initialSelectedModelKeys,
+  selectedModelKeys,
   onSelectedModelKeysChange,
 }: ProviderComparisonViewProps) {
   const t = useTranslations("providers")
-
-  const [selectedModelKeys, setSelectedModelKeys] = useState<string[]>(() =>
-    (initialSelectedModelKeys ?? []).slice(0, MAX_MODELS)
-  )
   const [popoverOpen, setPopoverOpen] = useState(false)
+  const [onlyDifferences, setOnlyDifferences] = useState(false)
 
   const providerSettings = useSettingsStore((s) => s.providerSettings)
   const providerUsageStats = useSettingsStore((s) => s.providerUsageStats)
@@ -174,23 +326,19 @@ export function ProviderComparisonView({
   const formatPrice = (pricePerMillion: number): string =>
     pricePerMillion === 0
       ? t("comparison.free")
-      : t("comparison.pricePerMillion", { price: `$${pricePerMillion.toFixed(2)}` })
-  const formatEstCost = (entry: BuiltInProviderModelEntry): string => {
-    const cost = estimateCostPer1K(entry)
-    return cost === null ? t("comparison.notAvailable") : `$${cost.toFixed(3)}`
-  }
+      : t("comparison.pricePerMillion", { price: formatUsdPerMillion(pricePerMillion) })
 
-  /* Build the list of available model options from all enabled providers */
+  /* Every catalog model is selectable. The Models tab can tick a model on a
+     provider that is not enabled yet, and a key that resolves to nothing
+     would read as the selection silently losing a row. Enabled providers
+     lead the picker instead. */
   const availableModels = useMemo<ModelOption[]>(() => {
     const catalog = getBuiltInProviderCatalog()
     const options: ModelOption[] = []
-
     for (const catalogEntry of catalog) {
-      const pSettings = providerSettings[catalogEntry.id]
-      const isEnabled = pSettings?.enabled ?? catalogEntry.defaultEnabled
-      if (!isEnabled) continue
       if (!catalogEntry.models || catalogEntry.models.length === 0) continue
-
+      const pSettings = providerSettings[catalogEntry.id]
+      const providerEnabled = pSettings?.enabled ?? catalogEntry.defaultEnabled
       const devModels = modelsDevRow?.providers[catalogEntry.id]?.models ?? []
       for (const model of catalogEntry.models) {
         const dev = devModels.find((d) => d.id === model.id)
@@ -200,7 +348,7 @@ export function ProviderComparisonView({
           modelName: model.name,
           providerId: catalogEntry.id,
           providerName: catalogEntry.name,
-          // Fill missing model-level fields from models.dev (authoritative).
+          providerEnabled,
           entry: enrichComparisonEntry(model, dev),
           catalogEntry,
         })
@@ -209,174 +357,190 @@ export function ProviderComparisonView({
     return options
   }, [providerSettings, modelsDevRow])
 
-  /* Group available models by provider for the popover */
-  const modelsByProvider = useMemo(() => {
-    const grouped: Record<string, ModelOption[]> = {}
+  /* Group for the picker: enabled providers first, catalog order within. */
+  const pickerGroups = useMemo(() => {
+    const grouped = new Map<string, ModelOption[]>()
     for (const option of availableModels) {
-      if (!grouped[option.providerId]) {
-        grouped[option.providerId] = []
-      }
-      grouped[option.providerId].push(option)
+      const list = grouped.get(option.providerId) ?? []
+      list.push(option)
+      grouped.set(option.providerId, list)
     }
-    return grouped
+    return [...grouped.values()].sort(
+      (a, b) => Number(b[0].providerEnabled) - Number(a[0].providerEnabled)
+    )
   }, [availableModels])
 
-  /* Resolve selected model details */
   const selectedModels = useMemo<ModelOption[]>(() => {
+    const byKey = new Map(availableModels.map((m) => [m.key, m]))
     return selectedModelKeys
-      .map((key) => availableModels.find((m) => m.key === key))
-      .filter(Boolean) as ModelOption[]
+      .map((key) => byKey.get(key))
+      .filter((m): m is ModelOption => m !== undefined)
+      .slice(0, COMPARISON_MAX_MODELS)
   }, [selectedModelKeys, availableModels])
+
+  const selectedSet = useMemo(() => new Set(selectedModelKeys), [selectedModelKeys])
+  const atMax = selectedModelKeys.length >= COMPARISON_MAX_MODELS
+
+  const toggleModel = (key: string) => {
+    if (selectedSet.has(key)) {
+      onSelectedModelKeysChange(selectedModelKeys.filter((k) => k !== key))
+    } else if (!atMax) {
+      onSelectedModelKeysChange([...selectedModelKeys, key])
+    }
+  }
 
   /* Recommendation: lowest average cost per 1M tokens */
   const bestValueModel = useMemo(() => {
-    if (selectedModels.length === 0) return null
     const withPricing = selectedModels.filter((m) => m.entry.pricing)
     if (withPricing.length === 0) return null
     return withPricing.reduce((best, current) => {
-      const bestAvg =
-        ((best.entry.pricing?.promptPer1M ?? 0) + (best.entry.pricing?.completionPer1M ?? 0)) / 2
-      const currentAvg =
-        ((current.entry.pricing?.promptPer1M ?? 0) +
-          (current.entry.pricing?.completionPer1M ?? 0)) /
-        2
-      return currentAvg < bestAvg ? current : best
+      const avg = (m: ModelOption) =>
+        ((m.entry.pricing?.promptPer1M ?? 0) + (m.entry.pricing?.completionPer1M ?? 0)) / 2
+      return avg(current) < avg(best) ? current : best
     })
   }, [selectedModels])
 
-  /* Toggle model selection */
-  const toggleModel = (key: string) => {
-    setSelectedModelKeys((prev) => {
-      let next: string[]
-      if (prev.includes(key)) {
-        next = prev.filter((k) => k !== key)
-      } else if (prev.length >= MAX_MODELS) {
-        return prev
-      } else {
-        next = [...prev, key]
-      }
-      onSelectedModelKeysChange?.(next)
-      return next
-    })
+  const ctx: RowContext = {
+    latencyFor: (model) => {
+      // cognia-next keys usage by `${providerId}:${modelId}`.
+      const modelStats = providerUsageStats?.[`${model.providerId}:${model.modelId}`]
+      return (modelStats as { avgLatencyMs?: number }[] | undefined)?.[0]?.avgLatencyMs
+    },
+    formatPrice,
+    notAvailable: t("comparison.notAvailable"),
   }
-
-  /* Render one optional pricing-dimension row — skipped entirely when none of
-   * the selected models declares a rate for it, so cache/batch/audio rows only
-   * appear when there's something to compare. */
-  const renderPriceRow = (field: NumericPricingField, label: string) => {
-    const anyHas = selectedModels.some((m) => typeof m.entry.pricing?.[field] === "number")
-    if (!anyHas) return null
-    return (
-      <ComparisonRow label={label}>
-        {selectedModels.map((model) => {
-          const v = model.entry.pricing?.[field]
-          return (
-            <TableCell key={model.key} className="px-3 py-2 text-center text-sm font-mono">
-              {typeof v === "number" ? formatPrice(v) : "—"}
-            </TableCell>
-          )
-        })}
-      </ComparisonRow>
-    )
-  }
+  const rows = compareRows(buildRowDefs(ctx), selectedModels, ctx)
+  const visibleRows = onlyDifferences ? rows.filter((r) => r.differs) : rows
+  const differingCount = rows.filter((r) => r.differs).length
 
   /* ── Render ─────────────────────────────────────────────────────────────── */
 
+  const addModelPicker = (
+    <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={atMax}
+          className="h-8 gap-1"
+          title={atMax ? t("comparison.maxReached") : undefined}
+          data-testid="comparison-add-model"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          {t("comparison.addModel")}
+          <ChevronDown className="h-3 w-3 opacity-60" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-80 p-2" align="start">
+        <ScrollArea className="max-h-80">
+          {pickerGroups.map((models) => (
+            <div key={models[0].providerId} className="mb-2">
+              <p className="mb-1 flex items-center gap-1.5 px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <ProviderIcon
+                  providerId={models[0].providerId}
+                  label={models[0].providerName}
+                  size={14}
+                />
+                <span className="truncate">{models[0].providerName}</span>
+                {!models[0].providerEnabled && (
+                  <span className="ml-auto font-normal normal-case tracking-normal">
+                    {t("comparison.providerDisabled")}
+                  </span>
+                )}
+              </p>
+              {models.map((model) => {
+                const isChecked = selectedSet.has(model.key)
+                const isDisabled = !isChecked && atMax
+                return (
+                  <label
+                    key={model.key}
+                    htmlFor={`compare-model-${model.key}`}
+                    className={cn(
+                      "flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-muted",
+                      isDisabled && "pointer-events-none opacity-50"
+                    )}
+                  >
+                    <Checkbox
+                      id={`compare-model-${model.key}`}
+                      checked={isChecked}
+                      disabled={isDisabled}
+                      onCheckedChange={() => toggleModel(model.key)}
+                    />
+                    <span className="flex-1 truncate">{model.modelName}</span>
+                    {model.entry.pricing && (
+                      <span className="font-mono text-xs tabular-nums text-muted-foreground">
+                        {formatUsdPerMillion(model.entry.pricing.promptPer1M)}
+                      </span>
+                    )}
+                  </label>
+                )
+              })}
+            </div>
+          ))}
+        </ScrollArea>
+      </PopoverContent>
+    </Popover>
+  )
+
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    <div className="flex flex-1 flex-col overflow-hidden" data-testid="provider-comparison-view">
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-3 border-b px-4 py-3">
-        <Button variant="ghost" size="sm" onClick={onBack} className="gap-1 pl-1">
+      <div className="flex shrink-0 items-center gap-2 border-b px-4 py-2.5">
+        <Button variant="ghost" size="sm" onClick={onBack} className="h-8 gap-1 pl-1">
           <ArrowLeft className="h-4 w-4" />
           {t("comparison.back")}
         </Button>
-        <div className="flex flex-1 items-center gap-2">
-          <Layers className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-base font-semibold">{t("comparison.title")}</h2>
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <GitCompareArrows className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <h2 className="truncate text-base font-semibold">{t("comparison.title")}</h2>
         </div>
-        <span className="text-xs text-muted-foreground">{t("comparison.maxReached")}</span>
+        <Badge variant="outline" className="tabular-nums" data-testid="comparison-count">
+          {t("comparison.selectedCount", {
+            count: selectedModelKeys.length,
+            max: COMPARISON_MAX_MODELS,
+          })}
+        </Badge>
       </div>
 
-      {/* ── Model selector ──────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2">
-        <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
-          <PopoverTrigger asChild>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={selectedModelKeys.length >= MAX_MODELS}
-              className="gap-1"
-            >
-              {t("comparison.addModel")}
-              <ChevronDown className="h-3 w-3" />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-72 p-2" align="start">
-            <ScrollArea className="max-h-72">
-              {Object.entries(modelsByProvider).map(([providerId, models]) => (
-                <div key={providerId} className="mb-2">
-                  <p className="mb-1 px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    {models[0]?.providerName ?? providerId}
-                  </p>
-                  {models.map((model) => {
-                    const isChecked = selectedModelKeys.includes(model.key)
-                    const isDisabled = !isChecked && selectedModelKeys.length >= MAX_MODELS
-                    return (
-                      <label
-                        key={model.key}
-                        htmlFor={`compare-model-${model.key}`}
-                        className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-muted"
-                        style={isDisabled ? { opacity: 0.5, pointerEvents: "none" } : undefined}
-                      >
-                        <Checkbox
-                          id={`compare-model-${model.key}`}
-                          checked={isChecked}
-                          onCheckedChange={() => toggleModel(model.key)}
-                        />
-                        <span className="flex-1 truncate">{model.modelName}</span>
-                        {model.entry.pricing && (
-                          <span className="text-xs text-muted-foreground">
-                            ${model.entry.pricing.promptPer1M.toFixed(2)}
-                          </span>
-                        )}
-                      </label>
-                    )
-                  })}
-                </div>
-              ))}
-            </ScrollArea>
-          </PopoverContent>
-        </Popover>
-
-        {/* Selected model chips */}
-        {selectedModels.map((model) => (
-          <Badge
-            key={model.key}
-            variant="secondary"
-            className="flex items-center gap-1 pr-1 text-xs"
+      {/* ── Toolbar ──────────────────────────────────────────────────────── */}
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-4 py-2">
+        {addModelPicker}
+        <Button
+          type="button"
+          size="sm"
+          variant={onlyDifferences ? "secondary" : "ghost"}
+          aria-pressed={onlyDifferences}
+          className="h-8 text-xs"
+          disabled={selectedModels.length < 2}
+          onClick={() => setOnlyDifferences((v) => !v)}
+          data-testid="comparison-only-differences"
+        >
+          {t("comparison.onlyDifferences")}
+          {selectedModels.length >= 2 && (
+            <span className="ml-1 tabular-nums text-muted-foreground">({differingCount})</span>
+          )}
+        </Button>
+        {selectedModels.length > 0 && (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="ml-auto h-8 text-xs text-muted-foreground"
+            onClick={() => onSelectedModelKeysChange([])}
+            data-testid="comparison-clear"
           >
-            <span>{model.modelName}</span>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              className="ml-1 size-5 rounded-full"
-              onClick={() => toggleModel(model.key)}
-              aria-label={t("comparison.removeModel", { name: model.modelName })}
-            >
-              <X className="h-2.5 w-2.5" />
-            </Button>
-          </Badge>
-        ))}
+            {t("comparison.clearAll")}
+          </Button>
+        )}
       </div>
 
       {/* ── Main content ────────────────────────────────────────────────────── */}
-      <div className="flex flex-1 flex-col overflow-auto px-4 py-4">
+      <div className="flex min-h-0 flex-1 flex-col overflow-auto">
         {selectedModels.length === 0 ? (
           /* ── Empty state ──────────────────────────────────────────────────── */
-          <div className="flex flex-1 items-center justify-center">
-            <div className="text-center">
-              <Layers className="mx-auto h-12 w-12 text-muted-foreground/30" />
+          <div className="flex flex-1 items-center justify-center p-6">
+            <div className="max-w-sm text-center">
+              <GitCompareArrows className="mx-auto h-10 w-10 text-muted-foreground/30" />
               <h3 className="mt-4 text-base font-semibold text-foreground">
                 {t("comparison.emptyTitle")}
               </h3>
@@ -387,208 +551,131 @@ export function ProviderComparisonView({
           </div>
         ) : (
           /* ── Comparison table ─────────────────────────────────────────────── */
-          <div className="border-y">
-            <Table className="min-w-full text-sm">
-              <TableHeader>
-                <TableRow className="border-b bg-muted/40">
-                  <TableHead className="w-36 py-2 pl-3 pr-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    {t("comparison.selectModels")}
-                  </TableHead>
-                  {selectedModels.map((model) => (
-                    <TableHead
-                      key={model.key}
-                      className="min-w-[140px] px-3 py-2 text-center text-sm font-semibold"
-                    >
-                      <div>{model.modelName}</div>
-                      <div className="text-xs font-normal text-muted-foreground">
-                        {model.providerName}
+          <table
+            className="w-max min-w-full border-separate border-spacing-0 text-sm"
+            data-testid="comparison-table"
+          >
+            <thead>
+              <tr>
+                <th
+                  scope="col"
+                  className="sticky left-0 top-0 z-30 border-b border-r bg-background px-3 py-2 text-left text-xs font-medium text-muted-foreground"
+                >
+                  {t("comparison.attribute")}
+                </th>
+                {selectedModels.map((model) => (
+                  <th
+                    key={model.key}
+                    scope="col"
+                    className="sticky top-0 z-20 min-w-[11rem] border-b bg-background px-3 py-2 text-center align-top"
+                    data-testid={`comparison-column-${model.key}`}
+                  >
+                    <div className="flex items-start justify-center gap-2">
+                      <ProviderIcon
+                        providerId={model.providerId}
+                        label={model.providerName}
+                        size={20}
+                      />
+                      <div className="min-w-0 text-left">
+                        <div className="truncate text-sm font-semibold">{model.modelName}</div>
+                        <div className="truncate text-xs font-normal text-muted-foreground">
+                          {model.providerName}
+                        </div>
                       </div>
-                    </TableHead>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody className="divide-y">
-                {/* Provider */}
-                <ComparisonRow label={t("comparison.provider")}>
-                  {selectedModels.map((model) => (
-                    <TableCell key={model.key} className="px-3 py-2 text-center text-sm">
-                      {model.providerName}
-                    </TableCell>
-                  ))}
-                </ComparisonRow>
-
-                {/* Context Window */}
-                <ComparisonRow label={t("comparison.contextWindow")}>
-                  {selectedModels.map((model) => (
-                    <TableCell key={model.key} className="px-3 py-2 text-center text-sm font-mono">
-                      {formatContext(model.entry.contextLength, t("comparison.notAvailable"))}
-                    </TableCell>
-                  ))}
-                </ComparisonRow>
-
-                {/* Max Output */}
-                <ComparisonRow label={t("comparison.maxOutput")}>
-                  {selectedModels.map((model) => (
-                    <TableCell key={model.key} className="px-3 py-2 text-center text-sm font-mono">
-                      {model.entry.maxOutputTokens
-                        ? formatContext(model.entry.maxOutputTokens)
-                        : "—"}
-                    </TableCell>
-                  ))}
-                </ComparisonRow>
-
-                {/* Text Generation (always true for chat models) */}
-                <ComparisonRow label={t("comparison.textGeneration")}>
-                  {selectedModels.map((model) => (
-                    <TableCell key={model.key} className="px-3 py-2 text-center">
-                      <CapabilityCell supported={true} />
-                    </TableCell>
-                  ))}
-                </ComparisonRow>
-
-                {/* Vision */}
-                <ComparisonRow label={t("comparison.vision")}>
-                  {selectedModels.map((model) => (
-                    <TableCell key={model.key} className="px-3 py-2 text-center">
-                      <CapabilityCell supported={model.entry.supportsVision} />
-                    </TableCell>
-                  ))}
-                </ComparisonRow>
-
-                {/* Code Generation (proxy: supportsTools as commonly both go together) */}
-                <ComparisonRow label={t("comparison.codeGeneration")}>
-                  {selectedModels.map((model) => (
-                    <TableCell key={model.key} className="px-3 py-2 text-center">
-                      <CapabilityCell supported={model.entry.supportsTools} />
-                    </TableCell>
-                  ))}
-                </ComparisonRow>
-
-                {/* Function Calling */}
-                <ComparisonRow label={t("comparison.functionCalling")}>
-                  {selectedModels.map((model) => (
-                    <TableCell key={model.key} className="px-3 py-2 text-center">
-                      <CapabilityCell supported={model.entry.supportsTools} />
-                    </TableCell>
-                  ))}
-                </ComparisonRow>
-
-                {/* Streaming */}
-                <ComparisonRow label={t("comparison.streaming")}>
-                  {selectedModels.map((model) => (
-                    <TableCell key={model.key} className="px-3 py-2 text-center">
-                      <CapabilityCell supported={model.entry.supportsStreaming} />
-                    </TableCell>
-                  ))}
-                </ComparisonRow>
-
-                {/* Reasoning */}
-                <ComparisonRow label={t("comparison.reasoning")}>
-                  {selectedModels.map((model) => (
-                    <TableCell key={model.key} className="px-3 py-2 text-center">
-                      <CapabilityCell supported={Boolean(model.entry.supportsReasoning)} />
-                    </TableCell>
-                  ))}
-                </ComparisonRow>
-
-                {/* Audio */}
-                <ComparisonRow label={t("comparison.audio")}>
-                  {selectedModels.map((model) => (
-                    <TableCell key={model.key} className="px-3 py-2 text-center">
-                      <CapabilityCell supported={Boolean(model.entry.supportsAudio)} />
-                    </TableCell>
-                  ))}
-                </ComparisonRow>
-
-                {/* Video */}
-                <ComparisonRow label={t("comparison.video")}>
-                  {selectedModels.map((model) => (
-                    <TableCell key={model.key} className="px-3 py-2 text-center">
-                      <CapabilityCell supported={Boolean(model.entry.supportsVideo)} />
-                    </TableCell>
-                  ))}
-                </ComparisonRow>
-
-                {/* Image generation */}
-                <ComparisonRow label={t("comparison.imageGeneration")}>
-                  {selectedModels.map((model) => (
-                    <TableCell key={model.key} className="px-3 py-2 text-center">
-                      <CapabilityCell supported={Boolean(model.entry.supportsImageGeneration)} />
-                    </TableCell>
-                  ))}
-                </ComparisonRow>
-
-                {/* Embedding */}
-                <ComparisonRow label={t("comparison.embedding")}>
-                  {selectedModels.map((model) => (
-                    <TableCell key={model.key} className="px-3 py-2 text-center">
-                      <CapabilityCell supported={Boolean(model.entry.supportsEmbedding)} />
-                    </TableCell>
-                  ))}
-                </ComparisonRow>
-
-                {/* Avg Latency — from usage stats if available */}
-                <ComparisonRow label={t("comparison.avgLatency")}>
-                  {selectedModels.map((model) => {
-                    // cognia-next keys usage by `${providerId}:${modelId}`.
-                    const modelStats = providerUsageStats?.[`${model.providerId}:${model.modelId}`]
-                    const latency = (modelStats as { avgLatencyMs?: number }[] | undefined)?.[0]
-                      ?.avgLatencyMs
-                    return (
-                      <TableCell key={model.key} className="px-3 py-2 text-center text-sm">
-                        {formatLatency(latency)}
-                      </TableCell>
-                    )
-                  })}
-                </ComparisonRow>
-
-                {/* Input Price */}
-                <ComparisonRow label={t("comparison.inputPrice")}>
-                  {selectedModels.map((model) => (
-                    <TableCell key={model.key} className="px-3 py-2 text-center text-sm font-mono">
-                      {model.entry.pricing
-                        ? formatPrice(model.entry.pricing.promptPer1M)
-                        : t("comparison.noPrice")}
-                    </TableCell>
-                  ))}
-                </ComparisonRow>
-
-                {/* Output Price */}
-                <ComparisonRow label={t("comparison.outputPrice")}>
-                  {selectedModels.map((model) => (
-                    <TableCell key={model.key} className="px-3 py-2 text-center text-sm font-mono">
-                      {model.entry.pricing
-                        ? formatPrice(model.entry.pricing.completionPer1M)
-                        : t("comparison.noPrice")}
-                    </TableCell>
-                  ))}
-                </ComparisonRow>
-
-                {/* Extended pricing dimensions (cache / batch / audio) — each
-                    row renders only when at least one selected model declares it. */}
-                {renderPriceRow("cachedInputPer1M", t("comparison.cacheReadPrice"))}
-                {renderPriceRow("cacheCreationPer1M", t("comparison.cacheWritePrice"))}
-                {renderPriceRow("batchInputPer1M", t("comparison.batchInputPrice"))}
-                {renderPriceRow("batchOutputPer1M", t("comparison.batchOutputPrice"))}
-                {renderPriceRow("audioInputPer1M", t("comparison.audioInputPrice"))}
-                {renderPriceRow("audioOutputPer1M", t("comparison.audioOutputPrice"))}
-
-                {/* Est. Cost/1K calls */}
-                <ComparisonRow label={t("comparison.estCostPer1K")}>
-                  {selectedModels.map((model) => (
-                    <TableCell key={model.key} className="px-3 py-2 text-center text-sm font-mono">
-                      {formatEstCost(model.entry)}
-                    </TableCell>
-                  ))}
-                </ComparisonRow>
-              </TableBody>
-            </Table>
-          </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        className="size-6 shrink-0 rounded-full text-muted-foreground"
+                        onClick={() => toggleModel(model.key)}
+                        aria-label={t("comparison.removeModel", { name: model.modelName })}
+                        data-testid={`comparison-remove-${model.key}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {SECTION_ORDER.map((section) => {
+                const sectionRows = visibleRows.filter((r) => r.def.section === section)
+                if (sectionRows.length === 0) return null
+                return (
+                  <React.Fragment key={section}>
+                    <tr data-testid={`comparison-section-${section}`}>
+                      <th
+                        scope="rowgroup"
+                        colSpan={selectedModels.length + 1}
+                        className="sticky left-0 z-10 border-b bg-muted/50 px-3 py-1 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+                      >
+                        {t(`comparison.section.${section}`)}
+                      </th>
+                    </tr>
+                    {sectionRows.map((row) => (
+                      <tr
+                        key={row.def.id}
+                        data-testid={`comparison-row-${row.def.id}`}
+                        data-differs={row.differs || undefined}
+                        className={cn(
+                          "group",
+                          row.differs && selectedModels.length > 1 && "bg-primary/[0.03]"
+                        )}
+                      >
+                        <th
+                          scope="row"
+                          className="sticky left-0 z-10 whitespace-nowrap border-b border-r bg-background px-3 py-1.5 text-left text-xs font-medium text-muted-foreground group-hover:bg-muted/40"
+                        >
+                          {t(row.def.labelKey)}
+                        </th>
+                        {row.values.map((value, index) => {
+                          const isBest = row.bestIndex === index
+                          return (
+                            <td
+                              key={selectedModels[index].key}
+                              data-best={isBest || undefined}
+                              className={cn(
+                                "border-b px-3 py-1.5 text-center group-hover:bg-muted/40",
+                                row.def.kind === "number" && "font-mono text-sm tabular-nums",
+                                isBest && "font-semibold text-emerald-600 dark:text-emerald-400"
+                              )}
+                            >
+                              <span className="inline-flex items-center gap-1">
+                                {row.def.format(value)}
+                                {isBest && (
+                                  <Trophy
+                                    className="h-3 w-3"
+                                    aria-label={t("comparison.bestInRow")}
+                                  />
+                                )}
+                              </span>
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    ))}
+                  </React.Fragment>
+                )
+              })}
+              {visibleRows.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={selectedModels.length + 1}
+                    className="px-3 py-8 text-center text-sm text-muted-foreground"
+                    data-testid="comparison-no-differences"
+                  >
+                    {t("comparison.noDifferences")}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         )}
 
         {/* ── Recommendation ────────────────────────────────────────────────── */}
         {bestValueModel && (
-          <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-800 dark:bg-emerald-950/30">
+          <div className="m-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-800 dark:bg-emerald-950/30">
             <p className="text-sm font-medium text-emerald-800 dark:text-emerald-300">
               <span className="mr-1 text-emerald-500">
                 <Check className="inline h-4 w-4" />
@@ -600,11 +687,11 @@ export function ProviderComparisonView({
               {bestValueModel.entry.pricing && (
                 <span className="ml-1 text-xs text-emerald-600 dark:text-emerald-400">
                   {t("comparison.averagePricePerMillion", {
-                    price: `$${(
+                    price: formatUsdPerMillion(
                       (bestValueModel.entry.pricing.promptPer1M +
                         bestValueModel.entry.pricing.completionPer1M) /
-                      2
-                    ).toFixed(2)}`,
+                        2
+                    ),
                   })}
                 </span>
               )}
@@ -613,18 +700,5 @@ export function ProviderComparisonView({
         )}
       </div>
     </div>
-  )
-}
-
-/* ── ComparisonRow helper ─────────────────────────────────────────────────── */
-
-function ComparisonRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <TableRow className="even:bg-muted/20">
-      <TableCell className="py-2 pl-3 pr-2 text-xs font-medium text-muted-foreground whitespace-nowrap">
-        {label}
-      </TableCell>
-      {children}
-    </TableRow>
   )
 }

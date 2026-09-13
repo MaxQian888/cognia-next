@@ -2,7 +2,8 @@
 
 import React, { useMemo } from "react"
 import { useTranslations } from "next-intl"
-import { Search, BarChart3, ArrowUpDown, Check, Route } from "lucide-react"
+import { Search, GitCompareArrows, ArrowUpDown, Check, Route } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -42,6 +43,10 @@ interface ProviderSidebarProps {
   selectedId: string | null
   onSelect: (id: string) => void
   onCompareClick: () => void
+  /** The compare workspace is the active detail. */
+  compareSelected?: boolean
+  /** Models ticked for comparison, shown as a count on the entry. */
+  compareCount?: number
   onRoutingClick?: () => void
   routingSelected?: boolean
   globalTotal?: number
@@ -77,6 +82,8 @@ export function ProviderSidebar({
   selectedId,
   onSelect,
   onCompareClick,
+  compareSelected = false,
+  compareCount = 0,
   onRoutingClick,
   routingSelected = false,
   globalTotal = providers.length,
@@ -263,9 +270,25 @@ export function ProviderSidebar({
             {t("sidebar.routing")}
           </Button>
         )}
-        <Button variant="ghost" size="sm" onClick={onCompareClick} className="w-full justify-start">
-          <BarChart3 className="mr-2 h-4 w-4" />
-          {t("sidebar.modelCompare")}
+        <Button
+          variant={compareSelected ? "secondary" : "ghost"}
+          size="sm"
+          onClick={onCompareClick}
+          aria-current={compareSelected ? "page" : undefined}
+          className="w-full justify-start"
+          data-testid="provider-sidebar-compare"
+        >
+          <GitCompareArrows className="mr-2 h-4 w-4" />
+          <span className="min-w-0 flex-1 truncate text-left">{t("sidebar.modelCompare")}</span>
+          {compareCount > 0 && (
+            <Badge
+              variant="secondary"
+              className="ml-2 h-4 min-w-4 px-1 text-[10px] tabular-nums"
+              data-testid="provider-sidebar-compare-count"
+            >
+              {compareCount}
+            </Badge>
+          )}
         </Button>
       </div>
 

@@ -2,43 +2,47 @@
  * @jest-environment jsdom
  */
 import React from "react"
-import { render, screen, fireEvent } from "@testing-library/react"
-import { ProviderModelsTab } from "./provider-models-tab"
+import { render, screen, fireEvent, within } from "@testing-library/react"
+import { ProviderModelsTab, nextSort, sortModels } from "./provider-models-tab"
 import type { ModelConfig } from "./provider-models-tab"
 
 // ── i18n mock ─────────────────────────────────────────────────────────────────
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, params?: Record<string, unknown>) => {
-    if (key === "modelsTab.sortBy") return `Sort: ${params?.label}`
-    if (key === "modelsTab.countSummary")
+  useTranslations: (ns?: string) => (key: string, params?: Record<string, unknown>) => {
+    const full = ns === "providers.modelsTab.capability" ? `modelsTab.capability.${key}` : key
+    if (full === "modelsTab.countSummary")
       return `Showing ${params?.shown} of ${params?.total} · ${params?.enabled} enabled`
-    if (key === "modelsTab.modes") return `${params?.count} modes`
+    if (full === "modelsTab.compareSelected") return `${params?.count} of ${params?.max} selected`
+    if (full === "modelsTab.compareCheckbox") return `Compare ${params?.name}`
+    if (full === "modelsTab.compareLimit") return `Up to ${params?.max}`
+    if (full === "modelsTab.sortColumn") return `Sort by ${params?.label}`
     const map: Record<string, string> = {
-      "modelsTab.maxOutput": "max out",
       "modelsTab.openWeights": "open weights",
       "modelsTab.searchPlaceholder": "Search models...",
       "modelsTab.refreshModels": "Refresh Model List",
       "modelsTab.selectAll": "Select All",
       "modelsTab.deselectAll": "Deselect All",
-      "modelsTab.batchEnable": "Enable Selected",
-      "modelsTab.batchDisable": "Disable Selected",
       "modelsTab.contextWindow": "Context",
+      "modelsTab.columnModel": "Model",
+      "modelsTab.columnMaxOutput": "Max out",
+      "modelsTab.columnPrice": "Price / 1M",
+      "modelsTab.columnReleased": "Released",
       "modelsTab.noModels": "No models found",
       "modelsTab.knowledgeCutoff": "Cutoff",
-      "modelsTab.updated": "Updated",
       "modelsTab.capabilities": "Capabilities",
       "modelsTab.enabledOnly": "Enabled only",
       "modelsTab.clearFilters": "Clear filters",
-      "modelsTab.sortDefault": "Default",
-      "modelsTab.sortName": "Name",
-      "modelsTab.sortContext": "Context",
-      "modelsTab.sortRelease": "Newest",
+      "modelsTab.compareOpen": "Compare",
+      "modelsTab.compareClear": "Clear",
       "modelsTab.capability.vision": "Vision",
+      "modelsTab.capability.tools": "Tools",
+      "modelsTab.capability.reasoning": "Reasoning",
       "modelsTab.lifecycle.deprecated": "Deprecated",
       "modelsTab.lifecycle.beta": "Beta",
+      testConnection: "Test connection",
     }
-    return map[key] ?? key
+    return map[full] ?? full
   },
 }))
 
@@ -56,31 +60,38 @@ jest.mock("@/components/ui/badge")
 
 jest.mock("@/components/ui/switch")
 
+jest.mock("@/components/ui/checkbox")
+
 // ── Test data ─────────────────────────────────────────────────────────────────
 
 const mockModels: ModelConfig[] = [
   {
     id: "gpt-4o",
     name: "GPT-4o",
-    capabilities: ["Text", "Vision"],
+    capabilities: ["tools", "vision"],
     contextLength: 128000,
+    maxOutputTokens: 16384,
     supportsTools: true,
     supportsVision: true,
+    pricing: { promptPer1M: 2.5, completionPer1M: 10 },
+    releaseDate: "2024-05-13",
   },
   {
     id: "gpt-4o-mini",
     name: "GPT-4o Mini",
-    capabilities: ["Text"],
+    capabilities: ["tools"],
     contextLength: 128000,
     supportsTools: true,
     supportsVision: false,
+    pricing: { promptPer1M: 0.15, completionPer1M: 0.6 },
+    releaseDate: "2024-07-18",
   },
   {
     id: "o1",
     name: "O1",
-    capabilities: ["Text", "Code"],
+    capabilities: ["tools", "reasoning"],
     contextLength: 200000,
-    supportsTools: false,
+    supportsTools: true,
     supportsVision: false,
   },
 ]
@@ -94,25 +105,31 @@ const defaultProps = {
   isRefreshing: false,
 }
 
+const switchFor = (id: string) =>
+  screen.getAllByTestId("switch").find((s) => s.getAttribute("aria-label") === id)!
+
 describe("ProviderModelsTab", () => {
   beforeEach(() => {
     jest.clearAllMocks()
   })
 
-  // ── 1. Renders model cards for each model in the list ─────────────────────
+  // ── Table shape ───────────────────────────────────────────────────────────
 
-  it("renders a card for each model in the list", () => {
+  it("renders one table row per model", () => {
     render(<ProviderModelsTab {...defaultProps} />)
+    expect(screen.getByTestId("models-table")).toBeInTheDocument()
+    expect(screen.getByTestId("model-row-gpt-4o")).toBeInTheDocument()
+    expect(screen.getByTestId("model-row-gpt-4o-mini")).toBeInTheDocument()
+    expect(screen.getByTestId("model-row-o1")).toBeInTheDocument()
     expect(screen.getByText("GPT-4o")).toBeInTheDocument()
-    expect(screen.getByText("GPT-4o Mini")).toBeInTheDocument()
-    expect(screen.getByText("O1")).toBeInTheDocument()
   })
 
-  it("renders capability badges for each model", () => {
+  it("renders capability glyphs per row in a fixed order with accessible names", () => {
     render(<ProviderModelsTab {...defaultProps} />)
-    const badges = screen.getAllByTestId("badge")
-    // GPT-4o has Text + Vision, GPT-4o Mini has Text, O1 has Text + Code
-    expect(badges.length).toBeGreaterThanOrEqual(4)
+    const row = screen.getByTestId("model-row-gpt-4o")
+    const glyphs = within(row).getAllByRole("listitem")
+    expect(glyphs.map((g) => g.getAttribute("data-capability"))).toEqual(["tools", "vision"])
+    expect(glyphs[0]).toHaveAttribute("aria-label", "Tools")
   })
 
   it("shows the latest diagnostic state on the matching model row", () => {
@@ -132,103 +149,106 @@ describe("ProviderModelsTab", () => {
     )
   })
 
-  it("formats context window size correctly (128K)", () => {
+  it("formats context, max output and price as compact numerals", () => {
     render(<ProviderModelsTab {...defaultProps} />)
-    // 128000 → "128K"
-    const contextLabels = screen.getAllByText(/128K/)
-    expect(contextLabels.length).toBeGreaterThan(0)
-  })
-
-  it("renders max output, open-weights badge, and reasoning mode count", () => {
-    render(
-      <ProviderModelsTab
-        {...defaultProps}
-        models={[
-          {
-            id: "glm-x",
-            name: "GLM X",
-            capabilities: ["Text"],
-            contextLength: 128000,
-            maxOutputTokens: 64000,
-            openWeights: true,
-            modeCount: 2,
-          },
-        ]}
-        enabledModels={[]}
-      />
-    )
-    expect(screen.getByText(/64K max out/)).toBeInTheDocument()
-    expect(screen.getByText("open weights")).toBeInTheDocument()
-    expect(screen.getByText("2 modes")).toBeInTheDocument()
+    const row = screen.getByTestId("model-row-gpt-4o")
+    expect(within(row).getByText("128K")).toBeInTheDocument()
+    expect(within(row).getByText("16K")).toBeInTheDocument()
+    expect(screen.getByTestId("model-price-gpt-4o")).toHaveTextContent("$2.50 / $10.00")
+    expect(screen.getByTestId("model-price-o1")).toHaveTextContent("—")
   })
 
   it("formats large context window size correctly (1M+)", () => {
-    const propsWithLarge = {
-      ...defaultProps,
-      models: [
-        {
-          id: "gemini-1m",
-          name: "Gemini 1M",
-          contextLength: 1000000,
-        },
-      ],
-    }
-    const { container } = render(<ProviderModelsTab {...propsWithLarge} />)
-    // The context span contains "1M Context" as text nodes — verify via container text
-    expect(container.textContent).toMatch(/1M/)
+    render(
+      <ProviderModelsTab
+        {...defaultProps}
+        models={[{ id: "big", name: "Big", contextLength: 1_500_000 }]}
+      />
+    )
+    expect(screen.getByText("1.5M")).toBeInTheDocument()
   })
 
-  // ── 2. Search filters models by name ──────────────────────────────────────
-
-  it("shows all models when search is empty", () => {
+  it("keeps the sticky header out of the scroller's flow", () => {
     render(<ProviderModelsTab {...defaultProps} />)
-    expect(screen.getByText("GPT-4o")).toBeInTheDocument()
+    const thead = screen.getByTestId("models-table").querySelector("thead")
+    expect(thead).toHaveClass("sticky", "top-0")
+  })
+
+  it("keeps the toolbar out of the scroller so only the table moves", () => {
+    render(<ProviderModelsTab {...defaultProps} />)
+    const tab = screen.getByTestId("models-tab")
+    const toolbar = tab.firstElementChild as HTMLElement
+    expect(toolbar).toHaveClass("shrink-0")
+    expect(toolbar).toContainElement(screen.getByTestId("search-input"))
+    expect(toolbar).not.toContainElement(screen.getByTestId("models-table"))
+  })
+
+  // ── Sorting ───────────────────────────────────────────────────────────────
+
+  it("cycles a column header through ascending, descending and default", () => {
+    render(<ProviderModelsTab {...defaultProps} />)
+    const rowsIn = () =>
+      screen
+        .getAllByTestId(/^model-row-/)
+        .map((r) => r.getAttribute("data-testid")!.replace("model-row-", ""))
+    expect(rowsIn()).toEqual(["gpt-4o", "gpt-4o-mini", "o1"])
+    const header = screen.getByTestId("models-sort-context")
+    fireEvent.click(header)
+    expect(rowsIn()).toEqual(["gpt-4o", "gpt-4o-mini", "o1"])
+    expect(header.closest("th")).toHaveAttribute("aria-sort", "ascending")
+    fireEvent.click(header)
+    expect(rowsIn()[0]).toBe("o1")
+    expect(header.closest("th")).toHaveAttribute("aria-sort", "descending")
+    fireEvent.click(header)
+    expect(header.closest("th")).toHaveAttribute("aria-sort", "none")
+    expect(rowsIn()).toEqual(["gpt-4o", "gpt-4o-mini", "o1"])
+  })
+
+  it("sinks models without a value to the bottom in either direction", () => {
+    const desc = sortModels(mockModels, { key: "price", direction: "desc" })
+    expect(desc.map((m) => m.id)).toEqual(["gpt-4o", "gpt-4o-mini", "o1"])
+    const asc = sortModels(mockModels, { key: "price", direction: "asc" })
+    expect(asc.map((m) => m.id)).toEqual(["gpt-4o-mini", "gpt-4o", "o1"])
+  })
+
+  it("nextSort: a different column starts ascending", () => {
+    expect(nextSort({ key: "name", direction: "desc" }, "context")).toEqual({
+      key: "context",
+      direction: "asc",
+    })
+    expect(nextSort({ key: "name", direction: "desc" }, "name")).toBeNull()
+  })
+
+  // ── Search ────────────────────────────────────────────────────────────────
+
+  it("filters models by search query (case-insensitive) and can clear it", () => {
+    render(<ProviderModelsTab {...defaultProps} />)
+    fireEvent.change(screen.getByTestId("search-input"), { target: { value: "MINI" } })
     expect(screen.getByText("GPT-4o Mini")).toBeInTheDocument()
+    expect(screen.queryByText("O1")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText("Clear filters"))
     expect(screen.getByText("O1")).toBeInTheDocument()
   })
 
-  it("filters models by search query (case-insensitive)", () => {
+  it("shows the empty message when search matches nothing", () => {
     render(<ProviderModelsTab {...defaultProps} />)
-    const searchInput = screen.getByTestId("search-input")
-    fireEvent.change(searchInput, { target: { value: "gpt" } })
-    expect(screen.getByText("GPT-4o")).toBeInTheDocument()
-    expect(screen.getByText("GPT-4o Mini")).toBeInTheDocument()
-    expect(screen.queryByText("O1")).not.toBeInTheDocument()
-  })
-
-  it("shows no models message when search matches nothing", () => {
-    render(<ProviderModelsTab {...defaultProps} />)
-    const searchInput = screen.getByTestId("search-input")
-    fireEvent.change(searchInput, { target: { value: "nonexistent-model-xyz" } })
+    fireEvent.change(screen.getByTestId("search-input"), { target: { value: "zzz" } })
     expect(screen.getByText("No models found")).toBeInTheDocument()
+    expect(screen.queryByTestId("models-table")).not.toBeInTheDocument()
   })
 
-  // ── 3. Enabled models show switch in "on" state ───────────────────────────
+  // ── Enable switches ───────────────────────────────────────────────────────
 
-  it("shows enabled model switch as checked", () => {
+  it("reflects the enabled list on the switches", () => {
     render(<ProviderModelsTab {...defaultProps} />)
-    // gpt-4o is in enabledModels
-    const switches = screen.getAllByTestId("switch")
-    const enabledSwitch = switches.find((s) => s.getAttribute("aria-label") === "gpt-4o")
-    expect(enabledSwitch).toBeChecked()
+    expect(switchFor("gpt-4o")).toBeChecked()
+    expect(switchFor("gpt-4o-mini")).not.toBeChecked()
   })
-
-  it("shows disabled model switch as unchecked", () => {
-    render(<ProviderModelsTab {...defaultProps} />)
-    // gpt-4o-mini is NOT in enabledModels
-    const switches = screen.getAllByTestId("switch")
-    const disabledSwitch = switches.find((s) => s.getAttribute("aria-label") === "gpt-4o-mini")
-    expect(disabledSwitch).not.toBeChecked()
-  })
-
-  // ── 4. Toggling a switch calls onEnabledModelsChange ─────────────────────
 
   it("enabling a model adds it to enabled list", () => {
     const onEnabledModelsChange = jest.fn()
     render(<ProviderModelsTab {...defaultProps} onEnabledModelsChange={onEnabledModelsChange} />)
-    const switches = screen.getAllByTestId("switch")
-    const miniSwitch = switches.find((s) => s.getAttribute("aria-label") === "gpt-4o-mini")
-    fireEvent.click(miniSwitch!)
+    fireEvent.click(switchFor("gpt-4o-mini"))
     expect(onEnabledModelsChange).toHaveBeenCalledWith(
       expect.arrayContaining(["gpt-4o", "gpt-4o-mini"])
     )
@@ -243,20 +263,16 @@ describe("ProviderModelsTab", () => {
         onEnabledModelsChange={onEnabledModelsChange}
       />
     )
-    const switches = screen.getAllByTestId("switch")
-    const enabledSwitch = switches.find((s) => s.getAttribute("aria-label") === "gpt-4o")
-    fireEvent.click(enabledSwitch!)
-    expect(onEnabledModelsChange).toHaveBeenCalledWith(expect.not.arrayContaining(["gpt-4o"]))
+    fireEvent.click(switchFor("gpt-4o"))
+    expect(onEnabledModelsChange).toHaveBeenCalledWith(["gpt-4o-mini"])
   })
 
   // An empty whitelist means "all enabled", so emptying it by switching the
-  // last model off would turn every OTHER model back on. The switch bounces
-  // back instead, and the list stays explicit.
+  // last model off would turn every OTHER model back on.
   it("refuses to empty the whitelist when the last enabled model is switched off", () => {
     const onEnabledModelsChange = jest.fn()
     render(<ProviderModelsTab {...defaultProps} onEnabledModelsChange={onEnabledModelsChange} />)
-    const switches = screen.getAllByTestId("switch")
-    fireEvent.click(switches.find((s) => s.getAttribute("aria-label") === "gpt-4o")!)
+    fireEvent.click(switchFor("gpt-4o"))
     expect(onEnabledModelsChange).toHaveBeenCalledWith(["gpt-4o"])
   })
 
@@ -269,27 +285,21 @@ describe("ProviderModelsTab", () => {
         onEnabledModelsChange={onEnabledModelsChange}
       />
     )
-    const switches = screen.getAllByTestId("switch")
-    expect(switches).toHaveLength(mockModels.length)
-    switches.forEach((modelSwitch) => expect(modelSwitch).toBeChecked())
-
-    fireEvent.click(switches.find((item) => item.getAttribute("aria-label") === "gpt-4o-mini")!)
-    expect(onEnabledModelsChange).toHaveBeenCalledWith(["gpt-4o", "o1"])
+    expect(switchFor("o1")).toBeChecked()
+    fireEvent.click(switchFor("o1"))
+    expect(onEnabledModelsChange).toHaveBeenCalledWith(["gpt-4o", "gpt-4o-mini"])
   })
 
-  // ── 5. Shows empty state when models array is empty ───────────────────────
+  // ── Empty list ────────────────────────────────────────────────────────────
 
-  it('shows "No models found" empty state when models array is empty', () => {
+  it("renders the empty state and no batch toolbar for an empty model list", () => {
     render(<ProviderModelsTab {...defaultProps} models={[]} />)
     expect(screen.getByText("No models found")).toBeInTheDocument()
+    expect(screen.queryByText("Select All")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("models-table")).not.toBeInTheDocument()
   })
 
-  it("does not render any model cards when models array is empty", () => {
-    render(<ProviderModelsTab {...defaultProps} models={[]} />)
-    expect(screen.queryByTestId("switch")).not.toBeInTheDocument()
-  })
-
-  // ── 6. Refresh button calls onRefreshModels ───────────────────────────────
+  // ── Provider actions ──────────────────────────────────────────────────────
 
   it("offers a connection test that is distinct from the model refresh", () => {
     const onRefreshModels = jest.fn()
@@ -304,6 +314,8 @@ describe("ProviderModelsTab", () => {
     fireEvent.click(screen.getByTestId("models-tab-test-connection"))
     expect(onTestConnection).toHaveBeenCalledTimes(1)
     expect(onRefreshModels).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByText("Refresh Model List"))
+    expect(onRefreshModels).toHaveBeenCalledTimes(1)
   })
 
   it("hides the connection test when no handler is supplied", () => {
@@ -311,33 +323,12 @@ describe("ProviderModelsTab", () => {
     expect(screen.queryByTestId("models-tab-test-connection")).not.toBeInTheDocument()
   })
 
-  it("calls onRefreshModels when refresh button is clicked", () => {
-    const onRefreshModels = jest.fn()
-    render(<ProviderModelsTab {...defaultProps} onRefreshModels={onRefreshModels} />)
-    const refreshButton = screen.getByText("Refresh Model List")
-    fireEvent.click(refreshButton)
-    expect(onRefreshModels).toHaveBeenCalledTimes(1)
-  })
-
   it("disables refresh button while refreshing", () => {
-    render(<ProviderModelsTab {...defaultProps} isRefreshing={true} />)
-    const refreshButton = screen.getByText("Refresh Model List").closest("button")
-    expect(refreshButton).toBeDisabled()
+    render(<ProviderModelsTab {...defaultProps} isRefreshing />)
+    expect(screen.getByText("Refresh Model List").closest("button")).toBeDisabled()
   })
 
-  // ── 7. Batch operations toolbar ───────────────────────────────────────────
-
-  it("shows batch toolbar when models are present", () => {
-    render(<ProviderModelsTab {...defaultProps} />)
-    expect(screen.getByText("Select All")).toBeInTheDocument()
-    expect(screen.getByText("Deselect All")).toBeInTheDocument()
-  })
-
-  it("does not show batch toolbar when models array is empty", () => {
-    render(<ProviderModelsTab {...defaultProps} models={[]} />)
-    expect(screen.queryByText("Select All")).not.toBeInTheDocument()
-    expect(screen.queryByText("Deselect All")).not.toBeInTheDocument()
-  })
+  // ── Batch actions ─────────────────────────────────────────────────────────
 
   it("Select All preserves the canonical empty list when all models are enabled", () => {
     const onEnabledModelsChange = jest.fn()
@@ -357,7 +348,7 @@ describe("ProviderModelsTab", () => {
     render(
       <ProviderModelsTab
         {...defaultProps}
-        enabledModels={["gpt-4o", "gpt-4o-mini", "o1"]}
+        enabledModels={[]}
         onEnabledModelsChange={onEnabledModelsChange}
       />
     )
@@ -367,201 +358,131 @@ describe("ProviderModelsTab", () => {
 
   it("Select All with search only enables filtered models", () => {
     const onEnabledModelsChange = jest.fn()
-    render(
-      <ProviderModelsTab
-        {...defaultProps}
-        enabledModels={["o1"]}
-        onEnabledModelsChange={onEnabledModelsChange}
-      />
-    )
-    // Filter to only GPT models
-    fireEvent.change(screen.getByTestId("search-input"), { target: { value: "gpt" } })
+    render(<ProviderModelsTab {...defaultProps} onEnabledModelsChange={onEnabledModelsChange} />)
+    fireEvent.change(screen.getByTestId("search-input"), { target: { value: "mini" } })
     fireEvent.click(screen.getByText("Select All"))
-    const called = onEnabledModelsChange.mock.calls[0][0] as string[]
-    expect(called).toContain("gpt-4o")
-    expect(called).toContain("gpt-4o-mini")
-    expect(called).toContain("o1")
+    expect(onEnabledModelsChange).toHaveBeenCalledWith(["gpt-4o", "gpt-4o-mini"])
   })
 
-  // "Enable Selected" / "Disable Selected" were removed: they ran the exact
-  // same handlers as Select All / Deselect All — one action under two names.
-  it("no longer duplicates the batch actions under a second pair of names", () => {
-    render(<ProviderModelsTab {...defaultProps} />)
-    expect(screen.queryByText("Enable Selected")).not.toBeInTheDocument()
-    expect(screen.queryByText("Disable Selected")).not.toBeInTheDocument()
-  })
+  // ── Badges & metadata ─────────────────────────────────────────────────────
 
-  // ── 7b. Toolbar stays pinned; only the list scrolls ───────────────────────
-
-  it("keeps the toolbar out of the scroller so only the model list moves", () => {
-    const { container } = render(<ProviderModelsTab {...defaultProps} />)
-    const scroller = container.querySelector('[data-slot="scroll-area"]')
-    expect(scroller).toBeInTheDocument()
-    // Search + batch actions live above the scroller, not inside it.
-    expect(scroller).not.toContainElement(screen.getByTestId("search-input"))
-    expect(scroller).not.toContainElement(screen.getByText("Select All").closest("button"))
-    // The model cards do live inside it.
-    expect(scroller).toContainElement(screen.getByText("GPT-4o"))
-  })
-
-  // ── 8. models.dev metadata: status badge, knowledge cutoff, updated ────────
-
-  const metaModel: ModelConfig = {
-    id: "claude-legacy",
-    name: "Claude Legacy",
-    contextLength: 200000,
-    status: "deprecated",
-    knowledge: "2024-04",
-    lastUpdated: "2025-02-01",
-    family: "claude-3",
-  }
-
-  it("renders a status badge for non-stable models", () => {
-    render(<ProviderModelsTab {...defaultProps} models={[metaModel]} />)
+  it("renders a lifecycle badge for non-stable models only", () => {
+    render(
+      <ProviderModelsTab
+        {...defaultProps}
+        models={[
+          { id: "old", name: "Old", status: "deprecated" },
+          { id: "beta", name: "Bee", status: "beta" },
+          { id: "ok", name: "Ok", status: "stable" },
+        ]}
+      />
+    )
     expect(screen.getByText("Deprecated")).toBeInTheDocument()
-  })
-
-  it("renders an outline status badge for preview states like beta", () => {
-    render(
-      <ProviderModelsTab
-        {...defaultProps}
-        models={[{ ...metaModel, status: "beta" }]}
-        enabledModels={[]}
-      />
-    )
     expect(screen.getByText("Beta")).toBeInTheDocument()
+    expect(within(screen.getByTestId("model-row-ok")).queryByTestId("badge")).toBeNull()
   })
 
-  it("formats sub-1K context windows verbatim", () => {
-    const { container } = render(
-      <ProviderModelsTab
-        {...defaultProps}
-        models={[{ id: "tiny", name: "Tiny", contextLength: 512 }]}
-        enabledModels={[]}
-      />
-    )
-    expect(container.textContent).toContain("512")
-  })
-
-  it("does not render a status badge for stable/empty status", () => {
+  it("renders open weights, variants and the knowledge cutoff", () => {
     render(
       <ProviderModelsTab
         {...defaultProps}
-        models={[{ ...metaModel, status: "stable" }]}
-        enabledModels={[]}
+        models={[
+          {
+            id: "x",
+            name: "X",
+            openWeights: true,
+            variants: ["low", "high"],
+            knowledge: "2025-01",
+            releaseDate: "2025-02-01",
+          },
+        ]}
       />
     )
-    expect(screen.queryByText("stable")).not.toBeInTheDocument()
+    expect(screen.getByText("open weights")).toBeInTheDocument()
+    expect(screen.getByTestId("model-variants-x")).toHaveTextContent("low / high")
+    expect(screen.getByText("Cutoff 2025-01")).toBeInTheDocument()
+    expect(screen.getByText("2025-02-01")).toBeInTheDocument()
   })
 
-  it("renders knowledge cutoff and last-updated metadata", () => {
-    const { container } = render(
-      <ProviderModelsTab {...defaultProps} models={[metaModel]} enabledModels={[]} />
+  it("reserves glyph space while models.dev metadata is loading", () => {
+    render(
+      <ProviderModelsTab {...defaultProps} models={[{ id: "x", name: "X" }]} metadataLoading />
     )
-    expect(container.textContent).toContain("Cutoff 2024-04")
-    expect(container.textContent).toContain("Updated 2025-02-01")
+    expect(screen.getByTestId("model-caps-placeholder")).toBeInTheDocument()
   })
 
-  it("omits metadata spans when the fields are absent", () => {
-    const { container } = render(
-      <ProviderModelsTab
-        {...defaultProps}
-        models={[{ id: "x", name: "Bare", contextLength: 1000 }]}
-        enabledModels={[]}
-      />
-    )
-    expect(container.textContent).not.toContain("Cutoff")
-    expect(container.textContent).not.toContain("Updated")
-  })
+  // ── Capability filter ─────────────────────────────────────────────────────
 
-  // ── 9. Filtering: capability chips, enabled-only, sort, clear, count ───────
-
-  it("renders a capability filter chip per distinct capability", () => {
+  it("renders a labelled filter chip per distinct capability, AND-combined", () => {
     render(<ProviderModelsTab {...defaultProps} />)
-    // Union across the mock models is Code / Text / Vision.
-    expect(screen.getByRole("button", { name: "Code" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Text" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Vision" })).toBeInTheDocument()
-  })
-
-  it("does not render capability chips when no models are present", () => {
-    render(<ProviderModelsTab {...defaultProps} models={[]} />)
-    expect(screen.queryByRole("button", { name: "Text" })).not.toBeInTheDocument()
-  })
-
-  it("filtering by a capability narrows the grid (AND semantics)", () => {
-    render(<ProviderModelsTab {...defaultProps} />)
-    fireEvent.click(screen.getByRole("button", { name: "Vision" }))
-    // Only GPT-4o exposes Vision.
+    expect(screen.getByTestId("models-cap-filter-tools")).toHaveTextContent("Tools")
+    fireEvent.click(screen.getByTestId("models-cap-filter-vision"))
     expect(screen.getByText("GPT-4o")).toBeInTheDocument()
-    expect(screen.queryByText("GPT-4o Mini")).not.toBeInTheDocument()
     expect(screen.queryByText("O1")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("models-cap-filter-reasoning"))
+    expect(screen.getByText("No models found")).toBeInTheDocument()
   })
 
-  it("enabled-only toggle shows only enabled models", () => {
-    render(<ProviderModelsTab {...defaultProps} />)
-    fireEvent.click(screen.getByRole("button", { name: "Enabled only" }))
-    // Only gpt-4o is in enabledModels.
-    expect(screen.getByText("GPT-4o")).toBeInTheDocument()
-    expect(screen.queryByText("GPT-4o Mini")).not.toBeInTheDocument()
-    expect(screen.queryByText("O1")).not.toBeInTheDocument()
-  })
+  // ── Compare column ────────────────────────────────────────────────────────
 
-  it("cycles the sort mode label on click", () => {
-    render(<ProviderModelsTab {...defaultProps} />)
-    expect(screen.getByRole("button", { name: "Sort: Default" })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Sort: Default" }))
-    expect(screen.getByRole("button", { name: "Sort: Name" })).toBeInTheDocument()
-  })
+  describe("compare column", () => {
+    const compare = () => ({
+      keys: ["openai:gpt-4o", "anthropic:claude"],
+      onToggle: jest.fn(),
+      onOpen: jest.fn(),
+      onClear: jest.fn(),
+    })
 
-  it("shows a clear-filters button only when a filter is active, and it resets", () => {
-    render(<ProviderModelsTab {...defaultProps} />)
-    expect(screen.queryByRole("button", { name: "Clear filters" })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Vision" }))
-    const clear = screen.getByRole("button", { name: "Clear filters" })
-    fireEvent.click(clear)
-    // All models visible again after reset.
-    expect(screen.getByText("GPT-4o")).toBeInTheDocument()
-    expect(screen.getByText("GPT-4o Mini")).toBeInTheDocument()
-    expect(screen.getByText("O1")).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Clear filters" })).not.toBeInTheDocument()
-  })
+    it("is absent when no selection is supplied", () => {
+      render(<ProviderModelsTab {...defaultProps} />)
+      expect(screen.queryByTestId("model-compare-gpt-4o")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("models-compare-bar")).not.toBeInTheDocument()
+    })
 
-  it("renders a count summary that reflects shown / total / enabled", () => {
-    render(<ProviderModelsTab {...defaultProps} />)
-    expect(screen.getByText("Showing 3 of 3 · 1 enabled")).toBeInTheDocument()
-    fireEvent.change(screen.getByTestId("search-input"), { target: { value: "gpt" } })
-    expect(screen.getByText("Showing 2 of 3 · 1 enabled")).toBeInTheDocument()
-  })
-})
+    it("ticks this provider's rows from the cross-provider key set", () => {
+      render(<ProviderModelsTab {...defaultProps} compare={compare()} />)
+      expect(screen.getByTestId("model-compare-gpt-4o")).toBeChecked()
+      expect(screen.getByTestId("model-compare-o1")).not.toBeChecked()
+      expect(screen.getByTestId("model-compare-o1")).toHaveAttribute("aria-label", "Compare O1")
+    })
 
-// The models.dev catalog is a separate Dexie read that lands after the static
-// provider catalog, so cards used to paint bare and then *grow* a capability
-// row, shifting everything below.
-describe("ProviderModelsTab late metadata", () => {
-  const bare = [
-    { id: "m1", name: "M1", contextLength: 1000 },
-    { id: "m2", name: "M2", contextLength: 2000 },
-  ]
+    it("toggles with the provider-qualified key", () => {
+      const c = compare()
+      render(<ProviderModelsTab {...defaultProps} compare={c} />)
+      fireEvent.click(screen.getByTestId("model-compare-o1"))
+      expect(c.onToggle).toHaveBeenCalledWith("openai:o1")
+    })
 
-  it("reserves the capability row while the catalog read is in flight", () => {
-    render(<ProviderModelsTab {...defaultProps} models={bare} metadataLoading />)
-    expect(screen.getAllByTestId("model-caps-placeholder")).toHaveLength(2)
-  })
+    it("shows the pinned bar with the global count and opens the comparison", () => {
+      const c = compare()
+      render(<ProviderModelsTab {...defaultProps} compare={c} />)
+      const bar = screen.getByTestId("models-compare-bar")
+      expect(bar).toHaveTextContent("2 of 4 selected")
+      fireEvent.click(screen.getByTestId("models-compare-open"))
+      expect(c.onOpen).toHaveBeenCalledTimes(1)
+      fireEvent.click(screen.getByTestId("models-compare-clear"))
+      expect(c.onClear).toHaveBeenCalledTimes(1)
+    })
 
-  it("drops the placeholder once metadata has landed", () => {
-    render(<ProviderModelsTab {...defaultProps} models={bare} metadataLoading={false} />)
-    expect(screen.queryByTestId("model-caps-placeholder")).not.toBeInTheDocument()
-  })
+    it("needs two models before Compare is enabled, and hides the bar at zero", () => {
+      const { rerender } = render(
+        <ProviderModelsTab {...defaultProps} compare={{ ...compare(), keys: ["openai:gpt-4o"] }} />
+      )
+      expect(screen.getByTestId("models-compare-open")).toBeDisabled()
+      rerender(<ProviderModelsTab {...defaultProps} compare={{ ...compare(), keys: [] }} />)
+      expect(screen.queryByTestId("models-compare-bar")).not.toBeInTheDocument()
+    })
 
-  it("never placeholders a model that already has capabilities", () => {
-    render(<ProviderModelsTab {...defaultProps} metadataLoading />)
-    expect(screen.queryByTestId("model-caps-placeholder")).not.toBeInTheDocument()
-    expect(screen.getAllByText("Vision").length).toBeGreaterThan(0)
-  })
-
-  it("defaults to no placeholder when the prop is omitted", () => {
-    render(<ProviderModelsTab {...defaultProps} models={bare} />)
-    expect(screen.queryByTestId("model-caps-placeholder")).not.toBeInTheDocument()
+    it("disables the unticked boxes once four models are selected", () => {
+      render(
+        <ProviderModelsTab
+          {...defaultProps}
+          compare={{ ...compare(), keys: ["a:1", "b:2", "c:3", "openai:gpt-4o"] }}
+        />
+      )
+      expect(screen.getByTestId("model-compare-gpt-4o")).not.toBeDisabled()
+      expect(screen.getByTestId("model-compare-o1")).toBeDisabled()
+      expect(screen.getByTestId("model-compare-o1")).toHaveAttribute("title", "Up to 4")
+    })
   })
 })

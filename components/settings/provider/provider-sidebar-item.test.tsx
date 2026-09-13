@@ -82,9 +82,16 @@ describe("ProviderSidebarItem", () => {
     expect(dot).toBeInTheDocument()
   })
 
-  it("applies selected styling when isSelected is true", () => {
+  it("tints the selected row instead of filling it, so the brand icon and status colours survive", () => {
     const { container } = render(<ProviderSidebarItem {...defaultProps} isSelected />)
-    expect(container.firstChild).toHaveClass("bg-primary")
+    expect(container.firstChild).toHaveClass("bg-accent")
+    expect(container.firstChild).not.toHaveClass("bg-primary")
+    expect(container.firstChild).toHaveAttribute("aria-selected", "true")
+  })
+
+  it("renders the model count as quiet text rather than a badge", () => {
+    render(<ProviderSidebarItem {...defaultProps} modelCount={11} />)
+    expect(screen.getByTestId("provider-model-count")).toHaveTextContent("11")
   })
 
   it("calls onClick when clicked", () => {

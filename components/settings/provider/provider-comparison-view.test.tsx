@@ -1,28 +1,39 @@
 /**
  * @jest-environment jsdom
  */
-import React from "react"
-import { render, screen, fireEvent } from "@testing-library/react"
-import { ProviderComparisonView } from "./provider-comparison-view"
+import React, { useState } from "react"
+import { render, screen, fireEvent, within } from "@testing-library/react"
+import { ProviderComparisonView, compareRows, comparisonModelKey } from "./provider-comparison-view"
 
 // ── i18n mock ─────────────────────────────────────────────────────────────────
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => {
+  useTranslations: () => (key: string, params?: Record<string, unknown>) => {
+    if (key === "comparison.selectedCount") return `${params?.count} / ${params?.max}`
+    if (key === "comparison.removeModel") return `Remove ${params?.name}`
+    if (key === "comparison.bestValue") return `Best value: ${params?.model}`
+    if (key === "comparison.pricePerMillion") return `${params?.price} / 1M`
     const map: Record<string, string> = {
       "comparison.title": "Model Comparison",
       "comparison.back": "Back",
-      "comparison.selectModels": "Select Models",
+      "comparison.attribute": "Attribute",
       "comparison.emptyTitle": "No models selected",
-      "comparison.emptyDescription": "Select up to 4 models to compare side by side",
+      "comparison.emptyDescription": "Tick models on a Models tab or add them here",
       "comparison.addModel": "Add model",
       "comparison.maxReached": "Max 4 models",
-      "comparison.provider": "Provider",
+      "comparison.onlyDifferences": "Only differences",
+      "comparison.clearAll": "Clear all",
+      "comparison.noDifferences": "No differences",
+      "comparison.bestInRow": "Best in row",
+      "comparison.providerDisabled": "disabled",
+      "comparison.section.limits": "Limits",
+      "comparison.section.capabilities": "Capabilities",
+      "comparison.section.pricing": "Pricing",
+      "comparison.section.performance": "Performance",
       "comparison.contextWindow": "Context Window",
       "comparison.maxOutput": "Max Output",
       "comparison.textGeneration": "Text Generation",
       "comparison.vision": "Vision",
-      "comparison.codeGeneration": "Code Generation",
       "comparison.functionCalling": "Function Calling",
       "comparison.streaming": "Streaming",
       "comparison.reasoning": "Reasoning",
@@ -31,7 +42,6 @@ jest.mock("next-intl", () => ({
       "comparison.imageGeneration": "Image Generation",
       "comparison.embedding": "Embedding",
       "comparison.avgLatency": "Avg Latency",
-      "comparison.availability": "Availability",
       "comparison.inputPrice": "Input Price",
       "comparison.outputPrice": "Output Price",
       "comparison.cacheReadPrice": "Cache Read Price",
@@ -41,9 +51,11 @@ jest.mock("next-intl", () => ({
       "comparison.audioInputPrice": "Audio Input Price",
       "comparison.audioOutputPrice": "Audio Output Price",
       "comparison.estCostPer1K": "Est. Cost/1K calls",
-      "comparison.bestValue": "Best value",
+      "comparison.free": "Free",
       "comparison.noPrice": "N/A",
       "comparison.notAvailable": "N/A",
+      "comparison.supported": "Supported",
+      "comparison.unsupported": "Unsupported",
     }
     return map[key] ?? key
   },
@@ -51,22 +63,14 @@ jest.mock("next-intl", () => ({
 
 // ── Store mock ────────────────────────────────────────────────────────────────
 
-const mockProviderSettings: Record<string, { enabled: boolean; enabledModels?: string[] }> = {
+const mockProviderSettings: Record<string, { enabled: boolean }> = {
   openai: { enabled: true },
   anthropic: { enabled: true },
   google: { enabled: false },
 }
 
 const mockUsageStats = {
-  openai: {
-    "gpt-4o": {
-      callCount: 50,
-      inputTokens: 100000,
-      outputTokens: 40000,
-      avgLatencyMs: 1200,
-      dailyStats: {},
-    },
-  },
+  "openai:gpt-4o": [{ avgLatencyMs: 1200 }],
 }
 
 jest.mock("@/stores", () => ({
@@ -80,6 +84,16 @@ jest.mock("@/stores", () => ({
       providerSettings: mockProviderSettings,
       providerUsageStats: mockUsageStats,
     }),
+}))
+
+jest.mock("@/hooks/settings/use-models-dev-catalog", () => ({
+  useModelsDevCatalog: () => ({ row: undefined, isLoading: false, sync: jest.fn() }),
+}))
+
+jest.mock("@/components/providers/ai/provider-icon", () => ({
+  ProviderIcon: ({ providerId }: { providerId: string }) => (
+    <span data-testid={`provider-icon-${providerId}`} />
+  ),
 }))
 
 // ── Catalog mock ──────────────────────────────────────────────────────────────
@@ -159,187 +173,188 @@ jest.mock("@cognia/provider-types/built-in-provider-catalog", () => ({
 // ── UI component mocks ────────────────────────────────────────────────────────
 
 jest.mock("@/components/ui/button")
-
 jest.mock("@/components/ui/popover")
-
 jest.mock("@/components/ui/checkbox")
-
 jest.mock("@/components/ui/scroll-area")
-
 jest.mock("@/components/ui/badge")
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+// ── Harness ───────────────────────────────────────────────────────────────────
+
+const GPT4O = comparisonModelKey("openai", "gpt-4o")
+const MINI = comparisonModelKey("openai", "gpt-4o-mini")
+const SONNET = comparisonModelKey("anthropic", "claude-3-5-sonnet-20241022")
+const GEMINI = comparisonModelKey("google", "gemini-2.0-flash")
+
+const onBack = jest.fn()
+const onChange = jest.fn()
+
+function Harness({ initial = [] as string[] }: { initial?: string[] }) {
+  const [keys, setKeys] = useState<string[]>(initial)
+  return (
+    <ProviderComparisonView
+      onBack={onBack}
+      selectedModelKeys={keys}
+      onSelectedModelKeysChange={(next) => {
+        onChange(next)
+        setKeys(next)
+      }}
+    />
+  )
+}
+
+const row = (id: string) => screen.getByTestId(`comparison-row-${id}`)
+const pickerBox = (key: string) =>
+  document.getElementById(`compare-model-${key}`) as HTMLInputElement
 
 describe("ProviderComparisonView", () => {
-  const onBack = jest.fn()
-
   beforeEach(() => {
     jest.clearAllMocks()
   })
 
-  // ── 1. Title renders ──────────────────────────────────────────────────────
-
-  it('renders "Model Comparison" title', () => {
-    render(<ProviderComparisonView onBack={onBack} />)
+  it("renders the title, a Back button and the selection count", () => {
+    render(<Harness />)
     expect(screen.getByText("Model Comparison")).toBeInTheDocument()
-  })
-
-  // ── 2. Back button ────────────────────────────────────────────────────────
-
-  it("renders a Back button", () => {
-    render(<ProviderComparisonView onBack={onBack} />)
-    expect(screen.getByText("Back")).toBeInTheDocument()
-  })
-
-  it("calls onBack when Back button is clicked", () => {
-    render(<ProviderComparisonView onBack={onBack} />)
+    expect(screen.getByTestId("comparison-count")).toHaveTextContent("0 / 4")
     fireEvent.click(screen.getByText("Back"))
     expect(onBack).toHaveBeenCalledTimes(1)
   })
 
-  // ── 3. Empty state ────────────────────────────────────────────────────────
+  it("shows guidance when nothing is selected, and no table", () => {
+    render(<Harness />)
+    expect(screen.getByText("No models selected")).toBeInTheDocument()
+    expect(screen.queryByTestId("comparison-table")).not.toBeInTheDocument()
+    expect(screen.getByTestId("comparison-only-differences")).toBeDisabled()
+  })
 
-  it("shows guidance text when no models are selected", () => {
-    render(<ProviderComparisonView onBack={onBack} />)
+  it("lists every catalog provider in the picker, enabled ones first and disabled ones labelled", () => {
+    render(<Harness />)
+    const headings = screen.getAllByText(/OpenAI|Anthropic|Google AI/)
+    expect(headings.map((h) => h.textContent)).toEqual(["OpenAI", "Anthropic", "Google AI"])
+    expect(screen.getByText("disabled")).toBeInTheDocument()
+    expect(pickerBox(GEMINI)).toBeInTheDocument()
+  })
+
+  it("is controlled: picking a model reports the new key list and the table follows", () => {
+    render(<Harness />)
+    fireEvent.click(pickerBox(GPT4O))
+    expect(onChange).toHaveBeenLastCalledWith([GPT4O])
+    expect(screen.getByTestId("comparison-column-openai:gpt-4o")).toHaveTextContent("GPT-4o")
+    expect(screen.getByTestId("comparison-count")).toHaveTextContent("1 / 4")
+    expect(row("context")).toHaveTextContent("128K")
+    expect(row("maxOutput")).toHaveTextContent("4K")
+  })
+
+  it("restores a supplied selection and ignores unknown keys instead of dropping them", () => {
+    render(<Harness initial={[GPT4O, "nope:gone", SONNET]} />)
+    expect(screen.getByTestId("comparison-column-openai:gpt-4o")).toBeInTheDocument()
+    expect(
+      screen.getByTestId("comparison-column-anthropic:claude-3-5-sonnet-20241022")
+    ).toBeInTheDocument()
+    // The count reports the stored keys, so a key that will resolve after a
+    // catalog sync still counts against the cap.
+    expect(screen.getByTestId("comparison-count")).toHaveTextContent("3 / 4")
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it("groups the rows into sections", () => {
+    render(<Harness initial={[GPT4O]} />)
+    for (const section of ["limits", "capabilities", "pricing", "performance"]) {
+      expect(screen.getByTestId(`comparison-section-${section}`)).toBeInTheDocument()
+    }
+    expect(screen.getByText("Vision")).toBeInTheDocument()
+    expect(screen.getByText("Function Calling")).toBeInTheDocument()
+    expect(row("inputPrice")).toHaveTextContent("$2.50 / 1M")
+    expect(row("outputPrice")).toHaveTextContent("$10.00 / 1M")
+  })
+
+  it("renders extended pricing rows only for dimensions a model declares, dashing the others", () => {
+    render(<Harness initial={[GPT4O, MINI]} />)
+    expect(row("cacheRead")).toBeInTheDocument()
+    expect(row("cacheWrite")).toBeInTheDocument()
+    expect(screen.queryByTestId("comparison-row-batchInput")).not.toBeInTheDocument()
+    const cells = within(row("cacheRead")).getAllByRole("cell")
+    expect(cells[0]).toHaveTextContent("$0.25 / 1M")
+    expect(cells[1]).toHaveTextContent("—")
+  })
+
+  it("renders capability check/cross indicators", () => {
+    render(<Harness initial={[GPT4O]} />)
+    expect(within(row("vision")).getByTestId("capability-yes")).toBeInTheDocument()
+    expect(within(row("audio")).getByTestId("capability-no")).toBeInTheDocument()
+  })
+
+  it("marks the best value in a numeric row and never on a tie", () => {
+    render(<Harness initial={[GPT4O, SONNET]} />)
+    // Higher context wins.
+    const contextCells = within(row("context")).getAllByRole("cell")
+    expect(contextCells[1]).toHaveAttribute("data-best", "true")
+    expect(contextCells[0]).not.toHaveAttribute("data-best")
+    // Lower input price wins.
+    const priceCells = within(row("inputPrice")).getAllByRole("cell")
+    expect(priceCells[0]).toHaveAttribute("data-best", "true")
+    // Both stream: a tie has no winner, and the row does not differ.
+    const streamCells = within(row("streaming")).getAllByRole("cell")
+    expect(streamCells.some((c) => c.hasAttribute("data-best"))).toBe(false)
+    expect(row("streaming")).not.toHaveAttribute("data-differs")
+    expect(row("context")).toHaveAttribute("data-differs", "true")
+  })
+
+  it("can hide the rows the models agree on", () => {
+    render(<Harness initial={[GPT4O, SONNET]} />)
+    expect(row("streaming")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("comparison-only-differences"))
+    expect(screen.queryByTestId("comparison-row-streaming")).not.toBeInTheDocument()
+    expect(row("context")).toBeInTheDocument()
+  })
+
+  it("says so when only-differences leaves nothing", () => {
+    // Two models that agree on everything: the fixture has none, so the
+    // pure row derivation is exercised directly.
+    const ctx = { latencyFor: () => undefined, formatPrice: String, notAvailable: "n/a" }
+    const rows = compareRows(
+      [
+        {
+          id: "x",
+          section: "limits",
+          labelKey: "x",
+          kind: "number",
+          best: "high",
+          value: () => 1,
+          format: String,
+        },
+      ],
+      [{} as never, {} as never],
+      ctx
+    )
+    expect(rows).toHaveLength(1)
+    expect(rows[0].differs).toBe(false)
+    expect(rows[0].bestIndex).toBeNull()
+  })
+
+  it("removes a model from its column header and clears the whole selection", () => {
+    render(<Harness initial={[GPT4O, SONNET]} />)
+    fireEvent.click(screen.getByTestId("comparison-remove-openai:gpt-4o"))
+    expect(onChange).toHaveBeenLastCalledWith([SONNET])
+    fireEvent.click(screen.getByTestId("comparison-clear"))
+    expect(onChange).toHaveBeenLastCalledWith([])
     expect(screen.getByText("No models selected")).toBeInTheDocument()
   })
 
-  it("shows empty description when no models are selected", () => {
-    render(<ProviderComparisonView onBack={onBack} />)
-    expect(screen.getByText("Select up to 4 models to compare side by side")).toBeInTheDocument()
+  it("caps the selection at four and disables the picker past it", () => {
+    render(<Harness initial={[GPT4O, MINI, SONNET, GEMINI]} />)
+    expect(screen.getByTestId("comparison-add-model")).toBeDisabled()
+    expect(screen.getByTestId("comparison-count")).toHaveTextContent("4 / 4")
   })
 
-  // ── 4. Model selector renders ─────────────────────────────────────────────
-
-  it("renders the model selector button", () => {
-    render(<ProviderComparisonView onBack={onBack} />)
-    expect(screen.getByText("Add model")).toBeInTheDocument()
+  it("reads latency from the usage stats keyed by provider:model", () => {
+    render(<Harness initial={[GPT4O, SONNET]} />)
+    const cells = within(row("latency")).getAllByRole("cell")
+    expect(cells[0]).toHaveTextContent("1.2s")
+    expect(cells[1]).toHaveTextContent("—")
   })
 
-  it("renders provider groups in the popover content", () => {
-    render(<ProviderComparisonView onBack={onBack} />)
-    // PopoverContent is always rendered in our mock
-    expect(screen.getByTestId("popover-content")).toBeInTheDocument()
-    // Provider names should appear as group headers
-    expect(screen.getAllByText("OpenAI").length).toBeGreaterThanOrEqual(1)
-  })
-
-  it("renders model checkboxes in the popover", () => {
-    render(<ProviderComparisonView onBack={onBack} />)
-    // Model names should appear inside the popover
-    expect(screen.getByText("GPT-4o")).toBeInTheDocument()
-    expect(screen.getByText("GPT-4o Mini")).toBeInTheDocument()
-    expect(screen.getByText("Claude 3.5 Sonnet")).toBeInTheDocument()
-  })
-
-  // ── 5. Comparison table after selecting a model ───────────────────────────
-
-  it("shows the comparison table with correct column count after selecting a model", () => {
-    render(<ProviderComparisonView onBack={onBack} />)
-
-    // Click the GPT-4o checkbox to select it
-    const checkboxes = screen.getAllByRole("checkbox")
-    fireEvent.click(checkboxes[0]) // first model checkbox
-
-    // Table should now be visible — check for a known row label
-    expect(screen.getByText("Provider")).toBeInTheDocument()
-    expect(screen.getByText("Context Window")).toBeInTheDocument()
-  })
-
-  it("shows capability rows in the comparison table", () => {
-    render(<ProviderComparisonView onBack={onBack} />)
-
-    const checkboxes = screen.getAllByRole("checkbox")
-    fireEvent.click(checkboxes[0])
-
-    expect(screen.getByText("Vision")).toBeInTheDocument()
-    expect(screen.getByText("Streaming")).toBeInTheDocument()
-    expect(screen.getByText("Function Calling")).toBeInTheDocument()
-  })
-
-  it("renders pricing rows in the comparison table", () => {
-    render(<ProviderComparisonView onBack={onBack} />)
-
-    const checkboxes = screen.getAllByRole("checkbox")
-    fireEvent.click(checkboxes[0])
-
-    expect(screen.getByText("Input Price")).toBeInTheDocument()
-    expect(screen.getByText("Output Price")).toBeInTheDocument()
-  })
-
-  it("renders extended pricing rows only for dimensions a model declares", () => {
-    render(<ProviderComparisonView onBack={onBack} />)
-
-    const checkboxes = screen.getAllByRole("checkbox")
-    fireEvent.click(checkboxes[0]) // GPT-4o declares cache read/write pricing
-
-    // Cache rows appear because GPT-4o declares them…
-    expect(screen.getByText("Cache Read Price")).toBeInTheDocument()
-    expect(screen.getByText("Cache Write Price")).toBeInTheDocument()
-    // …but batch/audio rows are skipped entirely when no selected model has them.
-    expect(screen.queryByText("Batch Input Price")).not.toBeInTheDocument()
-    expect(screen.queryByText("Audio Input Price")).not.toBeInTheDocument()
-  })
-
-  it("shows a dash for a model lacking a dimension another model declares", () => {
-    render(<ProviderComparisonView onBack={onBack} />)
-
-    const checkboxes = screen.getAllByRole("checkbox")
-    fireEvent.click(checkboxes[0]) // GPT-4o (has cache pricing)
-    fireEvent.click(checkboxes[2]) // Claude 3.5 Sonnet (no cache pricing)
-
-    // The cache row renders (GPT-4o has it) and the model that lacks it shows "—".
-    expect(screen.getByText("Cache Read Price")).toBeInTheDocument()
-    expect(screen.getAllByText("—").length).toBeGreaterThan(0)
-  })
-
-  it("renders the extended models.dev capability rows", () => {
-    render(<ProviderComparisonView onBack={onBack} />)
-
-    const checkboxes = screen.getAllByRole("checkbox")
-    fireEvent.click(checkboxes[0])
-
-    expect(screen.getByText("Reasoning")).toBeInTheDocument()
-    expect(screen.getByText("Audio")).toBeInTheDocument()
-    expect(screen.getByText("Video")).toBeInTheDocument()
-    expect(screen.getByText("Image Generation")).toBeInTheDocument()
-    expect(screen.getByText("Embedding")).toBeInTheDocument()
-  })
-
-  // ── 6. Capability indicators ──────────────────────────────────────────────
-
-  it("renders capability check/cross indicators for a selected model", () => {
-    render(<ProviderComparisonView onBack={onBack} />)
-
-    const checkboxes = screen.getAllByRole("checkbox")
-    fireEvent.click(checkboxes[0]) // GPT-4o (supportsVision: true)
-
-    // Capability rows should still render even when icon internals are not exposed by the mock.
-    expect(screen.getByText("Vision")).toBeInTheDocument()
-  })
-
-  // ── 7. Recommendation ────────────────────────────────────────────────────
-
-  it("shows best value recommendation when models with pricing are selected", () => {
-    render(<ProviderComparisonView onBack={onBack} />)
-
-    const checkboxes = screen.getAllByRole("checkbox")
-    // Select GPT-4o Mini (cheap) and Claude 3.5 Sonnet (expensive)
-    fireEvent.click(checkboxes[1]) // GPT-4o Mini
-    fireEvent.click(checkboxes[2]) // Claude 3.5 Sonnet (if available)
-
-    // Best value section should appear — text may be split across elements
-    const bestValueElements = screen.getAllByText((content, element) => {
-      return element?.textContent?.includes("Best value") ?? false
-    })
-    expect(bestValueElements.length).toBeGreaterThan(0)
-  })
-
-  // ── 8. Max selection limit ────────────────────────────────────────────────
-
-  it("shows Max 4 models label in the selector area", () => {
-    render(<ProviderComparisonView onBack={onBack} />)
-    // The label should appear somewhere in the component (header area or tooltip)
-    expect(screen.getByText("Max 4 models")).toBeInTheDocument()
+  it("recommends the cheapest model by average price", () => {
+    render(<Harness initial={[GPT4O, MINI]} />)
+    expect(screen.getByTestId("comparison-best-value")).toHaveTextContent("Best value: GPT-4o Mini")
   })
 })

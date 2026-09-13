@@ -2,8 +2,7 @@
 
 import React, { useCallback } from "react"
 import { useTranslations } from "next-intl"
-import { Check, AlertTriangle, X, Circle, Info, Activity } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { Activity } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { hasBrandIcon } from "@/components/icons/brand-icon"
 import { ProviderIcon } from "@/components/providers/ai/provider-icon"
@@ -42,60 +41,61 @@ interface ProviderSidebarItemProps {
 /**
  * Per-status presentation. `labelKey` / `reasonKey` resolve under the
  * `providers.sidebar` namespace — the reason is surfaced as a native tooltip on
- * the badge so a "warning"/"error" provider explains itself on hover and the
+ * the status so a "warning"/"error" provider explains itself on hover and the
  * user knows the row is worth opening.
+ *
+ * A status is a coloured dot plus a short word, not a filled pill. Six pills
+ * in six tints down a 320px rail were the loudest thing on the page, and
+ * "Unconfigured" is the resting state of most rows, so the list was mostly
+ * shouting about nothing. `dot` colours the marker, `text` the word.
  */
 const STATUS_CONFIG: Record<
   ProviderConnectionStatus,
   {
-    icon: React.ComponentType<{ className?: string }>
     labelKey: string
     reasonKey: string
-    className: string
+    dot: string
+    text: string
   }
 > = {
   connected: {
-    icon: Check,
     labelKey: "statusConnected",
     reasonKey: "reasonConnected",
-    className:
-      "border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-950 dark:text-green-400",
+    dot: "bg-green-500",
+    text: "text-green-700 dark:text-green-400",
   },
   warning: {
-    icon: AlertTriangle,
     labelKey: "statusWarning",
     reasonKey: "reasonWarning",
-    className:
-      "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-400",
+    dot: "bg-amber-500",
+    text: "text-amber-700 dark:text-amber-400",
   },
   untested: {
-    icon: Circle,
     labelKey: "statusUntested",
     reasonKey: "reasonUntested",
-    className: "border-muted-foreground/20 bg-muted/50 text-muted-foreground",
+    dot: "bg-muted-foreground/50",
+    text: "text-muted-foreground",
   },
   "not-configured": {
-    icon: Circle,
     labelKey: "statusUnconfigured",
     reasonKey: "reasonUnconfigured",
-    className: "border-muted-foreground/20 bg-muted/50 text-muted-foreground",
+    dot: "border border-muted-foreground/40 bg-transparent",
+    text: "text-muted-foreground",
   },
   error: {
-    icon: X,
     labelKey: "statusError",
     reasonKey: "reasonError",
-    className:
-      "border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-400",
+    dot: "bg-red-500",
+    text: "text-red-700 dark:text-red-400",
   },
   // Verified but with caveats (e.g. authoritative verification wasn't
   // possible in this runtime) — distinct from a plain "connected" pass so
-  // the sidebar badge doesn't overclaim.
+  // the sidebar marker doesn't overclaim.
   limited: {
-    icon: Info,
     labelKey: "statusLimited",
     reasonKey: "reasonLimited",
-    className:
-      "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-400",
+    dot: "bg-amber-500",
+    text: "text-amber-700 dark:text-amber-400",
   },
 }
 
@@ -115,7 +115,6 @@ export const ProviderSidebarItem = React.memo(function ProviderSidebarItem({
   const t = useTranslations("providers.sidebar")
   const handleClick = useCallback(() => onClick(providerId), [onClick, providerId])
   const statusCfg = STATUS_CONFIG[status]
-  const StatusIcon = statusCfg.icon
   const statusLabel = t(statusCfg.labelKey)
   const statusReason = t(statusCfg.reasonKey)
   const branded = hasBrandIcon(providerId)
@@ -132,21 +131,20 @@ export const ProviderSidebarItem = React.memo(function ProviderSidebarItem({
       aria-selected={isSelected}
       data-provider-row
       className={cn(
-        "h-auto w-full justify-start gap-3 whitespace-normal rounded-lg px-3 py-2.5 text-left font-normal transition-all duration-200",
+        // A selected row is tinted, not filled: a solid primary block hid the
+        // brand icon and the status colours on the one row you were looking
+        // at. The left bar carries the selection; the tint just keeps it
+        // together.
+        "relative h-auto w-full justify-start gap-2.5 whitespace-normal rounded-md px-2.5 py-2 text-left font-normal transition-colors",
         isSelected
-          ? "border-l-2 border-l-primary bg-primary text-primary-foreground"
+          ? "bg-accent text-accent-foreground shadow-[inset_2px_0_0_0_var(--primary)]"
           : "hover:bg-muted/50"
       )}
     >
       {branded || icon == null ? (
-        <ProviderIcon providerId={providerId} label={name} size={28} />
+        <ProviderIcon providerId={providerId} label={name} size={24} />
       ) : (
-        <div
-          className={cn(
-            "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-xs font-semibold",
-            isSelected ? "bg-primary-foreground/20" : "bg-muted"
-          )}
-        >
+        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-semibold">
           {icon}
         </div>
       )}
@@ -154,16 +152,12 @@ export const ProviderSidebarItem = React.memo(function ProviderSidebarItem({
         <div className="flex items-center gap-1.5">
           <span className="truncate text-sm font-medium">{name}</span>
           {modelCount !== undefined && modelCount > 0 && (
-            <Badge
-              variant="secondary"
-              className={cn(
-                "shrink-0 text-[10px] px-1 py-0",
-                isSelected &&
-                  "bg-primary-foreground/20 text-primary-foreground border-primary-foreground/30"
-              )}
+            <span
+              className="shrink-0 text-[11px] tabular-nums text-muted-foreground"
+              data-testid="provider-model-count"
             >
               {modelCount}
-            </Badge>
+            </span>
           )}
           {diagnosticStatus && (
             <span
@@ -186,25 +180,20 @@ export const ProviderSidebarItem = React.memo(function ProviderSidebarItem({
             </span>
           )}
         </div>
-        <div
-          className={cn(
-            "truncate text-xs",
-            isSelected ? "text-primary-foreground/70" : "text-muted-foreground"
-          )}
-        >
-          {subtitle}
-        </div>
+        <div className="truncate text-xs text-muted-foreground">{subtitle}</div>
       </div>
-      <Badge
-        variant="outline"
+      <span
         data-status={status}
         title={statusReason}
         aria-label={`${statusLabel} — ${statusReason}`}
-        className={cn("shrink-0 gap-1 text-[10px] px-1.5 py-0", statusCfg.className)}
+        className={cn(
+          "inline-flex shrink-0 items-center gap-1.5 text-[11px] leading-none",
+          statusCfg.text
+        )}
       >
-        <StatusIcon className="h-3 w-3" />
+        <span aria-hidden className={cn("size-1.5 rounded-full", statusCfg.dot)} />
         <span className="hidden @[16rem]/provider-rail:inline">{statusLabel}</span>
-      </Badge>
+      </span>
     </Button>
   )
 })

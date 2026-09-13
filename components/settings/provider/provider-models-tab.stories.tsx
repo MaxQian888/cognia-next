@@ -3,10 +3,10 @@ import { fn } from "storybook/test"
 
 import { ProviderModelsTab, type ModelConfig } from "./provider-models-tab"
 
-// Models tab for a provider config dialog: searchable / capability-filterable /
-// sortable model grid with per-model enable switches and batch operations. Uses
-// its own local `ModelConfig` shape (models.dev-derived metadata). Pure props;
-// "Refresh" calls `onTestConnection` on click only.
+// Models tab for a provider's detail pane: a compact, sortable table with
+// capability glyphs, context / output / price columns, per-model enable
+// switches, batch operations, and (when the pane supplies a selection) a
+// compare column feeding the cross-provider comparison. Pure props.
 
 const MODELS: ModelConfig[] = [
   {
@@ -18,6 +18,7 @@ const MODELS: ModelConfig[] = [
     maxOutputTokens: 32_768,
     releaseDate: "2026-01-15",
     knowledge: "2025-10",
+    pricing: { promptPer1M: 2, completionPer1M: 8 },
   },
   {
     id: "o3",
@@ -28,6 +29,7 @@ const MODELS: ModelConfig[] = [
     variants: ["low", "medium", "high"],
     modeCount: 3,
     releaseDate: "2025-12-01",
+    pricing: { promptPer1M: 10, completionPer1M: 40 },
   },
   {
     id: "gpt-3.5-turbo",
@@ -65,8 +67,21 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-// Populated grid with filters, sort, and batch toolbar.
+// Populated table with filters, sortable headers, and the batch toolbar.
 export const Populated: Story = {}
+
+// Two rows ticked for comparison: the compare column is on and the pinned
+// bar at the bottom offers Compare / Clear.
+export const Comparing: Story = {
+  args: {
+    compare: {
+      keys: ["openai:gpt-4.1", "openai:o3"],
+      onToggle: fn(),
+      onOpen: fn(),
+      onClear: fn(),
+    },
+  },
+}
 
 // Refresh in progress — spinner on the refresh button.
 export const Refreshing: Story = {

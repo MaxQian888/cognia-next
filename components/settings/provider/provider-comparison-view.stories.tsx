@@ -1,15 +1,16 @@
 import type { Meta, StoryObj } from "@storybook/nextjs"
+import { useState } from "react"
 import { fn } from "storybook/test"
 
-import { ProviderComparisonView } from "./provider-comparison-view"
+import { ProviderComparisonView, comparisonModelKey } from "./provider-comparison-view"
 import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 import { useSettingsStore } from "@/stores/settings"
 import { makeProviderSettingsMap } from "@/lib/storybook/fixtures/settings-provider"
 
-// Global side-by-side model comparison. Available models come from the built-in
-// catalog filtered by enabled providers (FLAT `providerSettings`, falling back
-// to each provider's catalog `defaultEnabled`). No models selected → empty
-// state; pick up to four from the "Add model" popover to populate the table.
+// Side-by-side model comparison. The selection is CONTROLLED (the settings
+// pane owns it and persists it as `comparisonModelKeys`), so each story holds
+// it in local state. Available models come from the whole built-in catalog;
+// enabled providers lead the "Add model" picker and disabled ones are labelled.
 const meta = {
   title: "Settings/Provider/ProviderComparisonView",
   component: ProviderComparisonView,
@@ -24,17 +25,41 @@ const meta = {
       </div>
     ),
   ],
-  args: { onBack: fn() },
+  args: { onBack: fn(), selectedModelKeys: [], onSelectedModelKeysChange: fn() },
+  render: function Render(args) {
+    const [keys, setKeys] = useState<readonly string[]>(args.selectedModelKeys)
+    return (
+      <ProviderComparisonView
+        {...args}
+        selectedModelKeys={keys}
+        onSelectedModelKeysChange={(next) => {
+          args.onSelectedModelKeysChange(next)
+          setKeys(next)
+        }}
+      />
+    )
+  },
 } satisfies Meta<typeof ProviderComparisonView>
 
 export default meta
 type Story = StoryObj<typeof meta>
 
-// Empty store — only catalog default-enabled providers contribute model
-// options. Nothing selected yet, so the empty state is shown.
+// Nothing selected yet: the empty state points at the Models tab and the picker.
 export const Default: Story = {}
 
-// Explicitly enabled built-in providers widen the "Add model" popover list.
+// A three-way comparison with sections, a marked best value per numeric row
+// and the "only differences" toggle live.
+export const ThreeModels: Story = {
+  args: {
+    selectedModelKeys: [
+      comparisonModelKey("openai", "gpt-4.1"),
+      comparisonModelKey("anthropic", "claude-sonnet-4-6"),
+      comparisonModelKey("google", "gemini-2.5-pro"),
+    ],
+  },
+}
+
+// Explicitly enabled built-in providers lead the "Add model" picker.
 export const ProvidersEnabled: Story = {
   beforeEach: () => {
     resetStore(useSettingsStore)

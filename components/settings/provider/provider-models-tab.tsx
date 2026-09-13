@@ -2,14 +2,34 @@
 
 import React, { useState, useMemo } from "react"
 import { useTranslations } from "next-intl"
-import { Search, RefreshCw, Loader2, ArrowUpDown, X, PlugZap, CheckCheck, Ban } from "lucide-react"
+import {
+  Search,
+  RefreshCw,
+  Loader2,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  X,
+  PlugZap,
+  CheckCheck,
+  Ban,
+  GitCompareArrows,
+} from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
+import { ModelCapabilityIcons, useCapabilityLabel } from "./model-capability-icons"
+import {
+  COMPARISON_MAX_MODELS,
+  comparisonModelKey,
+  formatTokenCount,
+  formatUsdPerMillion,
+} from "./model-format"
 import type { ProviderDiagnosticBadgeStatus } from "./provider-sidebar-item"
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
@@ -41,12 +61,31 @@ export interface ModelConfig {
   knowledge?: string
   /** Last-updated date from models.dev. */
   lastUpdated?: string
+  /** USD per million tokens, when the catalog or models.dev knows it. */
+  pricing?: { promptPer1M: number; completionPer1M: number }
 }
 
-/** Sort modes for the model grid. `default` keeps catalog order. */
-type SortMode = "default" | "name" | "context" | "release"
+/** Sortable columns. `null` keeps catalog order. */
+export type ModelSortKey = "name" | "context" | "maxOutput" | "price" | "release"
+export type ModelSortDirection = "asc" | "desc"
+export interface ModelSort {
+  key: ModelSortKey
+  direction: ModelSortDirection
+}
 
-const SORT_CYCLE: SortMode[] = ["default", "name", "context", "release"]
+/**
+ * The cross-provider comparison selection, owned by the settings pane so it
+ * survives switching providers and reopening the compare workspace.
+ *
+ * Keys are `${providerId}:${modelId}` (see {@link comparisonModelKey}); the
+ * tab only ever adds or removes its own provider's rows.
+ */
+export interface ModelCompareSelection {
+  keys: readonly string[]
+  onToggle: (key: string) => void
+  onOpen: () => void
+  onClear: () => void
+}
 
 /**
  * Map a models.dev lifecycle `status` to a badge variant, or `null` when the
@@ -60,16 +99,6 @@ function statusBadgeVariant(status: string | undefined): "destructive" | "outlin
   if (["stable", "available", "ga", "active", "released"].includes(s)) return null
   if (["deprecated", "retired", "legacy", "sunset"].includes(s)) return "destructive"
   return "outline"
-}
-
-const CAPABILITY_LABEL_KEYS: Record<string, string> = {
-  vision: "modelsTab.capability.vision",
-  tools: "modelsTab.capability.tools",
-  reasoning: "modelsTab.capability.reasoning",
-  audio: "modelsTab.capability.audio",
-  structured: "modelsTab.capability.structured",
-  attachment: "modelsTab.capability.attachment",
-  interleaved: "modelsTab.capability.interleaved",
 }
 
 const LIFECYCLE_LABEL_KEYS: Record<string, string> = {
@@ -103,201 +132,291 @@ export interface ProviderModelsTabProps {
   isTesting?: boolean
   /**
    * True while the models.dev metadata read is still in flight. Model rows then
-   * reserve space for the capability chips instead of growing them in later.
+   * reserve space for the capability glyphs instead of growing them in later.
    */
   metadataLoading?: boolean
   diagnosticStatusByModel?: Record<string, ProviderDiagnosticBadgeStatus>
+  /** Omit to hide the compare column (a caller without a compare workspace). */
+  compare?: ModelCompareSelection
 }
 
-/* ── Helpers ─────────────────────────────────────────────────────────────── */
+/* ── Sorting ─────────────────────────────────────────────────────────────── */
 
-function formatContextLength(length: number): string {
-  if (length >= 1_000_000) {
-    const val = length / 1_000_000
-    return `${Number.isInteger(val) ? val : val.toFixed(1)}M`
-  }
-  if (length >= 1_000) {
-    const val = length / 1_000
-    return `${Number.isInteger(val) ? val : val.toFixed(0)}K`
-  }
-  return String(length)
+/** Average of the two per-1M rates; `null` when the model has no pricing. */
+function averagePrice(model: ModelConfig): number | null {
+  if (!model.pricing) return null
+  return (model.pricing.promptPer1M + model.pricing.completionPer1M) / 2
 }
 
-/* ── ModelCard ───────────────────────────────────────────────────────────── */
+/**
+ * Pure so the header-click semantics can be pinned: models with no value for
+ * the sort key always sink to the bottom regardless of direction, otherwise
+ * "sort by price, descending" would open with the priceless models on top.
+ */
+export function sortModels(models: readonly ModelConfig[], sort: ModelSort | null): ModelConfig[] {
+  const result = [...models]
+  if (!sort) return result
+  const sign = sort.direction === "asc" ? 1 : -1
+  const numeric =
+    (pick: (m: ModelConfig) => number | null | undefined) => (a: ModelConfig, b: ModelConfig) => {
+      const av = pick(a)
+      const bv = pick(b)
+      const aMissing = av === null || av === undefined
+      const bMissing = bv === null || bv === undefined
+      if (aMissing && bMissing) return 0
+      if (aMissing) return 1
+      if (bMissing) return -1
+      return sign * (av - bv)
+    }
+  switch (sort.key) {
+    case "name":
+      return result.sort((a, b) => sign * a.name.localeCompare(b.name))
+    case "context":
+      return result.sort(numeric((m) => m.contextLength))
+    case "maxOutput":
+      return result.sort(numeric((m) => m.maxOutputTokens))
+    case "price":
+      return result.sort(numeric(averagePrice))
+    case "release":
+      return result.sort((a, b) => {
+        const av = a.releaseDate ?? ""
+        const bv = b.releaseDate ?? ""
+        if (!av && !bv) return 0
+        if (!av) return 1
+        if (!bv) return -1
+        return sign * av.localeCompare(bv)
+      })
+  }
+}
 
-interface ModelCardProps {
+/** Header click: none → asc → desc → none, per column. */
+export function nextSort(current: ModelSort | null, key: ModelSortKey): ModelSort | null {
+  if (!current || current.key !== key) return { key, direction: "asc" }
+  if (current.direction === "asc") return { key, direction: "desc" }
+  return null
+}
+
+/* ── Header cell ─────────────────────────────────────────────────────────── */
+
+function SortableHead({
+  label,
+  sortKey,
+  sort,
+  onSort,
+  align = "left",
+  className,
+}: {
+  label: string
+  sortKey: ModelSortKey
+  sort: ModelSort | null
+  onSort: (key: ModelSortKey) => void
+  align?: "left" | "right"
+  className?: string
+}) {
+  const t = useTranslations("providers")
+  const active = sort?.key === sortKey
+  const Icon = !active ? ArrowUpDown : sort.direction === "asc" ? ArrowUp : ArrowDown
+  return (
+    <th
+      scope="col"
+      aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}
+      className={cn("px-2 py-1.5 font-medium", align === "right" && "text-right", className)}
+    >
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        data-testid={`models-sort-${sortKey}`}
+        title={t("modelsTab.sortColumn", { label })}
+        className={cn(
+          "inline-flex h-6 max-w-full items-center gap-1 rounded-sm px-1 text-xs hover:text-foreground",
+          align === "right" && "flex-row-reverse",
+          active ? "text-foreground" : "text-muted-foreground"
+        )}
+      >
+        <span className="truncate">{label}</span>
+        <Icon className={cn("size-3 shrink-0", !active && "opacity-50")} />
+      </button>
+    </th>
+  )
+}
+
+/* ── Row ─────────────────────────────────────────────────────────────────── */
+
+interface ModelRowProps {
   model: ModelConfig
   isEnabled: boolean
   onToggle: (id: string, enabled: boolean) => void
-  contextLabel: string
-  /** Pre-translated "Cutoff" prefix for the knowledge date. */
-  knowledgeLabel: string
-  /** Pre-translated "Updated" prefix for the last-updated date. */
-  updatedLabel: string
-  /** Pre-translated "max out" suffix for the output-token limit. */
-  maxOutputLabel: string
-  /** Pre-translated "open weights" badge text. */
-  openWeightsLabel: string
-  /** Pre-translated "modes" suffix, formatted with the count via ICU. */
-  formatModes: (count: number) => string
-  /** See `ProviderModelsTabProps.metadataLoading`. */
-  metadataLoading?: boolean
+  metadataLoading: boolean
   diagnosticStatus?: ProviderDiagnosticBadgeStatus
+  compare?: {
+    checked: boolean
+    disabled: boolean
+    onToggle: () => void
+  }
 }
 
-function ModelCard({
+const ModelRow = React.memo(function ModelRow({
   model,
   isEnabled,
   onToggle,
-  contextLabel,
-  knowledgeLabel,
-  updatedLabel,
-  maxOutputLabel,
-  openWeightsLabel,
-  formatModes,
-  metadataLoading = false,
+  metadataLoading,
   diagnosticStatus,
-}: ModelCardProps) {
+  compare,
+}: ModelRowProps) {
   const t = useTranslations("providers")
-  const caps: string[] = model.capabilities ?? []
-  const variants = model.variants ?? []
+  const caps = model.capabilities ?? []
   const statusVariant = statusBadgeVariant(model.status)
   // The models.dev catalog is a separate Dexie read that lands after the static
-  // provider catalog. Without a placeholder the card first paints bare and then
-  // *grows* a capability row, shifting everything below it. Reserve the row at
-  // the same height while the read is still in flight.
+  // provider catalog. Without a placeholder the row first paints bare and then
+  // grows a glyph row. Reserve the space while the read is in flight.
   const showCapsPlaceholder = metadataLoading && caps.length === 0
+  const lifecycleKey = model.status ? LIFECYCLE_LABEL_KEYS[model.status.toLowerCase()] : undefined
 
   return (
-    <div
+    <tr
       data-enabled={isEnabled || undefined}
+      data-testid={`model-row-${model.id}`}
       className={cn(
-        "flex min-w-0 flex-col gap-2 rounded-xl border p-3 transition-colors",
-        isEnabled
-          ? "border-primary/40 bg-primary/[0.04]"
-          : "bg-card hover:border-foreground/20 hover:bg-muted/40"
+        "border-b transition-colors last:border-b-0 hover:bg-muted/40",
+        !isEnabled && "text-muted-foreground",
+        compare?.checked && "bg-primary/[0.04]"
       )}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-            <span className="min-w-0 truncate text-sm font-semibold leading-tight">
-              {model.name}
-            </span>
-            {statusVariant && model.status && (
-              <Badge variant={statusVariant} className="text-[10px] px-1.5 py-0 capitalize">
-                {LIFECYCLE_LABEL_KEYS[model.status.toLowerCase()]
-                  ? t(LIFECYCLE_LABEL_KEYS[model.status.toLowerCase()])
-                  : model.status}
-              </Badge>
+      {compare && (
+        <td className="w-8 px-2 py-1.5 align-middle">
+          <Checkbox
+            checked={compare.checked}
+            disabled={compare.disabled}
+            onCheckedChange={compare.onToggle}
+            aria-label={t("modelsTab.compareCheckbox", { name: model.name })}
+            title={
+              compare.disabled
+                ? t("modelsTab.compareLimit", { max: COMPARISON_MAX_MODELS })
+                : undefined
+            }
+            data-testid={`model-compare-${model.id}`}
+          />
+        </td>
+      )}
+      {/* `w-full max-w-0`: the model column absorbs whatever width the fixed
+          columns leave and truncates inside it. Without the max-width a table
+          cell grows to its content, so a long model id pushed the switch
+          column past the pane edge on a phone. */}
+      <td className="w-full max-w-0 px-2 py-1.5 align-middle">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
+          <span
+            className={cn(
+              "min-w-0 truncate text-sm font-medium leading-tight",
+              isEnabled ? "text-foreground" : "text-muted-foreground"
             )}
-            {model.openWeights && (
-              <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                {openWeightsLabel}
-              </Badge>
-            )}
-            {diagnosticStatus && (
-              <Badge
-                variant="outline"
-                data-testid={`model-diagnostic-${model.id}`}
-                data-diagnostic-status={diagnosticStatus}
-                className={cn(
-                  "text-[10px] px-1.5 py-0",
-                  diagnosticStatus === "passed" && "border-emerald-500/30 text-emerald-600",
-                  diagnosticStatus === "failed" && "border-destructive/30 text-destructive",
-                  diagnosticStatus === "stale" && "text-muted-foreground"
-                )}
-              >
-                {t(
-                  `sidebar.diagnostic${diagnosticStatus[0].toUpperCase()}${diagnosticStatus.slice(1)}`
-                )}
-              </Badge>
-            )}
-          </div>
-          {/* The model *id* is what the user types into routing, aliases and
-              the CLI — it used to be visible nowhere on the card. */}
-          <div className="flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground">
-            <span className="truncate font-mono">{model.id}</span>
-            {model.family && (
-              <>
-                <span aria-hidden>·</span>
-                <span className="truncate">{model.family}</span>
-              </>
-            )}
-          </div>
+          >
+            {model.name}
+          </span>
+          {statusVariant && model.status && (
+            <Badge variant={statusVariant} className="px-1.5 py-0 text-[10px] capitalize">
+              {lifecycleKey ? t(lifecycleKey) : model.status}
+            </Badge>
+          )}
+          {model.openWeights && (
+            <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+              {t("modelsTab.openWeights")}
+            </Badge>
+          )}
+          {diagnosticStatus && (
+            <Badge
+              variant="outline"
+              data-testid={`model-diagnostic-${model.id}`}
+              data-diagnostic-status={diagnosticStatus}
+              className={cn(
+                "px-1.5 py-0 text-[10px]",
+                diagnosticStatus === "passed" && "border-emerald-500/30 text-emerald-600",
+                diagnosticStatus === "failed" && "border-destructive/30 text-destructive",
+                diagnosticStatus === "stale" && "text-muted-foreground"
+              )}
+            >
+              {t(
+                `sidebar.diagnostic${diagnosticStatus[0].toUpperCase()}${diagnosticStatus.slice(1)}`
+              )}
+            </Badge>
+          )}
         </div>
+        {/* The model *id* is what the user types into routing, aliases and
+            the CLI. */}
+        <div className="flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground">
+          <span className="truncate font-mono">{model.id}</span>
+          {model.family && (
+            <>
+              <span aria-hidden>·</span>
+              <span className="truncate">{model.family}</span>
+            </>
+          )}
+          {model.variants && model.variants.length > 0 && (
+            <>
+              <span aria-hidden>·</span>
+              <span className="truncate" data-testid={`model-variants-${model.id}`}>
+                {model.variants.join(" / ")}
+              </span>
+            </>
+          )}
+        </div>
+      </td>
+      <td className="px-2 py-1.5 align-middle">
+        {showCapsPlaceholder ? (
+          <div className="flex gap-1" data-testid="model-caps-placeholder" aria-hidden>
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="size-5 rounded-sm" />
+            ))}
+          </div>
+        ) : (
+          <ModelCapabilityIcons capabilities={caps} />
+        )}
+      </td>
+      <td className="whitespace-nowrap px-2 py-1.5 text-right align-middle font-mono text-xs tabular-nums">
+        {model.contextLength !== undefined ? formatTokenCount(model.contextLength) : "—"}
+      </td>
+      <td className="hidden whitespace-nowrap px-2 py-1.5 text-right align-middle font-mono text-xs tabular-nums @xl/provider-pane:table-cell">
+        {model.maxOutputTokens !== undefined && model.maxOutputTokens > 0
+          ? formatTokenCount(model.maxOutputTokens)
+          : "—"}
+      </td>
+      <td
+        className="hidden whitespace-nowrap px-2 py-1.5 text-right align-middle font-mono text-xs tabular-nums @2xl/provider-pane:table-cell"
+        data-testid={`model-price-${model.id}`}
+      >
+        {model.pricing ? (
+          <span title={t("modelsTab.pricePerMillionHint")}>
+            {formatUsdPerMillion(model.pricing.promptPer1M)}
+            <span className="text-muted-foreground"> / </span>
+            {formatUsdPerMillion(model.pricing.completionPer1M)}
+          </span>
+        ) : (
+          "—"
+        )}
+      </td>
+      <td className="hidden whitespace-nowrap px-2 py-1.5 text-right align-middle text-xs text-muted-foreground tabular-nums @3xl/provider-pane:table-cell">
+        {model.releaseDate ?? "—"}
+        {model.knowledge && (
+          <span className="block text-[10px]" title={t("modelsTab.knowledgeCutoff")}>
+            {t("modelsTab.knowledgeCutoff")} {model.knowledge}
+          </span>
+        )}
+      </td>
+      <td className="w-12 px-2 py-1.5 text-right align-middle">
         <Switch
           checked={isEnabled}
           onCheckedChange={(checked) => onToggle(model.id, checked)}
           aria-label={model.id}
           className="shrink-0"
         />
-      </div>
-
-      {showCapsPlaceholder ? (
-        <div className="flex flex-wrap gap-1" data-testid="model-caps-placeholder" aria-hidden>
-          {[0, 1, 2].map((i) => (
-            <Skeleton key={i} className="h-4 w-14 rounded-full" />
-          ))}
-        </div>
-      ) : (
-        caps.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {caps.map((cap) => (
-              <Badge key={cap} variant="secondary" className="text-xs px-1.5 py-0">
-                {CAPABILITY_LABEL_KEYS[cap.toLowerCase()]
-                  ? t(CAPABILITY_LABEL_KEYS[cap.toLowerCase()])
-                  : cap}
-              </Badge>
-            ))}
-          </div>
-        )
-      )}
-
-      {variants.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1">
-          {variants.map((v) => (
-            <Badge key={v} variant="outline" className="text-[10px] px-1.5 py-0">
-              {v}
-            </Badge>
-          ))}
-        </div>
-      )}
-
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-        {model.contextLength !== undefined && (
-          <span>
-            {formatContextLength(model.contextLength)} {contextLabel}
-          </span>
-        )}
-        {model.maxOutputTokens !== undefined && model.maxOutputTokens > 0 && (
-          <span>
-            {formatContextLength(model.maxOutputTokens)} {maxOutputLabel}
-          </span>
-        )}
-        {model.modeCount !== undefined && model.modeCount > 0 && (
-          <span>{formatModes(model.modeCount)}</span>
-        )}
-        {model.releaseDate && <span>{model.releaseDate}</span>}
-        {model.knowledge && (
-          <span>
-            {knowledgeLabel} {model.knowledge}
-          </span>
-        )}
-        {model.lastUpdated && (
-          <span>
-            {updatedLabel} {model.lastUpdated}
-          </span>
-        )}
-        {model.adapter && <span className="font-mono text-[10px]">{model.adapter}</span>}
-      </div>
-    </div>
+      </td>
+    </tr>
   )
-}
+})
 
 /* ── ProviderModelsTab ───────────────────────────────────────────────────── */
 
 export function ProviderModelsTab({
+  providerId,
   models,
   enabledModels,
   onEnabledModelsChange,
@@ -307,12 +426,13 @@ export function ProviderModelsTab({
   isTesting = false,
   metadataLoading = false,
   diagnosticStatusByModel = {},
+  compare,
 }: ProviderModelsTabProps) {
   const t = useTranslations("providers")
   const [search, setSearch] = useState("")
   const [capFilters, setCapFilters] = useState<string[]>([])
   const [enabledOnly, setEnabledOnly] = useState(false)
-  const [sort, setSort] = useState<SortMode>("default")
+  const [sort, setSort] = useState<ModelSort | null>(null)
   const allModelsEnabled = enabledModels.length === 0
 
   /* Capabilities present across the provider's models — drives the chip row. */
@@ -338,15 +458,7 @@ export function ProviderModelsTab({
       if (enabledOnly && !allModelsEnabled && !enabledSet.has(m.id)) return false
       return true
     })
-
-    if (sort === "name") {
-      result.sort((a, b) => a.name.localeCompare(b.name))
-    } else if (sort === "context") {
-      result.sort((a, b) => (b.contextLength ?? 0) - (a.contextLength ?? 0))
-    } else if (sort === "release") {
-      result.sort((a, b) => (b.releaseDate ?? "").localeCompare(a.releaseDate ?? ""))
-    }
-    return result
+    return sortModels(result, sort)
   }, [models, search, capFilters, enabledOnly, sort, enabledModels, allModelsEnabled])
 
   const enabledTotal = useMemo(
@@ -377,10 +489,6 @@ export function ProviderModelsTab({
     setCapFilters((prev) => (prev.includes(cap) ? prev.filter((c) => c !== cap) : [...prev, cap]))
   }
 
-  const cycleSort = () => {
-    setSort((prev) => SORT_CYCLE[(SORT_CYCLE.indexOf(prev) + 1) % SORT_CYCLE.length])
-  }
-
   const clearFilters = () => {
     setSearch("")
     setCapFilters([])
@@ -408,26 +516,20 @@ export function ProviderModelsTab({
     onEnabledModelsChange(next.length > 0 ? next : current.slice(0, 1))
   }
 
-  const sortLabel = t(
-    `modelsTab.sort${sort.charAt(0).toUpperCase()}${sort.slice(1)}` as
-      | "modelsTab.sortDefault"
-      | "modelsTab.sortName"
-      | "modelsTab.sortContext"
-      | "modelsTab.sortRelease"
-  )
+  const compareCount = compare?.keys.length ?? 0
+  const compareFull = compareCount >= COMPARISON_MAX_MODELS
+  const compareSet = useMemo(() => new Set(compare?.keys ?? []), [compare?.keys])
+  const capLabel = useCapabilityLabel()
 
   return (
-    /* Two bands: a pinned toolbar and a scroller. The tab used to be one long
-       scrolling document inside the detail panel's pane-wide `ScrollArea`, so
-       scrolling to a model 40 rows down took the search box, the capability
-       filters and the batch actions off-screen with it. The toolbar is now a
-       `shrink-0` sibling of the list and only the list moves. */
+    /* Three bands: a pinned toolbar, the scrolling table, and (while a
+       comparison selection exists) a pinned action bar. The tab used to be
+       one long scrolling document inside the detail panel's pane-wide
+       `ScrollArea`, so scrolling to a model 40 rows down took the search box
+       and the filters off-screen with it. */
     <div className="flex min-h-0 flex-1 flex-col" data-testid="models-tab">
       {/* ── Pinned toolbar ──────────────────────────────────────────────── */}
-      <div className="flex shrink-0 flex-col gap-2.5 border-b px-4 py-3">
-        {/* Search + provider-level actions. Wraps rather than overflowing: on a
-            narrow pane the buttons drop to their own line instead of being
-            clipped by the right edge. */}
+      <div className="flex shrink-0 flex-col gap-2 border-b px-4 py-2.5">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <div className="relative min-w-[9rem] flex-1">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -435,21 +537,21 @@ export function ProviderModelsTab({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={t("modelsTab.searchPlaceholder")}
-              className="h-9 pl-8"
+              className="h-8 pl-8"
             />
           </div>
-          <div className="flex min-w-0 shrink-0 items-center gap-2">
+          <div className="flex min-w-0 shrink-0 items-center gap-1.5">
             <Button
               variant="outline"
               size="sm"
-              className="h-9"
+              className="h-8"
               onClick={onRefreshModels}
               disabled={isRefreshing}
             >
               {isRefreshing ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
               ) : (
-                <RefreshCw className="mr-2 h-4 w-4" />
+                <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
               )}
               <span className="truncate">{t("modelsTab.refreshModels")}</span>
             </Button>
@@ -457,15 +559,15 @@ export function ProviderModelsTab({
               <Button
                 variant="outline"
                 size="sm"
-                className="h-9"
+                className="h-8"
                 onClick={onTestConnection}
                 disabled={isTesting}
                 data-testid="models-tab-test-connection"
               >
                 {isTesting ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
                 ) : (
-                  <PlugZap className="mr-2 h-4 w-4" />
+                  <PlugZap className="mr-1.5 h-3.5 w-3.5" />
                 )}
                 <span className="truncate">{t("testConnection")}</span>
               </Button>
@@ -474,11 +576,11 @@ export function ProviderModelsTab({
         </div>
 
         {models.length > 0 && (
-          <>
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             {/* Capability chips — wrap, never clip. */}
             {availableCaps.length > 0 && (
               <div
-                className="flex min-w-0 flex-wrap items-center gap-1.5"
+                className="flex min-w-0 flex-wrap items-center gap-1"
                 role="group"
                 aria-label={t("modelsTab.capabilities")}
               >
@@ -491,116 +593,209 @@ export function ProviderModelsTab({
                       size="sm"
                       variant={active ? "secondary" : "outline"}
                       aria-pressed={active}
+                      data-testid={`models-cap-filter-${cap}`}
                       className={cn(
-                        "h-6 max-w-full px-2 text-xs font-normal capitalize",
+                        "h-6 max-w-full px-2 text-xs font-normal",
                         active && "border-primary/40"
                       )}
                       onClick={() => toggleCap(cap)}
                     >
-                      <span className="truncate">{cap}</span>
+                      <span className="truncate">{capLabel(cap)}</span>
                     </Button>
                   )
                 })}
               </div>
             )}
-
-            {/* View controls + batch actions + count, on one wrapping row. The
-                batch pair used to be a second toolbar carrying four buttons,
-                two of which ("Enable/Disable Selected") ran the exact same
-                handlers as the other two — same action, two names. */}
-            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-              <Button
-                type="button"
-                size="sm"
-                variant={enabledOnly ? "secondary" : "ghost"}
-                aria-pressed={enabledOnly}
-                className="h-7 px-2 text-xs"
-                onClick={() => setEnabledOnly((prev) => !prev)}
-              >
-                {t("modelsTab.enabledOnly")}
-              </Button>
+            <span
+              className="mx-0.5 hidden h-4 w-px shrink-0 bg-border @xl/provider-pane:inline"
+              aria-hidden
+            />
+            <Button
+              type="button"
+              size="sm"
+              variant={enabledOnly ? "secondary" : "ghost"}
+              aria-pressed={enabledOnly}
+              className="h-6 px-2 text-xs"
+              onClick={() => setEnabledOnly((prev) => !prev)}
+            >
+              {t("modelsTab.enabledOnly")}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-xs"
+              onClick={handleSelectAll}
+            >
+              <CheckCheck className="mr-1 h-3.5 w-3.5" />
+              <span className="truncate">{t("modelsTab.selectAll")}</span>
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-xs"
+              onClick={handleDeselectAll}
+            >
+              <Ban className="mr-1 h-3.5 w-3.5" />
+              <span className="truncate">{t("modelsTab.deselectAll")}</span>
+            </Button>
+            {hasActiveFilters && (
               <Button
                 type="button"
                 size="sm"
                 variant="ghost"
-                className="h-7 px-2 text-xs"
-                onClick={cycleSort}
+                className="h-6 px-2 text-xs text-muted-foreground"
+                onClick={clearFilters}
               >
-                <ArrowUpDown className="mr-1.5 h-3.5 w-3.5" />
-                <span className="truncate">{t("modelsTab.sortBy", { label: sortLabel })}</span>
+                <X className="mr-1 h-3.5 w-3.5" />
+                <span className="truncate">{t("modelsTab.clearFilters")}</span>
               </Button>
-              <span className="mx-0.5 h-4 w-px shrink-0 bg-border" aria-hidden />
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={handleSelectAll}
-              >
-                <CheckCheck className="mr-1.5 h-3.5 w-3.5" />
-                <span className="truncate">{t("modelsTab.selectAll")}</span>
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={handleDeselectAll}
-              >
-                <Ban className="mr-1.5 h-3.5 w-3.5" />
-                <span className="truncate">{t("modelsTab.deselectAll")}</span>
-              </Button>
-              {hasActiveFilters && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 px-2 text-xs text-muted-foreground"
-                  onClick={clearFilters}
-                >
-                  <X className="mr-1 h-3.5 w-3.5" />
-                  <span className="truncate">{t("modelsTab.clearFilters")}</span>
-                </Button>
-              )}
-              <span className="ml-auto shrink-0 text-xs text-muted-foreground" role="status">
-                {t("modelsTab.countSummary", {
-                  shown: filtered.length,
-                  total: models.length,
-                  enabled: enabledTotal,
-                })}
-              </span>
-            </div>
-          </>
+            )}
+            <span className="ml-auto shrink-0 text-xs text-muted-foreground" role="status">
+              {t("modelsTab.countSummary", {
+                shown: filtered.length,
+                total: models.length,
+                enabled: enabledTotal,
+              })}
+            </span>
+          </div>
         )}
       </div>
 
-      {/* ── Scrolling model list ────────────────────────────────────────── */}
+      {/* ── Scrolling table ─────────────────────────────────────────────── */}
       <ScrollArea className="min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:!block">
         {filtered.length > 0 ? (
-          <div className="grid grid-cols-1 gap-2.5 p-4 @2xl/provider-pane:grid-cols-2">
-            {filtered.map((model) => (
-              <ModelCard
-                key={model.id}
-                model={model}
-                isEnabled={allModelsEnabled || enabledModels.includes(model.id)}
-                onToggle={handleToggle}
-                contextLabel={t("modelsTab.contextWindow")}
-                knowledgeLabel={t("modelsTab.knowledgeCutoff")}
-                updatedLabel={t("modelsTab.updated")}
-                maxOutputLabel={t("modelsTab.maxOutput")}
-                openWeightsLabel={t("modelsTab.openWeights")}
-                formatModes={(count) => t("modelsTab.modes", { count })}
-                metadataLoading={metadataLoading}
-                diagnosticStatus={diagnosticStatusByModel[model.id]}
-              />
-            ))}
-          </div>
+          <table
+            className="w-full border-collapse text-sm"
+            data-testid="models-table"
+            aria-label={t("modelsTab.tableLabel")}
+          >
+            {/* The header is sticky inside the scroller so a 40-row list keeps
+                its column names (and its sort affordance) in view. */}
+            <thead className="sticky top-0 z-10 bg-background/95 text-xs text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-background/80">
+              <tr className="border-b">
+                {compare && (
+                  <th scope="col" className="w-8 px-2 py-1.5">
+                    <span className="sr-only">{t("modelsTab.columnCompare")}</span>
+                    <GitCompareArrows className="size-3.5" aria-hidden />
+                  </th>
+                )}
+                <SortableHead
+                  label={t("modelsTab.columnModel")}
+                  sortKey="name"
+                  sort={sort}
+                  onSort={(key) => setSort((prev) => nextSort(prev, key))}
+                />
+                <th scope="col" className="px-2 py-1.5 text-left font-medium">
+                  {t("modelsTab.capabilities")}
+                </th>
+                <SortableHead
+                  label={t("modelsTab.contextWindow")}
+                  sortKey="context"
+                  sort={sort}
+                  onSort={(key) => setSort((prev) => nextSort(prev, key))}
+                  align="right"
+                />
+                <SortableHead
+                  label={t("modelsTab.columnMaxOutput")}
+                  sortKey="maxOutput"
+                  sort={sort}
+                  onSort={(key) => setSort((prev) => nextSort(prev, key))}
+                  align="right"
+                  className="hidden @xl/provider-pane:table-cell"
+                />
+                <SortableHead
+                  label={t("modelsTab.columnPrice")}
+                  sortKey="price"
+                  sort={sort}
+                  onSort={(key) => setSort((prev) => nextSort(prev, key))}
+                  align="right"
+                  className="hidden @2xl/provider-pane:table-cell"
+                />
+                <SortableHead
+                  label={t("modelsTab.columnReleased")}
+                  sortKey="release"
+                  sort={sort}
+                  onSort={(key) => setSort((prev) => nextSort(prev, key))}
+                  align="right"
+                  className="hidden @3xl/provider-pane:table-cell"
+                />
+                <th scope="col" className="w-12 px-2 py-1.5 text-right font-medium">
+                  <span className="sr-only">{t("modelsTab.columnEnabled")}</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((model) => {
+                const key = comparisonModelKey(providerId, model.id)
+                const checked = compareSet.has(key)
+                return (
+                  <ModelRow
+                    key={model.id}
+                    model={model}
+                    isEnabled={allModelsEnabled || enabledModels.includes(model.id)}
+                    onToggle={handleToggle}
+                    metadataLoading={metadataLoading}
+                    diagnosticStatus={diagnosticStatusByModel[model.id]}
+                    compare={
+                      compare
+                        ? {
+                            checked,
+                            disabled: !checked && compareFull,
+                            onToggle: () => compare.onToggle(key),
+                          }
+                        : undefined
+                    }
+                  />
+                )
+              })}
+            </tbody>
+          </table>
         ) : (
           <div className="flex items-center justify-center px-4 py-12 text-sm text-muted-foreground">
             {t("modelsTab.noModels")}
           </div>
         )}
       </ScrollArea>
+
+      {/* ── Pinned compare bar ──────────────────────────────────────────── */}
+      {compare && compareCount > 0 && (
+        <div
+          className="flex shrink-0 flex-wrap items-center gap-2 border-t bg-muted/40 px-4 py-2"
+          data-testid="models-compare-bar"
+          role="region"
+          aria-label={t("modelsTab.compareBarLabel")}
+        >
+          <GitCompareArrows className="size-4 text-muted-foreground" aria-hidden />
+          <span className="text-xs text-muted-foreground" role="status">
+            {t("modelsTab.compareSelected", { count: compareCount, max: COMPARISON_MAX_MODELS })}
+          </span>
+          <div className="ml-auto flex items-center gap-1.5">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-xs"
+              onClick={compare.onClear}
+              data-testid="models-compare-clear"
+            >
+              {t("modelsTab.compareClear")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="h-7 px-3 text-xs"
+              onClick={compare.onOpen}
+              disabled={compareCount < 2}
+              title={compareCount < 2 ? t("modelsTab.compareNeedsTwo") : undefined}
+              data-testid="models-compare-open"
+            >
+              {t("modelsTab.compareOpen")}
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

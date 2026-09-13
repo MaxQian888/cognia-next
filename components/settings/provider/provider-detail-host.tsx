@@ -36,7 +36,7 @@ import { ProviderCostTab } from "./provider-cost-tab"
 import { CustomProviderInlineConfig } from "./provider-custom-inline-config"
 import { ProviderDetailPanel } from "./provider-detail-panel"
 import { ProviderDiagnosticsTab } from "./provider-diagnostics-tab"
-import { ProviderModelsTab } from "./provider-models-tab"
+import { ProviderModelsTab, type ModelCompareSelection } from "./provider-models-tab"
 import { ProviderParametersTab } from "./provider-parameters-tab"
 import type { getBuiltInProviderReadiness, getCustomProviderReadiness } from "./provider-readiness"
 import { ProviderSetupChecklist } from "./provider-setup-checklist"
@@ -108,6 +108,8 @@ export interface ProviderDetailHostProps {
   onRequestDelete: () => void
   /** Mobile push-navigation back arrow. Absent on a split layout. */
   onBack?: () => void
+  /** The cross-provider comparison selection the Models tab ticks into. */
+  compare?: ModelCompareSelection
 }
 
 export function ProviderDetailHost({
@@ -140,6 +142,7 @@ export function ProviderDetailHost({
   onPersistLocalModels,
   onRequestDelete,
   onBack,
+  compare,
 }: ProviderDetailHostProps) {
   const t = useTranslations("providers")
 
@@ -440,6 +443,7 @@ export function ProviderDetailHost({
             isTesting={!!s.testingProviders[selectedId]}
             metadataLoading={modelsDevLoading}
             diagnosticStatusByModel={diagnosticStatusByModel}
+            compare={compare}
           />
         ) : (
           <div className="p-4 text-sm text-muted-foreground">{t("noModelsAvailable")}</div>
