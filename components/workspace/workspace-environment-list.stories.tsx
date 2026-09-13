@@ -120,3 +120,63 @@ export const Narrow: Story = {
   ],
   args: { presentation: "page", rootDir: "/Users/dev/repos/cognia", showCreate: true },
 }
+
+/**
+ * Past the filter threshold: the search field and the band chips both appear.
+ *
+ * Under six rows neither is offered, so this is the only story that shows the
+ * toolbar at full strength.
+ */
+export const Filterable: Story = {
+  decorators: [
+    (Story) => {
+      const grown = [
+        ...ROWS,
+        ...Array.from({ length: 5 }, (_, index) => ({
+          ...ROWS[1],
+          environmentId: `extra-${index}`,
+          workspaceId: `extra-${index}`,
+          path: `/Users/dev/.cognia/workspaces/task-49${index}0`,
+          branch: `agent/49${index}0/reviewer`,
+          locked: index % 2 === 0,
+          pinned: false,
+          state: index === 4 ? ("archived" as const) : ("active" as const),
+        })),
+      ]
+      setTransport({
+        call: async (command: string) =>
+          command === "task_workspace_environment_list" ? (grown as never) : (undefined as never),
+        subscribe: () => () => {},
+      } as never)
+      return (
+        <div className="w-[1000px] p-4">
+          <Story />
+        </div>
+      )
+    },
+  ],
+  args: {
+    presentation: "page",
+    rootDir: "/Users/dev/repos/cognia",
+    showCreate: true,
+    showPrune: true,
+  },
+}
+
+/** Nothing on disk yet: the empty state carries the way to make the first one. */
+export const EmptyInventory: Story = {
+  decorators: [
+    (Story) => {
+      setTransport({
+        call: async () => [] as never,
+        subscribe: () => () => {},
+      } as never)
+      return (
+        <div className="w-[760px] p-4">
+          <Story />
+        </div>
+      )
+    },
+  ],
+  args: { presentation: "page", rootDir: "/Users/dev/repos/cognia", showCreate: true },
+}

@@ -112,6 +112,27 @@ export const Wide: Story = {
   ],
 }
 
+/**
+ * The Environments tab, where the three sections have to read as siblings.
+ *
+ * The inventory used to be a bare `<section>` with a hand-rolled uppercase
+ * heading stacked on two console cards, so the tab looked half-finished; this
+ * is the story that shows whether they now line up.
+ */
+export const Environments: Story = {
+  decorators: [
+    (Story) => {
+      installStubs()
+      return (
+        <div style={{ height: "100vh", width: "100%" }}>
+          <Story />
+        </div>
+      )
+    },
+  ],
+  args: { tab: "environments" },
+}
+
 /** Phone width: one column, and the tab strip scrolls rather than clipping. */
 export const Narrow: Story = {
   decorators: [

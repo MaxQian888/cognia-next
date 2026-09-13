@@ -4,18 +4,24 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
+  AnchorIcon,
   ArchiveIcon,
   GitBranchPlusIcon,
   BoxesIcon,
+  FolderMinusIcon,
   FolderOpenIcon,
   GitBranchIcon,
+  MoreHorizontalIcon,
   PinIcon,
   PinOffIcon,
   RefreshCwIcon,
   RotateCcwIcon,
+  SearchIcon,
   ShieldCheckIcon,
   Trash2Icon,
+  XIcon,
 } from "lucide-react"
+import type { LucideIcon } from "lucide-react"
 import { useFormatter, useNow, useTranslations } from "next-intl"
 
 import {
@@ -31,8 +37,22 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
@@ -42,6 +62,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { gitWorktreePrune, gitWorktreeRemove, runGitUserAction } from "@/lib/git/commands"
 import { isRemoteGitTarget } from "@/lib/git/target"
 import {
@@ -59,6 +80,7 @@ import type {
   WorkspaceEnvironmentAction,
   WorkspaceEnvironmentSummary,
 } from "@/lib/task-workspace/types"
+import { ConsoleSection } from "@/components/surface/console-section"
 import { Surface } from "@/components/surface/surface"
 import { formatBytes } from "@/lib/agent/utils"
 import { useSessionStore } from "@/stores/chat/session-store"
@@ -105,11 +127,21 @@ export interface WorkspaceEnvironmentListProps {
  * down). A CSS query would have to render both layouts and hide one, which
  * puts every action button in the accessibility tree twice.
  *
- * 640px is where the five columns stop fitting without the action column
- * sliding off the end, which is not a cosmetic problem: it made every control
- * on the row unreachable on a phone.
+ * 560px rather than the 640 it was: collapsing the nine per-row icon buttons
+ * into one overflow menu took roughly 200px off the action column, so the
+ * table now fits comfortably well below the old threshold and a tablet-width
+ * pane no longer drops to cards it does not need.
  */
-const COMPACT_WIDTH = 640
+const COMPACT_WIDTH = 560
+
+/**
+ * Row count above which the filter field is offered.
+ *
+ * A search box over two rows is furniture, not a control. Fixed rather than
+ * derived from the container so the field does not appear and disappear as the
+ * pane is resized, which is the jumpiest thing a toolbar can do.
+ */
+const SEARCH_THRESHOLD = 6
 
 /**
  * Which band a row belongs to.
@@ -124,6 +156,9 @@ const COMPACT_WIDTH = 640
 type EnvironmentBand = "attention" | "active" | "dormant"
 
 const BAND_ORDER: readonly EnvironmentBand[] = ["attention", "active", "dormant"]
+
+/** The band filter's value space: every band, plus "do not filter". */
+type BandFilter = EnvironmentBand | "all"
 
 export function bandOf(row: WorkspaceEnvironmentSummary): EnvironmentBand {
   // Locked, conflicted or prunable: something is wrong, or something can be
@@ -190,6 +225,30 @@ function errorDetail(cause: unknown): string {
   return String(cause)
 }
 
+/**
+ * Everything a filter query is allowed to match.
+ *
+ * The path alone is not enough: the reader looking for "the worktree the
+ * scheduler made" or "whatever is on feature/login" knows the branch or the
+ * owner, not the generated directory name.
+ */
+function searchHaystack(row: WorkspaceEnvironmentSummary): string {
+  return [row.path, row.branch ?? "", row.head ?? "", row.ownerRef ?? "", row.sourceRoot]
+    .join("\n")
+    .toLowerCase()
+}
+
+/** One entry in a row's overflow menu. */
+interface RowAction {
+  key: string
+  label: string
+  icon: LucideIcon
+  /** Host command this maps to, for the availability gate. Omit if ungated. */
+  command?: string
+  destructive?: boolean
+  onSelect: () => void
+}
+
 /** Canonical Registry + Git environment inventory, reusable in page and sheet containers. */
 export function WorkspaceEnvironmentList({
   presentation = "page",
@@ -210,6 +269,8 @@ export function WorkspaceEnvironmentList({
   const router = useRouter()
   const [rows, setRows] = useState<WorkspaceEnvironmentSummary[] | null>(null)
   const [showAllProjects, setShowAllProjects] = useState(false)
+  const [query, setQuery] = useState("")
+  const [bandFilter, setBandFilter] = useState<BandFilter>("all")
   // Scoping happens here rather than in the query: the host answers with every
   // environment it knows about, and the count of the ones this Workspace does
   // not own is itself information — a worktree no project claims is what the
@@ -221,12 +282,27 @@ export function WorkspaceEnvironmentList({
   // Counted independently of the toggle, so the way back is always offered.
   const otherProjectCount =
     rows === null || !projectId ? 0 : rows.filter((row) => row.projectId !== projectId).length
+
+  const trimmedQuery = query.trim().toLowerCase()
+  /**
+   * Text filter, applied before the band split.
+   *
+   * The band chips count what the query left behind rather than the whole
+   * inventory: a chip reading "Active 12" over a filtered list of one is a
+   * number about a list nobody is looking at.
+   */
+  const searched = useMemo(() => {
+    if (scoped === null) return null
+    if (!trimmedQuery) return scoped
+    return scoped.filter((row) => searchHaystack(row).includes(trimmedQuery))
+  }, [scoped, trimmedQuery])
+
   // Bands are derived, not stored, so a row that stops being prunable moves out
   // of the attention band on the next load without anybody writing a flag.
-  const bands = useMemo(() => {
-    if (scoped === null) return null
+  const allBands = useMemo(() => {
+    if (searched === null) return null
     const byBand = new Map<EnvironmentBand, WorkspaceEnvironmentSummary[]>()
-    for (const row of scoped) {
+    for (const row of searched) {
       const band = bandOf(row)
       const bucket = byBand.get(band)
       if (bucket) bucket.push(row)
@@ -235,14 +311,33 @@ export function WorkspaceEnvironmentList({
     return BAND_ORDER.map((band) => ({ band, rows: byBand.get(band) ?? [] })).filter(
       (group) => group.rows.length > 0
     )
-  }, [scoped])
+  }, [searched])
+
+  /**
+   * What the list actually renders.
+   *
+   * The chip filter narrows the SAME derivation rather than a second one, so a
+   * chip can never offer a band the list cannot then show. A chip whose band
+   * has disappeared under the text query falls back to "all" during render
+   * instead of leaving the reader on an empty selection they did not make.
+   */
+  const bandExists = allBands?.some((group) => group.band === bandFilter) ?? false
+  const effectiveBand: BandFilter = bandFilter === "all" || bandExists ? bandFilter : "all"
+  const bands = useMemo(
+    () =>
+      allBands === null || effectiveBand === "all"
+        ? allBands
+        : allBands.filter((group) => group.band === effectiveBand),
+    [allBands, effectiveBand]
+  )
+  const visibleCount = (bands ?? []).reduce((total, group) => total + group.rows.length, 0)
 
   const { pendingKey: pendingId, error, setError, clearError, run } = useWorkspaceActionController()
   // Per command, not per host. A device can hold `workspace.write` and still
   // lack the `host.admin` an interactive command needs, so `remove`, `prune`
   // and `delete` can each be available while the others are not.
   const gate = useWorkspaceCommandGate()
-  const containerRef = useRef<HTMLElement | null>(null)
+  const containerRef = useRef<HTMLDivElement | null>(null)
   const containerWidth = useElementWidth(containerRef)
   // Zero means "not measured yet". The table is the unmeasured default so a
   // wide pane never flashes cards on first paint.
@@ -530,24 +625,40 @@ export function WorkspaceEnvironmentList({
           the one surface that lists worktrees could not answer "what is taking
           up the disk" or "is anything still using this".
         */}
-        <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 pt-0.5 text-[11px] text-muted-foreground">
-          <span title={row.lastUsedAt ? new Date(row.lastUsedAt).toLocaleString() : undefined}>
+        {/*
+          One dot-separated line that never wraps: the two short facts are
+          `shrink-0` and the owner truncates. Wrapping was the bug — the break
+          landed between a separator and its value, so the line ended in a bare
+          "·" or the next one began with it, depending on which side gave way.
+
+          In a card the owner gets its own line instead of truncating, because
+          there it is the only fact with no length bound (a session title, a
+          squad id) and a 340px column leaves it two or three characters.
+        */}
+        <div className="flex min-w-0 items-center gap-1.5 pt-0.5 text-[11px] text-muted-foreground">
+          <span
+            className="shrink-0"
+            title={row.lastUsedAt ? new Date(row.lastUsedAt).toLocaleString() : undefined}
+          >
             {row.lastUsedAt ? format.relativeTime(new Date(row.lastUsedAt), now) : t("neverUsed")}
           </span>
           {row.sizeBytes !== undefined ? (
             <>
               <span aria-hidden className="size-0.5 shrink-0 rounded-full bg-muted-foreground/50" />
-              <span className="tabular-nums">{formatBytes(row.sizeBytes)}</span>
+              <span className="shrink-0 tabular-nums">{formatBytes(row.sizeBytes)}</span>
             </>
           ) : null}
-          {owner ? (
+          {owner && !compact ? (
             <>
               <span aria-hidden className="size-0.5 shrink-0 rounded-full bg-muted-foreground/50" />
               <span className="min-w-0 truncate">{owner}</span>
             </>
           ) : null}
         </div>
-        <div className="flex flex-wrap gap-1 pt-1">
+        {owner && compact ? (
+          <div className="min-w-0 truncate pt-0.5 text-[11px] text-muted-foreground">{owner}</div>
+        ) : null}
+        <div className="flex flex-wrap gap-1 pt-1 empty:hidden">
           {row.locked ? (
             <Badge variant="outline" title={row.lockReason ?? undefined}>
               {t("locked")}
@@ -571,199 +682,516 @@ export function WorkspaceEnvironmentList({
     </Badge>
   )
 
-  const renderActions = (row: WorkspaceEnvironmentSummary) => (
-    <div className="flex justify-end gap-1">
-      {hasAction(row, "open") && canOpenPaths ? (
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          onClick={() => openPathAsWorkspace(row.path)}
-          aria-label={t("open")}
-        >
-          <FolderOpenIcon aria-hidden className="size-4" />
-        </Button>
-      ) : null}
-      {hasAction(row, "pin") && row.workspaceId ? (
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          {...actionProps("task_workspace_managed_pin", row.environmentId)}
-          onClick={() =>
-            void runManagedAction(row, "task_workspace_managed_pin", (workspaceId) =>
-              pinManagedWorkspace(workspaceId, !row.pinned)
-            )
-          }
-          aria-label={row.pinned ? t("unpin") : t("pin")}
-        >
-          {row.pinned ? (
-            <PinOffIcon aria-hidden className="size-4" />
-          ) : (
-            <PinIcon aria-hidden className="size-4" />
-          )}
-        </Button>
-      ) : null}
-      {hasAction(row, "makePermanent") && row.workspaceId ? (
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          {...actionProps("task_workspace_managed_permanent", row.environmentId)}
-          onClick={() =>
-            void runManagedAction(
-              row,
-              "task_workspace_managed_permanent",
-              makeManagedWorkspacePermanent
-            )
-          }
-          aria-label={t("makePermanent")}
-        >
-          <ShieldCheckIcon aria-hidden className="size-4" />
-        </Button>
-      ) : null}
-      {hasAction(row, "createBranchHere") && row.workspaceId ? (
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          {...actionProps("task_workspace_environment_create_branch", row.environmentId)}
-          onClick={() => {
-            setBranchTarget(row)
-            setBranchName("")
-          }}
-          aria-label={t("createBranch")}
-        >
-          <GitBranchIcon aria-hidden className="size-4" />
-        </Button>
-      ) : null}
-      {hasAction(row, "archive") && row.workspaceId ? (
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          {...actionProps("task_workspace_managed_archive", row.environmentId)}
-          onClick={() =>
-            void runManagedAction(row, "task_workspace_managed_archive", archiveManagedWorkspace)
-          }
-          aria-label={t("archive")}
-        >
-          <ArchiveIcon aria-hidden className="size-4" />
-        </Button>
-      ) : null}
-      {hasAction(row, "adopt") ? (
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          {...actionProps(
-            row.workspaceId ? "task_workspace_managed_adopt" : "task_workspace_environment_adopt",
-            row.environmentId
-          )}
-          onClick={() => void adoptEnvironment(row)}
-          aria-label={t("adopt")}
-        >
-          <ShieldCheckIcon aria-hidden className="size-4" />
-        </Button>
-      ) : null}
-      {hasAction(row, "restore") && row.workspaceId ? (
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          {...actionProps("task_workspace_managed_restore", row.environmentId)}
-          onClick={() =>
-            void runManagedAction(row, "task_workspace_managed_restore", restoreManagedWorkspace)
-          }
-          aria-label={t("restore")}
-        >
-          <RotateCcwIcon aria-hidden className="size-4" />
-        </Button>
-      ) : null}
-      {hasAction(row, "delete") && row.workspaceId ? (
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          {...actionProps("task_workspace_managed_delete", row.environmentId)}
-          onClick={() => setDeleteTarget(row)}
-          aria-label={t("delete")}
-        >
-          <Trash2Icon aria-hidden className="size-4" />
-        </Button>
-      ) : null}
-      {hasAction(row, "remove") ? (
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          {...actionProps("git_worktree_remove", row.environmentId)}
-          onClick={() => requestRemove(row)}
-          aria-label={t("remove")}
-        >
-          <Trash2Icon aria-hidden className="size-4" />
-        </Button>
+  /**
+   * Everything this row offers beyond "open", in menu order.
+   *
+   * Built as data rather than as nine conditional buttons for two reasons. The
+   * row used to render up to nine icon-only ghost buttons, of which two pairs
+   * were the SAME glyph with different meanings — `Trash2` for both "delete the
+   * archived environment" and "remove the worktree", `ShieldCheck` for both
+   * "adopt" and "make permanent" — so the most destructive controls on the
+   * surface were the two you could not tell apart. A labelled menu ends that by
+   * construction. It also collapses the action column, which is what let the
+   * table survive down to a much narrower pane.
+   */
+  const rowActions = (row: WorkspaceEnvironmentSummary): RowAction[] => {
+    const actions: RowAction[] = []
+    if (hasAction(row, "pin") && row.workspaceId) {
+      actions.push({
+        key: "pin",
+        label: row.pinned ? t("unpin") : t("pin"),
+        icon: row.pinned ? PinOffIcon : PinIcon,
+        command: "task_workspace_managed_pin",
+        onSelect: () =>
+          void runManagedAction(row, "task_workspace_managed_pin", (workspaceId) =>
+            pinManagedWorkspace(workspaceId, !row.pinned)
+          ),
+      })
+    }
+    if (hasAction(row, "createBranchHere") && row.workspaceId) {
+      actions.push({
+        key: "createBranch",
+        label: t("createBranch"),
+        icon: GitBranchPlusIcon,
+        command: "task_workspace_environment_create_branch",
+        onSelect: () => {
+          setBranchTarget(row)
+          setBranchName("")
+        },
+      })
+    }
+    if (hasAction(row, "makePermanent") && row.workspaceId) {
+      actions.push({
+        key: "makePermanent",
+        label: t("makePermanent"),
+        icon: AnchorIcon,
+        command: "task_workspace_managed_permanent",
+        onSelect: () =>
+          void runManagedAction(
+            row,
+            "task_workspace_managed_permanent",
+            makeManagedWorkspacePermanent
+          ),
+      })
+    }
+    if (hasAction(row, "adopt")) {
+      actions.push({
+        key: "adopt",
+        label: t("adopt"),
+        icon: ShieldCheckIcon,
+        command: row.workspaceId
+          ? "task_workspace_managed_adopt"
+          : "task_workspace_environment_adopt",
+        onSelect: () => void adoptEnvironment(row),
+      })
+    }
+    if (hasAction(row, "restore") && row.workspaceId) {
+      actions.push({
+        key: "restore",
+        label: t("restore"),
+        icon: RotateCcwIcon,
+        command: "task_workspace_managed_restore",
+        onSelect: () =>
+          void runManagedAction(row, "task_workspace_managed_restore", restoreManagedWorkspace),
+      })
+    }
+    if (hasAction(row, "archive") && row.workspaceId) {
+      actions.push({
+        key: "archive",
+        label: t("archive"),
+        icon: ArchiveIcon,
+        command: "task_workspace_managed_archive",
+        destructive: true,
+        onSelect: () =>
+          void runManagedAction(row, "task_workspace_managed_archive", archiveManagedWorkspace),
+      })
+    }
+    if (hasAction(row, "delete") && row.workspaceId) {
+      actions.push({
+        key: "delete",
+        label: t("delete"),
+        icon: Trash2Icon,
+        command: "task_workspace_managed_delete",
+        destructive: true,
+        onSelect: () => setDeleteTarget(row),
+      })
+    }
+    if (hasAction(row, "remove")) {
+      actions.push({
+        key: "remove",
+        label: t("remove"),
+        icon: FolderMinusIcon,
+        command: "git_worktree_remove",
+        destructive: true,
+        onSelect: () => requestRemove(row),
+      })
+    }
+    return actions
+  }
+
+  const renderActions = (row: WorkspaceEnvironmentSummary) => {
+    const actions = rowActions(row)
+    // The separator only earns its line when both halves exist.
+    const firstDestructive = actions.findIndex((action) => action.destructive)
+    return (
+      <div className="flex shrink-0 items-center justify-end gap-0.5">
+        {hasAction(row, "open") && canOpenPaths ? (
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            onClick={() => openPathAsWorkspace(row.path)}
+            aria-label={t("open")}
+          >
+            <FolderOpenIcon aria-hidden className="size-4" />
+          </Button>
+        ) : null}
+        {actions.length > 0 ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label={t("rowActions")}
+                data-testid={`workspace-environment-actions-${row.environmentId}`}
+              >
+                <MoreHorizontalIcon aria-hidden className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64">
+              {actions.map((action, index) => (
+                <Fragment key={action.key}>
+                  {index === firstDestructive && index > 0 ? <DropdownMenuSeparator /> : null}
+                  <DropdownMenuItem
+                    variant={action.destructive ? "destructive" : "default"}
+                    onClick={action.onSelect}
+                    {...(action.command
+                      ? actionProps(action.command, row.environmentId)
+                      : { disabled: pendingId === row.environmentId })}
+                  >
+                    <action.icon aria-hidden className="size-4" />
+                    {action.label}
+                  </DropdownMenuItem>
+                </Fragment>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
+      </div>
+    )
+  }
+
+  const canOpenPaths = !rootDir || !isRemoteGitTarget(rootDir)
+  const canPrune = Boolean(rows?.some((row) => hasAction(row, "prune")))
+  const offerSearch = (scoped?.length ?? 0) >= SEARCH_THRESHOLD || trimmedQuery.length > 0
+  const offerBandFilter = (allBands?.length ?? 0) > 1
+  const filtering = trimmedQuery.length > 0 || effectiveBand !== "all"
+  /**
+   * Whether the empty state is the one carrying the create offer.
+   *
+   * With nothing on disk there is exactly one thing to do, and printing the
+   * same button twice — once greyed into a toolbar, once as the empty state's
+   * call to action — makes the reader work out whether they differ. The toolbar
+   * button comes back the moment the form is open, because then it is the
+   * control that closes it again.
+   */
+  const emptyOffersCreate =
+    Boolean(showCreate && rootDir) &&
+    !createOpen &&
+    !filtering &&
+    searched !== null &&
+    visibleCount === 0
+
+  const clearFilters = () => {
+    setQuery("")
+    setBandFilter("all")
+  }
+
+  // ------------------------------------------------------------------ toolbar
+
+  /**
+   * One wrapping row: narrow-the-list controls first, change-the-list last.
+   *
+   * Wrapping rather than a fixed two-row split. The split reserved a whole row
+   * for "New worktree" even on a 900px card, where it sat alone against the
+   * right edge under an equally empty band; `flex-wrap` plus `ml-auto` gives
+   * the same two rows at sheet width and one row when there is room. The order
+   * still separates the two kinds, so a destructive Prune never lands beside a
+   * filter chip.
+   */
+  const showCreateButton = Boolean(showCreate && rootDir) && !emptyOffersCreate
+  const showActionRow = showCreateButton || showPrune || presentation === "sheet"
+
+  const toolbar = (
+    <div className="flex flex-col gap-2 empty:hidden" data-testid="workspace-environments-toolbar">
+      {offerSearch || offerBandFilter || showActionRow ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {offerSearch ? (
+            <div className="relative min-w-40 flex-1">
+              <SearchIcon
+                aria-hidden
+                className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+              />
+              <Input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={t("searchPlaceholder")}
+                aria-label={t("searchPlaceholder")}
+                className="h-8 pl-8 text-xs"
+                data-testid="workspace-environments-search"
+              />
+              {query ? (
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  className="absolute right-0.5 top-1/2 size-7 -translate-y-1/2"
+                  onClick={() => setQuery("")}
+                  aria-label={t("clearSearch")}
+                >
+                  <XIcon aria-hidden className="size-3.5" />
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+          {offerBandFilter ? (
+            <ToggleGroup
+              type="single"
+              value={effectiveBand}
+              // Radix single groups emit "" when the active item is re-clicked.
+              // Falling back to "all" keeps the control a true radio instead of
+              // leaving the list filtered by nothing anybody selected.
+              onValueChange={(next) => setBandFilter((next || "all") as BandFilter)}
+              variant="outline"
+              spacing={1.5}
+              aria-label={t("bandFilterLabel")}
+              className="flex flex-wrap"
+              data-testid="workspace-environments-band-filter"
+            >
+              <ToggleGroupItem
+                value="all"
+                variant="outline"
+                className="h-8 gap-1.5 rounded-control px-2.5 text-xs data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
+              >
+                {t("filterAll")}
+                <span className="tabular-nums opacity-70">{searched?.length ?? 0}</span>
+              </ToggleGroupItem>
+              {(allBands ?? []).map((group) => (
+                <ToggleGroupItem
+                  key={group.band}
+                  value={group.band}
+                  variant="outline"
+                  className="h-8 gap-1.5 rounded-control px-2.5 text-xs data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
+                  data-testid={`workspace-environments-filter-${group.band}`}
+                >
+                  <span
+                    aria-hidden
+                    className={cn("size-1.5 rounded-full", PULSE_CLASS[group.band])}
+                  />
+                  {t(`bands.${group.band}`)}
+                  <span className="tabular-nums opacity-70">{group.rows.length}</span>
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+          ) : null}
+
+          {/* The sheet has no masthead, so the count rides the toolbar there.
+              It also does the job `flex-1` does for the search field on the
+              page: pushing the mutation group to the far end. */}
+          {presentation === "sheet" && !offerSearch ? (
+            <span className="min-w-0 flex-1 text-xs text-muted-foreground">
+              {t("count", { count: scoped?.length ?? 0 })}
+            </span>
+          ) : null}
+
+          {showActionRow ? (
+            <div className="ml-auto flex items-center gap-2">
+              {showCreateButton ? (
+                <Button
+                  size="sm"
+                  variant={createOpen ? "secondary" : "outline"}
+                  className="h-8"
+                  onClick={() => setCreateOpen((current) => !current)}
+                  aria-expanded={createOpen}
+                  data-testid="workspace-environments-create-toggle"
+                  {...actionProps("git_worktree_add")}
+                >
+                  <GitBranchPlusIcon aria-hidden className="size-4" />
+                  {t("create")}
+                </Button>
+              ) : null}
+              {showPrune ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8"
+                  onClick={() => void prune()}
+                  {...(() => {
+                    const props = actionProps("git_worktree_prune")
+                    return { ...props, disabled: props.disabled || !canPrune || pendingId !== null }
+                  })()}
+                  aria-label={t("prune")}
+                >
+                  <RefreshCwIcon aria-hidden className="size-4" />
+                  {t("prune")}
+                </Button>
+              ) : null}
+              {/* On the page the reload lives in the card masthead, beside the
+                  count it refreshes. The sheet has no masthead of its own. */}
+              {presentation === "sheet" ? (
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  onClick={() => void load()}
+                  aria-label={t("refresh")}
+                >
+                  <RefreshCwIcon aria-hidden className="size-4" />
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
       ) : null}
     </div>
   )
 
-  const canOpenPaths = !rootDir || !isRemoteGitTarget(rootDir)
-  const canPrune = Boolean(rows?.some((row) => hasAction(row, "prune")))
+  // ------------------------------------------------------------------- content
 
-  return (
-    <section
+  const content =
+    searched === null ? (
+      <div className="flex flex-col gap-2" aria-label={t("loading")}>
+        <Skeleton className="h-14 w-full" />
+        <Skeleton className="h-14 w-full" />
+        <Skeleton className="h-14 w-full" />
+      </div>
+    ) : visibleCount === 0 ? (
+      /*
+        Two different nothings. "This workspace has no environments" is answered
+        with the way to make one; "your filter matched none" is answered with
+        the way to clear it. One shared empty state told the reader to create a
+        worktree when they had ten and had simply mistyped a branch name.
+      */
+      <Empty className="border">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            {filtering ? <SearchIcon aria-hidden /> : <BoxesIcon aria-hidden />}
+          </EmptyMedia>
+          <EmptyTitle>{filtering ? t("noMatchesTitle") : t("emptyTitle")}</EmptyTitle>
+          <EmptyDescription>
+            {filtering ? t("noMatchesDescription") : t("emptyDescription")}
+          </EmptyDescription>
+        </EmptyHeader>
+        {filtering ? (
+          <EmptyContent>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={clearFilters}
+              data-testid="workspace-environments-clear-filters"
+            >
+              {t("clearFilters")}
+            </Button>
+          </EmptyContent>
+        ) : showCreate && rootDir ? (
+          <EmptyContent>
+            <Button
+              size="sm"
+              onClick={() => setCreateOpen(true)}
+              data-testid="workspace-environments-empty-create"
+              {...actionProps("git_worktree_add")}
+            >
+              <GitBranchPlusIcon aria-hidden className="size-4" />
+              {t("create")}
+            </Button>
+          </EmptyContent>
+        ) : null}
+      </Empty>
+    ) : compact ? (
+      /* Narrow container: one card per row, same parts, same bands. */
+      <div className="flex flex-col gap-3">
+        {(bands ?? []).map((group) => (
+          <section key={group.band} className="flex flex-col gap-2">
+            <h3
+              className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+              data-testid={`workspace-environment-band-${group.band}`}
+            >
+              <span aria-hidden className={cn("size-1.5 rounded-full", PULSE_CLASS[group.band])} />
+              {t(`bands.${group.band}`)}
+              <span className="font-normal tabular-nums">{group.rows.length}</span>
+            </h3>
+            <ul className="flex flex-col gap-2">
+              {group.rows.map((row) => (
+                <Surface asChild key={row.environmentId} radius="panel">
+                  <li
+                    data-testid={`workspace-environment-card-${row.environmentId}`}
+                    className="flex flex-col gap-2 border p-3"
+                  >
+                    {/*
+                      Actions ride beside the identity rather than under the
+                      whole card. A `justify-end` footer row put the only
+                      controls a card has at the far edge of a 340px column,
+                      under two lines of metadata nobody was reading on the way
+                      to them.
+                    */}
+                    <div className="flex items-start gap-2">
+                      <div className="min-w-0 flex-1">{renderIdentity(row)}</div>
+                      {renderActions(row)}
+                    </div>
+                    {/*
+                      The card has no column headers, so an unlabelled
+                      placeholder is noise rather than information: a bare
+                      dash beside the ownership badge says nothing the
+                      reader can decode. The table keeps its placeholders,
+                      because there the header names the column.
+                    */}
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      {renderKind(row)}
+                      {presentation === "page" && row.state ? (
+                        <span className="text-xs text-muted-foreground">
+                          {t(`states.${row.state}`)}
+                        </span>
+                      ) : null}
+                      {presentation === "page" && row.base ? (
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {t(`bases.${row.base.kind}`)}
+                        </span>
+                      ) : null}
+                    </div>
+                  </li>
+                </Surface>
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
+    ) : (
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>{t("path")}</TableHead>
+            <TableHead>{t("kind")}</TableHead>
+            {presentation === "page" ? <TableHead>{t("state")}</TableHead> : null}
+            {presentation === "page" ? <TableHead>{t("base")}</TableHead> : null}
+            <TableHead className="w-20 text-right">{t("actions")}</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {(bands ?? []).map((group) => (
+            <Fragment key={group.band}>
+              {/*
+                A spanning header row rather than one table per band, so
+                every band keeps the same column widths. Three narrow
+                tables stacked would make the same path column three
+                different widths down the page.
+              */}
+              <TableRow
+                className="hover:bg-transparent"
+                data-testid={`workspace-environment-band-${group.band}`}
+              >
+                <TableCell
+                  colSpan={presentation === "page" ? 5 : 3}
+                  className="bg-muted/40 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <span
+                      aria-hidden
+                      className={cn("size-1.5 rounded-full", PULSE_CLASS[group.band])}
+                    />
+                    {t(`bands.${group.band}`)}
+                    <span className="font-normal tabular-nums">{group.rows.length}</span>
+                  </span>
+                </TableCell>
+              </TableRow>
+              {group.rows.map((row) => (
+                <TableRow
+                  key={row.environmentId}
+                  data-testid={`workspace-environment-${row.environmentId}`}
+                >
+                  <TableCell className="max-w-80">{renderIdentity(row)}</TableCell>
+                  <TableCell>{renderKind(row)}</TableCell>
+                  {presentation === "page" ? (
+                    <TableCell>{row.state ? t(`states.${row.state}`) : t("stateNone")}</TableCell>
+                  ) : null}
+                  {presentation === "page" ? (
+                    <TableCell className="font-mono text-xs">
+                      {row.base ? t(`bases.${row.base.kind}`) : t("baseNone")}
+                    </TableCell>
+                  ) : null}
+                  <TableCell>{renderActions(row)}</TableCell>
+                </TableRow>
+              ))}
+            </Fragment>
+          ))}
+        </TableBody>
+      </Table>
+    )
+
+  const body = (
+    <div
       ref={containerRef}
-      className="flex min-h-0 flex-col gap-2"
-      data-testid="workspace-environments"
+      className="flex min-h-0 flex-col gap-3"
       data-density={compact ? "compact" : "full"}
       data-presentation={presentation}
     >
-      {/* At card width the heading and its two actions do not fit on one row,
-          and squeezing them wrapped the title to three lines beside the
-          buttons. Wrapping the row instead puts the actions underneath. */}
-      <div className={cn("flex items-center gap-2", compact && "flex-wrap")}>
-        {presentation === "page" ? (
-          <div className={cn("min-w-0 flex-1", compact && "basis-full")}>
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              {t("title")}
-            </h2>
-            <p className="text-xs text-muted-foreground">{t("description")}</p>
-          </div>
-        ) : (
-          <span
-            className={cn("min-w-0 flex-1 text-xs text-muted-foreground", compact && "basis-full")}
-          >
-            {t("count", { count: scoped?.length ?? 0 })}
-          </span>
-        )}
-        {showCreate && rootDir ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setCreateOpen((current) => !current)}
-            aria-expanded={createOpen}
-            data-testid="workspace-environments-create-toggle"
-            {...actionProps("git_worktree_add")}
-          >
-            <GitBranchPlusIcon aria-hidden className="size-4" />
-            {t("create")}
-          </Button>
-        ) : null}
-        {showPrune ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => void prune()}
-            {...(() => {
-              const props = actionProps("git_worktree_prune")
-              return { ...props, disabled: props.disabled || !canPrune || pendingId !== null }
-            })()}
-            aria-label={t("prune")}
-          >
-            <RefreshCwIcon aria-hidden className="size-4" />
-            {t("prune")}
-          </Button>
-        ) : null}
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          onClick={() => void load()}
-          aria-label={t("refresh")}
-        >
-          <RefreshCwIcon aria-hidden className="size-4" />
-        </Button>
-      </div>
+      {toolbar}
 
       {showCreate && rootDir && createOpen ? (
         <Surface radius="panel" className="border p-3" data-testid="workspace-environments-create">
@@ -784,138 +1212,13 @@ export function WorkspaceEnvironmentList({
         </p>
       ) : null}
 
-      {scoped === null ? (
-        <div className="flex flex-col gap-2" aria-label={t("loading")}>
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-full" />
-        </div>
-      ) : scoped.length === 0 ? (
-        <Empty className="border">
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <BoxesIcon aria-hidden />
-            </EmptyMedia>
-            <EmptyTitle>{t("emptyTitle")}</EmptyTitle>
-            <EmptyDescription>{t("emptyDescription")}</EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      ) : (
-        <>
-          {compact ? null : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t("path")}</TableHead>
-                  <TableHead>{t("kind")}</TableHead>
-                  {presentation === "page" ? <TableHead>{t("state")}</TableHead> : null}
-                  {presentation === "page" ? <TableHead>{t("base")}</TableHead> : null}
-                  <TableHead className="text-right">{t("actions")}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(bands ?? []).map((group) => (
-                  <Fragment key={group.band}>
-                    {/*
-                      A spanning header row rather than one table per band, so
-                      every band keeps the same column widths. Three narrow
-                      tables stacked would make the same path column three
-                      different widths down the page.
-                    */}
-                    <TableRow
-                      className="hover:bg-transparent"
-                      data-testid={`workspace-environment-band-${group.band}`}
-                    >
-                      <TableCell
-                        colSpan={presentation === "page" ? 5 : 3}
-                        className="bg-muted/40 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
-                      >
-                        {t(`bands.${group.band}`)}
-                        <span className="ml-1.5 font-normal tabular-nums">{group.rows.length}</span>
-                      </TableCell>
-                    </TableRow>
-                    {group.rows.map((row) => (
-                      <TableRow
-                        key={row.environmentId}
-                        data-testid={`workspace-environment-${row.environmentId}`}
-                      >
-                        <TableCell className="max-w-80">{renderIdentity(row)}</TableCell>
-                        <TableCell>{renderKind(row)}</TableCell>
-                        {presentation === "page" ? (
-                          <TableCell>
-                            {row.state ? t(`states.${row.state}`) : t("stateNone")}
-                          </TableCell>
-                        ) : null}
-                        {presentation === "page" ? (
-                          <TableCell className="font-mono text-xs">
-                            {row.base ? t(`bases.${row.base.kind}`) : t("baseNone")}
-                          </TableCell>
-                        ) : null}
-                        <TableCell>{renderActions(row)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </Fragment>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-
-          {/* Narrow container: one card per row, same parts, same bands. */}
-          {compact ? (
-            <div className="flex flex-col gap-3">
-              {(bands ?? []).map((group) => (
-                <section key={group.band} className="flex flex-col gap-2">
-                  <h3
-                    className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
-                    data-testid={`workspace-environment-band-${group.band}`}
-                  >
-                    {t(`bands.${group.band}`)}
-                    <span className="ml-1.5 font-normal tabular-nums">{group.rows.length}</span>
-                  </h3>
-                  <ul className="flex flex-col gap-2">
-                    {group.rows.map((row) => (
-                      <Surface asChild key={row.environmentId} radius="panel">
-                        <li
-                          data-testid={`workspace-environment-card-${row.environmentId}`}
-                          className="flex flex-col gap-2 border p-3"
-                        >
-                          <div className="min-w-0">{renderIdentity(row)}</div>
-                          {/*
-                            The card has no column headers, so an unlabelled
-                            placeholder is noise rather than information: a bare
-                            dash beside the ownership badge says nothing the
-                            reader can decode. The table keeps its placeholders,
-                            because there the header names the column.
-                          */}
-                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                            {renderKind(row)}
-                            {presentation === "page" && row.state ? (
-                              <span className="text-xs text-muted-foreground">
-                                {t(`states.${row.state}`)}
-                              </span>
-                            ) : null}
-                            {presentation === "page" && row.base ? (
-                              <span className="font-mono text-xs text-muted-foreground">
-                                {t(`bases.${row.base.kind}`)}
-                              </span>
-                            ) : null}
-                          </div>
-                          {renderActions(row)}
-                        </li>
-                      </Surface>
-                    ))}
-                  </ul>
-                </section>
-              ))}
-            </div>
-          ) : null}
-        </>
-      )}
+      {content}
 
       {otherProjectCount > 0 ? (
         <Button
           size="sm"
           variant="ghost"
-          className="self-start text-xs text-muted-foreground"
+          className="h-7 self-start text-xs text-muted-foreground"
           onClick={() => setShowAllProjects((current) => !current)}
           data-testid="workspace-environments-scope-toggle"
         >
@@ -924,7 +1227,11 @@ export function WorkspaceEnvironmentList({
             : t("otherWorkspaces", { count: otherProjectCount })}
         </Button>
       ) : null}
+    </div>
+  )
 
+  const dialogs = (
+    <>
       <AlertDialog
         open={branchTarget !== null}
         onOpenChange={(open) => {
@@ -1019,6 +1326,60 @@ export function WorkspaceEnvironmentList({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </>
+  )
+
+  /*
+    On the page this is a console card like every other section of the tab; in
+    the sheet it is frameless because the Sheet already drew a header and a
+    border around it. The frame used to be hand-rolled here — a bare `<section>`
+    with an uppercase `<h2>` — which is why the `/workspace` Environments tab
+    read as one unfinished block stacked on two finished cards.
+  */
+  if (presentation === "page") {
+    return (
+      <>
+        <ConsoleSection
+          id="environments"
+          // `workspace-section-*`, the prefix its siblings on the tab already
+          // use. Not `workspace-environments`: the tab panel around it owns
+          // that test id, and two elements answering one query is how a later
+          // test asserts against the wrapper it did not mean.
+          idPrefix="workspace-section"
+          pane="workspace-pane"
+          icon={BoxesIcon}
+          title={t("title")}
+          description={t("description")}
+          meta={
+            <span className="flex items-center gap-1">
+              <span className="tabular-nums">{scoped?.length ?? 0}</span>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                className="-my-1 size-6"
+                onClick={() => void load()}
+                aria-label={t("refresh")}
+              >
+                <RefreshCwIcon aria-hidden className="size-3.5" />
+              </Button>
+            </span>
+          }
+        >
+          {body}
+        </ConsoleSection>
+        {dialogs}
+      </>
+    )
+  }
+
+  return (
+    <section
+      className="flex min-h-0 flex-col gap-2"
+      data-testid="workspace-environments"
+      data-presentation={presentation}
+    >
+      {body}
+      {dialogs}
     </section>
   )
 }

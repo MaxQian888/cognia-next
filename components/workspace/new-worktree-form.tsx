@@ -98,30 +98,52 @@ export function NewWorktreeForm({
     }
   }
 
+  const ready = Boolean(branch.trim() && path.trim())
+
   return (
-    <div className={cn("flex flex-col gap-3", className)} data-testid="new-worktree-form">
-      <div className="grid gap-1.5">
-        <Label htmlFor="worktree-branch">{t("worktrees.branchLabel")}</Label>
-        <Input
-          id="worktree-branch"
-          value={branch}
-          onChange={(event) => setBranch(event.target.value)}
-          placeholder={t("worktrees.branchPlaceholder")}
-          data-testid="worktree-branch"
-        />
+    /*
+      A container query, not a viewport one. The same form is mounted inside a
+      sheet on the desktop, inside a card on `/workspace`, and inside a phone
+      column, so the viewport never describes the width it actually has: the
+      old single stack put three full-width fields and a full-width button into
+      a 900px card, and the same stack into 320px.
+    */
+    <div
+      className={cn("@container/worktree-form flex flex-col gap-3", className)}
+      data-testid="new-worktree-form"
+    >
+      <div className="grid gap-3 @md/worktree-form:grid-cols-2">
+        <div className="grid gap-1.5">
+          <Label htmlFor="worktree-branch" className="text-xs">
+            {t("worktrees.branchLabel")}
+          </Label>
+          <Input
+            id="worktree-branch"
+            value={branch}
+            onChange={(event) => setBranch(event.target.value)}
+            placeholder={t("worktrees.branchPlaceholder")}
+            className="h-8 font-mono text-xs"
+            data-testid="worktree-branch"
+          />
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor="worktree-base-ref" className="text-xs">
+            {t("worktrees.baseRefLabel")}
+          </Label>
+          <Input
+            id="worktree-base-ref"
+            value={baseRef}
+            onChange={(event) => setBaseRef(event.target.value)}
+            placeholder={t("worktrees.baseRefPlaceholder")}
+            className="h-8 font-mono text-xs"
+            data-testid="worktree-base-ref"
+          />
+        </div>
       </div>
       <div className="grid gap-1.5">
-        <Label htmlFor="worktree-base-ref">{t("worktrees.baseRefLabel")}</Label>
-        <Input
-          id="worktree-base-ref"
-          value={baseRef}
-          onChange={(event) => setBaseRef(event.target.value)}
-          placeholder={t("worktrees.baseRefPlaceholder")}
-          data-testid="worktree-base-ref"
-        />
-      </div>
-      <div className="grid gap-1.5">
-        <Label htmlFor="worktree-path">{t("worktrees.pathLabel")}</Label>
+        <Label htmlFor="worktree-path" className="text-xs">
+          {t("worktrees.pathLabel")}
+        </Label>
         <div className="flex gap-2">
           <Input
             id="worktree-path"
@@ -132,13 +154,15 @@ export function NewWorktreeForm({
             placeholder={
               remote ? t("worktrees.relativePathPlaceholder") : t("worktrees.pathPlaceholder")
             }
-            className="min-w-0"
+            className="h-8 min-w-0 font-mono text-xs"
             data-testid="worktree-path"
           />
           {!remote && hasNativePicker ? (
             <Button
               type="button"
+              size="sm"
               variant="outline"
+              className="h-8 shrink-0"
               onClick={() => void chooseDirectory()}
               disabled={busy}
               data-testid="worktree-pick-directory"
@@ -149,19 +173,27 @@ export function NewWorktreeForm({
           ) : null}
         </div>
       </div>
-      <Button
-        onClick={() => void createWorktree()}
-        disabled={busy || !branch.trim() || !path.trim() || !can("git_worktree_add")}
-        className="gap-1.5"
-        data-testid="worktree-create"
-      >
-        {busy ? (
-          <Spinner className="size-3.5" />
-        ) : (
-          <GitBranchPlusIcon aria-hidden className="size-3.5" />
-        )}
-        {t("worktrees.create")}
-      </Button>
+      {/*
+        The submit sits at the end of its own row rather than spanning the
+        form. A full-width primary button under three fields reads as the
+        page's main action; this one only ever applies to the form above it.
+      */}
+      <div className="flex justify-end">
+        <Button
+          size="sm"
+          className="h-8 gap-1.5"
+          onClick={() => void createWorktree()}
+          disabled={busy || !ready || !can("git_worktree_add")}
+          data-testid="worktree-create"
+        >
+          {busy ? (
+            <Spinner className="size-3.5" />
+          ) : (
+            <GitBranchPlusIcon aria-hidden className="size-3.5" />
+          )}
+          {t("worktrees.create")}
+        </Button>
+      </div>
     </div>
   )
 }

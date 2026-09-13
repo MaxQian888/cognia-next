@@ -45,6 +45,40 @@ jest.mock("@/lib/workspace/open-folder", () => ({
   openPathAsWorkspace: (...args: unknown[]) => openMock(...args),
 }))
 
+/**
+ * Radix portals don't render into jsdom — flatten the row overflow menu.
+ *
+ * The row's secondary actions moved out of nine icon-only ghost buttons and
+ * into one labelled menu (two pairs of them shared a glyph: `Trash2` meant both
+ * "delete the archived environment" and "remove the worktree"). Flattening the
+ * menu keeps every assertion below querying the action by its accessible name,
+ * which is what those assertions were always about. The menu's own structure —
+ * that there IS a trigger, and that the destructive half is separated — is
+ * pinned by its own case rather than by every action case.
+ */
+jest.mock("@/components/ui/dropdown-menu", () => ({
+  DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenuTrigger: ({ children }: { children: React.ReactNode; asChild?: boolean }) => (
+    <div>{children}</div>
+  ),
+  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenuSeparator: () => <hr data-testid="row-action-separator" />,
+  DropdownMenuItem: ({
+    children,
+    onClick,
+    disabled,
+  }: {
+    children: React.ReactNode
+    onClick?: () => void
+    disabled?: boolean
+    variant?: string
+  }) => (
+    <button type="button" onClick={onClick} disabled={disabled}>
+      {children}
+    </button>
+  ),
+}))
+
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
@@ -542,6 +576,149 @@ describe("row pulse", () => {
     const dot = await screen.findByTestId("workspace-environment-pulse-git:prunable")
     expect(dot).toHaveAttribute("data-pulse", "attention")
     expect(dot).toHaveAttribute("aria-label", "pulses.attention")
+  })
+})
+
+describe("row overflow menu", () => {
+  it("gives every row one labelled menu instead of a bank of icon buttons", async () => {
+    listMock.mockResolvedValue([manual])
+    render(<WorkspaceEnvironmentList rootDir="/repo" />)
+
+    await screen.findByTestId("workspace-environment-git:manual")
+    // Open stays inline — it is the row's primary verb and needs no label to
+    // be guessed at. Everything else is behind the one trigger.
+    expect(screen.getByRole("button", { name: "open" })).toBeInTheDocument()
+    expect(screen.getByTestId("workspace-environment-actions-git:manual")).toHaveAttribute(
+      "aria-label",
+      "rowActions"
+    )
+  })
+
+  it("separates the destructive half of the menu from the rest", async () => {
+    listMock.mockResolvedValue([manual])
+    render(<WorkspaceEnvironmentList rootDir="/repo" />)
+
+    await screen.findByTestId("workspace-environment-git:manual")
+    // `adopt` then `remove`: one separator, drawn only because both halves exist.
+    expect(screen.getAllByTestId("row-action-separator")).toHaveLength(1)
+  })
+
+  it("renders no trigger at all for a row that offers nothing but open", async () => {
+    listMock.mockResolvedValue([{ ...manual, allowedActions: ["open"] }])
+    render(<WorkspaceEnvironmentList rootDir="/repo" />)
+
+    await screen.findByTestId("workspace-environment-git:manual")
+    expect(screen.queryByTestId("workspace-environment-actions-git:manual")).not.toBeInTheDocument()
+  })
+})
+
+describe("WorkspaceEnvironmentList — filtering", () => {
+  /** Six rows: the threshold at which the filter field is worth its space. */
+  const many = Array.from({ length: 6 }, (_, index) => ({
+    ...manual,
+    environmentId: `git:${index}`,
+    path: index < 3 ? `/work/alpha-${index}` : `/work/beta-${index}`,
+    branch: index < 3 ? `feature/alpha-${index}` : `fix/beta-${index}`,
+  }))
+
+  it("withholds the filter field until there is a list worth filtering", async () => {
+    listMock.mockResolvedValue([manual])
+    render(<WorkspaceEnvironmentList rootDir="/repo" />)
+
+    await screen.findByTestId("workspace-environment-git:manual")
+    expect(screen.queryByTestId("workspace-environments-search")).not.toBeInTheDocument()
+  })
+
+  it("narrows the list by path and by branch", async () => {
+    listMock.mockResolvedValue(many)
+    render(<WorkspaceEnvironmentList rootDir="/repo" />)
+
+    await screen.findByTestId("workspace-environment-git:0")
+    fireEvent.change(screen.getByTestId("workspace-environments-search"), {
+      target: { value: "beta" },
+    })
+    expect(screen.queryByTestId("workspace-environment-git:0")).not.toBeInTheDocument()
+    expect(screen.getByTestId("workspace-environment-git:5")).toBeInTheDocument()
+
+    // The branch is what the reader usually remembers, not the generated path.
+    fireEvent.change(screen.getByTestId("workspace-environments-search"), {
+      target: { value: "feature/alpha-1" },
+    })
+    expect(screen.getByTestId("workspace-environment-git:1")).toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-environment-git:2")).not.toBeInTheDocument()
+  })
+
+  it("answers an over-narrow filter with the way back, not with 'create one'", async () => {
+    listMock.mockResolvedValue(many)
+    render(<WorkspaceEnvironmentList rootDir="/repo" showCreate />)
+
+    await screen.findByTestId("workspace-environment-git:0")
+    fireEvent.change(screen.getByTestId("workspace-environments-search"), {
+      target: { value: "nothing-matches-this" },
+    })
+
+    expect(screen.getByText("noMatchesTitle")).toBeInTheDocument()
+    expect(screen.queryByText("emptyTitle")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("workspace-environments-clear-filters"))
+    expect(screen.getByTestId("workspace-environment-git:0")).toBeInTheDocument()
+  })
+
+  it("offers a band chip per band and shows only that band when picked", async () => {
+    // `managed` is locked (attention), `manual` is neither (active).
+    listMock.mockResolvedValue([managed, manual])
+    render(<WorkspaceEnvironmentList rootDir="/repo" />)
+
+    await screen.findByTestId("workspace-environment-ws-1")
+    fireEvent.click(screen.getByTestId("workspace-environments-filter-active"))
+    expect(screen.queryByTestId("workspace-environment-ws-1")).not.toBeInTheDocument()
+    expect(screen.getByTestId("workspace-environment-git:manual")).toBeInTheDocument()
+  })
+
+  it("hides the band chips when every row is in one band", async () => {
+    listMock.mockResolvedValue([manual])
+    render(<WorkspaceEnvironmentList rootDir="/repo" />)
+
+    await screen.findByTestId("workspace-environment-git:manual")
+    expect(screen.queryByTestId("workspace-environments-band-filter")).not.toBeInTheDocument()
+  })
+
+  /**
+   * A chip selection outlives the rows it described. Left alone, narrowing the
+   * text query until the chosen band is gone leaves the reader staring at an
+   * empty list they never asked for, with a chip selected that no longer
+   * exists to un-select.
+   */
+  it("falls back to every band when the chosen one is filtered away", async () => {
+    listMock.mockResolvedValue([managed, ...many])
+    render(<WorkspaceEnvironmentList rootDir="/repo" />)
+
+    await screen.findByTestId("workspace-environment-ws-1")
+    fireEvent.click(screen.getByTestId("workspace-environments-filter-attention"))
+    expect(screen.queryByTestId("workspace-environment-git:0")).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByTestId("workspace-environments-search"), {
+      target: { value: "alpha" },
+    })
+    expect(screen.getByTestId("workspace-environment-git:0")).toBeInTheDocument()
+  })
+})
+
+describe("WorkspaceEnvironmentList — empty state", () => {
+  it("offers creation from the empty state rather than describing it", async () => {
+    listMock.mockResolvedValue([])
+    render(<WorkspaceEnvironmentList rootDir="/repo" showCreate />)
+
+    expect(await screen.findByText("emptyTitle")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("workspace-environments-empty-create"))
+    expect(screen.getByTestId("workspace-environments-create")).toBeInTheDocument()
+  })
+
+  it("describes the empty inventory without an offer it cannot honour", async () => {
+    listMock.mockResolvedValue([])
+    render(<WorkspaceEnvironmentList />)
+
+    expect(await screen.findByText("emptyTitle")).toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-environments-empty-create")).not.toBeInTheDocument()
   })
 })
 

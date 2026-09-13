@@ -151,53 +151,71 @@ export function AgentBranchesSection({ rootDir }: AgentBranchesSectionProps) {
           {t("empty")}
         </p>
       ) : (
-        <ul className="flex flex-col gap-1" data-testid="workspace-agent-branches">
+        /*
+          A container query on the list, not the viewport: this card is half a
+          grid cell of a pane, so a viewport breakpoint would seat the branch
+          name and both buttons on one line inside 260px and squeeze the name —
+          the only part of the row that identifies what is being deleted — down
+          to a few characters.
+        */
+        <ul
+          className="@container/branches flex flex-col gap-1"
+          data-testid="workspace-agent-branches"
+        >
           {branches.map((branch) => (
             <li
               key={branch.name}
-              className="flex items-center gap-2 rounded-control border px-3 py-2"
+              className="flex flex-col gap-1.5 rounded-control border px-3 py-2 @sm/branches:flex-row @sm/branches:items-center @sm/branches:gap-2"
               data-testid={`workspace-agent-branch-${branch.name}`}
             >
-              <GitBranchIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1 truncate font-mono text-xs" title={branch.name}>
-                {branch.name}
+              <span className="flex min-w-0 flex-1 items-center gap-2">
+                <GitBranchIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate font-mono text-xs" title={branch.name}>
+                  {branch.name}
+                </span>
               </span>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7"
-                disabled={!checkoutGate.available}
-                title={checkoutGate.reason ?? undefined}
-                data-unavailable={checkoutGate.available ? undefined : "true"}
-                onClick={() => void doCheckout(branch.name)}
-              >
-                {t("actions.checkout")}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7"
-                disabled={!deleteGate.available}
-                title={deleteGate.reason ?? undefined}
-                data-unavailable={deleteGate.available ? undefined : "true"}
-                onClick={() => void doDelete(branch.name)}
-              >
-                {t("actions.delete")}
-              </Button>
+              <span className="flex shrink-0 items-center gap-1">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7"
+                  disabled={!checkoutGate.available}
+                  title={checkoutGate.reason ?? undefined}
+                  data-unavailable={checkoutGate.available ? undefined : "true"}
+                  onClick={() => void doCheckout(branch.name)}
+                >
+                  {t("actions.checkout")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7"
+                  disabled={!deleteGate.available}
+                  title={deleteGate.reason ?? undefined}
+                  data-unavailable={deleteGate.available ? undefined : "true"}
+                  onClick={() => void doDelete(branch.name)}
+                >
+                  {t("actions.delete")}
+                </Button>
+              </span>
             </li>
           ))}
         </ul>
       )}
 
-      <Button
-        size="sm"
-        variant="ghost"
-        className="-ml-2 mt-2 h-7 text-xs"
-        onClick={() => setCompareOpen(true)}
-        data-testid="workspace-agent-branches-compare"
-      >
-        {t("actions.compare")}
-      </Button>
+      {/* Separated from the list rather than hanging off its last row: it acts
+          on the repository, not on whichever branch is directly above it. */}
+      <div className="mt-3 border-t pt-2">
+        <Button
+          size="sm"
+          variant="ghost"
+          className="-ml-2 h-7 text-xs"
+          onClick={() => setCompareOpen(true)}
+          data-testid="workspace-agent-branches-compare"
+        >
+          {t("actions.compare")}
+        </Button>
+      </div>
       <CompareRefsSheet open={compareOpen} onOpenChange={setCompareOpen} rootDir={rootDir} />
     </ConsoleSection>
   )

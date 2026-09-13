@@ -336,6 +336,112 @@ describe("WorkspaceManageDialog", () => {
   })
 })
 
+describe("WorkspaceManageDialog draft state", () => {
+  it("keeps Save inert until the draft differs from what is stored", () => {
+    renderDialog()
+    fireEvent.click(screen.getByTestId("workspace-new"))
+
+    // A freshly created workspace is already saved — offering Save here is an
+    // enabled button that does nothing.
+    expect(screen.getByTestId("workspace-save")).toBeDisabled()
+    expect(screen.queryByTestId("workspace-unsaved")).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText("nameLabel"), { target: { value: "Backend" } })
+    expect(screen.getByTestId("workspace-save")).toBeEnabled()
+    expect(screen.getByTestId("workspace-unsaved")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("workspace-save"))
+    expect(screen.getByTestId("workspace-save")).toBeDisabled()
+    expect(screen.queryByTestId("workspace-unsaved")).not.toBeInTheDocument()
+  })
+
+  /**
+   * The draft used to be thrown away in silence: the selection effect reset the
+   * form and nothing said an edited name had just been lost.
+   */
+  it("asks before a selection change throws an edited draft away", () => {
+    renderDialog()
+    fireEvent.click(screen.getByTestId("workspace-new"))
+    const first = useProjectStore.getState().projects[0].id
+    fireEvent.click(screen.getByTestId("workspace-new"))
+    const second = useProjectStore.getState().projects[1].id
+
+    fireEvent.change(screen.getByLabelText("nameLabel"), { target: { value: "Edited" } })
+    fireEvent.click(screen.getByTestId(`workspace-row-${first}`))
+
+    // Still on the edited one, with the question in front of the reader.
+    expect(screen.getByTestId("workspace-discard-confirm")).toBeInTheDocument()
+    expect(screen.getByLabelText("nameLabel")).toHaveValue("Edited")
+
+    fireEvent.click(screen.getByTestId("workspace-discard-confirm"))
+    expect(screen.getByLabelText("nameLabel")).toHaveValue("defaultName")
+    expect(useProjectStore.getState().projects.find((p) => p.id === second)?.name).toBe(
+      "defaultName"
+    )
+  })
+
+  it("switches straight through when the draft is clean", () => {
+    renderDialog()
+    fireEvent.click(screen.getByTestId("workspace-new"))
+    const first = useProjectStore.getState().projects[0].id
+    fireEvent.click(screen.getByTestId("workspace-new"))
+
+    fireEvent.click(screen.getByTestId(`workspace-row-${first}`))
+    expect(screen.queryByTestId("workspace-discard-confirm")).not.toBeInTheDocument()
+  })
+})
+
+describe("WorkspaceManageDialog delete confirmation", () => {
+  /**
+   * Armed, the footer used to hold two destructive buttons and no way out, so
+   * the only exit from a mis-clicked Delete was to pick one of them.
+   */
+  it("offers a way out of the armed state", () => {
+    renderDialog()
+    fireEvent.click(screen.getByTestId("workspace-new"))
+
+    fireEvent.click(screen.getByTestId("workspace-delete"))
+    expect(screen.getByTestId("workspace-delete-confirm")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("workspace-delete-cancel"))
+    expect(screen.queryByTestId("workspace-delete-confirm")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-delete-data")).not.toBeInTheDocument()
+    expect(useProjectStore.getState().projects).toHaveLength(1)
+  })
+})
+
+describe("WorkspaceManageDialog list filtering", () => {
+  function seed(names: string[]) {
+    act(() => {
+      for (const name of names) useProjectStore.getState().createProject({ name })
+    })
+  }
+
+  it("withholds the filter field until the roster is worth filtering", () => {
+    seed(["Alpha", "Beta"])
+    renderDialog()
+    expect(screen.queryByTestId("workspace-manage-search")).not.toBeInTheDocument()
+  })
+
+  it("filters the roster by name and says so when nothing matches", () => {
+    seed(["Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta"])
+    renderDialog()
+
+    const ids = Object.fromEntries(
+      useProjectStore.getState().projects.map((p) => [p.name, p.id] as const)
+    )
+    fireEvent.change(screen.getByTestId("workspace-manage-search"), { target: { value: "eta" } })
+    expect(screen.getByTestId(`workspace-row-${ids.Beta}`)).toBeInTheDocument()
+    expect(screen.getByTestId(`workspace-row-${ids.Zeta}`)).toBeInTheDocument()
+    expect(screen.queryByTestId(`workspace-row-${ids.Alpha}`)).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByTestId("workspace-manage-search"), {
+      target: { value: "nothing-matches" },
+    })
+    expect(screen.getByTestId("workspace-manage-no-matches")).toBeInTheDocument()
+  })
+})
+
 describe("WorkspaceManageDialog browse gating", () => {
   afterEach(() => {
     browseAvailable.value = true

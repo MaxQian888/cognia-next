@@ -113,7 +113,15 @@
       "conflict": "Conflict",
       "dormant": "Dormant",
       "provisioning": "Provisioning"
-    }
+    },
+    "rowActions": "More actions",
+    "searchPlaceholder": "Filter by path, branch, commit or owner…",
+    "clearSearch": "Clear the search text",
+    "clearFilters": "Clear all filters",
+    "bandFilterLabel": "Filter environments by state",
+    "filterAll": "All",
+    "noMatchesTitle": "No environment matches",
+    "noMatchesDescription": "Nothing here matches the current filter. Clear it to see the whole inventory."
   },
   "manage": {
     "activeBadge": "Active",
@@ -202,7 +210,18 @@
     "title": "Workspaces",
     "trustRoot": "Trust",
     "trustedBadge": "Trusted",
-    "untrustedBadge": "Untrusted"
+    "untrustedBadge": "Untrusted",
+    "searchPlaceholder": "Search workspaces…",
+    "clearSearch": "Clear the search",
+    "noMatches": "No workspace matches that search",
+    "unsaved": "Unsaved changes",
+    "deleteQuestion": "Remove this workspace?",
+    "cancelDelete": "Keep it",
+    "discardTitle": "Discard unsaved changes?",
+    "discardDescription": "The name and folders you edited have not been saved. Switching workspace now throws those edits away.",
+    "discardCancel": "Keep editing",
+    "discardConfirm": "Discard and switch",
+    "noSelectionTitle": "No workspace selected"
   },
   "switcher": {
     "active": "Active workspace: {name}",
