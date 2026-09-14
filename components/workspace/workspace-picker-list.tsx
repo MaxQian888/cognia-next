@@ -72,14 +72,29 @@ export interface WorkspacePickerActions {
   adoptableCount: number
 }
 
-export interface WorkspacePickerListProps {
-  actions: WorkspacePickerActions
+export interface WorkspacePickerSelection {
+  items: readonly Pick<Project, "id" | "name">[]
+  activeId: string | null
+  onSelect: (id: string) => void
+}
+
+interface WorkspacePickerAppearanceProps {
   /** Fired after the active workspace changes, so the container can close. */
   onSwitched?: () => void
   /** Touch targets are taller in a Drawer than in a Popover. */
   density?: "compact" | "comfortable"
   className?: string
 }
+
+/** Controlled rows are supplied by the caller's authority; this list grants no access. */
+export type WorkspacePickerListProps = WorkspacePickerAppearanceProps &
+  (
+    | { actions: WorkspacePickerActions; selection?: never }
+    | { selection: WorkspacePickerSelection; actions?: never }
+  )
+
+type PickerRow = Pick<Project, "id" | "name"> &
+  Partial<Pick<Project, "roots" | "pinned" | "lastAccessedAt">>
 
 /**
  * Everything the footer opens, owned above the Popover or Drawer.
@@ -138,13 +153,15 @@ export function useWorkspacePickerDialogs(): {
 
 export function WorkspacePickerList({
   actions,
+  selection,
   onSwitched,
   density = "compact",
   className,
 }: WorkspacePickerListProps) {
   const t = useTranslations("workspace.switcher")
   const projects = useProjectStore((s) => s.projects)
-  const activeProjectId = useProjectStore((s) => s.activeProjectId)
+  const localActiveProjectId = useProjectStore((s) => s.activeProjectId)
+  const activeProjectId = selection ? selection.activeId : localActiveProjectId
   const setActiveProject = useProjectStore((s) => s.setActiveProject)
   const updateProject = useProjectStore((s) => s.updateProject)
 
@@ -152,14 +169,18 @@ export function WorkspacePickerList({
   // project id to "has any untrusted root".
   const [untrustedMap, setUntrustedMap] = useState<Record<string, boolean>>({})
 
-  const visible = useMemo(
-    () => projects.filter((p) => !p.isArchived).sort((a, b) => a.name.localeCompare(b.name)),
-    [projects]
+  const visible = useMemo<PickerRow[]>(
+    () =>
+      (selection
+        ? selection.items.map(({ id, name }) => ({ id, name }))
+        : projects.filter((p) => !p.isArchived)
+      ).sort((a, b) => a.name.localeCompare(b.name)),
+    [projects, selection]
   )
   const recent = useMemo(
     () =>
       [...visible]
-        .sort((a, b) => +new Date(b.lastAccessedAt) - +new Date(a.lastAccessedAt))
+        .sort((a, b) => +new Date(b.lastAccessedAt ?? 0) - +new Date(a.lastAccessedAt ?? 0))
         .slice(0, RECENT_COUNT),
     [visible]
   )
@@ -176,13 +197,13 @@ export function WorkspacePickerList({
     )
   }, [visible, trimmed])
   // Pin the Recent group only when the list is large and unfiltered.
-  const showRecent = isLarge && !trimmed && recent.length > 0
-  const showPinned = !trimmed && pinned.length > 0
+  const showRecent = !selection && isLarge && !trimmed && recent.length > 0
+  const showPinned = !selection && !trimmed && pinned.length > 0
 
   // Resolve per-workspace trust badges lazily. `isWorkspaceTrusted` reads the
   // Dexie `trustedWorkspaces` table, so this works on every shell.
   useEffect(() => {
-    if (visible.length === 0) return
+    if (selection || visible.length === 0) return
     let cancelled = false
     void Promise.all(
       visible.map(async (p) => {
@@ -199,11 +220,12 @@ export function WorkspacePickerList({
     return () => {
       cancelled = true
     }
-  }, [visible])
+  }, [visible, selection])
 
   const roomy = density === "comfortable"
   const handleSwitch = (id: string) => {
-    setActiveProject(id)
+    if (selection) selection.onSelect(id)
+    else setActiveProject(id)
     setQuery("")
     onSwitched?.()
   }
@@ -214,7 +236,7 @@ export function WorkspacePickerList({
     action()
   }
 
-  const renderRow = (p: Project, keyPrefix = "") => {
+  const renderRow = (p: PickerRow, keyPrefix = "") => {
     const primaryPath = primaryRootOf(p)?.path
     const rootCount = p.roots?.length ?? 0
     const isActive = activeProjectId === p.id
@@ -247,7 +269,7 @@ export function WorkspacePickerList({
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1">
               <span className={cn("truncate", isActive && "font-medium")}>{p.name}</span>
-              {untrustedMap[p.id] && (
+              {!selection && untrustedMap[p.id] && (
                 <ShieldAlertIcon
                   aria-label={t("untrustedHint")}
                   className="size-3 shrink-0 text-amber-500"
@@ -265,18 +287,20 @@ export function WorkspacePickerList({
           </span>
           {isActive && <CheckIcon className="size-4 shrink-0 text-primary" />}
         </button>
-        <button
-          type="button"
-          aria-label={p.pinned ? t("unpin", { name: p.name }) : t("pin", { name: p.name })}
-          data-testid={`workspace-pin-${keyPrefix}${p.id}`}
-          onClick={() => updateProject(p.id, { pinned: !p.pinned })}
-          className={cn(
-            "mr-1 flex shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground",
-            roomy ? "size-9" : "size-7"
-          )}
-        >
-          <StarIcon className={cn("size-3.5", p.pinned && "fill-current text-amber-500")} />
-        </button>
+        {!selection && (
+          <button
+            type="button"
+            aria-label={p.pinned ? t("unpin", { name: p.name }) : t("pin", { name: p.name })}
+            data-testid={`workspace-pin-${keyPrefix}${p.id}`}
+            onClick={() => updateProject(p.id, { pinned: !p.pinned })}
+            className={cn(
+              "mr-1 flex shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground",
+              roomy ? "size-9" : "size-7"
+            )}
+          >
+            <StarIcon className={cn("size-3.5", p.pinned && "fill-current text-amber-500")} />
+          </button>
+        )}
       </div>
     )
   }
@@ -380,40 +404,44 @@ export function WorkspacePickerList({
         </div>
       </ScrollArea>
 
-      <Separator className="my-1" />
-      {actions.canOpenFolder &&
-        footerButton(
-          "workspace-switcher-open-folder",
-          <FolderOpenIcon className="size-4 shrink-0 text-muted-foreground" />,
-          t("openFolder"),
-          () => runAction(actions.openFolder)
-        )}
-      {footerButton(
-        "workspace-switcher-new",
-        <PlusIcon className="size-4 shrink-0 text-muted-foreground" />,
-        t("newWorkspace"),
-        () => runAction(actions.newWorkspace)
-      )}
-      {/*
+      {actions && (
+        <>
+          <Separator className="my-1" />
+          {actions.canOpenFolder &&
+            footerButton(
+              "workspace-switcher-open-folder",
+              <FolderOpenIcon className="size-4 shrink-0 text-muted-foreground" />,
+              t("openFolder"),
+              () => runAction(actions.openFolder)
+            )}
+          {footerButton(
+            "workspace-switcher-new",
+            <PlusIcon className="size-4 shrink-0 text-muted-foreground" />,
+            t("newWorkspace"),
+            () => runAction(actions.newWorkspace)
+          )}
+          {/*
         Only when there is something to adopt: a permanent "Detected folders
         (0)" row would train the user to ignore the one time it matters. The
         count is the whole affordance.
       */}
-      {actions.adoptableCount > 0 &&
-        footerButton(
-          "workspace-switcher-adopt",
-          <FolderSearchIcon className="size-4 shrink-0 text-muted-foreground" />,
-          t("adoptEntry"),
-          () => runAction(actions.adopt),
-          <Badge variant="secondary" className="shrink-0 font-normal tabular-nums">
-            {actions.adoptableCount}
-          </Badge>
-        )}
-      {footerButton(
-        "workspace-switcher-manage",
-        <SlidersHorizontalIcon className="size-4 shrink-0 text-muted-foreground" />,
-        t("manage"),
-        () => runAction(actions.manage)
+          {actions.adoptableCount > 0 &&
+            footerButton(
+              "workspace-switcher-adopt",
+              <FolderSearchIcon className="size-4 shrink-0 text-muted-foreground" />,
+              t("adoptEntry"),
+              () => runAction(actions.adopt),
+              <Badge variant="secondary" className="shrink-0 font-normal tabular-nums">
+                {actions.adoptableCount}
+              </Badge>
+            )}
+          {footerButton(
+            "workspace-switcher-manage",
+            <SlidersHorizontalIcon className="size-4 shrink-0 text-muted-foreground" />,
+            t("manage"),
+            () => runAction(actions.manage)
+          )}
+        </>
       )}
     </div>
   )

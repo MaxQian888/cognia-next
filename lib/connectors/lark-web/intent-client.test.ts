@@ -1,6 +1,13 @@
 /** @jest-environment jsdom */
 
+jest.mock("@/lib/tauri", () => ({ transport: { call: jest.fn() } }))
+jest.mock("@/lib/collab/runtime-client", () => ({ resolveCurrentCollabContext: jest.fn() }))
+
 import {
+  checkLarkPersonalHost,
+  loadLarkTeamWorkspaces,
+  resolveLarkWorkbench,
+  type LarkWorkbenchContext,
   extractMessageRefs,
   parseShortcutLaunch,
   pollLarkIntent,
@@ -10,6 +17,8 @@ import {
   submitLarkIntent,
 } from "./intent-client"
 import { LARK_WEB_SESSION_STORAGE_KEY } from "./session"
+import { resolveCurrentCollabContext, type CurrentCollabContext } from "@/lib/collab/runtime-client"
+import { transport } from "@/lib/tauri"
 
 function fakeJwt(payload: Record<string, unknown>): string {
   const encode = (obj: unknown) =>
@@ -32,8 +41,242 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 beforeEach(() => {
+  jest.clearAllMocks()
   window.sessionStorage.clear()
   window.history.replaceState(null, "", "/lark/shortcut")
+})
+
+describe("Lark workbench access", () => {
+  const context: LarkWorkbenchContext = {
+    mode: "both",
+    userId: "usr_alice",
+    accountId: "acct_owner",
+    serverId: "server-one",
+  }
+  const flow = (fetchFn: typeof fetch, search = "?adapter_id=lk-1") =>
+    resolveLarkWorkbench({
+      search,
+      returnTo: "/lark/workbench?adapter_id=lk-1",
+      apiBase: "https://api.example",
+      fetchFn,
+      pollIntervalMs: 1,
+      pollBudgetMs: 3,
+      sleep: async () => undefined,
+    })
+  const completedFetch = (result: unknown) =>
+    jest
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(202, { requestId: "req/workbench" }))
+      .mockResolvedValue(jsonResponse(200, { status: "done", result }))
+
+  it("requires an adapter and redirects absent or other-adapter SSO without sending credentials", async () => {
+    const fetchFn = jest.fn()
+    expect(await flow(fetchFn, "")).toEqual({ kind: "error", code: "adapter_missing" })
+    expect(await flow(fetchFn)).toMatchObject({
+      kind: "login",
+      loginUrl: expect.stringContaining("adapter_id=lk-1"),
+    })
+    seedSession()
+    expect(await flow(fetchFn, "?adapter_id=lk-2")).toMatchObject({
+      kind: "login",
+      loginUrl: expect.stringContaining("adapter_id=lk-2"),
+    })
+    expect(window.sessionStorage.getItem(LARK_WEB_SESSION_STORAGE_KEY)).toBeNull()
+    expect(fetchFn).not.toHaveBeenCalled()
+  })
+
+  it("polls an accepted request and uses the server policy rather than launch parameters", async () => {
+    const token = seedSession()
+    const fetchFn = jest
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(202, { requestId: "req/workbench" }))
+      .mockResolvedValueOnce(jsonResponse(200, { status: "pending" }))
+      .mockResolvedValueOnce(jsonResponse(200, { status: "done", result: context }))
+    expect(await flow(fetchFn, "?adapter_id=lk-1&mode=personal&userId=attacker")).toEqual({
+      kind: "ready",
+      context,
+    })
+    expect(fetchFn).toHaveBeenNthCalledWith(
+      1,
+      "https://api.example/integrations/lark/workbench/resolve",
+      expect.objectContaining({
+        method: "POST",
+        body: "{}",
+        headers: expect.objectContaining({ Authorization: `Bearer ${token}` }),
+      })
+    )
+    expect(fetchFn).toHaveBeenNthCalledWith(
+      2,
+      "https://api.example/integrations/lark/intent/req%2Fworkbench",
+      expect.anything()
+    )
+    expect(fetchFn).toHaveBeenCalledTimes(3)
+  })
+
+  it.each([
+    { ...context, mode: "disabled" },
+    { ...context, userId: "" },
+    { ...context, userId: null },
+    { ...context, accountId: null },
+    { ...context, accountId: "" },
+    { ...context, serverId: 1 },
+    { ...context, serverId: "" },
+    {},
+  ])("rejects malformed resolved context %j", async (result) => {
+    seedSession()
+    expect(await flow(completedFetch(result))).toEqual({
+      kind: "error",
+      code: "workbench_unavailable",
+    })
+  })
+
+  it("propagates submission and principal denials and expires rejected SSO", async () => {
+    seedSession()
+    expect(
+      await flow(jest.fn().mockResolvedValue(jsonResponse(403, { code: "workbench_disabled" })))
+    ).toEqual({ kind: "error", code: "workbench_disabled" })
+    const denied = jest
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(202, { requestId: "req" }))
+      .mockResolvedValue(jsonResponse(200, { status: "error", error: "principal_disabled" }))
+    expect(await flow(denied)).toEqual({ kind: "error", code: "principal_disabled" })
+    expect(await flow(jest.fn().mockResolvedValue(jsonResponse(401, {})))).toMatchObject({
+      kind: "login",
+    })
+    expect(window.sessionStorage.getItem(LARK_WEB_SESSION_STORAGE_KEY)).toBeNull()
+  })
+
+  it("opens personal access only for the paired bot host and account", async () => {
+    const call = jest
+      .fn()
+      .mockResolvedValueOnce({ serverId: context.serverId })
+      .mockResolvedValueOnce({ hostStateScope: { accountId: context.accountId } })
+    expect(await checkLarkPersonalHost(context, call)).toBeNull()
+    expect(call.mock.calls).toEqual([["companion_endpoints"], ["host_feature_manifest"]])
+    const never = jest.fn()
+    expect(await checkLarkPersonalHost({ ...context, mode: "team" }, never)).toBe("mode_forbidden")
+    expect(never).not.toHaveBeenCalled()
+  })
+
+  it("uses the production transport with its receiver when no call seam is supplied", async () => {
+    const receivers: unknown[] = []
+    jest.mocked(transport.call).mockImplementation(function (this: unknown, name: string) {
+      receivers.push(this)
+      if (name === "companion_endpoints")
+        return Promise.resolve({ serverId: context.serverId }) as never
+      if (name === "host_feature_manifest")
+        return Promise.resolve({ hostStateScope: { accountId: context.accountId } }) as never
+      throw new Error(`unsupported command: ${name}`)
+    })
+    expect(await checkLarkPersonalHost({ ...context, mode: "personal" })).toBeNull()
+    expect(receivers).toEqual([transport, transport])
+  })
+
+  it.each(["personal", "team"] as const)(
+    "accepts server-selected %s mode without a launch adapter",
+    async (mode) => {
+      seedSession()
+      expect(await flow(completedFetch({ ...context, mode }), "")).toEqual({
+        kind: "ready",
+        context: { ...context, mode },
+      })
+    }
+  )
+
+  it.each([
+    [{ serverId: "another-host" }, { hostStateScope: { accountId: context.accountId } }],
+    [{ serverId: context.serverId }, { hostStateScope: { accountId: "another-account" } }],
+    [{}, {}],
+  ])("refuses host/profile mismatches", async (endpoints, manifest) => {
+    const call = jest.fn().mockResolvedValueOnce(endpoints).mockResolvedValueOnce(manifest)
+    expect(await checkLarkPersonalHost(context, call)).toBe("host_mismatch")
+  })
+
+  it("reports unavailable host transport", async () => {
+    expect(
+      await checkLarkPersonalHost(context, jest.fn().mockRejectedValue(new Error("not paired")))
+    ).toBe("host_required")
+  })
+
+  function team(currentUser = context.userId, serverUser = context.userId) {
+    const myMemberships = jest.fn().mockResolvedValue({ userId: serverUser })
+    const listWorkspaces = jest
+      .fn()
+      .mockResolvedValue([
+        { id: "ws_team", name: "Shared", orgId: "org_team", secret: "not projected" },
+      ])
+    const resolve = jest.fn().mockResolvedValue({
+      orgId: "org_team",
+      userId: currentUser,
+      localAccountId: "acct_browser",
+      client: { myMemberships, listWorkspaces },
+    } as unknown as CurrentCollabContext)
+    return { resolve, myMemberships, listWorkspaces }
+  }
+
+  it("loads only the server's authorized workspaces for the same canonical person", async () => {
+    const deps = team()
+    expect(await loadLarkTeamWorkspaces(context, deps.resolve)).toEqual({
+      kind: "ready",
+      items: [{ id: "ws_team", name: "Shared" }],
+    })
+    expect(deps.myMemberships).toHaveBeenCalledWith("org_team")
+    expect(deps.listWorkspaces).toHaveBeenCalledWith("org_team")
+  })
+
+  it("uses the existing collaboration context resolver by default", async () => {
+    const deps = team()
+    jest.mocked(resolveCurrentCollabContext).mockResolvedValue(await deps.resolve())
+    expect(await loadLarkTeamWorkspaces({ ...context, mode: "team" })).toEqual({
+      kind: "ready",
+      items: [{ id: "ws_team", name: "Shared" }],
+    })
+    expect(resolveCurrentCollabContext).toHaveBeenCalledTimes(1)
+    expect(deps.listWorkspaces).toHaveBeenCalledWith("org_team")
+  })
+
+  it.each([
+    ["usr_other", context.userId],
+    [context.userId, "usr_other"],
+  ])("refuses either local or server identity disagreement", async (current, server) => {
+    const deps = team(current, server)
+    expect(await loadLarkTeamWorkspaces(context, deps.resolve)).toEqual({
+      kind: "error",
+      code: "identity_mismatch",
+    })
+    expect(deps.listWorkspaces).not.toHaveBeenCalled()
+  })
+
+  it("requires team mode and an authenticated collaboration context", async () => {
+    const resolve = jest.fn().mockResolvedValue(null)
+    expect(await loadLarkTeamWorkspaces({ ...context, mode: "personal" }, resolve)).toEqual({
+      kind: "error",
+      code: "mode_forbidden",
+    })
+    expect(resolve).not.toHaveBeenCalled()
+    expect(await loadLarkTeamWorkspaces(context, resolve)).toEqual({
+      kind: "error",
+      code: "team_sign_in_required",
+    })
+  })
+
+  it.each(["resolve", "membership", "workspaces"])(
+    "surfaces %s failures without substituting local workspaces",
+    async (stage) => {
+      const deps = team()
+      const failing =
+        stage === "resolve"
+          ? deps.resolve
+          : stage === "membership"
+            ? deps.myMemberships
+            : deps.listWorkspaces
+      failing.mockRejectedValue(new Error("unavailable"))
+      expect(await loadLarkTeamWorkspaces(context, deps.resolve)).toEqual({
+        kind: "error",
+        code: "team_unavailable",
+      })
+    }
+  )
 })
 
 describe("parseShortcutLaunch", () => {
@@ -125,6 +368,95 @@ describe("submitLarkIntent", () => {
 })
 
 describe("pollLarkIntent", () => {
+  it.each([
+    [401, "session_expired"],
+    [403, "forbidden"],
+    [404, "intent_expired"],
+  ] as const)(
+    "stops polling on HTTP %s instead of retrying a denied request",
+    async (status, code) => {
+      const token = seedSession()
+      const fetchFn = jest.fn().mockResolvedValue(jsonResponse(status, {}))
+      expect(
+        await pollLarkIntent({ requestId: "r", fetchFn, sleep: async () => undefined })
+      ).toEqual({ kind: "error", code })
+      expect(fetchFn).toHaveBeenCalledTimes(1)
+      expect(window.sessionStorage.getItem(LARK_WEB_SESSION_STORAGE_KEY)).toBe(
+        status === 401 ? null : token
+      )
+    }
+  )
+
+  it("retries transient network and invalid JSON responses within the poll budget", async () => {
+    seedSession()
+    const fetchFn = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({
+        status: 502,
+        json: async () => {
+          throw new Error("not json")
+        },
+      })
+      .mockResolvedValueOnce(jsonResponse(200, { status: "done", result: { id: "ready" } }))
+    expect(
+      await pollLarkIntent({
+        requestId: "r",
+        fetchFn,
+        pollIntervalMs: 1,
+        pollBudgetMs: 3,
+        sleep: async () => undefined,
+      })
+    ).toEqual({ kind: "done", result: { id: "ready" } })
+    expect(fetchFn).toHaveBeenCalledTimes(3)
+  })
+
+  it("bounds pending polls and reports unlabelled intent errors", async () => {
+    seedSession()
+    const fetchFn = jest.fn().mockResolvedValue(jsonResponse(200, { status: "pending" }))
+    expect(
+      await pollLarkIntent({
+        requestId: "r",
+        fetchFn,
+        pollIntervalMs: 1,
+        pollBudgetMs: 2,
+        sleep: async () => undefined,
+      })
+    ).toEqual({ kind: "error", code: "timeout" })
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+    fetchFn.mockResolvedValue(jsonResponse(200, { status: "error" }))
+    expect(await pollLarkIntent({ requestId: "r", fetchFn, sleep: async () => undefined })).toEqual(
+      { kind: "error", code: "intent_failed" }
+    )
+  })
+
+  it("does not poll without a live SSO session", async () => {
+    const fetchFn = jest.fn()
+    expect(await pollLarkIntent({ requestId: "r", fetchFn })).toEqual({
+      kind: "error",
+      code: "poll_failed",
+    })
+    expect(fetchFn).not.toHaveBeenCalled()
+  })
+
+  it("uses the default timer and global fetch", async () => {
+    seedSession()
+    jest.useFakeTimers()
+    const original = globalThis.fetch
+    globalThis.fetch = jest
+      .fn()
+      .mockResolvedValue(jsonResponse(200, { status: "done", result: { id: "ready" } }))
+    try {
+      const pending = pollLarkIntent({ requestId: "r" })
+      expect(globalThis.fetch).not.toHaveBeenCalled()
+      await jest.advanceTimersByTimeAsync(1000)
+      expect(await pending).toEqual({ kind: "done", result: { id: "ready" } })
+    } finally {
+      globalThis.fetch = original
+      jest.useRealTimers()
+    }
+  })
+
   it("resolves done results and surfaces brain errors", async () => {
     seedSession()
     let polls = 0

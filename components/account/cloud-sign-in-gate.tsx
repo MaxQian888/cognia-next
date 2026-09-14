@@ -173,6 +173,9 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
   // it: `NEXT_PUBLIC_E2E_CLOUD_GATE=1` keeps the gate live under E2E.
   const ungated =
     (process.env.NEXT_PUBLIC_E2E === "1" && process.env.NEXT_PUBLIC_E2E_CLOUD_GATE !== "1") ||
+    // This entry handles Feishu SSO itself, then requests the existing host
+    // pairing or team sign-in according to the mode the user opens.
+    /^\/lark\/workbench(?:\/|\.html)?$/.test(pathname ?? "") ||
     (pathname ? UNGATED_PATHS.some((prefix) => pathname.startsWith(prefix)) : false) ||
     isSecondaryOverlayRole(getPetWindowRole())
 

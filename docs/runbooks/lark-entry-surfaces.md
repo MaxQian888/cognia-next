@@ -27,6 +27,68 @@ with no `COGNIA_LARK_PUBLIC_BASE` behind it print a warning and start.
 
 ## 2. Lark developer-console configuration
 
+### Cognia app homepage (2026-09-12)
+
+Use the existing Lark adapter's **Web entry & Lark surfaces** settings. Set
+the Web entry base, enable the principal registry and Web SSO, and choose
+**Personal**, **Team**, or **Personal and team** under workbench access.
+The default is **Disabled**. Copy the generated
+`<web base>/lark/workbench?adapter_id=<encoded adapter id>` into the Feishu
+application's desktop and mobile homepage settings. Enable both the bot and
+web application capabilities on the same application. The reserved
+`cognia.open_workbench` bot menu action uses this same homepage when enabled.
+The URL contains an adapter identifier, never a login or device credential.
+
+This is an H5 application entry, not a native workplace widget. It reuses
+Cognia's existing components and permissions:
+
+- A browser still creates or unlocks its existing local profile vault. The
+  entry route skips product onboarding and the automatic cloud login screen;
+  navigating to the normal console retains their existing behavior.
+- Feishu Web SSO resolves the adapter, tenant, application and linked Cognia
+  user on the bot runtime. Unbound, disabled or legacy identities cannot
+  open the workbench. Mode changes are checked again on each entry action.
+- **Personal** verifies the already-paired host's server ID and account scope
+  match the bot before opening the existing chat console. Pairing is done
+  through the existing Devices page. Feishu login does not issue a device
+  grant or expose the bot owner's profile to other people.
+- **Team** uses the existing cloud account flow (including a configured
+  Feishu social provider), canonical user ID and collaboration memberships.
+  The shared workspace picker lists the server-authorized workspaces. A
+  selection refreshes the collaboration mirror and displays the existing
+  members and activity components, including published plans, runs and
+  artifact links. The issue board uses the existing collaboration source.
+  Team access does not grant personal device, model or connector settings.
+
+**Current boundary:** this entry does not turn a collaboration workspace into
+a shared remote chat runtime. Full team chat, approvals and host
+administration still require a team execution and permission model; selecting
+a workspace must not silently fall back to the owner's personal chat shell.
+The existing personal console remains the complete paired-device surface.
+
+Web SSO now exchanges its one-use PKCE authorization code with
+`POST https://accounts.feishu.cn/oauth/v3/token`; success requires HTTP 2xx,
+`code: 0`, no OAuth error, and a nonempty token. Configure the callback below
+and keep the app secret on the companion server.
+
+Deployment acceptance:
+
+1. Open the homepage in real desktop and mobile Feishu clients. Complete the
+   local vault and SSO flow; confirm no token remains in the address bar.
+2. Test a linked personal user with the matching paired host, then a wrong
+   host/profile and an unpaired browser. Only the matching host opens.
+3. Test a team member, an unbound user and a different signed-in cloud user.
+   Only the matching member sees authorized workspaces. Revoke membership
+   after listing and confirm selection fails.
+4. Change mode or disable the adapter while the entry is open; the next
+   action must recheck policy. Verify the bot menu and homepage agree.
+5. Confirm a team user receives no owner device grant and cannot access
+   owner settings through collaboration membership alone.
+
+Official API references: [H5 applications](https://open.feishu.cn/document/client-docs/h5/introduction),
+[open an H5 app with AppLink](https://open.feishu.cn/document/common-capabilities/applink-protocol/supported-protocol/open-an-h5-app),
+and [OAuth v3 token exchange](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/authentication-management/access-token/get-user-access-token-v3).
+
 ### Run details in a paired Web client
 
 Run-card **View details** buttons use `webEntryBaseUrl` (or

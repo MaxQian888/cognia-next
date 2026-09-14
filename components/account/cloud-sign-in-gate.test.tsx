@@ -106,6 +106,30 @@ beforeEach(() => {
 })
 
 describe("CloudSignInGate", () => {
+  it.each(["/lark/workbench", "/lark/workbench/", "/lark/workbench.html"])(
+    "lets the Feishu entry choose personal or team authentication at %s",
+    (pathname) => {
+      window.history.replaceState(null, "", `${pathname}#lark_session=token`)
+      const d = deps({ pathname })
+      renderGate(d)
+      expect(screen.getByTestId("app")).toBeInTheDocument()
+      expect(d.discover).not.toHaveBeenCalled()
+      expect(window.location.hash).toBe("#lark_session=token")
+      window.history.replaceState(null, "", "/")
+    }
+  )
+
+  it("still requires cloud identity on the normal app and workbench-like paths", async () => {
+    const { rerender } = renderGate(deps({ pathname: "/lark/workbench" }))
+    rerender(
+      <CloudSignInGate deps={deps({ pathname: "/lark/workbench-admin" })}>
+        <div data-testid="protected" />
+      </CloudSignInGate>
+    )
+    expect(await screen.findByTestId("cloud-sign-in-social-github")).toBeInTheDocument()
+    expect(screen.queryByTestId("protected")).not.toBeInTheDocument()
+  })
+
   /** Most installs: nothing to sign in to, and the gate is invisible. */
   it("passes straight through when there is no multi-tenant deployment", async () => {
     renderGate(

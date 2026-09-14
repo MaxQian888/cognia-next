@@ -9,10 +9,12 @@
  * idempotency key, so transport redeliveries never double-post.
  */
 
-import type { LarkFlagAdapterSettings } from "@/lib/connectors/feature-flags"
+import { isLarkFeatureEnabled, type LarkFlagAdapterSettings } from "@/lib/connectors/feature-flags"
 import { appendAudit } from "@/lib/connectors/audit"
 import {
   buildAuthorizedConversationLink,
+  buildWorkbenchUrl,
+  readWorkbenchMode,
   resolveWebEntryBase,
 } from "@/lib/connectors/entry/deep-links"
 import { hashOpenId, resolveConnectorPrincipal } from "@/lib/connectors/principal/resolve"
@@ -140,6 +142,26 @@ export async function handleMenuLink(
   if (!base) {
     await deps.enqueue(
       p2pReply(adapterId, outcome.openId, outcome.eventId, "menu-link", LINK_BASE_MISSING_REPLY)
+    )
+    return
+  }
+
+  // The reserved workbench entry has its own SSO/principal gate on arrival.
+  // Keep this URL stable instead of minting a one-conversation entry token.
+  if (
+    outcome.eventKey === "cognia.open_workbench" &&
+    readWorkbenchMode(adapterRow) !== "disabled" &&
+    isLarkFeatureEnabled("larkWebSso", adapterRow)
+  ) {
+    const workbenchUrl = buildWorkbenchUrl(adapterId, base)
+    await deps.enqueue(
+      p2pReply(
+        adapterId,
+        outcome.openId,
+        outcome.eventId,
+        "menu-link",
+        workbenchUrl ? `${outcome.command.label ?? path}\n${workbenchUrl}` : LINK_BASE_MISSING_REPLY
+      )
     )
     return
   }

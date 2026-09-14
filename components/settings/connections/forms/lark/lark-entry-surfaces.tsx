@@ -34,6 +34,12 @@ import {
   getLarkStrictCallbackAuthorizationMode,
 } from "@/lib/connectors/feature-flags"
 import type { AdapterInstanceRow, LarkChatSurfaceRow } from "@/lib/db/connector-types"
+import {
+  buildWorkbenchUrl,
+  readWorkbenchMode,
+  resolveWebEntryBase,
+  type LarkWorkbenchMode,
+} from "@/lib/connectors/entry/deep-links"
 
 const ENTRY_FLAGS: LarkBooleanFeatureFlag[] = [
   "larkPrincipalRegistry",
@@ -100,6 +106,9 @@ export function LarkEntrySurfaces({ adapterId }: LarkEntrySurfacesProps) {
     patchAdapterInstanceSettings(adapterId, patch)
 
   const strictMode = getLarkStrictCallbackAuthorizationMode(row ?? undefined)
+  const workbenchMode = readWorkbenchMode(row)
+  const workbenchUrl = buildWorkbenchUrl(adapterId, resolveWebEntryBase(row))
+  const [workbenchSaveFailed, setWorkbenchSaveFailed] = useState(false)
 
   const surfaceCtx = {
     adapterId,
@@ -139,6 +148,46 @@ export function LarkEntrySurfaces({ adapterId }: LarkEntrySurfacesProps) {
         <CardTitle className="text-sm font-medium">{t("title")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-5">
+        <div className="space-y-2">
+          <Label className="text-xs">{t("workbenchModeLabel")}</Label>
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label={t("workbenchModeLabel")}>
+            {(["disabled", "personal", "team", "both"] as LarkWorkbenchMode[]).map((mode) => (
+              <Button
+                key={mode}
+                type="button"
+                size="sm"
+                disabled={!row}
+                variant={workbenchMode === mode ? "default" : "outline"}
+                aria-pressed={workbenchMode === mode}
+                onClick={() => {
+                  setWorkbenchSaveFailed(false)
+                  void patchSettings({ larkWorkbenchMode: mode }).catch(() =>
+                    setWorkbenchSaveFailed(true)
+                  )
+                }}
+              >
+                {t(`workbenchMode.${mode}`)}
+              </Button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">{t("workbenchHelp")}</p>
+          {workbenchSaveFailed && (
+            <p role="alert" className="text-xs text-destructive">
+              {t("workbenchSaveFailed")}
+            </p>
+          )}
+          {workbenchMode !== "disabled" && workbenchUrl && (
+            <>
+              <Label htmlFor="lark-workbench-url">{t("workbenchUrlLabel")}</Label>
+              <Input
+                id="lark-workbench-url"
+                readOnly
+                value={workbenchUrl}
+                onFocus={(event) => event.target.select()}
+              />
+            </>
+          )}
+        </div>
         <div className="space-y-2">
           <Label htmlFor="lark-web-base" className="text-xs">
             {t("webBaseLabel")}

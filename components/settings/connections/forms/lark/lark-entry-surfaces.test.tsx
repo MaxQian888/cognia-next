@@ -17,6 +17,11 @@ jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringGet: jest.fn(async () => "secret"),
 }))
 
+jest.mock("@/lib/db/adapter-instances", () => {
+  const actual = jest.requireActual("@/lib/db/adapter-instances")
+  return { ...actual, patchAdapterInstanceSettings: jest.fn(actual.patchAdapterInstanceSettings) }
+})
+
 jest.mock("@/lib/connectors/adapters/lark/surface-sweep", () => ({
   resyncLarkChatSurfaces: jest.fn(async () => ({ synced: 2, errors: 1, skipped: 0 })),
 }))
@@ -31,6 +36,7 @@ import { getDb, __resetDbForTesting } from "@/lib/db/schema"
 import { ensureChatSurface, markChatSurfaceError } from "@/lib/db/lark-chat-surfaces"
 import { resyncLarkChatSurfaces } from "@/lib/connectors/adapters/lark/surface-sweep"
 import { LarkEntrySurfaces } from "./lark-entry-surfaces"
+import * as adapterInstances from "@/lib/db/adapter-instances"
 
 const ADAPTER_ID = "lark-ui-1"
 
@@ -52,8 +58,54 @@ describe("LarkEntrySurfaces", () => {
     __resetDbForTesting()
   })
   afterEach(async () => {
+    jest.restoreAllMocks()
     await getDb().delete()
     __resetDbForTesting()
+  })
+
+  it("persists personal/team policy and exposes the configured workbench URL", async () => {
+    await seedAdapter({ webEntryBaseUrl: "https://cognia.example", unrelated: "preserved" })
+    const user = userEvent.setup({ delay: null })
+    render(<LarkEntrySurfaces adapterId={ADAPTER_ID} />)
+    const disabled = await screen.findByRole("button", { name: "workbenchMode.disabled" })
+    await waitFor(() => expect(disabled).toBeEnabled())
+    expect(disabled).toHaveAttribute("aria-pressed", "true")
+    expect(screen.queryByRole("textbox", { name: "workbenchUrlLabel" })).not.toBeInTheDocument()
+
+    for (const mode of ["personal", "team", "both"]) {
+      const button = screen.getByRole("button", { name: `workbenchMode.${mode}` })
+      await user.click(button)
+      await waitFor(() => expect(button).toHaveAttribute("aria-pressed", "true"))
+      expect((await getDb().adapterInstances.get(ADAPTER_ID))?.settings).toMatchObject({
+        larkWorkbenchMode: mode,
+        unrelated: "preserved",
+      })
+    }
+    const url = screen.getByRole("textbox", { name: "workbenchUrlLabel" })
+    expect(url).toHaveValue(`https://cognia.example/lark/workbench?adapter_id=${ADAPTER_ID}`)
+    expect(url).toHaveAttribute("readonly")
+    await user.click(disabled)
+    await waitFor(() =>
+      expect(screen.queryByRole("textbox", { name: "workbenchUrlLabel" })).not.toBeInTheDocument()
+    )
+  })
+
+  it("surfaces failed policy persistence and clears the error on a successful retry", async () => {
+    await seedAdapter({ larkWorkbenchMode: "personal" })
+    const patch = jest.mocked(adapterInstances.patchAdapterInstanceSettings)
+    const user = userEvent.setup({ delay: null })
+    render(<LarkEntrySurfaces adapterId={ADAPTER_ID} />)
+    const team = await screen.findByRole("button", { name: "workbenchMode.team" })
+    await waitFor(() => expect(team).toBeEnabled())
+    patch.mockRejectedValueOnce(new Error("write failed"))
+    await user.click(team)
+    expect(await screen.findByRole("alert")).toHaveTextContent("workbenchSaveFailed")
+    expect((await getDb().adapterInstances.get(ADAPTER_ID))?.settings?.larkWorkbenchMode).toBe(
+      "personal"
+    )
+    await user.click(team)
+    await waitFor(() => expect(team).toHaveAttribute("aria-pressed", "true"))
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
   })
 
   it("persists the web entry base on blur", async () => {

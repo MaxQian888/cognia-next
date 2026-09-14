@@ -904,7 +904,17 @@
       "title": "Web 入口与飞书表面",
       "webBaseHelp": "飞书客户端内可访问的 Cognia Web 应用公网 https 地址。Chat Tab / 菜单链接与 SSO 跳转都基于它构建；留空则外部链接保持关闭。",
       "webBaseLabel": "Web 入口基础 URL",
-      "webBasePlaceholder": "https://cognia.example.com"
+      "webBasePlaceholder": "https://cognia.example.com",
+      "workbenchModeLabel": "工作台入口",
+      "workbenchMode": {
+        "disabled": "停用",
+        "personal": "个人",
+        "team": "团队",
+        "both": "个人和团队"
+      },
+      "workbenchHelp": "将此链接配置为飞书应用的桌面端和移动端主页。个人入口需要连接对应设备，团队入口需要登录已绑定的团队账户。此设置不会授予额外权限。",
+      "workbenchSaveFailed": "工作台模式保存失败，请重试。",
+      "workbenchUrlLabel": "应用主页链接"
     },
     "openCompanion": "打开伴侣设置",
     "openCompanionAria": "打开 移动端伴侣 → Tunnel",

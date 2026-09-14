@@ -26,5 +26,34 @@
     "preparing": "正在准备导入…",
     "title": "导入消息"
   },
-  "title": "Cognia 入口"
+  "title": "Cognia 入口",
+  "workbench": {
+    "title": "Cognia 工作台",
+    "description": "打开个人控制台或选择团队工作区，沿用已有的设备授权和团队权限。",
+    "loading": "正在验证访问权限…",
+    "login": "正在跳转到飞书登录…",
+    "personal": "个人控制台",
+    "team": "团队工作区",
+    "retry": "重试",
+    "devices": "连接设备",
+    "account": "团队账户",
+    "errors": {
+      "workbench_unavailable": "工作台暂时不可用，请重试。",
+      "adapter_missing": "请从已配置的飞书应用主页打开工作台。",
+      "workbench_disabled": "此 Bot 尚未启用工作台和飞书网页登录。",
+      "principal_unbound": "你的飞书身份尚未关联 Cognia 用户，请联系管理员完成绑定。",
+      "principal_legacy": "此 Bot 需要先完成身份绑定才能使用工作台。",
+      "identity_mismatch": "飞书和 Cognia 账户不一致，请登录已绑定的账户。",
+      "host_required": "请连接运行此 Bot 的设备，再打开个人控制台。",
+      "host_mismatch": "当前连接的设备或配置档与此 Bot 不一致，请切换到对应设备和配置档。",
+      "team_sign_in_required": "请先登录团队账户，再选择工作区。",
+      "team_unavailable": "无法加载团队工作区，请检查团队账户后重试。",
+      "mode_forbidden": "此控制台模式已停用，请刷新工作台。",
+      "forbidden": "你已无权访问此工作区。",
+      "session_expired": "飞书会话已过期，请重试并重新登录。",
+      "intent_expired": "本次权限验证已过期，请重试。",
+      "timeout": "Bot 未及时响应，请确认其在线后重试。"
+    },
+    "issues": "打开任务看板"
+  }
 }

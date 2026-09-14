@@ -38,6 +38,9 @@ export function OnboardingGate({ children }: { children: ReactNode }) {
   const router = useRouter()
   const pathname = usePathname()
   const onOnboardingRoute = pathname?.startsWith(ONBOARDING_ROUTE) ?? false
+  // Let the entry capture its Feishu session before a first-run redirect.
+  // Entering the normal app afterwards still requires onboarding.
+  const onLarkWorkbench = /^\/lark\/workbench(?:\/|\.html)?$/.test(pathname ?? "")
   // The disposable development account that `pnpm dev` provisions for a fresh
   // browser profile is, by construction, always a first run: no settings row,
   // no sessions. Routing it into the flow would put the setup wizard back in
@@ -51,15 +54,15 @@ export function OnboardingGate({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (devLocalAccount) return
-    if (status !== "enter" || onOnboardingRoute) return
+    if (status !== "enter" || onOnboardingRoute || onLarkWorkbench) return
     router.replace(ONBOARDING_ROUTE)
-  }, [devLocalAccount, status, onOnboardingRoute, router])
+  }, [devLocalAccount, status, onOnboardingRoute, onLarkWorkbench, router])
 
   // The flow's own route renders regardless of the verdict: entering it from
   // Settings ("re-run setup") is a deliberate revisit by someone the gate has
   // already decided is onboarded, and blocking that would make the re-run
   // entry point dead.
-  if (onOnboardingRoute) return <>{children}</>
+  if (onOnboardingRoute || onLarkWorkbench) return <>{children}</>
 
   if (devLocalAccount) return <>{children}</>
 

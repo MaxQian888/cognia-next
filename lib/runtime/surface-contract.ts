@@ -442,6 +442,8 @@ export const INTERNAL_ROUTE_EXEMPTIONS = [
   "/island",
   "/lark/entry",
   "/lark/shortcut",
+  // The entry resolves Feishu identity before choosing paired-host or team access.
+  "/lark/workbench",
   // Same category as `/plugin-auth/callback`: an identity-provider return leg
   // that hands off and navigates away, with no runtime of its own to classify.
   "/logto/callback",

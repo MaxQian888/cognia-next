@@ -22,6 +22,13 @@ function snapshot(overrides: Partial<RuntimeSnapshot> = {}): RuntimeSnapshot {
   }
 }
 
+it("classifies the Feishu workbench as an entry that owns its authentication", () => {
+  expect(isInternalRouteExempt("/lark/workbench")).toBe(true)
+  expect(isInternalRouteExempt("/lark/workbench?adapter_id=lk-1")).toBe(true)
+  expect(isInternalRouteExempt("/lark/workbench-admin")).toBe(false)
+  expect(isInternalRouteExempt("/lark/workbench/settings")).toBe(false)
+})
+
 it("classifies every public sidebar destination exactly once", () => {
   expect(SURFACE_CONTRACTS.map((contract) => contract.id).sort()).toEqual(
     expect.arrayContaining(SIDEBAR_NAV_META.map((item) => item.id))

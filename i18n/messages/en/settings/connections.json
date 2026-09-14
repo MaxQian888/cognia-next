@@ -904,7 +904,17 @@
       "title": "Web entry & Lark surfaces",
       "webBaseHelp": "Public https URL of the Cognia web app reachable from inside Lark clients. Chat Tab / menu links and SSO bounces are built on it; leave empty to keep external links disabled.",
       "webBaseLabel": "Web entry base URL",
-      "webBasePlaceholder": "https://cognia.example.com"
+      "webBasePlaceholder": "https://cognia.example.com",
+      "workbenchModeLabel": "Workbench access",
+      "workbenchMode": {
+        "disabled": "Disabled",
+        "personal": "Personal",
+        "team": "Team",
+        "both": "Personal and team"
+      },
+      "workbenchHelp": "Set this URL as the Feishu app desktop and mobile homepage. Personal access requires the matching paired device; team access requires the linked team account. This setting does not grant permissions.",
+      "workbenchSaveFailed": "Could not save the workbench mode. Please retry.",
+      "workbenchUrlLabel": "App homepage URL"
     },
     "openCompanion": "Open Companion settings",
     "openCompanionAria": "Open Mobile Companion → Tunnel",

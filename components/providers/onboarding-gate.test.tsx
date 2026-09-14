@@ -48,6 +48,43 @@ afterEach(() => {
 })
 
 describe("OnboardingGate", () => {
+  it.each(["/lark/workbench", "/lark/workbench/", "/lark/workbench.html"])(
+    "lets the workbench capture its SSO fragment before first-run routing at %s",
+    (route) => {
+      pathname = route
+      window.history.replaceState(null, "", `${route}?adapter_id=lk-1#lark_session=token`)
+      gate.mockReturnValue({ status: "enter", shell: "web" })
+      const { rerender } = render(
+        <OnboardingGate>
+          <p>entry</p>
+        </OnboardingGate>
+      )
+      expect(screen.getByText("entry")).toBeInTheDocument()
+      expect(replace).not.toHaveBeenCalled()
+      expect(window.location.hash).toBe("#lark_session=token")
+      pathname = "/"
+      rerender(
+        <OnboardingGate>
+          <p>app</p>
+        </OnboardingGate>
+      )
+      expect(replace).toHaveBeenCalledWith("/onboarding")
+      expect(screen.queryByText("app")).not.toBeInTheDocument()
+      window.history.replaceState(null, "", "/")
+    }
+  )
+
+  it("does not exempt similarly prefixed routes", () => {
+    pathname = "/lark/workbench-admin"
+    gate.mockReturnValue({ status: "enter", shell: "web" })
+    render(
+      <OnboardingGate>
+        <p>app</p>
+      </OnboardingGate>
+    )
+    expect(replace).toHaveBeenCalledWith("/onboarding")
+  })
+
   it("keeps the boot screen up, as its preferences step, while the verdict is still resolving", () => {
     gate.mockReturnValue({ status: "resolving", shell: "tauri" })
     render(

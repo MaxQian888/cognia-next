@@ -8,6 +8,7 @@ import {
   installLarkIntentHandler,
   isChatMember,
   type LarkIntentDependencies,
+  type LarkIntentFrame,
 } from "./consumed-handler"
 
 function makeDeps(overrides: Partial<LarkIntentDependencies> = {}) {
@@ -70,6 +71,142 @@ function makeDeps(overrides: Partial<LarkIntentDependencies> = {}) {
     getAdapter: jest.Mock
   }
 }
+
+describe("resolve_workbench", () => {
+  const frame: LarkIntentFrame = {
+    kind: "resolve_workbench",
+    requestId: "req_workbench",
+    adapterId: "lk-1",
+    serverId: "host_one",
+    verifiedIdentity: { openId: "ou_alice", tenantKey: "tk_one", appId: "cli_1" },
+    session: { idHash: "session-hash", issuedAt: 10, expiresAt: 20 },
+  }
+  const adapter = {
+    id: "lk-1",
+    type: "lark",
+    enabled: true,
+    settings: { larkWorkbenchMode: "both", larkWebSso: true },
+  }
+  function workbenchDeps() {
+    return makeDeps({
+      getAdapter: jest.fn().mockResolvedValue(adapter),
+      resolvePrincipal: jest.fn().mockResolvedValue({
+        status: "resolved",
+        principal: { id: "fp_alice", cogniaUserId: "usr_alice" },
+        tenant: {},
+        accountId: "acct_served",
+      }),
+    })
+  }
+
+  it("answers with stored policy and resolved identity, without chat-membership or task creation", async () => {
+    const deps = workbenchDeps()
+    await handleLarkIntentFrame(frame, deps)
+    expect(deps.resolvePrincipal).toHaveBeenCalledWith({
+      platform: "lark",
+      adapterRow: adapter,
+      remoteUserId: "ou_alice",
+      identityScope: { tenantKey: "tk_one", appId: "cli_1" },
+    })
+    expect(deps.call).toHaveBeenCalledWith("lark_result_complete", {
+      requestId: "req_workbench",
+      result: { mode: "both", userId: "usr_alice", accountId: "acct_served", serverId: "host_one" },
+    })
+    expect(deps.touchSession).toHaveBeenCalledWith(
+      expect.objectContaining({ principalId: "fp_alice", jtiHash: "session-hash" })
+    )
+    expect(deps.tenantRequest).not.toHaveBeenCalled()
+    expect(deps.plusCreate).not.toHaveBeenCalled()
+  })
+
+  it.each(["adapterId", "serverId", "verifiedIdentity"] as const)(
+    "rejects missing %s before resolving a principal",
+    async (field) => {
+      const deps = workbenchDeps()
+      await handleLarkIntentFrame({ ...frame, [field]: undefined }, deps)
+      expect(deps.call).toHaveBeenCalledWith("lark_result_complete", {
+        requestId: "req_workbench",
+        error: "intent_malformed",
+      })
+      expect(deps.resolvePrincipal).not.toHaveBeenCalled()
+    }
+  )
+
+  it("ignores frames without a pending request", async () => {
+    const deps = workbenchDeps()
+    await handleLarkIntentFrame({ ...frame, requestId: undefined }, deps)
+    expect(deps.getAdapter).not.toHaveBeenCalled()
+    expect(deps.call).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    undefined,
+    { ...adapter, enabled: false },
+    { ...adapter, type: "slack" },
+    { ...adapter, settings: { larkWorkbenchMode: "disabled" } },
+    { ...adapter, settings: { larkWorkbenchMode: "both", larkWebSso: false } },
+  ])("requires an enabled Lark workbench and SSO policy", async (row) => {
+    const deps = workbenchDeps()
+    deps.getAdapter.mockResolvedValue(row)
+    await handleLarkIntentFrame(frame, deps)
+    expect(deps.call).toHaveBeenCalledWith("lark_result_complete", {
+      requestId: "req_workbench",
+      error: "workbench_disabled",
+    })
+    expect(deps.resolvePrincipal).not.toHaveBeenCalled()
+  })
+
+  it.each([null, "another-app"])(
+    "rejects missing or mismatched configured app credentials",
+    async (credential) => {
+      const deps = workbenchDeps()
+      deps.keyringGet.mockResolvedValue(credential)
+      await handleLarkIntentFrame(frame, deps)
+      expect(deps.call).toHaveBeenCalledWith("lark_result_complete", {
+        requestId: "req_workbench",
+        error: "principal_unbound",
+      })
+      expect(deps.resolvePrincipal).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(["legacy", "cross_account", "principal_disabled", "tenant_disabled", "unbound"])(
+    "fails closed for %s principals",
+    async (status) => {
+      const deps = workbenchDeps()
+      deps.resolvePrincipal.mockResolvedValue({ status })
+      await handleLarkIntentFrame(frame, deps)
+      expect(deps.call).toHaveBeenCalledWith("lark_result_complete", {
+        requestId: "req_workbench",
+        error: `principal_${status}`,
+      })
+    }
+  )
+
+  it("requires a Cognia person even when account resolution succeeds", async () => {
+    const deps = workbenchDeps()
+    deps.resolvePrincipal.mockResolvedValue({
+      status: "resolved",
+      principal: { id: "fp_1" },
+      accountId: "acct_served",
+    })
+    await handleLarkIntentFrame(frame, deps)
+    expect(deps.call).toHaveBeenCalledWith("lark_result_complete", {
+      requestId: "req_workbench",
+      error: "principal_unbound",
+    })
+  })
+
+  it("reports adapter storage failure as unavailable", async () => {
+    const deps = workbenchDeps()
+    deps.getAdapter.mockRejectedValue(new Error("database unavailable"))
+    await handleLarkIntentFrame(frame, deps)
+    expect(deps.call).toHaveBeenCalledWith("lark_result_complete", {
+      requestId: "req_workbench",
+      error: "workbench_unavailable",
+    })
+  })
+})
 
 describe("handleLarkIntentFrame", () => {
   it("marks the ledger + audits on entry_consumed", async () => {

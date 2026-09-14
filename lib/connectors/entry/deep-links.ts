@@ -32,6 +32,26 @@ import {
  */
 export const CHAT_TAB_URL_VERSION = 1
 
+export type LarkWorkbenchMode = "disabled" | "personal" | "team" | "both"
+
+/** Entry policy only; host grants and collaboration membership remain authoritative. */
+export function readWorkbenchMode(row?: LarkFlagAdapterSettings): LarkWorkbenchMode {
+  const mode = row?.settings?.larkWorkbenchMode
+  return mode === "personal" || mode === "team" || mode === "both" ? mode : "disabled"
+}
+
+/** Stable URL for the developer console's desktop/mobile homepage. */
+export function buildWorkbenchUrl(adapterId: string, webBase: string | null): string | null {
+  if (!adapterId.trim()) return null
+  // Share the external-base validation, including deployment path prefixes.
+  const validated = buildRunDetailsUrl("", webBase)
+  if (!validated) return null
+  const url = new URL(validated)
+  url.pathname = url.pathname.replace(/\/agent-runs$/, "/lark/workbench")
+  url.search = new URLSearchParams({ adapter_id: adapterId }).toString()
+  return url.href
+}
+
 /** Web app base URL reachable from inside Lark clients, when configured. */
 export function resolveWebEntryBase(adapterRow?: LarkFlagAdapterSettings): string | null {
   const configured =

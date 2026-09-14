@@ -95,6 +95,65 @@ beforeEach(() => {
 })
 
 describe("WorkspacePickerList", () => {
+  it("selects supplied workspaces without reading trust or mutating local projects", () => {
+    seed(2)
+    const localState = useProjectStore.getState()
+    const notify = jest.fn()
+    const unsubscribe = useProjectStore.subscribe(notify)
+    const order: string[] = []
+    const onSelect = jest.fn((id: string) => order.push(id))
+    render(
+      <WorkspacePickerList
+        selection={{
+          items: [{ id: "team-one", name: "Team One" }],
+          activeId: "team-one",
+          onSelect,
+        }}
+        onSwitched={() => order.push("closed")}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Team One" }))
+
+    expect(onSelect).toHaveBeenCalledWith("team-one")
+    expect(order).toEqual(["team-one", "closed"])
+    expect(notify).not.toHaveBeenCalled()
+    expect(useProjectStore.getState()).toBe(localState)
+    expect(
+      jest.requireMock("@/lib/db/trusted-workspaces").isWorkspaceTrusted
+    ).not.toHaveBeenCalled()
+    expect(screen.queryByText("Workspace 0")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-pin-team-one")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-switcher-new")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-switcher-manage")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-switcher-open-folder")).not.toBeInTheDocument()
+    unsubscribe()
+  })
+
+  it("searches controlled rows without recent or pinned groups and accepts a refreshed selection", () => {
+    const onSelect = jest.fn()
+    const items = Array.from({ length: 9 }, (_, i) => ({ id: `team-${i}`, name: `Team ${i}` }))
+    const { rerender } = render(
+      <WorkspacePickerList selection={{ items, activeId: null, onSelect }} />
+    )
+    expect(screen.getAllByRole("button")).toHaveLength(9)
+    expect(screen.queryByText("recentHeading")).not.toBeInTheDocument()
+    expect(screen.queryByText("pinnedHeading")).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByRole("textbox", { name: "searchPlaceholder" }), {
+      target: { value: "Team 7" },
+    })
+    expect(screen.getByRole("button", { name: "Team 7" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Team 0" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Team 7" }))
+    expect(onSelect).toHaveBeenCalledWith("team-7")
+    expect(screen.getByRole("textbox", { name: "searchPlaceholder" })).toHaveValue("")
+
+    rerender(<WorkspacePickerList selection={{ items: [], activeId: null, onSelect }} />)
+    expect(screen.getByText("empty")).toBeInTheDocument()
+    expect(screen.queryByRole("button")).not.toBeInTheDocument()
+  })
+
   it("switches the active workspace and tells the container to close", () => {
     seed(2)
     const onSwitched = jest.fn()

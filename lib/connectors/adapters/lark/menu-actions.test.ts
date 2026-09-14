@@ -98,6 +98,104 @@ describe("handleMenuLink", () => {
     eventId: "evt_2",
   }
 
+  it.each(["personal", "team", "both"])(
+    "opens the stable workbench entry for %s mode with event deduplication",
+    async (mode) => {
+      const d = deps()
+      const row = {
+        settings: {
+          webEntryBaseUrl: "https://cognia.example/deploy",
+          larkWorkbenchMode: mode,
+          larkWebSso: true,
+        },
+      }
+      await handleMenuLink(ADAPTER_ID, row, outcome, d)
+      await handleMenuLink(ADAPTER_ID, row, outcome, d)
+      const first = d.enqueue.mock.calls[0][0]
+      expect(first.request.segments[0].text).toBe(
+        `Open workbench / 打开工作台\nhttps://cognia.example/deploy/lark/workbench?adapter_id=${ADAPTER_ID}`
+      )
+      expect(first.request.metadata.idempotencyKey).toBe(`menu-link:${ADAPTER_ID}:evt_2`)
+      expect(d.enqueue.mock.calls[1][0].request.metadata.idempotencyKey).toBe(
+        first.request.metadata.idempotencyKey
+      )
+      expect(d.resolvePrincipal).not.toHaveBeenCalled()
+      expect(d.buildConversationLink).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each([
+    { larkWorkbenchMode: "disabled", larkWebSso: true },
+    { larkWorkbenchMode: "both", larkWebSso: false },
+  ])(
+    "preserves the authorized conversation link when workbench or SSO is disabled",
+    async (settings) => {
+      const d = deps()
+      d.resolvePrincipal.mockResolvedValue({
+        status: "resolved",
+        principal: { id: "fp_1", tenantKey: "tk_1", appId: "cli_1" },
+        accountId: "acct_1",
+      })
+      d.buildConversationLink.mockResolvedValue("https://cognia.example/lark/entry?entry=legacy")
+      await handleMenuLink(
+        ADAPTER_ID,
+        { settings: { webEntryBaseUrl: "https://cognia.example", ...settings } },
+        outcome,
+        d
+      )
+      expect(d.enqueue.mock.calls[0][0].request.segments[0].text).toContain("entry=legacy")
+      expect(d.buildConversationLink).toHaveBeenCalledTimes(1)
+    }
+  )
+
+  it("leaves other link actions unchanged while workbench is enabled", async () => {
+    const d = deps()
+    await handleMenuLink(
+      ADAPTER_ID,
+      {
+        settings: {
+          webEntryBaseUrl: "https://cognia.example",
+          larkWorkbenchMode: "both",
+          larkWebSso: true,
+        },
+      },
+      {
+        ...outcome,
+        eventKey: "custom.memory",
+        command: {
+          ...outcome.command,
+          triggerKey: "custom.memory",
+          action: { type: "link", value: "/memory" },
+        },
+      },
+      d
+    )
+    expect(d.enqueue.mock.calls[0][0].request.segments[0].text).toContain(
+      "https://cognia.example/memory"
+    )
+    expect(d.resolvePrincipal).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not publish an invalid workbench base", async () => {
+    const d = deps()
+    await handleMenuLink(
+      ADAPTER_ID,
+      {
+        settings: {
+          webEntryBaseUrl: "https://operator:secret@cognia.example",
+          larkWorkbenchMode: "both",
+          larkWebSso: true,
+        },
+      },
+      outcome,
+      d
+    )
+    expect(d.enqueue.mock.calls[0][0].request.segments[0].text).toContain(
+      "尚未配置 Cognia Web 入口"
+    )
+    expect(d.enqueue.mock.calls[0][0].request.segments[0].text).not.toContain("secret")
+  })
+
   it("replies with the resolved web-entry URL when a base is configured", async () => {
     const d = deps()
     await handleMenuLink(

@@ -7,6 +7,8 @@ import {
   buildSurfaceUrl,
   buildRunDetailsUrl,
   resolveWebEntryBase,
+  buildWorkbenchUrl,
+  readWorkbenchMode,
 } from "./deep-links"
 
 const ENTRY_INPUT = {
@@ -21,6 +23,25 @@ const ENTRY_INPUT = {
 }
 
 const ENV_KEYS = ["COGNIA_LARK_WEB_BASE", "NEXT_PUBLIC_COGNIA_WEB_BASE"]
+
+describe("workbench entry configuration", () => {
+  it.each(["personal", "team", "both"] as const)("accepts configured %s mode", (mode) => {
+    expect(readWorkbenchMode({ settings: { larkWorkbenchMode: mode } })).toBe(mode)
+  })
+  it.each([undefined, null, "", "invalid", true])("does not enable an invalid mode %s", (mode) => {
+    expect(readWorkbenchMode({ settings: { larkWorkbenchMode: mode } })).toBe("disabled")
+  })
+  it("builds a stable entry without a user credential or expiring token", () => {
+    expect(buildWorkbenchUrl("lk/1", "https://cognia.example/app/")).toBe(
+      "https://cognia.example/app/lark/workbench?adapter_id=lk%2F1"
+    )
+  })
+  it.each([null, "", "javascript:alert(1)", "https://x.test/?token=x", "https://u:p@x.test"])(
+    "refuses unsafe base %s",
+    (base) => expect(buildWorkbenchUrl("lk", base)).toBeNull()
+  )
+  it("requires an adapter", () => expect(buildWorkbenchUrl("", "https://x.test")).toBeNull())
+})
 
 describe("external run details URLs", () => {
   it("preserves a deployment prefix and encodes the exact run identifier", () => {

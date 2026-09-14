@@ -23,6 +23,7 @@ import {
   decodeJwtPayload,
   getLarkWebSession,
 } from "./session"
+import type { LarkWorkbenchMode } from "../entry/deep-links"
 
 export interface ShortcutLaunch {
   triggerId?: string
@@ -152,11 +153,12 @@ export async function submitLarkIntent(
   const body = (await response.json().catch(() => ({}))) as {
     requestId?: string
     error?: string
+    code?: string
   }
   if (response.status === 202 && body.requestId) {
     return { kind: "accepted", requestId: body.requestId }
   }
-  return { kind: "error", code: body.error ?? "submit_failed" }
+  return { kind: "error", code: body.code ?? body.error ?? "submit_failed" }
 }
 
 export type LarkIntentResult =
@@ -189,15 +191,124 @@ export async function pollLarkIntent(options: PollIntentOptions): Promise<LarkIn
       { headers: { Authorization: `Bearer ${session}` } }
     ).catch(() => null)
     if (!response) continue
+    if (response.status === 401) {
+      clearLarkWebSession()
+      return { kind: "error", code: "session_expired" }
+    }
+    if (response.status === 403) return { kind: "error", code: "forbidden" }
+    if (response.status === 404) return { kind: "error", code: "intent_expired" }
     const body = (await response.json().catch(() => ({}))) as {
       status?: string
       result?: Record<string, unknown>
       error?: string
     }
-    if (body.status === "done" && body.result) return { kind: "done", result: body.result }
+    if (response.status === 200 && body.status === "done" && body.result)
+      return { kind: "done", result: body.result }
     if (body.status === "error") return { kind: "error", code: body.error ?? "intent_failed" }
   }
   return { kind: "error", code: "timeout" }
+}
+
+export interface LarkWorkbenchContext {
+  mode: Exclude<LarkWorkbenchMode, "disabled">
+  userId: string
+  accountId: string
+  serverId: string
+}
+
+export type LarkWorkbenchOutcome =
+  | { kind: "ready"; context: LarkWorkbenchContext }
+  | { kind: "login"; loginUrl: string }
+  | { kind: "error"; code: string }
+
+/** Workbench launch reuses the same SSO and intent transport as chat entries. */
+export async function resolveLarkWorkbench(
+  options: Omit<ShortcutFlowOptions, "getTriggerDetail">
+): Promise<LarkWorkbenchOutcome> {
+  captureLarkSessionFromLocation()
+  const adapterId = resolveLaunchAdapterId(parseShortcutLaunch(options.search))
+  if (!adapterId) return { kind: "error", code: "adapter_missing" }
+  const existing = getLarkWebSession()
+  if (existing && decodeJwtPayload(existing)?.adapter_id !== adapterId) clearLarkWebSession()
+  const submitted = await submitLarkIntent({
+    ...options,
+    adapterId,
+    path: "/workbench/resolve",
+    body: {},
+  })
+  if (submitted.kind !== "accepted") return submitted
+  const settled = await pollLarkIntent({ ...options, requestId: submitted.requestId })
+  if (settled.kind === "error") return settled
+  const { mode, userId, accountId, serverId } = settled.result
+  if (
+    (mode !== "personal" && mode !== "team" && mode !== "both") ||
+    typeof userId !== "string" ||
+    !userId ||
+    typeof accountId !== "string" ||
+    !accountId ||
+    typeof serverId !== "string" ||
+    !serverId
+  )
+    return { kind: "error", code: "workbench_unavailable" }
+  return { kind: "ready", context: { mode, userId, accountId, serverId } }
+}
+
+export type LarkWorkbenchAccessError =
+  | "mode_forbidden"
+  | "host_required"
+  | "host_mismatch"
+  | "team_sign_in_required"
+  | "identity_mismatch"
+  | "team_unavailable"
+
+/** Verify the paired host is the one serving this bot before opening the shared shell. */
+export async function checkLarkPersonalHost(
+  context: LarkWorkbenchContext,
+  call?: <T>(name: string) => Promise<T>
+): Promise<LarkWorkbenchAccessError | null> {
+  if (context.mode === "team") return "mode_forbidden"
+  try {
+    let invoke = call
+    if (!invoke) {
+      const { transport } = await import("@/lib/tauri")
+      invoke = <T>(name: string) => transport.call<T>(name)
+    }
+    const endpoints = await invoke<{ serverId?: string }>("companion_endpoints")
+    const manifest = await invoke<{ hostStateScope?: { accountId?: string } }>(
+      "host_feature_manifest"
+    )
+    return endpoints?.serverId === context.serverId &&
+      manifest?.hostStateScope?.accountId === context.accountId
+      ? null
+      : "host_mismatch"
+  } catch {
+    return "host_required"
+  }
+}
+
+/** Read the authorized team collection, never the owner's local project table. */
+export async function loadLarkTeamWorkspaces(
+  context: LarkWorkbenchContext,
+  resolveContext?: typeof import("@/lib/collab/runtime-client").resolveCurrentCollabContext
+): Promise<
+  | { kind: "ready"; items: Array<{ id: string; name: string }> }
+  | { kind: "error"; code: LarkWorkbenchAccessError }
+> {
+  if (context.mode === "personal") return { kind: "error", code: "mode_forbidden" }
+  try {
+    const resolve =
+      resolveContext ?? (await import("@/lib/collab/runtime-client")).resolveCurrentCollabContext
+    const current = await resolve()
+    if (!current) return { kind: "error", code: "team_sign_in_required" }
+    const membership = await current.client.myMemberships(current.orgId)
+    if (membership.userId !== context.userId || current.userId !== context.userId) {
+      return { kind: "error", code: "identity_mismatch" }
+    }
+    const workspaces = await current.client.listWorkspaces(current.orgId)
+    return { kind: "ready", items: workspaces.map(({ id, name }) => ({ id, name })) }
+  } catch {
+    return { kind: "error", code: "team_unavailable" }
+  }
 }
 
 export type ShortcutFlowOutcome =

@@ -38,6 +38,8 @@ import { handlePlusCreate } from "@/lib/connectors/adapters/lark/plus-create"
 import { runPrincipalAdminIntent } from "@/lib/connectors/principal/admin-intent"
 import { hashOpenId, resolveConnectorPrincipal } from "@/lib/connectors/principal/resolve"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
+import { readWorkbenchMode } from "./deep-links"
+import { isLarkFeatureEnabled } from "@/lib/connectors/feature-flags"
 
 export const LARK_INTENT_TOPIC = "connectors://lark-intent"
 
@@ -48,6 +50,7 @@ export interface LarkIntentFrame {
   kind?: string
   requestId?: string
   adapterId?: string
+  serverId?: string
   chatId?: string
   jti?: string
   entryType?: string
@@ -177,6 +180,73 @@ export async function handleLarkIntentFrame(
   frame: LarkIntentFrame,
   deps: LarkIntentDependencies
 ): Promise<void> {
+  if (frame.kind === "resolve_workbench") {
+    const { requestId, adapterId, verifiedIdentity } = frame
+    if (!requestId) return
+    const finish = (value: { result: Record<string, unknown> } | { error: string }) =>
+      deps.call("lark_result_complete", { requestId, ...value })
+    if (
+      !adapterId ||
+      !frame.serverId ||
+      !verifiedIdentity?.openId ||
+      !verifiedIdentity.tenantKey ||
+      !verifiedIdentity.appId
+    ) {
+      await finish({ error: "intent_malformed" })
+      return
+    }
+    try {
+      const row = await deps.getAdapter(adapterId)
+      const mode = readWorkbenchMode(row)
+      if (
+        !row ||
+        !row.enabled ||
+        row.type !== "lark" ||
+        mode === "disabled" ||
+        !isLarkFeatureEnabled("larkWebSso", row)
+      ) {
+        await finish({ error: "workbench_disabled" })
+        return
+      }
+      const credentials = await credsFor(deps, adapterId)
+      if (!credentials || credentials.appId !== verifiedIdentity.appId) {
+        await finish({ error: "principal_unbound" })
+        return
+      }
+      const resolution = await deps.resolvePrincipal({
+        platform: "lark",
+        adapterRow: row,
+        remoteUserId: verifiedIdentity.openId,
+        identityScope: { tenantKey: verifiedIdentity.tenantKey, appId: verifiedIdentity.appId },
+      })
+      await recordSessionSighting(
+        frame,
+        deps,
+        resolution.status === "resolved" ? resolution.principal.id : undefined
+      )
+      // A legacy bot is not permission to expose a person's control panel.
+      if (resolution.status !== "resolved" || !resolution.principal.cogniaUserId) {
+        await finish({
+          error:
+            resolution.status === "resolved"
+              ? "principal_unbound"
+              : `principal_${resolution.status}`,
+        })
+        return
+      }
+      await finish({
+        result: {
+          mode,
+          userId: resolution.principal.cogniaUserId,
+          accountId: resolution.accountId,
+          serverId: frame.serverId,
+        },
+      })
+    } catch {
+      await finish({ error: "workbench_unavailable" }).catch(() => undefined)
+    }
+    return
+  }
   if (frame.kind === "entry_consumed") {
     if (frame.jti) await deps.markConsumed(frame.jti)
     if (frame.adapterId) {

@@ -61,7 +61,7 @@ pub const SCOPE_SURFACE: &str = "lark_surface";
 pub const SCOPE_WEB: &str = "lark_web";
 
 const LARK_AUTHORIZE_URL: &str = "https://accounts.feishu.cn/open-apis/authen/v1/authorize";
-const LARK_TOKEN_URL: &str = "https://open.feishu.cn/open-apis/authen/v2/oauth/token";
+const LARK_TOKEN_URL: &str = "https://accounts.feishu.cn/oauth/v3/token";
 const LARK_USER_INFO_URL: &str = "https://open.feishu.cn/open-apis/authen/v1/user_info";
 
 /// Event-bus topic the headless brain subscribes to for surface resolves and
@@ -302,17 +302,48 @@ static SSO_PENDING: Lazy<Mutex<HashMap<String, SsoPending>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Clone)]
+struct IntentOwner {
+    session_jti: String,
+    adapter_id: String,
+}
+
+#[derive(Clone)]
 enum IntentState {
-    Pending { created_at_ms: i64 },
-    Done { result: Value, settled_at_ms: i64 },
-    Error { code: String, settled_at_ms: i64 },
+    Pending {
+        created_at_ms: i64,
+        owner: Option<IntentOwner>,
+    },
+    Done {
+        result: Value,
+        settled_at_ms: i64,
+        owner: Option<IntentOwner>,
+    },
+    Error {
+        code: String,
+        settled_at_ms: i64,
+        owner: Option<IntentOwner>,
+    },
 }
 
 impl IntentState {
+    fn owner(&self) -> Option<&IntentOwner> {
+        match self {
+            Self::Pending { owner, .. } | Self::Done { owner, .. } | Self::Error { owner, .. } => {
+                owner.as_ref()
+            }
+        }
+    }
+
+    fn allows_session(&self, session: &WebSessionClaims) -> bool {
+        self.owner().is_none_or(|owner| {
+            owner.session_jti == session.jti && owner.adapter_id == session.adapter_id
+        })
+    }
+
     /// The stamp `prune_intents` ages each state against.
     fn stamp(&self) -> i64 {
         match self {
-            IntentState::Pending { created_at_ms } => *created_at_ms,
+            IntentState::Pending { created_at_ms, .. } => *created_at_ms,
             IntentState::Done { settled_at_ms, .. } | IntentState::Error { settled_at_ms, .. } => {
                 *settled_at_ms
             }
@@ -358,7 +389,7 @@ fn prune_sso(now: i64) {
 fn prune_intents(now: i64) {
     let mut map = PENDING_INTENTS.lock();
     map.retain(|_, state| match state {
-        IntentState::Pending { created_at_ms } => now - *created_at_ms < INTENT_TTL_MS,
+        IntentState::Pending { created_at_ms, .. } => now - *created_at_ms < INTENT_TTL_MS,
         // Terminal results linger so a slow poller still sees them, then age
         // out like everything else.
         _ => now - state.stamp() < INTENT_TERMINAL_TTL_MS,
@@ -368,12 +399,17 @@ fn prune_intents(now: i64) {
 
 /// Register a fresh pending intent and return its id.
 pub fn register_intent() -> String {
+    register_owned_intent(None)
+}
+
+fn register_owned_intent(owner: Option<IntentOwner>) -> String {
     let id = Uuid::new_v4().to_string();
     prune_intents(now_ms());
     PENDING_INTENTS.lock().insert(
         id.clone(),
         IntentState::Pending {
             created_at_ms: now_ms(),
+            owner,
         },
     );
     id
@@ -382,19 +418,22 @@ pub fn register_intent() -> String {
 /// Brain-side completion (via the `lark_result_complete` RPC arm).
 pub fn complete_intent(request_id: &str, result: Result<Value, String>) -> bool {
     let mut map = PENDING_INTENTS.lock();
-    if !map.contains_key(request_id) {
+    let Some(existing) = map.get(request_id) else {
         return false;
-    }
+    };
+    let owner = existing.owner().cloned();
     map.insert(
         request_id.to_string(),
         match result {
             Ok(value) => IntentState::Done {
                 result: value,
                 settled_at_ms: now_ms(),
+                owner,
             },
             Err(code) => IntentState::Error {
                 code,
                 settled_at_ms: now_ms(),
+                owner,
             },
         },
     );
@@ -653,9 +692,20 @@ pub struct CallbackQuery {
 #[derive(Deserialize)]
 struct LarkTokenResponse {
     #[serde(default)]
+    code: Option<i64>,
+    #[serde(default)]
     access_token: Option<String>,
     #[serde(default)]
     error: Option<String>,
+}
+
+fn validated_access_token(status: StatusCode, response: LarkTokenResponse) -> Option<String> {
+    if !status.is_success() || response.code != Some(0) || response.error.is_some() {
+        return None;
+    }
+    response
+        .access_token
+        .filter(|token| !token.trim().is_empty())
 }
 
 #[derive(Deserialize)]
@@ -740,21 +790,19 @@ pub async fn callback_handler(
         .send()
         .await;
     let access_token = match token_resp {
-        Ok(resp) => match resp.json::<LarkTokenResponse>().await {
-            Ok(LarkTokenResponse {
-                access_token: Some(token),
-                ..
-            }) => token,
-            Ok(LarkTokenResponse { error, .. }) => {
-                tracing::warn!(target: "lark_entry", error = ?error, "lark token exchange rejected");
+        Ok(resp) => {
+            let status = resp.status();
+            let access_token = resp
+                .json::<LarkTokenResponse>()
+                .await
+                .ok()
+                .and_then(|response| validated_access_token(status, response));
+            let Some(token) = access_token else {
                 super::metrics::record_lark_counter("lark_sso_failures_total");
                 return error_json(StatusCode::BAD_GATEWAY, "sso_exchange_failed");
-            }
-            Err(_) => {
-                super::metrics::record_lark_counter("lark_sso_failures_total");
-                return error_json(StatusCode::BAD_GATEWAY, "sso_exchange_failed");
-            }
-        },
+            };
+            token
+        }
         Err(_) => {
             super::metrics::record_lark_counter("lark_sso_failures_total");
             return error_json(StatusCode::BAD_GATEWAY, "sso_exchange_failed");
@@ -956,18 +1004,16 @@ pub async fn intent_poll_handler(
     State(state): State<SharedState>,
     Path(request_id): Path<String>,
 ) -> Response {
-    // Same session requirement as resolve — intents are session-scoped work.
-    let secret = state.secret.read().clone();
-    let Some(session_token) = bearer_token(&headers) else {
-        return error_json(StatusCode::UNAUTHORIZED, "session_required");
+    let session = match require_web_session(&state, &headers) {
+        Ok(session) => session,
+        Err(response) => return response,
     };
-    let session: Result<WebSessionClaims, _> = verify_claims(&secret, &session_token);
-    if session.map(|c| c.scope) != Ok(SCOPE_WEB.to_string()) {
-        return error_json(StatusCode::UNAUTHORIZED, "session_invalid");
-    }
-
     prune_intents(now_ms());
-    let snapshot = PENDING_INTENTS.lock().get(&request_id).cloned();
+    let snapshot = PENDING_INTENTS
+        .lock()
+        .get(&request_id)
+        .cloned()
+        .filter(|intent| intent.allows_session(&session));
     match snapshot {
         None => error_json(StatusCode::NOT_FOUND, "intent_unknown"),
         Some(IntentState::Pending { .. }) => {
@@ -1007,6 +1053,43 @@ fn require_web_session(
 /// Max messages one shortcut import may carry — Lark's own message-shortcut
 /// cap (消息条数不能超过20条), enforced again brain-side.
 const SHORTCUT_IMPORT_MAX_MESSAGES: usize = 20;
+
+/// Resolve the configured workbench entry for the authenticated Feishu person.
+/// This issues no device credential or collaboration grant. The existing
+/// console retains its pairing and OIDC authorization boundaries.
+pub async fn workbench_resolve_handler(
+    State(state): State<SharedState>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    let session = match require_web_session(&state, &headers) {
+        Ok(session) => session,
+        Err(response) => return response,
+    };
+    let request_id = register_owned_intent(Some(IntentOwner {
+        session_jti: session.jti.clone(),
+        adapter_id: session.adapter_id.clone(),
+    }));
+    state.event_bus.publish(
+        LARK_INTENT_TOPIC.to_string(),
+        json!({
+            "kind": "resolve_workbench",
+            "requestId": request_id,
+            "adapterId": session.adapter_id,
+            "serverId": super::healthz::derive_server_id(&state.secret.read()),
+            "verifiedIdentity": {
+                "openId": session.oid,
+                "tenantKey": session.tk,
+                "appId": session.app,
+            },
+            "session": session_ledger(&session),
+        }),
+    );
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({ "status": "pending", "requestId": request_id })),
+    )
+        .into_response()
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1362,6 +1445,7 @@ pub fn router(state: SharedState) -> Router {
     Router::new()
         .route("/web/login", get(login_handler))
         .route("/web/callback", get(callback_handler))
+        .route("/workbench/resolve", post(workbench_resolve_handler))
         .route("/entry/resolve", post(resolve_handler))
         .route("/intent/{request_id}", get(intent_poll_handler))
         .route("/shortcut/import", post(shortcut_import_handler))
@@ -1457,6 +1541,46 @@ mod tests {
     use super::*;
 
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
+
+    #[test]
+    fn oauth_v3_accepts_only_successful_nonempty_tokens() {
+        for (status, body, expected) in [
+            (
+                StatusCode::OK,
+                json!({"code": 0, "access_token": "token"}),
+                Some("token"),
+            ),
+            (
+                StatusCode::BAD_REQUEST,
+                json!({"code": 0, "access_token": "token"}),
+                None,
+            ),
+            (
+                StatusCode::OK,
+                json!({"code": 20050, "access_token": "token"}),
+                None,
+            ),
+            (
+                StatusCode::OK,
+                json!({"code": 0, "error": "invalid_grant", "access_token": "token"}),
+                None,
+            ),
+            (StatusCode::OK, json!({"access_token": "token"}), None),
+            (StatusCode::OK, json!({"code": 0}), None),
+            (StatusCode::OK, json!({"code": 0, "access_token": ""}), None),
+            (
+                StatusCode::OK,
+                json!({"code": 0, "access_token": " \t\n"}),
+                None,
+            ),
+        ] {
+            let response = serde_json::from_value(body).expect("token response");
+            assert_eq!(
+                validated_access_token(status, response).as_deref(),
+                expected
+            );
+        }
+    }
 
     fn entry_input() -> IssueEntryInput {
         IssueEntryInput {
@@ -1585,6 +1709,109 @@ mod tests {
 
         // Unknown request ids are rejected, not created.
         assert!(!complete_intent("nope", Ok(Value::Null)));
+    }
+
+    #[tokio::test]
+    async fn workbench_route_binds_pending_and_terminal_results_to_session() {
+        use tower::ServiceExt as _;
+        let state = test_state();
+        let app = router(state.clone());
+        let session = issue_web_session(SECRET, "lk-1", "ou_alice", "tk_a", "cli_1", None).unwrap();
+        let request = |method: &str, uri: &str, token: &str| {
+            axum::http::Request::builder()
+                .method(method)
+                .uri(uri)
+                .header("authorization", format!("Bearer {token}"))
+                .body(axum::body::Body::empty())
+                .unwrap()
+        };
+        let denied = app
+            .clone()
+            .oneshot(request("POST", "/workbench/resolve", "invalid"))
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+        let response = app
+            .clone()
+            .oneshot(request("POST", "/workbench/resolve", &session))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        let id = body["requestId"].as_str().unwrap();
+        let path = format!("/intent/{id}");
+        let super::super::event_bus::SubscribeResult::Ok { replay, .. } =
+            state.event_bus.subscribe(Some(0), now_ms())
+        else {
+            panic!("event replay unavailable");
+        };
+        let event = replay
+            .iter()
+            .find(|event| event.payload["requestId"] == id)
+            .unwrap();
+        assert_eq!(event.event_type, LARK_INTENT_TOPIC);
+        assert_eq!(event.payload["kind"], "resolve_workbench");
+        assert_eq!(event.payload["adapterId"], "lk-1");
+        assert_eq!(
+            event.payload["verifiedIdentity"],
+            json!({"openId": "ou_alice", "tenantKey": "tk_a", "appId": "cli_1"})
+        );
+        assert_eq!(
+            event.payload["serverId"],
+            super::super::healthz::derive_server_id(SECRET)
+        );
+        let other = issue_web_session(SECRET, "lk-1", "ou_alice", "tk_a", "cli_1", None).unwrap();
+        let mut wrong_adapter: WebSessionClaims = verify_claims(SECRET, &session).unwrap();
+        wrong_adapter.adapter_id = "lk-2".into();
+        let wrong_adapter = sign(SECRET, &wrong_adapter).unwrap();
+        for outcome in [
+            None,
+            Some(Ok(json!({"entry": "private"}))),
+            Some(Err("denied".into())),
+        ] {
+            if let Some(outcome) = outcome {
+                assert!(complete_intent(id, outcome));
+            }
+            assert_eq!(
+                app.clone()
+                    .oneshot(request("GET", &path, &session))
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::OK
+            );
+            for token in [&other, &wrong_adapter] {
+                assert_eq!(
+                    app.clone()
+                        .oneshot(request("GET", &path, token))
+                        .await
+                        .unwrap()
+                        .status(),
+                    StatusCode::NOT_FOUND
+                );
+            }
+        }
+        // Owner metadata shares the terminal record's lifetime and cannot leak
+        // after expiration or revive when a late completion arrives.
+        if let Some(IntentState::Error { settled_at_ms, .. }) = PENDING_INTENTS.lock().get_mut(id) {
+            *settled_at_ms = now_ms() - INTENT_TERMINAL_TTL_MS;
+        }
+        prune_intents(now_ms());
+        assert!(!PENDING_INTENTS.lock().contains_key(id));
+        assert!(!complete_intent(id, Ok(Value::Null)));
+
+        let legacy = register_intent();
+        assert_eq!(
+            app.oneshot(request("GET", &format!("/intent/{legacy}"), &other))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::OK
+        );
+        PENDING_INTENTS.lock().remove(&legacy);
     }
 
     #[test]

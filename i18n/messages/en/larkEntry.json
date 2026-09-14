@@ -26,5 +26,34 @@
     "preparing": "Preparing the import…",
     "title": "Import messages"
   },
-  "title": "Cognia entry"
+  "title": "Cognia entry",
+  "workbench": {
+    "title": "Cognia workbench",
+    "description": "Open your personal console or choose a team workspace. Existing device and team permissions apply.",
+    "loading": "Verifying access…",
+    "login": "Redirecting to Feishu sign-in…",
+    "personal": "Personal console",
+    "team": "Team workspaces",
+    "retry": "Retry",
+    "devices": "Connect a device",
+    "account": "Team account",
+    "errors": {
+      "workbench_unavailable": "The workbench is unavailable. Please try again.",
+      "adapter_missing": "Open the workbench from the configured Feishu app homepage.",
+      "workbench_disabled": "This bot has not enabled the workbench and Feishu web sign-in.",
+      "principal_unbound": "Your Feishu identity is not linked to a Cognia user. Ask the administrator to link it.",
+      "principal_legacy": "This bot needs identity binding before the workbench can be used.",
+      "identity_mismatch": "Your Feishu and Cognia accounts do not match. Sign in with the linked account.",
+      "host_required": "Connect the device running this bot to open your personal console.",
+      "host_mismatch": "The connected device or profile does not match this bot. Switch to the matching device and profile.",
+      "team_sign_in_required": "Sign in to the team account before choosing a workspace.",
+      "team_unavailable": "Could not load your team workspaces. Check your team account and try again.",
+      "mode_forbidden": "This console mode is no longer enabled. Refresh the workbench.",
+      "forbidden": "You no longer have access to this workspace.",
+      "session_expired": "Your Feishu session expired. Retry to sign in again.",
+      "intent_expired": "This access check expired. Please retry.",
+      "timeout": "The bot did not answer in time. Check that it is online and retry."
+    },
+    "issues": "Open issue board"
+  }
 }
