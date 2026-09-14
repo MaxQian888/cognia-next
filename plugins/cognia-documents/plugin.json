@@ -10,7 +10,13 @@
   "license": "MIT",
   "minAppVersion": "0.1.0",
   "engines": { "cognia": ">=0.1.0" },
-  "permissions": ["artifact:read", "artifact:write", "filesystem:read", "filesystem:write"],
+  "permissions": [
+    "artifact:read",
+    "artifact:write",
+    "filesystem:read",
+    "filesystem:write",
+    "export:session"
+  ],
   "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
