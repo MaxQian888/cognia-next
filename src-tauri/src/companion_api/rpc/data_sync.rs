@@ -45,6 +45,8 @@ pub(super) const COMMANDS: &[&str] = &[
     "provider_diagnostics_history",
     "provider_diagnostics_start",
     "provider_diagnostics_cancel",
+    "session_reference_search",
+    "session_reference_snapshot",
     "connector_send",
     "connector_enqueue_outbound",
     "connector_approve_draft",
@@ -715,6 +717,11 @@ pub(super) async fn dispatch(
         | "provider_diagnostics_history"
         | "provider_diagnostics_start"
         | "provider_diagnostics_cancel"
+        // `@msg:` / `@prompt:` / `^` from a paired device, which syncs only the
+        // recent end of each conversation. Reads, answered by the host's own
+        // history search in `lib/chat/mentions/host-reference-rpc.ts`.
+        | "session_reference_search"
+        | "session_reference_snapshot"
         | "perf_close_lease"
         | "perf_hotspots"
         | "perf_lease_snapshot"

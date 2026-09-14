@@ -956,6 +956,7 @@
           }
         },
         "message": {},
+        "reference": {},
         "thread_handoff": {},
         "timeline": {},
         "transcript": {

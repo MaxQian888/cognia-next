@@ -20,6 +20,7 @@ import {
   type EntityMentionSource,
 } from "./entity-sources"
 import { invalidateEntityMentionCaches } from "./entity-cache"
+import { __setHostHistoryReferenceClientForTests } from "./host-references"
 import type { EntitySelectionKind } from "@/types/artifact/artifact"
 
 // The `@chat:` source reaches these through `await import(...)`, so the mocks
@@ -68,6 +69,11 @@ jest.mock("./prompt-reference", () => ({
   promptFingerprint: (id: string) => promptFingerprintMock(id),
 }))
 
+// Which shell this is. The history sources ask a paired host instead of this
+// database on the two companion profiles; everything else here is the host.
+let hostProfile = "web-standalone"
+jest.mock("@/lib/platform/capabilities", () => ({ detectHostProfile: () => hostProfile }))
+
 const loadNewestResultsMock = jest.fn()
 const searchResultsMock = jest.fn()
 jest.mock("@/lib/db/chat-result-index", () => ({
@@ -94,6 +100,13 @@ function fakeSource(kind: string, prefix: string): EntityMentionSource {
     search: async () => [],
     snapshot: async () => null,
   }
+}
+
+/** The candidates of one search, for the assertions that are only about them. */
+async function searchCandidates(
+  ...args: Parameters<typeof searchEntityMentionCandidates>
+): Promise<EntityMentionCandidate[]> {
+  return (await searchEntityMentionCandidates(...args)).candidates
 }
 
 function candidate(over: Partial<EntityMentionCandidate> = {}): EntityMentionCandidate {
@@ -322,27 +335,27 @@ describe("searchEntityMentionCandidates", () => {
       candidate({ id: "1", title: "alpha", searchText: "alpha" }),
       candidate({ id: "2", title: "beta", searchText: "beta" }),
     ])
-    expect((await searchEntityMentionCandidates(source, "al", {})).map((c) => c.id)).toEqual(["1"])
-    expect((await searchEntityMentionCandidates(source, "alp", {})).map((c) => c.id)).toEqual(["1"])
-    expect((await searchEntityMentionCandidates(source, "be", {})).map((c) => c.id)).toEqual(["2"])
+    expect((await searchCandidates(source, "al", {})).map((c) => c.id)).toEqual(["1"])
+    expect((await searchCandidates(source, "alp", {})).map((c) => c.id)).toEqual(["1"])
+    expect((await searchCandidates(source, "be", {})).map((c) => c.id)).toEqual(["2"])
     expect(source.calls).toBe(1)
   })
 
   it("returns everything for an empty query", async () => {
     const source = listSource([candidate({ id: "1" }), candidate({ id: "2" })])
-    expect(await searchEntityMentionCandidates(source, "", {})).toHaveLength(2)
+    expect(await searchCandidates(source, "", {})).toHaveLength(2)
   })
 
   it("matches case-insensitively", async () => {
     const source = listSource([candidate({ id: "1", searchText: "readme notes" })])
-    expect(await searchEntityMentionCandidates(source, "README", {})).toHaveLength(1)
+    expect(await searchCandidates(source, "README", {})).toHaveLength(1)
   })
 
   it("caps the offered rows at the shared limit", async () => {
     const rows = Array.from({ length: ENTITY_MENTION_RESULT_LIMIT + 5 }, (_, i) =>
       candidate({ id: String(i), searchText: "x" })
     )
-    expect(await searchEntityMentionCandidates(listSource(rows), "x", {})).toHaveLength(
+    expect(await searchCandidates(listSource(rows), "x", {})).toHaveLength(
       ENTITY_MENTION_RESULT_LIMIT
     )
   })
@@ -355,10 +368,29 @@ describe("searchEntityMentionCandidates", () => {
       search,
       snapshot: async () => null,
     }
-    expect((await searchEntityMentionCandidates(source, "q", {})).map((c) => c.id)).toEqual([
-      "engine",
-    ])
+    expect((await searchCandidates(source, "q", {})).map((c) => c.id)).toEqual(["engine"])
     expect(search).toHaveBeenCalledWith("q", {})
+  })
+
+  it("keeps what a source says about where its answer came from", async () => {
+    const source: EntityMentionSource = {
+      entityKind: "message",
+      prefix: "msg:",
+      search: async () => ({ candidates: [candidate({ id: "copy" })], reach: "device-copy" }),
+      snapshot: async () => null,
+    }
+    await expect(searchEntityMentionCandidates(source, "q", {})).resolves.toEqual({
+      candidates: [candidate({ id: "copy" })],
+      reach: "device-copy",
+    })
+    // A bare list and a load-backed source carry no such claim.
+    const bare: EntityMentionSource = { ...source, search: async () => [candidate()] }
+    expect(await searchEntityMentionCandidates(bare, "q", {})).toEqual({
+      candidates: [candidate()],
+    })
+    expect(
+      await searchEntityMentionCandidates(listSource([candidate({ searchText: "q" })]), "q", {})
+    ).toEqual({ candidates: [candidate({ searchText: "q" })] })
   })
 })
 
@@ -393,7 +425,7 @@ describe("@chat: candidates", () => {
 
   async function chatCandidates(ctx: Parameters<typeof searchEntityMentionCandidates>[2]) {
     const source = getEntityMentionSourceByPrefix("chat:")!
-    return searchEntityMentionCandidates(source, "", ctx)
+    return searchCandidates(source, "", ctx)
   }
 
   // A subagent's inner transcript, a workbench aside and a workflow-editor
@@ -458,7 +490,7 @@ describe("@teammate: candidates", () => {
    * prompt, so `@teammate:Reviewer` means "answer the way the reviewer would".
    */
   it("offers the roster with its Squad on the second line", async () => {
-    const rows = await searchEntityMentionCandidates(source(), "", { projectId: "p" })
+    const rows = await searchCandidates(source(), "", { projectId: "p" })
     expect(rows).toEqual([
       expect.objectContaining({
         entityKind: "teammate",
@@ -482,13 +514,13 @@ describe("@teammate: candidates", () => {
       m2: mate({ id: "m2", teamId: "shared" }),
       m3: mate({ id: "m3", teamId: "other" }),
     }
-    const rows = await searchEntityMentionCandidates(source(), "", { projectId: "p" })
+    const rows = await searchCandidates(source(), "", { projectId: "p" })
     expect(rows.map((r) => r.id).sort()).toEqual(["m1", "m2"])
   })
 
   it("drops a teammate whose Squad is gone", async () => {
     agentTeamState.teams = {}
-    expect(await searchEntityMentionCandidates(source(), "", {})).toEqual([])
+    expect(await searchCandidates(source(), "", {})).toEqual([])
   })
 
   it("snapshots what the teammate is, longest field last", async () => {
@@ -559,7 +591,7 @@ describe("@msg: candidates", () => {
   // its TITLE, and the tuned cross-conversation index was already there.
   it("searches message CONTENT through the ADR-0099 engine", async () => {
     searchChatHistoryMock.mockResolvedValue({ results: [hit()], moreOlderHistory: false })
-    const rows = await searchEntityMentionCandidates(source(), "restack", { projectId: "p" })
+    const rows = await searchCandidates(source(), "restack", { projectId: "p" })
     expect(searchChatHistoryMock).toHaveBeenCalledWith(
       expect.objectContaining({ query: "restack", projectId: "p", collapseBySession: false }),
       expect.objectContaining({ pendingRows: expect.any(Function) })
@@ -569,14 +601,14 @@ describe("@msg: candidates", () => {
 
   it("identifies a candidate by conversation AND message", async () => {
     searchChatHistoryMock.mockResolvedValue({ results: [hit()], moreOlderHistory: false })
-    const [row] = await searchEntityMentionCandidates(source(), "restack", {})
+    const [row] = await searchCandidates(source(), "restack", {})
     expect(row.id).toBe("s1#m1")
     expect(row.entityKind).toBe("message")
   })
 
   it("titles the row by conversation and subtitles it with the excerpt", async () => {
     searchChatHistoryMock.mockResolvedValue({ results: [hit()], moreOlderHistory: false })
-    const [row] = await searchEntityMentionCandidates(source(), "restack", {})
+    const [row] = await searchCandidates(source(), "restack", {})
     expect(row.title).toBe("Restacking")
     expect(row.subtitle).toContain("assistant")
     expect(row.subtitle).toContain("run /stack restack")
@@ -585,14 +617,14 @@ describe("@msg: candidates", () => {
   // A conversation link would land on the tail; the reference is to one turn.
   it("links to the message permalink, not to the conversation", async () => {
     searchChatHistoryMock.mockResolvedValue({ results: [hit()], moreOlderHistory: false })
-    const [row] = await searchEntityMentionCandidates(source(), "restack", {})
+    const [row] = await searchCandidates(source(), "restack", {})
     expect(row.href).toBe("/?session=s1&message=m1")
   })
 
   // Below the floor the engine would scan the whole resident haystack for one
   // letter — the same floor ⌘K applies.
   it("does not reach the engine for a one-character query", async () => {
-    expect(await searchEntityMentionCandidates(source(), "r", {})).toEqual([])
+    expect(await searchCandidates(source(), "r", {})).toEqual([])
     expect(searchChatHistoryMock).not.toHaveBeenCalled()
   })
 
@@ -603,7 +635,7 @@ describe("@msg: candidates", () => {
       { messageId: "m9", sessionId: "s9", projectId: "p", role: "user", createdAt: 0, text: "hi" },
     ])
     bulkGetMock.mockResolvedValue([{ id: "s9", title: "Nine" }])
-    const rows = await searchEntityMentionCandidates(source(), "", {})
+    const rows = await searchCandidates(source(), "", {})
     expect(searchChatHistoryMock).not.toHaveBeenCalled()
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ id: "s9#m9", title: "Nine" })
@@ -617,7 +649,7 @@ describe("@msg: candidates", () => {
       { messageId: "c", sessionId: "sc", projectId: "", role: "user", createdAt: 0, text: "x" },
     ])
     bulkGetMock.mockImplementation(async (ids: string[]) => ids.map((id) => ({ id, title: id })))
-    const rows = await searchEntityMentionCandidates(source(), "", { projectId: "p" })
+    const rows = await searchCandidates(source(), "", { projectId: "p" })
     expect(rows.map((r) => r.id)).toEqual(["sa#a", "sc#c"])
   })
 
@@ -626,7 +658,7 @@ describe("@msg: candidates", () => {
       { messageId: "m", sessionId: "s", projectId: "", role: "user", createdAt: 0, text: "x" },
     ])
     bulkGetMock.mockResolvedValue([{ id: "s", title: "" }])
-    const [row] = await searchEntityMentionCandidates(source(), "", {})
+    const [row] = await searchCandidates(source(), "", {})
     expect(row.title).toBe("s")
   })
 
@@ -649,20 +681,20 @@ describe("@msg: candidates", () => {
       { id: "aside", title: "Aside", kind: "subagent", parentSessionId: "live" },
       { id: "old", title: "Old", archivedAt: 5 },
     ])
-    const rows = await searchEntityMentionCandidates(source(), "", {})
+    const rows = await searchCandidates(source(), "", {})
     expect(rows.map((r) => r.id)).toEqual(["live#m-live"])
   })
 
   // What `^` and `@msg:` read trails persistence by an idle drain; the message
   // the user just saw must be pickable now.
   it("flushes the index queue, without a backfill step, before reading", async () => {
-    await searchEntityMentionCandidates(source(), "", {})
+    await searchCandidates(source(), "", {})
     expect(drainMock).toHaveBeenCalledWith(undefined, { backfill: false })
   })
 
   it("carries the owning conversation onto the candidate", async () => {
     searchChatHistoryMock.mockResolvedValue({ results: [hit()], moreOlderHistory: false })
-    const [row] = await searchEntityMentionCandidates(source(), "restack", {})
+    const [row] = await searchCandidates(source(), "restack", {})
     expect(row.sourceSessionId).toBe("s1")
   })
 
@@ -671,7 +703,7 @@ describe("@msg: candidates", () => {
       results: Array.from({ length: 30 }, (_, i) => hit({ messageId: `m${i}` })),
       moreOlderHistory: false,
     })
-    const rows = await searchEntityMentionCandidates(source(), "restack", {})
+    const rows = await searchCandidates(source(), "restack", {})
     expect(searchChatHistoryMock.mock.calls[0][0].limit).toBe(ENTITY_MENTION_RESULT_LIMIT)
     expect(rows).toHaveLength(30)
   })
@@ -691,7 +723,7 @@ describe("@prompt: source", () => {
   it("hands the query and the composer's place to the prompt module", async () => {
     const row = candidate({ entityKind: "prompt", id: "s1#m1", insertText: "ship it" })
     searchOwnPromptsMock.mockResolvedValue([row])
-    await expect(source().search!("deploy", ctx)).resolves.toEqual([row])
+    await expect(source().search!("deploy", ctx)).resolves.toEqual({ candidates: [row] })
     expect(searchOwnPromptsMock).toHaveBeenCalledWith("deploy", ctx)
   })
 
@@ -702,7 +734,7 @@ describe("@prompt: source", () => {
   })
 
   it("does not search on a one-character query", async () => {
-    await expect(source().search!("d", ctx)).resolves.toEqual([])
+    await expect(source().search!("d", ctx)).resolves.toEqual({ candidates: [] })
     expect(searchOwnPromptsMock).not.toHaveBeenCalled()
     expect(drainMock).not.toHaveBeenCalled()
   })
@@ -775,7 +807,7 @@ describe("@result: candidates", () => {
       { id: "s2", title: "Two", kind: "subagent", parentSessionId: "s1" },
       { id: "s3", title: "Three", archivedAt: 1 },
     ])
-    const rows = await searchEntityMentionCandidates(source(), "", {})
+    const rows = await searchCandidates(source(), "", {})
     expect(rows.map((r) => r.id)).toEqual(["keep"])
     expect(rows[0].sourceSessionId).toBe("s1")
   })
@@ -783,7 +815,7 @@ describe("@result: candidates", () => {
   // The empty query IS the `^` case: the most recent results, by index walk.
   it("lists the newest results for an empty query", async () => {
     loadNewestResultsMock.mockResolvedValue([resultRow()])
-    const rows = await searchEntityMentionCandidates(source(), "", {})
+    const rows = await searchCandidates(source(), "", {})
     expect(loadNewestResultsMock).toHaveBeenCalled()
     expect(searchResultsMock).not.toHaveBeenCalled()
     expect(rows[0]).toMatchObject({ entityKind: "result", id: "m1:1", title: "/tmp/a.txt" })
@@ -791,7 +823,7 @@ describe("@result: candidates", () => {
 
   it("searches the index for a non-empty query", async () => {
     searchResultsMock.mockResolvedValue([resultRow()])
-    await searchEntityMentionCandidates(source(), "grep", {})
+    await searchCandidates(source(), "grep", {})
     expect(searchResultsMock).toHaveBeenCalledWith("grep", expect.any(Number))
     expect(loadNewestResultsMock).not.toHaveBeenCalled()
   })
@@ -800,7 +832,7 @@ describe("@result: candidates", () => {
   // command look identical without it.
   it("says the tool, the size and the excerpt on the row", async () => {
     loadNewestResultsMock.mockResolvedValue([resultRow()])
-    const [row] = await searchEntityMentionCandidates(source(), "", {})
+    const [row] = await searchCandidates(source(), "", {})
     expect(row.subtitle).toContain("Read")
     expect(row.subtitle).toContain("2.4 kB")
     expect(row.subtitle).toContain("the file body")
@@ -808,7 +840,7 @@ describe("@result: candidates", () => {
 
   it("links back to the message that produced it", async () => {
     loadNewestResultsMock.mockResolvedValue([resultRow()])
-    const [row] = await searchEntityMentionCandidates(source(), "", {})
+    const [row] = await searchCandidates(source(), "", {})
     expect(row.href).toBe("/?session=s1&message=m1")
   })
 
@@ -818,7 +850,7 @@ describe("@result: candidates", () => {
       resultRow({ resultId: "b", projectId: "q" }),
       resultRow({ resultId: "c", projectId: "" }),
     ])
-    const rows = await searchEntityMentionCandidates(source(), "", { projectId: "p" })
+    const rows = await searchCandidates(source(), "", { projectId: "p" })
     expect(rows.map((r) => r.id)).toEqual(["a", "c"])
   })
 
@@ -826,9 +858,7 @@ describe("@result: candidates", () => {
     loadNewestResultsMock.mockResolvedValue(
       Array.from({ length: 40 }, (_, i) => resultRow({ resultId: `r${i}` }))
     )
-    expect(await searchEntityMentionCandidates(source(), "", {})).toHaveLength(
-      ENTITY_MENTION_RESULT_LIMIT
-    )
+    expect(await searchCandidates(source(), "", {})).toHaveLength(ENTITY_MENTION_RESULT_LIMIT)
   })
 })
 
@@ -868,5 +898,85 @@ describe("shortcut characters", () => {
 
   it("allows a source with no shortcut at all", () => {
     expect(() => registerEntityMentionSource(fakeSource("custom", "custom:"))).not.toThrow()
+  })
+})
+
+describe("history sources on a paired device", () => {
+  const host = {
+    search: jest.fn(),
+    read: jest.fn(),
+    fingerprint: jest.fn(),
+  }
+
+  beforeEach(() => {
+    hostProfile = "mobile-companion"
+    host.search
+      .mockReset()
+      .mockImplementation(async (kind: string) => [
+        candidate({ entityKind: kind as EntitySelectionKind, id: `host-${kind}` }),
+      ])
+    host.read.mockReset().mockImplementation(async (_kind: string, id: string) => ({
+      id,
+      fingerprint: "host-fp",
+      body: `host body of ${id}`,
+    }))
+    host.fingerprint.mockReset().mockResolvedValue("host-fp")
+    __setHostHistoryReferenceClientForTests(host)
+    searchChatHistoryMock.mockReset()
+    searchOwnPromptsMock.mockReset()
+    searchResultsMock.mockReset()
+    loadNewestMock.mockReset()
+    loadNewestResultsMock.mockReset()
+    promptReferenceTextMock.mockReset()
+    promptFingerprintMock.mockReset()
+  })
+
+  afterEach(() => {
+    hostProfile = "web-standalone"
+    __setHostHistoryReferenceClientForTests(null)
+  })
+
+  // The fragment a phone syncs is not where `@msg:` has to look; the host is.
+  it.each([
+    ["msg:", "message"],
+    ["prompt:", "prompt"],
+    ["result:", "result"],
+  ] as const)("%s asks the host and never reads the copy", async (prefix, kind) => {
+    const source = getEntityMentionSourceByPrefix(prefix)!
+    const ctx = { projectId: "p", sessionId: "s" }
+    await expect(searchEntityMentionCandidates(source, "deploy", ctx)).resolves.toEqual({
+      candidates: [candidate({ entityKind: kind, id: `host-${kind}` })],
+    })
+    expect(host.search).toHaveBeenCalledWith(kind, "deploy", ctx)
+
+    const picked = candidate({ entityKind: kind, id: "s1#m1" })
+    await expect(source.snapshot(picked)).resolves.toBe("host body of s1#m1")
+    await expect(source.fingerprint!(picked)).resolves.toBe("host-fp")
+    expect(host.read).toHaveBeenCalledWith(kind, "s1#m1")
+    expect(host.fingerprint).toHaveBeenCalledWith(kind, "s1#m1")
+
+    expect(searchChatHistoryMock).not.toHaveBeenCalled()
+    expect(searchOwnPromptsMock).not.toHaveBeenCalled()
+    expect(searchResultsMock).not.toHaveBeenCalled()
+    expect(loadNewestMock).not.toHaveBeenCalled()
+    expect(loadNewestResultsMock).not.toHaveBeenCalled()
+    expect(promptReferenceTextMock).not.toHaveBeenCalled()
+    expect(promptFingerprintMock).not.toHaveBeenCalled()
+  })
+
+  it("marks a list read from the copy when the host cannot answer", async () => {
+    host.search.mockRejectedValue(new Error("offline"))
+    const row = candidate({ entityKind: "prompt", id: "s1#m1" })
+    searchOwnPromptsMock.mockResolvedValue([row])
+    await expect(
+      searchEntityMentionCandidates(getEntityMentionSourceByPrefix("prompt:")!, "deploy", {})
+    ).resolves.toEqual({ candidates: [row], reach: "device-copy" })
+  })
+
+  it("leaves every other source on this device's database", async () => {
+    listSessionsMock.mockResolvedValue([{ id: "s", title: "T", updatedAt: 0 }])
+    await searchEntityMentionCandidates(getEntityMentionSourceByPrefix("chat:")!, "", {})
+    expect(listSessionsMock).toHaveBeenCalled()
+    expect(host.search).not.toHaveBeenCalled()
   })
 })

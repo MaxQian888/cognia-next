@@ -64,6 +64,10 @@ jest.mock("@/lib/data/build-package", () => ({
 jest.mock("@/lib/data/apply-package", () => ({
   applyBackupPackage: jest.fn(async () => ({ applied: true })),
 }))
+jest.mock("@/lib/chat/mentions/host-reference-rpc", () => ({
+  sessionReferenceSearch: jest.fn(async () => ({ candidates: [] })),
+  sessionReferenceSnapshot: jest.fn(async () => ({ records: [] })),
+}))
 
 import { dispatchCommand } from "./desktop-write-source"
 
@@ -79,6 +83,10 @@ const cancelRegistry = jest.requireMock("@/lib/workflow/runtime/run-cancel-regis
 const twinJobs = jest.requireMock("@/lib/db/twin-jobs") as Record<string, jest.Mock>
 const buildPkg = jest.requireMock("@/lib/data/build-package") as Record<string, jest.Mock>
 const applyPkg = jest.requireMock("@/lib/data/apply-package") as Record<string, jest.Mock>
+const references = jest.requireMock("@/lib/chat/mentions/host-reference-rpc") as Record<
+  string,
+  jest.Mock
+>
 
 beforeEach(() => jest.clearAllMocks())
 
@@ -267,5 +275,21 @@ describe("dispatchCommand: settings + backup", () => {
     )
     expect(res.summary).toEqual({ applied: true })
     await expect(dispatchCommand("backup_import", {})).rejects.toThrow(/package is required/)
+  })
+})
+
+describe("dispatchCommand: history references", () => {
+  it("hands both reference commands their payload untouched", async () => {
+    const search = { kind: "message", query: "deploy", projectId: "p1" }
+    await expect(dispatchCommand("session_reference_search", search)).resolves.toEqual({
+      candidates: [],
+    })
+    expect(references.sessionReferenceSearch).toHaveBeenCalledWith(search)
+
+    const snapshot = { kind: "result", ids: ["m1:0"], withBody: true }
+    await expect(dispatchCommand("session_reference_snapshot", snapshot)).resolves.toEqual({
+      records: [],
+    })
+    expect(references.sessionReferenceSnapshot).toHaveBeenCalledWith(snapshot)
   })
 })

@@ -10816,6 +10816,71 @@
     "session_list": {
       "$ref": "#/$defs/SessionPage"
     },
+    "session_reference_search": {
+      "type": "object",
+      "x-cognia-wire-source": "lib/chat/mentions/host-reference-rpc.ts sessionReferenceSearch",
+      "required": ["candidates"],
+      "properties": {
+        "candidates": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "type": "object",
+            "required": ["id", "title"],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "subtitle": {
+                "type": "string"
+              },
+              "href": {
+                "type": "string"
+              },
+              "sourceSessionId": {
+                "type": "string"
+              },
+              "insertText": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "session_reference_snapshot": {
+      "type": "object",
+      "x-cognia-wire-source": "lib/chat/mentions/host-reference-rpc.ts sessionReferenceSnapshot",
+      "required": ["records"],
+      "properties": {
+        "records": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "required": ["id", "fingerprint"],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "fingerprint": {
+                "type": ["string", "null"]
+              },
+              "body": {
+                "type": ["string", "null"]
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "session_timeline": {
       "$ref": "#/$defs/SessionTimelinePage"
     },

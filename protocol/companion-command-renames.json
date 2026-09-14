@@ -2978,6 +2978,12 @@
     "session_list": {
       "to": "session.list"
     },
+    "session_reference_search": {
+      "to": "session.reference.search"
+    },
+    "session_reference_snapshot": {
+      "to": "session.reference.snapshot"
+    },
     "session_timeline": {
       "to": "session.timeline.get"
     },

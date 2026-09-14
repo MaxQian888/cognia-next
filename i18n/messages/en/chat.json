@@ -536,6 +536,7 @@
         "workflow": "Workflow"
       },
       "comingSoon": "Coming soon",
+      "entityDeviceCopy": "Couldn’t reach your host, so this list covers only what this device has synced — the recent part of each conversation.",
       "entityEmpty": "“{title}” has nothing to read — it may have been deleted.",
       "entityFailed": "Could not read “{title}”: {reason}",
       "entityInsertAction": "Put “{title}” back in the message",

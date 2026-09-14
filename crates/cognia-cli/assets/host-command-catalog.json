@@ -39497,6 +39497,181 @@
       "outputTyped": true
     },
     {
+      "name": "session_reference_search",
+      "category": "sessions",
+      "resource": "session",
+      "target": "execution",
+      "operation": "read",
+      "capability": "client.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "session_reference_search (client.read)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "message",
+              "prompt",
+              "result"
+            ]
+          },
+          "query": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "projectId": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "sessionId": {
+            "type": "string",
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "kind",
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "lib/chat/mentions/host-reference-rpc.ts sessionReferenceSearch",
+        "required": [
+          "candidates"
+        ],
+        "properties": {
+          "candidates": {
+            "type": "array",
+            "maxItems": 12,
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "title"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "subtitle": {
+                  "type": "string"
+                },
+                "href": {
+                  "type": "string"
+                },
+                "sourceSessionId": {
+                  "type": "string"
+                },
+                "insertText": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "session_reference_snapshot",
+      "category": "sessions",
+      "resource": "session",
+      "target": "execution",
+      "operation": "read",
+      "capability": "client.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "session_reference_snapshot (client.read)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "message",
+              "prompt",
+              "result"
+            ]
+          },
+          "ids": {
+            "minItems": 1,
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            }
+          },
+          "withBody": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "ids",
+          "withBody"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "lib/chat/mentions/host-reference-rpc.ts sessionReferenceSnapshot",
+        "required": [
+          "records"
+        ],
+        "properties": {
+          "records": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "fingerprint"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "fingerprint": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "body": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "session_timeline",
       "category": "sessions",
       "resource": "session",
@@ -60238,5 +60413,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "afc0862b4063d378c1a6d98f8341b0bdf322d1f075246a6bfa7e292fb8c5f402"
+  "catalogHash": "2413274247bb5c6ba71300ffa1c31107e95d2d70b9a2fcbcfe2bc236336f95ff"
 }

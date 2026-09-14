@@ -30,6 +30,7 @@ import {
   BookMarkedIcon,
   BoxIcon,
   CloudIcon,
+  CloudOffIcon,
   BrainIcon,
   CircleDotIcon,
   CircleHelpIcon,
@@ -1010,6 +1011,9 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
           </ul>
         )}
         {trigger?.kind === "bash" ? <BashHint query={trigger.query} /> : null}
+        {trigger?.kind === "entity" && entitySearch.reach === "device-copy" ? (
+          <EntityDeviceCopyNotice />
+        ) : null}
         {trigger?.kind === "entity" && offersInsertText ? <EntityInsertHint /> : null}
         {trigger?.kind === "doc" && docSearch.hostSupported && docSearch.accounts?.length ? (
           <div className="flex items-center gap-2 border-t bg-muted/15 px-3 py-2 text-[11px] leading-4 text-muted-foreground">
@@ -1553,6 +1557,25 @@ function BashHint({ query }: { query: string }) {
       <code className="block truncate rounded bg-muted px-2 py-1 font-mono text-xs">
         $ {query || t("bashEmpty")}
       </code>
+    </div>
+  )
+}
+
+/**
+ * History on a paired device is asked of the host; when the host could not
+ * answer, the list came from the fragment synced here and must say so — a
+ * missing match there is not evidence the thing was never said.
+ */
+function EntityDeviceCopyNotice() {
+  const t = useTranslations("chat.composer.popover")
+  return (
+    <div
+      className="flex items-start gap-2 border-t bg-muted/15 px-3 py-2 text-[11px] leading-4 text-muted-foreground"
+      data-testid="composer-entity-device-copy"
+      role="status"
+    >
+      <CloudOffIcon aria-hidden className="mt-px size-3.5 shrink-0" />
+      <span>{t("entityDeviceCopy")}</span>
     </div>
   )
 }

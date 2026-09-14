@@ -5,9 +5,11 @@
  * `@chat:` / `@artifact:` panel.
  *
  * Deliberately much thinner than `use-remote-doc-search.ts`: every source here
- * is local, so there is no account to pick, no host to be unsupported on, and
- * no network error taxonomy. What is left is a debounced call and the
- * discipline of not letting a stale response overwrite a newer one.
+ * reads this app's own records, so there is no account to pick, no host to be
+ * unsupported on, and no network error taxonomy. What is left is a debounced
+ * call and the discipline of not letting a stale response overwrite a newer
+ * one. The one network leg — history on a paired device, asked of its host —
+ * reports back only whether it had to settle for the device's copy.
  *
  * The debounce is shorter than the document one (which crosses a network) but
  * non-zero all the same — the memory and issue sources read whole tables and
@@ -22,6 +24,7 @@ import {
   searchEntityMentionCandidates,
   type EntityMentionCandidate,
   type EntityMentionContext,
+  type EntityMentionSearchPage,
   type EntityMentionSource,
 } from "@/lib/chat/mentions/entity-sources"
 
@@ -43,6 +46,8 @@ export interface EntityMentionSearchState {
   loading: boolean
   /** Message from a failed read; the panel shows it instead of "no matches". */
   error: string | null
+  /** Where the listed candidates came from, when that is not the whole story. */
+  reach: EntityMentionSearchPage["reach"] | null
 }
 
 export function useEntityMentionSearch({
@@ -57,6 +62,7 @@ export function useEntityMentionSearch({
   const [items, setItems] = useState<readonly EntityMentionCandidate[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [reach, setReach] = useState<EntityMentionSearchState["reach"]>(null)
   // Which source the last effect run was for, so opening the panel (or
   // switching namespace inside it) can drop the candidate caches exactly once.
   const lastSourceRef = useRef<EntityMentionSource | null>(null)
@@ -74,6 +80,7 @@ export function useEntityMentionSearch({
       setItems([])
       setLoading(false)
       setError(null)
+      setReach(null)
       return
     }
     // The panel just opened on this source. Drop the cached candidate lists,
@@ -89,9 +96,10 @@ export function useEntityMentionSearch({
     setError(null)
     const handle = window.setTimeout(() => {
       void searchEntityMentionCandidates(source, query.trim(), { projectId, sessionId })
-        .then((results) => {
+        .then((page) => {
           if (cancelled) return
-          setItems(results)
+          setItems(page.candidates)
+          setReach(page.reach ?? null)
           setLoading(false)
         })
         .catch((err: unknown) => {
@@ -101,6 +109,7 @@ export function useEntityMentionSearch({
             err: err instanceof Error ? err.message : String(err),
           })
           setItems([])
+          setReach(null)
           setError(err instanceof Error ? err.message : String(err))
           setLoading(false)
         })
@@ -117,5 +126,8 @@ export function useEntityMentionSearch({
   // whose dependency array holds this object, so a fresh identity every render
   // rebuilt the whole list each frame and reset the keyboard highlight
   // mid-typing.
-  return useMemo(() => ({ source, items, loading, error }), [source, items, loading, error])
+  return useMemo(
+    () => ({ source, items, loading, error, reach }),
+    [source, items, loading, error, reach]
+  )
 }

@@ -44,7 +44,7 @@ beforeEach(() => {
   jest.mocked(searchWorkspace).mockReset()
   jest
     .mocked(useEntityMentionSearch)
-    .mockReturnValue({ source: null, items: [], loading: false, error: null })
+    .mockReturnValue({ source: null, items: [], loading: false, error: null, reach: null })
 })
 
 // Stable `t` per the real next-intl contract (its `t` identity is memoized).
@@ -286,6 +286,7 @@ describe("ComposerPopover — reference modes", () => {
       items: [candidate],
       loading: false,
       error: null,
+      reach: null,
     }
     jest.mocked(useEntityMentionSearch).mockReturnValue(state)
     const view = mount("entity")
@@ -297,6 +298,38 @@ describe("ComposerPopover — reference modes", () => {
       .mockReturnValue({ ...state, items: [], error: "Read failed" })
     mount("entity", {}, "missing")
     expect(screen.getByText("Read failed")).toBeInTheDocument()
+  })
+
+  it("says when the history list came from this device's copy instead of the host", () => {
+    const candidate = {
+      entityKind: "message" as const,
+      id: "s1#m1",
+      title: "Release prep",
+      searchText: "release prep",
+    }
+    const state = {
+      source: { entityKind: "message" as const, prefix: "msg:", snapshot: jest.fn() },
+      items: [candidate],
+      loading: false,
+      error: null,
+      reach: "device-copy" as const,
+    }
+    jest.mocked(useEntityMentionSearch).mockReturnValue(state)
+    const view = mount("entity")
+    expect(screen.getByTestId("composer-entity-device-copy")).toHaveTextContent("entityDeviceCopy")
+    // Still pickable: the copy is real, only partial.
+    fireEvent.mouseDown(screen.getByText("Release prep").closest("li")!)
+    expect(view.onPick).toHaveBeenCalledWith({ kind: "entity", candidate })
+    view.unmount()
+
+    jest.mocked(useEntityMentionSearch).mockReturnValue({ ...state, items: [] })
+    const empty = mount("entity", {}, "older")
+    expect(screen.getByTestId("composer-entity-device-copy")).toBeInTheDocument()
+    empty.unmount()
+
+    jest.mocked(useEntityMentionSearch).mockReturnValue({ ...state, reach: null })
+    mount("entity")
+    expect(screen.queryByTestId("composer-entity-device-copy")).toBeNull()
   })
 })
 
@@ -670,6 +703,7 @@ describe("ComposerPopover — a record taken as text", () => {
       items,
       loading: false,
       error: null,
+      reach: null,
     })
     return setup({ kind: "entity", namespace: "prompt:", query: "", tokenStart: 0, tokenEnd: 8 })
   }

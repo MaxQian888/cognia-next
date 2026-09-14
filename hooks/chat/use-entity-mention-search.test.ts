@@ -133,6 +133,38 @@ describe("useEntityMentionSearch", () => {
     await waitFor(() => expect(result.current.error).toBeNull())
   })
 
+  it("says when a source answered from this device's copy, and forgets it on the next answer", async () => {
+    search.mockResolvedValueOnce({ candidates: [candidate("a")], reach: "device-copy" })
+    const { result, rerender } = renderHook(
+      ({ query }) => useEntityMentionSearch({ namespace: "custom:", query, context: {} }),
+      { initialProps: { query: "a" } }
+    )
+    expect(result.current.reach).toBeNull()
+    await flushDebounce()
+    await waitFor(() => expect(result.current.reach).toBe("device-copy"))
+    expect(result.current.items).toEqual([candidate("a")])
+
+    rerender({ query: "b" })
+    await flushDebounce()
+    await waitFor(() => expect(result.current.reach).toBeNull())
+    expect(result.current.items).toEqual([candidate("a")])
+  })
+
+  it("drops the device-copy notice when the next read fails outright", async () => {
+    search.mockResolvedValueOnce({ candidates: [candidate("a")], reach: "device-copy" })
+    const { result, rerender } = renderHook(
+      ({ query }) => useEntityMentionSearch({ namespace: "custom:", query, context: {} }),
+      { initialProps: { query: "a" } }
+    )
+    await flushDebounce()
+    await waitFor(() => expect(result.current.reach).toBe("device-copy"))
+    search.mockRejectedValueOnce(new Error("db closed"))
+    rerender({ query: "b" })
+    await flushDebounce()
+    await waitFor(() => expect(result.current.error).toBe("db closed"))
+    expect(result.current.reach).toBeNull()
+  })
+
   it("reports no source for an unregistered prefix", () => {
     const { result } = renderHook(() =>
       useEntityMentionSearch({ namespace: "nope:", query: "a", context: {} })

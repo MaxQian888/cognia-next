@@ -588,6 +588,10 @@ const KNOWN_COMMANDS: &[&str] = &[
     "provider_diagnostics_history",
     "provider_diagnostics_start",
     "provider_diagnostics_cancel",
+    // `@msg:` / `@prompt:` / `^` from a paired device — reads answered through
+    // desktop_writes_bridge by the host's own history search.
+    "session_reference_search",
+    "session_reference_snapshot",
     // ADR-0056 Wave 4 — external-agent config (Zustand/localStorage on the
     // desktop, not Dexie). `external_agent_list` is a read-only projection;
     // `external_agent_update` (enable/disable + permission mode) round-trips
@@ -1438,6 +1442,8 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "host_state_status",
     "provider_diagnostics_status",
     "provider_diagnostics_history",
+    "session_reference_search",
+    "session_reference_snapshot",
     "scheduled_task_list",
     "scheduled_task_get",
     "scheduled_task_runs",

@@ -282,6 +282,8 @@ mod tests {
         ("provider_diagnostics_history", OutputShape::Declared(RootType::Object)),
         ("provider_diagnostics_start", OutputShape::Opaque(RootType::Object)),
         ("provider_diagnostics_cancel", OutputShape::Opaque(RootType::Any)),
+        ("session_reference_search", OutputShape::Declared(RootType::Object)),
+        ("session_reference_snapshot", OutputShape::Declared(RootType::Object)),
         ("connector_send", OutputShape::Opaque(RootType::Object)),
         ("connector_enqueue_outbound", OutputShape::Declared(RootType::Object)),
         ("connector_approve_draft", OutputShape::Opaque(RootType::Any)),

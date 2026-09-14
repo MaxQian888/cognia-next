@@ -3,6 +3,7 @@ import { z } from "zod"
 const stringArray = z.array(z.string())
 const emptyRequest = z.object({})
 const browserSession = z.object({ browserSessionId: z.string().min(1) })
+const historyReferenceKind = z.enum(["message", "prompt", "result"])
 
 const browserWaitOptions = z.object({
   mode: z.enum(["appear", "disappear"]).optional(),
@@ -492,6 +493,21 @@ const schemas = {
     confirmedMaxEstimatedCostUsd: z.number().nonnegative(),
   }),
   provider_diagnostics_cancel: z.object({ jobId: z.string().min(1) }),
+
+  // `@msg:` / `@prompt:` / `^` from a paired device, answered with the host's
+  // own history reads (lib/chat/mentions/host-reference-rpc.ts). The bounds are
+  // the ones that module parses against.
+  session_reference_search: z.object({
+    kind: historyReferenceKind,
+    query: z.string().max(500),
+    projectId: z.string().max(1000).optional(),
+    sessionId: z.string().max(1000).optional(),
+  }),
+  session_reference_snapshot: z.object({
+    kind: historyReferenceKind,
+    ids: z.array(z.string().min(1).max(1000)).min(1).max(50),
+    withBody: z.boolean(),
+  }),
 
   // `generation` is required by both arms (rpc/plugins.rs) so the host can
   // reject a call aimed at a since-reloaded Python runtime. It was declared in

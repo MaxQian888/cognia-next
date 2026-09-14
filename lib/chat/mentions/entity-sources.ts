@@ -35,6 +35,7 @@
  */
 
 import type { EntitySelectionKind, EntitySelectionRef } from "@/types/artifact/artifact"
+import type { HistoryReferenceKind } from "./host-references"
 import { truncationMarker } from "@/lib/docs-providers/limits"
 // The one place this repo already decided how short a CONTENT query may be —
 // titles match from one character, message bodies do not, because a
@@ -92,6 +93,18 @@ export interface EntityMentionCandidate {
   insertText?: string
 }
 
+/** One answer from a source, with what the panel must say about it. */
+export interface EntityMentionSearchPage {
+  candidates: EntityMentionCandidate[]
+  /**
+   * `"device-copy"`: the records live on a paired host this device could not
+   * reach, so the candidates come from the partial copy synced here — the
+   * recent end of each conversation, not its whole history. The panel says so,
+   * because "no matches" from a fragment reads as "it was never said".
+   */
+  reach?: "device-copy"
+}
+
 /** What a source needs to know about where the composer is. */
 export interface EntityMentionContext {
   /** Active workspace, for the kinds that are workspace-scoped. */
@@ -133,8 +146,14 @@ export interface EntityMentionSource {
    * Defaults to a substring filter over the cached {@link load} result. Only a
    * source that must push the query down to its own engine overrides it — and
    * then it owns its own cost control, because nothing caches per query.
+   *
+   * May answer with a {@link EntityMentionSearchPage} instead of a bare list
+   * when it has something to say about where the answer came from.
    */
-  search?(query: string, ctx: EntityMentionContext): Promise<EntityMentionCandidate[]>
+  search?(
+    query: string,
+    ctx: EntityMentionContext
+  ): Promise<EntityMentionCandidate[] | EntityMentionSearchPage>
   /**
    * The record's body, as the model should read it. Returns null when the
    * record vanished between the pick and the read (deleted in another window),
@@ -422,9 +441,10 @@ export async function searchEntityMentionCandidates(
   source: EntityMentionSource,
   query: string,
   ctx: EntityMentionContext
-): Promise<EntityMentionCandidate[]> {
-  if (source.search) return source.search(query, ctx)
-  return take(await loadEntityCandidates(source, ctx), query)
+): Promise<EntityMentionSearchPage> {
+  if (!source.search) return { candidates: take(await loadEntityCandidates(source, ctx), query) }
+  const answer = await source.search(query, ctx)
+  return Array.isArray(answer) ? { candidates: answer } : answer
 }
 
 /** `12.3 kB` — what the row is about to inline, in the units a person reads. */
@@ -509,6 +529,217 @@ export async function listableSessionTitles(
 async function flushSearchIndex(): Promise<void> {
   const { drainSearchIndex } = await import("@/lib/chat/search/indexer")
   await drainSearchIndex(undefined, { backfill: false }).catch(() => undefined)
+}
+
+// ---------------------------------------------------------------------------
+// History references: `@msg:`, `@prompt:`, `^`
+// ---------------------------------------------------------------------------
+
+/** How one history kind reads THIS device's database, whatever device it is. */
+export interface LocalHistoryReference {
+  search(query: string, ctx: EntityMentionContext): Promise<EntityMentionCandidate[]>
+  snapshot(id: string): Promise<string | null>
+  fingerprint(id: string): Promise<string | null>
+}
+
+const LOCAL_HISTORY_REFERENCES: Record<HistoryReferenceKind, LocalHistoryReference> = {
+  message: {
+    // `search`, not `load`: the corpus here is every message in the account.
+    // The ADR-0099 engine already holds a resident, tuned index of exactly that
+    // — and until now nothing in the composer used it, so `@chat:` could only
+    // match a conversation by its TITLE. Finding the conversation where a thing
+    // was discussed is the whole reason a person reaches for a reference.
+    async search(query, ctx) {
+      const { pendingSearchRows } = await import("@/lib/chat/search/pending-rows")
+      const { messageRefId } = await import("./message-reference")
+      const scope = ctx.projectId ? { projectId: ctx.projectId } : {}
+
+      // Short queries do not reach the engine: one letter would scan the whole
+      // resident haystack. The empty-query case is not a search at all — it is
+      // "the most recent messages", which the index answers directly.
+      if (query.length > 0 && query.length < CONTENT_SEARCH_MIN_QUERY) return []
+
+      await flushSearchIndex()
+
+      if (query.length === 0) {
+        const { loadNewestChatSearchText } = await import("@/lib/db/chat-search-text")
+        const rows = (await loadNewestChatSearchText(ENTITY_MENTION_RESULT_LIMIT * 3)).filter(
+          (row) => !ctx.projectId || !row.projectId || row.projectId === ctx.projectId
+        )
+        const titles = await listableSessionTitles(rows.map((row) => row.sessionId))
+        return rows
+          .filter((row) => titles.has(row.sessionId))
+          .slice(0, ENTITY_MENTION_RESULT_LIMIT)
+          .map((row) =>
+            messageCandidate({
+              sessionId: row.sessionId,
+              messageId: row.messageId,
+              sessionTitle: titles.get(row.sessionId) ?? row.sessionId,
+              role: row.role,
+              createdAt: row.createdAt,
+              excerpt: row.text,
+              refId: messageRefId(row.sessionId, row.messageId),
+            })
+          )
+      }
+
+      const { searchChatHistory } = await import("@/lib/chat/search/engine")
+      const outcome = await searchChatHistory(
+        {
+          query,
+          limit: ENTITY_MENTION_RESULT_LIMIT,
+          ...scope,
+          // One hit per conversation would hide the second half of an exchange
+          // in the very conversation the user is aiming at — the opposite of
+          // what a message-level reference is for.
+          collapseBySession: false,
+        },
+        { pendingRows: pendingSearchRows }
+      )
+      return outcome.results.map((hit) =>
+        messageCandidate({
+          sessionId: hit.sessionId,
+          messageId: hit.messageId,
+          sessionTitle: hit.sessionTitle || hit.sessionId,
+          role: hit.role,
+          createdAt: hit.createdAt,
+          excerpt: hit.snippet.text,
+          refId: messageRefId(hit.sessionId, hit.messageId),
+        })
+      )
+    },
+    async snapshot(id) {
+      const { buildMessageReferenceText, parseMessageRefId } = await import("./message-reference")
+      const parsed = parseMessageRefId(id)
+      if (!parsed) return null
+      return buildMessageReferenceText(parsed)
+    },
+    async fingerprint(id) {
+      const { parseMessageRefId } = await import("./message-reference")
+      const parsed = parseMessageRefId(id)
+      if (!parsed) return null
+      const { getDb } = await import("@/lib/db/schema")
+      const row = await getDb().messages.get(parsed.messageId)
+      if (!row || row.sessionId !== parsed.sessionId) return null
+      // A message row has no version column, so a digest of its parts stands in.
+      // It used to be their serialized LENGTH, which missed the edit people make
+      // most — correcting a word.
+      const { contentFingerprint } = await import("./content-fingerprint")
+      return `${row.createdAt}:${contentFingerprint(JSON.stringify(row.parts))}`
+    },
+  },
+  prompt: {
+    // `@msg:`'s engine with the role filter on, plus the authorship check the
+    // `user` role cannot make by itself — see `prompt-reference.ts`. The floor
+    // and the flush are the same as `@msg:` for the same reasons.
+    async search(query, ctx) {
+      if (query.length > 0 && query.length < CONTENT_SEARCH_MIN_QUERY) return []
+      await flushSearchIndex()
+      const { searchOwnPrompts } = await import("./prompt-reference")
+      return searchOwnPrompts(query, ctx)
+    },
+    async snapshot(id) {
+      const { promptReferenceText } = await import("./prompt-reference")
+      return promptReferenceText(id)
+    },
+    async fingerprint(id) {
+      const { promptFingerprint } = await import("./prompt-reference")
+      return promptFingerprint(id)
+    },
+  },
+  result: {
+    async search(query, ctx) {
+      const { loadNewestChatResults, searchChatResults } =
+        await import("@/lib/db/chat-result-index")
+      // Over-fetch, then filter by workspace: `projectId` is on the row, but a
+      // second compound index just for this would buy nothing at these sizes,
+      // and a pre-isolation row (`projectId: ""`) must stay reachable.
+      await flushSearchIndex()
+      const rows = (
+        query
+          ? await searchChatResults(query, ENTITY_MENTION_RESULT_LIMIT * 3)
+          : await loadNewestChatResults(ENTITY_MENTION_RESULT_LIMIT * 3)
+      ).filter((r) => !ctx.projectId || !r.projectId || r.projectId === ctx.projectId)
+      const titles = await listableSessionTitles(rows.map((r) => r.sessionId))
+      return rows
+        .filter((r) => titles.has(r.sessionId))
+        .slice(0, ENTITY_MENTION_RESULT_LIMIT)
+        .map((r) => ({
+          entityKind: "result" as const,
+          // The row id already encodes its message and part; carrying it whole
+          // is what lets `snapshot` re-read the live body instead of trusting
+          // the preview it was listed with.
+          id: r.resultId,
+          title: r.title,
+          subtitle: `${r.toolName} · ${formatResultSize(r.bytes)} · ${r.preview}`.slice(0, 200),
+          href: `/?session=${encodeURIComponent(r.sessionId)}&message=${encodeURIComponent(r.messageId)}`,
+          sourceSessionId: r.sessionId,
+          searchText: r.searchText,
+        }))
+    },
+    async snapshot(id) {
+      const { resultBodyText } = await import("./result-reference")
+      return resultBodyText(id)
+    },
+    async fingerprint(id) {
+      // A digest of the body. A tool result is immutable once its turn
+      // finishes, so the changes worth catching are the message being deleted,
+      // edited, or its parts reordered — all of which move this. (It was the
+      // body's length, which a same-length edit slipped past.)
+      const [{ resultBodyText }, { contentFingerprint }] = await Promise.all([
+        import("./result-reference"),
+        import("./content-fingerprint"),
+      ])
+      const body = await resultBodyText(id)
+      return body === null ? null : contentFingerprint(body)
+    },
+  },
+}
+
+/**
+ * The history kind's read of this device's own database.
+ *
+ * What a host answers a paired device with (`host-reference-rpc.ts`), called
+ * directly rather than through the registered source so the host never asks
+ * itself whether to ask a host.
+ */
+export function localHistoryReference(kind: HistoryReferenceKind): LocalHistoryReference {
+  return LOCAL_HISTORY_REFERENCES[kind]
+}
+
+/**
+ * A history source that reads where the history actually is.
+ *
+ * On the host — the desktop, the headless brain, a standalone browser — that
+ * is this database. A paired phone or browser syncs only the recent end of each
+ * conversation, so searching its copy would miss most of what `@msg:` exists to
+ * find, and a record picked from the host's results may not be here at all.
+ * There the source asks the host (`host-references.ts`) and falls back to the
+ * copy only when the host cannot answer.
+ */
+function historyReferenceSource(
+  kind: HistoryReferenceKind,
+  prefix: string,
+  shortcut?: string
+): EntityMentionSource {
+  const local = LOCAL_HISTORY_REFERENCES[kind]
+  return {
+    entityKind: kind,
+    prefix,
+    ...(shortcut ? { shortcut } : {}),
+    async search(query, ctx) {
+      const { searchHistoryReferences } = await import("./host-references")
+      return searchHistoryReferences(kind, query, ctx, local)
+    },
+    async snapshot(candidate) {
+      const { snapshotHistoryReference } = await import("./host-references")
+      return snapshotHistoryReference(kind, candidate.id, local)
+    },
+    async fingerprint(candidate) {
+      const { fingerprintHistoryReference } = await import("./host-references")
+      return fingerprintHistoryReference(kind, candidate.id, local)
+    },
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -673,171 +904,17 @@ function registerBuiltinEntityMentionSources(): void {
     },
   })
 
-  registerEntityMentionSource({
-    entityKind: "message",
-    prefix: "msg:",
-    // `search`, not `load`: the corpus here is every message in the account.
-    // The ADR-0099 engine already holds a resident, tuned index of exactly that
-    // — and until now nothing in the composer used it, so `@chat:` could only
-    // match a conversation by its TITLE. Finding the conversation where a thing
-    // was discussed is the whole reason a person reaches for a reference.
-    async search(query, ctx) {
-      const { pendingSearchRows } = await import("@/lib/chat/search/pending-rows")
-      const { messageRefId } = await import("./message-reference")
-      const scope = ctx.projectId ? { projectId: ctx.projectId } : {}
-
-      // Short queries do not reach the engine: one letter would scan the whole
-      // resident haystack. The empty-query case is not a search at all — it is
-      // "the most recent messages", which the index answers directly.
-      if (query.length > 0 && query.length < CONTENT_SEARCH_MIN_QUERY) return []
-
-      await flushSearchIndex()
-
-      if (query.length === 0) {
-        const { loadNewestChatSearchText } = await import("@/lib/db/chat-search-text")
-        const rows = (await loadNewestChatSearchText(ENTITY_MENTION_RESULT_LIMIT * 3)).filter(
-          (row) => !ctx.projectId || !row.projectId || row.projectId === ctx.projectId
-        )
-        const titles = await listableSessionTitles(rows.map((row) => row.sessionId))
-        return rows
-          .filter((row) => titles.has(row.sessionId))
-          .slice(0, ENTITY_MENTION_RESULT_LIMIT)
-          .map((row) =>
-            messageCandidate({
-              sessionId: row.sessionId,
-              messageId: row.messageId,
-              sessionTitle: titles.get(row.sessionId) ?? row.sessionId,
-              role: row.role,
-              createdAt: row.createdAt,
-              excerpt: row.text,
-              refId: messageRefId(row.sessionId, row.messageId),
-            })
-          )
-      }
-
-      const { searchChatHistory } = await import("@/lib/chat/search/engine")
-      const outcome = await searchChatHistory(
-        {
-          query,
-          limit: ENTITY_MENTION_RESULT_LIMIT,
-          ...scope,
-          // One hit per conversation would hide the second half of an exchange
-          // in the very conversation the user is aiming at — the opposite of
-          // what a message-level reference is for.
-          collapseBySession: false,
-        },
-        { pendingRows: pendingSearchRows }
-      )
-      return outcome.results.map((hit) =>
-        messageCandidate({
-          sessionId: hit.sessionId,
-          messageId: hit.messageId,
-          sessionTitle: hit.sessionTitle || hit.sessionId,
-          role: hit.role,
-          createdAt: hit.createdAt,
-          excerpt: hit.snippet.text,
-          refId: messageRefId(hit.sessionId, hit.messageId),
-        })
-      )
-    },
-    async snapshot(candidate) {
-      const { buildMessageReferenceText, parseMessageRefId } = await import("./message-reference")
-      const parsed = parseMessageRefId(candidate.id)
-      if (!parsed) return null
-      return buildMessageReferenceText(parsed)
-    },
-    async fingerprint(candidate) {
-      const { parseMessageRefId } = await import("./message-reference")
-      const parsed = parseMessageRefId(candidate.id)
-      if (!parsed) return null
-      const { getDb } = await import("@/lib/db/schema")
-      const row = await getDb().messages.get(parsed.messageId)
-      if (!row || row.sessionId !== parsed.sessionId) return null
-      // A message row has no version column, so a digest of its parts stands in.
-      // It used to be their serialized LENGTH, which missed the edit people make
-      // most — correcting a word.
-      const { contentFingerprint } = await import("./content-fingerprint")
-      return `${row.createdAt}:${contentFingerprint(JSON.stringify(row.parts))}`
-    },
-  })
-
-  registerEntityMentionSource({
-    entityKind: "prompt",
-    prefix: "prompt:",
-    // `@msg:`'s engine with the role filter on, plus the authorship check the
-    // `user` role cannot make by itself — see `prompt-reference.ts`. The floor
-    // and the flush are the same as `@msg:` for the same reasons.
-    async search(query, ctx) {
-      if (query.length > 0 && query.length < CONTENT_SEARCH_MIN_QUERY) return []
-      await flushSearchIndex()
-      const { searchOwnPrompts } = await import("./prompt-reference")
-      return searchOwnPrompts(query, ctx)
-    },
-    async snapshot(candidate) {
-      const { promptReferenceText } = await import("./prompt-reference")
-      return promptReferenceText(candidate.id)
-    },
-    async fingerprint(candidate) {
-      const { promptFingerprint } = await import("./prompt-reference")
-      return promptFingerprint(candidate.id)
-    },
-  })
-
-  registerEntityMentionSource({
-    entityKind: "result",
-    prefix: "result:",
-    // `^` — the one shortcut character. Reusing a result is the reference
-    // people reach for mid-sentence and most often want from the LAST few
-    // turns, and `@result:` is eight characters before the first candidate
-    // appears. Same source, second door: the panel, the staging path and the
-    // prompt block are all the namespace's.
-    shortcut: "^",
-    async search(query, ctx) {
-      const { loadNewestChatResults, searchChatResults } =
-        await import("@/lib/db/chat-result-index")
-      // Over-fetch, then filter by workspace: `projectId` is on the row, but a
-      // second compound index just for this would buy nothing at these sizes,
-      // and a pre-isolation row (`projectId: ""`) must stay reachable.
-      await flushSearchIndex()
-      const rows = (
-        query
-          ? await searchChatResults(query, ENTITY_MENTION_RESULT_LIMIT * 3)
-          : await loadNewestChatResults(ENTITY_MENTION_RESULT_LIMIT * 3)
-      ).filter((r) => !ctx.projectId || !r.projectId || r.projectId === ctx.projectId)
-      const titles = await listableSessionTitles(rows.map((r) => r.sessionId))
-      return rows
-        .filter((r) => titles.has(r.sessionId))
-        .slice(0, ENTITY_MENTION_RESULT_LIMIT)
-        .map((r) => ({
-          entityKind: "result" as const,
-          // The row id already encodes its message and part; carrying it whole
-          // is what lets `snapshot` re-read the live body instead of trusting
-          // the preview it was listed with.
-          id: r.resultId,
-          title: r.title,
-          subtitle: `${r.toolName} · ${formatResultSize(r.bytes)} · ${r.preview}`.slice(0, 200),
-          href: `/?session=${encodeURIComponent(r.sessionId)}&message=${encodeURIComponent(r.messageId)}`,
-          sourceSessionId: r.sessionId,
-          searchText: r.searchText,
-        }))
-    },
-    async snapshot(candidate) {
-      const { resultBodyText } = await import("./result-reference")
-      return resultBodyText(candidate.id)
-    },
-    async fingerprint(candidate) {
-      // A digest of the body. A tool result is immutable once its turn
-      // finishes, so the changes worth catching are the message being deleted,
-      // edited, or its parts reordered — all of which move this. (It was the
-      // body's length, which a same-length edit slipped past.)
-      const [{ resultBodyText }, { contentFingerprint }] = await Promise.all([
-        import("./result-reference"),
-        import("./content-fingerprint"),
-      ])
-      const body = await resultBodyText(candidate.id)
-      return body === null ? null : contentFingerprint(body)
-    },
-  })
+  // `@msg:`, `@prompt:` and `^` read conversation HISTORY, which is the one
+  // corpus a paired device holds only a fragment of — see
+  // `historyReferenceSource` below.
+  registerEntityMentionSource(historyReferenceSource("message", "msg:"))
+  registerEntityMentionSource(historyReferenceSource("prompt", "prompt:"))
+  // `^` — the one shortcut character. Reusing a result is the reference
+  // people reach for mid-sentence and most often want from the LAST few
+  // turns, and `@result:` is eight characters before the first candidate
+  // appears. Same source, second door: the panel, the staging path and the
+  // prompt block are all the namespace's.
+  registerEntityMentionSource(historyReferenceSource("result", "result:", "^"))
 
   registerEntityMentionSource({
     entityKind: "teammate",

@@ -536,6 +536,7 @@
         "workflow": "工作流"
       },
       "comingSoon": "即将上线",
+      "entityDeviceCopy": "连不上主机，这里只列出本设备已同步的内容，也就是每个会话最近的部分。",
       "entityEmpty": "「{title}」没有可读内容，可能已被删除。",
       "entityFailed": "读取「{title}」失败：{reason}",
       "entityInsertAction": "把「{title}」填回输入框",

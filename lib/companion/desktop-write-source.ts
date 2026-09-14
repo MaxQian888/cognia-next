@@ -389,6 +389,16 @@ export async function dispatchCommand(
         await import("@/lib/provider-diagnostics/companion")
       return cancelRemoteProviderDiagnostics(payload)
     }
+    // `@msg:` / `@prompt:` / `^` from a paired device, which syncs only the
+    // recent end of each conversation (`lib/chat/mentions/host-references.ts`).
+    case "session_reference_search": {
+      const { sessionReferenceSearch } = await import("@/lib/chat/mentions/host-reference-rpc")
+      return sessionReferenceSearch(payload)
+    }
+    case "session_reference_snapshot": {
+      const { sessionReferenceSnapshot } = await import("@/lib/chat/mentions/host-reference-rpc")
+      return sessionReferenceSnapshot(payload)
+    }
     // Mobile outbound-queue commands (Gap 3 reconciliation) — these go
     // through the same generic desktop_writes_bridge but land in
     // subsystem-specific dispatch arms below. Production callers:
