@@ -23,6 +23,8 @@ export function createPresentationsRuntime(ctx: PresentationsPluginContext) {
     if (!artifact) throw new Error(`Presentation artifact not found: ${artifactId}`)
     if (artifact.metadata?.plugin?.kind !== PRESENTATION_ARTIFACT_KIND)
       throw new Error(`Artifact is not a Cognia presentation: ${artifactId}`)
+    if (artifact.metadata?.plugin?.ownerPluginId !== ctx.pluginId)
+      throw new Error(`Artifact is not owned by this plugin: ${artifactId}`)
     return { artifact, deck: parsePresentation(artifact.content) }
   }
   const createArtifact = async (
@@ -73,7 +75,13 @@ export function createPresentationsRuntime(ctx: PresentationsPluginContext) {
     }) => {
       const file = input.handle
         ? await ctx.files.readAttachment(input.handle)
-        : (await ctx.files.open({ accept: [".pptx", PPTX_MIME], maxBytes: 100 * 1024 * 1024 }))[0]
+        : (
+            await ctx.files.open({
+              accept: [".pptx", PPTX_MIME],
+              multiple: false,
+              maxBytes: 100 * 1024 * 1024,
+            })
+          )[0]
       if (!file) return { ok: false as const, cancelled: true as const }
       const deck = await importPptx(file.bytes, file.name)
       if (input.title?.trim()) deck.title = input.title.trim()
@@ -156,7 +164,9 @@ export function createPresentationsRuntime(ctx: PresentationsPluginContext) {
       if (!reopened.valid || reopened.slideCount !== deck.slides.length)
         throw new Error("PPTX round-trip validation failed before export.")
       const result = await ctx.files.save({
-        suggestedName: suggestedName ?? `${safe(deck.title)}.pptx`,
+        suggestedName:
+          suggestedName ??
+          `${safe(deck.sourceFilename?.replace(/\.pptx$/i, "") ?? deck.title)}.pptx`,
         mimeType: PPTX_MIME,
         bytes,
       })

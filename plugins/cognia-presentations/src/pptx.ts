@@ -1,6 +1,7 @@
 import JSZip from "jszip"
 import {
   createPresentation,
+  normalizeHexColor,
   PPTX_MIME,
   type PresentationDeck,
   type PresentationSlide,
@@ -70,45 +71,403 @@ export async function exportPptx(deck: PresentationDeck): Promise<Uint8Array> {
   return new Uint8Array(await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" }))
 }
 
+const MAX_IMPORT_SLIDES = 500
+const MAX_IMPORT_MEDIA_BYTES = 16 * 1024 * 1024
+const IMAGE_MIME_BY_EXTENSION: Record<string, "image/png" | "image/jpeg"> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+}
+
+interface PackageRelationship {
+  type: string
+  target: string
+}
+
 export async function importPptx(
   bytes: Uint8Array,
   filename = "presentation.pptx"
 ): Promise<PresentationDeck> {
-  const zip = await JSZip.loadAsync(bytes)
-  if (!zip.file("ppt/presentation.xml"))
-    throw new Error("Invalid PPTX package: ppt/presentation.xml is missing.")
-  const deck = createPresentation(filename.replace(/\.pptx$/i, "") || "Presentation")
+  const zip = await JSZip.loadAsync(bytes).catch(() => {
+    throw new Error("Invalid PPTX package: not a readable ZIP archive.")
+  })
+  const presentationXml = await zip.file("ppt/presentation.xml")?.async("string")
+  if (!presentationXml) throw new Error("Invalid PPTX package: ppt/presentation.xml is missing.")
+
+  const features = new Set<string>()
+  const deck = createPresentation((await packageTitle(zip)) || baseName(filename))
   deck.sourceFilename = filename
-  const paths = Object.keys(zip.files)
+
+  const slideSize = presentationXml.match(/<p:sldSz\b[^>]*\/>?/)
+  if (slideSize) {
+    const cx = numberAttr(slideSize[0], "cx")
+    const cy = numberAttr(slideSize[0], "cy")
+    if (cx && cy) {
+      deck.width = round2(cx / EMU)
+      deck.height = round2(cy / EMU)
+    }
+  }
+
+  const slidePaths = await slideOrder(zip, presentationXml)
+  if (slidePaths.length > MAX_IMPORT_SLIDES) features.add("truncated slide list")
+  // JSZip materialises intermediate directories as `dir: true` entries; only
+  // real files count when scanning package parts.
+  const partPaths = Object.keys(zip.files).filter((path) => !zip.files[path].dir)
+  const chartParts = new Set(partPaths.filter((path) => /^ppt\/charts\/chart\d+\.xml$/.test(path)))
+  const importedChartParts = new Set<string>()
+
+  deck.slides = []
+  for (const [index, path] of slidePaths.slice(0, MAX_IMPORT_SLIDES).entries()) {
+    const xml = await zip.file(path)!.async("string")
+    const rels = await relationships(zip, relsPathFor(path))
+    const slide = await importSlide(zip, xml, rels, deck, index, features, importedChartParts)
+    if (/<p:timing[\s>]/.test(xml) || /<p:transition[\s>]/.test(xml))
+      features.add("animations/transitions")
+    deck.slides.push(slide)
+  }
+
+  const mediaPaths = partPaths.filter((path) => /^ppt\/media\//.test(path))
+  if (mediaPaths.some((path) => !IMAGE_MIME_BY_EXTENSION[fileExtension(path)]))
+    features.add("embedded media")
+  if (chartParts.size > importedChartParts.size) features.add("native charts")
+  if (partPaths.some((path) => /^ppt\/diagrams\//.test(path))) features.add("SmartArt diagrams")
+  if (partPaths.some((path) => /^ppt\/embeddings\//.test(path))) features.add("embedded objects")
+  if (partPaths.some((path) => /^ppt\/comments\//.test(path))) features.add("comments")
+  deck.importedFeatures = [...features]
+  return deck
+}
+
+async function importSlide(
+  zip: JSZip,
+  xml: string,
+  rels: Map<string, PackageRelationship>,
+  deck: PresentationDeck,
+  index: number,
+  features: Set<string>,
+  importedChartParts: Set<string>
+): Promise<PresentationSlide> {
+  const elements: SlideElement[] = []
+  let fallbackY = 0.5
+  let elementSequence = 0
+  const nextId = () => `e${++elementSequence}`
+  const blocks =
+    xml.match(/<p:(?:sp|pic|graphicFrame)\b[\s\S]*?<\/p:(?:sp|pic|graphicFrame)>/g) ?? []
+  for (const block of blocks) {
+    const tag = block.match(/^<p:(sp|pic|graphicFrame)\b/)?.[1]
+    const geometry = blockGeometry(block, deck, fallbackY)
+    fallbackY = geometry.y + geometry.height + 0.25
+    if (tag === "sp") {
+      const element = importShape(block, geometry, nextId())
+      if (element) elements.push(element)
+    } else if (tag === "pic") {
+      const element = await importPicture(zip, block, geometry, rels, nextId(), features)
+      if (element) elements.push(element)
+    } else if (tag === "graphicFrame") {
+      const element = await importGraphicFrame(
+        zip,
+        block,
+        geometry,
+        rels,
+        nextId(),
+        importedChartParts
+      )
+      if (element) elements.push(element)
+    }
+  }
+  const titled = elements.find(
+    (element): element is Extract<SlideElement, { type: "text" | "shape" }> =>
+      (element.type === "text" || element.type === "shape") &&
+      typeof element.text === "string" &&
+      element.text.trim().length > 0
+  )
+  const title = titled?.text?.trim() || `Slide ${index + 1}`
+  const notesTarget = [...rels.values()].find((rel) => rel.type.endsWith("/notesSlide"))?.target
+  const speakerNotes = notesTarget
+    ? await importNotes(zip, resolvePart("ppt/slides", notesTarget))
+    : undefined
+  return {
+    id: `s${index + 1}`,
+    title,
+    elements,
+    ...(speakerNotes ? { speakerNotes } : {}),
+  }
+}
+
+/** A `p:sp` becomes a text element for text boxes, otherwise a shape. */
+function importShape(
+  block: string,
+  geometry: { x: number; y: number; width: number; height: number },
+  id: string
+): SlideElement | null {
+  const paragraphs = blockParagraphs(block)
+  const text = paragraphs.join("\n")
+  const isTextBox = /\btxBox="1"/.test(block) || /<a:noFill\s*\/>/.test(spPrOf(block))
+  const preset = block.match(/<a:prstGeom\s+prst="([^"]+)"/)?.[1]
+  const fill = shapeFill(block)
+  if (isTextBox || (!fill && (!preset || preset === "rect"))) {
+    if (!text.trim()) return null
+    const runProps = block.match(/<a:rPr\b[^>]*>/)?.[0] ?? ""
+    const size = numberAttr(runProps, "sz")
+    return {
+      id,
+      type: "text",
+      ...geometry,
+      text,
+      ...(size ? { fontSize: size / 100 } : {}),
+      ...(/\bb="1"/.test(runProps) ? { bold: true } : {}),
+      ...(runColor(block) ? { color: runColor(block) } : {}),
+    }
+  }
+  const shape = preset === "ellipse" || preset === "roundRect" ? preset : ("rect" as const)
+  return {
+    id,
+    type: "shape",
+    ...geometry,
+    shape,
+    ...(fill ? { fill } : {}),
+    ...(shapeLine(block) ? { line: shapeLine(block) } : {}),
+    ...(text.trim() ? { text } : {}),
+  }
+}
+
+async function importPicture(
+  zip: JSZip,
+  block: string,
+  geometry: { x: number; y: number; width: number; height: number },
+  rels: Map<string, PackageRelationship>,
+  id: string,
+  features: Set<string>
+): Promise<SlideElement | null> {
+  const embed = block.match(/<a:blip\b[^>]*\br:embed="([^"]+)"/)?.[1]
+  const target = embed ? rels.get(embed)?.target : undefined
+  if (!target) return null
+  const path = resolvePart("ppt/slides", target)
+  const mimeType = IMAGE_MIME_BY_EXTENSION[fileExtension(path)]
+  const file = zip.file(path)
+  if (!file || !mimeType) {
+    features.add("unsupported media")
+    return null
+  }
+  const bytes = await file.async("uint8array")
+  if (bytes.byteLength > MAX_IMPORT_MEDIA_BYTES) {
+    features.add("oversized media")
+    return null
+  }
+  const name = block.match(/<p:cNvPr\b[^>]*\bname="([^"]*)"/)?.[1]
+  const descr = block.match(/<p:cNvPr\b[^>]*\bdescr="([^"]*)"/)?.[1]
+  const alt = decodeXml(descr || name || file.name || "image")
+  return {
+    id,
+    type: "image",
+    ...geometry,
+    dataBase64: base64Encode(bytes),
+    mimeType,
+    alt,
+  }
+}
+
+async function importGraphicFrame(
+  zip: JSZip,
+  block: string,
+  geometry: { x: number; y: number; width: number; height: number },
+  rels: Map<string, PackageRelationship>,
+  id: string,
+  importedChartParts: Set<string>
+): Promise<SlideElement | null> {
+  if (/<a:tbl>[\s\S]*?<\/a:tbl>/.test(block)) {
+    const rows = [...block.matchAll(/<a:tr\b[^>]*>([\s\S]*?)<\/a:tr>/g)].map((row) =>
+      [...row[1].matchAll(/<a:tc\b[^>]*>([\s\S]*?)<\/a:tc>/g)].map((cell) =>
+        cellTexts(cell[1]).join(" ")
+      )
+    )
+    if (rows.length) return { id, type: "table", ...geometry, rows }
+    return null
+  }
+  const chartRel = block.match(/<c:chart\b[^>]*\br:id="([^"]+)"/)?.[1]
+  const chartTarget = chartRel ? rels.get(chartRel)?.target : undefined
+  if (!chartTarget) return null
+  const chartPath = resolvePart("ppt/slides", chartTarget)
+  const chartXml = await zip.file(chartPath)?.async("string")
+  if (!chartXml) return null
+  importedChartParts.add(chartPath)
+  return importChart(chartXml, geometry, id)
+}
+
+/** First `c:ser` of a chart part → a native chart element (categories + values). */
+function importChart(
+  xml: string,
+  geometry: { x: number; y: number; width: number; height: number },
+  id: string
+): SlideElement | null {
+  const series = xml.match(/<c:ser>[\s\S]*?<\/c:ser>/)?.[0]
+  if (!series) return null
+  const cat = series.match(/<c:cat>[\s\S]*?<\/c:cat>/)?.[0] ?? ""
+  const val = series.match(/<c:val>[\s\S]*?<\/c:val>/)?.[0] ?? ""
+  const labels = cachedPoints(cat).map((point) => point.text)
+  const values = cachedPoints(val).map((point) => Number(point.text))
+  if (!labels.length || labels.length !== values.length || values.some((v) => !Number.isFinite(v)))
+    return null
+  const title = xml.match(/<c:title>[\s\S]*?<\/c:title>/)?.[0]
+  return {
+    id,
+    type: "chart",
+    ...geometry,
+    labels,
+    values,
+    ...(title ? { title: cellTexts(title).join(" ").trim() || undefined } : {}),
+  }
+}
+
+async function importNotes(zip: JSZip, path: string): Promise<string | undefined> {
+  const xml = await zip.file(path)?.async("string")
+  if (!xml) return undefined
+  const body = xml.match(/<p:sp>[\s\S]*?<\/p:sp>/g) ?? []
+  // The notes slide's first shapes are placeholders (slide image, header); the
+  // body text lives in the last text-bearing shape.
+  const text = body
+    .map((shape) => blockParagraphs(shape).join("\n"))
+    .filter(Boolean)
+    .join("\n")
+  return text.trim() || undefined
+}
+
+/** `<a:t>` runs grouped per `<a:p>` paragraph. */
+function blockParagraphs(block: string): string[] {
+  const paragraphs = block.match(/<a:p>[\s\S]*?<\/a:p>/g) ?? [block]
+  return paragraphs
+    .map((paragraph) => cellTexts(paragraph).join(""))
+    .filter((text) => text.length > 0)
+}
+
+function cellTexts(xml: string): string[] {
+  return [...xml.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)].map((match) => decodeXml(match[1]))
+}
+
+function spPrOf(block: string): string {
+  return block.match(/<p:spPr\b[^>]*>[\s\S]*?<\/p:spPr>/)?.[0] ?? ""
+}
+
+function shapeFill(block: string): string | undefined {
+  const spPr = spPrOf(block)
+  return spPr.match(/<a:solidFill>\s*<a:srgbClr val="([0-9A-Fa-f]{6})"/)?.[1]?.toUpperCase()
+}
+
+function shapeLine(block: string): string | undefined {
+  const spPr = spPrOf(block)
+  return spPr.match(/<a:ln\b[^>]*>[\s\S]*?<a:srgbClr val="([0-9A-Fa-f]{6})"/)?.[1]?.toUpperCase()
+}
+
+function runColor(block: string): string | undefined {
+  return block
+    .match(/<a:rPr\b[^>]*>[\s\S]*?<a:solidFill>\s*<a:srgbClr val="([0-9A-Fa-f]{6})"/)?.[1]
+    ?.toUpperCase()
+}
+
+function cachedPoints(xml: string): Array<{ idx: number; text: string }> {
+  return [...xml.matchAll(/<c:pt\s+idx="(\d+)"[^>]*>\s*<c:v>([\s\S]*?)<\/c:v>\s*<\/c:pt>/g)]
+    .map((match) => ({ idx: Number(match[1]), text: decodeXml(match[2]) }))
+    .sort((a, b) => a.idx - b.idx)
+}
+
+function blockGeometry(
+  block: string,
+  deck: PresentationDeck,
+  fallbackY: number
+): { x: number; y: number; width: number; height: number } {
+  const xfrm = block.match(/<[ap]:xfrm\b[^>]*>([\s\S]*?)<\/[ap]:xfrm>/)?.[1] ?? ""
+  const off = xfrm.match(/<a:off\b[^>]*\/>/)?.[0] ?? ""
+  const ext = xfrm.match(/<a:ext\b[^>]*\/>/)?.[0] ?? ""
+  const x = numberAttr(off, "x")
+  const y = numberAttr(off, "y")
+  const cx = numberAttr(ext, "cx")
+  const cy = numberAttr(ext, "cy")
+  return {
+    x: x !== undefined ? round2(x / EMU) : 0.8,
+    y: y !== undefined ? round2(y / EMU) : fallbackY,
+    width: cx !== undefined ? round2(cx / EMU) : Math.max(deck.width - 1.6, 1),
+    height: cy !== undefined ? round2(cy / EMU) : 0.6,
+  }
+}
+
+async function relationships(
+  zip: JSZip,
+  relsPath: string
+): Promise<Map<string, PackageRelationship>> {
+  const map = new Map<string, PackageRelationship>()
+  const xml = await zip.file(relsPath)?.async("string")
+  if (!xml) return map
+  for (const match of xml.matchAll(/<Relationship\b[^>]*\/>/g)) {
+    const id = match[0].match(/\bId="([^"]+)"/)?.[1]
+    const type = match[0].match(/\bType="([^"]+)"/)?.[1]
+    const target = match[0].match(/\bTarget="([^"]+)"/)?.[1]
+    if (id && type && target) map.set(id, { type, target })
+  }
+  return map
+}
+
+/** Ordered slide part paths from `p:sldIdLst` → presentation rels. */
+async function slideOrder(zip: JSZip, presentationXml: string): Promise<string[]> {
+  const rels = await relationships(zip, "ppt/_rels/presentation.xml.rels")
+  const ordered = [...presentationXml.matchAll(/<p:sldId\b[^>]*\br:id="([^"]+)"[^>]*\/>/g)]
+    .map((match) => rels.get(match[1]))
+    .filter((rel): rel is PackageRelationship => Boolean(rel))
+    .filter((rel) => rel.type.endsWith("/slide"))
+    .map((rel) => resolvePart("ppt", rel.target))
+    .filter((path) => Boolean(zip.file(path)))
+  if (ordered.length) return ordered
+  return Object.keys(zip.files)
     .filter((path) => /^ppt\/slides\/slide\d+\.xml$/.test(path))
     .sort((a, b) => slideNumber(a) - slideNumber(b))
-  deck.slides = await Promise.all(
-    paths.map(async (path, index) => {
-      const xml = await zip.file(path)!.async("string")
-      const texts = [...xml.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)].map((match) => decodeXml(match[1]))
-      return {
-        id: `s${index + 1}`,
-        title: texts[0] || `Slide ${index + 1}`,
-        elements: texts.map((text, textIndex) => ({
-          id: `t${textIndex + 1}`,
-          type: "text" as const,
-          x: 0.8,
-          y: textIndex === 0 ? 0.5 : 1.4 + textIndex * 0.65,
-          width: 11.7,
-          height: 0.55,
-          text,
-          fontSize: textIndex === 0 ? 30 : 20,
-        })),
-      }
-    })
-  )
-  if (Object.keys(zip.files).some((path) => path.startsWith("ppt/charts/")))
-    deck.importedFeatures.push("native charts")
-  if (Object.keys(zip.files).some((path) => path.startsWith("ppt/notesSlides/")))
-    deck.importedFeatures.push("speaker notes")
-  if (Object.keys(zip.files).some((path) => path.startsWith("ppt/media/")))
-    deck.importedFeatures.push("embedded media")
-  return deck
+}
+
+function relsPathFor(partPath: string): string {
+  const slash = partPath.lastIndexOf("/")
+  return `${partPath.slice(0, slash)}/_rels/${partPath.slice(slash + 1)}.rels`
+}
+
+/** Resolve a relationship target relative to its owning part's directory. */
+function resolvePart(baseDir: string, target: string): string {
+  const segments = [...baseDir.split("/"), ...target.split("/")]
+  const resolved: string[] = []
+  for (const segment of segments) {
+    if (!segment || segment === ".") continue
+    if (segment === "..") resolved.pop()
+    else resolved.push(segment)
+  }
+  return resolved.join("/")
+}
+
+async function packageTitle(zip: JSZip): Promise<string | undefined> {
+  const xml = await zip.file("docProps/core.xml")?.async("string")
+  const title = xml?.match(/<dc:title>([\s\S]*?)<\/dc:title>/)?.[1]
+  return title ? decodeXml(title).trim() || undefined : undefined
+}
+
+function baseName(filename: string): string {
+  return filename.replace(/\.pptx$/i, "").trim() || "Presentation"
+}
+
+function fileExtension(path: string): string {
+  const dot = path.lastIndexOf(".")
+  return dot >= 0 ? path.slice(dot + 1).toLowerCase() : ""
+}
+
+function numberAttr(tag: string, name: string): number | undefined {
+  const value = tag.match(new RegExp(`\\b${name}="(-?\\d+)"`))?.[1]
+  return value === undefined ? undefined : Number(value)
+}
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100
+}
+
+function base64Encode(bytes: Uint8Array): string {
+  let binary = ""
+  const chunk = 0x8000
+  for (let index = 0; index < bytes.length; index += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunk))
+  }
+  return btoa(binary)
 }
 
 export async function validatePptxRoundTrip(bytes: Uint8Array) {
@@ -139,9 +498,10 @@ function slideXml(
     )
   }
   let shapeId = 2
+  const allocId = () => shapeId++
   const elements = slide.elements
     .flatMap((element) =>
-      renderElement(element, shapeId++, deck, slideNumberValue, relationships, media)
+      renderElement(element, allocId, deck, slideNumberValue, relationships, media)
     )
     .join("")
   const source = slide.sourceNote
@@ -157,7 +517,7 @@ function slideXml(
           fontSize: 9,
           color: "64748B",
         },
-        shapeId++
+        allocId()
       )
     : ""
   return {
@@ -172,14 +532,14 @@ function slideXml(
 
 function renderElement(
   element: SlideElement,
-  id: number,
+  allocId: () => number,
   deck: PresentationDeck,
   slideNumberValue: number,
   relationships: string[],
   media: Array<{ path: string; base64: string }>
 ): string[] {
-  if (element.type === "text") return [renderTextShape(element, id)]
-  if (element.type === "shape") return [renderShape(element, id)]
+  if (element.type === "text") return [renderTextShape(element, allocId())]
+  if (element.type === "shape") return [renderShape(element, allocId())]
   if (element.type === "table")
     return element.rows.flatMap((row, rowIndex) =>
       row.map((cell, columnIndex) =>
@@ -195,7 +555,7 @@ function renderElement(
             line: "CBD5E1",
             text: cell,
           },
-          id * 100 + rowIndex * 10 + columnIndex
+          allocId()
         )
       )
     )
@@ -213,7 +573,7 @@ function renderElement(
           fill: deck.theme.accent,
           text: element.labels[index],
         },
-        id * 100 + index
+        allocId()
       )
     )
     return element.title
@@ -223,14 +583,14 @@ function renderElement(
               id: `${element.id}-title`,
               type: "text",
               x: element.x,
-              y: element.y - 0.4,
+              y: Math.max(element.y - 0.4, 0.05),
               width: element.width,
               height: 0.35,
               text: element.title,
               fontSize: 18,
               bold: true,
             },
-            id
+            allocId()
           ),
           ...bars,
         ]
@@ -244,7 +604,7 @@ function renderElement(
     `<Relationship Id="${relId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image${mediaIndex}.${extension}"/>`
   )
   return [
-    `<p:pic><p:nvPicPr><p:cNvPr id="${id}" name="${escapeXml(element.alt)}" descr="${escapeXml(element.alt)}"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${relId}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>${transform(element)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`,
+    `<p:pic><p:nvPicPr><p:cNvPr id="${allocId()}" name="${escapeXml(element.alt)}" descr="${escapeXml(element.alt)}"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${relId}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>${transform(element)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`,
   ]
 }
 
@@ -343,7 +703,7 @@ function slideNumber(path: string) {
   return Number(path.match(/slide(\d+)/)?.[1] ?? 0)
 }
 function color(value: string) {
-  return value.replace(/^#/, "").toUpperCase()
+  return normalizeHexColor(value, "000000")
 }
 function escapeXml(value: string) {
   return value
@@ -355,6 +715,8 @@ function escapeXml(value: string) {
 }
 function decodeXml(value: string) {
   return value
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')

@@ -1,4 +1,4 @@
-import type { PluginTool } from "@cognia/plugin-sdk"
+import type { PluginToolDef, PluginToolRegistration } from "@cognia/plugin-sdk"
 import type { PresentationOperation } from "./model"
 import { createPresentationsRuntime, type PresentationsPluginContext } from "./runtime"
 
@@ -18,6 +18,44 @@ const artifactOnly = {
   required: ["artifactId"],
   additionalProperties: false,
 }
+/**
+ * Closed shape for slide elements. `type` is enumerated and every per-type
+ * field is declared so the model receives a fully-described element contract;
+ * per-type required-field enforcement (e.g. `rows` for tables) happens in
+ * `assertSlideElements` inside the model layer, which a JSON-Schema
+ * discriminated union cannot reach through the host's schema→zod bridge.
+ */
+const slideElement = {
+  type: "object",
+  properties: {
+    id: { type: "string", minLength: 1 },
+    type: { enum: ["text", "shape", "image", "table", "chart"] },
+    x: { type: "number", description: "Left edge in inches" },
+    y: { type: "number", description: "Top edge in inches" },
+    width: { type: "number", description: "Width in inches" },
+    height: { type: "number", description: "Height in inches" },
+    text: { type: "string", description: "Text content (text/shape)" },
+    fontSize: { type: "number", minimum: 1, description: "Points (text)" },
+    bold: { type: "boolean" },
+    color: { type: "string", description: "Hex color without #, e.g. 1F2937" },
+    shape: { enum: ["rect", "roundRect", "ellipse"] },
+    fill: { type: "string", description: "Hex fill without # (shape)" },
+    line: { type: "string", description: "Hex outline without # (shape)" },
+    dataBase64: { type: "string", description: "Base64 image bytes (image)" },
+    mimeType: { enum: ["image/png", "image/jpeg"] },
+    alt: { type: "string", description: "Alt text (image, required for accessibility)" },
+    rows: {
+      type: "array",
+      items: { type: "array", items: { type: "string" } },
+      description: "Table rows of cell strings (table)",
+    },
+    labels: { type: "array", items: { type: "string" }, description: "Chart labels" },
+    values: { type: "array", items: { type: "number" }, description: "Chart values" },
+    title: { type: "string", description: "Chart title" },
+  },
+  required: ["id", "type", "x", "y", "width", "height"],
+  additionalProperties: false,
+} as const
 const operations = {
   type: "array",
   minItems: 1,
@@ -29,7 +67,7 @@ const operations = {
       title: { type: "string" },
       slideId: { type: "string" },
       index: { type: "integer", minimum: 0 },
-      elements: { type: "array", items: { type: "object", additionalProperties: true } },
+      elements: { type: "array", items: slideElement },
       speakerNotes: { type: "string" },
       sourceNote: { type: "string" },
     },
@@ -37,7 +75,7 @@ const operations = {
     additionalProperties: false,
   },
 } as const
-export function createPresentationTools(ctx: PresentationsPluginContext): PluginTool[] {
+export function createPresentationTools(ctx: PresentationsPluginContext): PluginToolRegistration[] {
   const runtime = createPresentationsRuntime(ctx)
   return [
     tool(
@@ -72,13 +110,15 @@ export function createPresentationTools(ctx: PresentationsPluginContext): Plugin
           ...(args as { handle?: string; title?: string }),
           sessionId: tc.sessionId,
           messageId: tc.messageId,
-        })
+        }),
+      { timeoutMs: 120_000 }
     ),
     tool(
       PRESENTATION_TOOL_NAMES[2],
       "Inspect slides, elements, speaker notes, sources, and compatibility findings.",
       artifactOnly,
-      (args) => runtime.inspect((args as { artifactId: string }).artifactId)
+      (args) => runtime.inspect((args as { artifactId: string }).artifactId),
+      { retryable: true }
     ),
     tool(
       PRESENTATION_TOOL_NAMES[3],
@@ -107,13 +147,15 @@ export function createPresentationTools(ctx: PresentationsPluginContext): Plugin
       PRESENTATION_TOOL_NAMES[4],
       "Validate slide bounds, readability, accessibility, and native PPTX round-trip integrity.",
       artifactOnly,
-      (args) => runtime.validate((args as { artifactId: string }).artifactId)
+      (args) => runtime.validate((args as { artifactId: string }).artifactId),
+      { retryable: true }
     ),
     tool(
       PRESENTATION_TOOL_NAMES[5],
       "Open the plugin-owned responsive slide preview.",
       artifactOnly,
-      (args) => runtime.preview((args as { artifactId: string }).artifactId)
+      (args) => runtime.preview((args as { artifactId: string }).artifactId),
+      { retryable: true }
     ),
     tool(
       PRESENTATION_TOOL_NAMES[6],
@@ -143,7 +185,8 @@ export function createPresentationTools(ctx: PresentationsPluginContext): Plugin
           input.suggestedName,
           input.allowUnsupportedFeatureLoss
         )
-      }
+      },
+      { timeoutMs: 60_000 }
     ),
   ]
 }
@@ -151,12 +194,12 @@ function tool(
   name: string,
   description: string,
   parametersSchema: Record<string, unknown>,
-  execute: (...args: Parameters<PluginTool["execute"]>) => unknown | Promise<unknown>
-): PluginTool {
+  execute: (...args: Parameters<PluginToolRegistration["execute"]>) => unknown | Promise<unknown>,
+  options?: Pick<PluginToolDef, "retryable" | "timeoutMs">
+): PluginToolRegistration {
   return {
     name,
-    pluginId: "cognia-presentations",
-    definition: { name, description, parametersSchema },
+    definition: { name, description, parametersSchema, ...options },
     execute: async (...args) => execute(...args),
   }
 }

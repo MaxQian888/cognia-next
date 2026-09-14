@@ -1,58 +1,71 @@
-import type { PluginDefinition, PluginManifest } from "@cognia/plugin-sdk"
+import { defineImporter, definePluginManifest, type PluginDefinition } from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
-import { PRESENTATION_ARTIFACT_KIND, PPTX_MIME } from "./model"
+import { PresentationResultCard, setPresentationResultBridge } from "./card"
+import { PRESENTATION_ARTIFACT_KIND, PPTX_MIME, type PresentationDeck } from "./model"
 import { importPptx } from "./pptx"
 import { createPresentationRenderer } from "./preview"
-import type { PresentationsPluginContext } from "./runtime"
-import { createPresentationTools } from "./tools"
+import { createPresentationTools, PRESENTATION_TOOL_NAMES } from "./tools"
 
-export const manifest = manifestJson as PluginManifest
+// plugin.json is the manifest source of truth — including the declarative
+// `i18n.locales` bundle, which the manager merges before activate() runs.
+export const manifest = definePluginManifest(manifestJson)
+
+function buildImporter(t: (key: string, vars?: Record<string, string | number>) => string) {
+  return defineImporter<PresentationDeck>({
+    id: "pptx",
+    name: t("importer.name"),
+    description: t("importer.description"),
+    format: "pptx",
+    extensions: ["pptx"],
+    mimeType: PPTX_MIME,
+    import: async (source) => {
+      if (typeof source.content === "string")
+        return { success: false, error: t("importer.binaryRequired") }
+      try {
+        return {
+          success: true,
+          data: await importPptx(new Uint8Array(source.content), source.filename),
+        }
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : t("importer.failed"),
+        }
+      }
+    },
+  })
+}
+
 const definition: PluginDefinition = {
   manifest,
   activate: async (ctx) => {
-    ctx.i18n.registerTranslations("en", {
-      "presentations.preview.slides": "Slides",
-      "presentations.preview.notes": "Speaker notes",
-      "presentations.preview.validation": "Validation",
-    })
-    ctx.i18n.registerTranslations("zh-CN", {
-      "presentations.preview.slides": "幻灯片",
-      "presentations.preview.notes": "演讲者备注",
-      "presentations.preview.validation": "校验",
-    })
+    const t = (key: string, vars?: Record<string, string | number>) => ctx.i18n.t(key, vars)
     ctx.artifact.registerRenderer(
       PRESENTATION_ARTIFACT_KIND,
-      createPresentationRenderer({
-        slides: ctx.i18n.t("presentations.preview.slides"),
-        notes: ctx.i18n.t("presentations.preview.notes"),
-        validation: ctx.i18n.t("presentations.preview.validation"),
-      })
+      createPresentationRenderer(t, (handler) => ctx.i18n.onLocaleChange(handler))
     )
-    ctx.import.registerImporter({
-      id: "pptx",
-      name: "PowerPoint presentation",
-      description: "Import PPTX into the Cognia presentation model.",
-      format: "pptx",
-      extensions: ["pptx"],
-      mimeType: PPTX_MIME,
-      import: async (source) => {
-        if (typeof source.content === "string")
-          return { success: false, error: "PPTX import requires binary content." }
-        try {
-          return {
-            success: true,
-            data: await importPptx(new Uint8Array(source.content), source.filename),
-          }
-        } catch (error) {
-          return {
-            success: false,
-            error: error instanceof Error ? error.message : "PPTX import failed.",
-          }
-        }
-      },
+    // Importer labels resolve at registration time — re-register on locale
+    // change, matching the cognia-documents convention.
+    let disposeImporter = ctx.import.registerImporter(buildImporter(t))
+    ctx.lifecycle?.onDispose?.(
+      ctx.i18n.onLocaleChange(() => {
+        disposeImporter()
+        disposeImporter = ctx.import.registerImporter(buildImporter(t))
+      }),
+      "cognia-presentations:importer-locale"
+    )
+    ctx.lifecycle?.onDispose?.(() => disposeImporter(), "cognia-presentations:importer")
+    for (const tool of createPresentationTools(ctx)) ctx.agent.registerTool(tool)
+    setPresentationResultBridge({
+      t,
+      openArtifact: (artifactId) => ctx.artifact.openArtifact(artifactId),
     })
-    for (const tool of createPresentationTools(ctx as unknown as PresentationsPluginContext))
-      ctx.agent.registerTool(tool)
+    ctx.lifecycle?.onDispose?.(
+      () => setPresentationResultBridge(null),
+      "cognia-presentations:result-bridge"
+    )
+    for (const name of PRESENTATION_TOOL_NAMES)
+      ctx.toolResult?.registerToolResultRenderer?.(name, PresentationResultCard)
     ctx.logger.info("cognia-presentations plugin activated")
   },
 }
