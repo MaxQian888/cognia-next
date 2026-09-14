@@ -1,30 +1,36 @@
 "use client"
 
 /**
- * Mobile-native scheduler page — surfaces the unified scheduler from the
- * `/me` (Capacitor bottom-nav) entry point.
+ * `/me/scheduler`: the scheduler in the phone shell (ADR-0179 §6).
  *
- * Why this is a separate page from `/scheduler`
- * ---------------------------------------------
- * The desktop `/scheduler` route wraps everything in `SidebarProvider` and a
- * three-pane layout (sidebar + detail + xl rail). On a 375-wide phone, even
- * after the matchMedia breakpoint hides the sidebar, the page still pays the
- * SidebarProvider context cost and the chrome doesn't feel native. This page
- * skips the desktop wrapper entirely: stat strip → kind chips → search →
- * flat list of unified items → push-detail. The data layer (sources
- * registry, `useUnifiedScheduledItems`, `useScheduler`) is shared verbatim.
+ * The same components as `/scheduler` over the same store and the same
+ * address, narrower: the attention block and a stat strip above the list,
+ * the flat rows, a full-screen push of `ItemDetail`, the run sheet, and the
+ * same delete confirmation. The desktop shell is not mounted, because a
+ * `SidebarProvider` and a resizable group cost a phone something for a
+ * layout it never renders.
  *
- * A layout that is not compact gets bounced to `/scheduler` — the full one is the
- * better experience there.
+ * Creation here is app-only; system, workflow and backup creation, bulk
+ * actions, templates and import/export stay on the desktop, each needing a
+ * surface the phone shell does not have.
+ *
+ * A layout that is not compact is bounced to `/scheduler`; the two routes
+ * are a mutually exclusive pair, never a loop.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { Search } from "lucide-react"
+import { ChevronLeftIcon, SearchIcon, XIcon } from "lucide-react"
+import { toast } from "sonner"
 
-import { Input } from "@/components/ui/input"
-import { Button, buttonVariants } from "@/components/ui/button"
+import { Button } from "@/components/ui/button"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import {
   Sheet,
   SheetContent,
@@ -32,200 +38,262 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+import { StatStrip, type StatStripItem } from "@/components/surface/stat-strip"
 import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
-import { MeSection } from "@/components/mobile/me/me-section"
 import { FloatingActionButton } from "@/components/ui/floating-action-button"
-import { MobileSchedulerStatStrip } from "@/components/mobile/scheduler/mobile-scheduler-stat-strip"
-import { SchedulerHostBar } from "@/components/scheduler/scheduler-host-bar"
-import { FilterChips, SchedulerMobileDetailView, TaskForm } from "@/components/scheduler"
+import { FilterChips, TaskForm, SchedulerSkeleton } from "@/components/scheduler"
+import { DeleteItemDialog } from "@/components/scheduler/delete-item-dialog"
+import { ItemDetail } from "@/components/scheduler/detail/item-detail"
+import type { ItemActions } from "@/components/scheduler/detail/item-hero"
 import { KindFilterChips } from "@/components/scheduler/kind-filter-chips"
-import { filterUnifiedItems, isUnifiedStatusFilter } from "@/lib/scheduler/unified-filter"
-import { defaultTaskTimezone, seedTaskDefaults } from "@/lib/scheduler/task-defaults"
-import { UnifiedTaskSidebarItem } from "@/components/scheduler/unified-task-sidebar-item"
-import { useScheduler } from "@/hooks/scheduler"
+import { AttentionBlock } from "@/components/scheduler/overview/attention-block"
+import { RunDetailSheet } from "@/components/scheduler/run-detail-sheet"
+import {
+  SchedulerHostPopover,
+  SchedulerHostStatusBadge,
+  SchedulerHostSummaryLine,
+  useSchedulerHostSummary,
+} from "@/components/scheduler/scheduler-host-popover"
+import { SchedulerListRow } from "@/components/scheduler/scheduler-list-row"
+import { TaskListEmptyState } from "@/components/scheduler/empty-states"
+import { useScheduler, useSystemScheduler } from "@/hooks/scheduler"
+import { useLocalisedItems } from "@/hooks/scheduler/use-localised-items"
+import { useSchedulerListFilter } from "@/hooks/scheduler/use-scheduler-list-filter"
+import { useSchedulerSelection } from "@/hooks/scheduler/use-scheduler-selection"
 import { useUnifiedScheduledItems } from "@/hooks/scheduler/use-unified-items"
+import {
+  toUnifiedFromTaskExecution,
+  useUnifiedRecentRuns,
+} from "@/hooks/scheduler/use-unified-recent-runs"
+import { useNowTicker } from "@/hooks/fleet/use-now-ticker"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
+import { AGENDA_DAYS, buildAgenda } from "@/lib/scheduler/agenda"
+import { deriveAttention, signalsForItem, type AttentionSignal } from "@/lib/scheduler/attention"
+import { orderListItems } from "@/lib/scheduler/list-order"
+import { buildOutcomeCells, summarizeOutcomeCells } from "@/lib/scheduler/outcome-strip"
 import { bootstrapSchedulerSources } from "@/lib/scheduler/sources/bootstrap"
 import { getSchedulerSourceRegistry } from "@/lib/scheduler/sources/registry"
-import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
-import { useProjectStore } from "@/stores/project/project-store"
-import { useSchedulerHostTarget } from "@/hooks/scheduler/use-scheduler-host-target"
+import { defaultTaskTimezone, seedTaskDefaults } from "@/lib/scheduler/task-defaults"
+import { consumeScheduledTaskDraft } from "@/lib/scheduler/task-draft-handoff"
 import { workspaceScopeForSchedulerHost } from "@/lib/scheduler/task-workspace-binding"
-import { useSchedulerStore } from "@/stores/scheduler/scheduler-store"
-import { cn } from "@/lib/utils"
+import { deriveUnifiedStatistics, filterUnifiedItems } from "@/lib/scheduler/unified-filter"
 import { COMPACT_ABOVE_TAB_BAR_BOTTOM } from "@/lib/shell/compact-shell"
-import {
-  SCHEDULED_ITEM_KINDS,
-  type ScheduledItemKind,
-  type UnifiedScheduledItem,
-} from "@/types/scheduler/unified"
+import { useProjectStore } from "@/stores/project/project-store"
+import { useSchedulerStore } from "@/stores/scheduler/scheduler-store"
 import type { CreateScheduledTaskInput } from "@/types/scheduler"
+import { parseUnifiedId, type UnifiedScheduledItem } from "@/types/scheduler/unified"
+import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
+
+const APP_TABLE_KINDS = new Set(["app", "plugin", "connector"])
 
 export default function MobileSchedulerPage() {
+  return (
+    <Suspense fallback={<SchedulerSkeleton variant="sidebar" />}>
+      <MobileSchedulerBody />
+    </Suspense>
+  )
+}
+
+function MobileSchedulerBody() {
   const t = useTranslations("scheduler")
   const tMobile = useTranslations("mobile.me")
   const router = useRouter()
-  // Width, not runtime. `/me` next door already learned this: asking
-  // `usePlatform()` here bounced a 375px browser out of the phone-shaped
-  // scheduler and into `/scheduler`, which has no compact body at all, so the
-  // narrow tab landed on a desktop three-pane layout it cannot render.
-  const compact = useCompactLayout()
 
+  // Width, not runtime: a narrow browser tab is a phone-shaped scheduler.
+  const compact = useCompactLayout()
   const [mounted, setMounted] = useState(false)
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true)
   }, [])
-
   useEffect(() => {
-    if (!mounted) return
-    if (compact) return
+    if (!mounted || compact) return
     router.replace("/scheduler")
   }, [compact, mounted, router])
 
   const {
-    statistics,
+    tasks,
+    executions,
     selectedTask,
     isInitialized,
+    isLoading,
     createTask,
     updateTask,
+    deleteTask,
     pauseTask,
     resumeTask,
     runTaskNow,
     selectTask,
     refresh,
-    loadRecentExecutions,
-    loadUpcomingTasks,
+    cancelExecution,
+    hasMoreExecutions,
+    loadMoreExecutions,
   } = useScheduler()
+  const { tasks: systemTasks, pendingConfirmations } = useSystemScheduler()
+  const maxTasksPerSource = useSchedulerStore((s) => s.permissionPolicy.maxTasksPerSource)
+  const taskDefaults = useSchedulerStore((s) => s.permissionPolicy.taskDefaults)
 
   useEffect(() => {
     bootstrapSchedulerSources()
   }, [])
-
-  const { items: unifiedItems, countsByKind } = useUnifiedScheduledItems({
+  const { items: rawItems, errors: sourceErrors } = useUnifiedScheduledItems({
     registry: getSchedulerSourceRegistry(),
   })
+  const items = useLocalisedItems(rawItems)
+  const { runs: recentRuns } = useUnifiedRecentRuns({ limit: 200 })
+  const tick = useNowTicker()
+  const now = Math.floor(tick / 60_000) * 60_000
 
-  useEffect(() => {
-    if (isInitialized) {
-      loadRecentExecutions(10)
-      loadUpcomingTasks(5)
+  const host = useSchedulerHostSummary()
+  const localProjectId = useProjectStore((s) => s.activeProjectId)
+  const workspaceScope = workspaceScopeForSchedulerHost(host.target, localProjectId)
+  const scopedItems = useMemo(
+    () => filterUnifiedItems(items, { projectId: workspaceScope }),
+    [items, workspaceScope]
+  )
+  const filter = useSchedulerListFilter(items, workspaceScope)
+  const statistics = useMemo(() => deriveUnifiedStatistics(scopedItems), [scopedItems])
+  const tasksById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks])
+  const signals = useMemo(
+    () =>
+      deriveAttention({
+        items: scopedItems,
+        tasksById,
+        runs: recentRuns,
+        pendingConfirmations: pendingConfirmations.length,
+        hostSuspended: host.suspended,
+        sourceErrors,
+        maxTasksPerSource,
+      }),
+    [
+      scopedItems,
+      tasksById,
+      recentRuns,
+      pendingConfirmations.length,
+      host.suspended,
+      sourceErrors,
+      maxTasksPerSource,
+    ]
+  )
+  const signalByItem = useMemo(() => {
+    const map = new Map<string, AttentionSignal | null>()
+    for (const signal of signals) {
+      if (signal.itemUnifiedId && !map.has(signal.itemUnifiedId))
+        map.set(signal.itemUnifiedId, signal)
     }
-  }, [isInitialized, loadRecentExecutions, loadUpcomingTasks])
+    return map
+  }, [signals])
+  const orderedItems = useMemo(
+    () => orderListItems(filter.facets.visibleItems, { signalByItem, now }),
+    [filter.facets.visibleItems, signalByItem, now]
+  )
+  const outcomeCells = useMemo(() => buildOutcomeCells(recentRuns, { now }), [recentRuns, now])
+  const agenda = useMemo(
+    () => buildAgenda(scopedItems, { now, days: AGENDA_DAYS }),
+    [scopedItems, now]
+  )
 
-  // --- Local UI state ---
-  const [searchQuery, setSearchQuery] = useState("")
-  const [activeFilter, setActiveFilter] = useState("all")
-  const [selectedKinds, setSelectedKinds] = useState<Set<ScheduledItemKind>>(new Set())
-  const [selectedUnifiedItem, setSelectedUnifiedItem] = useState<UnifiedScheduledItem | null>(null)
+  // --- Selection (the address) ---
+  const selection = useSchedulerSelection(items, isInitialized)
+  const selectedItem = useMemo(
+    () => items.find((item) => item.unifiedId === selection.itemId) ?? null,
+    [items, selection.itemId]
+  )
+  const selectedIsAppTable = Boolean(selectedItem && APP_TABLE_KINDS.has(selectedItem.kind))
+  const selectedSourceId = selectedIsAppTable ? selectedItem!.sourceId : null
+  useEffect(() => {
+    selectTask(selectedSourceId)
+  }, [selectedSourceId, selectTask])
+  const selectedAppTask = useMemo(
+    () => (selectedSourceId ? (tasksById.get(selectedSourceId) ?? selectedTask) : undefined),
+    [selectedSourceId, tasksById, selectedTask]
+  )
+  const selectedSystemTask = useMemo(
+    () =>
+      selectedItem?.kind === "system"
+        ? systemTasks.find((task) => task.id === selectedItem.sourceId)
+        : undefined,
+    [selectedItem, systemTasks]
+  )
+  const itemRuns = useMemo<UnifiedExecutionRun[]>(() => {
+    if (!selectedItem) return []
+    if (selectedIsAppTable) return executions.map(toUnifiedFromTaskExecution)
+    return recentRuns.filter((run) => run.itemUnifiedId === selectedItem.unifiedId)
+  }, [selectedItem, selectedIsAppTable, executions, recentRuns])
+  const itemOutcomeCells = useMemo(() => buildOutcomeCells(itemRuns, { now }), [itemRuns, now])
+  const itemSignals = useMemo(
+    () => (selectedItem ? signalsForItem(signals, selectedItem.unifiedId) : []),
+    [signals, selectedItem]
+  )
+  const selectedRun = useMemo(() => {
+    if (!selection.runId) return null
+    return (
+      itemRuns.find((run) => run.unifiedId === selection.runId) ??
+      recentRuns.find((run) => run.unifiedId === selection.runId) ??
+      null
+    )
+  }, [selection.runId, itemRuns, recentRuns])
+
+  // --- Sheets and dialogs ---
   const [showCreateSheet, setShowCreateSheet] = useState(false)
-  // Settings → Scheduled Tasks → "Defaults for new tasks" (mirrors the desktop
-  // create sheet in `components/scheduler/scheduler-dialogs.tsx`).
-  const taskDefaults = useSchedulerStore((s) => s.permissionPolicy.taskDefaults)
+  const [createDraft, setCreateDraft] = useState<{
+    input: Partial<CreateScheduledTaskInput>
+    summary?: string
+  } | null>(null)
+  // The composer's "schedule this" hand-off used to expire here unread: the
+  // desktop route redirected to this page, and this page never looked.
+  useEffect(() => {
+    const handed = consumeScheduledTaskDraft()
+    if (!handed) return
+    queueMicrotask(() => {
+      setCreateDraft(handed)
+      setShowCreateSheet(true)
+    })
+  }, [])
   const [showEditSheet, setShowEditSheet] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  /**
-   * Holds the full unified item being deleted so the confirm dialog can show
-   * its display name and route the dispatch through the source registry
-   * (kind-aware) rather than the app-only `useScheduler.deleteTask`.
-   */
-  const [deleteConfirmItem, setDeleteConfirmItem] = useState<UnifiedScheduledItem | null>(null)
-
-  // Derived: filter by search / kind / status / workspace. Shares the desktop
-  // page's filtering engine (`lib/scheduler/unified-filter.ts`) so the two
-  // surfaces can't drift on what "active" or a search hit means.
-  const localProjectId = useProjectStore((s) => s.activeProjectId)
-  // Same rule as the desktop page, and it matters more here: a paired phone
-  // reads the HOST's schedules while `activeProjectId` stays this device's.
-  const { target: schedulerHostTarget } = useSchedulerHostTarget()
-  const workspaceScope = workspaceScopeForSchedulerHost(schedulerHostTarget, localProjectId)
-  const visibleItems = useMemo(
-    () =>
-      filterUnifiedItems(unifiedItems, {
-        search: searchQuery,
-        status: isUnifiedStatusFilter(activeFilter) ? activeFilter : "all",
-        kinds: selectedKinds,
-        // Same workspace scope as the desktop page. An unattributed row still
-        // shows everywhere. See `taskVisibleInWorkspace`.
-        projectId: workspaceScope,
-      }),
-    [unifiedItems, selectedKinds, activeFilter, searchQuery, workspaceScope]
-  )
-
-  const grouped = useMemo(() => {
-    const groups = new Map<ScheduledItemKind, UnifiedScheduledItem[]>()
-    for (const kind of SCHEDULED_ITEM_KINDS) groups.set(kind, [])
-    for (const item of visibleItems) {
-      const bucket = groups.get(item.kind)
-      if (bucket) bucket.push(item)
-    }
-    return Array.from(groups.entries()).filter(([, items]) => items.length > 0)
-  }, [visibleItems])
-
-  // --- Handlers ---
-  const dispatchUnified = useCallback(
-    (action: "runNow" | "pause" | "resume" | "delete") => async (item: UnifiedScheduledItem) => {
-      const source = getSchedulerSourceRegistry().getSource(item.kind)
-      if (!source) return
-      await source[action](item.sourceId)
-    },
-    []
-  )
+  const [pendingDelete, setPendingDelete] = useState<UnifiedScheduledItem | null>(null)
 
   const handleSelectItem = useCallback(
-    (item: UnifiedScheduledItem) => {
-      if (item.kind === "app") {
-        selectTask(item.sourceId)
-        setSelectedUnifiedItem(null)
-      } else {
-        selectTask(null)
-        setSelectedUnifiedItem(item)
-      }
-    },
-    [selectTask]
+    (item: UnifiedScheduledItem) => selection.selectItem(item.unifiedId),
+    [selection]
   )
-
-  const handleBack = useCallback(() => {
-    selectTask(null)
-    setSelectedUnifiedItem(null)
-  }, [selectTask])
+  const handleSelectUnifiedId = useCallback(
+    (unifiedId: string) => {
+      if (items.some((item) => item.unifiedId === unifiedId)) selection.selectItem(unifiedId)
+    },
+    [items, selection]
+  )
+  const handleOpenRun = useCallback(
+    (run: UnifiedExecutionRun) => selection.openRun(run.unifiedId),
+    [selection]
+  )
 
   const handleCreate = useCallback(
     async (input: CreateScheduledTaskInput) => {
       setIsSubmitting(true)
       try {
-        await createTask(input)
+        const created = await createTask(input)
+        if (!created) {
+          toast.error(useSchedulerStore.getState().error ?? t("createTaskFailed"))
+          return
+        }
         setShowCreateSheet(false)
+        setCreateDraft(null)
+        selection.selectItem(`app:${created.id}`)
       } finally {
         setIsSubmitting(false)
       }
     },
-    [createTask]
+    [createTask, selection, t]
   )
 
-  /**
-   * Edit submit — app-kind tasks only (the same scope as `TaskForm`, which
-   * builds a `CreateScheduledTaskInput`). Mirrors the desktop
-   * `SchedulerDialogs` edit handler: merge the form output back into the
-   * selected task via `updateTask`, clearing the end bound / forward chains
-   * when the form returns them empty. Non-app kinds keep their own editors
-   * (workflow editor, backup settings, …) and aren't routed here.
-   */
   const handleEdit = useCallback(
     async (input: CreateScheduledTaskInput) => {
-      if (!selectedTask) return
+      if (!selectedAppTask) return
       setIsSubmitting(true)
       try {
-        await updateTask(selectedTask.id, {
+        await updateTask(selectedAppTask.id, {
           name: input.name,
           description: input.description,
           trigger: input.trigger,
@@ -242,236 +310,296 @@ export default function MobileSchedulerPage() {
         setIsSubmitting(false)
       }
     },
-    [selectedTask, updateTask]
+    [selectedAppTask, updateTask]
   )
 
-  const handleConfirmDelete = useCallback(async () => {
-    if (!deleteConfirmItem) return
-    await dispatchUnified("delete")(deleteConfirmItem)
-    setDeleteConfirmItem(null)
-    handleBack()
-  }, [deleteConfirmItem, dispatchUnified, handleBack])
+  const handleDeleteConfirm = useCallback(async () => {
+    const item = pendingDelete
+    if (!item) return
+    setPendingDelete(null)
+    if (APP_TABLE_KINDS.has(item.kind)) {
+      await deleteTask(item.sourceId)
+    } else {
+      const source = getSchedulerSourceRegistry().getSource(item.kind)
+      await source?.delete(item.sourceId)
+    }
+    if (selection.itemId === item.unifiedId) selection.clear()
+  }, [pendingDelete, deleteTask, selection])
 
-  /**
-   * Match the desktop sidebar contract: the row's delete affordance always
-   * resolves a `UnifiedScheduledItem`. We stash the full item so the confirm
-   * dialog can name it and route the dispatch through the source registry,
-   * which delegates to the right backend per kind (app → useScheduler,
-   * workflow → workflowDb, backup → schedulerDb backup row, etc.).
-   */
-  const handleRowDelete = useCallback((item: UnifiedScheduledItem) => {
-    setDeleteConfirmItem(item)
-  }, [])
-
-  /**
-   * SchedulerMobileDetailView's app-kind onDelete contract is `(taskId) =>`.
-   * We look the unified item back up so the confirm dialog stays kind-aware.
-   * For unified-kind detail views the onUnifiedDelete prop is wired directly
-   * to `dispatchUnified("delete")` (immediate), matching desktop semantics.
-   */
-  const handleAppDetailDelete = useCallback(
-    (taskId: string) => {
-      const match = unifiedItems.find((it) => it.kind === "app" && it.sourceId === taskId)
-      if (match) setDeleteConfirmItem(match)
+  const handleCancelRun = useCallback(
+    async (run: UnifiedExecutionRun) => {
+      const parsed = parseUnifiedId(run.unifiedId)
+      if (!parsed || !APP_TABLE_KINDS.has(run.kind)) {
+        toast.error(t("cancelRunUnreachable"))
+        return
+      }
+      const outcome = await cancelExecution(parsed.sourceId)
+      if (outcome.cancelled) toast.success(t("cancelRunSuccess"))
+      else if (outcome.reason === "requested") toast.info(t("cancelRunRequested"))
+      else if (outcome.reason === "already-settled") toast.info(t("cancelRunAlreadyFinished"))
+      else if (outcome.reason === "unsupported-on-remote")
+        toast.error(t("cancelRunRemoteUnsupported"))
+      else toast.error(t("cancelRunUnreachable"))
     },
-    [unifiedItems]
+    [cancelExecution, t]
+  )
+  const handleCancelRunId = useCallback(
+    (runUnifiedId: string) => {
+      const run = recentRuns.find((candidate) => candidate.unifiedId === runUnifiedId)
+      if (run) void handleCancelRun(run)
+    },
+    [recentRuns, handleCancelRun]
   )
 
-  // Prevent a flash of phone chrome behind the desktop frame during the redirect.
-  if (!mounted) return null
-  if (!compact) return null
+  const itemActions = useMemo<ItemActions>(() => {
+    const report = (item: UnifiedScheduledItem) => (error: unknown) => {
+      toast.error(t("actionFailed", { name: item.name }), {
+        description: error instanceof Error ? error.message : String(error),
+      })
+    }
+    const dispatch =
+      (store: (taskId: string) => Promise<unknown>, action: "runNow" | "pause" | "resume") =>
+      (item: UnifiedScheduledItem) => {
+        if (APP_TABLE_KINDS.has(item.kind)) {
+          void store(item.sourceId).catch(report(item))
+          return
+        }
+        const source = getSchedulerSourceRegistry().getSource(item.kind)
+        if (!source) {
+          toast.error(t("actionFailed", { name: item.name }))
+          return
+        }
+        void source[action](item.sourceId).catch(report(item))
+      }
+    return {
+      onRunNow: dispatch(runTaskNow, "runNow"),
+      onPause: dispatch(pauseTask, "pause"),
+      onResume: dispatch(resumeTask, "resume"),
+      onDelete: (item) => setPendingDelete(item),
+      onEdit: selectedItem?.kind === "app" ? () => setShowEditSheet(true) : undefined,
+    }
+  }, [t, runTaskNow, pauseTask, resumeTask, selectedItem?.kind])
 
-  const showingDetail = !!selectedTask || !!selectedUnifiedItem
+  if (!mounted || !compact) return null
+  if (!isInitialized) return <SchedulerSkeleton variant="sidebar" />
+
+  const outcome = summarizeOutcomeCells(outcomeCells)
+  const stats: StatStripItem[] = [
+    {
+      id: "active",
+      label: t("mobile.statStripLabels.active"),
+      value: statistics.activeItems,
+      total: statistics.totalItems,
+      tone: statistics.activeItems > 0 ? "positive" : "neutral",
+    },
+    {
+      id: "paused",
+      label: t("mobile.statStripLabels.paused"),
+      value: statistics.pausedItems,
+      tone: statistics.pausedItems > 0 ? "attention" : "neutral",
+    },
+    {
+      id: "executions",
+      label: t("mobile.statStripLabels.executions"),
+      value: outcome.succeeded + outcome.failed,
+      tone: "neutral",
+    },
+    {
+      id: "successRate",
+      label: t("mobile.statStripLabels.successRate"),
+      value: outcome.successRate === null ? "—" : `${outcome.successRate}%`,
+      tone:
+        outcome.successRate === null
+          ? "neutral"
+          : outcome.successRate >= 90
+            ? "positive"
+            : outcome.successRate >= 70
+              ? "attention"
+              : "critical",
+    },
+  ]
+
+  const statusFilters = [
+    { key: "all", label: t("filter.all"), count: filter.facets.statusCounts.all },
+    { key: "active", label: t("statuses.active"), count: filter.facets.statusCounts.active },
+    { key: "paused", label: t("statuses.paused"), count: filter.facets.statusCounts.paused },
+  ]
+
+  const showingDetail = Boolean(selectedItem)
 
   return (
     <>
       <SubPageShell
-        title={t("title") || tMobile("schedulerRow") || "Scheduler"}
-        backAria={tMobile("appearanceBackAria") || "Back"}
+        title={t("title")}
+        backAria={tMobile("appearanceBackAria")}
         testid="mobile-scheduler-page"
         bodyClassName="space-y-4 px-4 py-4 pb-28"
       >
-        <SchedulerHostBar />
-        <MobileSchedulerStatStrip statistics={statistics} />
-
-        <div className="space-y-2" data-testid="mobile-scheduler-filters">
-          <div className="relative">
-            <Search
-              className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-              aria-hidden="true"
-            />
-            <Input
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder={t("searchTasks")}
-              aria-label={t("searchTasks")}
-              className="h-9 pl-8"
-              data-testid="mobile-scheduler-search"
-            />
-          </div>
-
-          {/*
-            The shared chip components carry their own `px-3` (sized for the
-            desktop sidebar). Pull the row back by the same amount so the first
-            chip aligns flush with the search box / stat cards instead of
-            sitting visibly indented on the phone.
-          */}
-          <div className="-mx-3">
-            <FilterChips
-              filters={[
-                { key: "all", label: t("filter.all") || "All", count: unifiedItems.length },
-                {
-                  key: "active",
-                  label: t("statuses.active") || "Active",
-                  count: unifiedItems.filter((i) => i.status === "active").length,
-                },
-                {
-                  key: "paused",
-                  label: t("statuses.paused") || "Paused",
-                  count: unifiedItems.filter((i) => i.status === "paused").length,
-                },
-              ]}
-              activeFilter={activeFilter}
-              onFilterChange={setActiveFilter}
-            />
-
-            <KindFilterChips
-              selected={selectedKinds}
-              onToggle={(kind) => {
-                const next = new Set(selectedKinds)
-                if (next.has(kind)) next.delete(kind)
-                else next.add(kind)
-                setSelectedKinds(next)
-              }}
-              onClear={() => setSelectedKinds(new Set())}
-              countsByKind={countsByKind}
-            />
-          </div>
+        <div
+          className="flex items-center gap-2 text-xs text-muted-foreground"
+          data-testid="mobile-scheduler-host"
+        >
+          <SchedulerHostSummaryLine summary={host} className="min-w-0 flex-1" />
+          <SchedulerHostStatusBadge summary={host} />
+          <SchedulerHostPopover />
         </div>
 
-        {grouped.length === 0 ? (
-          <p
-            className="py-10 text-center text-sm text-muted-foreground"
-            data-testid="mobile-scheduler-empty"
-          >
-            {searchQuery || activeFilter !== "all" || selectedKinds.size > 0
-              ? t("emptyFiltered") || "No matching tasks"
-              : t("emptyTitle") || "No scheduled tasks yet"}
-          </p>
+        <StatStrip
+          stats={stats}
+          testId="mobile-scheduler-stats"
+          cellTestIdPrefix="mobile-scheduler-stat"
+        />
+
+        <AttentionBlock
+          signals={signals}
+          next={agenda.next}
+          onSelectItem={handleSelectUnifiedId}
+          onCancelRun={handleCancelRunId}
+          onRetrySources={() => refresh()}
+          onSwitchToPaired={host.pairedAvailable ? () => host.setTarget("paired") : undefined}
+          onOpenPolicy={() => router.push("/settings?section=scheduled-tasks")}
+        />
+
+        <div className="space-y-2" data-testid="mobile-scheduler-filters">
+          <InputGroup className="h-9">
+            <InputGroupAddon align="inline-start">
+              <SearchIcon className="size-4 text-muted-foreground" aria-hidden="true" />
+            </InputGroupAddon>
+            <InputGroupInput
+              value={filter.filter.search}
+              onChange={(event) => filter.setSearch(event.target.value)}
+              placeholder={t("searchTasks")}
+              aria-label={t("searchTasks")}
+              data-testid="mobile-scheduler-search"
+            />
+            {filter.filter.search ? (
+              <InputGroupAddon align="inline-end">
+                <InputGroupButton
+                  size="icon-xs"
+                  onClick={() => filter.setSearch("")}
+                  aria-label={t("clearSearch")}
+                >
+                  <XIcon className="size-3" />
+                </InputGroupButton>
+              </InputGroupAddon>
+            ) : null}
+          </InputGroup>
+          <FilterChips
+            filters={statusFilters}
+            activeFilter={filter.filter.status}
+            onFilterChange={(key) => filter.setStatus(key as typeof filter.filter.status)}
+          />
+          <KindFilterChips
+            selected={new Set(filter.kinds)}
+            onToggle={filter.toggleKind}
+            onClear={filter.clearKindFilters}
+            countsByKind={filter.facets.countsByKind}
+          />
+        </div>
+
+        {scopedItems.length === 0 ? (
+          <TaskListEmptyState onCreate={() => setShowCreateSheet(true)} />
+        ) : orderedItems.length === 0 ? (
+          <TaskListEmptyState variant="filtered" onClearFilters={filter.reset} />
         ) : (
-          <div className="space-y-3" data-testid="mobile-scheduler-list">
-            {grouped.map(([kind, items]) => (
-              <MeSection
-                key={kind}
-                title={t(`kindFilter.${kind}`) || kind}
-                testid={`mobile-scheduler-group-${kind}`}
-              >
-                {/*
-                  Mobile scheduler shell: `MeSection` (canonical /me/* grouping) wraps
-                  `UnifiedTaskSidebarItem` rows. The row body stays shared with the
-                  desktop scheduler — it carries a status dot + a dropdown menu
-                  (run / pause / edit / delete) that `MeRow` cannot express without
-                  losing functionality. The outer `SubPageShell + MeSection` chrome
-                  gives this page the same visual cadence as the rest of `/me/*`.
-                */}
-                {items.map((item) => (
-                  <UnifiedTaskSidebarItem
-                    key={item.unifiedId}
-                    item={item}
-                    isActive={
-                      selectedUnifiedItem?.unifiedId === item.unifiedId ||
-                      (item.kind === "app" && selectedTask?.id === item.sourceId)
-                    }
-                    onClick={handleSelectItem}
-                    onRunNow={dispatchUnified("runNow")}
-                    onPause={dispatchUnified("pause")}
-                    onResume={dispatchUnified("resume")}
-                    onDelete={handleRowDelete}
-                  />
-                ))}
-              </MeSection>
+          <div className="flex flex-col" role="list" data-testid="mobile-scheduler-list">
+            {orderedItems.map((item) => (
+              <div key={item.unifiedId} role="listitem">
+                <SchedulerListRow
+                  item={item}
+                  signal={signalByItem.get(item.unifiedId) ?? null}
+                  selected={selection.itemId === item.unifiedId}
+                  checked={false}
+                  onSelect={handleSelectItem}
+                  onToggleCheck={() => {}}
+                />
+              </div>
             ))}
           </div>
         )}
       </SubPageShell>
 
-      {/* FAB → create new task. Anchored to viewport so it stays visible while
-          the list scrolls. The default FAB offset only clears the safe-area;
-          on `/me/*` the fixed `MobileTabBar` is still mounted, so lift the FAB
-          above it or it covers the bottom nav / "我" tab. The reserve is
-          stated once, in `lib/shell/compact-shell.ts`. */}
-      {!showingDetail && (
+      {showingDetail ? null : (
         <FloatingActionButton
-          aria-label={t("mobile.fabCreateAria") || t("createTask") || "Create task"}
+          aria-label={t("mobile.fabCreateAria")}
           data-testid="mobile-scheduler-fab"
           className={COMPACT_ABOVE_TAB_BAR_BOTTOM}
           onClick={() => setShowCreateSheet(true)}
         />
       )}
 
-      {/* Full-screen detail push. Renders above SubPageShell when an item is
-          selected. */}
-      {showingDetail && (
+      {selectedItem ? (
         <div
           className="fixed inset-0 z-40 flex flex-col bg-background"
           data-testid="mobile-scheduler-detail-overlay"
         >
-          <SchedulerMobileDetailView
-            task={selectedTask ?? undefined}
-            unifiedItem={selectedTask ? undefined : (selectedUnifiedItem ?? undefined)}
-            onBack={handleBack}
-            onPause={pauseTask}
-            onResume={resumeTask}
-            onRunNow={runTaskNow}
-            onDelete={handleAppDetailDelete}
-            onEdit={() => {
-              // App-kind tasks edit in-place via the same `TaskForm` the create
-              // sheet uses (prefilled from `selectedTask`). Non-app kinds never
-              // reach this callback — their detail view omits the edit action.
-              if (selectedTask) setShowEditSheet(true)
-            }}
-            onUnifiedRunNow={dispatchUnified("runNow")}
-            onUnifiedPause={dispatchUnified("pause")}
-            onUnifiedResume={dispatchUnified("resume")}
-            onUnifiedDelete={dispatchUnified("delete")}
+          <header className="flex shrink-0 items-center gap-2 border-b px-2 py-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => selection.clear()}
+              aria-label={t("back")}
+              data-testid="mobile-scheduler-back"
+            >
+              <ChevronLeftIcon className="size-5" />
+            </Button>
+            <span className="min-w-0 flex-1 truncate text-sm font-medium">{selectedItem.name}</span>
+          </header>
+          <ItemDetail
+            item={selectedItem}
+            task={selectedIsAppTable ? selectedAppTask : undefined}
+            systemTask={selectedSystemTask}
+            signals={itemSignals}
+            runs={itemRuns}
+            runsLoading={isLoading}
+            hasMoreRuns={selectedIsAppTable ? hasMoreExecutions : false}
+            onLoadMoreRuns={selectedIsAppTable ? loadMoreExecutions : undefined}
+            selectedRunId={selection.runId}
+            outcomeCells={itemOutcomeCells}
+            allTasks={tasks}
+            actions={itemActions}
+            onOpenRun={handleOpenRun}
+            onCancelRun={handleCancelRun}
+            onSelectItem={handleSelectUnifiedId}
+            onBackupScheduled={refresh}
+            className="min-h-0 flex-1"
           />
         </div>
-      )}
+      ) : null}
 
-      {/* Create-task sheet. Slides in from the right (desktop) or the bottom
-          (small breakpoint via shadcn defaults). */}
-      <Sheet open={showCreateSheet} onOpenChange={setShowCreateSheet}>
+      <Sheet
+        open={showCreateSheet}
+        onOpenChange={(open) => {
+          setShowCreateSheet(open)
+          if (!open) setCreateDraft(null)
+        }}
+      >
         <SheetContent
           side="right"
           className="w-full overflow-y-auto sm:max-w-lg"
           data-testid="mobile-scheduler-create-sheet"
         >
           <SheetHeader>
-            <SheetTitle>{t("createTask") || "Create task"}</SheetTitle>
+            <SheetTitle>{t("createTask")}</SheetTitle>
             <SheetDescription>
-              {t("createTaskDescription") || "Set up a new scheduled task"}
+              {createDraft?.summary ?? t("createTaskDescription")}
             </SheetDescription>
           </SheetHeader>
           <div className="mt-4">
             <TaskForm
-              // Settings → Scheduled Tasks → "Defaults for new tasks", same as
-              // the desktop create sheet. Create only — the edit sheet below
-              // must keep the task's own stored config.
-              key={JSON.stringify(taskDefaults ?? "no-defaults")}
-              initialValues={seedTaskDefaults(taskDefaults)}
+              key={createDraft ? "draft" : JSON.stringify(taskDefaults ?? "no-defaults")}
+              initialValues={createDraft?.input ?? seedTaskDefaults(taskDefaults)}
               defaultTimezone={defaultTaskTimezone(taskDefaults)}
               onSubmit={handleCreate}
               onCancel={() => setShowCreateSheet(false)}
               isSubmitting={isSubmitting}
-              existingTasks={[]}
+              existingTasks={tasks}
             />
           </div>
         </SheetContent>
       </Sheet>
 
-      {/* Edit-task sheet — app-kind only, prefilled from the selected task.
-          Mirrors the desktop `SchedulerDialogs` edit sheet but reuses the
-          mobile slide-in chrome. */}
       <Sheet open={showEditSheet} onOpenChange={setShowEditSheet}>
         <SheetContent
           side="right"
@@ -483,77 +611,49 @@ export default function MobileSchedulerPage() {
             <SheetDescription>{t("editTaskDescription")}</SheetDescription>
           </SheetHeader>
           <div className="mt-4">
-            {selectedTask ? (
+            {selectedAppTask ? (
               <TaskForm
                 initialValues={{
-                  name: selectedTask.name,
-                  description: selectedTask.description,
-                  type: selectedTask.type,
-                  trigger: selectedTask.trigger,
-                  payload: selectedTask.payload,
-                  config: selectedTask.config,
-                  notification: selectedTask.notification,
-                  endAt: selectedTask.endAt,
-                  onSuccessTaskIds: selectedTask.onSuccessTaskIds,
-                  onFailureTaskIds: selectedTask.onFailureTaskIds,
+                  name: selectedAppTask.name,
+                  description: selectedAppTask.description,
+                  type: selectedAppTask.type,
+                  trigger: selectedAppTask.trigger,
+                  payload: selectedAppTask.payload,
+                  config: selectedAppTask.config,
+                  notification: selectedAppTask.notification,
+                  endAt: selectedAppTask.endAt,
+                  onSuccessTaskIds: selectedAppTask.onSuccessTaskIds,
+                  onFailureTaskIds: selectedAppTask.onFailureTaskIds,
                 }}
                 onSubmit={handleEdit}
                 onCancel={() => setShowEditSheet(false)}
                 isSubmitting={isSubmitting}
-                existingTasks={[]}
+                existingTasks={tasks}
               />
             ) : null}
           </div>
         </SheetContent>
       </Sheet>
 
-      {/* Delete confirmation — shadcn AlertDialog (matches the desktop
-          `SchedulerDialogs` pattern). The unified item context lets the
-          title interpolate the task name so users can tell what they're
-          about to delete. */}
-      <AlertDialog
-        open={!!deleteConfirmItem}
+      <RunDetailSheet
+        open={selectedRun !== null}
         onOpenChange={(open) => {
-          if (!open) setDeleteConfirmItem(null)
+          if (!open) selection.openRun(null)
         }}
-      >
-        <AlertDialogContent data-testid="mobile-scheduler-delete-confirm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {t("deleteTaskConfirm") || "Are you sure you want to delete this task?"}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {deleteConfirmItem?.name
-                ? `${deleteConfirmItem.name} — ${t("deleteTask") || "Delete task"}`
-                : t("deleteTask") || "Delete task"}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel data-testid="mobile-scheduler-delete-cancel">
-              {t("cancel") || "Cancel"}
-            </AlertDialogCancel>
-            <AlertDialogAction
-              data-testid="mobile-scheduler-delete-confirm-button"
-              onClick={handleConfirmDelete}
-              className={cn(buttonVariants({ variant: "destructive" }))}
-            >
-              {t("delete") || "Delete"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        run={selectedRun}
+        runs={itemRuns.length > 0 ? itemRuns : recentRuns}
+        onNavigate={handleOpenRun}
+        onOpenItem={handleSelectUnifiedId}
+      />
 
-      {/* Pull-to-refresh-like manual refresh hook — exposed via a hidden
-          accessible button. The connector / sync layer keeps Dexie reads
-          live, so most users never need this, but a manual control is wired
-          for parity with the desktop refresh menu. */}
-      <Button
-        type="button"
-        variant="ghost"
-        onClick={() => refresh()}
-        className="sr-only"
-        aria-label={t("refresh") || "Refresh"}
-        data-testid="mobile-scheduler-refresh"
+      <DeleteItemDialog
+        item={pendingDelete}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null)
+        }}
+        onConfirm={() => {
+          void handleDeleteConfirm()
+        }}
       />
     </>
   )

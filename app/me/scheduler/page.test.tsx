@@ -1,491 +1,313 @@
 /**
- * @jest-environment jsdom
- *
- * Tests focus on the platform gate, the unified-items filtering, FAB → create
- * flow, and the detail push overlay. The downstream scheduler components are
- * heavily Dexie/Tauri-dependent so they're stubbed.
+ * `/me/scheduler` (ADR-0179 §6): the phone shell over the shared scheduler
+ * components. The data hooks and the heavy children are stubbed; what is
+ * pinned here is the wiring: the same store-backed filter and address-backed
+ * selection as the desktop, the detail push with the full run set, the
+ * confirmed delete for every kind, and the composer draft hand-off.
  */
 
-import { render, screen, fireEvent, act } from "@testing-library/react"
-import type { TaskStatistics } from "@/types/scheduler"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import type { UnifiedScheduledItem } from "@/types/scheduler/unified"
-
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
-  useLocale: () => "en",
-}))
+import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
 
 const routerReplace = jest.fn()
+const routerPush = jest.fn()
+let searchParams = new URLSearchParams()
 jest.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: routerReplace, push: jest.fn(), back: jest.fn() }),
+  useRouter: () => ({ replace: routerReplace, push: routerPush, back: jest.fn() }),
+  usePathname: () => "/me/scheduler",
+  useSearchParams: () => searchParams,
 }))
 
 let compactValue = true
-jest.mock("@/hooks/ui/use-compact-layout", () => ({
-  useCompactLayout: () => compactValue,
-}))
+jest.mock("@/hooks/ui/use-compact-layout", () => ({ useCompactLayout: () => compactValue }))
 
-const createTaskMock = jest.fn(async () => undefined)
+const createTaskMock = jest.fn(async () => ({ id: "new", name: "New" }))
 const updateTaskMock = jest.fn(async () => undefined)
 const pauseTaskMock = jest.fn(async () => undefined)
 const resumeTaskMock = jest.fn(async () => undefined)
-const deleteTaskMock = jest.fn(async () => undefined)
+const deleteTaskMock = jest.fn(async () => true)
 const runTaskNowMock = jest.fn(async () => undefined)
 const selectTaskMock = jest.fn()
 const refreshMock = jest.fn(async () => undefined)
-const loadRecentExecutionsMock = jest.fn(async () => undefined)
-const loadUpcomingTasksMock = jest.fn(async () => undefined)
+const cancelExecutionMock = jest.fn(async () => ({ cancelled: true }))
+const loadMoreExecutionsMock = jest.fn()
 
-const schedulerStateRef: {
-  current: {
-    statistics: TaskStatistics | null
-    selectedTask: { id: string; name: string } | null
-    isInitialized: boolean
-  }
-} = {
-  current: {
-    statistics: {
-      totalTasks: 4,
-      activeTasks: 2,
-      pausedTasks: 1,
-      totalExecutions: 10,
-      successfulExecutions: 9,
-      failedExecutions: 1,
-      averageDuration: 1500,
-      upcomingExecutions: 1,
-    } as TaskStatistics,
-    selectedTask: null,
-    isInitialized: true,
-  },
-}
-
+const executionsRef: { current: unknown[] } = { current: [] }
 jest.mock("@/hooks/scheduler", () => ({
   useScheduler: () => ({
-    statistics: schedulerStateRef.current.statistics,
-    selectedTask: schedulerStateRef.current.selectedTask,
-    isInitialized: schedulerStateRef.current.isInitialized,
+    tasks: [{ id: "t1", name: "Nightly", type: "chat", status: "active" }],
+    executions: executionsRef.current,
+    selectedTask: undefined,
+    isInitialized: true,
+    isLoading: false,
     createTask: createTaskMock,
     updateTask: updateTaskMock,
+    deleteTask: deleteTaskMock,
     pauseTask: pauseTaskMock,
     resumeTask: resumeTaskMock,
-    deleteTask: deleteTaskMock,
     runTaskNow: runTaskNowMock,
     selectTask: selectTaskMock,
     refresh: refreshMock,
-    loadRecentExecutions: loadRecentExecutionsMock,
-    loadUpcomingTasks: loadUpcomingTasksMock,
+    cancelExecution: cancelExecutionMock,
+    hasMoreExecutions: true,
+    loadMoreExecutions: loadMoreExecutionsMock,
   }),
+  useSystemScheduler: () => ({ tasks: [], pendingConfirmations: [] }),
 }))
 
 let unifiedItemsRef: UnifiedScheduledItem[] = []
-let countsByKindRef: Record<string, number> = {}
 jest.mock("@/hooks/scheduler/use-unified-items", () => ({
-  useUnifiedScheduledItems: () => ({
-    items: unifiedItemsRef,
-    countsByKind: countsByKindRef,
-    activeCountsByKind: countsByKindRef,
+  useUnifiedScheduledItems: () => ({ items: unifiedItemsRef, errors: {} }),
+}))
+let recentRunsRef: UnifiedExecutionRun[] = []
+jest.mock("@/hooks/scheduler/use-unified-recent-runs", () => ({
+  useUnifiedRecentRuns: () => ({ runs: recentRunsRef, isLoading: false }),
+  toUnifiedFromTaskExecution: (exec: { id: string }) => ({
+    unifiedId: `app:${exec.id}`,
+    kind: "app",
+    itemUnifiedId: "app:t1",
+    itemName: "Nightly",
+    status: "succeeded",
+    startedAt: 1,
+    origin: { tableName: "t", nativeId: exec.id },
   }),
 }))
 
-const sourceRunNow = jest.fn(async () => undefined)
-const sourcePause = jest.fn(async () => undefined)
-const sourceResume = jest.fn(async () => undefined)
 const sourceDelete = jest.fn(async () => undefined)
-jest.mock("@/lib/scheduler/sources/bootstrap", () => ({
-  bootstrapSchedulerSources: jest.fn(),
-}))
+const sourcePause = jest.fn(async () => undefined)
+jest.mock("@/lib/scheduler/sources/bootstrap", () => ({ bootstrapSchedulerSources: jest.fn() }))
 jest.mock("@/lib/scheduler/sources/registry", () => ({
   getSchedulerSourceRegistry: () => ({
     getSource: () => ({
-      runNow: sourceRunNow,
-      pause: sourcePause,
-      resume: sourceResume,
       delete: sourceDelete,
+      pause: sourcePause,
+      resume: jest.fn(),
+      runNow: jest.fn(),
     }),
   }),
 }))
+const draftRef: { current: { input: Record<string, unknown>; summary?: string } | null } = {
+  current: null,
+}
+jest.mock("@/lib/scheduler/task-draft-handoff", () => ({
+  consumeScheduledTaskDraft: () => {
+    const handed = draftRef.current
+    draftRef.current = null
+    return handed
+  },
+}))
 
 jest.mock("@/components/mobile/me/sub-page-shell", () => ({
-  SubPageShell: ({
-    children,
-    title,
-    testid,
+  SubPageShell: ({ children, testid }: { children: React.ReactNode; testid?: string }) => (
+    <div data-testid={testid}>{children}</div>
+  ),
+}))
+jest.mock("@/components/scheduler/scheduler-host-popover", () => ({
+  SchedulerHostPopover: () => <div data-testid="host-popover" />,
+  SchedulerHostStatusBadge: () => null,
+  SchedulerHostSummaryLine: () => <span data-testid="host-summary" />,
+  useSchedulerHostSummary: () => ({
+    target: "local",
+    label: "this device",
+    pairedAvailable: false,
+    suspended: false,
+    onlyWhileOpen: false,
+    pairedLabel: "",
+    setTarget: jest.fn(),
+  }),
+}))
+jest.mock("@/components/scheduler/detail/item-detail", () => ({
+  ItemDetail: ({
+    item,
+    runs,
+    hasMoreRuns,
+    actions,
   }: {
-    children: React.ReactNode
-    title: string
-    testid?: string
+    item: { name: string }
+    runs: unknown[]
+    hasMoreRuns?: boolean
+    actions: { onDelete: (i: unknown) => void; onPause: (i: unknown) => void }
   }) => (
-    <div data-testid={testid}>
-      <h1>{title}</h1>
-      {children}
+    <div data-testid="item-detail" data-runs={runs.length} data-more={String(hasMoreRuns)}>
+      {item.name}
+      <button data-testid="detail-delete" onClick={() => actions.onDelete(item)} />
+      <button data-testid="detail-pause" onClick={() => actions.onPause(item)} />
     </div>
   ),
 }))
-
+jest.mock("@/components/scheduler/run-detail-sheet", () => ({
+  RunDetailSheet: ({ open, run }: { open: boolean; run: { unifiedId: string } | null }) =>
+    open && run ? <div data-testid="run-sheet">{run.unifiedId}</div> : null,
+}))
 jest.mock("@/components/scheduler", () => ({
-  FilterChips: ({
-    activeFilter,
-    onFilterChange,
-    filters,
-  }: {
-    activeFilter: string
-    onFilterChange: (key: string) => void
-    filters: Array<{ key: string; label: string; count?: number }>
-  }) => (
-    <div data-testid="filter-chips">
-      {filters.map((f) => (
-        <button
-          key={f.key}
-          type="button"
-          data-active={activeFilter === f.key}
-          data-testid={`filter-chip-${f.key}`}
-          onClick={() => onFilterChange(f.key)}
-        >
-          {f.label} ({f.count ?? 0})
-        </button>
-      ))}
-    </div>
-  ),
-  SchedulerMobileDetailView: ({ onBack, onEdit }: { onBack: () => void; onEdit?: () => void }) => (
-    <div data-testid="stub-mobile-detail-view">
-      <button type="button" onClick={onBack} data-testid="stub-detail-back">
-        back
-      </button>
-      <button type="button" onClick={() => onEdit?.()} data-testid="stub-detail-edit">
-        edit
-      </button>
-    </div>
-  ),
+  FilterChips: () => <div data-testid="filter-chips" />,
+  SchedulerSkeleton: () => <div data-testid="skeleton" />,
   TaskForm: ({
     onSubmit,
-    onCancel,
+    initialValues,
   }: {
-    onSubmit: (input: unknown) => Promise<void>
-    onCancel: () => void
+    onSubmit: (i: unknown) => void
+    initialValues?: { name?: string }
   }) => (
-    <div data-testid="stub-task-form">
-      <button
-        type="button"
-        data-testid="stub-task-form-submit"
-        onClick={() => void onSubmit({ name: "new" })}
-      >
-        submit
-      </button>
-      <button type="button" data-testid="stub-task-form-cancel" onClick={onCancel}>
-        cancel
-      </button>
-    </div>
+    <button
+      data-testid="task-form"
+      data-name={initialValues?.name ?? ""}
+      onClick={() => onSubmit({ name: "x" })}
+    />
   ),
 }))
-
 jest.mock("@/components/scheduler/kind-filter-chips", () => ({
-  KindFilterChips: ({
-    selected,
-    onToggle,
-    onClear,
-  }: {
-    selected: Set<string>
-    onToggle: (kind: string) => void
-    onClear: () => void
-  }) => (
-    <div data-testid="kind-filter-chips">
-      <button type="button" onClick={onClear} data-testid="kind-clear">
-        clear
-      </button>
-      <button type="button" onClick={() => onToggle("workflow")} data-testid="kind-workflow">
-        workflow {selected.has("workflow") ? "on" : "off"}
-      </button>
-    </div>
-  ),
+  KindFilterChips: () => <div data-testid="kind-chips" />,
 }))
-
-jest.mock("@/components/scheduler/unified-task-sidebar-item", () => ({
-  UnifiedTaskSidebarItem: ({
+jest.mock("@/components/ui/sheet")
+jest.mock("@/components/scheduler/delete-item-dialog", () => ({
+  DeleteItemDialog: ({
     item,
-    onClick,
-    onDelete,
+    onConfirm,
   }: {
-    item: UnifiedScheduledItem
-    onClick: (item: UnifiedScheduledItem) => void
-    onDelete?: (item: UnifiedScheduledItem) => void
-  }) => (
-    <div data-testid={`unified-row-${item.unifiedId}-wrapper`}>
-      <button
-        type="button"
-        data-testid={`unified-row-${item.unifiedId}`}
-        onClick={() => onClick(item)}
-      >
+    item: { name: string } | null
+    onConfirm: () => void
+  }) =>
+    item ? (
+      <button data-testid="confirm-delete" onClick={onConfirm}>
         {item.name}
       </button>
-      {onDelete ? (
-        <button
-          type="button"
-          data-testid={`unified-row-${item.unifiedId}-delete`}
-          onClick={() => onDelete(item)}
-        >
-          delete
-        </button>
-      ) : null}
-    </div>
-  ),
+    ) : null,
 }))
-
-jest.mock("@/components/scheduler/scheduler-host-bar", () => ({
-  SchedulerHostBar: () => <div data-testid="scheduler-host-bar" />,
-}))
-jest.mock("@/components/mobile/scheduler/mobile-scheduler-stat-strip", () => ({
-  MobileSchedulerStatStrip: ({ statistics }: { statistics: TaskStatistics | null }) => (
-    <div data-testid="stub-stat-strip">{statistics ? statistics.activeTasks : "no-stats"}</div>
-  ),
-}))
-
-jest.mock("@/components/ui/floating-action-button", () => ({
-  FloatingActionButton: (props: React.ComponentProps<"button">) => (
-    <button type="button" {...props} data-testid="stub-fab" />
-  ),
-}))
-
-function makeItem(overrides: Partial<UnifiedScheduledItem> = {}): UnifiedScheduledItem {
-  return {
-    unifiedId: "app:task-1",
-    kind: "app",
-    sourceId: "task-1",
-    name: "Daily summary",
-    status: "active",
-    triggerSummary: { type: "cron", text: "0 9 * * *" },
-    origin: { tableName: "schedulerDb.tasks", deepLinkHref: "/scheduler" },
-    capabilities: { runNow: true, pause: true, edit: true, delete: true },
-    ...overrides,
-  } as UnifiedScheduledItem
-}
+jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn(), info: jest.fn() } }))
 
 import MobileSchedulerPage from "./page"
+import { useSchedulerStore } from "@/stores/scheduler/scheduler-store"
+
+function item(
+  kind: UnifiedScheduledItem["kind"],
+  sourceId: string,
+  name: string
+): UnifiedScheduledItem {
+  return {
+    unifiedId: `${kind}:${sourceId}`,
+    kind,
+    sourceId,
+    name,
+    status: "active",
+    triggerSummary: { type: "cron", cron: "* * * * *" },
+    origin: { deepLinkHref: "/scheduler" },
+    capabilities: { runNow: true, pause: true, edit: true, delete: true },
+  }
+}
 
 beforeEach(() => {
-  routerReplace.mockReset()
-  createTaskMock.mockReset()
-  updateTaskMock.mockReset()
-  selectTaskMock.mockReset()
-  sourceRunNow.mockReset()
-  sourcePause.mockReset()
-  sourceResume.mockReset()
-  sourceDelete.mockReset()
+  jest.clearAllMocks()
   compactValue = true
-  unifiedItemsRef = []
-  countsByKindRef = { app: 0, workflow: 0, backup: 0, plugin: 0, system: 0, connector: 0 }
-  schedulerStateRef.current.selectedTask = null
+  searchParams = new URLSearchParams()
+  unifiedItemsRef = [item("app", "t1", "Nightly"), item("workflow", "w1", "Deploy")]
+  recentRunsRef = []
+  executionsRef.current = []
+  draftRef.current = null
+  useSchedulerStore.getState().resetListFilter()
 })
 
-describe("MobileSchedulerPage layout gate", () => {
-  it("renders the phone body on a compact layout", () => {
-    compactValue = true
-    render(<MobileSchedulerPage />)
-    expect(screen.getByTestId("mobile-scheduler-page")).toBeInTheDocument()
-    expect(routerReplace).not.toHaveBeenCalled()
-  })
-
-  /**
-   * Width, not runtime. This used to ask `usePlatform()`, so a 375px browser
-   * was bounced out of the only scheduler that fits it and into `/scheduler`,
-   * which renders a master-detail layout a narrow tab cannot show. `/scheduler`
-   * now bounces the other way, so the pair is mutually exclusive.
-   */
-  it("stays put in a narrow browser, which is not a native runtime", () => {
-    compactValue = true
-    render(<MobileSchedulerPage />)
-    expect(routerReplace).not.toHaveBeenCalled()
-  })
-
-  it("returns null and redirects to /scheduler when the layout is wide", () => {
+describe("MobileSchedulerPage", () => {
+  it("bounces a wide layout to the desktop route", () => {
     compactValue = false
-    const { container } = render(<MobileSchedulerPage />)
-    expect(container.firstChild).toBeNull()
+    render(<MobileSchedulerPage />)
     expect(routerReplace).toHaveBeenCalledWith("/scheduler")
   })
-})
 
-describe("MobileSchedulerPage list rendering", () => {
-  it("renders the empty state when there are no unified items", () => {
+  it("renders the stat strip, the attention block and one row per item", () => {
     render(<MobileSchedulerPage />)
-    expect(screen.getByTestId("mobile-scheduler-empty")).toBeInTheDocument()
+    expect(screen.getByTestId("mobile-scheduler-stats")).toBeInTheDocument()
+    expect(screen.getByTestId("mobile-scheduler-stat-active")).toHaveTextContent("2/2")
+    // jsdom is a web host, so the chat task reads as unsupported: the block has a row.
+    expect(screen.getByTestId("attention-block")).toBeInTheDocument()
+    expect(screen.getByTestId("scheduler-list-row-app:t1")).toBeInTheDocument()
+    expect(screen.getByTestId("scheduler-list-row-workflow:w1")).toBeInTheDocument()
+    expect(screen.getByTestId("mobile-scheduler-fab")).toBeInTheDocument()
   })
 
-  it("groups items by kind and renders rows", () => {
-    unifiedItemsRef = [
-      makeItem({ unifiedId: "app:1", name: "App task" }),
-      makeItem({ unifiedId: "workflow:2", kind: "workflow", name: "WF task" }),
-    ]
+  it("writes a tap into the address and opens the detail from it with the full run set", () => {
+    const first = render(<MobileSchedulerPage />)
+    fireEvent.click(
+      screen
+        .getByTestId("scheduler-list-row-app:t1")
+        .querySelector("button[aria-current], button:not([role='checkbox'])")!
+    )
+    expect(routerReplace).toHaveBeenCalledWith("/me/scheduler?item=app%3At1")
+    first.unmount()
+
+    executionsRef.current = [{ id: "e1" }, { id: "e2" }]
+    searchParams = new URLSearchParams("item=app:t1")
     render(<MobileSchedulerPage />)
-    expect(screen.getByTestId("unified-row-app:1")).toBeInTheDocument()
-    expect(screen.getByTestId("unified-row-workflow:2")).toBeInTheDocument()
-    expect(screen.getByTestId("mobile-scheduler-group-app")).toBeInTheDocument()
-    expect(screen.getByTestId("mobile-scheduler-group-workflow")).toBeInTheDocument()
+    const detail = screen.getByTestId("item-detail")
+    expect(detail).toHaveTextContent("Nightly")
+    expect(detail.dataset.runs).toBe("2")
+    expect(detail.dataset.more).toBe("true")
+    expect(selectTaskMock).toHaveBeenCalledWith("t1")
+    expect(screen.queryByTestId("mobile-scheduler-fab")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("mobile-scheduler-back"))
+    expect(routerReplace).toHaveBeenLastCalledWith("/me/scheduler")
   })
 
-  it("filters by status when the active chip is clicked", () => {
-    unifiedItemsRef = [
-      makeItem({ unifiedId: "app:1", name: "Active" }),
-      makeItem({ unifiedId: "app:2", name: "Paused", status: "paused" }),
-    ]
+  it("confirms a delete and routes it by kind", async () => {
+    searchParams = new URLSearchParams("item=workflow:w1")
     render(<MobileSchedulerPage />)
-    fireEvent.click(screen.getByTestId("filter-chip-paused"))
-    expect(screen.queryByTestId("unified-row-app:1")).toBeNull()
-    expect(screen.getByTestId("unified-row-app:2")).toBeInTheDocument()
-  })
-
-  it("filters by kind when a kind chip is toggled", () => {
-    unifiedItemsRef = [
-      makeItem({ unifiedId: "app:1", kind: "app", name: "App" }),
-      makeItem({ unifiedId: "workflow:2", kind: "workflow", name: "Workflow" }),
-    ]
-    render(<MobileSchedulerPage />)
-    fireEvent.click(screen.getByTestId("kind-workflow"))
-    expect(screen.queryByTestId("unified-row-app:1")).toBeNull()
-    expect(screen.getByTestId("unified-row-workflow:2")).toBeInTheDocument()
-    fireEvent.click(screen.getByTestId("kind-clear"))
-    expect(screen.getByTestId("unified-row-app:1")).toBeInTheDocument()
-  })
-
-  it("filters by the search input", () => {
-    unifiedItemsRef = [
-      makeItem({ unifiedId: "app:1", name: "Daily summary" }),
-      makeItem({ unifiedId: "app:2", name: "Weekly digest" }),
-    ]
-    render(<MobileSchedulerPage />)
-    fireEvent.change(screen.getByTestId("mobile-scheduler-search"), {
-      target: { value: "weekly" },
-    })
-    expect(screen.queryByTestId("unified-row-app:1")).toBeNull()
-    expect(screen.getByTestId("unified-row-app:2")).toBeInTheDocument()
-  })
-})
-
-describe("MobileSchedulerPage interactions", () => {
-  it("opens the create sheet when the FAB is clicked", () => {
-    render(<MobileSchedulerPage />)
-    fireEvent.click(screen.getByTestId("stub-fab"))
-    expect(screen.getByTestId("stub-task-form")).toBeInTheDocument()
-  })
-
-  it("lifts the FAB above the mobile tab bar so it doesn't occlude the bottom nav", () => {
-    render(<MobileSchedulerPage />)
-    // The h-14 (spacing.14) offset must be present so the FAB clears the fixed
-    // MobileTabBar mounted on /me/* routes.
-    expect(screen.getByTestId("stub-fab").className).toContain("spacing.14")
-  })
-
-  it("calls createTask and closes the sheet on submit", async () => {
-    render(<MobileSchedulerPage />)
-    fireEvent.click(screen.getByTestId("stub-fab"))
+    fireEvent.click(screen.getByTestId("detail-delete"))
     await act(async () => {
-      fireEvent.click(screen.getByTestId("stub-task-form-submit"))
+      fireEvent.click(screen.getByTestId("confirm-delete"))
     })
-    expect(createTaskMock).toHaveBeenCalledWith({ name: "new" })
+    expect(sourceDelete).toHaveBeenCalledWith("w1")
+    expect(deleteTaskMock).not.toHaveBeenCalled()
+    expect(routerReplace).toHaveBeenLastCalledWith("/me/scheduler")
   })
 
-  it("edits an app-kind task in-place via the detail view (no desktop redirect)", async () => {
-    schedulerStateRef.current.selectedTask = {
-      id: "task-7",
-      name: "Daily Digest",
-    } as unknown as typeof schedulerStateRef.current.selectedTask
+  it("pauses an app row through the store and another kind through its source", async () => {
+    searchParams = new URLSearchParams("item=app:t1")
     render(<MobileSchedulerPage />)
-
-    // Detail overlay is shown because selectedTask is set; tap Edit.
-    fireEvent.click(screen.getByTestId("stub-detail-edit"))
-    expect(screen.getByTestId("mobile-scheduler-edit-sheet")).toBeInTheDocument()
-
     await act(async () => {
-      fireEvent.click(screen.getByTestId("stub-task-form-submit"))
+      fireEvent.click(screen.getByTestId("detail-pause"))
     })
-    expect(updateTaskMock).toHaveBeenCalledWith("task-7", expect.objectContaining({ name: "new" }))
+    expect(pauseTaskMock).toHaveBeenCalledWith("t1")
+    expect(sourcePause).not.toHaveBeenCalled()
   })
 
-  it("routes app-kind selections through selectTask and unified-kind selections through state", () => {
-    unifiedItemsRef = [
-      makeItem({ unifiedId: "app:1", kind: "app", sourceId: "task-1" }),
-      makeItem({ unifiedId: "workflow:2", kind: "workflow", sourceId: "wf-1" }),
-    ]
-    render(<MobileSchedulerPage />)
-    fireEvent.click(screen.getByTestId("unified-row-app:1"))
-    expect(selectTaskMock).toHaveBeenCalledWith("task-1")
-
-    selectTaskMock.mockClear()
-    fireEvent.click(screen.getByTestId("unified-row-workflow:2"))
-    expect(selectTaskMock).toHaveBeenCalledWith(null)
-    expect(screen.getByTestId("mobile-scheduler-detail-overlay")).toBeInTheDocument()
-    expect(screen.getByTestId("stub-mobile-detail-view")).toBeInTheDocument()
-  })
-
-  it("hides the FAB when the detail overlay is showing", () => {
-    unifiedItemsRef = [makeItem({ unifiedId: "workflow:2", kind: "workflow" })]
-    render(<MobileSchedulerPage />)
-    fireEvent.click(screen.getByTestId("unified-row-workflow:2"))
-    expect(screen.queryByTestId("stub-fab")).toBeNull()
-  })
-
-  it("dismisses the detail overlay when the stubbed back handler fires", () => {
-    unifiedItemsRef = [makeItem({ unifiedId: "workflow:2", kind: "workflow" })]
-    render(<MobileSchedulerPage />)
-    fireEvent.click(screen.getByTestId("unified-row-workflow:2"))
-    fireEvent.click(screen.getByTestId("stub-detail-back"))
-    expect(screen.queryByTestId("mobile-scheduler-detail-overlay")).toBeNull()
-    expect(screen.getByTestId("stub-fab")).toBeInTheDocument()
-  })
-})
-
-describe("MobileSchedulerPage delete flow", () => {
-  it("opens the AlertDialog naming the unified item being deleted", () => {
-    unifiedItemsRef = [
-      makeItem({
-        unifiedId: "workflow:wf-1",
+  it("opens the run sheet from the address", () => {
+    recentRunsRef = [
+      {
+        unifiedId: "workflow:r1",
         kind: "workflow",
-        sourceId: "wf-1",
-        name: "Nightly digest",
-      }),
+        itemUnifiedId: "workflow:w1",
+        itemName: "Deploy",
+        status: "succeeded",
+        startedAt: 1,
+        origin: { tableName: "t", nativeId: "r1" },
+      },
     ]
+    searchParams = new URLSearchParams("run=workflow:r1")
     render(<MobileSchedulerPage />)
-    fireEvent.click(screen.getByTestId("unified-row-workflow:wf-1-delete"))
-    const dialog = screen.getByTestId("mobile-scheduler-delete-confirm")
-    expect(dialog).toBeInTheDocument()
-    expect(dialog.textContent).toContain("Nightly digest")
+    expect(screen.getByTestId("run-sheet")).toHaveTextContent("workflow:r1")
   })
 
-  it("routes the delete dispatch through the source registry for unified kinds", async () => {
-    unifiedItemsRef = [
-      makeItem({
-        unifiedId: "backup:b-1",
-        kind: "backup",
-        sourceId: "b-1",
-        name: "Backup task",
-      }),
-    ]
+  it("consumes a composer draft into the create sheet and lands on the created task", async () => {
+    draftRef.current = { input: { name: "Remind me" }, summary: "Every morning" }
     render(<MobileSchedulerPage />)
-    fireEvent.click(screen.getByTestId("unified-row-backup:b-1-delete"))
     await act(async () => {
-      fireEvent.click(screen.getByTestId("mobile-scheduler-delete-confirm-button"))
+      await Promise.resolve()
     })
-    expect(sourceDelete).toHaveBeenCalledWith("b-1")
-  })
-
-  it("also routes the app-kind delete through the source registry (no /scheduler.deleteTask short-circuit)", async () => {
-    unifiedItemsRef = [
-      makeItem({ unifiedId: "app:task-1", kind: "app", sourceId: "task-1", name: "App task" }),
-    ]
-    render(<MobileSchedulerPage />)
-    fireEvent.click(screen.getByTestId("unified-row-app:task-1-delete"))
+    expect(screen.getByTestId("task-form").dataset.name).toBe("Remind me")
     await act(async () => {
-      fireEvent.click(screen.getByTestId("mobile-scheduler-delete-confirm-button"))
+      fireEvent.click(screen.getByTestId("task-form"))
     })
-    expect(sourceDelete).toHaveBeenCalledWith("task-1")
+    expect(createTaskMock).toHaveBeenCalled()
+    expect(routerReplace).toHaveBeenLastCalledWith("/me/scheduler?item=app%3Anew")
   })
 
-  it("dismisses the AlertDialog when Cancel is clicked", () => {
-    unifiedItemsRef = [makeItem({ unifiedId: "app:task-1", kind: "app", sourceId: "task-1" })]
+  it("filters through the shared store", () => {
+    act(() => {
+      useSchedulerStore.getState().setListFilter({ search: "deploy" })
+    })
     render(<MobileSchedulerPage />)
-    fireEvent.click(screen.getByTestId("unified-row-app:task-1-delete"))
-    expect(screen.getByTestId("mobile-scheduler-delete-confirm")).toBeInTheDocument()
-    fireEvent.click(screen.getByTestId("mobile-scheduler-delete-cancel"))
-    expect(screen.queryByTestId("mobile-scheduler-delete-confirm")).toBeNull()
-    expect(sourceDelete).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("scheduler-list-row-app:t1")).not.toBeInTheDocument()
+    expect(screen.getByTestId("scheduler-list-row-workflow:w1")).toBeInTheDocument()
   })
 })
