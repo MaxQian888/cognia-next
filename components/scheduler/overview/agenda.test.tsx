@@ -60,4 +60,15 @@ describe("Agenda", () => {
     fireEvent.click(screen.getAllByTestId("agenda-density-cell")[0])
     expect(screen.getByTestId("agenda-empty")).toHaveTextContent("Nothing scheduled that day")
   })
+
+  it("collapses a dense task into one row per day with its fire count", () => {
+    const agenda = buildAgenda([item("fast", now + 5 * 60_000, 5 * 60_000)], { now, days: 1 })
+    render(<Agenda agenda={agenda} windowDays={1} now={now} onSelectItem={jest.fn()} />)
+    // A one-day window from 09:00 spans two calendar days: one row each.
+    const rows = screen.getAllByTestId("agenda-occurrence")
+    expect(rows).toHaveLength(2)
+    expect(Number(rows[0].dataset.count)).toBeGreaterThan(100)
+    expect(rows[0]).toHaveTextContent(`×${rows[0].dataset.count}`)
+    expect(rows[0]).toHaveTextContent(/until/)
+  })
 })

@@ -237,6 +237,15 @@ describe("Cron Parser", () => {
       expect(getNextCronTimes("invalid", 5)).toEqual([])
       expect(getNextCronTimes("0 * * * *", 0)).toEqual([])
     })
+
+    it("stops at endDate instead of walking past the window", () => {
+      const baseDate = new Date("2024-01-15T08:00:00")
+      const endDate = new Date("2024-01-15T10:30:00")
+      const times = getNextCronTimes("0 * * * *", 50, baseDate, undefined, endDate)
+      expect(times.length).toBe(2)
+      expect(times.every((d) => d <= endDate)).toBe(true)
+      expect(getNextCronTimes("0 0 1 1 *", 4000, baseDate, undefined, endDate)).toEqual([])
+    })
   })
 
   describe("describeCronExpression", () => {

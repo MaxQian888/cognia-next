@@ -154,4 +154,10 @@ describe("TaskNotificationDisplay", () => {
     expect(screen.queryByText(/…$/)).not.toBeInTheDocument()
     expect(screen.queryByText(longUrl)).not.toBeInTheDocument()
   })
+
+  it("renders only the facts in the bare variant, for a host that owns the title", () => {
+    render(<TaskNotificationDisplay notification={undefined} variant="bare" />)
+    expect(screen.getByTestId("task-notification-facts")).toBeInTheDocument()
+    expect(screen.queryByRole("heading")).not.toBeInTheDocument()
+  })
 })

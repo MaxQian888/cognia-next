@@ -27983,8 +27983,10 @@
       "empty": "Nothing scheduled in the next two weeks",
       "emptyDay": "Nothing scheduled that day",
       "runsCount": "{count, plural, one {# run} other {# runs}}",
+      "times": "×{count}",
       "today": "Today",
-      "tomorrow": "Tomorrow"
+      "tomorrow": "Tomorrow",
+      "until": "until {time}"
     },
     "all": "All",
     "allowConcurrent": "Allow Concurrent",
@@ -28492,6 +28494,7 @@
     "noExecutions": "No executions yet",
     "noExecutionsYet": "No executions yet",
     "noSchedule": "No schedule",
+    "noTags": "No tags",
     "noTasks": "No scheduled tasks",
     "notificationChannels": "Notification Channels",
     "notificationConfig": "Notifications",
@@ -29012,6 +29015,7 @@
     "systemAction": "Action",
     "systemActionType": "Action Type",
     "systemCronExpression": "Cron Expression",
+    "systemDefault": "System default",
     "systemRunAt": "Run At",
     "systemRunLevel": "Run Level",
     "systemScheduler": "System Scheduler",
@@ -29022,6 +29026,7 @@
     "systemTasks": "System Tasks",
     "systemTrigger": "Trigger",
     "systemTriggerType": "Trigger Type",
+    "tags": "Tags",
     "taskName": "Task Name",
     "taskNamePlaceholder": "Enter task name",
     "taskPayload": "Task Payload",
@@ -29082,6 +29087,7 @@
       "today": "Today",
       "tomorrow": "Tomorrow"
     },
+    "timeout": "Timeout",
     "timeoutMs": "Timeout (ms)",
     "timezone": "Timezone",
     "timing": "Timing",

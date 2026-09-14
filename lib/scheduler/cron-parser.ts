@@ -207,18 +207,23 @@ export function getNextCronTime(
 
 /**
  * Get multiple upcoming occurrences of a cron expression.
+ *
+ * `endDate` bounds the walk: a yearly expression asked for thousands of fires
+ * inside a two-week window returns none instead of walking thousands of years.
  */
 export function getNextCronTimes(
   expression: string,
   count: number,
   fromDate: Date = new Date(),
-  timezone?: string
+  timezone?: string,
+  endDate?: Date
 ): Date[] {
   if (count <= 0) return []
   if (usesNearestWeekday(expression)) return []
   try {
     const interval = CronExpressionParser.parse(expression, {
       currentDate: fromDate,
+      endDate,
       tz: timezone ?? localTimezone(),
     })
     return interval.take(count).map((d) => d.toDate())

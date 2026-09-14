@@ -74,8 +74,10 @@ function expandSchedule(
   maxPerTask: number
 ): Date[] {
   if (spec.type === "cron" && spec.cron) {
-    // Enumerate up to maxPerTask future fires, then keep those in the window.
-    return getNextCronTimes(spec.cron, maxPerTask, from, spec.timezone).filter(
+    // Enumerate up to maxPerTask future fires inside the window. The end
+    // bound matters: without it a sparse expression walks maxPerTask fires
+    // however far ahead they lie before the filter discards them.
+    return getNextCronTimes(spec.cron, maxPerTask, from, spec.timezone, windowEnd).filter(
       (d) => d >= from && d < windowEnd
     )
   }

@@ -23,4 +23,11 @@ describe("TaskTagsDisplay", () => {
     const { container } = render(<TaskTagsDisplay tags={["alpha"]} className="extra-class" />)
     expect(container.querySelector(".extra-class")).not.toBeNull()
   })
+
+  it("renders only the badges in the bare variant, for a host that owns the title", () => {
+    render(<TaskTagsDisplay tags={["alpha"]} variant="bare" />)
+    expect(screen.getByTestId("task-tags-badges")).toBeInTheDocument()
+    expect(screen.queryByRole("heading")).not.toBeInTheDocument()
+    expect(screen.getByText("alpha")).toBeInTheDocument()
+  })
 })

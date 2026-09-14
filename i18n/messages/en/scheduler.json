@@ -1158,7 +1158,9 @@
     "emptyDay": "Nothing scheduled that day",
     "runsCount": "{count, plural, one {# run} other {# runs}}",
     "today": "Today",
-    "tomorrow": "Tomorrow"
+    "tomorrow": "Tomorrow",
+    "times": "×{count}",
+    "until": "until {time}"
   },
   "kindSummary": {
     "activeOfTotal": "{active}/{total} active"
@@ -1212,5 +1214,9 @@
     "backupDescription": "Encrypted backup to {path}",
     "outboundQueue": "Outbound queue ({count})",
     "outboundQueueDescription": "Connector outbound delivery queue"
-  }
+  },
+  "systemDefault": "System default",
+  "tags": "Tags",
+  "timeout": "Timeout",
+  "noTags": "No tags"
 }

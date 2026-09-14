@@ -8,6 +8,12 @@ import type { TaskNotificationConfig } from "@/types/scheduler"
 
 interface TaskNotificationDisplayProps {
   notification: TaskNotificationConfig | undefined
+  /**
+   * `card` (default) draws its own titled card; `bare` renders only the
+   * facts, for a host that already supplies the section title (the unified
+   * item detail's ConsoleSection).
+   */
+  variant?: "card" | "bare"
   className?: string
 }
 
@@ -42,7 +48,11 @@ function formatNotifyOn(notification: TaskNotificationConfig | undefined, t: Tra
   return t("notifyOnModes.never")
 }
 
-export function TaskNotificationDisplay({ notification, className }: TaskNotificationDisplayProps) {
+export function TaskNotificationDisplay({
+  notification,
+  className,
+  variant = "card",
+}: TaskNotificationDisplayProps) {
   const t = useTranslations("scheduler")
 
   const items = [
@@ -61,6 +71,21 @@ export function TaskNotificationDisplay({ notification, className }: TaskNotific
       : []),
   ]
 
+  const facts = (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid="task-notification-facts">
+      {items.map((item) => (
+        <div key={item.label} className="flex flex-col gap-0.5">
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            {item.label}
+          </span>
+          <span className="text-sm font-mono text-foreground">{item.value}</span>
+        </div>
+      ))}
+    </div>
+  )
+
+  if (variant === "bare") return <div className={className}>{facts}</div>
+
   return (
     <Card className={cn("border-border/50 bg-card/80", className)}>
       <CardContent className="p-4">
@@ -68,16 +93,7 @@ export function TaskNotificationDisplay({ notification, className }: TaskNotific
           <Bell className="h-4 w-4 text-amber-500" />
           {t("notificationConfig")}
         </h3>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {items.map((item) => (
-            <div key={item.label} className="flex flex-col gap-0.5">
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                {item.label}
-              </span>
-              <span className="text-sm font-mono text-foreground">{item.value}</span>
-            </div>
-          ))}
-        </div>
+        {facts}
       </CardContent>
     </Card>
   )

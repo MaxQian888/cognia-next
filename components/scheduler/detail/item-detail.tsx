@@ -257,19 +257,13 @@ export function ItemDetail({
                 icon={BellIcon}
                 pane={pane}
               >
-                <TaskNotificationDisplay
-                  notification={task.notification}
-                  className="border-none bg-transparent shadow-none"
-                />
+                <TaskNotificationDisplay notification={task.notification} variant="bare" />
               </ConsoleSection>
             ) : null}
 
             {task?.tags && task.tags.length > 0 ? (
               <ConsoleSection id="tags" title={tDetail("tagsTitle")} icon={TagIcon} pane={pane}>
-                <TaskTagsDisplay
-                  tags={task.tags}
-                  className="border-none bg-transparent shadow-none"
-                />
+                <TaskTagsDisplay tags={task.tags} variant="bare" />
               </ConsoleSection>
             ) : null}
 

@@ -27983,8 +27983,10 @@
       "empty": "未来两周没有计划中的运行",
       "emptyDay": "这一天没有计划中的运行",
       "runsCount": "{count} 次运行",
+      "times": "×{count}",
       "today": "今天",
-      "tomorrow": "明天"
+      "tomorrow": "明天",
+      "until": "直到 {time}"
     },
     "all": "全部",
     "allowConcurrent": "允许并发",
@@ -28492,6 +28494,7 @@
     "noExecutions": "暂无执行记录",
     "noExecutionsYet": "暂无执行记录",
     "noSchedule": "未设置计划",
+    "noTags": "没有标签",
     "noTasks": "暂无定时任务",
     "notificationChannels": "通知渠道",
     "notificationConfig": "通知配置",
@@ -29012,6 +29015,7 @@
     "systemAction": "动作",
     "systemActionType": "动作类型",
     "systemCronExpression": "Cron 表达式",
+    "systemDefault": "系统默认",
     "systemRunAt": "运行时间",
     "systemRunLevel": "运行级别",
     "systemScheduler": "系统调度器",
@@ -29022,6 +29026,7 @@
     "systemTasks": "系统任务",
     "systemTrigger": "触发器",
     "systemTriggerType": "触发类型",
+    "tags": "标签",
     "taskName": "任务名称",
     "taskNamePlaceholder": "输入任务名称",
     "taskPayload": "任务负载",
@@ -29082,6 +29087,7 @@
       "today": "今天",
       "tomorrow": "明天"
     },
+    "timeout": "超时",
     "timeoutMs": "超时（毫秒）",
     "timezone": "时区",
     "timing": "时间",

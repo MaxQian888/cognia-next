@@ -1,4 +1,4 @@
-import { buildAgenda } from "./agenda"
+import { AGENDA_MAX_PER_TASK, buildAgenda, groupDayByItem } from "./agenda"
 import type { UnifiedScheduledItem } from "@/types/scheduler/unified"
 
 const HOUR = 60 * 60 * 1000
@@ -34,5 +34,42 @@ describe("buildAgenda", () => {
     const agenda = buildAgenda([], { now })
     expect(agenda.days).toEqual([])
     expect(agenda.next).toBeUndefined()
+  })
+
+  it("projects a five-minute task across the whole window, not just its first hundred fires", () => {
+    const agenda = buildAgenda([item("fast", 5 * 60 * 1000, now + 60 * 1000)], { now, days: 14 })
+    expect(agenda.occurrences.length).toBeGreaterThan(100)
+    expect(agenda.occurrences.length).toBeLessThanOrEqual(AGENDA_MAX_PER_TASK)
+    expect(agenda.countsByDay.get("2026-09-20")).toBe(288)
+  })
+
+  it("bounds a cron walk to the window instead of enumerating years ahead", () => {
+    const yearly: UnifiedScheduledItem = {
+      ...item("yearly", HOUR, now + HOUR),
+      triggerSummary: { type: "cron", cron: "0 0 1 1 *" },
+      nextRunAt: undefined,
+    }
+    const started = Date.now()
+    const agenda = buildAgenda([yearly], { now, days: 14 })
+    expect(Date.now() - started).toBeLessThan(500)
+    expect(agenda.occurrences).toEqual([])
+  })
+})
+
+describe("groupDayByItem", () => {
+  const now = new Date(2026, 8, 13, 9, 0).getTime()
+
+  it("collapses a day to one entry per item with first, last and count", () => {
+    const agenda = buildAgenda(
+      [item("fast", 30 * 60 * 1000, now + 60 * 1000), item("daily", 24 * HOUR, now + 2 * HOUR)],
+      { now, days: 1 }
+    )
+    const entries = groupDayByItem(agenda.days[0])
+    expect(entries.map((e) => e.first.taskName)).toEqual(["fast", "daily"])
+    const fast = entries[0]
+    expect(fast.count).toBeGreaterThan(1)
+    expect(fast.last.date.getTime()).toBeGreaterThan(fast.first.date.getTime())
+    expect(entries[1]).toMatchObject({ count: 1 })
+    expect(entries[1].last).toBe(entries[1].first)
   })
 })

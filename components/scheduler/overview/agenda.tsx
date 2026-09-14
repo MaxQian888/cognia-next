@@ -13,8 +13,8 @@ import { useState } from "react"
 import { useTranslations } from "next-intl"
 
 import { cn } from "@/lib/utils"
-import type { Agenda as AgendaData } from "@/lib/scheduler/agenda"
-import type { Occurrence, OccurrenceDay } from "@/lib/scheduler/upcoming-occurrences"
+import { groupDayByItem, type Agenda as AgendaData, type AgendaEntry } from "@/lib/scheduler/agenda"
+import type { OccurrenceDay } from "@/lib/scheduler/upcoming-occurrences"
 
 import { KindIcon } from "../kind-visuals"
 
@@ -97,9 +97,9 @@ export function Agenda({ agenda, windowDays, now, onSelectItem, className }: Age
                 </span>
               </h4>
               <ol className="flex flex-col">
-                {day.occurrences.map((occurrence, index) => (
-                  <li key={`${occurrence.taskId}:${occurrence.date.getTime()}:${index}`}>
-                    <OccurrenceRow occurrence={occurrence} onSelectItem={onSelectItem} />
+                {groupDayByItem(day).map((entry) => (
+                  <li key={`${entry.first.taskId}:${entry.first.date.getTime()}`}>
+                    <EntryRow entry={entry} onSelectItem={onSelectItem} />
                   </li>
                 ))}
               </ol>
@@ -111,27 +111,46 @@ export function Agenda({ agenda, windowDays, now, onSelectItem, className }: Age
   )
 }
 
-function OccurrenceRow({
-  occurrence,
+/**
+ * One row per item per day. A dense interval task shows its first fire, how
+ * many follow, and when the last one lands, instead of one row per fire.
+ */
+function EntryRow({
+  entry,
   onSelectItem,
 }: {
-  occurrence: Occurrence
+  entry: AgendaEntry
   onSelectItem: (unifiedId: string) => void
 }) {
+  const t = useTranslations("scheduler.agenda")
+  const { first, last, count } = entry
   return (
     <button
       type="button"
-      onClick={() => onSelectItem(occurrence.taskId)}
+      onClick={() => onSelectItem(first.taskId)}
       className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       data-testid="agenda-occurrence"
+      data-count={count}
     >
       <span className="w-14 shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
-        {occurrence.date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+        {formatTime(first.date)}
       </span>
-      <KindIcon kind={occurrence.kind} className="size-3 text-muted-foreground" />
-      <span className="min-w-0 flex-1 truncate">{occurrence.taskName}</span>
+      <KindIcon kind={first.kind} className="size-3 text-muted-foreground" />
+      <span className="min-w-0 flex-1 truncate">{first.taskName}</span>
+      {count > 1 ? (
+        <span className="shrink-0 tabular-nums text-[11px] text-muted-foreground">
+          {t("times", { count })}
+          <span className="ms-1.5 hidden @[28rem]/console-pane:inline">
+            {t("until", { time: formatTime(last.date) })}
+          </span>
+        </span>
+      ) : null}
     </button>
   )
+}
+
+function formatTime(date: Date): string {
+  return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
 }
 
 function localDayKey(date: Date): string {

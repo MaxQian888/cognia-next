@@ -1158,7 +1158,9 @@
     "emptyDay": "这一天没有计划中的运行",
     "runsCount": "{count} 次运行",
     "today": "今天",
-    "tomorrow": "明天"
+    "tomorrow": "明天",
+    "times": "×{count}",
+    "until": "直到 {time}"
   },
   "kindSummary": {
     "activeOfTotal": "{active}/{total} 活动"
@@ -1212,5 +1214,9 @@
     "backupDescription": "加密备份到 {path}",
     "outboundQueue": "出站队列（{count}）",
     "outboundQueueDescription": "连接器出站投递队列"
-  }
+  },
+  "systemDefault": "系统默认",
+  "tags": "标签",
+  "timeout": "超时",
+  "noTags": "没有标签"
 }

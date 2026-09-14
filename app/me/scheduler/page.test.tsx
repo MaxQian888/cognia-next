@@ -217,7 +217,9 @@ describe("MobileSchedulerPage", () => {
 
   it("renders the stat strip, the attention block and one row per item", () => {
     render(<MobileSchedulerPage />)
-    expect(screen.getByTestId("mobile-scheduler-stats")).toBeInTheDocument()
+    // Pinned: the shell section is a flex column and the strip must not be
+    // the child that yields (it collapsed to one clipped row on a phone).
+    expect(screen.getByTestId("mobile-scheduler-stats")).toHaveClass("shrink-0")
     expect(screen.getByTestId("mobile-scheduler-stat-active")).toHaveTextContent("2/2")
     // jsdom is a web host, so the chat task reads as unsupported: the block has a row.
     expect(screen.getByTestId("attention-block")).toBeInTheDocument()

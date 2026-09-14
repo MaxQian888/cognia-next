@@ -446,6 +446,9 @@ function MobileSchedulerBody() {
 
         <StatStrip
           stats={stats}
+          // The shell section is a flex column; without this the grid is the
+          // one child that yields, and it collapses to a single clipped row.
+          className="shrink-0"
           testId="mobile-scheduler-stats"
           cellTestIdPrefix="mobile-scheduler-stat"
         />
