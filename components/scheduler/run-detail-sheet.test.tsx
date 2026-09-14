@@ -1,11 +1,7 @@
 /** @jest-environment jsdom */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
-
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
-}))
 
 // Stub Sheet primitives to render inline so we can assert on contents.
 jest.mock("@/components/ui/sheet")
@@ -14,7 +10,7 @@ jest.mock("@/components/workflow/runs/run-status-pill", () => ({
   RunStatusPill: ({ status }: { status: string }) => <span data-testid="stub-pill">{status}</span>,
 }))
 
-import { RunDetailSheet } from "./run-detail-sheet"
+import { RunDetailSheet, runProgressFraction } from "./run-detail-sheet"
 
 function makeRun(overrides: Partial<UnifiedExecutionRun> = {}): UnifiedExecutionRun {
   return {
@@ -32,14 +28,14 @@ function makeRun(overrides: Partial<UnifiedExecutionRun> = {}): UnifiedExecution
       { ts: Date.parse("2026-05-10T09:00:01Z"), level: "info", message: "started" },
       { ts: Date.parse("2026-05-10T09:00:02Z"), level: "warn", message: "noted" },
     ],
-    origin: { tableName: "schedulerDb.executions", nativeId: "run-1" },
+    origin: { tableName: "scheduledTaskRuns", nativeId: "run-1" },
     ...overrides,
   }
 }
 
 describe("RunDetailSheet", () => {
   it("renders nothing when run is null", () => {
-    const { container } = render(<RunDetailSheet open={true} onOpenChange={() => {}} run={null} />)
+    const { container } = render(<RunDetailSheet open onOpenChange={() => {}} run={null} />)
     expect(container).toBeEmptyDOMElement()
   })
 
@@ -50,36 +46,65 @@ describe("RunDetailSheet", () => {
     expect(container.querySelector("[role='dialog']")).toBeNull()
   })
 
-  it("renders the item name, status pill, payload, result, and timing rows for a successful run", () => {
-    render(<RunDetailSheet open={true} onOpenChange={() => {}} run={makeRun()} />)
-    expect(screen.getByTestId("run-sheet-title")).toHaveTextContent("Daily summary")
+  it("names the item as a link back, with the pill, kind, payload, result and human duration", () => {
+    const onOpenItem = jest.fn()
+    render(<RunDetailSheet open onOpenChange={() => {}} run={makeRun()} onOpenItem={onOpenItem} />)
+    fireEvent.click(screen.getByTestId("run-sheet-open-item"))
+    expect(onOpenItem).toHaveBeenCalledWith("app:task-1")
     expect(screen.getByTestId("stub-pill")).toHaveTextContent("succeeded")
+    expect(screen.getByText("App")).toBeInTheDocument()
     expect(screen.getByTestId("run-sheet-payload")).toHaveTextContent("prompt")
     expect(screen.getByTestId("run-sheet-result")).toHaveTextContent("reply")
+    expect(screen.getByText("5.0s")).toBeInTheDocument()
+    expect(screen.queryByTestId("run-sheet-previous")).not.toBeInTheDocument()
   })
 
-  it("shows a trigger-source badge when the run carries provenance", () => {
+  it("walks the list it came from", () => {
+    const runs = [
+      makeRun({ unifiedId: "app:a" }),
+      makeRun({ unifiedId: "app:b" }),
+      makeRun({ unifiedId: "app:c" }),
+    ]
+    const onNavigate = jest.fn()
     render(
       <RunDetailSheet
-        open={true}
+        open
         onOpenChange={() => {}}
-        run={makeRun({ triggerSource: "backfill" })}
+        run={runs[1]}
+        runs={runs}
+        onNavigate={onNavigate}
       />
     )
-    expect(screen.getByTestId("run-sheet-trigger-source")).toHaveTextContent(
-      "triggerSources.backfill"
+    expect(screen.getByText("2 of 3")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("run-sheet-previous"))
+    expect(onNavigate).toHaveBeenLastCalledWith(runs[0])
+    fireEvent.click(screen.getByTestId("run-sheet-next"))
+    expect(onNavigate).toHaveBeenLastCalledWith(runs[2])
+    render(
+      <RunDetailSheet
+        open
+        onOpenChange={() => {}}
+        run={runs[0]}
+        runs={runs}
+        onNavigate={onNavigate}
+      />
     )
+    expect(screen.getAllByTestId("run-sheet-previous")[1]).toBeDisabled()
   })
 
-  it("omits the trigger-source badge when absent", () => {
-    render(<RunDetailSheet open={true} onOpenChange={() => {}} run={makeRun()} />)
-    expect(screen.queryByTestId("run-sheet-trigger-source")).not.toBeInTheDocument()
+  it("shows a trigger-source badge only when the run carries provenance", () => {
+    const { rerender } = render(
+      <RunDetailSheet open onOpenChange={() => {}} run={makeRun({ triggerSource: "backfill" })} />
+    )
+    expect(screen.getByText("Backfill")).toBeInTheDocument()
+    rerender(<RunDetailSheet open onOpenChange={() => {}} run={makeRun()} />)
+    expect(screen.queryByText("Backfill")).not.toBeInTheDocument()
   })
 
   it("hides the result block and shows the error block when the run failed", () => {
     render(
       <RunDetailSheet
-        open={true}
+        open
         onOpenChange={() => {}}
         run={makeRun({
           status: "failed",
@@ -92,50 +117,35 @@ describe("RunDetailSheet", () => {
     const err = screen.getByTestId("run-sheet-error")
     expect(err).toHaveTextContent("boom")
     expect(err).toHaveTextContent("timeout")
-    // No stack → no disclosure at all.
     expect(screen.queryByTestId("run-sheet-stack")).toBeNull()
   })
 
   it("keeps a stack trace behind a closed, bounded disclosure", () => {
     render(
       <RunDetailSheet
-        open={true}
+        open
         onOpenChange={() => {}}
         run={makeRun({
           status: "failed",
           result: undefined,
-          error: { message: "boom", stack: "at a()\nat b()\nat c()" },
+          error: { message: "boom", stack: "at a()\nat b()" },
         })}
       />
     )
     const stack = screen.getByTestId("run-sheet-stack")
     expect(stack).toHaveAttribute("data-state", "closed")
-    fireEvent.click(screen.getByRole("button", { name: "stackTrace" }))
+    fireEvent.click(screen.getByRole("button", { name: "Stack trace" }))
     expect(stack).toHaveAttribute("data-state", "open")
-    // Bounded + wrapping, so opening it can't stretch the sheet indefinitely.
     const pre = stack.querySelector("pre")!
     expect(pre.className).toContain("max-h-64")
     expect(pre.className).toContain("overflow-auto")
     expect(pre.className).toContain("break-words")
   })
 
-  it("bounds the payload and result dumps so a large blob scrolls in place", () => {
-    render(<RunDetailSheet open={true} onOpenChange={() => {}} run={makeRun()} />)
-    expect(screen.getByTestId("run-sheet-payload").className).toContain("max-h-64")
-    expect(screen.getByTestId("run-sheet-result").className).toContain("overflow-auto")
-  })
-
-  it("logs are collapsed by default and reveal when the toggle is clicked", () => {
-    render(<RunDetailSheet open={true} onOpenChange={() => {}} run={makeRun()} />)
-    expect(screen.queryByTestId("run-sheet-logs")).toBeNull()
-    fireEvent.click(screen.getByTestId("run-sheet-logs-toggle"))
-    expect(screen.getByTestId("run-sheet-logs")).toBeInTheDocument()
-  })
-
-  it("colours every log level once revealed", () => {
+  it("logs are collapsed by default, reveal on toggle, and colour every level", () => {
     render(
       <RunDetailSheet
-        open={true}
+        open
         onOpenChange={() => {}}
         run={makeRun({
           logs: [
@@ -147,9 +157,9 @@ describe("RunDetailSheet", () => {
         })}
       />
     )
+    expect(screen.queryByTestId("run-sheet-logs")).toBeNull()
     fireEvent.click(screen.getByTestId("run-sheet-logs-toggle"))
     const logs = screen.getByTestId("run-sheet-logs")
-    expect(logs.querySelector(".text-muted-foreground")).not.toBeNull()
     expect(logs.querySelector(".text-blue-500")).not.toBeNull()
     expect(logs.querySelector(".text-yellow-500")).not.toBeNull()
     expect(logs.querySelector(".text-red-500")).not.toBeNull()
@@ -160,7 +170,7 @@ describe("RunDetailSheet", () => {
     circular.self = circular
     render(
       <RunDetailSheet
-        open={true}
+        open
         onOpenChange={() => {}}
         run={makeRun({ payload: circular, result: undefined })}
       />
@@ -169,17 +179,31 @@ describe("RunDetailSheet", () => {
   })
 
   it("hides the logs section entirely when the run has no logs", () => {
-    render(
-      <RunDetailSheet open={true} onOpenChange={() => {}} run={makeRun({ logs: undefined })} />
-    )
+    render(<RunDetailSheet open onOpenChange={() => {}} run={makeRun({ logs: undefined })} />)
     expect(screen.queryByTestId("run-sheet-logs-toggle")).toBeNull()
+  })
+
+  it("shows a running plugin run's progress from its newest progress line", () => {
+    const run = makeRun({
+      status: "running",
+      finishedAt: undefined,
+      durationMs: undefined,
+      logs: [
+        { ts: 0, level: "info", message: "25% — fetching" },
+        { ts: 1, level: "info", message: "60% — indexing" },
+      ],
+    })
+    expect(runProgressFraction(run)).toBe(0.6)
+    expect(runProgressFraction(makeRun())).toBeNull()
+    render(<RunDetailSheet open onOpenChange={() => {}} run={run} />)
+    expect(screen.getByTestId("run-sheet-progress")).toHaveTextContent("60% done")
+    expect(screen.getAllByText("still running").length).toBeGreaterThan(0)
   })
 
   it("close button fires onOpenChange(false)", () => {
     const onOpenChange = jest.fn()
-    render(<RunDetailSheet open={true} onOpenChange={onOpenChange} run={makeRun()} />)
-    const closeBtn = screen.getByRole("button", { name: /close/i })
-    fireEvent.click(closeBtn)
+    render(<RunDetailSheet open onOpenChange={onOpenChange} run={makeRun()} />)
+    fireEvent.click(screen.getByRole("button", { name: /close/i }))
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 })

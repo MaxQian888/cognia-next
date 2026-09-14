@@ -16,14 +16,14 @@
  *     split.
  *   - 768–1023 px (tablet): `SidebarProvider` + flex layout; the sidebar
  *     starts collapsed to free space for the detail pane; no rail.
- *   - < 768 px (mobile): single pane; selecting a task pushes a full-screen
- *     detail overlay (AnimatePresence slide-in, reduced-motion aware).
+ *   - < 768 px: not this shell. A compact viewport is redirected to
+ *     `/me/scheduler` before this renders (ADR-0179 §6); the full-screen
+ *     mobile overlay this shell used to carry was unreachable for that reason.
  *
  * Data, handlers, and dialogs stay in `app/scheduler/page.tsx` — this
  * component only arranges the rendered panes it is given.
  */
 
-import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { useCallback, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 
@@ -69,12 +69,8 @@ export interface SchedulerShellProps {
   header: React.ReactNode
   /** Detail / dashboard pane content. */
   detail: React.ReactNode
-  /** Desktop-only right rail (self-gated `xl:flex`); omitted on tablet/mobile. */
+  /** Desktop-only right rail (self-gated `xl:flex`); omitted on tablet. */
   rail?: React.ReactNode
-  /** Full-screen mobile detail content; rendered when `isMobileDetailOpen`. */
-  mobileDetail?: React.ReactNode
-  /** Whether the mobile push-detail overlay is open. */
-  isMobileDetailOpen?: boolean
 }
 
 function DesktopSchedulerShell({ sidebar, header, detail, rail }: SchedulerShellProps) {
@@ -173,48 +169,23 @@ function DesktopSchedulerShell({ sidebar, header, detail, rail }: SchedulerShell
 }
 
 export function SchedulerShell(props: SchedulerShellProps) {
-  const { sidebar, header, detail, mobileDetail, isMobileDetailOpen = false } = props
+  const { sidebar, header, detail } = props
   const breakpoint = useBreakpoint()
-  const prefersReducedMotion = useReducedMotion()
 
   if (breakpoint === "desktop") {
     return <DesktopSchedulerShell {...props} />
   }
 
-  const isMobile = breakpoint === "mobile"
-  const isTablet = breakpoint === "tablet"
-  const showOverlay = isMobile && isMobileDetailOpen
-
+  // Tablet two-pane layout; the rail is intentionally not rendered below the
+  // desktop tier. A mobile breakpoint never reaches this shell (see above);
+  // if it did, the collapsed-list tablet layout is the honest fallback.
   return (
     <SidebarProvider
-      defaultOpen={!isTablet}
+      defaultOpen={false}
       data-bg-target="chat"
       className="relative flex h-full min-h-0 w-full flex-1 overflow-hidden"
     >
-      {/* Mobile detail view — full-screen push. */}
-      <AnimatePresence>
-        {showOverlay && (
-          <motion.div
-            key="mobile-detail"
-            data-testid="scheduler-mobile-detail-shell"
-            className="absolute inset-0 z-30 bg-background"
-            {...(prefersReducedMotion
-              ? {}
-              : {
-                  initial: { x: "100%" },
-                  animate: { x: 0 },
-                  exit: { x: "100%" },
-                  transition: { duration: 0.22, ease: "easeOut" },
-                })}
-          >
-            {mobileDetail}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Tablet two-pane / mobile list layout. The rail is intentionally not
-          rendered below the desktop tier. */}
-      <div className={cn("flex h-full w-full min-w-0 flex-1", showOverlay && "hidden")}>
+      <div className="flex h-full w-full min-w-0 flex-1">
         {sidebar("chrome")}
         <SidebarInset data-bg-target="chat">
           {header}

@@ -148,7 +148,6 @@ function renderShell(overrides: Partial<React.ComponentProps<typeof SchedulerShe
       header={<div data-testid="shell-header">header</div>}
       detail={<div data-testid="shell-detail">detail</div>}
       rail={<div data-testid="shell-rail">rail</div>}
-      mobileDetail={<div data-testid="shell-mobile-detail">mobile detail</div>}
       {...overrides}
     />
   )
@@ -204,10 +203,9 @@ describe("SchedulerShell", () => {
       )
     })
 
-    it("renders the rail and never the mobile overlay", () => {
-      renderShell({ isMobileDetailOpen: true })
+    it("renders the rail", () => {
+      renderShell()
       expect(screen.getByTestId("shell-rail")).toBeInTheDocument()
-      expect(screen.queryByTestId("scheduler-mobile-detail-shell")).not.toBeInTheDocument()
     })
 
     describe("list-panel collapse", () => {
@@ -294,49 +292,16 @@ describe("SchedulerShell", () => {
       renderShell()
       expect(screen.queryByTestId("shell-rail")).not.toBeInTheDocument()
     })
-
-    it("never shows the mobile overlay even when flagged open", () => {
-      renderShell({ isMobileDetailOpen: true })
-      expect(screen.queryByTestId("scheduler-mobile-detail-shell")).not.toBeInTheDocument()
-    })
   })
 
   describe("mobile", () => {
     beforeEach(() => mockBreakpoint.mockReturnValue("mobile"))
 
-    it("shows the list when the detail overlay is closed", () => {
-      renderShell({ isMobileDetailOpen: false })
+    it("falls back to the tablet layout; the routes redirect a phone to /me/scheduler", () => {
+      renderShell()
       expect(screen.getByTestId("sidebar-chrome")).toBeInTheDocument()
-      expect(screen.queryByTestId("scheduler-mobile-detail-shell")).not.toBeInTheDocument()
       expect(screen.queryByTestId("shell-rail")).not.toBeInTheDocument()
-    })
-
-    it("pushes the full-screen detail overlay and hides the list when open", () => {
-      renderShell({ isMobileDetailOpen: true })
-      expect(screen.getByTestId("scheduler-mobile-detail-shell")).toBeInTheDocument()
-      expect(screen.getByTestId("shell-mobile-detail")).toBeInTheDocument()
-      const listWrap = screen.getByTestId("sidebar-chrome").parentElement
-      expect(listWrap?.className).toContain("hidden")
-    })
-
-    it("survives a breakpoint switch mid-selection", () => {
-      const view = renderShell({ isMobileDetailOpen: true })
-      expect(screen.getByTestId("scheduler-mobile-detail-shell")).toBeInTheDocument()
-
-      mockBreakpoint.mockReturnValue("desktop")
-      view.rerender(
-        <SchedulerShell
-          sidebar={(variant) => <div data-testid={`sidebar-${variant}`}>sidebar</div>}
-          header={<div data-testid="shell-header">header</div>}
-          detail={<div data-testid="shell-detail">detail</div>}
-          rail={<div data-testid="shell-rail">rail</div>}
-          mobileDetail={<div data-testid="shell-mobile-detail">mobile detail</div>}
-          isMobileDetailOpen
-        />
-      )
-
       expect(screen.queryByTestId("scheduler-mobile-detail-shell")).not.toBeInTheDocument()
-      expect(screen.getByTestId("scheduler-list-pane")).toBeInTheDocument()
     })
   })
 })

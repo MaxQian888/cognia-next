@@ -65,14 +65,3 @@ export const WithRail: Story = {
     ),
   },
 }
-
-/** Mobile push-detail overlay open (visible only at the mobile breakpoint). */
-export const MobileDetailOpen: Story = {
-  args: {
-    sidebar: () => <Sidebar />,
-    header: Header,
-    detail: Detail,
-    isMobileDetailOpen: true,
-    mobileDetail: <div className="p-6 text-sm">Full-screen mobile detail overlay content.</div>,
-  },
-}
