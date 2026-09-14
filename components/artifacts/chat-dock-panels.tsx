@@ -13,8 +13,15 @@
  * behind a feature flag.
  *
  * This module is deliberately pure catalogue: no layout, no persistence, no
- * engine. Each hook takes the facts a panel needs and returns the array, with
- * the identical `useMemo` dependencies the inline versions had.
+ * engine. Each hook takes the facts a panel needs and returns the array.
+ *
+ * **Renderer identity is a panel's lifetime.** The workbench mounts
+ * `<panel.renderer />`, so a new renderer function is a new component and the
+ * panel remounts. The renderers here are built once per conversation (and per
+ * artifact) and read the facts they render from `usePanelInputs`, so a new
+ * `session` object, a streamed message or an artifact save re-renders a panel
+ * instead of rebuilding it. See `hooks/context-workbench/use-panel-inputs.ts`
+ * for the loop this used to be.
  */
 
 import {
@@ -44,6 +51,11 @@ import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Textarea } from "@/components/ui/textarea"
 import { buildAsideContext } from "@/lib/chat/session-aside-context"
+import {
+  usePanelInput,
+  usePanelInputs,
+  type PanelInputs,
+} from "@/hooks/context-workbench/use-panel-inputs"
 import { SIDECHAT_PANEL_ID } from "@/lib/tasks/spawn-task-core"
 import { useChatViewportStore } from "@/stores/chat/chat-viewport-store"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
@@ -146,6 +158,186 @@ function useSideBrowserRequest(scopeKey: string): {
   return { requestedUrl: requestedUrl ?? undefined, requestId, revealBrowserPanel }
 }
 
+/** The facts every panel on either surface can read. */
+interface DockPanelInputs {
+  activeSessionId: string | null
+  sessionProject: Project | undefined
+  workspaceLayout: ChatDockWorkspaceLayout
+  workspaceAvailable: boolean
+  scopeKey: string
+  onWidthHint: (mode: ContextPanelMode, panelId?: string) => void
+  requestedUrl: string | undefined
+  requestId: number
+  revealBrowserPanel: () => boolean
+}
+
+interface ArtifactPanelInputs extends DockPanelInputs {
+  artifactId: string
+  artifact: Artifact | undefined
+  hostLayout: ArtifactPanelMode
+  textSelection: TextSelectionCoordinates | undefined
+  pendingSelectionComment: string | null
+  onPendingSelectionComment: (comment: string | null) => void
+}
+
+type Inputs<T extends DockPanelInputs> = { inputs: PanelInputs<T> }
+
+function DockArtifactListPanel<T extends DockPanelInputs>({ inputs }: Inputs<T>) {
+  const activeSessionId = usePanelInput(inputs, (input) => input.activeSessionId)
+  return (
+    <ArtifactList sessionId={activeSessionId ?? undefined} className="h-full" maxHeight="100%" />
+  )
+}
+
+function DockBrowserPanel<T extends DockPanelInputs>({ inputs }: Inputs<T>) {
+  const activeSessionId = usePanelInput(inputs, (input) => input.activeSessionId)
+  const requestedUrl = usePanelInput(inputs, (input) => input.requestedUrl)
+  const requestId = usePanelInput(inputs, (input) => input.requestId)
+  const revealBrowserPanel = usePanelInput(inputs, (input) => input.revealBrowserPanel)
+  return (
+    <BrowserPreviewPane
+      sessionId={activeSessionId ?? undefined}
+      requestedUrl={requestedUrl}
+      requestId={requestId}
+      // `retention: "stateful"` keeps this panel mounted behind whichever
+      // tab is showing, so a clicked link must bring it to the front
+      // before it may claim the URL, otherwise the link reads as a no-op.
+      onRequestReveal={revealBrowserPanel}
+    />
+  )
+}
+
+function DockProjectOverviewPanel<T extends DockPanelInputs>({ inputs }: Inputs<T>) {
+  const sessionProject = usePanelInput(inputs, (input) => input.sessionProject)
+  if (!sessionProject) return null
+  return (
+    <ProjectOverviewPanel
+      projectId={sessionProject.id}
+      onOpenWorkspace={() => {
+        const { scopeKey, onWidthHint } = inputs.getState()
+        useContextWorkbenchStore.getState().navigatePanel(scopeKey, WORKSPACE_PANEL_ID, "wide")
+        onWidthHint("wide", WORKSPACE_PANEL_ID)
+      }}
+    />
+  )
+}
+
+function DockWorkspacePanel<T extends DockPanelInputs>({ inputs }: Inputs<T>) {
+  const activeSessionId = usePanelInput(inputs, (input) => input.activeSessionId)
+  const workspaceAvailable = usePanelInput(inputs, (input) => input.workspaceAvailable)
+  const workspaceLayout = usePanelInput(inputs, (input) => input.workspaceLayout)
+  return workspaceAvailable ? (
+    <DockWorkspace activeSessionId={activeSessionId} layout={workspaceLayout} />
+  ) : (
+    <ContextCapabilityUnavailable capability="workspace" />
+  )
+}
+
+function DockRunContextPanel<T extends DockPanelInputs>({ inputs }: Inputs<T>) {
+  const activeSessionId = usePanelInput(inputs, (input) => input.activeSessionId)
+  return activeSessionId ? <RunContextPanel sessionId={activeSessionId} /> : null
+}
+
+function DockMemoryPanel<T extends DockPanelInputs>({ inputs }: Inputs<T>) {
+  const activeSessionId = usePanelInput(inputs, (input) => input.activeSessionId)
+  return <MemoryWorkbenchPanel sessionId={activeSessionId} />
+}
+
+function ArtifactResourceChatPanel({ inputs }: Inputs<ArtifactPanelInputs>) {
+  const pendingSelectionComment = usePanelInput(inputs, (input) => input.pendingSelectionComment)
+  const hasSelection = usePanelInput(inputs, (input) => Boolean(input.textSelection))
+  // Read at send time, not subscribed: the chat should not re-render on every
+  // artifact save, and the aside must see the content as it is when it sends.
+  const getResourceContext = useCallback(() => inputs.getState().artifact?.content ?? "", [inputs])
+  const submitSelectionComment = useCallback(
+    (comment: string | null) => inputs.getState().onPendingSelectionComment(comment),
+    [inputs]
+  )
+  return (
+    <ResourceWorkbenchChatPanel
+      getResourceContext={getResourceContext}
+      pendingPrompt={pendingSelectionComment}
+      onPendingPromptConsumed={() => submitSelectionComment(null)}
+      // The selection composer used to be a panel of its own
+      // (`selection-ai`), sharing the `ai` activity with this one at a
+      // higher `order` — so the rail button could only ever open this
+      // panel, and once two artifact tabs claimed the header the group
+      // tabs collapsed into an overflow menu and buried it a second time.
+      // Folding it in makes "select a range, hand it to the AI" one click
+      // from the rail, next to the conversation it feeds.
+      selectionHeader={
+        <ArtifactSelectionCommentPanel
+          hasSelection={hasSelection}
+          onSubmit={submitSelectionComment}
+        />
+      }
+    />
+  )
+}
+
+function ArtifactCommentsRenderer({ inputs }: Inputs<ArtifactPanelInputs>) {
+  const artifact = usePanelInput(inputs, (input) => input.artifact)
+  const artifactId = usePanelInput(inputs, (input) => input.artifactId)
+  const textSelection = usePanelInput(inputs, (input) => input.textSelection)
+  if (!artifact) return null
+  return (
+    <ContextCommentsPanel
+      resource={{ kind: "artifact", id: artifactId, projectId: artifact.projectId }}
+      resourceTitle={artifact.title}
+      revision={String(artifact.version)}
+      anchor={
+        textSelection
+          ? {
+              kind: "text-range",
+              start: textSelection.start,
+              end: textSelection.end,
+              revision: String(artifact.version),
+            }
+          : undefined
+      }
+    />
+  )
+}
+
+function ArtifactProposalReviewRenderer({ inputs }: Inputs<ArtifactPanelInputs>) {
+  const artifact = usePanelInput(inputs, (input) => input.artifact)
+  const hostLayout = usePanelInput(inputs, (input) => input.hostLayout)
+  return artifact ? <ArtifactReviewView artifact={artifact} panelMode={hostLayout} /> : null
+}
+
+function ArtifactPreviewRenderer({ inputs }: Inputs<ArtifactPanelInputs>) {
+  const hostLayout = usePanelInput(inputs, (input) => input.hostLayout)
+  return <ArtifactPanelContent panelMode={hostLayout} />
+}
+
+function ArtifactMetadataRenderer({ inputs }: Inputs<ArtifactPanelInputs>) {
+  const tWorkbench = useTranslations("contextWorkbench")
+  const artifact = usePanelInput(inputs, (input) => input.artifact)
+  if (!artifact) return null
+  return (
+    <ContextMetadataPanel
+      title={tWorkbench("metadata.artifactTitle")}
+      fields={[
+        { label: tWorkbench("metadata.artifactType"), value: artifact.type },
+        {
+          label: tWorkbench("metadata.language"),
+          value: artifact.language ?? tWorkbench("metadata.unknown"),
+        },
+        { label: tWorkbench("metadata.version"), value: artifact.version },
+        {
+          label: tWorkbench("metadata.runtimeStatus"),
+          value: artifact.metadata?.runtimeHealth ?? tWorkbench("metadata.notRun"),
+        },
+        {
+          label: tWorkbench("metadata.updatedAt"),
+          value: artifact.updatedAt.toLocaleString(),
+        },
+      ]}
+      footer={<ArtifactSourceMessageLink messageId={artifact.messageId} />}
+    />
+  )
+}
+
 /** The dock's artifact-surface panel catalogue. */
 export function useArtifactSurfacePanels({
   artifactId,
@@ -164,8 +356,46 @@ export function useArtifactSurfacePanels({
   scopeKey,
   onWidthHint,
 }: ArtifactSurfacePanelsInput): ContextPanelDefinition[] {
-  const tWorkbench = useTranslations("contextWorkbench")
   const { requestedUrl, requestId, revealBrowserPanel } = useSideBrowserRequest(scopeKey)
+  const inputs = usePanelInputs<ArtifactPanelInputs>({
+    artifactId,
+    artifact,
+    activeSessionId,
+    sessionProject,
+    hostLayout,
+    workspaceLayout,
+    workspaceAvailable,
+    textSelection,
+    pendingSelectionComment,
+    onPendingSelectionComment,
+    scopeKey,
+    onWidthHint,
+    requestedUrl,
+    requestId,
+    revealBrowserPanel,
+  })
+
+  // Rebuilt, and so remounted, only when the conversation or the artifact
+  // changes — the two moments a panel's state stops being about what is shown.
+  const renderers = useMemo(() => {
+    const key = `${activeSessionId ?? "none"}:${artifactId}`
+    return {
+      resourceChat: () => <ArtifactResourceChatPanel key={key} inputs={inputs} />,
+      comments: () => <ArtifactCommentsRenderer key={key} inputs={inputs} />,
+      proposalReview: () => <ArtifactProposalReviewRenderer key={key} inputs={inputs} />,
+      preview: () => <ArtifactPreviewRenderer key={key} inputs={inputs} />,
+      browser: () => <DockBrowserPanel key={key} inputs={inputs} />,
+      artifactList: () => <DockArtifactListPanel key={key} inputs={inputs} />,
+      runContext: () => <DockRunContextPanel key={key} inputs={inputs} />,
+      metadata: () => <ArtifactMetadataRenderer key={key} inputs={inputs} />,
+      memory: () => <DockMemoryPanel key={key} inputs={inputs} />,
+      projectOverview: () => <DockProjectOverviewPanel key={key} inputs={inputs} />,
+      workspace: () => <DockWorkspacePanel key={key} inputs={inputs} />,
+    }
+  }, [activeSessionId, artifactId, inputs])
+
+  const hasProjectRoots = Boolean(sessionProject?.roots.length)
+  const hasPendingReview = Boolean(pendingReview)
 
   return useMemo<ContextPanelDefinition[]>(
     () => [
@@ -178,26 +408,7 @@ export function useArtifactSurfacePanels({
         appliesTo: (resource) => resource.kind === "artifact",
         retention: "stateful",
         requiresChatScope: true,
-        renderer: () => (
-          <ResourceWorkbenchChatPanel
-            getResourceContext={() => artifact?.content ?? ""}
-            pendingPrompt={pendingSelectionComment}
-            onPendingPromptConsumed={() => onPendingSelectionComment(null)}
-            // The selection composer used to be a panel of its own
-            // (`selection-ai`), sharing the `ai` activity with this one at a
-            // higher `order` — so the rail button could only ever open this
-            // panel, and once two artifact tabs claimed the header the group
-            // tabs collapsed into an overflow menu and buried it a second time.
-            // Folding it in makes "select a range, hand it to the AI" one click
-            // from the rail, next to the conversation it feeds.
-            selectionHeader={
-              <ArtifactSelectionCommentPanel
-                hasSelection={Boolean(textSelection)}
-                onSubmit={onPendingSelectionComment}
-              />
-            }
-          />
-        ),
+        renderer: renderers.resourceChat,
       },
       {
         id: "comments",
@@ -208,24 +419,7 @@ export function useArtifactSurfacePanels({
         appliesTo: (resource) => resource.kind === "artifact",
         retention: "stateful",
         getBadge: () => unresolvedCommentCount,
-        renderer: () =>
-          artifact ? (
-            <ContextCommentsPanel
-              resource={{ kind: "artifact", id: artifactId, projectId: artifact.projectId }}
-              resourceTitle={artifact.title}
-              revision={String(artifact.version)}
-              anchor={
-                textSelection
-                  ? {
-                      kind: "text-range",
-                      start: textSelection.start,
-                      end: textSelection.end,
-                      revision: String(artifact.version),
-                    }
-                  : undefined
-              }
-            />
-          ) : null,
+        renderer: renderers.comments,
       },
       {
         // Ordered *after* the artifact list inside the `review` activity. The
@@ -242,9 +436,8 @@ export function useArtifactSurfacePanels({
         appliesTo: (resource) => resource.kind === "artifact",
         retention: "stateful",
         preferredMode: "wide",
-        getBadge: () => (pendingReview ? 1 : 0),
-        renderer: () =>
-          artifact ? <ArtifactReviewView artifact={artifact} panelMode={hostLayout} /> : null,
+        getBadge: () => (hasPendingReview ? 1 : 0),
+        renderer: renderers.proposalReview,
       },
       {
         id: "preview",
@@ -254,7 +447,7 @@ export function useArtifactSurfacePanels({
         order: 10,
         appliesTo: (resource) => resource.kind === "artifact",
         retention: "stateful",
-        renderer: () => <ArtifactPanelContent panelMode={hostLayout} />,
+        renderer: renderers.preview,
       },
       {
         // Session-scoped content on an artifact-scoped surface, deliberately:
@@ -272,17 +465,7 @@ export function useArtifactSurfacePanels({
         // embedded-webview lease behind it — was torn down every time.
         scope: "session",
         preferredMode: "wide",
-        renderer: () => (
-          <BrowserPreviewPane
-            sessionId={activeSessionId ?? undefined}
-            requestedUrl={requestedUrl}
-            requestId={requestId}
-            // `retention: "stateful"` keeps this panel mounted behind whichever
-            // tab is showing, so a clicked link must bring it to the front
-            // before it may claim the URL, otherwise the link reads as a no-op.
-            onRequestReveal={revealBrowserPanel}
-          />
-        ),
+        renderer: renderers.browser,
       },
       {
         // Named for what it shows — every artifact in scope — not "history".
@@ -297,13 +480,7 @@ export function useArtifactSurfacePanels({
         appliesTo: (resource) => resource.kind === "artifact",
         retention: "stateful",
         preferredMode: "wide",
-        renderer: () => (
-          <ArtifactList
-            sessionId={activeSessionId ?? undefined}
-            className="h-full"
-            maxHeight="100%"
-          />
-        ),
+        renderer: renderers.artifactList,
       },
       {
         id: "run-context",
@@ -315,7 +492,7 @@ export function useArtifactSurfacePanels({
         retention: "stateful",
         scope: "session",
         getBadge: () => pendingRunLearningCount,
-        renderer: () => (activeSessionId ? <RunContextPanel sessionId={activeSessionId} /> : null),
+        renderer: renderers.runContext,
       },
       {
         id: "metadata",
@@ -325,29 +502,7 @@ export function useArtifactSurfacePanels({
         order: 35,
         appliesTo: (resource) => resource.kind === "artifact",
         retention: "stateful",
-        renderer: () =>
-          artifact ? (
-            <ContextMetadataPanel
-              title={tWorkbench("metadata.artifactTitle")}
-              fields={[
-                { label: tWorkbench("metadata.artifactType"), value: artifact.type },
-                {
-                  label: tWorkbench("metadata.language"),
-                  value: artifact.language ?? tWorkbench("metadata.unknown"),
-                },
-                { label: tWorkbench("metadata.version"), value: artifact.version },
-                {
-                  label: tWorkbench("metadata.runtimeStatus"),
-                  value: artifact.metadata?.runtimeHealth ?? tWorkbench("metadata.notRun"),
-                },
-                {
-                  label: tWorkbench("metadata.updatedAt"),
-                  value: artifact.updatedAt.toLocaleString(),
-                },
-              ]}
-              footer={<ArtifactSourceMessageLink messageId={artifact.messageId} />}
-            />
-          ) : null,
+        renderer: renderers.metadata,
       },
       {
         id: "memory",
@@ -357,7 +512,7 @@ export function useArtifactSurfacePanels({
         order: 36,
         appliesTo: (resource) => resource.kind === "artifact",
         retention: "stateful",
-        renderer: () => <MemoryWorkbenchPanel sessionId={activeSessionId} />,
+        renderer: renderers.memory,
       },
       {
         id: PROJECT_OVERVIEW_PANEL_ID,
@@ -365,23 +520,11 @@ export function useArtifactSurfacePanels({
         labelKey: "projectOverview.panelTitle",
         icon: FolderKanbanIcon,
         order: 25,
-        appliesTo: (resource) =>
-          resource.kind === "artifact" && Boolean(sessionProject?.roots.length),
+        appliesTo: (resource) => resource.kind === "artifact" && hasProjectRoots,
         retention: "stateful",
         scope: "session",
         preferredMode: "wide",
-        renderer: () =>
-          sessionProject ? (
-            <ProjectOverviewPanel
-              projectId={sessionProject.id}
-              onOpenWorkspace={() => {
-                useContextWorkbenchStore
-                  .getState()
-                  .navigatePanel(scopeKey, WORKSPACE_PANEL_ID, "wide")
-                onWidthHint("wide", WORKSPACE_PANEL_ID)
-              }}
-            />
-          ) : null,
+        renderer: renderers.projectOverview,
       },
       {
         id: WORKSPACE_PANEL_ID,
@@ -395,35 +538,10 @@ export function useArtifactSurfacePanels({
         // git diff belong to the conversation's project, not to one artifact.
         scope: "session",
         preferredMode: "wide",
-        renderer: () =>
-          workspaceAvailable ? (
-            <DockWorkspace activeSessionId={activeSessionId} layout={workspaceLayout} />
-          ) : (
-            <ContextCapabilityUnavailable capability="workspace" />
-          ),
+        renderer: renderers.workspace,
       },
     ],
-    [
-      activeSessionId,
-      artifact,
-      artifactId,
-      onWidthHint,
-      hostLayout,
-      workspaceLayout,
-      pendingReview,
-      pendingRunLearningCount,
-      pendingSelectionComment,
-      onPendingSelectionComment,
-      requestedUrl,
-      requestId,
-      revealBrowserPanel,
-      sessionProject,
-      scopeKey,
-      tWorkbench,
-      textSelection,
-      unresolvedCommentCount,
-      workspaceAvailable,
-    ]
+    [hasPendingReview, hasProjectRoots, pendingRunLearningCount, renderers, unresolvedCommentCount]
   )
 }
 
@@ -446,6 +564,81 @@ export interface SessionSurfacePanelsInput {
   onWidthHint: (mode: ContextPanelMode, panelId?: string) => void
 }
 
+interface SessionPanelInputs extends DockPanelInputs {
+  session: Session | null
+  sessionMessages: UIMessage[]
+}
+
+function SessionSidechatRenderer({ inputs }: Inputs<SessionPanelInputs>) {
+  const tWorkbench = useTranslations("contextWorkbench")
+  const activeSessionId = usePanelInput(inputs, (input) => input.activeSessionId)
+  // Re-resolved on every send, so the aside always sees the main thread as it
+  // stands now rather than a snapshot from when the panel opened — and read
+  // from the store rather than subscribed, so a streamed token in the main
+  // thread does not even re-render the aside.
+  const getResourceContext = useCallback(
+    () => buildAsideContext(inputs.getState().sessionMessages),
+    [inputs]
+  )
+  return activeSessionId ? (
+    <ResourceWorkbenchChatPanel
+      getResourceContext={getResourceContext}
+      asideTargetSessionId={activeSessionId}
+      multiAside
+    />
+  ) : (
+    <Empty className="h-full rounded-none">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <MessagesSquareIcon />
+        </EmptyMedia>
+        <EmptyTitle className="text-base">{tWorkbench("sidechatPlaceholder.title")}</EmptyTitle>
+        <EmptyDescription>{tWorkbench("sidechatPlaceholder.description")}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
+  )
+}
+
+function SessionSourceControlRenderer({ inputs }: Inputs<SessionPanelInputs>) {
+  const workspaceAvailable = usePanelInput(inputs, (input) => input.workspaceAvailable)
+  return workspaceAvailable ? (
+    <SourceControlWorkbenchPanel />
+  ) : (
+    <ContextCapabilityUnavailable capability="workspace" />
+  )
+}
+
+function SessionCommentsRenderer({ inputs }: Inputs<SessionPanelInputs>) {
+  const activeSessionId = usePanelInput(inputs, (input) => input.activeSessionId)
+  const projectId = usePanelInput(inputs, (input) => input.session?.projectId)
+  const title = usePanelInput(inputs, (input) => input.session?.title)
+  const updatedAt = usePanelInput(inputs, (input) => input.session?.updatedAt)
+  if (!activeSessionId) return null
+  return (
+    <ContextCommentsPanel
+      resource={{ kind: "session", id: activeSessionId, projectId }}
+      resourceTitle={title}
+      revision={String(updatedAt ?? 0)}
+    />
+  )
+}
+
+function SessionSourcesRenderer({ inputs }: Inputs<SessionPanelInputs>) {
+  const sessionMessages = usePanelInput(inputs, (input) => input.sessionMessages)
+  return <SessionSourcesPanel messages={sessionMessages} />
+}
+
+function SessionSquadRenderer({ inputs }: Inputs<SessionPanelInputs>) {
+  const activeSessionId = usePanelInput(inputs, (input) => input.activeSessionId)
+  return <SquadContextPanel sessionId={activeSessionId} />
+}
+
+function SessionTeamMembersRenderer({ inputs }: Inputs<SessionPanelInputs>) {
+  const activeSessionId = usePanelInput(inputs, (input) => input.activeSessionId)
+  const teamId = usePanelInput(inputs, (input) => input.session?.teamId ?? null)
+  return <TeamMembersPanel teamSessionId={activeSessionId} teamId={teamId} />
+}
+
 /** The eight panels of the dock's session surface — no artifact is active. */
 export function useSessionSurfacePanels({
   activeSessionId,
@@ -461,8 +654,46 @@ export function useSessionSurfacePanels({
   scopeKey,
   onWidthHint,
 }: SessionSurfacePanelsInput): ContextPanelDefinition[] {
-  const tWorkbench = useTranslations("contextWorkbench")
   const { requestedUrl, requestId, revealBrowserPanel } = useSideBrowserRequest(scopeKey)
+  const inputs = usePanelInputs<SessionPanelInputs>({
+    activeSessionId,
+    session,
+    sessionProject,
+    sessionMessages,
+    workspaceLayout,
+    workspaceAvailable,
+    scopeKey,
+    onWidthHint,
+    requestedUrl,
+    requestId,
+    revealBrowserPanel,
+  })
+
+  // Rebuilt, and so remounted, only when the conversation changes. The dock's
+  // `session` is a live query — a new object on every read — and this used to
+  // be keyed on it, so the sidechat remounted several times a second.
+  const renderers = useMemo(() => {
+    const key = activeSessionId ?? "none"
+    return {
+      artifactList: () => <DockArtifactListPanel key={key} inputs={inputs} />,
+      sidechat: () => <SessionSidechatRenderer key={key} inputs={inputs} />,
+      browser: () => <DockBrowserPanel key={key} inputs={inputs} />,
+      projectOverview: () => <DockProjectOverviewPanel key={key} inputs={inputs} />,
+      workspace: () => <DockWorkspacePanel key={key} inputs={inputs} />,
+      sourceControl: () => <SessionSourceControlRenderer key={key} inputs={inputs} />,
+      comments: () => <SessionCommentsRenderer key={key} inputs={inputs} />,
+      runContext: () => <DockRunContextPanel key={key} inputs={inputs} />,
+      sources: () => <SessionSourcesRenderer key={key} inputs={inputs} />,
+      memory: () => <DockMemoryPanel key={key} inputs={inputs} />,
+      logs: () => <LogsWorkbenchPanel key={key} />,
+      squad: () => <SessionSquadRenderer key={key} inputs={inputs} />,
+      teamMembers: () => <SessionTeamMembersRenderer key={key} inputs={inputs} />,
+    }
+  }, [activeSessionId, inputs])
+
+  const hasProjectRoots = Boolean(sessionProject?.roots.length)
+  const isTeamSession = session?.kind === "team"
+  const hasActiveSession = Boolean(activeSessionId)
 
   return useMemo<ContextPanelDefinition[]>(
     () => [
@@ -474,13 +705,7 @@ export function useSessionSurfacePanels({
         order: 10,
         appliesTo: (resource) => resource.kind === "session",
         retention: "stateful",
-        renderer: () => (
-          <ArtifactList
-            sessionId={activeSessionId ?? undefined}
-            className="h-full"
-            maxHeight="100%"
-          />
-        ),
+        renderer: renderers.artifactList,
       },
       {
         // Sidechat belongs on the session surface: it is an aside to the main
@@ -495,30 +720,8 @@ export function useSessionSurfacePanels({
         appliesTo: (resource) =>
           resource.kind === "session" && !resource.sessionId.startsWith("resource-workbench:"),
         retention: "stateful",
-        requiresChatScope: Boolean(activeSessionId),
-        renderer: () =>
-          activeSessionId ? (
-            <ResourceWorkbenchChatPanel
-              // Re-resolved on every send, so the aside always sees the main
-              // thread as it stands now rather than a snapshot from when the
-              // panel opened.
-              getResourceContext={() => buildAsideContext(sessionMessages)}
-              asideTargetSessionId={activeSessionId}
-              multiAside
-            />
-          ) : (
-            <Empty className="h-full rounded-none">
-              <EmptyHeader>
-                <EmptyMedia variant="icon">
-                  <MessagesSquareIcon />
-                </EmptyMedia>
-                <EmptyTitle className="text-base">
-                  {tWorkbench("sidechatPlaceholder.title")}
-                </EmptyTitle>
-                <EmptyDescription>{tWorkbench("sidechatPlaceholder.description")}</EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          ),
+        requiresChatScope: hasActiveSession,
+        renderer: renderers.sidechat,
       },
       {
         id: "browser",
@@ -530,17 +733,7 @@ export function useSessionSurfacePanels({
         retention: "stateful",
         scope: "session",
         preferredMode: "wide",
-        renderer: () => (
-          <BrowserPreviewPane
-            sessionId={activeSessionId ?? undefined}
-            requestedUrl={requestedUrl}
-            requestId={requestId}
-            // `retention: "stateful"` keeps this panel mounted behind whichever
-            // tab is showing, so a clicked link must bring it to the front
-            // before it may claim the URL, otherwise the link reads as a no-op.
-            onRequestReveal={revealBrowserPanel}
-          />
-        ),
+        renderer: renderers.browser,
       },
       {
         id: PROJECT_OVERVIEW_PANEL_ID,
@@ -548,23 +741,11 @@ export function useSessionSurfacePanels({
         labelKey: "projectOverview.panelTitle",
         icon: FolderKanbanIcon,
         order: 25,
-        appliesTo: (resource) =>
-          resource.kind === "session" && Boolean(sessionProject?.roots.length),
+        appliesTo: (resource) => resource.kind === "session" && hasProjectRoots,
         retention: "stateful",
         scope: "session",
         preferredMode: "wide",
-        renderer: () =>
-          sessionProject ? (
-            <ProjectOverviewPanel
-              projectId={sessionProject.id}
-              onOpenWorkspace={() => {
-                useContextWorkbenchStore
-                  .getState()
-                  .navigatePanel(scopeKey, WORKSPACE_PANEL_ID, "wide")
-                onWidthHint("wide", WORKSPACE_PANEL_ID)
-              }}
-            />
-          ) : null,
+        renderer: renderers.projectOverview,
       },
       {
         id: WORKSPACE_PANEL_ID,
@@ -577,12 +758,7 @@ export function useSessionSurfacePanels({
         scope: "session",
         preferredMode: "wide",
         getBadge: () => uncommittedChangeCount,
-        renderer: () =>
-          workspaceAvailable ? (
-            <DockWorkspace activeSessionId={activeSessionId} layout={workspaceLayout} />
-          ) : (
-            <ContextCapabilityUnavailable capability="workspace" />
-          ),
+        renderer: renderers.workspace,
       },
       {
         id: "source-control",
@@ -594,12 +770,7 @@ export function useSessionSurfacePanels({
         retention: "stateful",
         scope: "session",
         getBadge: () => uncommittedChangeCount,
-        renderer: () =>
-          workspaceAvailable ? (
-            <SourceControlWorkbenchPanel />
-          ) : (
-            <ContextCapabilityUnavailable capability="workspace" />
-          ),
+        renderer: renderers.sourceControl,
       },
       {
         // The conversation can be commented on like any other resource — notes
@@ -614,14 +785,7 @@ export function useSessionSurfacePanels({
         appliesTo: (resource) => resource.kind === "session",
         retention: "stateful",
         getBadge: () => unresolvedCommentCount,
-        renderer: () =>
-          activeSessionId ? (
-            <ContextCommentsPanel
-              resource={{ kind: "session", id: activeSessionId, projectId: session?.projectId }}
-              resourceTitle={session?.title}
-              revision={String(session?.updatedAt ?? 0)}
-            />
-          ) : null,
+        renderer: renderers.comments,
       },
       {
         id: "run-context",
@@ -633,7 +797,7 @@ export function useSessionSurfacePanels({
         retention: "stateful",
         scope: "session",
         getBadge: () => pendingRunLearningCount,
-        renderer: () => (activeSessionId ? <RunContextPanel sessionId={activeSessionId} /> : null),
+        renderer: renderers.runContext,
       },
       {
         id: "session-sources",
@@ -644,7 +808,7 @@ export function useSessionSurfacePanels({
         appliesTo: (resource) => resource.kind === "session",
         retention: "stateful",
         getBadge: () => sourceCount,
-        renderer: () => <SessionSourcesPanel messages={sessionMessages} />,
+        renderer: renderers.sources,
       },
       {
         // Fills the `inspect` rail slot, which stood empty on this surface while
@@ -667,7 +831,7 @@ export function useSessionSurfacePanels({
         order: 55,
         appliesTo: (resource) => resource.kind === "session",
         retention: "stateful",
-        renderer: () => <MemoryWorkbenchPanel sessionId={activeSessionId} />,
+        renderer: renderers.memory,
       },
       {
         id: "logs",
@@ -677,7 +841,7 @@ export function useSessionSurfacePanels({
         order: 60,
         appliesTo: (resource) => resource.kind === "session",
         retention: "stateful",
-        renderer: () => <LogsWorkbenchPanel />,
+        renderer: renderers.logs,
       },
       {
         // The Squad running THIS conversation. Its predecessor showed
@@ -693,7 +857,7 @@ export function useSessionSurfacePanels({
         appliesTo: (resource) => resource.kind === "session",
         retention: "stateful",
         scope: "session",
-        renderer: () => <SquadContextPanel sessionId={activeSessionId} />,
+        renderer: renderers.squad,
       },
       {
         // Team conversations only — the roster, the shared notes and the
@@ -705,31 +869,21 @@ export function useSessionSurfacePanels({
         labelKey: "contextWorkbench.teamMembersPanel.title",
         icon: UsersIcon,
         order: 17,
-        appliesTo: (resource) => resource.kind === "session" && session?.kind === "team",
+        appliesTo: (resource) => resource.kind === "session" && isTeamSession,
         retention: "stateful",
         scope: "session",
-        renderer: () => (
-          <TeamMembersPanel teamSessionId={activeSessionId} teamId={session?.teamId ?? null} />
-        ),
+        renderer: renderers.teamMembers,
       },
     ],
     [
-      activeSessionId,
-      onWidthHint,
+      hasActiveSession,
+      hasProjectRoots,
+      isTeamSession,
       pendingRunLearningCount,
-      requestedUrl,
-      requestId,
-      revealBrowserPanel,
-      session,
-      sessionMessages,
-      sessionProject,
-      scopeKey,
+      renderers,
       sourceCount,
-      tWorkbench,
       uncommittedChangeCount,
       unresolvedCommentCount,
-      workspaceAvailable,
-      workspaceLayout,
     ]
   )
 }

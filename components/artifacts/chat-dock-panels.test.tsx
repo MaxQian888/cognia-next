@@ -795,3 +795,160 @@ describe("useSessionSurfacePanels", () => {
     expect(screen.getByTestId("artifact-list")).toHaveAttribute("data-session", "none")
   })
 })
+
+// The workbench mounts `<panel.renderer />`, so a renderer's identity IS its
+// panel's lifetime. The sidechat twitched because the dock's `session` is a live
+// query — a new object on every read — and every renderer was rebuilt from it,
+// so the aside remounted (and flashed its empty state) several times a second.
+describe("panel lifetime", () => {
+  type RendererProps = { workbenchInstanceId: string; resource: ContextResource; active: boolean }
+
+  function SessionHost({ input, panelId }: { input: SessionSurfacePanelsInput; panelId: string }) {
+    const Renderer = panelById(useSessionSurfacePanels(input), panelId)
+      .renderer as ComponentType<RendererProps>
+    return <Renderer workbenchInstanceId="wb" resource={SESSION_RESOURCE} active />
+  }
+
+  function ArtifactHost({
+    input,
+    panelId,
+  }: {
+    input: ArtifactSurfacePanelsInput
+    panelId: string
+  }) {
+    const Renderer = panelById(useArtifactSurfacePanels(input), panelId)
+      .renderer as ComponentType<RendererProps>
+    return <Renderer workbenchInstanceId="wb" resource={ARTIFACT_RESOURCE} active />
+  }
+
+  it("keeps every session renderer when only the facts they render change", () => {
+    const seen: ContextPanelDefinition[][] = []
+    function Harness({ input }: { input: SessionSurfacePanelsInput }) {
+      seen.push(useSessionSurfacePanels(input))
+      return null
+    }
+    const { rerender } = render(<Harness input={sessionInput()} />)
+    rerender(
+      <Harness
+        input={sessionInput({
+          session: { ...session, updatedAt: 1700000009000 } as unknown as Session,
+          sessionMessages: [
+            { id: "m1", role: "user", parts: [] },
+            { id: "m2", role: "assistant", parts: [] },
+          ],
+          unresolvedCommentCount: 9,
+        })}
+      />
+    )
+    const before = seen[0]!
+    const after = seen.at(-1)!
+    for (const panel of before) {
+      expect(panelById(after, panel.id).renderer).toBe(panel.renderer)
+    }
+    // The badge, which is not a renderer, still follows.
+    expect(panelById(after, "comments").getBadge?.(SESSION_RESOURCE)).toBe(9)
+  })
+
+  it("rebuilds the session renderers when the conversation changes", () => {
+    const seen: ContextPanelDefinition[][] = []
+    function Harness({ input }: { input: SessionSurfacePanelsInput }) {
+      seen.push(useSessionSurfacePanels(input))
+      return null
+    }
+    const { rerender } = render(<Harness input={sessionInput()} />)
+    rerender(<Harness input={sessionInput({ activeSessionId: "s2" })} />)
+    expect(panelById(seen.at(-1)!, "session-sidechat").renderer).not.toBe(
+      panelById(seen[0]!, "session-sidechat").renderer
+    )
+  })
+
+  it("updates a mounted panel in place when its facts change", () => {
+    const { rerender } = render(<SessionHost input={sessionInput()} panelId="comments" />)
+    const node = screen.getByTestId("comments")
+    expect(node).toHaveAttribute("data-revision", "1700000001000")
+
+    rerender(
+      <SessionHost
+        input={sessionInput({
+          session: { ...session, updatedAt: 1700000009000 } as unknown as Session,
+        })}
+        panelId="comments"
+      />
+    )
+    expect(screen.getByTestId("comments")).toBe(node)
+    expect(node).toHaveAttribute("data-revision", "1700000009000")
+  })
+
+  it("keeps the sidechat mounted while the main thread streams, and reads it at send time", () => {
+    const { rerender } = render(<SessionHost input={sessionInput()} panelId="session-sidechat" />)
+    const node = screen.getByTestId("chat-panel")
+    rerender(
+      <SessionHost
+        input={sessionInput({
+          session: { ...session } as unknown as Session,
+          sessionMessages: [
+            { id: "m1", role: "user", parts: [] },
+            { id: "m2", role: "assistant", parts: [{ type: "text", text: "streamed" }] },
+          ] as never,
+        })}
+        panelId="session-sidechat"
+      />
+    )
+    expect(screen.getByTestId("chat-panel")).toBe(node)
+  })
+
+  it("keeps every artifact renderer across an artifact save", () => {
+    const seen: ContextPanelDefinition[][] = []
+    function Harness({ input }: { input: ArtifactSurfacePanelsInput }) {
+      seen.push(useArtifactSurfacePanels(input))
+      return null
+    }
+    const { rerender } = render(<Harness input={artifactInput()} />)
+    rerender(
+      <Harness
+        input={artifactInput({
+          artifact: { ...artifact, version: 9, content: "console.log(2)" },
+          textSelection: { kind: "text", start: 1, end: 2 },
+        })}
+      />
+    )
+    for (const panel of seen[0]!) {
+      expect(panelById(seen.at(-1)!, panel.id).renderer).toBe(panel.renderer)
+    }
+  })
+
+  it("hands a mounted artifact panel the saved artifact without remounting it", () => {
+    const { rerender } = render(<ArtifactHost input={artifactInput()} panelId="comments" />)
+    const node = screen.getByTestId("comments")
+    rerender(
+      <ArtifactHost
+        input={artifactInput({ artifact: { ...artifact, version: 9 } })}
+        panelId="comments"
+      />
+    )
+    expect(screen.getByTestId("comments")).toBe(node)
+    expect(node).toHaveAttribute("data-revision", "9")
+  })
+
+  it("reads the artifact's current content when the resource chat sends", () => {
+    const { rerender } = render(<ArtifactHost input={artifactInput()} panelId="resource-chat" />)
+    rerender(
+      <ArtifactHost
+        input={artifactInput({ artifact: { ...artifact, content: "saved since" } })}
+        panelId="resource-chat"
+      />
+    )
+    // The stub calls `getResourceContext` while rendering; a re-render driven by
+    // the pending prompt reads the saved content, not the mount-time copy.
+    rerender(
+      <ArtifactHost
+        input={artifactInput({
+          artifact: { ...artifact, content: "saved since" },
+          pendingSelectionComment: "why?",
+        })}
+        panelId="resource-chat"
+      />
+    )
+    expect(screen.getByTestId("chat-panel")).toHaveAttribute("data-context", "saved since")
+  })
+})
