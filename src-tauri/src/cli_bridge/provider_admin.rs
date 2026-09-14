@@ -326,7 +326,7 @@ mod tests {
             "generatedAtMs": 1, "profileVersion": 1, "authority": "renderer"
         }))
         .unwrap();
-        gateway.set_snapshot(snapshot);
+        gateway.try_set_snapshot(snapshot).unwrap();
 
         let unknown = mint_bridge_ticket(&gateway, ticket_request("gpt-nope")).unwrap_err();
         assert_eq!(unknown.0, StatusCode::NOT_FOUND);
