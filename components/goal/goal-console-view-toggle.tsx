@@ -1,10 +1,9 @@
 "use client"
 
 /**
- * Grid / List toggle for the Goals console open-goals section. Mirrors
- * `components/scheduler/scheduler-dashboard-view-toggle.tsx` (same shadcn
- * `ToggleGroup` primitive) but is bound to `useGoalConsoleView`, which persists
- * the active mode to `AppSettings` (cross-device).
+ * Grid / List toggle for the Goals console open-goals section. A shadcn
+ * `ToggleGroup` bound to `useGoalConsoleView`, which persists the active mode
+ * to `AppSettings` (cross-device).
  *
  * Labels collapse to icon-only below `sm` so the toggle never crowds the
  * console header on narrow screens.

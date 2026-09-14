@@ -18,8 +18,8 @@
  * `components/settings/scheduler/scheduler-permission-settings.tsx` layout.
  * Cards 1-4 are net-new and intentionally avoid duplicating
  * `app/scheduler/page.tsx` (master-detail workbench),
- * `components/scheduler/scheduler-dashboard-view.tsx` (KPI / chart / strips),
- * `app/scheduler/scheduler-content-header.tsx` (cleanup / import / export menu),
+ * `components/scheduler/overview/scheduler-overview.tsx` (attention / outcomes / agenda),
+ * `components/scheduler/scheduler-page-header.tsx` (cleanup / import / export menu),
  * `components/settings/data/tabs/backup-restore-tab.tsx` (backup cron list),
  * `components/settings/sections/plugins-section.tsx` (plugin scheduled jobs UI),
  * or `components/settings/webhooks/webhooks-section.tsx`
