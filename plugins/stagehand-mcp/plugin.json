@@ -1,8 +1,8 @@
 {
   "id": "cognia-stagehand-mcp",
   "name": "Stagehand Browser",
-  "version": "0.1.0",
-  "description": "AI-native browser automation via Browserbase Stagehand \u2014 act/extract/observe/agent primitives over a managed Chromium runtime.",
+  "version": "0.2.0",
+  "description": "AI-native browser automation via Browserbase Stagehand — hosted and self-hosted MCP presets plus a /stagehand setup guide.",
   "type": "frontend",
   "capabilities": ["mcp-server-preset", "commands"],
   "main": "src/index.ts",
@@ -12,12 +12,17 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "permissions": [],
+  "permissions": ["extension:ui", "shell:execute"],
+  "permissionJustifications": {
+    "extension:ui": "Opens the /stagehand setup guide modal that compares the hosted and self-hosted presets and links into MCP settings.",
+    "shell:execute": "Runs `node --version` and `npx --version` when you press 'Check environment' in the /stagehand guide — the only two commands, both covered by shellCommands."
+  },
+  "shellCommands": ["node", "npx"],
   "activationEvents": ["startup", "onCommand:stagehand"],
   "runtimeCompatibility": {
     "browser": {
       "availability": "blocked",
-      "reason": "Requires npx to spawn @browserbasehq/mcp-stagehand \u2014 desktop only."
+      "reason": "The self-hosted preset spawns @browserbasehq/mcp via npx, and the setup guide's environment check needs the desktop shell."
     },
     "tauri": {
       "availability": "supported",
@@ -25,14 +30,87 @@
     },
     "mobile": {
       "availability": "blocked",
-      "reason": "Spawns @browserbasehq/mcp-stagehand via npx \u2014 unavailable on mobile."
+      "reason": "The self-hosted preset spawns @browserbasehq/mcp via npx — unavailable on mobile."
     }
   },
+  "mcpServerPresets": [
+    {
+      "id": "stagehand-hosted",
+      "name": "Stagehand — Hosted",
+      "description": "Browserbase's hosted Streamable-HTTP endpoint — no local Node.js, and the default Gemini model cost is covered. The API key goes in a request header so it is stored in the credential vault.",
+      "icon": "☁️",
+      "transport": "http",
+      "config": {
+        "url": "https://mcp.browserbase.com/mcp",
+        "headers": {}
+      },
+      "fields": [
+        {
+          "key": "url",
+          "label": "Endpoint URL",
+          "placement": "url",
+          "placeholder": "https://mcp.browserbase.com/mcp",
+          "description": "Leave as-is for the default Gemini model. Optional query params: ?modelName=…&modelApiKey=…&keepAlive=true&proxies=true."
+        },
+        {
+          "key": "x-bb-api-key",
+          "label": "Browserbase API key",
+          "placement": "header",
+          "placeholder": "bb_live_…",
+          "secret": true,
+          "description": "Get one at browserbase.com/overview."
+        }
+      ],
+      "runtime": "both",
+      "docsUrl": "https://docs.browserbase.com/integrations/mcp/setup",
+      "tags": ["web", "browser", "ai-native", "cloud"]
+    },
+    {
+      "id": "stagehand",
+      "name": "Stagehand — Self-hosted",
+      "description": "AI-native browser automation (act / extract / observe / agent). Spawns @browserbasehq/mcp over stdio; sessions run on Browserbase cloud Chromium.",
+      "icon": "🖥️",
+      "transport": "stdio",
+      "config": {
+        "command": "npx",
+        "args": ["-y", "@browserbasehq/mcp@latest"],
+        "env": {
+          "BROWSERBASE_API_KEY": "",
+          "BROWSERBASE_PROJECT_ID": "",
+          "GEMINI_API_KEY": ""
+        }
+      },
+      "fields": [
+        {
+          "key": "BROWSERBASE_API_KEY",
+          "label": "Browserbase API key",
+          "placement": "env",
+          "secret": true,
+          "description": "Get one at browserbase.com."
+        },
+        {
+          "key": "BROWSERBASE_PROJECT_ID",
+          "label": "Browserbase project ID",
+          "placement": "env"
+        },
+        {
+          "key": "GEMINI_API_KEY",
+          "label": "Gemini API key (Stagehand model)",
+          "placement": "env",
+          "secret": true,
+          "description": "Stagehand defaults to google/gemini-2.5-flash-lite. Pass --modelName plus --modelApiKey in the server args to use a different provider."
+        }
+      ],
+      "runtime": "both",
+      "docsUrl": "https://github.com/browserbase/mcp-server-browserbase",
+      "tags": ["web", "browser", "ai-native"]
+    }
+  ],
   "commands": [
     {
       "id": "stagehand",
       "name": "/stagehand",
-      "description": "Attach the Stagehand MCP browser to the current character.",
+      "description": "Open the Stagehand browser setup guide — compare hosted vs self-hosted presets and jump to the right gallery card.",
       "icon": "Drama"
     }
   ]
