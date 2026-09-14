@@ -75,6 +75,42 @@
       "args": ["build"]
     },
     {
+      // The asset staging `pnpm dev` runs first, for launch configs that start
+      // next directly (see "Next.js: debug server-side").
+      "label": "ui:prepare",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["run", "predev"],
+      "problemMatcher": []
+    },
+    {
+      // The native half of tauri.conf.json `beforeDevCommand`. TAURI_CONFIG must
+      // match DEV_TAURI_CONFIG in scripts/dev/tauri.mjs byte for byte, or the
+      // cognia-server build re-runs the sidecar resource copy.
+      "label": "tauri:prepare-dev",
+      "type": "shell",
+      "command": "pnpm terminal-host:prepare:dev && pnpm external-agent-launcher:prepare:dev && pnpm plugin-node:prepare && pnpm sidecar:codeserver-agent:build",
+      "options": {
+        "env": {
+          "TAURI_CONFIG": "{\"bundle\":{\"resources\":[]}}"
+        }
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "tauri:debug-dev",
+      "dependsOrder": "sequence",
+      "dependsOn": ["tauri:prepare-dev", "ui:dev-if-needed"],
+      "problemMatcher": []
+    },
+    {
+      // tauri.conf.json `beforeBuildCommand`, verbatim.
+      "label": "tauri:prepare-build",
+      "type": "shell",
+      "command": "pnpm terminal-host:prepare && pnpm external-agent-launcher:prepare && pnpm plugin-node:prepare && pnpm sidecar:codeserver-agent:build && pnpm build && pnpm tauri:frontend:check",
+      "problemMatcher": []
+    },
+    {
       "label": "tauri:dev",
       "type": "shell",
       "isBackground": true,

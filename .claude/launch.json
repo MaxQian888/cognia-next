@@ -8,16 +8,36 @@
       "port": 3000
     },
     {
-      "name": "storybook",
+      "name": "cognia-next-web-headless",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["storybook", "--no-open"],
-      "port": 6006
+      "runtimeArgs": ["dev:web-headless"],
+      "port": 3000
+    },
+    {
+      "name": "cognia-next-static",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["start"],
+      "port": 3000
+    },
+    {
+      "name": "docs",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "docs", "exec", "next", "dev"],
+      "port": 3001,
+      "autoPort": true
     },
     {
       "name": "web",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "web", "exec", "next", "dev", "-p", "3002"],
-      "port": 3002
+      "runtimeArgs": ["--filter", "web", "exec", "next", "dev"],
+      "port": 3002,
+      "autoPort": true
+    },
+    {
+      "name": "storybook",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["storybook", "--no-open"],
+      "port": 6006
     }
   ]
 }
