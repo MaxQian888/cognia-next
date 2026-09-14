@@ -4,6 +4,8 @@ export const MODELS = ["swe-2-medium", "swe-2-high", "swe-2-max"] as const
 export interface Config {
   repository: string
   model: (typeof MODELS)[number]
+  executionMode: "approval" | "unattended"
+  publicationMode: "approval" | "automatic"
   timeoutMs: number
   maxRepairAttempts: number
 }
@@ -15,6 +17,12 @@ export function parseConfig(raw: Record<string, unknown>): Config {
   }
   const model = raw.model ?? MODELS[0]
   if (!MODELS.includes(model as Config["model"])) throw new Error("Unsupported Devin SWE-2 model")
+  const executionMode = raw.executionMode ?? "approval"
+  const publicationMode = raw.publicationMode ?? "approval"
+  if (executionMode !== "approval" && executionMode !== "unattended")
+    throw new Error("executionMode must be approval or unattended")
+  if (publicationMode !== "approval" && publicationMode !== "automatic")
+    throw new Error("publicationMode must be approval or automatic")
   const timeoutMinutes = raw.timeoutMinutes ?? 30
   const maxRepairAttempts = raw.maxRepairAttempts ?? 2
   if (
@@ -36,6 +44,8 @@ export function parseConfig(raw: Record<string, unknown>): Config {
   return {
     repository,
     model: model as Config["model"],
+    executionMode,
+    publicationMode,
     timeoutMs: timeoutMinutes * 60_000,
     maxRepairAttempts,
   }
@@ -52,6 +62,22 @@ export const configSchema = {
       pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
     },
     model: { type: "string", title: "Devin model", enum: [...MODELS], default: MODELS[0] },
+    executionMode: {
+      type: "string",
+      title: "Execution mode",
+      enum: ["approval", "unattended"],
+      default: "approval",
+      description:
+        "Unattended execution requires an explicit host grant for automatic command execution.",
+    },
+    publicationMode: {
+      type: "string",
+      title: "Publication mode",
+      enum: ["approval", "automatic"],
+      default: "approval",
+      description:
+        "Automatic publication requires an explicit host policy grant. No mode merges pull requests.",
+    },
     timeoutMinutes: {
       type: "integer",
       title: "Execution timeout (minutes)",

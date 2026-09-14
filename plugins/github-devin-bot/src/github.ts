@@ -9,6 +9,7 @@ export interface Item {
   updated_at: string
   html_url?: string
   draft?: boolean
+  user?: { id: number; login: string }
   pull_request?: { url: string }
   head?: { sha: string; ref: string; repo: { full_name: string } | null }
   base?: { sha: string; ref: string; repo: { full_name: string } }
@@ -16,6 +17,8 @@ export interface Item {
 
 export interface WorkflowRun {
   id: number
+  workflow_id?: number
+  name?: string
   head_sha: string
   status: string
   conclusion: string | null
@@ -29,6 +32,7 @@ export interface WorkflowRun {
 export interface CheckRun {
   id: number
   name: string
+  app?: { id: number }
   head_sha: string
   status: string
   conclusion: string | null
@@ -56,11 +60,10 @@ export function githubReader(
   now = Date.now
 ) {
   const prefix = `https://api.github.com/repos/${repository}`
-  async function request<T>(path: string, etag?: string) {
-    if (path && !path.startsWith("/")) throw new Error("Expected a repository-relative GitHub path")
+  async function read<T>(url: string, etag?: string) {
     const response = await ctx.integrations.authenticatedRequest<T>(
       { runId, slotId: "github" },
-      `${prefix}${path}`,
+      url,
       {
         method: "GET",
         headers: {
@@ -87,6 +90,10 @@ export function githubReader(
     }
     return { ...response, headers }
   }
+  async function request<T>(path: string, etag?: string) {
+    if (path && !path.startsWith("/")) throw new Error("Expected a repository-relative GitHub path")
+    return read<T>(`${prefix}${path}`, etag)
+  }
   async function pages<T>(path: string, field?: string): Promise<T[]> {
     const items: T[] = []
     for (let page = 1; ; page++) {
@@ -105,6 +112,8 @@ export function githubReader(
   return {
     request,
     pages,
+    viewer: async () =>
+      (await read<{ id: number; login: string }>("https://api.github.com/user")).data,
     item: async (number: number, kind: "issue" | "pr") =>
       (await request<Item>(`/${kind === "pr" ? "pulls" : "issues"}/${number}`)).data,
   }
@@ -129,6 +138,37 @@ export const resourceId = (repository: string, number: number) =>
   `${repository.toLowerCase()}#${number}`
 export const failedConclusion = (value: string | null) =>
   ["failure", "timed_out", "action_required", "startup_failure"].includes(value ?? "")
+
+/** A newer execution supersedes every older state for the same check/workflow. */
+export function currentCiExecutions(workflows: WorkflowRun[], checks: CheckRun[], sha: string) {
+  const latestWorkflows = new Map<string | number, WorkflowRun>()
+  for (const run of workflows
+    .filter((run) => run.head_sha === sha)
+    .sort((a, b) => b.id - a.id || (b.run_attempt ?? 1) - (a.run_attempt ?? 1))) {
+    const key = run.workflow_id ?? run.name ?? run.id
+    if (!latestWorkflows.has(key)) latestWorkflows.set(key, run)
+  }
+  const latestChecks = new Map<string, CheckRun>()
+  for (const check of checks
+    .filter((check) => check.head_sha === sha)
+    .sort((a, b) => b.id - a.id)) {
+    const key = `${check.app?.id ?? "unknown"}:${check.name}`
+    if (!latestChecks.has(key)) latestChecks.set(key, check)
+  }
+  return { workflows: [...latestWorkflows.values()], checks: [...latestChecks.values()] }
+}
+
+export function currentCiFailures(workflows: WorkflowRun[], checks: CheckRun[], sha: string) {
+  const latest = currentCiExecutions(workflows, checks, sha)
+  return {
+    workflows: latest.workflows.filter(
+      (run) => run.status === "completed" && failedConclusion(run.conclusion)
+    ),
+    checks: latest.checks.filter(
+      (check) => check.status === "completed" && failedConclusion(check.conclusion)
+    ),
+  }
+}
 
 export function parseWork(value: unknown, repository: string): Work {
   if (!value || typeof value !== "object") throw new Error("Invalid work event")

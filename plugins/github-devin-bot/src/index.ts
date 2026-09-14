@@ -13,7 +13,7 @@ export const githubDevinBotDef = {
   name: "GitHub Devin Bot",
   version: "1.0.0",
   description:
-    "Monitor GitHub issues, pull requests, and CI; prepare Devin SWE-2 changes for approval.",
+    "Monitor GitHub issues, pull requests, and CI with approval or explicitly authorized automatic publication.",
   executor: "handler",
   entry: "dist/index.js",
   export: "githubDevinBot",
@@ -76,7 +76,8 @@ export const githubDevinBotDef = {
     integrationActions: ["github.openPr", "github.reviewPr"],
   },
   policy: {
-    requireApprovalForWrites: true,
+    maxAuthority: "bypassPermissions",
+    maxAutonomy: "autopilot",
     maxConcurrentRuns: 1,
     maxRunDurationMs: 1_800_000,
     allowSelfTriggering: false,
@@ -89,7 +90,8 @@ export const manifest = {
   name: "GitHub Devin Bot",
   version: "1.0.0",
   type: "frontend",
-  description: "An approval-gated GitHub repository maintenance Bot powered by Devin SWE-2.",
+  description:
+    "A GitHub repository maintenance Bot powered by Devin SWE-2, with configurable execution and publication approval.",
   author: "Cognia Official",
   license: "MIT",
   minAppVersion: "0.1.0",

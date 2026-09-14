@@ -3,7 +3,7 @@
   "name": "GitHub Devin Bot",
   "version": "1.0.0",
   "type": "frontend",
-  "description": "An approval-gated GitHub repository maintenance Bot powered by Devin SWE-2.",
+  "description": "A GitHub repository maintenance Bot powered by Devin SWE-2, with configurable execution and publication approval.",
   "author": "Cognia Official",
   "license": "MIT",
   "minAppVersion": "0.1.0",
@@ -52,7 +52,7 @@
       "id": "repository-monitor",
       "name": "GitHub Devin Bot",
       "version": "1.0.0",
-      "description": "Monitor GitHub issues, pull requests, and CI; prepare Devin SWE-2 changes for approval.",
+      "description": "Monitor GitHub issues, pull requests, and CI with approval or explicitly authorized automatic publication.",
       "executor": "handler",
       "entry": "dist/index.js",
       "export": "githubDevinBot",
@@ -127,7 +127,8 @@
         "integrationActions": ["github.openPr", "github.reviewPr"]
       },
       "policy": {
-        "requireApprovalForWrites": true,
+        "maxAuthority": "bypassPermissions",
+        "maxAutonomy": "autopilot",
         "maxConcurrentRuns": 1,
         "maxRunDurationMs": 1800000,
         "allowSelfTriggering": false
@@ -147,6 +148,20 @@
             "title": "Devin model",
             "enum": ["swe-2-medium", "swe-2-high", "swe-2-max"],
             "default": "swe-2-medium"
+          },
+          "executionMode": {
+            "type": "string",
+            "title": "Execution mode",
+            "enum": ["approval", "unattended"],
+            "default": "approval",
+            "description": "Unattended execution requires an explicit host grant for automatic command execution."
+          },
+          "publicationMode": {
+            "type": "string",
+            "title": "Publication mode",
+            "enum": ["approval", "automatic"],
+            "default": "approval",
+            "description": "Automatic publication requires an explicit host policy grant. No mode merges pull requests."
           },
           "timeoutMinutes": {
             "type": "integer",

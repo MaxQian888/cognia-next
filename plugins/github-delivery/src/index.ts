@@ -347,39 +347,121 @@ export const mergePr: IntegrationActionHandler = (input, context) =>
 
 export const reviewPr: IntegrationActionHandler = async (input, context) => {
   const number = positiveInteger(input, "prNumber")
-  const body = requiredString(input, "body")
+  const comments = input.comments as
+    Array<{ path: string; line: number; side: string; body: string }> | undefined
+  if (
+    comments !== undefined &&
+    (!Array.isArray(comments) ||
+      comments.length > 50 ||
+      comments.some(
+        (comment) =>
+          !comment ||
+          typeof comment.path !== "string" ||
+          !comment.path ||
+          comment.path.startsWith("/") ||
+          comment.path.includes("\\") ||
+          comment.path.split("/").includes("..") ||
+          !Number.isSafeInteger(comment.line) ||
+          comment.line < 1 ||
+          !["LEFT", "RIGHT"].includes(comment.side) ||
+          typeof comment.body !== "string" ||
+          !comment.body.trim()
+      ))
+  )
+    throw new Error("Invalid inline review comments")
+  if (!(comments?.length && input.body === undefined)) requiredString(input, "body")
+  const body = typeof input.body === "string" ? input.body : ""
+  const event = input.event ?? "COMMENT"
+  if (!["COMMENT", "REQUEST_CHANGES", "APPROVE"].includes(event as string))
+    throw new Error("Invalid review event")
+  if (event === "APPROVE" && comments?.length)
+    throw new Error("Approval cannot include unresolved findings")
+  if ((event !== "COMMENT" || comments?.length) && typeof input.commitId !== "string")
+    throw new Error("A verdict or inline review requires an exact commitId")
   if (typeof input.commitId === "string") {
     const path = `/repos/${repo(input)}/pulls/${number}`
-    const current = await githubRequest<{ head: { sha: string }; state: string }>(context, path)
-    if (current.data.state !== "open" || current.data.head.sha !== input.commitId)
+    const current = await githubRequest<{
+      head: { sha: string }
+      state: string
+      draft?: boolean
+      body?: string
+      user?: { id: number }
+    }>(context, path)
+    if (
+      current.data.state !== "open" ||
+      current.data.draft ||
+      current.data.head.sha !== input.commitId
+    )
       throw new Error("Approved review target SHA changed or PR closed")
+    if (event === "APPROVE") {
+      if (current.data.body?.includes("<!-- cognia-github-devin:"))
+        throw new Error("Cannot approve a Bot-produced pull request")
+      // Identity is resolved by the provider, never supplied by the calling Bot.
+      // If the credential cannot identify its actor, approval fails closed.
+      const viewer = await githubRequest<{ id?: number }>(context, "/user")
+      if (!viewer.data.id || !current.data.user?.id)
+        throw new Error("Cannot verify review actor identity")
+      if (viewer.data.id === current.data.user.id)
+        throw new Error("Cannot approve your own pull request")
+    }
     // Review markers are stable per run. Search every page before retrying a POST.
     for (let page = 1; ; page += 1) {
-      const reviews = await githubRequest<Array<{ body?: string; commit_id?: string }>>(
-        context,
-        `${path}/reviews?per_page=100&page=${page}`
-      )
+      const reviews = await githubRequest<
+        Array<{ id?: number; body?: string; commit_id?: string; state?: string }>
+      >(context, `${path}/reviews?per_page=100&page=${page}`)
       const match = reviews.data.find(
-        (review) => review.body === body && review.commit_id === input.commitId
+        (review) =>
+          review.body === body &&
+          review.commit_id === input.commitId &&
+          review.state ===
+            (
+              {
+                COMMENT: "COMMENTED",
+                REQUEST_CHANGES: "CHANGES_REQUESTED",
+                APPROVE: "APPROVED",
+              } as Record<string, string>
+            )[event as string]
       )
-      if (match) return match
+      if (match) {
+        if (comments?.length) {
+          if (!match.id) throw new Error("Cannot verify existing inline review")
+          const existingComments: typeof comments = []
+          for (let commentPage = 1; ; commentPage++) {
+            const page = await githubRequest<typeof comments>(
+              context,
+              `${path}/reviews/${match.id}/comments?per_page=100&page=${commentPage}`
+            )
+            existingComments.push(...page.data)
+            if (page.data.length < 100) break
+          }
+          const canonical = (items: typeof comments) =>
+            JSON.stringify(
+              items
+                .map((comment) => ({
+                  path: comment.path,
+                  line: comment.line,
+                  side: comment.side,
+                  body: comment.body,
+                }))
+                .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
+            )
+          if (canonical(existingComments) !== canonical(comments))
+            throw new Error("Existing inline review content differs from approved content")
+        }
+        return match
+      }
       if (reviews.data.length < 100) break
     }
   }
   return actionRequest(context, input, `/pulls/${number}/reviews`, "POST", {
-    event: input.event ?? "COMMENT",
+    event,
     body,
+    ...(comments?.length ? { comments } : {}),
     ...(typeof input.commitId === "string" ? { commit_id: input.commitId } : {}),
   })
 }
 
-export const reviewPrInline: IntegrationActionHandler = (input, context) =>
-  actionRequest(context, input, `/pulls/${positiveInteger(input, "prNumber")}/reviews`, "POST", {
-    event: input.event ?? "COMMENT",
-    body: input.body,
-    comments: input.comments,
-    ...(typeof input.commitId === "string" ? { commit_id: input.commitId } : {}),
-  })
+export const reviewPrInline: IntegrationActionHandler = (input, context) => reviewPr(input, context)
 
 export const commentPr: IntegrationActionHandler = (input, context) =>
   actionRequest(context, input, `/issues/${positiveInteger(input, "prNumber")}/comments`, "POST", {
@@ -482,6 +564,20 @@ const repoProperty = { repoFullName: { type: "string", minLength: 3 } }
 const prProperty = { ...repoProperty, prNumber: { type: "integer", minimum: 1 } }
 const issueProperty = { ...repoProperty, issueNumber: { type: "integer", minimum: 1 } }
 const reviewEvent = { type: "string", enum: ["APPROVE", "REQUEST_CHANGES", "COMMENT"] }
+const reviewComments = {
+  type: "array",
+  maxItems: 50,
+  items: {
+    type: "object",
+    required: ["path", "line", "side", "body"],
+    properties: {
+      path: { type: "string" },
+      line: { type: "integer", minimum: 1 },
+      side: { type: "string", enum: ["LEFT", "RIGHT"] },
+      body: { type: "string" },
+    },
+  },
+}
 
 const actionDefinitions = [
   {
@@ -527,6 +623,7 @@ const actionDefinitions = [
       ...prProperty,
       body: { type: "string" },
       event: reviewEvent,
+      comments: reviewComments,
       commitId: { type: "string", pattern: "^[a-fA-F0-9]{40}$" },
     },
   },
@@ -539,7 +636,7 @@ const actionDefinitions = [
       ...prProperty,
       body: { type: "string" },
       event: reviewEvent,
-      comments: { type: "array", items: { type: "object" } },
+      comments: reviewComments,
       commitId: { type: "string", pattern: "^[a-fA-F0-9]{40}$" },
     },
   },

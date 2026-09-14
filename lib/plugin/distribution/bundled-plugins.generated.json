@@ -11,8 +11,8 @@
         },
         {
           "path": "README.md",
-          "bytes": 9085,
-          "sha256": "2f685a14bd498f3b88448c5c479cfd7582e1255d3cf3f233a22fb8f85dde30ed"
+          "bytes": 9894,
+          "sha256": "07d9bb805d5d405149d2a9e4767daac767a3c7b394a1dfb01316949a6d6568e6"
         },
         {
           "path": "main.py",
@@ -21,8 +21,8 @@
         },
         {
           "path": "plugin.json",
-          "bytes": 5948,
-          "sha256": "acf26790b8b33713f09e46fafc4016686c77de4db34c5e13223dace74b10403f"
+          "bytes": 6012,
+          "sha256": "b5db4ffbc2157296a673ab2fdb818ccd61f8850e631f70258e512db082f064a4"
         },
         {
           "path": "pyproject.toml",

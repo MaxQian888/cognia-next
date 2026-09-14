@@ -1,7 +1,7 @@
 {
   "id": "github-delivery",
   "name": "GitHub Delivery",
-  "description": "GitHub pull request, issue, review, release, tag, and Issue\u2192PR delivery.",
+  "description": "GitHub pull request, issue, review, release, tag, and Issue→PR delivery.",
   "author": {
     "name": "Cognia Official",
     "publicKey": "HywtZKOopAEuRqZGzXIfdqo9ID/FfBgXFvKIj9TF4N0="
@@ -10,8 +10,6 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "license": "MIT",
-  "minAppVersion": "0.1.0",
   "type": "frontend",
   "capabilities": ["integrations"],
   "permissions": [
@@ -43,7 +41,7 @@
     {
       "id": "github",
       "label": "GitHub",
-      "description": "Pull requests, issues, reviews, releases, tags, and Issue\u2192PR delivery.",
+      "description": "Pull requests, issues, reviews, releases, tags, and Issue→PR delivery.",
       "authStrategies": [
         {
           "id": "github-app",
@@ -77,6 +75,10 @@
               },
               "accountLabel": {
                 "type": "string"
+              },
+              "hostUrl": {
+                "type": "string",
+                "title": "Enterprise server URL"
               }
             }
           },
@@ -102,6 +104,10 @@
               "accountLabel": {
                 "type": "string",
                 "minLength": 1
+              },
+              "hostUrl": {
+                "type": "string",
+                "title": "Enterprise server URL"
               }
             }
           },
@@ -135,6 +141,36 @@
           "resourceKinds": ["repository"]
         },
         {
+          "id": "pull_request.reopened",
+          "label": "pull_request.reopened",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "pull_request.edited",
+          "label": "pull_request.edited",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "pull_request.ready_for_review",
+          "label": "pull_request.ready_for_review",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "pull_request.converted_to_draft",
+          "label": "pull_request.converted_to_draft",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "pull_request.labeled",
+          "label": "pull_request.labeled",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "pull_request.unlabeled",
+          "label": "pull_request.unlabeled",
+          "resourceKinds": ["repository"]
+        },
+        {
           "id": "pull_request.review_requested",
           "label": "pull_request.review_requested",
           "resourceKinds": ["repository"]
@@ -147,6 +183,21 @@
         {
           "id": "issues.closed",
           "label": "issues.closed",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "issues.reopened",
+          "label": "issues.reopened",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "issues.edited",
+          "label": "issues.edited",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "issues.unlabeled",
+          "label": "issues.unlabeled",
           "resourceKinds": ["repository"]
         },
         {
@@ -167,6 +218,21 @@
         {
           "id": "check_run.completed",
           "label": "check_run.completed",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "check_suite.completed",
+          "label": "check_suite.completed",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "workflow_run.completed",
+          "label": "workflow_run.completed",
+          "resourceKinds": ["repository"]
+        },
+        {
+          "id": "workflow_job.completed",
+          "label": "workflow_job.completed",
           "resourceKinds": ["repository"]
         },
         {
@@ -223,66 +289,6 @@
           "id": "github_app_authorization.revoked",
           "label": "github_app_authorization.revoked",
           "resourceKinds": ["repository"]
-        },
-        {
-          "id": "pull_request.reopened",
-          "label": "pull_request.reopened",
-          "resourceKinds": ["repository"]
-        },
-        {
-          "id": "pull_request.edited",
-          "label": "pull_request.edited",
-          "resourceKinds": ["repository"]
-        },
-        {
-          "id": "pull_request.ready_for_review",
-          "label": "pull_request.ready_for_review",
-          "resourceKinds": ["repository"]
-        },
-        {
-          "id": "pull_request.converted_to_draft",
-          "label": "pull_request.converted_to_draft",
-          "resourceKinds": ["repository"]
-        },
-        {
-          "id": "pull_request.labeled",
-          "label": "pull_request.labeled",
-          "resourceKinds": ["repository"]
-        },
-        {
-          "id": "pull_request.unlabeled",
-          "label": "pull_request.unlabeled",
-          "resourceKinds": ["repository"]
-        },
-        {
-          "id": "issues.reopened",
-          "label": "issues.reopened",
-          "resourceKinds": ["repository"]
-        },
-        {
-          "id": "issues.edited",
-          "label": "issues.edited",
-          "resourceKinds": ["repository"]
-        },
-        {
-          "id": "issues.unlabeled",
-          "label": "issues.unlabeled",
-          "resourceKinds": ["repository"]
-        },
-        {
-          "id": "check_suite.completed",
-          "label": "check_suite.completed",
-          "resourceKinds": ["repository"]
-        },
-        {
-          "id": "workflow_run.completed",
-          "label": "workflow_run.completed",
-          "resourceKinds": ["repository"]
-        },
-        {
-          "id": "workflow_job.completed",
-          "label": "workflow_job.completed",
-          "resourceKinds": ["repository"]
         }
       ],
       "inboxProjections": [
@@ -293,14 +299,14 @@
             "pull_request.opened",
             "pull_request.synchronize",
             "pull_request.closed",
-            "pull_request.review_requested",
-            "pull_request_review.submitted",
             "pull_request.reopened",
             "pull_request.edited",
             "pull_request.ready_for_review",
             "pull_request.converted_to_draft",
             "pull_request.labeled",
-            "pull_request.unlabeled"
+            "pull_request.unlabeled",
+            "pull_request.review_requested",
+            "pull_request_review.submitted"
           ],
           "threadKeyPointer": "/pull_request/number",
           "titlePointer": "/pull_request/title",
@@ -313,11 +319,11 @@
           "eventTypes": [
             "issues.opened",
             "issues.closed",
-            "issues.assigned",
-            "issues.labeled",
             "issues.reopened",
             "issues.edited",
-            "issues.unlabeled"
+            "issues.unlabeled",
+            "issues.assigned",
+            "issues.labeled"
           ],
           "threadKeyPointer": "/issue/number",
           "titlePointer": "/issue/title",
@@ -458,6 +464,30 @@
                 "type": "string",
                 "enum": ["APPROVE", "REQUEST_CHANGES", "COMMENT"]
               },
+              "comments": {
+                "type": "array",
+                "maxItems": 50,
+                "items": {
+                  "type": "object",
+                  "required": ["path", "line", "side", "body"],
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "line": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "side": {
+                      "type": "string",
+                      "enum": ["LEFT", "RIGHT"]
+                    },
+                    "body": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
               "commitId": {
                 "type": "string",
                 "pattern": "^[a-fA-F0-9]{40}$"
@@ -495,8 +525,26 @@
               },
               "comments": {
                 "type": "array",
+                "maxItems": 50,
                 "items": {
-                  "type": "object"
+                  "type": "object",
+                  "required": ["path", "line", "side", "body"],
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "line": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "side": {
+                      "type": "string",
+                      "enum": ["LEFT", "RIGHT"]
+                    },
+                    "body": {
+                      "type": "string"
+                    }
+                  }
                 }
               },
               "commitId": {
@@ -614,6 +662,59 @@
               "reason": {
                 "type": "string",
                 "enum": ["completed", "not_planned"]
+              }
+            },
+            "additionalProperties": false
+          },
+          "timeoutMs": 30000
+        },
+        {
+          "id": "updateIssue",
+          "operationId": "github.updateIssue",
+          "label": "updateIssue",
+          "handler": "updateIssue",
+          "risk": "write",
+          "idempotency": "required",
+          "inputSchema": {
+            "type": "object",
+            "required": ["repoFullName", "issueNumber"],
+            "properties": {
+              "repoFullName": {
+                "type": "string",
+                "minLength": 3
+              },
+              "issueNumber": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "title": {
+                "type": "string"
+              },
+              "body": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": ["open", "closed"]
+              },
+              "stateReason": {
+                "type": "string",
+                "enum": ["completed", "not_planned"]
+              },
+              "labels": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "milestone": {
+                "type": ["integer", "null"]
+              },
+              "assignees": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             },
             "additionalProperties": false
@@ -832,6 +933,12 @@
           "risk": "destructive"
         },
         {
+          "id": "web-updateIssue",
+          "operationId": "github.updateIssue",
+          "label": "updateIssue",
+          "risk": "write"
+        },
+        {
           "id": "web-createRelease",
           "operationId": "github.createRelease",
           "label": "createRelease",
@@ -893,6 +1000,7 @@
     "action.github.commentIssue": "github-delivery.action.commentIssue",
     "action.github.labelIssue": "github-delivery.action.labelIssue",
     "action.github.closeIssue": "github-delivery.action.closeIssue",
+    "action.github.updateIssue": "github-delivery.action.updateIssue",
     "action.github.createRelease": "github-delivery.action.createRelease",
     "action.github.generateChangelog": "github-delivery.action.generateChangelog",
     "action.github.pushTag": "github-delivery.action.pushTag",

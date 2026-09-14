@@ -1,9 +1,11 @@
 import type { BotRunContextV1, PluginContext } from "@cognia/plugin-sdk"
 import type { Config } from "./config"
 import {
-  failedConclusion,
+  currentCiFailures,
+  currentCiExecutions,
   GithubRequestError,
   githubReader,
+  parseWork,
   resourceId,
   workId,
   type Item,
@@ -24,6 +26,82 @@ interface MonitorCursor {
 
 const storageKey = (run: BotRunContextV1, repository: string) =>
   `monitor:v1:${run.installationId}:${repository.toLowerCase()}`
+
+type Publications = NonNullable<
+  Awaited<ReturnType<PluginContext["bots"]["getInstallation"]>>["publications"]
+>
+interface Published {
+  attempts: number
+  parentNumber?: number
+  sourceRunId?: string
+  headSha?: string
+  ciStatus?: string
+}
+
+/** Recover correlation from host-owned publications, never from a public marker alone. */
+async function recoverPublication(
+  ctx: PluginContext,
+  run: BotRunContextV1,
+  config: Config,
+  item: Item,
+  publications: Publications,
+  ancestors = new Set<number>()
+): Promise<Published | undefined> {
+  const key = `published:v1:${run.installationId}:${config.repository.toLowerCase()}:${item.number}`
+  const saved = await ctx.storage.get<Published>(key)
+  if (saved) return saved
+  if (!item.body?.includes("<!-- cognia-github-devin:") || !publications.length) return
+  const api = githubReader(ctx, run.runId, config.repository)
+  const pr = item.head ? item : item.pull_request ? await api.item(item.number, "pr") : undefined
+  if (!pr?.head || pr.head.repo?.full_name.toLowerCase() !== config.repository.toLowerCase()) return
+  const matches = publications.flatMap((publication) => {
+    if (
+      publication.repository.toLowerCase() !== config.repository.toLowerCase() ||
+      publication.branch !== pr.head!.ref ||
+      publication.headSha !== pr.head!.sha
+    )
+      return []
+    try {
+      const work = parseWork(publication.sourcePayload, config.repository)
+      return work.mode !== "review" &&
+        pr.body?.includes(`<!-- cognia-github-devin:${workId(work)} -->`)
+        ? [{ publication, work }]
+        : []
+    } catch {
+      return []
+    }
+  })
+  // Conflicting publication identities cannot establish which repair budget applies.
+  if (matches.length !== 1) return
+  const { publication, work } = matches[0]
+  let attempts = 0
+  if (work.mode === "repair") {
+    attempts = config.maxRepairAttempts
+    if (!ancestors.has(pr.number) && ancestors.size < config.maxRepairAttempts) {
+      const parent = await api.item(work.number, "pr")
+      const previous = await recoverPublication(
+        ctx,
+        run,
+        config,
+        parent,
+        publications,
+        new Set([...ancestors, pr.number])
+      )
+      // Uncorrelated marked parents may be older than the host's bounded history.
+      // Keep their repair budget exhausted instead of silently resetting it.
+      if (previous) attempts = Math.min(config.maxRepairAttempts, previous.attempts + 1)
+      else if (!parent.body?.includes("<!-- cognia-github-devin:")) attempts = 1
+    }
+  }
+  const recovered: Published = {
+    attempts,
+    parentNumber: work.number,
+    sourceRunId: publication.sourceRunId,
+    headSha: publication.headSha,
+  }
+  await ctx.storage.set(key, recovered)
+  return recovered
+}
 
 /** Delivery insertion is durable and idempotent; the short poll never parks on an approval. */
 async function enqueue(ctx: PluginContext, run: BotRunContextV1, work: Work) {
@@ -50,7 +128,8 @@ async function reconcileItem(
   config: Config,
   item: Item,
   cursor: MonitorCursor,
-  backfill: boolean
+  backfill: boolean,
+  publications: Publications
 ) {
   const api = githubReader(ctx, run.runId, config.repository)
   if (item.state !== "open") {
@@ -60,16 +139,15 @@ async function reconcileItem(
     return 0
   }
   const includedKey = `included:v1:${run.installationId}:${config.repository.toLowerCase()}:${item.number}`
+  const produced = await recoverPublication(ctx, run, config, item, publications)
   if (
     !backfill &&
+    !produced &&
     Date.parse(item.created_at) < cursor.watermark &&
     !(await ctx.storage.get<boolean>(includedKey))
   )
     return 0
   if (backfill) await ctx.storage.set(includedKey, true)
-  const produced = await ctx.storage.get<{ attempts: number }>(
-    `published:v1:${run.installationId}:${config.repository.toLowerCase()}:${item.number}`
-  )
   if (item.body?.includes("<!-- cognia-github-devin:") && !produced) return 0
   if (!item.head && !item.pull_request) {
     return enqueue(ctx, run, {
@@ -99,13 +177,31 @@ async function reconcileItem(
     `/actions/runs?head_sha=${encodeURIComponent(pr.head.sha)}`,
     "workflow_runs"
   )
-  const failure = workflows.find(
-    (workflow) => workflow.head_sha === pr.head!.sha && failedConclusion(workflow.conclusion)
-  )
   const checks = await api.pages<CheckRun>(`/commits/${pr.head.sha}/check-runs`, "check_runs")
-  const failed =
-    Boolean(failure) ||
-    checks.some((check) => check.head_sha === pr.head!.sha && failedConclusion(check.conclusion))
+  const failures = currentCiFailures(workflows, checks, pr.head.sha)
+  const failure = failures.workflows[0]
+  const failed = Boolean(failure) || failures.checks.length > 0
+  if (produced?.headSha === pr.head.sha) {
+    const latest = currentCiExecutions(workflows, checks, pr.head.sha)
+    const ciStatus = failed
+      ? "failed"
+      : (!latest.workflows.length && !latest.checks.length) ||
+          latest.workflows.some((workflow) => workflow.status !== "completed") ||
+          latest.checks.some((check) => check.status !== "completed")
+        ? "pending"
+        : "completed"
+    if (produced.ciStatus !== ciStatus) {
+      await ctx.storage.set(
+        `published:v1:${run.installationId}:${config.repository.toLowerCase()}:${pr.number}`,
+        { ...produced, ciStatus }
+      )
+      run.log(ciStatus === "failed" ? "warn" : "info", "Published PR CI changed", {
+        number: pr.number,
+        sha: pr.head.sha,
+        ciStatus,
+      })
+    }
+  }
   if (failed && (!produced || produced.attempts < config.maxRepairAttempts)) {
     dispatched += await enqueue(ctx, run, {
       repository: config.repository,
@@ -197,16 +293,37 @@ export async function monitor(
       if (backfill)
         return Promise.all((selected as number[]).map((number) => api.item(number, "issue")))
       if (run.event.source === "integration") {
-        if (run.event.provenance.selfProduced) return []
         const payload = run.event.payload as {
           repository?: { full_name?: string }
           issue?: Item
           pull_request?: Item
-          check_run?: { pull_requests?: { number: number }[] }
+          check_run?: { head_sha?: string; pull_requests?: { number: number }[] }
           workflow_run?: WorkflowRun
         }
         if (payload.repository?.full_name?.toLowerCase() !== config.repository.toLowerCase())
           return []
+        if (run.event.provenance.selfProduced) {
+          const sha = payload.check_run?.head_sha ?? payload.workflow_run?.head_sha
+          const numbers =
+            payload.check_run?.pull_requests ?? payload.workflow_run?.pull_requests ?? []
+          if (!["check_run.completed", "workflow_run.completed"].includes(run.event.type) || !sha)
+            return []
+          const correlated: Item[] = []
+          for (const { number } of numbers) {
+            const current = await api.item(number, "pr")
+            const produced = await recoverPublication(
+              ctx,
+              run,
+              config,
+              current,
+              installation.publications ?? []
+            )
+            if (produced?.headSha === sha && produced.sourceRunId) {
+              if (current.head?.sha === sha) correlated.push(current)
+            }
+          }
+          return correlated
+        }
         if (payload.issue) return [await api.item(payload.issue.number, "issue")]
         if (payload.pull_request) return [await api.item(payload.pull_request.number, "pr")]
         const numbers =
@@ -238,7 +355,7 @@ export async function monitor(
     for (const item of items) {
       run.signal.throwIfAborted()
       dispatched += await run.step.run(`dispatch-${item.number}`, () =>
-        reconcileItem(ctx, run, config, item, cursor, backfill)
+        reconcileItem(ctx, run, config, item, cursor, backfill, installation.publications ?? [])
       )
     }
     // Commit a cursor only after every delivery insertion succeeds. A failed scan replays safely.

@@ -1,5 +1,6 @@
 import { monitor } from "./monitor"
 import { fixture, issue, NOW, pr, SHA } from "./test-fixtures"
+import { workId } from "./github"
 
 function polling(mode: "implement" | "review" | "repair" = "implement") {
   const f = fixture(mode)
@@ -7,6 +8,301 @@ function polling(mode: "implement" | "review" | "repair" = "implement") {
   f.run.event.source = "schedule"
   return f
 }
+
+it("recovers completed CI without dispatching a new review or model run", async () => {
+  const f = recovering()
+  const normal = f.mocks.request.getMockImplementation()!
+  f.mocks.request.mockImplementation((binding, url) =>
+    url.includes("/actions/runs?")
+      ? Promise.resolve({
+          status: 200,
+          headers: {},
+          data: {
+            workflow_runs: [{ id: 22, head_sha: SHA, status: "completed", conclusion: "success" }],
+          },
+        })
+      : normal(binding, url)
+  )
+  await monitor(f.context, f.run, f.config, () => NOW)
+  expect(f.memory.get(f.key)).toMatchObject({ attempts: 0, ciStatus: "completed" })
+  expect(f.mocks.enqueue).not.toHaveBeenCalled()
+  expect(f.mocks.agent).not.toHaveBeenCalled()
+  expect(f.mocks.action).not.toHaveBeenCalled()
+})
+
+it.each(["workflow", "check"])(
+  "latest successful %s supersedes historical pending executions",
+  async (kind) => {
+    const f = recovering()
+    const normal = f.mocks.request.getMockImplementation()!
+    f.mocks.request.mockImplementation((binding, url) => {
+      if (url.includes("/actions/runs?"))
+        return Promise.resolve({
+          status: 200,
+          headers: {},
+          data: {
+            workflow_runs:
+              kind === "workflow"
+                ? [
+                    {
+                      id: 1,
+                      workflow_id: 5,
+                      head_sha: SHA,
+                      status: "in_progress",
+                      conclusion: null,
+                    },
+                    {
+                      id: 2,
+                      workflow_id: 5,
+                      head_sha: SHA,
+                      status: "completed",
+                      conclusion: "success",
+                    },
+                  ]
+                : [],
+          },
+        })
+      if (url.includes("/check-runs"))
+        return Promise.resolve({
+          status: 200,
+          headers: {},
+          data: {
+            check_runs:
+              kind === "check"
+                ? [
+                    {
+                      id: 1,
+                      name: "test",
+                      app: { id: 5 },
+                      head_sha: SHA,
+                      status: "in_progress",
+                      conclusion: null,
+                    },
+                    {
+                      id: 2,
+                      name: "test",
+                      app: { id: 5 },
+                      head_sha: SHA,
+                      status: "completed",
+                      conclusion: "success",
+                    },
+                  ]
+                : [],
+          },
+        })
+      return normal(binding, url)
+    })
+    await monitor(f.context, f.run, f.config, () => NOW)
+    expect(f.memory.get(f.key)).toMatchObject({ ciStatus: "completed" })
+    expect(f.mocks.enqueue).not.toHaveBeenCalled()
+  }
+)
+
+function recovering(mode: "implement" | "repair" = "implement") {
+  const f = polling("repair")
+  const source = {
+    ...f.work,
+    number: 7,
+    kind: mode === "implement" ? ("issue" as const) : ("pr" as const),
+    mode,
+  }
+  const publication = {
+    sourceRunId: "published-run",
+    repository: f.config.repository,
+    branch: f.item.head!.ref,
+    headSha: SHA,
+    snapshotId: "snapshot",
+    sourcePayload: source,
+  }
+  f.item.body = `Summary\n<!-- cognia-github-devin:${workId(source)} -->`
+  const installation = f.mocks.getInstallation.getMockImplementation()!
+  const publications = [publication]
+  f.mocks.getInstallation.mockImplementation(async () => ({
+    ...(await installation()),
+    publications,
+  }))
+  return {
+    ...f,
+    source,
+    publication,
+    publications,
+    key: `published:v1:install:${f.config.repository.toLowerCase()}:8`,
+  }
+}
+
+it.each(["poll", "self-ci"])(
+  "recovers exact published PR correlation after storage loss through %s",
+  async (source) => {
+    const f = recovering()
+    f.item.created_at = new Date(NOW - 60_000).toISOString()
+    if (source === "self-ci") {
+      f.run.event.source = "integration"
+      f.run.event.type = "check_run.completed"
+      f.run.event.provenance.selfProduced = true
+      f.run.event.payload = {
+        repository: { full_name: f.config.repository },
+        check_run: { head_sha: SHA, pull_requests: [{ number: 8 }] },
+      }
+    }
+    await monitor(f.context, f.run, f.config, () => NOW)
+    expect(f.memory.get(f.key)).toMatchObject({
+      attempts: 0,
+      sourceRunId: "published-run",
+      parentNumber: 7,
+      headSha: SHA,
+      ciStatus: "failed",
+    })
+    expect(f.mocks.enqueue).toHaveBeenCalledTimes(1)
+    expect(f.mocks.enqueue).toHaveBeenCalledWith(
+      "run",
+      expect.objectContaining({
+        payload: expect.objectContaining({ mode: "repair", revision: SHA }),
+      })
+    )
+    f.memo.clear()
+    await monitor(f.context, f.run, f.config, () => NOW + 60_001)
+    expect(f.mocks.enqueue).toHaveBeenCalledTimes(1)
+  }
+)
+
+it.each([
+  "repository",
+  "branch",
+  "sha",
+  "fork",
+  "marker",
+  "payload",
+  "review",
+  "ambiguous",
+  "issue",
+  "no-head",
+])("does not recover unverified publication %s", async (condition) => {
+  const f = recovering()
+  if (condition === "repository") f.publication.repository = "other/repository"
+  if (condition === "branch") f.publication.branch = "other"
+  if (condition === "sha") f.publication.headSha = "b".repeat(40)
+  if (condition === "fork") f.item.head!.repo = null
+  if (condition === "marker") f.item.body = "<!-- cognia-github-devin:unrelated -->"
+  if (condition === "payload") f.publication.sourcePayload = { ...f.source, number: -1 }
+  if (condition === "review")
+    Object.assign(f.publication.sourcePayload, { kind: "pr", mode: "review" })
+  if (condition === "ambiguous")
+    f.publications.push({ ...f.publication, sourceRunId: "different-run" })
+  if (condition === "issue" || condition === "no-head") {
+    delete f.item.head
+    if (condition === "no-head") f.item.pull_request = { url: "https://api.github.com/pulls/8" }
+  }
+  await monitor(f.context, f.run, f.config, () => NOW)
+  expect(f.memory.has(f.key)).toBe(false)
+  expect(f.mocks.enqueue).not.toHaveBeenCalled()
+})
+
+it.each(["external", "known", "recovered", "unresolved", "cycle"])(
+  "recovers a repair publication with bounded %s parent lineage",
+  async (condition) => {
+    const f = recovering("repair")
+    const parent = structuredClone(pr)
+    parent.number = 7
+    parent.head!.ref = "parent"
+    const parentWork = {
+      ...f.source,
+      kind: "issue" as const,
+      mode: "implement" as const,
+      number: 6,
+    }
+    if (condition !== "external") parent.body = `<!-- cognia-github-devin:${workId(parentWork)} -->`
+    if (condition === "known")
+      f.memory.set(`published:v1:install:${f.config.repository.toLowerCase()}:7`, { attempts: 1 })
+    if (condition === "recovered")
+      f.publications.push({
+        ...f.publication,
+        branch: "parent",
+        sourceRunId: "parent-run",
+        sourcePayload: parentWork,
+      })
+    if (condition === "cycle") {
+      Object.assign(f.source, { number: 8 })
+      f.item.body = `<!-- cognia-github-devin:${workId(f.source)} -->`
+    }
+    const normal = f.mocks.request.getMockImplementation()!
+    f.mocks.request.mockImplementation((binding, url) =>
+      url.endsWith("/pulls/7")
+        ? Promise.resolve({ status: 200, headers: {}, data: parent })
+        : normal(binding, url)
+    )
+    await monitor(f.context, f.run, f.config, () => NOW)
+    const attempts = condition === "external" || condition === "recovered" ? 1 : 2
+    expect(f.memory.get(f.key)).toMatchObject({ attempts, sourceRunId: "published-run" })
+    expect(f.mocks.enqueue).toHaveBeenCalledTimes(attempts === 1 ? 1 : 0)
+  }
+)
+it.each(["pending", "completed", "failed"])(
+  "records meaningful published-head CI %s transitions once",
+  async (ciStatus) => {
+    const f = polling(ciStatus === "failed" ? "repair" : "review")
+    f.item.body = "<!-- cognia-github-devin:owned -->"
+    const key = `published:v1:install:${f.config.repository.toLowerCase()}:8`
+    f.memory.set(key, { attempts: 0, headSha: SHA, sourceRunId: "parent" })
+    if (ciStatus === "completed") {
+      const normal = f.mocks.request.getMockImplementation()!
+      f.mocks.request.mockImplementation((binding, url) =>
+        url.includes("/check-runs")
+          ? Promise.resolve({
+              status: 200,
+              headers: {},
+              data: {
+                check_runs: [
+                  {
+                    id: 1,
+                    name: "test",
+                    head_sha: SHA,
+                    status: "completed",
+                    conclusion: "success",
+                  },
+                ],
+              },
+            })
+          : normal(binding, url)
+      )
+    }
+    await monitor(f.context, f.run, f.config, () => NOW)
+    expect(f.memory.get(key)).toMatchObject({ ciStatus, sourceRunId: "parent" })
+    expect(f.run.log).toHaveBeenCalledTimes(1)
+    f.memo.clear()
+    await monitor(f.context, f.run, f.config, () => NOW + 60_001)
+    expect(f.run.log).toHaveBeenCalledTimes(1)
+  }
+)
+it.each(["matched", "wrong-sha", "missing-run", "moved-head", "unrelated-event"])(
+  "allows only correlated self-produced CI: %s",
+  async (condition) => {
+    const f = polling("repair")
+    f.item.body = "<!-- cognia-github-devin:owned -->"
+    f.run.event.source = "integration"
+    f.run.event.type =
+      condition === "unrelated-event" ? "pull_request.opened" : "check_run.completed"
+    f.run.event.provenance.selfProduced = true
+    f.run.event.payload = {
+      repository: { full_name: f.config.repository },
+      check_run: { head_sha: SHA, pull_requests: [{ number: 8 }] },
+    }
+    f.memory.set(`published:v1:install:${f.config.repository.toLowerCase()}:8`, {
+      attempts: 0,
+      headSha: condition === "wrong-sha" ? "b".repeat(40) : SHA,
+      ...(condition === "missing-run" ? {} : { sourceRunId: "parent-run" }),
+    })
+    if (condition === "moved-head") f.item.head!.sha = "b".repeat(40)
+    await monitor(f.context, f.run, f.config, () => NOW)
+    expect(f.mocks.enqueue).toHaveBeenCalledTimes(condition === "matched" ? 1 : 0)
+    if (condition === "matched")
+      expect(f.mocks.enqueue).toHaveBeenCalledWith(
+        "run",
+        expect.objectContaining({
+          payload: expect.objectContaining({ mode: "repair", revision: SHA }),
+        })
+      )
+  }
+)
 it("queues new issues without invoking Devin or waiting for approval", async () => {
   const f = polling()
   await monitor(f.context, f.run, f.config, () => NOW)

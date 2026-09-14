@@ -49,6 +49,11 @@ export function fixture(mode: Work["mode"] = "implement") {
     const path = url.replace(`https://api.github.com/repos/${DEFAULT_REPOSITORY}`, "")
     let data: unknown
     if (path === "") data = { default_branch: "master" }
+    else if (path.startsWith("/compare/"))
+      data = {
+        status: "ahead",
+        merge_base_commit: { sha: path.slice("/compare/".length).split("...")[0] },
+      }
     else if (path.includes("/check-runs")) data = { check_runs: [] }
     else if (path.startsWith("/commits/")) data = { sha: SHA }
     else if (path === `/issues/${item.number}` || path === `/pulls/${item.number}`)

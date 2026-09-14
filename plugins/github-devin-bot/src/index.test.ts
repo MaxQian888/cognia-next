@@ -1,13 +1,24 @@
 import definition, { createGithubDevinBot, githubDevinBot, manifest } from "./index"
 import { fixture } from "./test-fixtures"
+import packagedManifest from "../plugin.json"
 
-it("declares only approval-gated GitHub writes and defaults to disarmed monitoring", () => {
+it("keeps the packaged and builtin manifest identical to the definition", () => {
+  expect(JSON.parse(JSON.stringify(manifest))).toEqual(packagedManifest)
+})
+
+it("declares bounded GitHub writes with grantable ceilings and defaults to disarmed monitoring", () => {
   expect(manifest.dependencies["github-delivery"]).toBeDefined()
   expect(manifest.runtimeCompatibility.headless).toMatchObject({
     availability: "supported",
     entrypoint: "dist/index.js",
   })
   expect(manifest.bots[0].requires.integrationActions).toEqual(["github.openPr", "github.reviewPr"])
+  expect(manifest.bots[0].policy).toMatchObject({
+    maxAuthority: "bypassPermissions",
+    maxAutonomy: "autopilot",
+    allowSelfTriggering: false,
+  })
+  expect(manifest.bots[0].policy).not.toHaveProperty("requireApprovalForWrites")
   expect(manifest.bots[0].triggers.find((trigger) => trigger.id === "work")).toMatchObject({
     concurrencyKey: "github-work:{{resource.scope}}",
     holdConcurrencyWhileWaiting: false,
