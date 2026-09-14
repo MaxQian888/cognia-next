@@ -15,10 +15,25 @@ interface PoolEntry extends E2BSandboxLease {
   closing?: Promise<void>
 }
 
+/** Immutable per-workspace row for status surfaces (the Context Workbench panel). */
+export interface E2BSandboxPoolEntry {
+  workspacePath: string
+  sandboxId: string
+  network: E2BNetworkMode
+  /** Session/runtime group the workspace is claimed under (host passes sessionId). */
+  ownerGroup?: string
+  ownerRefs: string[]
+  handleReleased: boolean
+  closing: boolean
+}
+
 /** Shared identity pool used by both the workspace backend and exec adapter. */
 export class E2BSandboxPool {
   private readonly byWorkspace = new Map<string, PoolEntry>()
   private readonly workspaceByOwner = new Map<string, string>()
+  private readonly listeners = new Set<() => void>()
+  /** Monotonic state version — the `useSyncExternalStore` snapshot primitive. */
+  private stateVersion = 0
 
   addWorkspace(workspacePath: string, sandbox: E2BSandboxFacade, network: E2BNetworkMode): void {
     if (this.byWorkspace.has(workspacePath)) {
@@ -31,6 +46,7 @@ export class E2BSandboxPool {
       ownerRefs: new Set(),
       handleReleased: false,
     })
+    this.emit()
   }
 
   forWorkspace(workspacePath: string): E2BSandboxLease {
@@ -38,6 +54,9 @@ export class E2BSandboxPool {
     if (!entry) throw new Error(`E2B backend: no live sandbox for handle ${workspacePath}`)
     if (entry.handleReleased) {
       throw new Error(`E2B backend: workspace handle ${workspacePath} has been released.`)
+    }
+    if (entry.closing) {
+      throw new Error(`E2B backend: workspace handle ${workspacePath} is closing.`)
     }
     return entry
   }
@@ -66,6 +85,7 @@ export class E2BSandboxPool {
     entry.ownerGroup = ownerGroup
     entry.ownerRefs.add(ownerRef)
     this.workspaceByOwner.set(ownerRef, workspacePath)
+    this.emit()
     return entry
   }
 
@@ -86,12 +106,14 @@ export class E2BSandboxPool {
     const entry = this.byWorkspace.get(workspacePath)
     if (!entry) {
       this.workspaceByOwner.delete(ownerRef)
+      this.emit()
       return
     }
     if (entry.ownerRefs.size > 1 || !entry.handleReleased) {
       entry.ownerRefs.delete(ownerRef)
       this.workspaceByOwner.delete(ownerRef)
       if (entry.ownerRefs.size === 0) entry.ownerGroup = undefined
+      this.emit()
       await this.retryReleasedWithoutOwners()
       return
     }
@@ -105,6 +127,7 @@ export class E2BSandboxPool {
     const entry = this.byWorkspace.get(workspacePath)
     if (!entry) return false
     entry.handleReleased = true
+    this.emit()
     if (entry.ownerRefs.size === 0) await this.closeWorkspace(workspacePath)
     return true
   }
@@ -120,14 +143,52 @@ export class E2BSandboxPool {
     this.byWorkspace.delete(workspacePath)
     for (const ownerRef of entry.ownerRefs) this.workspaceByOwner.delete(ownerRef)
     entry.ownerRefs.clear()
+    this.emit()
   }
 
   async dispose(): Promise<void> {
-    await Promise.all([...this.byWorkspace.keys()].map((path) => this.closeWorkspace(path)))
+    await this.closeAll([...this.byWorkspace.keys()])
   }
 
   liveSandboxCount(): number {
     return this.byWorkspace.size
+  }
+
+  /** Point-in-time pool rows for read-only status surfaces. */
+  snapshot(): E2BSandboxPoolEntry[] {
+    return [...this.byWorkspace.values()].map((entry) => ({
+      workspacePath: entry.workspacePath,
+      sandboxId: entry.sandbox.id,
+      network: entry.network,
+      ...(entry.ownerGroup ? { ownerGroup: entry.ownerGroup } : {}),
+      ownerRefs: [...entry.ownerRefs],
+      handleReleased: entry.handleReleased,
+      closing: entry.closing !== undefined,
+    }))
+  }
+
+  /** Fires after every pool mutation — drives panel re-render + rail badge. */
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+
+  /** Monotonic state version for `useSyncExternalStore` `getSnapshot`. */
+  getVersion(): number {
+    return this.stateVersion
+  }
+
+  private emit(): void {
+    this.stateVersion += 1
+    for (const listener of this.listeners) {
+      try {
+        listener()
+      } catch {
+        // A panel listener must never break lifecycle work.
+      }
+    }
   }
 
   private async closeWorkspace(workspacePath: string): Promise<void> {
@@ -140,12 +201,15 @@ export class E2BSandboxPool {
           this.byWorkspace.delete(workspacePath)
           for (const ownerRef of entry.ownerRefs) this.workspaceByOwner.delete(ownerRef)
           entry.ownerRefs.clear()
+          this.emit()
         },
         (error: unknown) => {
           entry.closing = undefined
+          this.emit()
           throw error
         }
       )
+      this.emit()
     }
     await entry.closing
   }
@@ -155,7 +219,14 @@ export class E2BSandboxPool {
       .filter(([, entry]) => entry.handleReleased && entry.ownerRefs.size === 0)
       .map(([workspacePath]) => workspacePath)
     if (ready.length === 0) return
-    const settled = await Promise.allSettled(ready.map((path) => this.closeWorkspace(path)))
+    await this.closeAll(ready)
+  }
+
+  /** Close every listed workspace, reporting all failures rather than the first. */
+  private async closeAll(workspacePaths: string[]): Promise<void> {
+    const settled = await Promise.allSettled(
+      workspacePaths.map((path) => this.closeWorkspace(path))
+    )
     const failures = settled.flatMap((result) =>
       result.status === "rejected" ? [result.reason] : []
     )

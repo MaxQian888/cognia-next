@@ -298,6 +298,29 @@ describe("E2BWorkspaceBackend", () => {
     expect(() => adaptSdkSandbox({ commands: {} } as never)).toThrow(/commands\.run/)
   })
 
+  it("falls back to `id` when the SDK exposes no `sandboxId`, and to close() when no kill()", async () => {
+    const run = jest.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 }))
+    const close = jest.fn(async () => undefined)
+    const facade = adaptSdkSandbox({ id: "legacy-id", commands: { run }, close })
+    expect(facade.id).toBe("legacy-id")
+    await facade.close()
+    expect(close).toHaveBeenCalledTimes(1)
+
+    const nothing = adaptSdkSandbox({ commands: { run } })
+    await expect(nothing.close()).rejects.toThrow(/neither `kill` nor `close`/)
+  })
+
+  it("clone without an injected factory surfaces the dormant-build error — not an install hint", async () => {
+    // `e2b` is not a dependency of this bundle, and a bare-specifier import()
+    // cannot resolve inside the shipped webview anyway — the failure is the
+    // contract. The message must name the state honestly (ADR rules: dormancy
+    // is documented, labeled, and pinned by a test).
+    const backend = new E2BWorkspaceBackend({ now: () => 0 })
+    await expect(
+      backend.clone({ repoFullName: "o/r", branch: "main", token: "t" })
+    ).rejects.toThrow(/unavailable in this build/)
+  })
+
   it("remove closes the sandbox and forgets it", async () => {
     const sandbox = makeSandbox("sb-4")
     const backend = new E2BWorkspaceBackend({ sandboxFactory: async () => sandbox })

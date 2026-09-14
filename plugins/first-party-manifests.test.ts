@@ -143,7 +143,13 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
   // `tools` is declared in the manifest now (so `deep_research` is discoverable
   // before activation); the skill is still registered imperatively in `activate`.
   "deep-research": ["field_missing:skills"],
-  "e2b-sandbox": ["field_missing:mcp-server-preset"],
+  // `mcpServerPresets[]` is materialized in plugin.json (pure data — the
+  // preset is also visible to static tooling before activation). The panel
+  // and workspace backend stay imperative: `manifest.contextPanels` /
+  // `workspaceBackends` resolve a renderer/factory from a separate `entry`
+  // module, and a `builtin://` plugin has no fetchable install path — same
+  // class as sre-agent/prompt-templates.
+  "e2b-sandbox": ["field_missing:context-panel", "field_missing:workspace-backend"],
   eval: ["field_missing:tools"],
   // Both example plugins now declare their contributions in plugin.json.
   // They are in `INTENTIONALLY_UNBUNDLED`, so the TS module-manifest overlay
@@ -173,7 +179,9 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
   // `builtin://` plugin has no fetchable install path for the separate entry
   // module `manifest.contextPanels` would import the renderer from.
   "sre-agent": ["field_missing:context-panel"],
-  "stagehand-mcp": ["field_missing:mcp-server-preset"],
+  // `mcpServerPresets[]` is materialized in plugin.json (pure data — also
+  // visible to static tooling before activation), same class as e2b-sandbox.
+  "stagehand-mcp": [],
   // Class 1: the security panel moved from a left-rail view container to the
   // right-hand Context Workbench, registered through
   // `ctx.contextPanels.register` in `activate()` for the same builtin://

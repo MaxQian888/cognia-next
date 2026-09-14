@@ -137,4 +137,128 @@ describe("E2BSandboxPool", () => {
     expect(vm.close).toHaveBeenCalledTimes(2)
     expect(pool.liveSandboxCount()).toBe(0)
   })
+
+  it("forWorkspace rejects a handle that is released or mid-close", async () => {
+    const pool = new E2BSandboxPool()
+    let finishClose: (() => void) | undefined
+    const vm = sandbox("vm-a")
+    vm.close.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishClose = resolve
+        })
+    )
+    pool.addWorkspace("/remote/a", vm, "on")
+    pool.claim("runtime:a", "/remote/a")
+    await pool.removeWorkspace("/remote/a")
+    expect(() => pool.forWorkspace("/remote/a")).toThrow(/released/)
+
+    // A `closing` entry that is NOT released comes from pool-level disposal —
+    // `releaseOwner` on a released workspace reports "released" first. Let the
+    // released workspace's close resolve so disposal can finish.
+    vm.close.mockResolvedValue(undefined)
+    const other = sandbox("vm-b")
+    other.close.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishClose = resolve
+        })
+    )
+    pool.addWorkspace("/remote/b", other, "off")
+    const disposal = pool.dispose()
+    expect(() => pool.forWorkspace("/remote/b")).toThrow(/closing/)
+    finishClose?.()
+    await disposal
+    expect(() => pool.forWorkspace("/remote/b")).toThrow(/no live sandbox/)
+  })
+
+  it("publishes immutable snapshots of every live workspace", () => {
+    const pool = new E2BSandboxPool()
+    const a = sandbox("vm-a")
+    pool.addWorkspace("/remote/a", a, "on")
+    pool.addWorkspace("/remote/b", sandbox("vm-b"), "off")
+    pool.claim("runtime:a", "/remote/a", "session:1")
+    pool.claim("runtime:b", "/remote/a", "session:1")
+
+    const rows = pool.snapshot()
+    expect(rows).toHaveLength(2)
+    const rowA = rows.find((row) => row.workspacePath === "/remote/a")
+    expect(rowA).toMatchObject({
+      sandboxId: "vm-a",
+      network: "on",
+      ownerGroup: "session:1",
+      ownerRefs: ["runtime:a", "runtime:b"],
+      handleReleased: false,
+      closing: false,
+    })
+    expect(rows.find((row) => row.workspacePath === "/remote/b")).toMatchObject({
+      sandboxId: "vm-b",
+      network: "off",
+      ownerRefs: [],
+    })
+    // Snapshot arrays are detached — mutating one must not corrupt the pool.
+    rowA?.ownerRefs.push("injected")
+    expect(
+      pool.snapshot().find((row) => row.workspacePath === "/remote/a")?.ownerRefs
+    ).toHaveLength(2)
+  })
+
+  it("notifies subscribers and bumps the version on every mutation", async () => {
+    const pool = new E2BSandboxPool()
+    const calls: number[] = []
+    const unsubscribe = pool.subscribe(() => calls.push(pool.getVersion()))
+
+    expect(pool.getVersion()).toBe(0)
+    pool.addWorkspace("/remote/a", sandbox("vm-a"), "on")
+    pool.claim("runtime:a", "/remote/a")
+    await pool.removeWorkspace("/remote/a") // released, then closed (no owners left at release? has owner → stays)
+    await pool.releaseOwner("runtime:a") // closes
+
+    expect(calls.length).toBeGreaterThanOrEqual(4)
+    expect(pool.getVersion()).toBe(calls[calls.length - 1])
+    expect(calls).toEqual([...calls].sort((x, y) => x - y)) // strictly monotonic
+
+    unsubscribe()
+    pool.addWorkspace("/remote/b", sandbox("vm-b"), "off")
+    const after = calls.length
+    pool.claim("runtime:b", "/remote/b")
+    expect(calls).toHaveLength(after) // unsubscribed listeners go quiet
+  })
+
+  it("never lets a throwing subscriber break a mutation", () => {
+    const pool = new E2BSandboxPool()
+    pool.subscribe(() => {
+      throw new Error("panel exploded")
+    })
+    expect(() => pool.addWorkspace("/remote/a", sandbox("vm-a"), "on")).not.toThrow()
+    expect(pool.liveSandboxCount()).toBe(1)
+  })
+
+  it("dispose reports every close failure as an AggregateError, not just the first", async () => {
+    const pool = new E2BSandboxPool()
+    const a = sandbox("vm-a")
+    const b = sandbox("vm-b")
+    a.close.mockRejectedValue(new Error("a down"))
+    b.close.mockRejectedValue(new Error("b down"))
+    pool.addWorkspace("/remote/a", a, "on")
+    pool.addWorkspace("/remote/b", b, "off")
+
+    const failure = await pool.dispose().catch((error: unknown) => error)
+    expect(failure).toBeInstanceOf(AggregateError)
+    expect((failure as AggregateError).errors).toHaveLength(2)
+    // Both closes were attempted — a rejected first close must not skip the rest.
+    expect(a.close).toHaveBeenCalledTimes(1)
+    expect(b.close).toHaveBeenCalledTimes(1)
+    // Failed entries stay tracked so a later dispose can retry them.
+    expect(pool.liveSandboxCount()).toBe(2)
+  })
+
+  it("dispose surfaces a single close failure verbatim (no AggregateError wrapper)", async () => {
+    const pool = new E2BSandboxPool()
+    const a = sandbox("vm-a")
+    a.close.mockRejectedValue(new Error("solo failure"))
+    pool.addWorkspace("/remote/a", a, "on")
+
+    await expect(pool.dispose()).rejects.toThrow("solo failure")
+  })
 })

@@ -8,20 +8,27 @@
  * the host filesystem.
  *
  * Why a separate file in this plugin:
- *   • Keeps `@e2b/sdk` as a peer / optional dep — not every user wants the
- *     cloud sandbox plumbing pulled into their bundle.
+ *   • Keeps `e2b` (the E2B JS SDK) out of the plugin's static graph — its dist
+ *     statically imports node builtins (`node:fs`, `undici`, `tar`,
+ *     `dockerfile-ast`), so a bundler-analyzable import would break the
+ *     webview build outright.
  *   • Lets us swap the SDK factory in tests without monkey-patching modules.
  *
- * Why dynamic import:
- *   • `@e2b/sdk` is not shipped as a direct dep of cognia-next. Users opt in
- *     by installing it alongside this plugin. We surface a single-line
- *     friendly install hint when the dynamic import fails.
+ * Why dynamic import — and why this path is DORMANT today:
+ *   • `Function("s","return import(s)")` keeps the specifier opaque to
+ *     webpack/Turbopack so the app bundle builds without the package. The same
+ *     indirection means a bare specifier can never resolve inside the shipped
+ *     webview either, so `defaultSandboxFactory` can only succeed where a
+ *     Node-style module resolution exists (unit tests with the dep installed,
+ *     or a future host-side bridge that loads the SDK in Node). Until that
+ *     bridge ships, the factory throws a single honest error naming the
+ *     dormant state — see `sdkUnavailableError()`.
  */
 
 import type { E2BBackend, WorkspaceHandle } from "@cognia/plugin-sdk/api/sandbox"
 import { E2BSandboxPool } from "./sandbox-pool"
 
-/** Narrow shape of `@e2b/sdk` we depend on. Real SDK exports `Sandbox`. */
+/** Narrow shape of the `e2b` package we depend on. Real SDK exports `Sandbox`. */
 export interface E2BSandboxFacade {
   id: string
   /** Run a shell command inside the sandbox, returning combined stdout/stderr. */
@@ -62,7 +69,7 @@ export interface E2BWorkspaceBackendOptions {
   apiKey?: string
   /** E2B-compatible API URL. AgentENV documents this as E2B_API_URL. */
   apiUrl?: string
-  /** Native @e2b/sdk domain override. Takes precedence over apiUrl. */
+  /** Native `e2b` SDK domain override. Takes precedence over apiUrl. */
   domain?: string
   /** Dynamic config resolver used by the plugin settings lifecycle. */
   connection?: () => E2BSandboxConnection
@@ -277,7 +284,7 @@ export async function assertSandboxCarriesEnv(sandbox: E2BSandboxFacade): Promis
       "This E2B sandbox facade does not forward per-command environment variables, " +
         "so a GitHub credential cannot be delivered to it safely. Refusing to clone: " +
         "the alternative is a token on the command line, readable by everything the agent runs. " +
-        "Upgrade @e2b/sdk, or supply a sandboxFactory whose exec() honours `envs`."
+        "Upgrade e2b, or supply a sandboxFactory whose exec() honours `envs`."
     )
   }
   sandboxesWithVerifiedEnv.add(sandbox)
@@ -331,33 +338,48 @@ function firstNonEmpty(...values: Array<string | undefined>): string | undefined
 }
 
 async function defaultSandboxFactory(opts: E2BSandboxConnection): Promise<E2BSandboxFacade> {
-  // Dynamic import keeps `@e2b/sdk` an optional dep. When it's missing we
-  // surface a single-line hint pointing users at the install path; the rest
-  // of the platform stays usable. Mirrors `microvm-exec.ts`'s default factory:
-  // the real SDK is async-construct (`Sandbox.create({ apiKey })`), not a
-  // bare `new Sandbox(...)`.
+  // Dynamic import keeps `e2b` an optional dep. When it's missing — which in
+  // the shipped webview is always, since no bundler ever resolved it — we
+  // surface a single honest dormant-state error; the rest of the platform
+  // stays usable. The real SDK is async-construct (`Sandbox.create({
+  // apiKey, domain, allowInternetAccess })`), not a bare `new Sandbox(...)`.
   let mod: { Sandbox?: unknown } | undefined
   try {
-    // `@e2b/sdk` is an optional peer dep — opt in via `pnpm add @e2b/sdk -w`.
-    // The dynamic specifier keeps webpack from trying to resolve it at build
-    // time, and the cast keeps TypeScript happy when the module isn't present.
-    mod = (await (Function("s", "return import(s)") as (s: string) => Promise<unknown>)(
-      "@e2b/sdk"
-    )) as { Sandbox?: unknown }
+    // `e2b` is the SDK's real npm name (`@e2b/sdk` does not exist). The
+    // Function-wrapped specifier keeps webpack/Turbopack from resolving it at
+    // build time — the package's `node:fs`/`undici` imports would break the
+    // static export if they were ever pulled in.
+    mod = (await (Function("s", "return import(s)") as (s: string) => Promise<unknown>)("e2b")) as {
+      Sandbox?: unknown
+    }
   } catch {
-    throw new Error(
-      "@e2b/sdk is not installed. Run `pnpm add @e2b/sdk -w`, then configure E2B Sandbox in Settings → Plugins."
-    )
+    throw sdkUnavailableError()
   }
   const SandboxCtor = mod?.Sandbox as
     { create?: (opts: unknown) => Promise<E2BSdkSandbox> } | undefined
   if (!SandboxCtor || typeof SandboxCtor.create !== "function") {
-    throw new Error("@e2b/sdk does not export `Sandbox.create` — incompatible SDK version")
+    throw new Error("e2b does not export `Sandbox.create` — incompatible SDK version")
   }
   return adaptSdkSandbox(await SandboxCtor.create(opts))
 }
 
-/** The part of the real `@e2b/sdk` Sandbox this adapter drives. */
+/**
+ * Why this is honest instead of an install hint: `pnpm add e2b` cannot make a
+ * bare-specifier `import()` resolvable inside the bundled webview, and the
+ * SDK's own Node imports make it unbundlable there anyway. Wiring `e2b`
+ * through a Node-side host (e.g. a Tauri sidecar bridge) is the tracked
+ * follow-up; the MCP preset (`@e2b/mcp-server` via npx) is unaffected because
+ * it runs in a spawned process, not in this bundle.
+ */
+function sdkUnavailableError(): Error {
+  return new Error(
+    "E2B sandbox provisioning is unavailable in this build: the `e2b` SDK is not " +
+      "bundled (webview bundles cannot resolve unbundled npm packages). The MCP " +
+      "preset still works — it spawns @e2b/mcp-server via npx in its own process."
+  )
+}
+
+/** The part of the real `e2b` Sandbox this adapter drives. */
 interface E2BSdkSandbox {
   sandboxId?: string
   id?: string
@@ -385,7 +407,7 @@ interface E2BSdkSandbox {
  */
 export function adaptSdkSandbox(sandbox: E2BSdkSandbox): E2BSandboxFacade {
   if (!sandbox?.commands || typeof sandbox.commands.run !== "function") {
-    throw new Error("@e2b/sdk Sandbox has no `commands.run` — incompatible SDK version")
+    throw new Error("e2b Sandbox has no `commands.run` — incompatible SDK version")
   }
   return {
     id: sandbox.sandboxId ?? sandbox.id ?? "e2b-sandbox",
@@ -428,7 +450,7 @@ export function adaptSdkSandbox(sandbox: E2BSdkSandbox): E2BSandboxFacade {
         await sandbox.close()
         return
       }
-      throw new Error("@e2b/sdk Sandbox has neither `kill` nor `close`")
+      throw new Error("e2b Sandbox has neither `kill` nor `close`")
     },
   }
 }

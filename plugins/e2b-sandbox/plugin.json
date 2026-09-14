@@ -4,34 +4,51 @@
   "version": "0.1.0",
   "description": "Run code in ephemeral Firecracker microVM sandboxes via E2B — useful for safe Computer Use isolation, code interpretation, and untrusted execution.",
   "type": "frontend",
-  "capabilities": ["mcp-server-preset", "commands", "configuration"],
+  "capabilities": [
+    "mcp-server-preset",
+    "commands",
+    "configuration",
+    "workspace-backend",
+    "context-panel"
+  ],
   "main": "src/index.ts",
-  "author": "cognia-next",
+  "author": { "name": "cognia-next" },
   "license": "MIT",
   "minAppVersion": "0.1.0",
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "permissions": ["native:process"],
+  "permissions": [
+    "native:process",
+    "secrets:read",
+    "secrets:write",
+    "extension:ui",
+    "session:read"
+  ],
   "configSchema": {
     "type": "object",
     "properties": {
       "apiKey": {
         "type": "string",
         "secret": true,
+        "order": 1,
         "title": "E2B / AgentENV API key",
-        "description": "Required for E2B Cloud; optional for local AgentENV if auth is disabled."
+        "description": "Required for E2B Cloud; optional for local AgentENV if auth is disabled. Saved keys are moved to the OS keyring, so this field clears after save."
       },
       "apiUrl": {
         "type": "string",
+        "format": "url",
+        "order": 2,
         "title": "AgentENV / E2B API URL",
-        "description": "Set this to your AgentENV server URL, for example http://127.0.0.1:8000."
+        "description": "Set this to your AgentENV server URL, for example http://127.0.0.1:8000. Leave empty for E2B Cloud."
+      },
+      "domain": {
+        "type": "string",
+        "order": 3,
+        "title": "E2B domain override",
+        "description": "Advanced: the SDK's native domain option (for example a self-hosted E2B domain). Takes precedence over the API URL when set."
       }
     }
-  },
-  "defaultConfig": {
-    "apiKey": "",
-    "apiUrl": ""
   },
   "activationEvents": ["startup", "onCommand:sandbox"],
   "runtimeCompatibility": {
@@ -52,8 +69,41 @@
     {
       "id": "sandbox",
       "name": "/sandbox",
-      "description": "Attach the E2B sandbox MCP to the current character.",
+      "description": "Show E2B sandbox connection status, live workspaces, and setup steps.",
       "icon": "Box"
+    }
+  ],
+  "mcpServerPresets": [
+    {
+      "id": "e2b-sandbox",
+      "name": "E2B Sandbox",
+      "description": "Run code in ephemeral Firecracker microVM sandboxes — Python, Node, shell, file ops. Untrusted-code safe.",
+      "icon": "📦",
+      "transport": "stdio",
+      "config": {
+        "command": "npx",
+        "args": ["-y", "@e2b/mcp-server"],
+        "env": { "E2B_API_KEY": "", "E2B_API_URL": "" }
+      },
+      "fields": [
+        {
+          "key": "E2B_API_KEY",
+          "label": "E2B / AgentENV API key",
+          "placement": "env",
+          "secret": true,
+          "description": "Required for E2B Cloud; optional for local AgentENV if auth is disabled."
+        },
+        {
+          "key": "E2B_API_URL",
+          "label": "AgentENV / E2B API URL",
+          "placement": "env",
+          "placeholder": "http://127.0.0.1:8000",
+          "description": "Set this to your AgentENV server URL. Leave empty for E2B Cloud."
+        }
+      ],
+      "runtime": "both",
+      "docsUrl": "https://github.com/e2b-dev/mcp-server",
+      "tags": ["sandbox", "code", "execution"]
     }
   ]
 }
