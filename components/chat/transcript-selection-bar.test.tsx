@@ -65,6 +65,14 @@ jest.mock("@/lib/chat/save-message-as-memory", () => ({
   saveMessagesAsMemory: (input: unknown) => mockSaveMemory(input),
 }))
 
+// The bar reads whether it is still present or animating out after the mode
+// ended; jsdom runs no exit animation, so a test sets it directly.
+let mockPresent = true
+jest.mock("motion/react", () => ({
+  ...jest.requireActual("motion/react"),
+  useIsPresent: () => mockPresent,
+}))
+
 const copy = enChat.transcriptSelection
 
 function msg(id: string, role: UIMessage["role"], text: string): UIMessage {
@@ -92,6 +100,7 @@ const staged = () => selectComposerContextSelections(useChatStore.getState(), "s
 beforeEach(() => {
   jest.clearAllMocks()
   runState = { status: "idle" }
+  mockPresent = true
   act(() => useChatStore.getState().clear())
   useProjectStore.setState({ activeProjectId: "p1" } as never)
 })
@@ -109,6 +118,14 @@ describe("TranscriptSelectionBar", () => {
       expect(screen.getByRole("button", { name: label })).toBeEnabled()
     }
     expect(screen.getByRole("toolbar", { name: copy.toolbarLabel })).toBeInTheDocument()
+  })
+
+  // Leaving is the first thing on the bar, not the last thing past four actions.
+  it("puts the way out first", () => {
+    setup()
+    const buttons = screen.getAllByRole("button")
+    expect(buttons[0]).toBe(screen.getByTestId("transcript-selection-exit"))
+    expect(buttons[0]).toHaveAccessibleName(copy.exit)
   })
 
   it("offers no action with nothing ticked", () => {
@@ -321,12 +338,37 @@ describe("TranscriptSelectionBar", () => {
     it("leaves both keys to a field being typed into", () => {
       const { onExit, onSelectAll } = setup()
       const field = document.createElement("textarea")
+      field.value = "half a sentence"
       document.body.appendChild(field)
       fireEvent.keyDown(field, { key: "Escape" })
       fireEvent.keyDown(field, { key: "a", metaKey: true })
       expect(onExit).not.toHaveBeenCalled()
       expect(onSelectAll).not.toHaveBeenCalled()
       field.remove()
+    })
+
+    // Focus sits in the composer by habit. With nothing typed there, Esc has
+    // nothing else to mean, and refusing it left no keyboard way out.
+    it("ends the mode on Esc from an empty field, but leaves ⌘A to it", () => {
+      const { onExit, onSelectAll } = setup()
+      const field = document.createElement("textarea")
+      document.body.appendChild(field)
+      fireEvent.keyDown(field, { key: "a", metaKey: true })
+      expect(onSelectAll).not.toHaveBeenCalled()
+      fireEvent.keyDown(field, { key: "Escape" })
+      expect(onExit).toHaveBeenCalledTimes(1)
+      field.remove()
+    })
+
+    it("acts on nothing while it animates out", () => {
+      mockPresent = false
+      const { onExit, onSelectAll } = setup()
+      fireEvent.keyDown(window, { key: "a", metaKey: true })
+      fireEvent.keyDown(window, { key: "Escape" })
+      expect(onSelectAll).not.toHaveBeenCalled()
+      expect(onExit).not.toHaveBeenCalled()
+      expect(screen.getByTestId("transcript-selection-reference")).toBeDisabled()
+      expect(screen.getByTestId("transcript-selection-exit")).toBeDisabled()
     })
 
     it("leaves an Esc another layer already handled", () => {

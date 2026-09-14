@@ -31,10 +31,16 @@ jest.mock("@/components/ai-elements/message", () => ({
   MessageActions: ({
     children,
     className,
+    ...rest
   }: {
     children: ReactForMocks.ReactNode
     className?: string
-  }) => ReactForMocks.createElement("div", { "data-test": "message-actions", className }, children),
+  }) =>
+    ReactForMocks.createElement(
+      "div",
+      { ...rest, "data-test": "message-actions", className },
+      children
+    ),
   MessageAction: ({
     children,
     onClick,
@@ -1391,6 +1397,17 @@ describe("select action", () => {
     )
     fireEvent.click(screen.getByLabelText("selectLabel"))
     expect(start).toHaveBeenCalledWith("sel3")
+  })
+
+  // Selection mode sets these aside (message-list.tsx); the reactions beside
+  // them are not marked, so they stay.
+  it("marks the row's own controls so selection mode can set them aside", () => {
+    useChatStore.setState({ activeSessionId: "sess-1" })
+    const { container } = render(<MessageRenderer message={assistantMsg("sel4")} />)
+    const marked = container.querySelectorAll("[data-message-actions]")
+    expect(marked.length).toBeGreaterThan(0)
+    const copy = screen.getAllByLabelText("copyTooltip")[0]!
+    expect(copy.closest("[data-message-actions]")).not.toBeNull()
   })
 })
 

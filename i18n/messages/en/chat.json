@@ -2325,6 +2325,7 @@
     "copyFailed": "Couldn't copy to the clipboard.",
     "count": "{count, plural, =0 {No messages selected} =1 {1 selected} other {# selected}}",
     "exit": "Done selecting",
+    "exitHint": "Done selecting (Esc)",
     "memoryEmpty": "There's nothing in those messages to save.",
     "memoryFailed": "Couldn't save as memory: {reason}",
     "memorySaved": "Saved a memory draft: “{title}”",

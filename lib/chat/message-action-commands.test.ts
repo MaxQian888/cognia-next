@@ -160,8 +160,8 @@ describe("select", () => {
     expect(ids({ role: "user", canSelect: true })).toContain("select")
   })
 
-  // The mobile sheet does not pass the capability, so it offers no row that
-  // would open nothing.
+  // A read-only transcript does not pass the capability, so it offers no row
+  // that would open nothing.
   it("is absent without the capability", () => {
     expect(ids()).not.toContain("select")
   })
@@ -169,5 +169,34 @@ describe("select", () => {
   it("needs a conversation to act on, not words", () => {
     expect(ids({ hasSession: false, canSelect: true })).not.toContain("select")
     expect(ids({ hasContent: false, canSelect: true })).toContain("select")
+  })
+})
+
+describe("selectText", () => {
+  const ids = (over: Partial<Parameters<typeof resolveMessageActionCommands>[0]> = {}) =>
+    resolveMessageActionCommands({
+      role: "assistant",
+      hasContent: true,
+      hasSession: true,
+      ...over,
+    }).map((c) => c.id)
+
+  it("is offered by a touch surface, on either role", () => {
+    expect(ids({ canSelectText: true })).toContain("selectText")
+    expect(ids({ role: "user", canSelectText: true })).toContain("selectText")
+  })
+
+  // Where text is selected in place, a sheet for it would be a second way to do
+  // the same thing.
+  it("is absent without the capability", () => {
+    expect(ids()).not.toContain("selectText")
+    expect(ids({ canSelect: true })).not.toContain("selectText")
+  })
+
+  // The sheet shows words to select from, and stages what is chosen into a
+  // conversation.
+  it("needs words and a conversation", () => {
+    expect(ids({ hasContent: false, canSelectText: true })).not.toContain("selectText")
+    expect(ids({ hasSession: false, canSelectText: true })).not.toContain("selectText")
   })
 })

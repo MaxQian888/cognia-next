@@ -946,14 +946,18 @@ function MessageRendererInner({
               unconditionally — so it needs the focus/touch reveals even more:
               without them a plugin that contributes a message action has NO
               way to be reached on a touch device, and none by keyboard. */}
-          <PluginExtensionSlot
-            point="chat.message.actions"
-            className={cn(
-              "mt-1 flex items-center gap-1 empty:hidden",
-              HOVER_REVEAL_CLASS,
-              message.role === "user" ? "ml-auto w-fit" : ""
-            )}
-          />
+          {/* `contents`: the marker must not add a box between the slot and the
+              row it right-aligns in. */}
+          <div className="contents" data-message-actions="">
+            <PluginExtensionSlot
+              point="chat.message.actions"
+              className={cn(
+                "mt-1 flex items-center gap-1 empty:hidden",
+                HOVER_REVEAL_CLASS,
+                message.role === "user" ? "ml-auto w-fit" : ""
+              )}
+            />
+          </div>
 
           {/* Plugin context-menu items targeting the `chat:message` zone
             (ctx.contextMenu.register) — hover ellipsis dropdown. Renders
@@ -964,6 +968,7 @@ function MessageRendererInner({
               HOVER_REVEAL_CLASS,
               message.role === "user" ? "ml-auto w-fit" : ""
             )}
+            data-message-actions=""
           >
             <MessagePluginMenu
               messageId={message.id}
@@ -988,7 +993,10 @@ function MessageRendererInner({
               data-testid="message-action-line"
             >
               <MessageReactionPills message={message} sessionId={branchSessionId} />
+              {/* Marked so selection mode can set the row's own controls aside
+                  (`message-list.tsx`); the reactions beside them stay. */}
               <MessageActions
+                data-message-actions=""
                 className={cn(
                   "text-xs text-muted-foreground transition-opacity",
                   // `focus-within` and `pointer-coarse` are not decoration: hover
@@ -1202,7 +1210,10 @@ function MessageRendererInner({
               data-testid="message-action-line"
             >
               <MessageReactionPills message={message} sessionId={branchSessionId} />
+              {/* Marked so selection mode can set the row's own controls aside
+                  (`message-list.tsx`); the reactions beside them stay. */}
               <MessageActions
+                data-message-actions=""
                 className={cn(
                   "text-xs text-muted-foreground",
                   message.role === "user" ? "w-fit" : ""

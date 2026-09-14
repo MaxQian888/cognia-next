@@ -4,7 +4,9 @@
  * Mobile bottom sheet for per-message actions (Wave 1.7).
  *
  * Triggered by long-press on a message row in the mobile shell. Provides
- * copy / quote / share / branch, plus — when the parent supplies the
+ * copy / quote / share / branch, "Select text" (a sheet for choosing part of the
+ * message, since the long press itself selects none), plus — when the parent
+ * supplies `onSelect` — "Select messages", and — when the parent supplies the
  * handlers — Regenerate (last assistant reply; the hover-only footer
  * controls in `message-renderer` are invisible on touch) and Delete
  * (confirmed destructive; the parent owns the store + Dexie + desktop
@@ -16,6 +18,7 @@ import { useTranslations } from "next-intl"
 import {
   GitBranchIcon,
   ImageIcon,
+  ListChecksIcon,
   Loader2Icon,
   PencilIcon,
   QuoteIcon,
@@ -24,6 +27,7 @@ import {
   Share2Icon,
   ScissorsIcon,
   SquareIcon,
+  TextSelectIcon,
   Trash2Icon,
   Volume2Icon,
 } from "lucide-react"
@@ -77,6 +81,7 @@ import { QuoteCardDialog } from "@/components/share/quote-card-dialog"
 import { TruncateFromDialog } from "@/components/chat/truncate-from-dialog"
 import { runMetadataOf } from "@/lib/chat/message-run-metadata"
 import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
+import { MessageTextSelectionSheet } from "./message-text-selection-sheet"
 
 export interface MessageActionSheetProps {
   message: UIMessage | null
@@ -105,6 +110,12 @@ export interface MessageActionSheetProps {
    */
   character?: CharacterVoiceSource | null
   messageMotion?: MessageMotion
+  /**
+   * Open the transcript's selection mode with this message ticked. Passed by a
+   * transcript that mounts the mode; the row renders iff set, so a read-only
+   * transcript offers no "Select messages" that would open nothing.
+   */
+  onSelect?: (message: UIMessage) => void
 }
 
 export function MessageActionSheet({
@@ -115,6 +126,7 @@ export function MessageActionSheet({
   onEditResend,
   character,
   messageMotion = "restrained",
+  onSelect,
 }: MessageActionSheetProps) {
   const t = useTranslations("mobile.messageActions")
   const tCommon = useTranslations("common")
@@ -132,6 +144,10 @@ export function MessageActionSheet({
     messageId: string
   } | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  // Held apart from `message`, which the parent clears as this sheet closes.
+  const [textTarget, setTextTarget] = useState<{ message: UIMessage; sessionId: string } | null>(
+    null
+  )
   // `null` = action-list mode; a string = edit mode holding the draft text.
   // Reset on every close so a reopened sheet always starts at the list.
   const [editText, setEditText] = useState<string | null>(null)
@@ -173,6 +189,9 @@ export function MessageActionSheet({
         canRegenerate: Boolean(onRegenerate),
         canReadAloud: ttsEnabled,
         canDelete: Boolean(onDelete),
+        canSelect: Boolean(onSelect),
+        // This sheet is the touch surface the capability exists for.
+        canSelectText: true,
         streaming: branchSessionStreaming,
       }),
     [
@@ -182,6 +201,7 @@ export function MessageActionSheet({
       onDelete,
       onEditResend,
       onRegenerate,
+      onSelect,
       text,
       ttsEnabled,
     ]
@@ -190,6 +210,20 @@ export function MessageActionSheet({
     () => new Map(commands.map((command) => [command.id, command])),
     [commands]
   )
+
+  const onSelectText = () => {
+    if (!message || !branchSessionId) return
+    void selectionFeedback()
+    setTextTarget({ message, sessionId: branchSessionId })
+    onOpenChange(false)
+  }
+
+  const onSelectMessages = () => {
+    if (!message || !onSelect) return
+    void selectionFeedback()
+    onSelect(message)
+    onOpenChange(false)
+  }
 
   const onBranch = () => {
     if (!message || !branchSessionId || branchSessionStreaming) return
@@ -389,6 +423,24 @@ export function MessageActionSheet({
             disabled={busy || !text}
             testid="message-action-copy"
           />
+          {commandById.has("selectText") && (
+            <Row
+              icon={<TextSelectIcon className="size-4" />}
+              label={t("selectText")}
+              onClick={onSelectText}
+              disabled={busy}
+              testid="message-action-select-text"
+            />
+          )}
+          {commandById.has("select") && onSelect && (
+            <Row
+              icon={<ListChecksIcon className="size-4" />}
+              label={t("select")}
+              onClick={onSelectMessages}
+              disabled={busy}
+              testid="message-action-select"
+            />
+          )}
           <Row
             icon={<QuoteIcon className="size-4" />}
             label={t("quote")}
@@ -559,6 +611,13 @@ export function MessageActionSheet({
           }
         />
       )}
+      <MessageTextSelectionSheet
+        message={textTarget?.message ?? null}
+        sessionId={textTarget?.sessionId ?? null}
+        onOpenChange={(next) => {
+          if (!next) setTextTarget(null)
+        }}
+      />
       {truncateOpen && message && branchSessionId && (
         <TruncateFromDialog
           sessionId={branchSessionId}

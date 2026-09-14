@@ -32,6 +32,19 @@ jest.mock("@/components/share/quote-card-dialog", () => ({
   QuoteCardDialog: ({ open }: { open: boolean }) =>
     open ? <div data-testid="quote-card-dialog" /> : null,
 }))
+// The text sheet has its own suite; here only which message it is opened on.
+jest.mock("./message-text-selection-sheet", () => ({
+  MessageTextSelectionSheet: ({
+    message,
+    sessionId,
+  }: {
+    message: { id: string } | null
+    sessionId: string | null
+  }) =>
+    message ? (
+      <div data-testid="text-selection-sheet" data-message={message.id} data-session={sessionId} />
+    ) : null,
+}))
 jest.mock("@/components/chat/truncate-from-dialog", () => ({
   TruncateFromDialog: ({ open }: { open: boolean }) =>
     open ? <div data-testid="truncate-from-dialog" /> : null,
@@ -141,6 +154,8 @@ const messages = {
       readAloud: "Read aloud",
       stopReading: "Stop reading",
       truncate: "Delete from here",
+      select: "Select messages",
+      selectText: "Select text",
     },
   },
   common: { cancel: "Cancel" },
@@ -153,6 +168,7 @@ function renderSheet(
     onRegenerate?: () => void | Promise<void>
     onDelete?: (m: UIMessage) => void | Promise<void>
     onEditResend?: (m: UIMessage, newText: string) => void | Promise<void>
+    onSelect?: (m: UIMessage) => void
     character?: { voiceProfile?: undefined } | null
   } = {}
 ) {
@@ -569,5 +585,51 @@ describe("MessageActionSheet", () => {
     })
     expect(onOpenChange).not.toHaveBeenCalledWith(false)
     expect(screen.getByTestId("message-action-edit-input")).toBeInTheDocument()
+  })
+
+  describe("selecting", () => {
+    const inSession = (text = "hello"): UIMessage =>
+      ({
+        id: "m1",
+        role: "assistant",
+        parts: [{ type: "text", text }],
+        metadata: { sessionId: "s9" },
+      }) as UIMessage
+
+    // A long press selects no text on a phone, so the sheet is the way to part
+    // of a message.
+    it("opens the text sheet on this message and closes itself", () => {
+      const onOpenChange = jest.fn()
+      renderSheet(inSession(), onOpenChange)
+      expect(screen.queryByTestId("text-selection-sheet")).toBeNull()
+      fireEvent.click(screen.getByTestId("message-action-select-text"))
+      expect(onOpenChange).toHaveBeenCalledWith(false)
+      const sheet = screen.getByTestId("text-selection-sheet")
+      expect(sheet).toHaveAttribute("data-message", "m1")
+      expect(sheet).toHaveAttribute("data-session", "s9")
+    })
+
+    it("offers no text to select without words or a conversation", () => {
+      renderSheet(inSession(""), jest.fn())
+      expect(screen.queryByTestId("message-action-select-text")).toBeNull()
+      renderSheet(makeMessage("no session"), jest.fn())
+      expect(screen.queryByTestId("message-action-select-text")).toBeNull()
+    })
+
+    it("opens selection mode through the transcript that passed onSelect", () => {
+      const onOpenChange = jest.fn()
+      const onSelect = jest.fn()
+      const message = inSession()
+      renderSheet(message, onOpenChange, { onSelect })
+      fireEvent.click(screen.getByTestId("message-action-select"))
+      expect(onSelect).toHaveBeenCalledWith(message)
+      expect(onOpenChange).toHaveBeenCalledWith(false)
+    })
+
+    // A read-only transcript has no mode for the row to open.
+    it("offers no Select messages without onSelect", () => {
+      renderSheet(inSession(), jest.fn())
+      expect(screen.queryByTestId("message-action-select")).toBeNull()
+    })
   })
 })

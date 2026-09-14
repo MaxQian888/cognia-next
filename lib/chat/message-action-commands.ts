@@ -16,6 +16,7 @@ export type MessageActionCommandId =
   | "saveAsMemory"
   | "saveAsIssue"
   | "select"
+  | "selectText"
   | "delete"
 
 export interface MessageActionCommandContext {
@@ -48,11 +49,20 @@ export interface MessageActionCommandContext {
    * messages, then reference, summarize, copy or save them together.
    *
    * A capability the SURFACE supplies, not the message: only a surface that
-   * mounts the selection mode passes it. The desktop transcript does; the
-   * mobile long-press sheet does not yet, and without the flag it offers no
-   * "Select" row that would open nothing.
+   * mounts the selection mode passes it — the desktop transcript and the mobile
+   * long-press sheet opened from one. A read-only transcript renders the same
+   * rows without it, and so offers no "Select" that would open nothing.
    */
   canSelect?: boolean
+  /**
+   * The surface offers a sheet for selecting PART of the message's text.
+   *
+   * Touch only. Where the pointer can drag across the transcript, text is
+   * selected in place and the selection capsule acts on it; on a phone a long
+   * press opens the action sheet instead of selecting a word, so the sheet is
+   * the way to a passage.
+   */
+  canSelectText?: boolean
   canDelete?: boolean
   streaming?: boolean
 }
@@ -108,6 +118,11 @@ export function resolveMessageActionCommands(
   // output a combined reference exists to hand over. A session is — every bulk
   // action stages into, or files under, the conversation.
   if (context.hasSession && context.canSelect) commands.push({ id: "select" })
+  // Words are required here, unlike above: the sheet shows the message's text
+  // to select from, and a tool-only turn has none.
+  if (context.hasSession && context.hasContent && context.canSelectText) {
+    commands.push({ id: "selectText" })
+  }
   if (context.canDelete) commands.push({ id: "delete", destructive: true })
   return commands
 }

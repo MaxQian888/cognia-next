@@ -62,6 +62,8 @@ import { densitySurfaceProps } from "@/lib/appearance/density-applier"
 import type { MessageDisplayPreferences } from "@/types/appearance"
 import type { Character } from "@cognia/agent-config-types"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { AnimatePresence } from "motion/react"
+import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 import { cn } from "@/lib/utils"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { PerfBoundary } from "@/lib/perf"
@@ -354,6 +356,8 @@ export function MessageList({
     []
   )
   const { active: selecting, isSelectable, toggle: toggleSelected } = selection
+  // A phone's back gesture leaves the mode before it leaves the conversation.
+  useBackDismiss(isMobile && selecting, selection.exit)
   // In the mode, a click on a message ticks it — unless it landed on something
   // that has its own job (a link, a button, a field) or ended a text selection,
   // which the transcript's selection capsule is there to act on.
@@ -391,7 +395,14 @@ export function MessageList({
     return {
       rowClassName: cn(
         "group/msgrow",
-        selecting && selectable && "cursor-pointer pl-10 sm:pl-10",
+        // In the mode a row is one thing to tick: its own controls step back
+        // (kept in layout, so no row changes height and the list holds still),
+        // and a long press selects no text.
+        selecting &&
+          "rounded-lg select-none [-webkit-touch-callout:none] [&_[data-message-actions]]:invisible",
+        // The tick fits the row's own padding from `sm` up, so text does not
+        // move when the mode starts; a phone's 12px gutter needs room made.
+        selecting && selectable && "cursor-pointer max-sm:pl-10",
         checked && "bg-primary/[0.06]"
       ),
       rowProps: {
@@ -632,7 +643,14 @@ export function MessageList({
       <HookNoticeMarker message={m} />
     ) : isMobile ? (
       <LongPress
+        // A long press opens the message's sheet, so it must not also select a
+        // word and raise the system's copy menu over it: part of a message is
+        // chosen from the sheet's "Select text" instead.
+        className="select-none [-webkit-touch-callout:none]"
         onLongPress={() => {
+          // In selection mode a tap ticks; a press held a little long is the
+          // same intent, not a request for the sheet.
+          if (selecting) return
           void selectionFeedback()
           setActionMessage(m)
         }}
@@ -710,7 +728,12 @@ export function MessageList({
             >
               <div
                 ref={contentRef}
-                className="mx-auto w-full max-w-[52rem] py-[calc(1.25rem*var(--density-spacing,1))] sm:py-[calc(1.75rem*var(--density-spacing,1))]"
+                className={cn(
+                  "mx-auto w-full max-w-[52rem] py-[calc(1.25rem*var(--density-spacing,1))] sm:py-[calc(1.75rem*var(--density-spacing,1))]",
+                  // Room under the last message for the floating bar, which is
+                  // a card in a narrow pane and a pill in a wide one.
+                  selecting && "pb-36 sm:pb-36 @xl/message-list:pb-20 @xl/message-list:sm:pb-20"
+                )}
                 data-slot="conversation-reading-column"
                 data-selecting={selecting ? "" : undefined}
               >
@@ -843,16 +866,19 @@ export function MessageList({
             {/* Same foot of the pane as the jump pill, and it takes the pill's
                 place while it is up: a pane that is often half the window has
                 room for one floating control, not two. */}
-            {selecting && selectionSessionId ? (
-              <TranscriptSelectionBar
-                sessionId={selectionSessionId}
-                messages={selectedMessages}
-                selectableCount={selectableIds.length}
-                onSelectAll={selection.selectAll}
-                onClear={selection.clear}
-                onExit={selection.exit}
-              />
-            ) : null}
+            <AnimatePresence>
+              {selecting && selectionSessionId ? (
+                <TranscriptSelectionBar
+                  key="transcript-selection-bar"
+                  sessionId={selectionSessionId}
+                  messages={selectedMessages}
+                  selectableCount={selectableIds.length}
+                  onSelectAll={selection.selectAll}
+                  onClear={selection.clear}
+                  onExit={selection.exit}
+                />
+              ) : null}
+            </AnimatePresence>
             {/* Outside the scroller on purpose — see ConversationJumpPill. */}
             <ConversationJumpPill
               mode={
@@ -914,6 +940,9 @@ export function MessageList({
             onOpenChange={(next) => {
               if (!next) setActionMessage(null)
             }}
+            // The sheet a long press opens is the phone's only way into
+            // selection mode: there is no hover to reveal a row's tick.
+            onSelect={(msg) => selection.start(msg.id)}
             // Regenerate only makes sense for the last assistant reply and
             // while no turn is in flight — mirrors the hover footer's gate in
             // message-renderer (which is unreachable on touch).
@@ -962,7 +991,11 @@ const ROW_INTERACTIVE_SELECTOR =
  * Out of the mode it shows on hovering the message, as the way in; it is not a
  * tab stop there, because forty invisible checkboxes between every message would
  * be forty stops a keyboard user never asked for — the message menu's "Select"
- * is their way in. On touch there is no hover, so it only appears in the mode.
+ * is their way in. On touch there is no hover, so it only appears in the mode,
+ * which the long-press sheet's "Select" opens.
+ *
+ * Both states sit in the row's left padding, in the same place, so the tick a
+ * pointer found on hover is the one that stays when the mode starts.
  */
 function RowSelectControl({
   checked,
@@ -983,7 +1016,7 @@ function RowSelectControl({
         // In the mode the row makes room for it; on hover it sits in the row's
         // own padding so nothing shifts under the pointer.
         active
-          ? "left-3"
+          ? "left-3 duration-150 animate-in fade-in-0 zoom-in-75 sm:left-0.5"
           : "left-0.5 hidden opacity-0 transition-opacity group-hover/msgrow:opacity-100 focus-within:opacity-100 sm:flex [@media(hover:none)]:hidden"
       )}
     >

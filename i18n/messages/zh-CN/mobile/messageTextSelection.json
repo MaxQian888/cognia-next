@@ -1,0 +1,9 @@
+{
+  "description": "选中消息里的一段，或直接对整条消息操作。",
+  "scopeMessage": "整条消息",
+  "scopeSelection": "已选：“{title}”",
+  "sourceMessage": "来自这条消息",
+  "title": "选择文本",
+  "translateInto": "翻译成",
+  "useWholeMessage": "用整条"
+}

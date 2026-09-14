@@ -8194,6 +8194,7 @@
       "copyFailed": "Couldn't copy to the clipboard.",
       "count": "{count, plural, =0 {No messages selected} =1 {1 selected} other {# selected}}",
       "exit": "Done selecting",
+      "exitHint": "Done selecting (Esc)",
       "memoryEmpty": "There's nothing in those messages to save.",
       "memoryFailed": "Couldn't save as memory: {reason}",
       "memorySaved": "Saved a memory draft: “{title}”",
@@ -20386,6 +20387,8 @@
       "quote": "Quote",
       "readAloud": "Read aloud",
       "regenerate": "Regenerate reply",
+      "select": "Select messages",
+      "selectText": "Select text",
       "share": "Share…",
       "shareCard": "Share as card",
       "shareDialogTitle": "Share via",
@@ -20394,6 +20397,15 @@
       "stopReading": "Stop reading",
       "title": "Message",
       "truncate": "Delete from here"
+    },
+    "messageTextSelection": {
+      "description": "Select part of the message, or act on all of it.",
+      "scopeMessage": "Whole message",
+      "scopeSelection": "Selected: “{title}”",
+      "sourceMessage": "From this message",
+      "title": "Select text",
+      "translateInto": "Translate into",
+      "useWholeMessage": "Use all"
     },
     "network": {
       "backAria": "Back to Me",

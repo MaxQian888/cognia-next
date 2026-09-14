@@ -71,10 +71,19 @@ export function useTranscriptSelection({
 
   const toggle = useCallback(
     (id: string, gesture?: { shiftKey?: boolean }) => {
+      // Unticking the only ticked message is putting the selection down — the
+      // same gesture ends a contextual selection in every mobile list. Staying
+      // in an empty mode made people hunt for the ✕. "Clear" on the bar is the
+      // deliberate way to empty the set and keep picking.
+      if (!gesture?.shiftKey && active && range.selected.size === 1 && isSelected(id)) {
+        setActive(false)
+        clearRange()
+        return
+      }
       setActive(true)
       handleClick(id, { ctrlKey: true, metaKey: false, shiftKey: Boolean(gesture?.shiftKey) })
     },
-    [handleClick]
+    [active, clearRange, handleClick, isSelected, range.selected.size]
   )
 
   const start = useCallback(

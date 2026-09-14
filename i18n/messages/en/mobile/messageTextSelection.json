@@ -1,0 +1,9 @@
+{
+  "description": "Select part of the message, or act on all of it.",
+  "scopeMessage": "Whole message",
+  "scopeSelection": "Selected: “{title}”",
+  "sourceMessage": "From this message",
+  "title": "Select text",
+  "translateInto": "Translate into",
+  "useWholeMessage": "Use all"
+}

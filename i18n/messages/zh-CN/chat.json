@@ -2325,6 +2325,7 @@
     "copyFailed": "无法复制到剪贴板。",
     "count": "{count, plural, =0 {未选择消息} other {已选 # 条}}",
     "exit": "退出多选",
+    "exitHint": "退出多选（Esc）",
     "memoryEmpty": "所选消息里没有可保存的内容。",
     "memoryFailed": "无法存为记忆：{reason}",
     "memorySaved": "已保存记忆草稿：「{title}」",

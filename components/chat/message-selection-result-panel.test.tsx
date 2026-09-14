@@ -74,6 +74,23 @@ describe("MessageSelectionResultPanel", () => {
     ).toBeNull()
   })
 
+  // A phone sheet hosts it full-width rather than as a popover.
+  it("takes the host's sizing over its popover default", () => {
+    render(
+      <MessageSelectionResultPanel
+        run={{ status: "running", request: request(), text: "", progress: null }}
+        className="w-full max-h-[45dvh]"
+        onStop={jest.fn()}
+        onRetry={jest.fn()}
+        onClose={jest.fn()}
+        onReference={jest.fn()}
+      />
+    )
+    const panel = screen.getByTestId("message-selection-result")
+    expect(panel).toHaveClass("w-full", "max-h-[45dvh]")
+    expect(panel.className).not.toContain("w-[min(92vw,440px)]")
+  })
+
   it("names the target language of a translation", () => {
     renderPanel(
       {

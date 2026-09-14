@@ -22,6 +22,7 @@ import {
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { useCopy } from "@/hooks/ui/use-copy"
 import type { SelectionRunState } from "@/hooks/chat/use-selection-action-run"
@@ -40,6 +41,8 @@ export interface MessageSelectionResultPanelProps {
    * opening words, which a count must not be dressed up as.
    */
   sourceLabel?: string
+  /** Overrides the popover sizing, for a host that is not a popover (a phone sheet). */
+  className?: string
   onStop: () => void
   onRetry: () => void
   onClose: () => void
@@ -63,6 +66,7 @@ export function MessageSelectionResultPanel({
   run,
   languageLabel,
   sourceLabel,
+  className,
   onStop,
   onRetry,
   onClose,
@@ -87,7 +91,7 @@ export function MessageSelectionResultPanel({
       data-testid="message-selection-result"
       data-status={run.status}
       aria-busy={running}
-      className="flex max-h-[min(60vh,480px)] w-[min(92vw,440px)] flex-col gap-2"
+      className={cn("flex max-h-[min(60vh,480px)] w-[min(92vw,440px)] flex-col gap-2", className)}
     >
       <header className="flex items-start justify-between gap-2">
         <div className="min-w-0">

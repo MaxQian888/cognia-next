@@ -8194,6 +8194,7 @@
       "copyFailed": "无法复制到剪贴板。",
       "count": "{count, plural, =0 {未选择消息} other {已选 # 条}}",
       "exit": "退出多选",
+      "exitHint": "退出多选（Esc）",
       "memoryEmpty": "所选消息里没有可保存的内容。",
       "memoryFailed": "无法存为记忆：{reason}",
       "memorySaved": "已保存记忆草稿：「{title}」",
@@ -20386,6 +20387,8 @@
       "quote": "引用",
       "readAloud": "朗读",
       "regenerate": "重新生成回复",
+      "select": "多选消息",
+      "selectText": "选择文本",
       "share": "分享…",
       "shareCard": "分享为卡片",
       "shareDialogTitle": "分享至",
@@ -20394,6 +20397,15 @@
       "stopReading": "停止朗读",
       "title": "消息",
       "truncate": "从这里删除"
+    },
+    "messageTextSelection": {
+      "description": "选中消息里的一段，或直接对整条消息操作。",
+      "scopeMessage": "整条消息",
+      "scopeSelection": "已选：“{title}”",
+      "sourceMessage": "来自这条消息",
+      "title": "选择文本",
+      "translateInto": "翻译成",
+      "useWholeMessage": "用整条"
     },
     "network": {
       "backAria": "返回我的",

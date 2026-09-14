@@ -15,18 +15,31 @@
  *
  * Each action that completes ends the mode, because it was what the selection
  * was for; a summary keeps it until its answer is referenced or closed. Esc
- * closes an open answer first and the mode second, and ⌘A / Ctrl+A ticks every
- * message — but never while typing, where both keys already mean something.
+ * closes an open answer first and the mode second — from anywhere but a field
+ * with something typed in it, where Esc belongs to the draft — and ⌘A / Ctrl+A
+ * ticks every message unless focus is in a field at all.
+ *
+ * It is drawn in the inverse of the page so it cannot be mistaken for a second
+ * composer, which it sits just above. Wide panes get one pill with the leaving ✕
+ * first; a narrow pane (a phone, a split view) gets a floating card whose
+ * actions keep their labels, because a row of bare icons is guesswork on touch.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { motion, useIsPresent } from "motion/react"
 import type { UIMessage } from "ai"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { BrainIcon, CheckCheckIcon, CopyIcon, QuoteIcon, SparklesIcon, XIcon } from "lucide-react"
+import { BrainIcon, CopyIcon, QuoteIcon, SparklesIcon, XIcon } from "lucide-react"
 import { createLogger } from "@cognia/logging"
 
 import { Button } from "@/components/ui/button"
+import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
+import {
+  FLOATING_BAR_BUTTON_CLASS,
+  FLOATING_BAR_CLASS,
+  FloatingBarAction,
+} from "@/components/chat/floating-action-bar"
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import { MessageSelectionResultPanel } from "@/components/chat/message-selection-result-panel"
 import { useSelectionActionRun } from "@/hooks/chat/use-selection-action-run"
@@ -36,6 +49,7 @@ import { buildMessageSetReference } from "@/lib/chat/selection/message-set-refer
 import { selectionCopyText, selectionMaterial } from "@/lib/chat/selection/transcript-selection"
 import { saveMessagesAsMemory } from "@/lib/chat/save-message-as-memory"
 import { isEditableTarget } from "@/lib/shortcuts/dom"
+import { MOBILE_SPRING } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { useProjectStore } from "@/stores/project/project-store"
@@ -73,6 +87,10 @@ export function TranscriptSelectionBar({
   const none = count === 0
   const allTicked = count > 0 && count >= selectableCount
   const panelOpen = run.status !== "idle"
+  const { reduce } = useFlowMotion()
+  // Still mounted while it animates out: by then it acts on nothing, or a ⌘A in
+  // that moment would tick every message of a mode that already ended.
+  const isPresent = useIsPresent()
 
   /** One action at a time: a double click must not stage two chips or file two drafts. */
   const exclusive = useCallback(async (action: () => Promise<void>) => {
@@ -203,19 +221,23 @@ export function TranscriptSelectionBar({
   // Esc and ⌘A belong to whatever is being typed into; everywhere else in the
   // pane they act on the selection. An Esc a popover already handled is left
   // to it (the answer panel marks its own).
-  const latest = useRef({ panelOpen, close, onExit, onSelectAll })
+  const latest = useRef({ panelOpen, close, onExit, onSelectAll, isPresent })
   useEffect(() => {
-    latest.current = { panelOpen, close, onExit, onSelectAll }
+    latest.current = { panelOpen, close, onExit, onSelectAll, isPresent }
   })
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.isComposing || isEditableTarget(event.target)) return
+      if (event.defaultPrevented || event.isComposing || !latest.current.isPresent) return
       if (event.key === "Escape") {
+        // An empty composer has nothing for Esc to discard, and focus lands there
+        // by habit — refusing it would leave the mode with no keyboard way out.
+        if (isEditableTarget(event.target) && editableHasText(event.target)) return
         event.preventDefault()
         if (latest.current.panelOpen) latest.current.close()
         else latest.current.onExit()
         return
       }
+      if (isEditableTarget(event.target)) return
       if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "a") {
         event.preventDefault()
         latest.current.onSelectAll()
@@ -225,90 +247,119 @@ export function TranscriptSelectionBar({
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [])
 
+  const actionsDisabled = none || busy || !isPresent
   return (
     <div
       className={cn(
-        "pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center px-3",
+        "pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center px-3",
         className
       )}
     >
       <Popover open={panelOpen}>
         <PopoverAnchor asChild>
-          <div
+          <motion.div
             role="toolbar"
             aria-label={t("toolbarLabel")}
             data-testid="transcript-selection-bar"
+            data-elevation="3"
+            initial={reduce ? false : { opacity: 0, y: 16, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={reduce ? { opacity: 0 } : { opacity: 0, y: 16, scale: 0.96 }}
+            transition={reduce ? { duration: 0.12 } : MOBILE_SPRING}
             className={cn(
-              "pointer-events-auto flex max-w-full items-center gap-0.5 rounded-xl border p-1 shadow-lg",
-              "bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/85"
+              "flex w-full flex-col gap-1 rounded-panel p-1.5",
+              FLOATING_BAR_CLASS,
+              "@xl/message-list:w-auto @xl/message-list:max-w-full @xl/message-list:flex-row @xl/message-list:items-center @xl/message-list:gap-0.5 @xl/message-list:rounded-pill @xl/message-list:p-1",
+              isPresent ? "pointer-events-auto" : "pointer-events-none"
             )}
           >
-            <span
-              className="px-2 text-xs font-medium tabular-nums whitespace-nowrap"
-              aria-live="polite"
-              data-testid="transcript-selection-count"
-            >
-              {t("count", { count })}
-            </span>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-8 px-2 text-xs"
-              onClick={allTicked ? onClear : onSelectAll}
-              aria-label={allTicked ? t("clear") : t("selectAll")}
-              data-testid="transcript-selection-all"
-            >
-              <CheckCheckIcon className="size-3.5" aria-hidden />
-              {/* The name is the button's own label; this is the same words, shown
-                  once the pane is wide enough for them. */}
-              <span className="hidden @2xl/message-list:inline" aria-hidden>
-                {allTicked ? t("clear") : t("selectAll")}
+            <div className="flex min-w-0 items-center gap-0.5">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className={cn(
+                  FLOATING_BAR_BUTTON_CLASS,
+                  "size-8 shrink-0 rounded-full pointer-coarse:size-11"
+                )}
+                aria-label={t("exit")}
+                title={t("exitHint")}
+                onClick={onExit}
+                disabled={!isPresent}
+                data-testid="transcript-selection-exit"
+              >
+                <XIcon className="size-4" aria-hidden />
+              </Button>
+              <span
+                className="min-w-0 truncate px-1.5 text-sm font-medium tabular-nums"
+                aria-live="polite"
+                data-testid="transcript-selection-count"
+              >
+                {/* Keyed on the count, so each tick lands with a small drop. */}
+                <motion.span
+                  key={count}
+                  className="inline-block"
+                  initial={reduce ? false : { y: -6, opacity: 0.4 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={MOBILE_SPRING}
+                >
+                  {t("count", { count })}
+                </motion.span>
               </span>
-            </Button>
-            <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
-            <BarAction
-              label={t("actions.reference")}
-              icon={QuoteIcon}
-              disabled={none || busy}
-              onClick={() => void onReference()}
-              testId="transcript-selection-reference"
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  FLOATING_BAR_BUTTON_CLASS,
+                  "ml-auto h-8 shrink-0 rounded-pill px-2.5 text-xs text-background/70 pointer-coarse:h-11"
+                )}
+                onClick={allTicked ? onClear : onSelectAll}
+                disabled={!isPresent || selectableCount === 0}
+                data-testid="transcript-selection-all"
+              >
+                {allTicked ? t("clear") : t("selectAll")}
+              </Button>
+            </div>
+            <span
+              className="hidden h-5 w-px shrink-0 bg-background/20 @xl/message-list:mx-1 @xl/message-list:block"
+              aria-hidden
             />
-            <BarAction
-              label={t("actions.summarize")}
-              icon={SparklesIcon}
-              disabled={none || busy}
-              onClick={onSummarize}
-              testId="transcript-selection-summarize"
-            />
-            <BarAction
-              label={t("actions.copy")}
-              icon={CopyIcon}
-              disabled={none || busy}
-              onClick={() => void onCopy()}
-              testId="transcript-selection-copy"
-            />
-            <BarAction
-              label={t("actions.saveMemory")}
-              icon={BrainIcon}
-              disabled={none || busy}
-              onClick={() => void onSaveMemory()}
-              testId="transcript-selection-saveMemory"
-            />
-            <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              className="size-8"
-              aria-label={t("exit")}
-              title={t("exit")}
-              onClick={onExit}
-              data-testid="transcript-selection-exit"
-            >
-              <XIcon className="size-3.5" />
-            </Button>
-          </div>
+            <div className="grid grid-cols-4 gap-0.5 @xl/message-list:flex @xl/message-list:items-center">
+              <FloatingBarAction
+                adaptive
+                label={t("actions.reference")}
+                icon={QuoteIcon}
+                disabled={actionsDisabled}
+                onClick={() => void onReference()}
+                data-testid="transcript-selection-reference"
+              />
+              <FloatingBarAction
+                adaptive
+                label={t("actions.summarize")}
+                icon={SparklesIcon}
+                disabled={actionsDisabled}
+                onClick={onSummarize}
+                data-testid="transcript-selection-summarize"
+              />
+              <FloatingBarAction
+                adaptive
+                label={t("actions.copy")}
+                icon={CopyIcon}
+                disabled={actionsDisabled}
+                onClick={() => void onCopy()}
+                data-testid="transcript-selection-copy"
+              />
+              <FloatingBarAction
+                adaptive
+                label={t("actions.saveMemory")}
+                icon={BrainIcon}
+                disabled={actionsDisabled}
+                onClick={() => void onSaveMemory()}
+                data-testid="transcript-selection-saveMemory"
+              />
+            </div>
+          </motion.div>
         </PopoverAnchor>
         {run.status !== "idle" ? (
           <PopoverContent
@@ -343,36 +394,10 @@ export function TranscriptSelectionBar({
   )
 }
 
-/** One bulk action: its icon always, its label once the pane is wide enough. */
-function BarAction({
-  label,
-  icon: Icon,
-  disabled,
-  onClick,
-  testId,
-}: {
-  label: string
-  icon: typeof QuoteIcon
-  disabled: boolean
-  onClick: () => void
-  testId: string
-}) {
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      className="h-8 px-2 text-xs"
-      disabled={disabled}
-      title={label}
-      aria-label={label}
-      onClick={onClick}
-      data-testid={testId}
-    >
-      <Icon className="size-3.5" aria-hidden />
-      <span className="hidden @xl/message-list:inline" aria-hidden>
-        {label}
-      </span>
-    </Button>
-  )
+/** Whether a field Esc might be aimed at holds anything to discard. */
+function editableHasText(target: EventTarget | null): boolean {
+  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+    return target.value.length > 0
+  }
+  return target instanceof HTMLElement && (target.textContent ?? "").trim().length > 0
 }

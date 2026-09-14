@@ -38,6 +38,29 @@ describe("useTranscriptSelection", () => {
     expect(ticked(result.current.selected)).toEqual(["m3"])
   })
 
+  // Putting the last tick down is putting the selection down.
+  it("ends the mode when the only ticked message is unticked", () => {
+    const { result } = setup()
+    act(() => result.current.toggle("m2"))
+    act(() => result.current.toggle("m2"))
+    expect(result.current.active).toBe(false)
+    expect(ticked(result.current.selected)).toEqual([])
+    // A later tick starts afresh.
+    act(() => result.current.toggle("m3"))
+    expect(result.current.active).toBe(true)
+    expect(ticked(result.current.selected)).toEqual(["m3"])
+  })
+
+  it("stays on after Clear, so picking can start over", () => {
+    const { result } = setup()
+    act(() => result.current.toggle("m2"))
+    act(() => result.current.clear())
+    expect(result.current.active).toBe(true)
+    act(() => result.current.toggle("m4"))
+    expect(result.current.active).toBe(true)
+    expect(ticked(result.current.selected)).toEqual(["m4"])
+  })
+
   it("extends a range with Shift, keeping earlier ticks", () => {
     const { result } = setup("s1", ["m0", ...IDS])
     act(() => result.current.toggle("m0"))

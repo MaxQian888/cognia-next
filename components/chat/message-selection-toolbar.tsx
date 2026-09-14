@@ -20,7 +20,7 @@
 // so the button drifted away from the text it was about.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useLocale, useTranslations } from "next-intl"
+import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import {
   ChevronDownIcon,
@@ -45,25 +45,17 @@ import {
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import { MessageSelectionResultPanel } from "@/components/chat/message-selection-result-panel"
 import {
-  SELECTION_TRANSLATE_LOCALE_PREF,
   TARGET_LOCALES,
-  initialTargetLocale,
   type TargetLocale,
 } from "@/components/selection-toolbar/selection-toolbar-actions"
-import {
-  useSelectionActionRun,
-  type SelectionRunRequest,
-} from "@/hooks/chat/use-selection-action-run"
+import { useMessageSelectionActions } from "@/hooks/chat/use-message-selection-actions"
 import { createResourceWorkbenchSession } from "@/lib/db/resource-workbench-sessions"
-import { buildMessageExcerptSelection } from "@/lib/chat/selection/message-excerpt"
 import {
   isDeliberateSelection,
   quoteSelection,
   selectionTitleFor,
 } from "@/lib/chat/selection/selection-text"
 import type { SelectionAction } from "@/lib/chat/selection/run-selection-action"
-import { getPref, setPref } from "@/lib/tauri/store"
-import type { EntityExcerptDerivation } from "@/types/artifact/artifact"
 import { getContextResourceKey } from "@/types/context-workbench"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { useChatStore } from "@/stores/chat/chat-store"
@@ -187,12 +179,6 @@ function virtualAnchorFor(anchor: SelectionAnchor) {
   }
 }
 
-const DERIVATIONS: Record<SelectionAction, EntityExcerptDerivation> = {
-  summarize: "summary",
-  explain: "explanation",
-  translate: "translation",
-}
-
 function mintId(): string {
   return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
     ? crypto.randomUUID()
@@ -217,81 +203,32 @@ export function MessageSelectionToolbar({
 }: MessageSelectionToolbarProps) {
   const t = useTranslations("chat.selection")
   const tLanguage = useTranslations("selectionToolbar.languages")
-  const locale = useLocale()
   const anchor = useTranscriptSelection(containerRef)
-  const { state: run, run: start, stop, close } = useSelectionActionRun()
+  const {
+    run,
+    start,
+    retry,
+    stop,
+    close,
+    targetLocale,
+    chooseLocale,
+    languageLabel,
+    referencePassage,
+    referenceResult,
+    referencing,
+  } = useMessageSelectionActions({ sessionId })
   const [panelAnchor, setPanelAnchor] = useState<SelectionAnchor | null>(null)
-  const [targetLocale, setTargetLocale] = useState<TargetLocale>(() => initialTargetLocale(locale))
-  const [referencing, setReferencing] = useState(false)
   const busyRef = useRef(false)
-
-  // The desktop selection toolbar's choice, so the two surfaces agree. Outside
-  // Tauri there is no store and the UI locale's default stands.
-  useEffect(() => {
-    let alive = true
-    void getPref<string>(SELECTION_TRANSLATE_LOCALE_PREF).then((saved) => {
-      if (alive && TARGET_LOCALES.includes(saved as TargetLocale)) {
-        setTargetLocale(saved as TargetLocale)
-      }
-    })
-    return () => {
-      alive = false
-    }
-  }, [])
-
-  const chooseLocale = useCallback((next: string) => {
-    if (!TARGET_LOCALES.includes(next as TargetLocale)) return
-    setTargetLocale(next as TargetLocale)
-    void setPref(SELECTION_TRANSLATE_LOCALE_PREF, next)
-  }, [])
-
-  const stage = useCallback(
-    async (input: {
-      messageIds: readonly string[]
-      text: string
-      quote: string
-      derivation: EntityExcerptDerivation
-      language?: string
-    }): Promise<boolean> => {
-      const selection = await buildMessageExcerptSelection({
-        sessionId,
-        messageIds: input.messageIds,
-        text: input.text,
-        excerpt: {
-          derivation: input.derivation,
-          quote: input.quote,
-          ...(input.language ? { language: input.language } : {}),
-        },
-      })
-      if (!selection) {
-        toast.error(t("referenceError"))
-        return false
-      }
-      useChatStore.getState().addContextSelection(selection, sessionId)
-      toast.success(t("referenced", { title: selection.title }))
-      return true
-    },
-    [sessionId, t]
-  )
 
   const onReference = useCallback(async () => {
     if (!anchor || busyRef.current) return
     busyRef.current = true
     try {
-      const staged = await stage({
-        messageIds: anchor.messageIds,
-        text: anchor.text,
-        quote: anchor.text,
-        derivation: "quote",
-      })
-      if (staged) window.getSelection()?.removeAllRanges()
-    } catch (err) {
-      log.error("selection-reference-failed", { sessionId, error: String(err) })
-      toast.error(t("referenceError"))
+      if (await referencePassage(anchor)) window.getSelection()?.removeAllRanges()
     } finally {
       busyRef.current = false
     }
-  }, [anchor, sessionId, stage, t])
+  }, [anchor, referencePassage])
 
   const onAsk = useCallback(async () => {
     if (!anchor || busyRef.current) return
@@ -329,44 +266,16 @@ export function MessageSelectionToolbar({
     (action: SelectionAction, chosenLocale?: TargetLocale) => {
       if (!anchor) return
       setPanelAnchor(anchor)
-      const request: SelectionRunRequest = {
-        action,
-        quote: anchor.text,
-        sessionId,
-        messageIds: anchor.messageIds,
-        context: anchor.context,
-        ...(action === "translate" ? { targetLocale: chosenLocale ?? targetLocale } : {}),
-      }
-      void start(request)
+      start(action, anchor, chosenLocale)
     },
-    [anchor, sessionId, start, targetLocale]
+    [anchor, start]
   )
 
   const onReferenceResult = useCallback(
     async (text: string) => {
-      if (run.status === "idle" || referencing) return
-      setReferencing(true)
-      try {
-        const { request } = run
-        const staged = await stage({
-          messageIds: request.messageIds,
-          text,
-          quote: request.quote,
-          derivation: DERIVATIONS[request.action],
-          ...(request.targetLocale ? { language: request.targetLocale } : {}),
-        })
-        if (staged) {
-          close()
-          setPanelAnchor(null)
-        }
-      } catch (err) {
-        log.error("selection-result-reference-failed", { sessionId, error: String(err) })
-        toast.error(t("referenceError"))
-      } finally {
-        setReferencing(false)
-      }
+      if (await referenceResult(text)) setPanelAnchor(null)
     },
-    [close, referencing, run, sessionId, stage, t]
+    [referenceResult]
   )
 
   const onClosePanel = useCallback(() => {
@@ -384,8 +293,6 @@ export function MessageSelectionToolbar({
     [panelAnchor]
   )
   const canReference = Boolean(anchor && anchor.messageIds.length > 0)
-  const languageLabel = (tag: string | undefined) =>
-    tag && TARGET_LOCALES.includes(tag as TargetLocale) ? tLanguage(tag as TargetLocale) : tag
 
   return (
     <>
@@ -524,7 +431,7 @@ export function MessageSelectionToolbar({
               run={run}
               languageLabel={languageLabel(run.request.targetLocale)}
               onStop={stop}
-              onRetry={() => void start(run.request)}
+              onRetry={retry}
               onClose={onClosePanel}
               onReference={(text) => void onReferenceResult(text)}
               referencing={referencing}

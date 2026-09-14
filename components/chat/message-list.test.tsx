@@ -160,13 +160,15 @@ jest.mock("@/components/interactions/long-press", () => ({
   LongPress: ({
     children,
     onLongPress,
+    className,
   }: {
     children: ReactForMocks.ReactNode
     onLongPress: () => void
+    className?: string
   }) =>
     ReactForMocks.createElement(
       "div",
-      { "data-test": "long-press", onClick: onLongPress },
+      { "data-test": "long-press", className, onClick: onLongPress },
       children
     ),
 }))
@@ -178,6 +180,7 @@ jest.mock("@/components/mobile/chat/message-action-sheet", () => ({
     onDelete?: (m: unknown) => void
     onEditResend?: (m: unknown, newText: string) => void
     onOpenChange?: (next: boolean) => void
+    onSelect?: (m: unknown) => void
     messageMotion?: string
   }) => {
     messageActionSheetProps.push(props)
@@ -202,6 +205,16 @@ jest.mock("@/components/mobile/chat/message-action-sheet", () => ({
           "data-test": "sheet-dismiss",
           onClick: () => props.onOpenChange?.(false),
         }),
+        props.message && props.onSelect
+          ? ReactForMocks.createElement("button", {
+              key: "select",
+              "data-test": "sheet-select",
+              onClick: () => {
+                props.onSelect?.(props.message)
+                props.onOpenChange?.(false)
+              },
+            })
+          : null,
         props.message && props.onEditResend
           ? ReactForMocks.createElement("button", {
               key: "edit",
@@ -2276,6 +2289,93 @@ describe("MessageList — selection mode", () => {
     )
     expect(tick("m1")).not.toBeNull()
     expect(tick("tail")).toBeNull()
+  })
+
+  describe("on a phone", () => {
+    beforeEach(() => {
+      ;(usePlatform as jest.Mock).mockReturnValue("mobile")
+    })
+    afterEach(() => {
+      ;(usePlatform as jest.Mock).mockReturnValue("desktop")
+    })
+    const pressed = (id: string) => row(id).querySelector<HTMLElement>("[data-test='long-press']")!
+    const sheet = () => document.querySelector("[data-test='action-sheet']")
+
+    // No hover reveals a tick on touch: the long-press sheet is the way in.
+    it("opens the mode from the long-press sheet", () => {
+      render(
+        <Wrapper>
+          <MessageList messages={MESSAGES} status="idle" />
+        </Wrapper>
+      )
+      fireEvent.click(pressed("m2"))
+      expect(sheet()).toHaveAttribute("data-message", "open")
+      fireEvent.click(document.querySelector("[data-test='sheet-select']")!)
+      expect(sheet()).toHaveAttribute("data-message", "closed")
+      expect(bar()).toHaveAttribute("data-count", "1")
+      expect(row("m2")).toHaveAttribute("data-selected", "true")
+    })
+
+    it("does not open the sheet for a press made in the mode", () => {
+      render(
+        <Wrapper>
+          <MessageList messages={MESSAGES} status="idle" />
+        </Wrapper>
+      )
+      fireEvent.click(tick("m1")!)
+      fireEvent.click(pressed("m3"))
+      expect(sheet()).toHaveAttribute("data-message", "closed")
+    })
+
+    // The press that opens the sheet must not also select a word under it.
+    it("selects no text under a long press", () => {
+      render(
+        <Wrapper>
+          <MessageList messages={MESSAGES} status="idle" />
+        </Wrapper>
+      )
+      expect(pressed("m1").className).toContain("select-none")
+      expect(pressed("m1").className).toContain("[-webkit-touch-callout:none]")
+    })
+
+    it("leaves the mode on the back gesture", () => {
+      render(
+        <Wrapper>
+          <MessageList messages={MESSAGES} status="idle" />
+        </Wrapper>
+      )
+      fireEvent.click(tick("m1")!)
+      expect(bar()).not.toBeNull()
+      act(() => {
+        window.dispatchEvent(new PopStateEvent("popstate"))
+      })
+      expect(bar()).toBeNull()
+    })
+  })
+
+  // In the mode a row is one thing to tick, not a set of controls.
+  it("sets a row's own controls aside in the mode, without changing its height", () => {
+    render(
+      <Wrapper>
+        <MessageList messages={MESSAGES} status="idle" />
+      </Wrapper>
+    )
+    expect(row("m1").className).not.toContain("[&_[data-message-actions]]:invisible")
+    fireEvent.click(tick("m1")!)
+    expect(row("m2").className).toContain("[&_[data-message-actions]]:invisible")
+    expect(row("m2").className).not.toMatch(/\bhidden\b/)
+  })
+
+  it("makes room under the last message for the bar", () => {
+    render(
+      <Wrapper>
+        <MessageList messages={MESSAGES} status="idle" />
+      </Wrapper>
+    )
+    const column = document.querySelector('[data-slot="conversation-reading-column"]')!
+    expect(column.className).not.toContain("pb-36")
+    fireEvent.click(tick("m1")!)
+    expect(column.className).toContain("pb-36")
   })
 
   it("ends the mode when the pane shows another conversation", () => {
