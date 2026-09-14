@@ -454,7 +454,8 @@ function createInitialState(
     intervalMinutes: 60,
     runAtDate: "",
     runAtTime: "",
-    eventType: "",
+    // Editing an event task used to reset this to blank.
+    eventType: initialValues?.trigger?.eventType || "",
     timezone: initialValues?.trigger?.timezone || defaultTimezone || "UTC",
     payloadJson: initialValues?.payload ? JSON.stringify(initialValues.payload, null, 2) : "{}",
     chatLikeDraft: isChatLikeTaskType(initialType)
@@ -529,6 +530,21 @@ function createInitialState(
     dependsOn: initialValues?.trigger?.dependsOn || [],
   }
 }
+
+/** The built-in event types the form offers; the copy lives under `eventTypePresets`. */
+export const EVENT_TYPE_PRESETS = [
+  "session:created",
+  "session:completed",
+  "session:deleted",
+  "agent:completed",
+  "workflow:completed",
+  "backup:needed",
+  "backup:completed",
+  "sync:started",
+  "sync:completed",
+  "sync:failed",
+] as const
+const EVENT_TYPE_CUSTOM = "custom"
 
 export function TaskForm({
   initialValues,
@@ -644,6 +660,11 @@ export function TaskForm({
       })
     }
   }, [f, t])
+
+  // Which preset the event-type picker shows; anything not in the list is "custom".
+  const eventTypePreset = (EVENT_TYPE_PRESETS as readonly string[]).includes(f.eventType)
+    ? f.eventType
+    : EVENT_TYPE_CUSTOM
 
   /**
    * Handle the user picking a different task type. We migrate the structured
@@ -1292,12 +1313,43 @@ export function TaskForm({
           {f.triggerType === "event" && (
             <div className="space-y-2 rounded-lg border border-dashed bg-muted/30 p-3">
               <Label className="text-sm">{t("eventType") || "Event Type"}</Label>
-              <Input
-                value={f.eventType}
-                onChange={(e) => updateForm({ eventType: e.target.value, triggerError: null })}
-                placeholder={t("eventTypePlaceholder")}
-                className="h-10 transition-all focus:ring-2 focus:ring-primary/20"
-              />
+              {/* The nine presets had copy for months while this was a bare
+                  text box. A preset fills the field; "Custom" keeps it free. */}
+              <Select
+                value={eventTypePreset}
+                onValueChange={(value) =>
+                  updateForm({
+                    eventType: value === EVENT_TYPE_CUSTOM ? "" : value,
+                    triggerError: null,
+                  })
+                }
+              >
+                <SelectTrigger
+                  className="h-10 text-sm"
+                  aria-label={t("eventTypePresetLabel")}
+                  data-testid="scheduler-event-type-preset"
+                >
+                  <SelectValue placeholder={t("eventTypePresetLabel")} />
+                </SelectTrigger>
+                <SelectContent>
+                  {EVENT_TYPE_PRESETS.map((preset) => (
+                    <SelectItem key={preset} value={preset}>
+                      {t(`eventTypePresets.${preset}`)}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value={EVENT_TYPE_CUSTOM}>{t("eventTypePresets.custom")}</SelectItem>
+                </SelectContent>
+              </Select>
+              {eventTypePreset === EVENT_TYPE_CUSTOM && (
+                <Input
+                  value={f.eventType}
+                  onChange={(e) => updateForm({ eventType: e.target.value, triggerError: null })}
+                  placeholder={t("eventTypePlaceholder")}
+                  aria-label={t("eventTypeCustomLabel")}
+                  className="h-10 transition-all focus:ring-2 focus:ring-primary/20"
+                  data-testid="scheduler-event-type-custom"
+                />
+              )}
             </div>
           )}
 
@@ -1581,6 +1633,10 @@ export function TaskForm({
                 label: t("notifyOnProgress"),
                 checked: f.notifyOnProgress,
                 field: "notifyOnProgress" as const,
+                // Only `plugin` has a progress reporter (`execution-progress.ts`);
+                // for every other type the switch would arm a notification that
+                // can never fire, so it is disabled and says why (Working Rule 7).
+                inert: f.taskType !== "plugin",
               },
             ].map((item) => (
               <div
@@ -1595,14 +1651,23 @@ export function TaskForm({
                 <Label className="cursor-pointer text-sm">{item.label}</Label>
                 <Switch
                   checked={item.checked}
+                  disabled={"inert" in item && item.inert}
+                  aria-describedby={
+                    "inert" in item && item.inert ? "notify-on-progress-hint" : undefined
+                  }
+                  data-testid={item.key === "progress" ? "notify-on-progress-switch" : undefined}
                   onCheckedChange={(v) => updateForm({ [item.field]: v })}
                 />
               </div>
             ))}
           </div>
 
-          {f.notifyOnProgress && (
-            <p className="text-[10px] text-muted-foreground" data-testid="notify-on-progress-hint">
+          {(f.notifyOnProgress || f.taskType !== "plugin") && (
+            <p
+              id="notify-on-progress-hint"
+              className="text-[10px] text-muted-foreground"
+              data-testid="notify-on-progress-hint"
+            >
               {t("notifyOnProgressHint")}
             </p>
           )}

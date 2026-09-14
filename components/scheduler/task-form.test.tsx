@@ -163,6 +163,48 @@ describe("TaskForm", () => {
     expect(document.querySelector("input")).not.toBeNull()
   })
 
+  it("offers the event-type presets and keeps a free field for a custom type", () => {
+    render(
+      <TaskForm
+        onSubmit={jest.fn(async () => undefined)}
+        onCancel={jest.fn()}
+        initialValues={{ trigger: { type: "event", eventType: "my:custom" } }}
+      />
+    )
+    const custom = screen.getByTestId("scheduler-event-type-custom") as HTMLInputElement
+    expect(custom.value).toBe("my:custom")
+    const presetSelect = screen
+      .getAllByTestId("select-stub")
+      .find((select) => select.querySelector("option[value='backup:completed']"))!
+    fireEvent.change(presetSelect, { target: { value: "backup:completed" } })
+    expect(screen.queryByTestId("scheduler-event-type-custom")).toBeNull()
+    expect((presetSelect as HTMLSelectElement).value).toBe("backup:completed")
+    fireEvent.change(presetSelect, { target: { value: "custom" } })
+    expect((screen.getByTestId("scheduler-event-type-custom") as HTMLInputElement).value).toBe("")
+  })
+
+  it("labels the progress notification inert for every type but plugin", () => {
+    const chat = render(
+      <TaskForm
+        onSubmit={jest.fn(async () => undefined)}
+        onCancel={jest.fn()}
+        initialValues={{ type: "chat" }}
+      />
+    )
+    expect(screen.getByTestId("notify-on-progress-switch")).toBeDisabled()
+    expect(screen.getByTestId("notify-on-progress-hint")).toBeInTheDocument()
+    chat.unmount()
+    render(
+      <TaskForm
+        onSubmit={jest.fn(async () => undefined)}
+        onCancel={jest.fn()}
+        initialValues={{ type: "plugin" }}
+      />
+    )
+    expect(screen.getByTestId("notify-on-progress-switch")).not.toBeDisabled()
+    expect(screen.queryByTestId("notify-on-progress-hint")).toBeNull()
+  })
+
   it("shows lifecycle and jitter controls for recurring triggers only", () => {
     const first = render(
       <TaskForm onSubmit={jest.fn(async () => undefined)} onCancel={jest.fn()} />
