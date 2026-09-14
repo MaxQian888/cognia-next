@@ -12,8 +12,9 @@
  *    separate `entry` module, and a bundled `builtin://` plugin has no
  *    fetchable install path to import one from.
  *  - `activate()` bridges `ctx.terminal` + `ctx.dexie` + `ctx.contextPanels`
- *    into a module-level runtime the panel reads.
- *  - `/security` reveals the panel instead of selecting a rail guild.
+ *    + `ctx.ui` into a module-level runtime the panel reads.
+ *  - `/security` reveals the panel; `/security <target>` also pre-fills the
+ *    scan form once one mounts (see `setPendingTarget`).
  *
  * The old container carried `when: "platform.tauri"`. Context panels have no
  * `when` clause, and it was redundant anyway: `runtimeCompatibility` blocks
@@ -26,7 +27,8 @@ import manifest from "../plugin.json"
 import { I18N_MESSAGES } from "./i18n"
 import { StrixPanel } from "./StrixPanel"
 import { PANEL_ID, PLUGIN_ID } from "./ids"
-import { clearStrixRuntime, setStrixRuntime } from "./runtime"
+import { markInterruptedRuns } from "./db"
+import { abortActiveScan, clearStrixRuntime, setPendingTarget, setStrixRuntime } from "./runtime"
 
 let disposePanel: (() => void) | undefined
 
@@ -46,7 +48,25 @@ const definition: PluginDefinition = {
         dexie,
         contextPanels: ctx.contextPanels ?? null,
         securityScans: ctx.securityScans,
+        ui: ctx.ui ?? null,
       })
+
+      // A run row left `running` by a previous host lifetime is lying — its
+      // PTY is long dead. Reconcile it to `cancelled` so the history and the
+      // execution journal stop showing a scan that can never finish.
+      // Best-effort: the panel must activate even if IndexedDB is unhappy.
+      const activatedAt = Date.now()
+      void markInterruptedRuns(dexie, {
+        cutoff: activatedAt,
+        error:
+          "Scan was interrupted — the host was closed or the plugin was reloaded before it finished.",
+      })
+        .then((runs) => {
+          for (const run of runs) {
+            void ctx.securityScans?.syncExecutionRun(run).catch(() => undefined)
+          }
+        })
+        .catch(() => undefined)
     } else {
       ctx.logger?.error?.("strix-security: ctx.dexie unavailable — panel will be inert")
     }
@@ -79,14 +99,22 @@ const definition: PluginDefinition = {
     // here — the supported shape per the author-SDK migration table. The
     // manager owns registration and teardown.
     return {
-      onCommand: async (command: string) => {
+      onCommand: async (command: string, args?: string[]) => {
         if (command !== "security") return false
+        // `/security https://example.com` pre-fills the form's target field;
+        // the panel consumes the stash on mount (or its next mount).
+        const target = args?.join(" ").trim()
+        if (target) setPendingTarget(target)
         return ctx.contextPanels?.reveal(PANEL_ID, "wide") ?? false
       },
     }
   },
 
   deactivate: async (ctx?: PluginContext) => {
+    // An in-flight scan holds a PTY the plugin owns; leaving it running past
+    // teardown would orphan the session. The runner records the run as
+    // `cancelled` when the abort lands.
+    abortActiveScan()
     disposePanel?.()
     disposePanel = undefined
     clearStrixRuntime()

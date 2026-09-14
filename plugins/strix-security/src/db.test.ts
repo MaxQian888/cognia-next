@@ -3,12 +3,20 @@
  */
 import {
   addSuppressionRule,
+  clearAllRuns,
+  deleteRun,
+  getPref,
   listFindingStates,
+  listFindings,
+  listRuns,
   listSuppressionRules,
+  markInterruptedRuns,
   removeSuppressionRule,
   setFindingState,
+  setPref,
   suppressionRuleId,
 } from "./db"
+import type { StrixRun } from "./types"
 import type { PluginDexieAPI } from "@cognia/plugin-sdk"
 /**
  * Map-backed stand-in for one namespaced plugin table.
@@ -31,13 +39,38 @@ function fakeDexie() {
       put: async (row: Record<string, unknown>) => {
         rows(name).set(String(row.key ?? row.id), row)
       },
+      get: async (key: string) => rows(name).get(key),
       delete: async (key: string) => {
         rows(name).delete(key)
       },
-      where: (field: string) => ({
-        equals: (value: unknown) => ({
-          toArray: async () => [...rows(name).values()].filter((row) => row[field] === value),
+      clear: async () => {
+        rows(name).clear()
+      },
+      bulkPut: async (list: Record<string, unknown>[]) => {
+        for (const row of list) rows(name).set(String(row.key ?? row.id ?? row.runId), row)
+      },
+      orderBy: (field: string) => ({
+        reverse: () => ({
+          toArray: async () =>
+            [...rows(name).values()].sort((a, b) => Number(b[field]) - Number(a[field])),
         }),
+      }),
+      where: (field: string) => ({
+        equals: (value: unknown) => {
+          const matched = () => [...rows(name).entries()].filter(([, row]) => row[field] === value)
+          return {
+            toArray: async () => matched().map(([, row]) => row),
+            delete: async () => {
+              for (const [key] of matched()) rows(name).delete(key)
+            },
+            filter: (fn: (row: Record<string, unknown>) => boolean) => ({
+              toArray: async () =>
+                matched()
+                  .map(([, row]) => row)
+                  .filter(fn),
+            }),
+          }
+        },
       }),
     }),
   } as unknown as PluginDexieAPI
@@ -177,5 +210,113 @@ describe("suppression rules", () => {
     await addSuppressionRule(api, { target: "https://b.com", ruleId: "xss", now: 1 })
     expect(await listSuppressionRules(api, "https://a.com")).toHaveLength(1)
     expect((await listSuppressionRules(api, "https://b.com"))[0].ruleId).toBe("xss")
+  })
+})
+
+describe("markInterruptedRuns", () => {
+  const runRow = (over: Partial<StrixRun>): StrixRun => ({
+    runId: "r",
+    target: "t",
+    startedAt: 0,
+    status: "running",
+    findingsCount: 0,
+    authorizedAt: 0,
+    ...over,
+  })
+
+  it("cancels runs started before activation and returns them", async () => {
+    const { api, rows } = fakeDexie()
+    rows("runs").set("old", runRow({ runId: "old", startedAt: 100 }))
+    rows("runs").set("done", runRow({ runId: "done", startedAt: 50, status: "done" }))
+
+    const reconciled = await markInterruptedRuns(api, { cutoff: 500, error: "interrupted" })
+    expect(reconciled).toHaveLength(1)
+    expect(reconciled[0]).toMatchObject({
+      runId: "old",
+      status: "cancelled",
+      endedAt: 500,
+      error: "interrupted",
+    })
+    expect(rows("runs").get("old")?.status).toBe("cancelled")
+    // A genuinely finished run is untouched.
+    expect(rows("runs").get("done")?.status).toBe("done")
+  })
+
+  it("leaves a scan started by this generation alone — another panel may own it", async () => {
+    const { api, rows } = fakeDexie()
+    rows("runs").set("live", runRow({ runId: "live", startedAt: 600 }))
+
+    const reconciled = await markInterruptedRuns(api, { cutoff: 500, error: "interrupted" })
+    expect(reconciled).toHaveLength(0)
+    expect(rows("runs").get("live")?.status).toBe("running")
+  })
+})
+
+describe("runs + findings tables", () => {
+  const runRow = (over: Partial<StrixRun>): StrixRun => ({
+    runId: "r",
+    target: "t",
+    startedAt: 0,
+    status: "done",
+    findingsCount: 0,
+    authorizedAt: 0,
+    ...over,
+  })
+
+  it("lists runs newest-first", async () => {
+    const { api, rows } = fakeDexie()
+    rows("runs").set("a", runRow({ runId: "a", startedAt: 10 }))
+    rows("runs").set("b", runRow({ runId: "b", startedAt: 30 }))
+    rows("runs").set("c", runRow({ runId: "c", startedAt: 20 }))
+
+    expect((await listRuns(api)).map((r) => r.runId)).toEqual(["b", "c", "a"])
+  })
+
+  it("lists only the findings belonging to a run", async () => {
+    const { api, rows } = fakeDexie()
+    rows("findings").set("f1", { id: 1, runId: "r1", severity: "high" })
+    rows("findings").set("f2", { id: 2, runId: "r2", severity: "low" })
+
+    const findings = await listFindings(api, "r1")
+    expect(findings).toHaveLength(1)
+    expect(findings[0].runId).toBe("r1")
+  })
+
+  it("deletes a run's findings with the run but leaves other runs alone", async () => {
+    const { api, rows } = fakeDexie()
+    rows("runs").set("r1", runRow({ runId: "r1" }))
+    rows("runs").set("r2", runRow({ runId: "r2" }))
+    rows("findings").set("f1", { id: 1, runId: "r1" })
+    rows("findings").set("f2", { id: 2, runId: "r2" })
+
+    await deleteRun(api, "r1")
+    expect(rows("runs").has("r1")).toBe(false)
+    expect(rows("runs").has("r2")).toBe(true)
+    expect(rows("findings").has("f1")).toBe(false)
+    expect(rows("findings").has("f2")).toBe(true)
+  })
+
+  it("clear-all wipes runs, findings, and target-scoped triage too", async () => {
+    const { api, rows } = fakeDexie()
+    rows("runs").set("r1", runRow({ runId: "r1" }))
+    rows("findings").set("f1", { id: 1, runId: "r1" })
+    rows("findingStates").set("s1", { key: "s1" })
+    rows("suppressionRules").set("x1", { id: "x1" })
+
+    await clearAllRuns(api)
+    for (const name of ["runs", "findings", "findingStates", "suppressionRules"]) {
+      expect(rows(name).size).toBe(0)
+    }
+  })
+})
+
+describe("prefs", () => {
+  it("round-trips a preference and reports misses as undefined", async () => {
+    const { api } = fakeDexie()
+    expect(await getPref(api, "lastTarget")).toBeUndefined()
+    await setPref(api, "lastTarget", "https://saved")
+    expect(await getPref(api, "lastTarget")).toBe("https://saved")
+    await setPref(api, "lastTarget", "https://newer")
+    expect(await getPref(api, "lastTarget")).toBe("https://newer")
   })
 })

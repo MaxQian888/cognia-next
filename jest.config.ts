@@ -462,6 +462,17 @@ const globalConfig: Config = {
     // pure TypeScript behind a mocked pdf.js seam — same co-located ≥90% contract.
     "plugins/cognia-pdf/src/**/*.{ts,tsx}",
     "!plugins/cognia-pdf/src/**/*.test.{ts,tsx}",
+    // Strix Security: the desktop-only pentest plugin — same co-located ≥90%
+    // contract. `types.ts` is interface-only (v8 scores it 0%) and
+    // `lib/mock-shell.ts` is a test double imported solely by *.test.ts files.
+    "plugins/strix-security/src/**/*.{ts,tsx}",
+    "!plugins/strix-security/src/**/*.test.{ts,tsx}",
+    "!plugins/strix-security/src/types.ts",
+    "!plugins/strix-security/src/lib/mock-shell.ts",
+    // E2B Sandbox: the browser-bundled workspace backend + microVM adapter +
+    // status panel are co-located unit-tested — same ≥90% contract.
+    "plugins/e2b-sandbox/src/**/*.{ts,tsx}",
+    "!plugins/e2b-sandbox/src/**/*.test.{ts,tsx}",
     // The overlay is shipped as a string and loaded by its suites via
     // readFileSync + eval, so V8 cannot attribute any coverage to it and all
     // ~1.8k lines report 0% — diluting the `global` bucket (the

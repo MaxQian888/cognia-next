@@ -35,6 +35,35 @@ export function listRuns(dexie: PluginDexieAPI): Promise<StrixRun[]> {
   return runsTable(dexie).orderBy("startedAt").reverse().toArray()
 }
 
+/**
+ * Cancel runs left `running` by a previous host lifetime.
+ *
+ * A scan whose `startedAt` predates this activation cannot still be running —
+ * its PTY died with the process or plugin generation that spawned it. Rows
+ * started AFTER activation belong to this generation (a second mounted panel
+ * could own one) and are left alone. Returns the reconciled rows so the
+ * caller can project them onto the execution journal.
+ */
+export async function markInterruptedRuns(
+  dexie: PluginDexieAPI,
+  input: { cutoff: number; error: string }
+): Promise<StrixRun[]> {
+  const stale = await runsTable(dexie)
+    .where("status")
+    .equals("running")
+    .filter((run) => run.startedAt < input.cutoff)
+    .toArray()
+  if (stale.length === 0) return []
+  const reconciled = stale.map((run) => ({
+    ...run,
+    status: "cancelled" as const,
+    endedAt: input.cutoff,
+    error: input.error,
+  }))
+  await runsTable(dexie).bulkPut(reconciled)
+  return reconciled
+}
+
 /** Findings for one run, most-severe first is applied by the caller. */
 export function listFindings(dexie: PluginDexieAPI, runId: string): Promise<StrixFinding[]> {
   return findingsTable(dexie).where("runId").equals(runId).toArray()

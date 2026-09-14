@@ -8,7 +8,7 @@ jest.mock("next-intl", () => ({ useLocale: () => "en" }))
 
 import { FindingsList } from "./findings-list"
 import { I18N_MESSAGES } from "../i18n"
-import { FINDING_STATES } from "../types"
+import { FINDING_STATES, SEVERITY_ORDER } from "../types"
 import type { FindingStateRow, StrixFinding, SuppressionRule } from "../types"
 
 function finding(over: Partial<StrixFinding> = {}): StrixFinding {
@@ -47,7 +47,27 @@ describe("FindingsList", () => {
     expect(screen.getAllByTestId("strix-finding")).toHaveLength(2)
   })
 
-  it("marks findings muted by a verdict and counts them", () => {
+  it("summarizes the report by severity, most severe first", () => {
+    render(
+      <FindingsList
+        findings={[
+          finding({ severity: "high" }),
+          finding({ vulnId: "v2", fingerprint: "fp2", severity: "critical" }),
+          finding({ vulnId: "v3", fingerprint: "fp3", severity: "high" }),
+        ]}
+      />
+    )
+    const chips = screen.getByTestId("strix-findings-severity")
+    expect(chips).toHaveTextContent("1 critical")
+    expect(chips).toHaveTextContent("2 high")
+    // Order follows SEVERITY_ORDER, not report order.
+    expect(chips.textContent?.indexOf("critical")).toBeLessThan(
+      chips.textContent?.indexOf("high") ?? 0
+    )
+  })
+
+  it("marks findings muted by a verdict and offers the open/muted filter", async () => {
+    const user = userEvent.setup()
     render(
       <FindingsList
         findings={[finding(), finding({ vulnId: "v2", fingerprint: "fp2" })]}
@@ -58,7 +78,23 @@ describe("FindingsList", () => {
     const cards = screen.getAllByTestId("strix-finding")
     expect(cards[0]).toHaveAttribute("data-suppressed", "true")
     expect(cards[1]).not.toHaveAttribute("data-suppressed")
-    expect(screen.getByTestId("strix-findings-muted")).toHaveTextContent("1")
+    expect(screen.getByTestId("strix-filter-muted")).toHaveTextContent("1")
+
+    await user.click(screen.getByTestId("strix-filter-open"))
+    expect(screen.getAllByTestId("strix-finding")).toHaveLength(1)
+    expect(screen.getByTestId("strix-finding")).not.toHaveAttribute("data-suppressed")
+
+    await user.click(screen.getByTestId("strix-filter-muted"))
+    expect(screen.getAllByTestId("strix-finding")).toHaveLength(1)
+    expect(screen.getByTestId("strix-finding")).toHaveAttribute("data-suppressed", "true")
+
+    await user.click(screen.getByTestId("strix-filter-all"))
+    expect(screen.getAllByTestId("strix-finding")).toHaveLength(2)
+  })
+
+  it("offers no filter when nothing is muted", () => {
+    render(<FindingsList findings={[finding()]} onStateChange={jest.fn()} />)
+    expect(screen.queryByTestId("strix-findings-filter")).not.toBeInTheDocument()
   })
 
   it("marks findings muted by a rule covering their class", () => {
@@ -84,7 +120,7 @@ describe("FindingsList", () => {
       />
     )
     expect(screen.getByTestId("strix-finding")).not.toHaveAttribute("data-suppressed")
-    expect(screen.queryByTestId("strix-findings-muted")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("strix-findings-filter")).not.toBeInTheDocument()
   })
 
   it("passes the verdict change up with the finding it belongs to", async () => {
@@ -92,7 +128,8 @@ describe("FindingsList", () => {
     const user = userEvent.setup()
     const target = finding({ vulnId: "v2", fingerprint: "fp2", title: "XSS" })
     render(<FindingsList findings={[finding(), target]} onStateChange={onStateChange} />)
-    await user.selectOptions(screen.getAllByTestId("strix-finding-state")[1], "accepted")
+    await user.click(screen.getAllByTestId("strix-finding-state")[1])
+    await user.click(screen.getByRole("option", { name: "Risk accepted" }))
     expect(onStateChange).toHaveBeenCalledWith(target, "accepted")
   })
 
@@ -133,6 +170,14 @@ describe("FindingsList", () => {
     await user.click(screen.getByTestId("strix-export-sarif"))
     expect(onExport).toHaveBeenCalled()
   })
+
+  it("stays single-column unless told the panel is wide", () => {
+    const { rerender, container } = render(<FindingsList findings={[finding()]} />)
+    expect(container.querySelector(".grid-cols-2")).toBeNull()
+
+    rerender(<FindingsList findings={[finding()]} columns={2} />)
+    expect(container.querySelector(".grid-cols-2")).not.toBeNull()
+  })
 })
 
 describe("triage translation keys", () => {
@@ -148,6 +193,19 @@ describe("triage translation keys", () => {
           state,
           typeof messages[`plugin.strix-security.triage.state.${state}`],
         ]).toEqual([locale, state, "string"])
+      }
+    }
+  })
+
+  it("carries every severity label in both locales", () => {
+    for (const locale of ["en", "zh-CN"] as const) {
+      const messages = I18N_MESSAGES[locale] as Record<string, string>
+      for (const severity of SEVERITY_ORDER) {
+        expect([
+          locale,
+          severity,
+          typeof messages[`plugin.strix-security.severity.${severity}`],
+        ]).toEqual([locale, severity, "string"])
       }
     }
   })

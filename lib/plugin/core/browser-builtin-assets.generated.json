@@ -9,9 +9,18 @@
         "description": "Plugin-owned native XLSX authoring, preview, validation, export, and Lark Sheets synchronization.",
         "type": "frontend",
         "capabilities": [
-          "tools"
+          "tools",
+          "importers"
         ],
         "main": "src/index.ts",
+        "icon": "FileSpreadsheet",
+        "keywords": [
+          "xlsx",
+          "excel",
+          "spreadsheet",
+          "workbook",
+          "lark"
+        ],
         "author": {
           "name": "cognia-next"
         },
@@ -56,8 +65,8 @@
       "path": "builtin://cognia-office",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-office/9369cad1f497d27160d8d6fdf2a7d7c299702d707e5f930a01f0c959cdaf8806.cjs",
-        "sha256": "9369cad1f497d27160d8d6fdf2a7d7c299702d707e5f930a01f0c959cdaf8806",
+        "url": "/_cognia/builtin-plugins/cognia-office/373287dcd227d5568fa06580adf3cdd07d4a1799beca2cafbe9dcc281228ed5f.cjs",
+        "sha256": "373287dcd227d5568fa06580adf3cdd07d4a1799beca2cafbe9dcc281228ed5f",
         "sharedModules": []
       }
     },
@@ -145,7 +154,8 @@
           "artifact:read",
           "artifact:write",
           "filesystem:read",
-          "filesystem:write"
+          "filesystem:write",
+          "export:session"
         ],
         "activationEvents": [
           "startup"
@@ -174,9 +184,11 @@
       "path": "builtin://cognia-documents",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-documents/af61c88d0227aaf5234511ce4d16a64158a1d624bb661ab16060db4ea27e6ac4.cjs",
-        "sha256": "af61c88d0227aaf5234511ce4d16a64158a1d624bb661ab16060db4ea27e6ac4",
-        "sharedModules": []
+        "url": "/_cognia/builtin-plugins/cognia-documents/d73d7bcaf8d678b14c58762620263c2052f441b95c0ae87bb64629c5d55e0e41.cjs",
+        "sha256": "d73d7bcaf8d678b14c58762620263c2052f441b95c0ae87bb64629c5d55e0e41",
+        "sharedModules": [
+          "@cognia/plugin-sdk"
+        ]
       }
     },
     "cognia-presentations": {
@@ -188,8 +200,7 @@
         "type": "frontend",
         "capabilities": [
           "tools",
-          "importers",
-          "exporters"
+          "importers"
         ],
         "main": "src/index.ts",
         "author": {
@@ -209,6 +220,54 @@
         "activationEvents": [
           "startup"
         ],
+        "i18n": {
+          "locales": {
+            "en": {
+              "renderer.name": "Cognia Presentation",
+              "preview.slides": "Slides",
+              "preview.slideOf": "Slide {index} of {total}",
+              "preview.slideLabel": "Slide {index}: {title}",
+              "preview.notes": "Speaker notes",
+              "preview.validation": "Validation",
+              "preview.empty": "This presentation has no slides yet.",
+              "preview.chart": "Chart",
+              "preview.chartSummary": "{title}: {count} bars",
+              "importer.name": "PowerPoint presentation",
+              "importer.description": "Import PPTX into the Cognia presentation model.",
+              "importer.binaryRequired": "PPTX import requires binary content.",
+              "importer.failed": "PPTX import failed.",
+              "card.title": "Presentation",
+              "card.slides": "Slides: {count}",
+              "card.errors": "Errors: {count}",
+              "card.warnings": "Warnings: {count}",
+              "card.exported": "Exported {size}",
+              "card.open": "Open",
+              "card.version": "v{version}"
+            },
+            "zh-CN": {
+              "renderer.name": "Cognia 演示文稿",
+              "preview.slides": "幻灯片",
+              "preview.slideOf": "第 {index} 张，共 {total} 张",
+              "preview.slideLabel": "幻灯片 {index}：{title}",
+              "preview.notes": "演讲者备注",
+              "preview.validation": "校验",
+              "preview.empty": "此演示文稿还没有幻灯片。",
+              "preview.chart": "图表",
+              "preview.chartSummary": "{title}：{count} 个数据条",
+              "importer.name": "PowerPoint 演示文稿",
+              "importer.description": "将 PPTX 导入为 Cognia 演示文稿模型。",
+              "importer.binaryRequired": "PPTX 导入需要二进制内容。",
+              "importer.failed": "PPTX 导入失败。",
+              "card.title": "演示文稿",
+              "card.slides": "幻灯片：{count}",
+              "card.errors": "错误：{count}",
+              "card.warnings": "警告：{count}",
+              "card.exported": "已导出 {size}",
+              "card.open": "打开",
+              "card.version": "版本 {version}"
+            }
+          }
+        },
         "runtimeCompatibility": {
           "browser": {
             "availability": "supported",
@@ -233,9 +292,14 @@
       "path": "builtin://cognia-presentations",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-presentations/15e51607e3a59883bce84d8a7ce512235f6cae0ead53009f39a25daf60bd93b9.cjs",
-        "sha256": "15e51607e3a59883bce84d8a7ce512235f6cae0ead53009f39a25daf60bd93b9",
-        "sharedModules": []
+        "url": "/_cognia/builtin-plugins/cognia-presentations/716a5e95eca56f2a46d3033c82e09784e1fb3c9ed2be44315ae389735ac43fe5.cjs",
+        "sha256": "716a5e95eca56f2a46d3033c82e09784e1fb3c9ed2be44315ae389735ac43fe5",
+        "sharedModules": [
+          "@cognia/plugin-sdk",
+          "@cognia/plugin-ui",
+          "lucide-react",
+          "react/jsx-runtime"
+        ]
       }
     },
     "cognia-visualize": {
@@ -276,21 +340,25 @@
             "entrypoint": "src/index.ts"
           },
           "headless": {
-            "availability": "supported",
-            "entrypoint": "src/index.ts"
+            "availability": "degraded",
+            "entrypoint": "src/index.ts",
+            "reason": "Authoring, validation, listing, and JSON export are available; the artifact preview panel and file save pickers require a UI shell."
           },
           "mobile": {
-            "availability": "supported",
-            "entrypoint": "src/index.ts"
+            "availability": "degraded",
+            "entrypoint": "src/index.ts",
+            "reason": "Authoring, preview, and report export are available; native save dialogs depend on the connected shell."
           }
         }
       },
       "path": "builtin://cognia-visualize",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-visualize/f50da9583eae213b93ec0d799453a0ffa26745b852f41f68a02e89649028bc81.cjs",
-        "sha256": "f50da9583eae213b93ec0d799453a0ffa26745b852f41f68a02e89649028bc81",
-        "sharedModules": []
+        "url": "/_cognia/builtin-plugins/cognia-visualize/487d0bbb5658bf31e42f7263a005642e77300d03fd4bad29a651431595bca4fd.cjs",
+        "sha256": "487d0bbb5658bf31e42f7263a005642e77300d03fd4bad29a651431595bca4fd",
+        "sharedModules": [
+          "@cognia/plugin-sdk"
+        ]
       }
     }
   }

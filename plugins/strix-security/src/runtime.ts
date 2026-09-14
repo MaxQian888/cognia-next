@@ -2,14 +2,25 @@
 // the React panel (which receives only `ContextPanelRenderProps`). `activate`
 // stashes the APIs here; the panel + runner read them via `getStrixRuntime()`.
 // Mirrors pet-daily-quests' `configureQuestStore` decoupling.
+//
+// The two slots below the runtime are process state, not React state, on
+// purpose: the panel can unmount (resource switch, workbench collapse) while a
+// scan keeps running, and a remounted panel still needs to cancel it; a
+// `/security <target>` dispatch can arrive while no panel is mounted and must
+// survive until one is.
 
 import type { PluginContextPanelAPI } from "@cognia/plugin-sdk"
-import type { PluginDexieAPI } from "@cognia/plugin-sdk"
+import type { PluginDexieAPI, PluginUIAPI } from "@cognia/plugin-sdk"
 import type { PluginSecurityScansAPI, PluginTerminalAPI } from "@cognia/plugin-sdk"
 export interface StrixRuntime {
   terminal: PluginTerminalAPI
   dexie: PluginDexieAPI
   securityScans: PluginSecurityScansAPI
+  /**
+   * Host-owned dialogs/toasts — the panel never falls back to
+   * `window.confirm`, which does not exist inside a workbench iframe.
+   */
+  ui?: PluginUIAPI | null
   /**
    * The workbench API the panel was registered through, so a running scan can
    * put a count on its own rail button. Null when registration was refused —
@@ -39,4 +50,53 @@ export function getStrixRuntime(): StrixRuntime {
     throw new Error("strix-security: runtime not initialized (plugin not activated)")
   }
   return runtime
+}
+
+// ------------------------------------------------------------ active scan
+
+/**
+ * The scan currently driving a PTY, if any. Only one runs at a time (the form
+ * gates on it), so a single slot suffices. Keyed by runId so a stale holder
+ * can be detected rather than aborted by accident.
+ */
+let activeScan: { runId: string; controller: AbortController } | null = null
+
+export function setActiveScan(runId: string, controller: AbortController): void {
+  activeScan = { runId, controller }
+}
+
+export function getActiveScan(): { runId: string; controller: AbortController } | null {
+  return activeScan
+}
+
+export function clearActiveScan(runId?: string): void {
+  if (!runId || activeScan?.runId === runId) activeScan = null
+}
+
+/**
+ * Abort the in-flight scan, wherever the request came from — the panel's
+ * cancel button, the run journal's controller, or plugin teardown. The runner
+ * translates the abort into a `cancelled` run row and kills the PTY itself.
+ */
+export function abortActiveScan(): void {
+  activeScan?.controller.abort()
+}
+
+// ---------------------------------------------------------- pending target
+
+/**
+ * A scan target carried in by `/security <target>`. One-shot: the first
+ * mounted ScanForm consumes it. `onCommand` cannot pass props to a panel that
+ * may not be mounted yet, so the hand-off lives here.
+ */
+let pendingTarget: string | null = null
+
+export function setPendingTarget(target: string): void {
+  pendingTarget = target
+}
+
+export function consumePendingTarget(): string | null {
+  const target = pendingTarget
+  pendingTarget = null
+  return target
 }

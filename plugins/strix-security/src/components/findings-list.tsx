@@ -1,16 +1,37 @@
 "use client"
 
+import { useState } from "react"
 import { Download, ShieldCheck } from "lucide-react"
 import { Button } from "@cognia/plugin-ui"
-import type { FindingState, FindingStateRow, StrixFinding, SuppressionRule } from "../types"
+import { cn } from "@cognia/plugin-ui"
+import {
+  SEVERITY_ORDER,
+  type FindingState,
+  type FindingStateRow,
+  type Severity,
+  type StrixFinding,
+  type SuppressionRule,
+} from "../types"
 import { findingStateOf, isSuppressed } from "../lib/triage"
 import { usePluginT } from "../use-plugin-t"
 import { FindingCard } from "./finding-card"
+
+const SEVERITY_CHIP: Record<Severity, string> = {
+  critical: "text-red-600 dark:text-red-400",
+  high: "text-orange-600 dark:text-orange-400",
+  medium: "text-amber-600 dark:text-amber-400",
+  low: "text-yellow-600 dark:text-yellow-400",
+  info: "text-slate-500 dark:text-slate-400",
+}
+
+type Filter = "all" | "open" | "muted"
 
 export interface FindingsListProps {
   findings: StrixFinding[]
   states?: readonly FindingStateRow[]
   rules?: readonly SuppressionRule[]
+  /** Card columns — 1 for a narrow panel, 2 when docked wide. */
+  columns?: 1 | 2
   onStateChange?: (finding: StrixFinding, state: FindingState) => void
   onSuppressRule?: (finding: StrixFinding) => void
   onUnsuppressRule?: (finding: StrixFinding) => void
@@ -21,12 +42,14 @@ export function FindingsList({
   findings,
   states = [],
   rules = [],
+  columns = 1,
   onStateChange,
   onSuppressRule,
   onUnsuppressRule,
   onExport,
 }: FindingsListProps) {
   const t = usePluginT()
+  const [filter, setFilter] = useState<Filter>("all")
 
   if (findings.length === 0) {
     return (
@@ -41,7 +64,20 @@ export function FindingsList({
   }
 
   const suppression = { states, rules }
-  const mutedCount = findings.filter((finding) => isSuppressed(finding, suppression)).length
+  const suppressedOf = (finding: StrixFinding) => isSuppressed(finding, suppression)
+  const mutedCount = findings.filter(suppressedOf).length
+  const visible =
+    filter === "all"
+      ? findings
+      : findings.filter((finding) => suppressedOf(finding) === (filter === "muted"))
+
+  // Per-severity counts, most severe first — the shape of the report at a
+  // glance, without reading a single card.
+  const bySeverity = new Map<Severity, number>()
+  for (const finding of findings) {
+    bySeverity.set(finding.severity, (bySeverity.get(finding.severity) ?? 0) + 1)
+  }
+  const severityChips = SEVERITY_ORDER.filter((s) => bySeverity.has(s))
 
   return (
     <div className="flex flex-col gap-2" data-testid="strix-findings">
@@ -49,11 +85,13 @@ export function FindingsList({
         <h3 className="text-xs font-semibold uppercase text-muted-foreground">
           {t("findings.count", { count: findings.length })}
         </h3>
-        {mutedCount > 0 && (
-          <span className="text-xs text-muted-foreground" data-testid="strix-findings-muted">
-            {t("triage.mutedCount", { count: mutedCount })}
-          </span>
-        )}
+        <span className="flex items-center gap-1.5 text-xs" data-testid="strix-findings-severity">
+          {severityChips.map((severity) => (
+            <span key={severity} className={cn("font-medium", SEVERITY_CHIP[severity])}>
+              {t(`severity.${severity}`, { count: bySeverity.get(severity) ?? 0 })}
+            </span>
+          ))}
+        </span>
         {onExport && (
           <Button
             size="sm"
@@ -67,20 +105,50 @@ export function FindingsList({
           </Button>
         )}
       </div>
-      {findings.map((f) => (
-        <FindingCard
-          key={`${f.runId}:${f.vulnId}:${f.id ?? ""}`}
-          finding={f}
-          state={findingStateOf(states, f.fingerprint)}
-          suppressed={isSuppressed(f, suppression)}
-          ruleMuted={Boolean(f.ruleId) && rules.some((rule) => rule.ruleId === f.ruleId)}
-          {...(onStateChange
-            ? { onStateChange: (state: FindingState) => onStateChange(f, state) }
-            : {})}
-          {...(onSuppressRule ? { onSuppressRule: () => onSuppressRule(f) } : {})}
-          {...(onUnsuppressRule ? { onUnsuppressRule: () => onUnsuppressRule(f) } : {})}
-        />
-      ))}
+
+      {mutedCount > 0 && (
+        <div className="flex items-center gap-1" data-testid="strix-findings-filter">
+          {(["all", "open", "muted"] as const).map((value) => (
+            <Button
+              key={value}
+              size="sm"
+              variant={filter === value ? "secondary" : "ghost"}
+              className="h-6 px-2 text-xs"
+              onClick={() => setFilter(value)}
+              aria-pressed={filter === value}
+              data-testid={`strix-filter-${value}`}
+            >
+              {value === "muted"
+                ? t("triage.mutedCount", { count: mutedCount })
+                : t(`findings.filter.${value}`, {
+                    count: value === "all" ? findings.length : findings.length - mutedCount,
+                  })}
+            </Button>
+          ))}
+        </div>
+      )}
+
+      <div className={cn("grid gap-2", columns === 2 ? "grid-cols-2 items-start" : "grid-cols-1")}>
+        {visible.map((f) => (
+          <FindingCard
+            key={`${f.runId}:${f.vulnId}:${f.id ?? ""}`}
+            finding={f}
+            state={findingStateOf(states, f.fingerprint)}
+            suppressed={isSuppressed(f, suppression)}
+            ruleMuted={Boolean(f.ruleId) && rules.some((rule) => rule.ruleId === f.ruleId)}
+            {...(onStateChange
+              ? { onStateChange: (state: FindingState) => onStateChange(f, state) }
+              : {})}
+            {...(onSuppressRule ? { onSuppressRule: () => onSuppressRule(f) } : {})}
+            {...(onUnsuppressRule ? { onUnsuppressRule: () => onUnsuppressRule(f) } : {})}
+          />
+        ))}
+      </div>
+      {visible.length === 0 && (
+        <p className="py-4 text-center text-xs text-muted-foreground">
+          {t("findings.filterEmpty")}
+        </p>
+      )}
     </div>
   )
 }

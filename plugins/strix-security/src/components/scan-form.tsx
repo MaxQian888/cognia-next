@@ -1,11 +1,13 @@
 "use client"
 
 import { useState } from "react"
-import { Play, Square } from "lucide-react"
+import { ChevronRight, Play, Square } from "lucide-react"
 import { Button } from "@cognia/plugin-ui"
 import { Checkbox } from "@cognia/plugin-ui"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@cognia/plugin-ui"
 import { Input } from "@cognia/plugin-ui"
 import { Label } from "@cognia/plugin-ui"
+import { cn } from "@cognia/plugin-ui"
 import type { ScanOptions } from "../types"
 import { usePluginT } from "../use-plugin-t"
 
@@ -32,6 +34,8 @@ export function ScanForm({
   const [model, setModel] = useState(defaultModel ?? "")
   const [apiKey, setApiKey] = useState("")
   const [authorized, setAuthorized] = useState(false)
+  // Open by default only when a remembered model override exists to show.
+  const [advancedOpen, setAdvancedOpen] = useState(() => Boolean(defaultModel))
 
   const targetValid = target.trim().length > 0
   const startDisabled = !canScan || !targetValid || !authorized || scanning
@@ -52,37 +56,59 @@ export function ScanForm({
         <Input
           id="strix-target"
           value={target}
-          onChange={(e) => setTarget(e.target.value)}
+          onChange={(e) => {
+            setTarget(e.target.value)
+            // The checkbox asserts authorization for THIS target — editing it
+            // after the fact would silently carry consent to a different
+            // system, so a changed target re-arms the requirement.
+            if (authorized) setAuthorized(false)
+          }}
           placeholder={t("form.targetPlaceholder")}
           disabled={scanning}
           data-testid="strix-target"
         />
       </div>
 
-      <div className="flex flex-col gap-1">
-        <Label htmlFor="strix-model">{t("form.modelLabel")}</Label>
-        <Input
-          id="strix-model"
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          placeholder={t("form.modelPlaceholder")}
-          disabled={scanning}
-          data-testid="strix-model"
-        />
-      </div>
+      <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+        <CollapsibleTrigger asChild>
+          <button
+            type="button"
+            className="flex w-fit items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+            data-testid="strix-advanced-toggle"
+          >
+            <ChevronRight
+              className={cn("size-3 transition-transform", advancedOpen && "rotate-90")}
+            />
+            {t("form.advanced")}
+          </button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="flex flex-col gap-3 pt-2">
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="strix-model">{t("form.modelLabel")}</Label>
+            <Input
+              id="strix-model"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder={t("form.modelPlaceholder")}
+              disabled={scanning}
+              data-testid="strix-model"
+            />
+          </div>
 
-      <div className="flex flex-col gap-1">
-        <Label htmlFor="strix-apikey">{t("form.apiKeyLabel")}</Label>
-        <Input
-          id="strix-apikey"
-          type="password"
-          value={apiKey}
-          onChange={(e) => setApiKey(e.target.value)}
-          placeholder={t("form.apiKeyPlaceholder")}
-          disabled={scanning}
-          data-testid="strix-apikey"
-        />
-      </div>
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="strix-apikey">{t("form.apiKeyLabel")}</Label>
+            <Input
+              id="strix-apikey"
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder={t("form.apiKeyPlaceholder")}
+              disabled={scanning}
+              data-testid="strix-apikey"
+            />
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
 
       <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2">
         <p className="text-xs text-amber-700 dark:text-amber-400">{t("form.authWarning")}</p>

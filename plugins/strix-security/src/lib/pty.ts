@@ -35,6 +35,15 @@ export class ScanAbortError extends Error {
   }
 }
 
+/**
+ * Cap on the PTY buffer while a scan's output is being forwarded to the
+ * console. Completion sentinels are emitted at the END of a command, so only
+ * the tail matters while streaming; an hours-long scan would otherwise grow
+ * the buffer without bound. When forwarding is OFF (artifact captures) the
+ * full buffer is kept — a capture's begin marker must survive to be found.
+ */
+const FORWARD_BUFFER_TAIL = 256 * 1024
+
 /** Spawn a shell tagged to this plugin and start buffering its output. */
 export async function openPty(
   terminal: PluginTerminalAPI,
@@ -46,12 +55,18 @@ export async function openPty(
   let buf = ""
   let forwarding = false
   const decoder = new TextDecoder()
-  const dispose = terminal.onData(id, (bytes) => {
-    const text = decoder.decode(bytes)
+  const unsubscribe = terminal.onData(id, (bytes) => {
+    // `{ stream: true }` — PTY chunks are byte-aligned, not UTF-8-aligned; a
+    // multibyte character split across two chunks must not decode to two
+    // replacement characters.
+    const text = decoder.decode(bytes, { stream: true })
     buf += text
-    if (forwarding && opts.onConsole) {
-      const clean = stripMarkers(stripAnsi(text))
-      if (clean) opts.onConsole(clean)
+    if (forwarding) {
+      if (opts.onConsole) {
+        const clean = stripMarkers(stripAnsi(text))
+        if (clean) opts.onConsole(clean)
+      }
+      if (buf.length > FORWARD_BUFFER_TAIL) buf = buf.slice(-FORWARD_BUFFER_TAIL)
     }
   })
   return {
@@ -60,7 +75,16 @@ export async function openPty(
     forward: (on) => {
       forwarding = on
     },
-    dispose,
+    dispose: () => {
+      unsubscribe()
+      // Flush any partial multibyte sequence still held by the decoder so a
+      // final capture or completion marker is not lost to a dangling byte.
+      try {
+        buf += decoder.decode()
+      } catch {
+        // already-flushed or abandoned decoder — nothing left to recover.
+      }
+    },
   }
 }
 

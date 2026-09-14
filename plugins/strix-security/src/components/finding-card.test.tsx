@@ -51,6 +51,30 @@ describe("FindingCard", () => {
     expect(screen.getByText(/POST/)).toBeInTheDocument()
   })
 
+  it("renders code locations with file:line and snippet", () => {
+    render(
+      <FindingCard
+        finding={{
+          ...base,
+          codeLocations: [
+            { file: "src/db.ts", startLine: 12, endLine: 18, snippet: "query(user)" },
+            { label: "entrypoint" },
+          ],
+        }}
+      />
+    )
+    expect(screen.getByTestId("strix-finding-locations")).toBeInTheDocument()
+    expect(screen.getByText("src/db.ts:12–18")).toBeInTheDocument()
+    expect(screen.getByText("query(user)")).toBeInTheDocument()
+    expect(screen.getByText("Unknown location")).toBeInTheDocument()
+    expect(screen.getByText("entrypoint")).toBeInTheDocument()
+  })
+
+  it("omits the locations section when the report has none", () => {
+    render(<FindingCard finding={base} />)
+    expect(screen.queryByTestId("strix-finding-locations")).not.toBeInTheDocument()
+  })
+
   describe("triage", () => {
     const triageable: StrixFinding = { ...base, fingerprint: "fp1", ruleId: "sqli" }
 
@@ -70,21 +94,34 @@ describe("FindingCard", () => {
       const onStateChange = jest.fn()
       const user = userEvent.setup()
       render(<FindingCard finding={triageable} state="open" onStateChange={onStateChange} />)
-      const select = screen.getByTestId("strix-finding-state")
-      expect(select).toHaveValue("open")
-      await user.selectOptions(select, "false-positive")
+      const trigger = screen.getByTestId("strix-finding-state")
+      expect(trigger).toHaveTextContent("Open")
+
+      await user.click(trigger)
+      await user.click(screen.getByRole("option", { name: "False positive" }))
       expect(onStateChange).toHaveBeenCalledWith("false-positive")
     })
 
-    it("offers every verdict in the closed set", () => {
+    it("offers every verdict in the closed set", async () => {
+      const user = userEvent.setup()
       render(<FindingCard finding={triageable} onStateChange={jest.fn()} />)
-      const options = screen.getByTestId("strix-finding-state").querySelectorAll("option")
-      expect([...options].map((option) => option.getAttribute("value"))).toEqual([
-        "open",
-        "accepted",
-        "false-positive",
-        "fixed",
+      await user.click(screen.getByTestId("strix-finding-state"))
+      expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
+        "Open",
+        "Risk accepted",
+        "False positive",
+        "Fixed",
       ])
+    })
+
+    it("shows the recorded verdict as a badge when it is not open", () => {
+      render(<FindingCard finding={triageable} state="fixed" onStateChange={jest.fn()} />)
+      expect(screen.getByTestId("strix-finding-state-badge")).toHaveTextContent("Fixed")
+    })
+
+    it("shows no verdict badge while a finding is open", () => {
+      render(<FindingCard finding={triageable} state="open" onStateChange={jest.fn()} />)
+      expect(screen.queryByTestId("strix-finding-state-badge")).not.toBeInTheDocument()
     })
 
     it("marks a muted finding without hiding it", () => {

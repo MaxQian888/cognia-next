@@ -1,10 +1,17 @@
 "use client"
 
-import { Bell, BellOff } from "lucide-react"
+import { Bell, BellOff, MapPin } from "lucide-react"
 import { Badge } from "@cognia/plugin-ui"
 import { Button } from "@cognia/plugin-ui"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@cognia/plugin-ui"
 import { cn } from "@cognia/plugin-ui"
-import { FINDING_STATES, type FindingState, type Severity, type StrixFinding } from "../types"
+import {
+  FINDING_STATES,
+  type CodeLocation,
+  type FindingState,
+  type Severity,
+  type StrixFinding,
+} from "../types"
 import { usePluginT } from "../use-plugin-t"
 
 const SEVERITY_CLASS: Record<Severity, string> = {
@@ -26,6 +33,44 @@ function Section({ title, text, code }: { title: string; text?: string; code?: s
           <code>{code}</code>
         </pre>
       )}
+    </div>
+  )
+}
+
+/** `file:start–end` — the one-line form of a code location. */
+function locationLine(location: CodeLocation): string {
+  const file = location.file ?? ""
+  if (location.startLine == null) return file
+  const end = location.endLine != null ? `–${location.endLine}` : ""
+  return `${file}:${location.startLine}${end}`
+}
+
+function CodeLocations({ locations }: { locations: CodeLocation[] }) {
+  const t = usePluginT()
+  if (locations.length === 0) return null
+  return (
+    <div className="mt-2" data-testid="strix-finding-locations">
+      <h5 className="flex items-center gap-1 text-xs font-semibold uppercase text-muted-foreground">
+        <MapPin className="size-3" />
+        {t("finding.locations")}
+      </h5>
+      <ul className="mt-1 flex flex-col gap-1.5">
+        {locations.map((location, i) => (
+          <li key={`${locationLine(location)}:${i}`}>
+            <div className="font-mono text-xs">
+              {locationLine(location) || t("finding.locationUnknown")}
+              {location.label && (
+                <span className="ml-2 font-sans text-muted-foreground">{location.label}</span>
+              )}
+            </div>
+            {location.snippet && (
+              <pre className="mt-0.5 overflow-x-auto rounded bg-muted p-2 text-xs">
+                <code>{location.snippet}</code>
+              </pre>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
@@ -74,6 +119,11 @@ export function FindingCard({
               {t("triage.suppressed")}
             </Badge>
           )}
+          {state !== "open" && (
+            <Badge variant="secondary" data-testid="strix-finding-state-badge">
+              {t(`triage.state.${state}`)}
+            </Badge>
+          )}
           <Badge className={cn("uppercase", SEVERITY_CLASS[finding.severity])}>
             {finding.severity}
           </Badge>
@@ -100,29 +150,29 @@ export function FindingCard({
         text={finding.pocDescription}
         code={finding.pocScriptCode}
       />
+      <CodeLocations locations={finding.codeLocations ?? []} />
       <Section title={t("finding.remediation")} text={finding.remediationSteps} />
 
       {triageable && (
         <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-2">
-          <label
-            className="text-xs text-muted-foreground"
-            htmlFor={`triage-${finding.fingerprint}`}
-          >
-            {t("triage.label")}
-          </label>
-          <select
-            id={`triage-${finding.fingerprint}`}
-            className="rounded-md border bg-background px-2 py-1 text-xs"
-            value={state}
-            onChange={(event) => onStateChange?.(event.target.value as FindingState)}
-            data-testid="strix-finding-state"
-          >
-            {FINDING_STATES.map((value) => (
-              <option key={value} value={value}>
-                {t(`triage.state.${value}`)}
-              </option>
-            ))}
-          </select>
+          <span className="text-xs text-muted-foreground">{t("triage.label")}</span>
+          <Select value={state} onValueChange={(value) => onStateChange?.(value as FindingState)}>
+            <SelectTrigger
+              size="sm"
+              className="w-auto min-w-28 gap-1 px-2 text-xs"
+              aria-label={t("triage.label")}
+              data-testid="strix-finding-state"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {FINDING_STATES.map((value) => (
+                <SelectItem key={value} value={value} className="text-xs">
+                  {t(`triage.state.${value}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           {finding.ruleId && onSuppressRule && !ruleMuted && (
             <Button
               size="sm"
