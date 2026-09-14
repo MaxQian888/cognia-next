@@ -31,10 +31,12 @@
   "i18n": {
     "locales": {
       "en": {
-        "panel.inspector": "Context Inspector"
+        "panel.inspector": "Context Inspector",
+        "panel.probe": "Inspector probe"
       },
       "zh-CN": {
-        "panel.inspector": "上下文检查器"
+        "panel.inspector": "上下文检查器",
+        "panel.probe": "检查器探针"
       }
     }
   }
