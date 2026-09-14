@@ -1,8 +1,8 @@
 {
   "id": "cognia-playwright-mcp",
   "name": "Playwright Browser",
-  "version": "0.1.0",
-  "description": "Browser automation via Microsoft Playwright MCP, with presets for an isolated browser or selected Chrome/Edge tabs through the official extension.",
+  "version": "0.2.0",
+  "description": "Browser automation via Microsoft Playwright MCP — presets for an isolated headless browser or attaching to Chrome/Edge, plus a /browser setup guide.",
   "type": "frontend",
   "capabilities": ["mcp-server-preset", "commands"],
   "main": "src/index.ts",
@@ -12,12 +12,17 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "permissions": [],
+  "permissions": ["extension:ui", "shell:execute"],
+  "permissionJustifications": {
+    "extension:ui": "Opens the /browser setup guide modal that explains each preset and links into MCP settings.",
+    "shell:execute": "Runs `node --version` and `npx --version` when you press 'Check environment' in the /browser guide — the only two commands, both covered by shellCommands."
+  },
+  "shellCommands": ["node", "npx"],
   "activationEvents": ["startup", "onCommand:browser"],
   "runtimeCompatibility": {
     "browser": {
       "availability": "blocked",
-      "reason": "Requires npx to spawn @playwright/mcp@latest \u2014 desktop only."
+      "reason": "Requires npx to spawn @playwright/mcp@latest — desktop only."
     },
     "tauri": {
       "availability": "supported",
@@ -25,14 +30,14 @@
     },
     "mobile": {
       "availability": "blocked",
-      "reason": "Spawns @playwright/mcp via npx \u2014 unavailable on mobile."
+      "reason": "Spawns @playwright/mcp via npx — unavailable on mobile."
     }
   },
   "commands": [
     {
       "id": "browser",
       "name": "/browser",
-      "description": "Configure an isolated Playwright browser or connect selected Chrome/Edge tabs.",
+      "description": "Open the Playwright browser setup guide — compare the presets and jump to the right gallery card.",
       "icon": "Globe"
     }
   ]
