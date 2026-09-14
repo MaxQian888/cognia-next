@@ -16,6 +16,7 @@ jest.mock("@cognia/logging", () => ({ loggers: { chat: { warn: jest.fn(), error:
 jest.mock("@/lib/chat/attachments/prepare", () => ({
   COMPOSER_MAX_ATTACHMENTS: 3,
   COMPOSER_MAX_ATTACHMENT_BYTES: 1024,
+  COMPOSER_VIDEO_SOURCE_MAX_BYTES: 4 * 1024 * 1024,
   prepareComposerAttachments: jest.fn(),
 }))
 jest.mock("@/lib/chat/smart-snapshot", () => ({
@@ -46,8 +47,11 @@ function file(name: string, type = "text/plain") {
 }
 
 /** Mounts the hook over a controllable text buffer + attachment sink. */
-function mount(opts: { isDesktop?: boolean; staged?: number; initialText?: string } = {}) {
+function mount(
+  opts: { isDesktop?: boolean; staged?: number; initialText?: string; acceptMotion?: boolean } = {}
+) {
   const add = jest.fn()
+  const expectCitation = jest.fn()
   const setInput = jest.fn()
   const setCaret = jest.fn()
   // Identity translators, but recorded — several gate messages carry the limit
@@ -59,6 +63,7 @@ function mount(opts: { isDesktop?: boolean; staged?: number; initialText?: strin
   const view = renderHook(() =>
     useAttachmentIntake({
       attachments: { files: new Array(opts.staged ?? 0).fill(null), add },
+      attachmentCitations: { expect: expectCitation },
       textInput: {
         get value() {
           return state.value
@@ -71,11 +76,12 @@ function mount(opts: { isDesktop?: boolean; staged?: number; initialText?: strin
       textareaRef: { current: textarea },
       setCaret,
       isDesktop: opts.isDesktop ?? true,
+      acceptMotion: opts.acceptMotion ?? true,
       t: (k) => k,
       tAttach,
     })
   )
-  return { view, add, setInput, setCaret, state, textarea, tAttach }
+  return { view, add, expectCitation, setInput, setCaret, state, textarea, tAttach }
 }
 
 /** A paste event carrying only text (no files). */
@@ -99,6 +105,7 @@ beforeEach(() => {
     unsupportedCount: 0,
     tooLargeCount: 0,
     optimizedCount: 0,
+    motionTooLargeCount: 0,
   })
 })
 
@@ -118,6 +125,41 @@ describe("acceptFiles — the single gate", () => {
     expect(add).toHaveBeenCalledWith([f])
   })
 
+  it("opts the gate into video preprocessing with the source ceiling", async () => {
+    const { view } = mount()
+    await act(async () => {
+      await view.result.current.acceptFiles([file("clip.mp4", "video/mp4")])
+    })
+    expect(prepared).toHaveBeenCalledWith(expect.any(Array), {
+      maxFileSize: 1024,
+      motion: { maxSourceBytes: 4 * 1024 * 1024 },
+    })
+  })
+
+  it("leaves video out when the conversation does not preprocess", async () => {
+    const { view } = mount({ acceptMotion: false })
+    await act(async () => {
+      await view.result.current.acceptFiles([file("clip.mp4", "video/mp4")])
+    })
+    expect(prepared).toHaveBeenCalledWith(expect.any(Array), { maxFileSize: 1024 })
+  })
+
+  it("warns with the video ceiling in megabytes", async () => {
+    prepared.mockResolvedValue({
+      files: [],
+      unsupportedCount: 0,
+      tooLargeCount: 0,
+      optimizedCount: 0,
+      motionTooLargeCount: 2,
+    })
+    const { view, tAttach } = mount()
+    await act(async () => {
+      await view.result.current.acceptFiles([file("a.mov", "video/quicktime")])
+    })
+    expect(tAttach).toHaveBeenCalledWith("videoSizeExceeded", { count: 2, max: 4 })
+    expect(toast.warning).toHaveBeenCalledWith("videoSizeExceeded")
+  })
+
   it("truncates to the remaining headroom and warns", async () => {
     prepared.mockResolvedValue({
       files: [file("a"), file("b"), file("c")],
@@ -133,6 +175,61 @@ describe("acceptFiles — the single gate", () => {
     expect(add.mock.calls[0][0]).toHaveLength(1)
     expect(toast.warning).toHaveBeenCalledWith("countLimit")
     expect(tAttach).toHaveBeenCalledWith("countLimit", { max: 3 })
+  })
+
+  it("resolves to exactly the files it staged", async () => {
+    const [a, b, c] = [file("a"), file("b"), file("c")]
+    prepared.mockResolvedValue({
+      files: [a, b, c],
+      unsupportedCount: 0,
+      tooLargeCount: 0,
+      optimizedCount: 0,
+    })
+    const { view } = mount({ staged: 2 })
+    let staged: File[] = []
+    await act(async () => {
+      staged = await view.result.current.acceptFiles([a, b, c])
+    })
+    expect(staged).toEqual([a])
+  })
+
+  // A remote document's citation can only find its attachment id if it is
+  // announced before `add()` mints that id.
+  it("announces a carried citation immediately before staging the file", async () => {
+    const doc = file("Plan.md", "text/markdown")
+    const other = file("notes.txt")
+    prepared.mockResolvedValue({
+      files: [doc, other],
+      unsupportedCount: 0,
+      tooLargeCount: 0,
+      optimizedCount: 0,
+    })
+    const citation = { kind: "doc" as const, id: "lark:doc_1", label: "Plan" }
+    const { view, add, expectCitation } = mount()
+    await act(async () => {
+      await view.result.current.acceptFiles([doc, other], {
+        citations: new Map([[doc, citation]]),
+      })
+    })
+    expect(expectCitation).toHaveBeenCalledTimes(1)
+    expect(expectCitation).toHaveBeenCalledWith(doc, citation)
+    expect(expectCitation.mock.invocationCallOrder[0]).toBeLessThan(
+      add.mock.invocationCallOrder[0]!
+    )
+  })
+
+  it("announces no citation for a file the gate refused", async () => {
+    const doc = file("Plan.md", "text/markdown")
+    const { view, add, expectCitation } = mount()
+    let staged: File[] = [doc]
+    await act(async () => {
+      staged = await view.result.current.acceptFiles([doc], {
+        citations: new Map([[doc, { kind: "doc" as const, id: "lark:doc_1" }]]),
+      })
+    })
+    expect(staged).toEqual([])
+    expect(add).not.toHaveBeenCalled()
+    expect(expectCitation).not.toHaveBeenCalled()
   })
 
   it("does not call add when nothing survives preparation", async () => {

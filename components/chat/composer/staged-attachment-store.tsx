@@ -18,6 +18,11 @@
  * the user finding out only after they hit send. The results are handed back to
  * `buildSendContent` via `DispatchOptions.precomputed`, so nothing is parsed
  * twice.
+ *
+ * Videos and GIFs take the motion pipeline (`lib/chat/attachments/video/`)
+ * instead, and are never read into a data URL: a 500 MB source is sampled
+ * straight from its blob URL. Their settings can be re-applied from the preview
+ * panel, which cancels the run in flight and starts another.
  */
 
 import {
@@ -33,10 +38,26 @@ import {
 import { usePromptInputAttachments } from "@/components/ai-elements/prompt-input"
 import {
   extractAttachment,
+  extractedFromVideoResult,
   withImageOcrText,
   type ExtractedAttachment,
+  type RejectReason,
 } from "@/lib/chat/attachments/dispatch"
+import { COMPOSER_MAX_ATTACHMENT_BYTES } from "@/lib/chat/attachments/prepare"
 import { applyOrder, reorderIds } from "@/lib/chat/attachments/reorder"
+import { isMotionDescriptor } from "@/lib/chat/attachments/video/classify"
+import {
+  VideoPreprocessError,
+  type VideoPreprocessErrorReason,
+} from "@/lib/chat/attachments/video/frame-source"
+import {
+  preprocessMotionAttachment,
+  type VideoPreprocessResult,
+} from "@/lib/chat/attachments/video/preprocess"
+import {
+  DEFAULT_VIDEO_SETTINGS,
+  type VideoPreprocessSettings,
+} from "@/lib/chat/attachments/video/settings"
 import { loggers } from "@cognia/logging"
 
 export interface StagedAttachmentState {
@@ -56,6 +77,23 @@ export interface StagedAttachmentState {
   ocrText?: string
   /** "Also send the OCR text alongside the image." Off by default. */
   includeOcr?: boolean
+  /** Present for a video or animated GIF: what was asked, and what came of it. */
+  video?: StagedVideoState
+}
+
+export interface StagedVideoState {
+  /** The settings of the run in flight, or of the last run. */
+  settings: VideoPreprocessSettings
+  /** The last successful run. Kept while a re-run is in flight, so the panel can keep showing it. */
+  result?: VideoPreprocessResult
+  /** 0..1 while a run is in flight. */
+  progress?: number
+  /** Why the last run failed. */
+  error?: {
+    reason: VideoPreprocessErrorReason
+    ffmpeg: VideoPreprocessError["ffmpeg"]
+    message: string
+  }
 }
 
 export interface StagedAttachmentsValue {
@@ -77,6 +115,8 @@ export interface StagedAttachmentsValue {
   /** Record OCR text for an image and opt it into the outbound payload. */
   setOcrText: (id: string, text: string) => void
   toggleIncludeOcr: (id: string) => void
+  /** Re-run a video with new settings, cancelling any run in flight for it. */
+  applyVideoSettings: (id: string, settings: VideoPreprocessSettings) => void
   /**
    * Pre-fill restored-draft extractions so re-staged files are not parsed a
    * second time.
@@ -122,6 +162,30 @@ function dataUrlToBytes(dataUrl: string): Uint8Array | undefined {
   return out
 }
 
+/** Map a failed motion run to the chip's machine-readable rejection. */
+export function videoRejectReason(error: VideoPreprocessError): RejectReason {
+  if (error.reason === "too-large") return "video-too-large"
+  if (error.reason === "undecodable") return "video-undecodable"
+  return "parse-failed"
+}
+
+/**
+ * A blob's bytes through `FileReader`, the same reader the data-URL path above
+ * uses. `Blob.arrayBuffer()` would do in every shipped WebView, but the jsdom
+ * this store is tested in does not implement it.
+ */
+function readBlobBytes(blob: Blob): Promise<Uint8Array> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer))
+    reader.onerror = () => reject(reader.error ?? new Error("read failed"))
+    reader.readAsArrayBuffer(blob)
+  })
+}
+
+/** How often (as a fraction of the run) progress is written to state. */
+const PROGRESS_STEP = 0.05
+
 /** Read a staged blob URL back into a data URL, which is what extraction needs. */
 async function blobUrlToDataUrl(
   url: string
@@ -136,7 +200,21 @@ async function blobUrlToDataUrl(
   return { dataUrl, size: blob.size, bytes: dataUrlToBytes(dataUrl) }
 }
 
-export function StagedAttachmentsProvider({ children }: { children: ReactNode }) {
+export interface StagedAttachmentsProviderProps {
+  children: ReactNode
+  /**
+   * Whether videos and animated GIFs take the motion pipeline. Off for a
+   * conversation whose files go to a person rather than a model (an IM
+   * binding): there a GIF is forwarded as the picture it is, and sampling
+   * frames nobody will read would only spend the CPU. Default on.
+   */
+  motion?: boolean
+}
+
+export function StagedAttachmentsProvider({
+  children,
+  motion = true,
+}: StagedAttachmentsProviderProps) {
   const attachments = usePromptInputAttachments()
   /**
    * SETTLED extraction results only, written exclusively from the async
@@ -156,36 +234,185 @@ export function StagedAttachmentsProvider({ children }: { children: ReactNode })
   const startedRef = useRef<Set<string>>(new Set())
   // Restored-draft extractions awaiting the file they belong to.
   const seedQueueRef = useRef<SeedEntry[]>([])
+  // The motion run in flight per attachment id, so a re-apply or a removal can
+  // cancel it instead of letting a stale result land.
+  const motionRunsRef = useRef<Map<string, AbortController>>(new Map())
 
   const files = attachments.files
   // Stands in for the file list's identity; `files` is a fresh array each render.
   const fileKey = files.map((f) => f.id).join(",")
+
+  /**
+   * Run the motion pipeline for one staged file. Only ever called from an
+   * effect's async body or an event handler, so its state writes are never
+   * synchronous in render or in an effect body.
+   */
+  const runMotion = useCallback(
+    (
+      file: { id: string; url?: string; filename?: string; mediaType?: string },
+      settings: VideoPreprocessSettings,
+      imageFallback: () => void
+    ) => {
+      motionRunsRef.current.get(file.id)?.abort()
+      const controller = new AbortController()
+      motionRunsRef.current.set(file.id, controller)
+      const filename = file.filename ?? "attachment"
+      const isCurrent = () =>
+        motionRunsRef.current.get(file.id) === controller && !controller.signal.aborted
+
+      void (async () => {
+        let sizeBytes = 0
+        try {
+          const blob = await (await fetch(file.url ?? "")).blob()
+          sizeBytes = blob.size
+          if (!isCurrent()) return
+          setResults((prev) => {
+            const cur = prev.get(file.id)
+            return new Map(prev).set(file.id, {
+              ...(cur ?? {}),
+              status: "extracting",
+              sizeBytes,
+              video: { settings, result: cur?.video?.result, progress: 0 },
+            })
+          })
+          let lastProgress = 0
+          const outcome = await preprocessMotionAttachment({
+            blob,
+            filename,
+            mediaType: file.mediaType ?? blob.type,
+            settings,
+            signal: controller.signal,
+            onProgress: (fraction) => {
+              if (fraction < 1 && fraction - lastProgress < PROGRESS_STEP) return
+              lastProgress = fraction
+              if (!isCurrent()) return
+              setResults((prev) => {
+                const cur = prev.get(file.id)
+                if (!cur?.video) return prev
+                return new Map(prev).set(file.id, {
+                  ...cur,
+                  video: { ...cur.video, progress: fraction },
+                })
+              })
+            },
+          })
+          if (!isCurrent()) return
+          if (outcome.kind === "still-gif") {
+            // A GIF with one frame is a picture: hand it to the image path.
+            motionRunsRef.current.delete(file.id)
+            imageFallback()
+            return
+          }
+          // Only a source small enough to send natively is kept for a draft;
+          // anything larger comes back as a name-only chip, like an evicted blob.
+          const bytes =
+            blob.size <= COMPOSER_MAX_ATTACHMENT_BYTES ? await readBlobBytes(blob) : undefined
+          if (!isCurrent()) return
+          motionRunsRef.current.delete(file.id)
+          setResults((prev) =>
+            new Map(prev).set(file.id, {
+              status: "ready",
+              sizeBytes,
+              ...(bytes ? { bytes } : {}),
+              extracted: extractedFromVideoResult(outcome.result, { filename, groupId: file.id }),
+              video: { settings: outcome.result.settings, result: outcome.result },
+            })
+          )
+        } catch (err) {
+          if (!isCurrent()) return
+          motionRunsRef.current.delete(file.id)
+          const error =
+            err instanceof VideoPreprocessError
+              ? err
+              : new VideoPreprocessError("failed", err instanceof Error ? err.message : String(err))
+          if (error.reason === "aborted") return
+          loggers.chat.warn("video preprocessing failed", {
+            reason: error.reason,
+            ffmpeg: error.ffmpeg,
+            err: error.message,
+          })
+          setResults((prev) =>
+            new Map(prev).set(file.id, {
+              status: "rejected",
+              sizeBytes,
+              extracted: {
+                kind: "video",
+                block: null,
+                tokens: 0,
+                rejectReason: videoRejectReason(error),
+              },
+              video: {
+                settings,
+                error: { reason: error.reason, ffmpeg: error.ffmpeg, message: error.message },
+              },
+            })
+          )
+        }
+      })()
+    },
+    []
+  )
 
   useEffect(() => {
     const live = new Set(files.map((f) => f.id))
     startedRef.current.forEach((id) => {
       if (!live.has(id)) startedRef.current.delete(id)
     })
+    // A removed attachment's run has nobody left to report to.
+    motionRunsRef.current.forEach((controller, id) => {
+      if (live.has(id)) return
+      controller.abort()
+      motionRunsRef.current.delete(id)
+    })
 
-    let cancelled = false
+    // Whether a result still has a chip to land on. NOT a per-run `cancelled`
+    // flag: this effect re-runs every time a file is added, and a flag flipped
+    // by that cleanup dropped the result of any extraction still in flight —
+    // the earlier chip then spun forever and `whenSettled` never resolved. A
+    // removed chip is pruned from `startedRef` above, which is the real signal.
+    const stillStaged = (id: string) => startedRef.current.has(id)
     for (const file of files) {
       if (startedRef.current.has(file.id)) continue
       startedRef.current.add(file.id)
 
+      const isMotion =
+        motion &&
+        isMotionDescriptor({
+          name: file.filename ?? "",
+          mediaType: file.mediaType ?? "",
+        })
+
       // A restored draft's extraction, matched on filename because the vendored
       // provider mints ids internally and `add()` returns nothing.
       const seedIdx = seedQueueRef.current.findIndex((e) => e.filename === file.filename)
+      if (seedIdx >= 0 && isMotion) {
+        // Sampled frames are not persisted with a draft, only the settings that
+        // produced them: re-run with those.
+        const [entry] = seedQueueRef.current.splice(seedIdx, 1)
+        runMotion(file, entry!.state.video?.settings ?? DEFAULT_VIDEO_SETTINGS, () =>
+          extractAsDocumentOrImage(file)
+        )
+        continue
+      }
       if (seedIdx >= 0) {
         const [entry] = seedQueueRef.current.splice(seedIdx, 1)
         // Deferred to a microtask so this is not a synchronous setState in the
         // effect body — same reason as the async paths below.
         void Promise.resolve().then(() => {
-          if (cancelled) return
+          if (!stillStaged(file.id)) return
           setResults((prev) => new Map(prev).set(file.id, entry!.state))
         })
         continue
       }
 
+      if (isMotion) {
+        runMotion(file, DEFAULT_VIDEO_SETTINGS, () => extractAsDocumentOrImage(file))
+        continue
+      }
+      extractAsDocumentOrImage(file)
+    }
+
+    function extractAsDocumentOrImage(file: (typeof files)[number]) {
       const isImage = (file.mediaType ?? "").startsWith("image/")
       void (async () => {
         try {
@@ -199,7 +426,7 @@ export function StagedAttachmentsProvider({ children }: { children: ReactNode })
             filename: file.filename,
             id: file.id,
           })
-          if (cancelled) return
+          if (!stillStaged(file.id)) return
           setResults((prev) =>
             new Map(prev).set(file.id, {
               status: extracted.block ? "ready" : "rejected",
@@ -212,7 +439,7 @@ export function StagedAttachmentsProvider({ children }: { children: ReactNode })
           loggers.chat.warn("attachment extraction failed", {
             err: err instanceof Error ? err.message : String(err),
           })
-          if (cancelled) return
+          if (!stillStaged(file.id)) return
           setResults((prev) =>
             new Map(prev).set(file.id, {
               status: "rejected",
@@ -229,11 +456,17 @@ export function StagedAttachmentsProvider({ children }: { children: ReactNode })
       })()
     }
 
-    return () => {
-      cancelled = true
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fileKey])
+
+  // Cancel every run on unmount.
+  useEffect(() => {
+    const runs = motionRunsRef.current
+    return () => {
+      runs.forEach((controller) => controller.abort())
+      runs.clear()
+    }
+  }, [])
 
   // ── Everything below is DERIVED from (live files × settled results) ────────
   const { byId, order, isExtracting, totalBytes, totalTokens, precomputed } = useMemo(() => {
@@ -247,6 +480,12 @@ export function StagedAttachmentsProvider({ children }: { children: ReactNode })
       if (!settled) {
         // No result yet — that IS the extracting state, no placeholder needed.
         map.set(file.id, { status: "extracting", sizeBytes: 0 })
+        pending = true
+        continue
+      }
+      if (settled.status === "extracting") {
+        // A video being (re-)processed: shown, but not sendable until it lands.
+        map.set(file.id, settled)
         pending = true
         continue
       }
@@ -318,11 +557,29 @@ export function StagedAttachmentsProvider({ children }: { children: ReactNode })
         mutateResult(id, (cur) => ({ ...cur, ocrText: text, includeOcr: true })),
       toggleIncludeOcr: (id) =>
         mutateResult(id, (cur) => ({ ...cur, includeOcr: !cur.includeOcr })),
+      applyVideoSettings: (id, settings) => {
+        const file = files.find((f) => f.id === id)
+        if (!file) return
+        runMotion(file, settings, () => {
+          // A still GIF never reaches the panel's controls; nothing to re-run.
+        })
+      },
       seedIncoming: (entries) => {
         seedQueueRef.current.push(...entries)
       },
     }),
-    [byId, order, isExtracting, totalBytes, totalTokens, precomputed, whenSettled, mutateResult]
+    [
+      byId,
+      order,
+      isExtracting,
+      totalBytes,
+      totalTokens,
+      precomputed,
+      whenSettled,
+      mutateResult,
+      files,
+      runMotion,
+    ]
   )
 
   return (

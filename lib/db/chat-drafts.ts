@@ -1,6 +1,8 @@
 import { getDb } from "./schema"
 import { enqueueHostStateIntentIfAvailable } from "./mobile-outbound-queue"
 import type { ChatTemplateBinding } from "@/lib/chat/template/binding"
+import type { ContextRef } from "@/lib/chat/mentions/types"
+import type { VideoPreprocessSettings } from "@/lib/chat/attachments/video/settings"
 
 /**
  * An attachment that was staged in the composer when a draft was saved.
@@ -30,6 +32,14 @@ export interface DraftAttachmentMeta {
   extractedText?: string
   tokens?: number
   /**
+   * How a staged video or animated GIF was set to be sampled. Its frames are
+   * not stored — they are cheap to re-derive from `bytes` and large to keep —
+   * so a restored draft re-runs the pipeline with these. Parsed with
+   * `isVideoPreprocessSettings` on the way back in: the row may predate or
+   * postdate this build.
+   */
+  videoSettings?: VideoPreprocessSettings
+  /**
    * SHA-256 of the staged bytes, lowercase hex.
    *
    * Computed once at staging time and carried so a resumed upload does not
@@ -49,6 +59,15 @@ export interface DraftAttachmentMeta {
    */
   uploadId?: string
   uploadedBytes?: number
+  /**
+   * What this attachment cites: a remote document picked with `@lark:` /
+   * `@google:` names the document it was fetched from. Restored with the file
+   * so switching conversations and back does not silently uncite a document
+   * that is still staged. See `lib/chat/mentions/attachment-citations.ts`.
+   *
+   * Local only, like `bytes`: the Host projection carries names and sizes.
+   */
+  citation?: ContextRef
 }
 
 /**

@@ -51,6 +51,7 @@ const meta = {
   title: "Chat/Composer/ContextChipBar",
   component: ContextChipBar,
   parameters: { layout: "padded" },
+  args: { videoRoute: { available: false, reason: "runtime" } },
   beforeEach: seed({ refs, selections }),
   decorators: [
     (Story: () => React.ReactElement) => (

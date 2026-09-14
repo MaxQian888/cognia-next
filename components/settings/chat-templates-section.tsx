@@ -665,7 +665,7 @@ function ParamDeclarationRow({
               <SelectItem key={kind} value={kind}>
                 {t(
                   `resource${kind.charAt(0).toUpperCase()}${kind.slice(1)}` as
-                    "resourceFile" | "resourceAgent" | "resourceSubagent"
+                    "resourceFile" | "resourceAgent" | "resourceSubagent" | "resourceMember"
                 )}
               </SelectItem>
             ))}

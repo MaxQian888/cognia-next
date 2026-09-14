@@ -13,6 +13,7 @@ const FIXTURES: Record<string, unknown> = {
   file: { kind: "file", entry: { relPath: "src/app.ts", isDir: false } },
   agent: { kind: "agent", target: { name: "reviewer" } },
   subagent: { kind: "subagent", target: { handle: "reviewer", name: "Reviewer" } },
+  member: { kind: "member", target: { id: "char-1", name: "Critic" }, role: "Reviewer" },
   skill: { kind: "skill", skill: { id: "s1", name: "Skill" } },
   preset: { kind: "preset", preset: { id: "p1", name: "Preset" } },
   doc: { kind: "doc", providerId: "lark", accountId: "a1", doc: { id: "d1", title: "Doc" } },
@@ -48,6 +49,7 @@ describe("resource parameter kinds", () => {
 
   it("rejects kinds that are not parameter-eligible", () => {
     expect(isResourceParamKind("file")).toBe(true)
+    expect(isResourceParamKind("member")).toBe(true)
     expect(isResourceParamKind("skill")).toBe(false)
     expect(isResourceParamKind(undefined)).toBe(false)
   })
@@ -61,6 +63,22 @@ describe("resource parameter kinds", () => {
       id: "src/lib",
       label: "src/lib",
       raw: "@src/lib/",
+    })
+  })
+
+  // Projected through the registered handler rather than a hand-built ref, so
+  // this breaks if the member pick ever changes what it inserts.
+  it("binds a team room member to its character id and inserts its name", () => {
+    const handler = listMentionPickHandlers().find((h) => h.kind === "member")
+    const ref = handler!.toContextRef(FIXTURES.member as Extract<PopoverItem, { kind: never }>)
+    const option = resourceOptionFromRef(ref!)
+    expect(option).toEqual({ id: "char-1", label: "Critic", raw: "@Critic" })
+    expect(resourceParamValue("member", option!)).toEqual({
+      kind: "resource",
+      resourceKind: "member",
+      id: "char-1",
+      label: "Critic",
+      raw: "@Critic",
     })
   })
 

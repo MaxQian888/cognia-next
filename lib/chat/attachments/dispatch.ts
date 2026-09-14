@@ -19,6 +19,11 @@
  *   - documents (any non-`unknown` {@link detectDocumentType}) → extracted text
  *     wrapped in a `text` block (kept as `type:'text'` so the connector PII
  *     gate `isPiiSafeSendContent` can scan it)
+ *   - videos / animated GIFs → whatever the motion pipeline
+ *     (`lib/chat/attachments/video/`) prepared at staging time: a description
+ *     plus a storyboard or frames, or the original file where the route allows.
+ *     There is no inline path — sampling needs the staged `File`, so a video
+ *     that reaches dispatch unprepared is rejected, never guessed at
  *   - everything else → rejected with a machine-readable reason
  *
  * Emitting `text` (not base64 `document`) blocks for documents is intentional:
@@ -41,6 +46,9 @@ import { COMPOSER_IMAGE_MAX_LONG_EDGE } from "./prepare"
 import { estimateFallbackTokens } from "@/lib/ai/tokens/fallback-estimator"
 import { getCustomImporterOwnersForFile } from "@/lib/plugin/api/import-api"
 import { authorizePluginAttachment } from "@/lib/plugin/api/files-api"
+import { videoMediaTypeOf } from "./video/classify"
+import type { VideoAttachmentInfo } from "./video/attachment-info"
+import type { VideoPreprocessResult } from "./video/preprocess"
 
 /**
  * The longest edge (px) we downscale large images to before base64-encoding.
@@ -68,7 +76,17 @@ export interface SubmittedFile {
   id?: string
 }
 
-export type RejectReason = "not-data-url" | "unsupported-type" | "empty" | "parse-failed"
+export type RejectReason =
+  | "not-data-url"
+  | "unsupported-type"
+  | "empty"
+  | "parse-failed"
+  /** No engine on this device could decode the video. */
+  | "video-undecodable"
+  /** The video source, or the frames sampled from it, is over its ceiling. */
+  | "video-too-large"
+  /** A video reached dispatch without having been preprocessed at staging time. */
+  | "video-unprocessed"
 
 export interface AttachmentReject {
   filename: string
@@ -84,9 +102,30 @@ export interface AttachmentReject {
  * doubles as the data source for the attachment preview panel's "model view":
  * `text` is verbatim what the model receives.
  */
+/** One way of sending a video: the blocks, in order, and what they amount to. */
+export interface VideoPayload {
+  /** Description text block first, then image blocks (sampled) or one `document` block (native). */
+  blocks: SendContentBlock[]
+  info: VideoAttachmentInfo
+  /** Estimated inline cost of the description text. Image cost is not counted, as for images. */
+  tokens: number
+}
+
+export interface ExtractedVideo {
+  /** Storyboard or frames. Always present: it is also the fallback for native. */
+  sampled: VideoPayload
+  /** The original (or trimmed) file. Present only when native delivery was asked for and prepared. */
+  native: VideoPayload | null
+  /** The first sampled frame, ≤512 px: the chip thumbnail and a native video's transcript poster. */
+  poster: { mediaType: string; base64: string; width: number; height: number }
+}
+
 export interface ExtractedAttachment {
-  kind: "image" | "document"
-  /** The block to send, or null when the attachment was rejected. */
+  kind: "image" | "document" | "video"
+  /**
+   * The block to send, or null when the attachment was rejected. For a video it
+   * is the first block of the sampled payload — the full set lives in `video`.
+   */
   block: SendContentBlock | null
   /** Estimated inline token cost, including opted-in OCR text for images. */
   tokens: number
@@ -98,6 +137,8 @@ export interface ExtractedAttachment {
   ocr?: { text: string; tokens: number }
   /** Downscaled image payload description (geometry is read off the rendered <img>). */
   image?: { mediaType: string; bytes: number }
+  /** Prepared payloads for a video or animated GIF. */
+  video?: ExtractedVideo
 }
 
 /**
@@ -111,9 +152,20 @@ export interface ExtractedAttachment {
 export interface AttachmentManifestEntry {
   filename: string
   mediaType: string
-  kind: "image" | "document"
+  kind: "image" | "document" | "video"
   /** Opaque byte handles keyed by the enabled importer plugin that owns them. */
   pluginHandles?: Record<string, string>
+  /**
+   * Set on every entry a video produced (one object shared by all of them).
+   * `poster` and `fallback` exist only for a native payload: the transcript
+   * shows the poster in place of the unstored file, and the controller swaps
+   * in `fallback` if the resolved route turns out unable to take video.
+   */
+  video?: {
+    info: VideoAttachmentInfo
+    poster?: ExtractedVideo["poster"]
+    fallback?: VideoPayload
+  }
 }
 
 export interface DispatchResult {
@@ -128,6 +180,13 @@ export interface DispatchResult {
 }
 
 export interface DispatchOptions {
+  /**
+   * Send a video's native payload where one was prepared. The composer sets it
+   * from the delivery gate's verdict for the conversation's route; left unset,
+   * every video goes as its sampled payload. The controller re-checks the
+   * resolved route before dispatch either way (`video/route-guard.ts`).
+   */
+  allowNativeVideo?: boolean
   /** Override the image downscale long-edge (px). Defaults to {@link IMAGE_MAX_LONG_EDGE}. */
   imageMaxLongEdge?: number
   /**
@@ -302,8 +361,84 @@ function authorizeMatchingPluginAttachments(
   )
 }
 
-function reject(kind: "image" | "document", reason: RejectReason): ExtractedAttachment {
+function reject(kind: ExtractedAttachment["kind"], reason: RejectReason): ExtractedAttachment {
   return { kind, block: null, tokens: 0, rejectReason: reason }
+}
+
+/**
+ * Wrap a motion-pipeline result as the staged extraction the composer caches.
+ * `groupId` ties every part the video produces to one transcript card.
+ */
+export function extractedFromVideoResult(
+  result: VideoPreprocessResult,
+  { filename, groupId }: { filename: string; groupId: string }
+): ExtractedAttachment {
+  const base: Omit<VideoAttachmentInfo, "delivery" | "frameTimes" | "grid"> = {
+    groupId,
+    filename,
+    sourceMediaType: result.source.mediaType,
+    kind: result.source.kind,
+    durationSec: result.source.durationSec,
+    width: result.source.width,
+    height: result.source.height,
+    ...(result.source.frameCount !== undefined ? { frameCount: result.source.frameCount } : {}),
+    strategy: result.settings.strategy,
+    range: result.settings.range,
+    engine: result.engine,
+  }
+  const sampled: VideoPayload = {
+    blocks: result.sampled.blocks,
+    tokens: estimateFallbackTokens(result.sampled.description),
+    info: {
+      ...base,
+      delivery: result.sampled.delivery,
+      frameTimes: result.sampled.frames.map((frame) => frame.timeSec),
+      ...(result.sampled.grid ? { grid: result.sampled.grid } : {}),
+    },
+  }
+  const native: VideoPayload | null = result.native
+    ? {
+        blocks: result.native.blocks,
+        tokens: estimateFallbackTokens(result.native.description),
+        info: {
+          ...base,
+          sourceMediaType: result.native.mediaType,
+          delivery: "native",
+          frameTimes: [],
+        },
+      }
+    : null
+  return {
+    kind: "video",
+    block: sampled.blocks[0] ?? null,
+    tokens: sampled.tokens,
+    video: { sampled, native, poster: result.poster },
+  }
+}
+
+/**
+ * Re-gate a video payload at the outbound boundary: its description text runs
+ * through the same fail-closed PII gate as document text (a filename can carry
+ * an address), and only the block shapes the pipeline produces may pass.
+ */
+function gateVideoPayload(payload: VideoPayload): VideoPayload | null {
+  const blocks: SendContentBlock[] = []
+  let tokens = 0
+  for (const block of payload.blocks) {
+    if (block.type === "text") {
+      const text = redactOutboundText(block.text)
+      if (!text) return null
+      tokens += estimateFallbackTokens(text)
+      blocks.push({ type: "text", text })
+    } else if (block.type === "image") {
+      blocks.push(block)
+    } else if (block.type === "document" && block.source.media_type.startsWith("video/")) {
+      blocks.push(block)
+    } else {
+      return null
+    }
+  }
+  return blocks.length > 0 ? { ...payload, blocks, tokens } : null
 }
 
 /**
@@ -314,6 +449,18 @@ function reject(kind: "image" | "document", reason: RejectReason): ExtractedAtta
  */
 function gateCachedAttachment(result: ExtractedAttachment): ExtractedAttachment {
   if (!result.block) return result
+  if (result.kind === "video") {
+    if (!result.video) return reject("video", "video-unprocessed")
+    const sampled = gateVideoPayload(result.video.sampled)
+    if (!sampled) return reject("video", "empty")
+    const native = result.video.native ? gateVideoPayload(result.video.native) : null
+    return {
+      ...result,
+      block: sampled.blocks[0]!,
+      tokens: sampled.tokens,
+      video: { ...result.video, sampled, native },
+    }
+  }
   if (result.kind === "document") {
     if (result.block.type !== "text") return reject("document", "parse-failed")
     const text = redactOutboundText(result.block.text)
@@ -359,6 +506,11 @@ export async function extractAttachment(
   const decoded = url.startsWith("data:") ? decodeDataUrl(url) : null
   const mediaType = file.mediaType || decoded?.mimeType || ""
   const looksLikeImage = mediaType.startsWith("image/") || isImageMimeType(mediaType)
+
+  // Videos are sampled from the staged File, which this function never sees.
+  if (!looksLikeImage && videoMediaTypeOf({ name: filename, mediaType })) {
+    return reject("video", "video-unprocessed")
+  }
 
   if (!decoded) return reject(looksLikeImage ? "image" : "document", "not-data-url")
 
@@ -424,7 +576,24 @@ export async function buildAttachmentBlocks(
     const result = cached
       ? gateCachedAttachment(cached)
       : await extractAttachment(f, options, index)
-    if (result.block) {
+    if (result.kind === "video" && result.block && result.video) {
+      const { sampled, native, poster } = result.video
+      const payload = options.allowNativeVideo && native ? native : sampled
+      const entry: AttachmentManifestEntry = {
+        filename,
+        mediaType: payload.info.sourceMediaType,
+        kind: "video",
+        video:
+          payload === native
+            ? { info: payload.info, poster, fallback: sampled }
+            : { info: payload.info },
+      }
+      for (const block of payload.blocks) {
+        blocks.push(block)
+        manifest.push(entry)
+      }
+      tokens += payload.tokens
+    } else if (result.block) {
       const mediaType = f.mediaType || result.image?.mediaType || ""
       const pluginHandles =
         result.kind === "document"

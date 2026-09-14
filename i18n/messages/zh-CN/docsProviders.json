@@ -25,6 +25,7 @@
   },
   "picker": {
     "accountLabel": "账号",
+    "attachFailed": "无法附加「{title}」。",
     "attached": "已附加「{title}」",
     "fetching": "正在获取「{title}」…",
     "hostUnsupported": "云端文档仅在桌面端可用。",

@@ -27,6 +27,7 @@ import type {
 } from "./parts-extensions"
 import type { ProjectHistoryEvidence } from "./project-history-evidence-registry"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
+import { VIDEO_ATTACHMENT_PART_KEY } from "@/lib/chat/attachments/video/attachment-info"
 import { attachUsageToLastAssistant } from "@/lib/chat/message-run-metadata"
 import type { HookNoticePartData } from "./hooks"
 import { registerUndoSnapshot } from "./compaction-undo"
@@ -1442,6 +1443,33 @@ export function makeUserMessage(
   const parts: Parts = []
   content.forEach((block, index) => {
     const entry = manifest?.[index]
+    // A video's blocks become ordinary parts tagged with its descriptor, and
+    // the renderer folds every tagged part into one card. The original file is
+    // never persisted: a native video leaves its poster in its place.
+    const video = entry?.kind === "video" ? entry.video : undefined
+    if (video) {
+      const tag = { [VIDEO_ATTACHMENT_PART_KEY]: video.info }
+      if (block.type === "text") {
+        parts.push({ type: "text", text: block.text, state: "done", ...tag } as unknown as Part)
+      } else if (block.type === "image") {
+        parts.push({
+          type: "file",
+          url: `data:${block.source.media_type};base64,${block.source.data}`,
+          mediaType: block.source.media_type,
+          filename: entry!.filename,
+          ...tag,
+        } as unknown as Part)
+      } else if (block.type === "document" && video.poster) {
+        parts.push({
+          type: "file",
+          url: `data:${video.poster.mediaType};base64,${video.poster.base64}`,
+          mediaType: video.poster.mediaType,
+          filename: entry!.filename,
+          ...tag,
+        } as unknown as Part)
+      }
+      return
+    }
     if (block.type === "text") {
       // Only a block the manifest claims is an attachment becomes a file card;
       // the user's own prose (and merged link context) stays a text part.

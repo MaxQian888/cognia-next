@@ -27,7 +27,8 @@ const KINDS: ReadonlySet<string> = new Set([
   "entity",
 ] satisfies ContextRefKind[])
 
-function isContextRef(value: unknown): value is ContextRef {
+/** A persisted value that can be trusted as a {@link ContextRef}: rows can predate or postdate this build. */
+export function isContextRef(value: unknown): value is ContextRef {
   if (typeof value !== "object" || value === null) return false
   const v = value as Record<string, unknown>
   return typeof v.id === "string" && typeof v.kind === "string" && KINDS.has(v.kind)

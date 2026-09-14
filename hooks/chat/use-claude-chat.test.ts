@@ -264,7 +264,13 @@ const toastWarning = jest.fn()
 jest.mock("@/lib/files/project-editor-bridge", () => ({
   flushProjectEditorEdits: () => flushProjectEditorEdits(),
 }))
-jest.mock("sonner", () => ({ toast: { warning: (msg: string) => toastWarning(msg) } }))
+const toastInfo = jest.fn()
+jest.mock("sonner", () => ({
+  toast: {
+    warning: (msg: string) => toastWarning(msg),
+    info: (msg: string) => toastInfo(msg),
+  },
+}))
 const resolveSendOptionsMock = jest.fn<Promise<SendOptions>, []>(async () => ({
   model: "sonnet",
   systemPrompt: "sys",
@@ -1329,6 +1335,97 @@ describe("useClaudeChat — actions", () => {
       await result.current.send("hello", undefined, { attachmentManifest: manifest })
     })
     expect(makeUserMessage).toHaveBeenCalledWith("hello", expect.any(String), manifest)
+  })
+
+  describe("native video route guard", () => {
+    const info = {
+      groupId: "v1",
+      filename: "demo.mp4",
+      sourceMediaType: "video/mp4",
+      kind: "video" as const,
+      durationSec: 12,
+      width: 1280,
+      height: 720,
+      delivery: "native" as const,
+      strategy: "uniform" as const,
+      range: null,
+      frameTimes: [],
+      engine: "browser" as const,
+    }
+    const fallback = {
+      blocks: [
+        { type: "text" as const, text: "storyboard of demo.mp4" },
+        {
+          type: "image" as const,
+          source: { type: "base64" as const, media_type: "image/jpeg", data: "Qk9BUkQ=" },
+        },
+      ],
+      tokens: 3,
+      info: { ...info, delivery: "storyboard" as const, frameTimes: [2, 6, 10] },
+    }
+    const nativeEntry = {
+      filename: "demo.mp4",
+      mediaType: "video/mp4",
+      kind: "video" as const,
+      video: {
+        info,
+        poster: { mediaType: "image/jpeg", base64: "UE9TVEVS", width: 512, height: 288 },
+        fallback,
+      },
+    }
+    const nativeContent = [
+      { type: "text" as const, text: "Sent as the original video file." },
+      {
+        type: "document" as const,
+        source: { type: "base64" as const, media_type: "video/mp4", data: "VklERU8=" },
+      },
+      { type: "text" as const, text: "what happens?" },
+    ]
+
+    it("swaps a native video for its storyboard when the resolved route cannot take video", async () => {
+      const { makeUserMessage } = jest.requireMock("@/lib/claude/adapter") as {
+        makeUserMessage: jest.Mock
+      }
+      // The suite's default route: no provider, i.e. the Claude Agent SDK.
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send(nativeContent, undefined, {
+          attachmentManifest: [nativeEntry, nativeEntry],
+        })
+      })
+      const expected = [...fallback.blocks, { type: "text", text: "what happens?" }]
+      expect(sendPromptMock.mock.calls[0]![1]).toEqual(expected)
+      const fallbackEntry = {
+        filename: "demo.mp4",
+        mediaType: "video/mp4",
+        kind: "video",
+        video: { info: fallback.info },
+      }
+      expect(makeUserMessage).toHaveBeenCalledWith(expected, expect.any(String), [
+        fallbackEntry,
+        fallbackEntry,
+      ])
+      expect(toastInfo).toHaveBeenCalledTimes(1)
+    })
+
+    it("sends the original file on a Gemini route that declares video", async () => {
+      resolveSendOptionsMock.mockResolvedValue({
+        provider: "google",
+        model: "gemini-3.6-flash",
+        systemPrompt: "sys",
+      })
+      toastInfo.mockClear()
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send(nativeContent, undefined, {
+          attachmentManifest: [nativeEntry, nativeEntry],
+        })
+      })
+      expect(sendPromptMock.mock.calls[0]![1]).toEqual(nativeContent)
+      expect(toastInfo).not.toHaveBeenCalled()
+    })
   })
 
   it("send() routes through the standalone engine (not the sidecar) in BYOK mode", async () => {

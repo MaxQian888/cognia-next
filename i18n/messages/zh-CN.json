@@ -2246,8 +2246,10 @@
       "pending": "待处理"
     },
     "botApproval": {
-      "agentReported": "以下测试结果由 Agent 报告，请审批前检查实际命令证据。",
+      "agentReported": "以下命令结果由 Agent 报告，尚未经独立验证。",
       "baseSha": "审批目标 SHA",
+      "command": "具体命令请求",
+      "commandTitle": "审批 Bot 命令",
       "detailUnavailable": "审批详情不可用，请刷新此运行后再审批。",
       "fileMode": "文件权限模式",
       "headSha": "工作区 HEAD",
@@ -2339,7 +2341,10 @@
     "outcome": {
       "action_unavailable": "该操作已失效——运行状态已经变化。",
       "already_retried": "该运行已经重试过了。",
+      "consentCode": "宿主授权码：",
+      "control_failed": "宿主未能执行此操作，请检查连接后重试。",
       "forbidden": "你没有控制该运行的权限。",
+      "host_consent_required": "请先在宿主上授权此设备，然后重试操作。",
       "interrupt_expired": "该审批在被处理前已过期。",
       "interrupt_not_found": "该审批已不存在。",
       "interrupt_resolved": "该审批已被处理过。",
@@ -2462,6 +2467,7 @@
     },
     "tests": {
       "counts": "{passed} 通过 · {failed} 失败 · {skipped} 跳过",
+      "exitCode": "退出码",
       "failed": "失败",
       "inconclusive": "无法判定",
       "inconclusiveHint": "输出无法解析——这不等于通过。",
@@ -4708,6 +4714,10 @@
     },
     "attentionCount": "{count, plural, =1 {1 项需要处理} other {# 项需要处理}}",
     "config": {
+      "allowAutomaticPublication": "允许自动发布 PR 和代码评审",
+      "allowUnattended": "允许执行命令，无需逐次审批",
+      "authorityHint": "当 Bot 请求无人执行或自动发布时使用这些权限。保存后授权给当前安装实例；更严格的宿主策略仍然生效。自动发布不包含合并权限。",
+      "authorityTitle": "宿主授权",
       "description": "该安装每次运行时传入的配置。",
       "emptyBody": "这个 Bot 没有设置表单。它需要的一切都来自触发器和凭据。",
       "emptyTitle": "无需配置",
@@ -4745,7 +4755,10 @@
       "description": "这个 Bot 背后的队列。一条从未跑起来的投递，在别处看不到任何运行记录。",
       "emptyBody": "还没有任何东西投递给这个 Bot。武装一个触发器，或者手动跑一次。",
       "emptyTitle": "没有投递",
-      "replay": "重放",
+      "previousRun": "上次运行",
+      "replay": "重试",
+      "retryQueued": "重试已排队",
+      "retryRun": "重试运行",
       "status": {
         "deadletter": "已放弃",
         "dismissed": "已作废",
@@ -4756,7 +4769,8 @@
         "running": "运行中",
         "succeeded": "已完成"
       },
-      "title": "投递"
+      "title": "投递",
+      "viewRun": "查看运行"
     },
     "description": "已安装的 Bot：各自被什么唤醒、由什么执行、被允许做什么。",
     "detail": {
@@ -4980,7 +4994,7 @@
     },
     "write": {
       "alreadyQueued": "这次运行已经在排队了。",
-      "alreadyReplayed": "这条投递已经不是死信了。",
+      "alreadyReplayed": "已有重试任务，或这条投递无法重试。",
       "armed": "触发器已武装",
       "disarmed": "触发器已关闭",
       "failed": "改动未能保存",
@@ -5008,7 +5022,10 @@
         "vault-locked": "先解锁保险库才能改动。"
       },
       "replayed": "投递已重新排队",
+      "retrySubmitted": "重试请求已排队，等待 Host 处理。",
+      "retryUnavailable": "请先在所属 Host 上启用此 Bot，并恢复其定义和原运行记录，再重试。",
       "started": "运行已启动",
+      "submitted": "请求已排队，等待 Host 处理。",
       "unavailable": "这项改动无法从这里进行"
     }
   },
@@ -6121,13 +6138,96 @@
           "empty": "未找到可读文本",
           "notDataUrl": "无法读取此文件",
           "parseFailed": "无法解析此文件",
-          "unsupportedType": "不支持的文件类型"
+          "unsupportedType": "不支持的文件类型",
+          "videoTooLarge": "过大，无法处理",
+          "videoUndecodable": "此处无法解码该视频",
+          "videoUnprocessed": "该视频未经处理"
         },
         "removeAria": "移除 {filename}",
         "reorderAria": "拖动排序 {filename}",
         "skipped": "{count, plural, =1 {1 个附件已被} other {# 个附件已被}}跳过（不支持的文件类型）。",
         "tokenBadge": "{tokens} tok",
-        "unsupported": "有 {count} 个文件不受支持。"
+        "unsupported": "有 {count} 个文件不受支持。",
+        "video": {
+          "apply": "应用",
+          "applying": "处理中…",
+          "browserFailed": "应用无法解码此文件，已改用 ffmpeg 打开。",
+          "chipFrames": "{count} 张图",
+          "chipNative": "视频",
+          "chipProgress": "{percent}%",
+          "chipStoryboard": "{count} 帧",
+          "delivery": {
+            "frames": "逐帧",
+            "framesHint": "多张独立图片：细节更多，token 更多",
+            "native": "原视频",
+            "nativeHint": "模型直接观看视频文件",
+            "storyboard": "故事板",
+            "storyboardHint": "一张带时间戳的拼图：成本最低"
+          },
+          "deliveryLabel": "发送方式",
+          "engine": {
+            "browser": "由应用解码",
+            "ffmpeg": "由 ffmpeg 解码",
+            "gif": "按 GIF 解码"
+          },
+          "error": {
+            "failed": "处理失败：{message}",
+            "ffmpegFailed": "应用和 ffmpeg 都无法解码此视频。",
+            "ffmpegMissing": "应用无法解码这种格式，且未安装 ffmpeg。请安装 ffmpeg，或将视频转为 MP4。",
+            "tooLarge": "视频过大，无法在此处理（上限 {max} MB）。",
+            "undecodable": "此设备无法解码该视频。请在桌面端打开，或将其转为 MP4。"
+          },
+          "estimate": "约 {tokens} 图片 tokens · {size}",
+          "frameAlt": "{time} 处的画面",
+          "frameCountLabel": "帧数",
+          "nativeDowngraded": "{filename} 已改为故事板发送：{reason}。",
+          "nativeDropped": "有 {count} 个视频无法发送给此模型，已被略过。",
+          "nativeFailure": {
+            "failed": "无法准备视频文件。",
+            "ffmpeg-missing": "未安装 ffmpeg，无法截取片段。",
+            "format": "这种格式无法作为视频文件发送。",
+            "too-large": "文件超过 10 MB。请缩短时间段，或改为发送帧。",
+            "trim-unavailable": "为「原视频」截取片段需要桌面端的 ffmpeg。如需截取时间段，请改用故事板或逐帧。"
+          },
+          "nativeFallbackNote": "如果实际运行的模型不支持视频，会改为发送故事板。",
+          "nativeGifUnavailable": "无法使用原视频：GIF 会以帧的形式发送。",
+          "nativeReady": "原视频 · {size}",
+          "nativeReason": {
+            "auto-routing": "自动路由要在发送后才确定模型",
+            "external-agent": "外部智能体不接受视频文件",
+            "model": "该模型不支持视频输入",
+            "platform": "此会话把文件发给人而不是模型",
+            "protocol": "该服务商的 API 不接受视频文件",
+            "runtime": "该模型所用的运行时不接受视频文件",
+            "shared": "共享会话会原样保存你发送的内容",
+            "standalone": "本地（自带密钥）模式无法发送视频文件",
+            "team": "团队房间的成员使用不同模型",
+            "too-large": "原视频必须小于 10 MB"
+          },
+          "nativeUnavailable": "无法使用原视频：{reason}。",
+          "outputTitle": "模型将收到的内容",
+          "panelTitle": "视频",
+          "pendingChanges": "点击应用后查看结果。",
+          "playerLabel": "{filename} 的视频预览",
+          "processing": "正在抽帧…",
+          "rangeEndAria": "结束时间",
+          "rangeLabel": "时间段",
+          "rangeStartAria": "开始时间",
+          "rangeValue": "{start} – {end}",
+          "rangeWhole": "整段",
+          "reset": "重置",
+          "retry": "重试",
+          "sceneNoCuts": "没有找到明显的场景切换，已均匀取帧。",
+          "sourceGif": "{duration} · {frames} 帧 · {width}×{height}",
+          "sourceVideo": "{duration} · {width}×{height}",
+          "storyboardAlt": "{filename} 的故事板",
+          "strategy": {
+            "scene": "按场景切换",
+            "uniform": "均匀间隔"
+          },
+          "strategyLabel": "取帧方式"
+        },
+        "videoSizeExceeded": "有 {count} 个视频超过 {max} MB，无法在此处理。"
       },
       "camera": {
         "captureAria": "拍照或添加照片",
@@ -7571,7 +7671,18 @@
       "usageCost": "费用：${cost}",
       "usageInput": "输入：{n}",
       "usageOutput": "输出：{n}",
-      "usageReasoning": "推理：{n}"
+      "usageReasoning": "推理：{n}",
+      "videoCard": {
+        "gif": "GIF",
+        "notStored": "原文件未保存。",
+        "range": "{start}–{end}",
+        "strategyScene": "按场景切换",
+        "strategyUniform": "均匀间隔",
+        "summaryFrames": "{count} 帧（{strategy}）",
+        "summaryNative": "以原视频发送",
+        "summaryStoryboard": "{count} 帧故事板（{strategy}）",
+        "video": "视频"
+      }
     },
     "messageDisplay": {
       "assistant": "助手",
@@ -8451,6 +8562,7 @@
     "repoReadOnly": "只读",
     "resourceAgent": "团队成员",
     "resourceFile": "工作区文件",
+    "resourceMember": "团队房间成员",
     "resourceSubagent": "子智能体",
     "save": "保存",
     "saveToRepo": "保存到仓库",
@@ -12686,6 +12798,7 @@
     },
     "picker": {
       "accountLabel": "账号",
+      "attachFailed": "无法附加「{title}」。",
       "attached": "已附加「{title}」",
       "fetching": "正在获取「{title}」…",
       "hostUnsupported": "云端文档仅在桌面端可用。",
@@ -16963,7 +17076,36 @@
       "preparing": "正在准备导入…",
       "title": "导入消息"
     },
-    "title": "Cognia 入口"
+    "title": "Cognia 入口",
+    "workbench": {
+      "account": "团队账户",
+      "description": "打开个人控制台或选择团队工作区，沿用已有的设备授权和团队权限。",
+      "devices": "连接设备",
+      "errors": {
+        "adapter_missing": "请从已配置的飞书应用主页打开工作台。",
+        "forbidden": "你已无权访问此工作区。",
+        "host_mismatch": "当前连接的设备或配置档与此 Bot 不一致，请切换到对应设备和配置档。",
+        "host_required": "请连接运行此 Bot 的设备，再打开个人控制台。",
+        "identity_mismatch": "飞书和 Cognia 账户不一致，请登录已绑定的账户。",
+        "intent_expired": "本次权限验证已过期，请重试。",
+        "mode_forbidden": "此控制台模式已停用，请刷新工作台。",
+        "principal_legacy": "此 Bot 需要先完成身份绑定才能使用工作台。",
+        "principal_unbound": "你的飞书身份尚未关联 Cognia 用户，请联系管理员完成绑定。",
+        "session_expired": "飞书会话已过期，请重试并重新登录。",
+        "team_sign_in_required": "请先登录团队账户，再选择工作区。",
+        "team_unavailable": "无法加载团队工作区，请检查团队账户后重试。",
+        "timeout": "Bot 未及时响应，请确认其在线后重试。",
+        "workbench_disabled": "此 Bot 尚未启用工作台和飞书网页登录。",
+        "workbench_unavailable": "工作台暂时不可用，请重试。"
+      },
+      "issues": "打开任务看板",
+      "loading": "正在验证访问权限…",
+      "login": "正在跳转到飞书登录…",
+      "personal": "个人控制台",
+      "retry": "重试",
+      "team": "团队工作区",
+      "title": "Cognia 工作台"
+    }
   },
   "loading": {
     "cancel": "取消",
@@ -33929,7 +34071,17 @@
           "title": "Web 入口与飞书表面",
           "webBaseHelp": "飞书客户端内可访问的 Cognia Web 应用公网 https 地址。Chat Tab / 菜单链接与 SSO 跳转都基于它构建；留空则外部链接保持关闭。",
           "webBaseLabel": "Web 入口基础 URL",
-          "webBasePlaceholder": "https://cognia.example.com"
+          "webBasePlaceholder": "https://cognia.example.com",
+          "workbenchHelp": "将此链接配置为飞书应用的桌面端和移动端主页。个人入口需要连接对应设备，团队入口需要登录已绑定的团队账户。此设置不会授予额外权限。",
+          "workbenchMode": {
+            "both": "个人和团队",
+            "disabled": "停用",
+            "personal": "个人",
+            "team": "团队"
+          },
+          "workbenchModeLabel": "工作台入口",
+          "workbenchSaveFailed": "工作台模式保存失败，请重试。",
+          "workbenchUrlLabel": "应用主页链接"
         },
         "openCompanion": "打开伴侣设置",
         "openCompanionAria": "打开 移动端伴侣 → Tunnel",

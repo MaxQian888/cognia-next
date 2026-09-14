@@ -1,4 +1,4 @@
-import { getMessageMentions } from "./read"
+import { getMessageMentions, isContextRef } from "./read"
 
 describe("getMessageMentions", () => {
   it("returns stored structured refs verbatim", () => {
@@ -36,5 +36,23 @@ describe("getMessageMentions", () => {
   it("returns [] when neither metadata nor text is present", () => {
     expect(getMessageMentions({})).toEqual([])
     expect(getMessageMentions({ metadata: {} })).toEqual([])
+  })
+})
+
+// Also the guard for citations restored from a draft row, which another build
+// may have written.
+describe("isContextRef", () => {
+  it("accepts a ref of a known kind", () => {
+    expect(isContextRef({ kind: "doc", id: "lark:doc_1", label: "Plan" })).toBe(true)
+  })
+
+  it.each([
+    ["undefined", undefined],
+    ["null", null],
+    ["a string", "lark:doc_1"],
+    ["a ref with no id", { kind: "doc" }],
+    ["a ref of an unknown kind", { kind: "spreadsheet", id: "x" }],
+  ])("rejects %s", (_label, value) => {
+    expect(isContextRef(value)).toBe(false)
   })
 })

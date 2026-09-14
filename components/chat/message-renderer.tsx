@@ -41,6 +41,11 @@ import {
   MessageImageGallery,
   type MessageImageGalleryProps,
 } from "@/components/chat/renderers/message-image-gallery"
+import {
+  collectMessageVideoAttachments,
+  MessageVideoAttachmentCard,
+} from "@/components/chat/renderers/message-video-attachment-card"
+import { videoAttachmentInfoOfPart } from "@/lib/chat/attachments/video/attachment-info"
 import { MessageImageCollectionProvider } from "@/components/chat/renderers/message-image-collection"
 import { PluginSurface } from "@/components/plugins/plugin-surface"
 import { UnknownPartCard } from "@/components/chat/message-parts/unknown-part-card"
@@ -412,15 +417,24 @@ function MessageRendererInner({
     [presentationParts, agentFlowMode]
   )
 
+  // A sent video's parts — its description, and the storyboard, frames or
+  // poster the model saw — fold into one card at the first part's position.
+  const messageVideoAttachments = useMemo(
+    () => collectMessageVideoAttachments(message.parts),
+    [message.parts]
+  )
+
   // Image file parts belong to one visual attachment group even when a text or
   // document part sits between them. Render the group at the first image's
   // transcript position and suppress the remaining individual image parts.
+  // A video's frames are not among them: they belong to the video's card.
   const messageImageGallery = useMemo(() => {
     const items: MessageImageGalleryProps["items"] = []
     const partIndexes = new Set<number>()
     message.parts.forEach((part, index) => {
       const file = part as { type?: string; url?: string; mediaType?: string; filename?: string }
       if (file.type !== "file" || !file.url || !file.mediaType?.startsWith("image/")) return
+      if (messageVideoAttachments.partIndexes.has(index)) return
       partIndexes.add(index)
       items.push({
         id: `${message.id}-${index}`,
@@ -434,7 +448,7 @@ function MessageRendererInner({
       partIndexes,
       firstPartIndex: partIndexes.values().next().value as number | undefined,
     }
-  }, [message.id, message.parts, t])
+  }, [message.id, message.parts, messageVideoAttachments, t])
 
   // Plain text of the message, for the "share as card" action + gate.
   const messageText = useMemo(() => extractText(message), [message])
@@ -842,6 +856,17 @@ function MessageRendererInner({
                   const { part, index } = segment.entry
                   const partKey = `${message.id}-${index}`
                   const partType = (part as { type?: string }).type
+                  if (messageVideoAttachments.partIndexes.has(index)) {
+                    const video = messageVideoAttachments.byFirstPartIndex.get(index)
+                    if (!video) return null
+                    return (
+                      <MessageVideoAttachmentCard
+                        key={`${message.id}-video-${video.info.groupId}`}
+                        attachment={video}
+                        idPrefix={message.id}
+                      />
+                    )
+                  }
                   if (messageImageGallery.partIndexes.has(index)) {
                     if (index !== messageImageGallery.firstPartIndex) return null
                     return (
@@ -1533,12 +1558,17 @@ function highlightMentions(
 }
 
 function extractText(message: UIMessage): string {
-  // Edit, quote, bring-back, read-aloud and forward all hand over what the
-  // user typed; the context envelope is the app's framing for the model.
-  return stripPromptPreambleFromParts(message.parts)
-    .filter((p): p is { type: "text"; text: string } => (p as { type?: string }).type === "text")
-    .map((p) => p.text)
-    .join("\n\n")
+  return (
+    // Edit, quote, bring-back, read-aloud and forward all hand over what the
+    // user typed; the context envelope is the app's framing for the model.
+    stripPromptPreambleFromParts(message.parts)
+      .filter((p): p is { type: "text"; text: string } => (p as { type?: string }).type === "text")
+      // A video's description is what the model read, not what the user wrote:
+      // it must not come back into an edit, a quote or a copy.
+      .filter((p) => videoAttachmentInfoOfPart(p) === null)
+      .map((p) => p.text)
+      .join("\n\n")
+  )
 }
 
 function shouldHideMessagePart(

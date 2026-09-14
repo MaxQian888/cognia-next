@@ -25,6 +25,7 @@ import { loggers } from "@cognia/logging"
 import {
   COMPOSER_MAX_ATTACHMENTS,
   COMPOSER_MAX_ATTACHMENT_BYTES,
+  COMPOSER_VIDEO_SOURCE_MAX_BYTES,
   prepareComposerAttachments,
 } from "@/lib/chat/attachments/prepare"
 import { captureSmartSnapshotFiles, SMART_SNAPSHOT_COMMAND_ID } from "@/lib/chat/smart-snapshot"
@@ -33,6 +34,8 @@ import { registerCommand } from "@/lib/plugin/commands/registry"
 import { collapsePaste } from "@/lib/paste-collapse"
 import { spliceToken } from "@/components/chat/composer-trigger"
 import { useRemoteDocStaging, type RemoteDocStagingItem } from "@/hooks/chat/use-remote-doc-staging"
+import type { AttachmentCitations } from "@/lib/chat/mentions/attachment-citations"
+import type { ContextRef } from "@/lib/chat/mentions/types"
 import { showMainWindow } from "@/lib/tauri/pet-window"
 import {
   attachmentToFiles,
@@ -56,13 +59,35 @@ interface TextInputApi {
   setInput: (next: string) => void
 }
 
+export interface AcceptFilesOptions {
+  /**
+   * Citations carried by particular files: a picked remote document cites the
+   * document it was fetched from. Keyed by the `File` handed in, so only a file
+   * that preparation passes through unchanged can carry one. Every document
+   * does; only an oversized image is re-encoded.
+   */
+  citations?: ReadonlyMap<File, ContextRef>
+}
+
 export interface UseAttachmentIntakeOptions {
   attachments: AttachmentsApi
+  /**
+   * Where a staged file's citation is announced, immediately before
+   * `attachments.add`. The provider mints the attachment id inside `add` and
+   * returns nothing, so announcing it any later could miss the id.
+   */
+  attachmentCitations: Pick<AttachmentCitations, "expect">
+
   textInput: TextInputApi
   textareaRef: React.RefObject<HTMLTextAreaElement | null>
   /** Moves the composer's caret model after a splice. */
   setCaret: (caret: number) => void
   isDesktop: boolean
+  /**
+   * Accept videos and animated GIFs for on-device preprocessing. Off in an IM
+   * platform conversation, whose files go to a person rather than a model.
+   */
+  acceptMotion: boolean
   /** `useTranslations("chat.composer")` — smart-snapshot copy. */
   t: (key: string, values?: Record<string, string | number | Date>) => string
   /** `useTranslations("chat.composer.attachments")` — gate copy. */
@@ -71,10 +96,12 @@ export interface UseAttachmentIntakeOptions {
 
 export function useAttachmentIntake({
   attachments,
+  attachmentCitations,
   textInput,
   textareaRef,
   setCaret,
   isDesktop,
+  acceptMotion,
   t,
   tAttach,
 }: UseAttachmentIntakeOptions) {
@@ -99,8 +126,13 @@ export function useAttachmentIntake({
   const [pastedBlocks, setPastedBlocks] = useState<Record<string, string>>({})
   const pasteSeq = useRef(0)
 
+  /**
+   * Resolves to the files actually staged. A file the gate refused (type, size,
+   * count headroom) is absent, and its toast has already said why, so a caller
+   * that promised the user an attachment can tell whether it delivered one.
+   */
   const acceptFiles = useCallback(
-    async (files: FileList | File[]) => {
+    async (files: FileList | File[], options: AcceptFilesOptions = {}): Promise<File[]> => {
       const list = [...files]
       const imageCount = list.filter((f) => (f.type ?? "").startsWith("image/")).length
       attachmentPrepareCountRef.current += 1
@@ -109,6 +141,7 @@ export function useAttachmentIntake({
       try {
         const prepared = await prepareComposerAttachments(list, {
           maxFileSize: MAX_FILE_SIZE,
+          ...(acceptMotion ? { motion: { maxSourceBytes: COMPOSER_VIDEO_SOURCE_MAX_BYTES } } : {}),
         })
         if (prepared.unsupportedCount > 0) {
           toast.warning(tAttach("unsupported", { count: prepared.unsupportedCount }))
@@ -118,6 +151,14 @@ export function useAttachmentIntake({
             tAttach("fileSizeExceeded", {
               count: prepared.tooLargeCount,
               max: MAX_FILE_SIZE / (1024 * 1024),
+            })
+          )
+        }
+        if (prepared.motionTooLargeCount > 0) {
+          toast.warning(
+            tAttach("videoSizeExceeded", {
+              count: prepared.motionTooLargeCount,
+              max: COMPOSER_VIDEO_SOURCE_MAX_BYTES / (1024 * 1024),
             })
           )
         }
@@ -134,15 +175,20 @@ export function useAttachmentIntake({
         }
         if (take.length > 0) {
           attachmentFileCountRef.current += take.length
+          for (const staged of take) {
+            const citation = options.citations?.get(staged)
+            if (citation) attachmentCitations.expect(staged, citation)
+          }
           attachments.add(take)
         }
+        return take
       } finally {
         attachmentPrepareCountRef.current = Math.max(0, attachmentPrepareCountRef.current - 1)
         setAttachmentPrepareCount((count) => Math.max(0, count - 1))
         if (imageCount > 0) setPreparingImageCount((count) => Math.max(0, count - imageCount))
       }
     },
-    [attachments, tAttach]
+    [acceptMotion, attachmentCitations, attachments, tAttach]
   )
 
   const [smartSnapshotPending, setSmartSnapshotPending] = useState(false)
@@ -184,9 +230,7 @@ export function useAttachmentIntake({
     })
   }, [captureSmartSnapshot, isDesktop, t])
 
-  const stageRemoteDoc = useRemoteDocStaging({
-    acceptFiles: (files) => void acceptFiles(files),
-  })
+  const stageRemoteDoc = useRemoteDocStaging({ acceptFiles })
 
   // Mobile "+" menu → fold every pick (camera / album multi-pick / files)
   // into the same acceptFiles gate the paperclip input uses, so the size /

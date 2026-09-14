@@ -43,6 +43,8 @@ import { useChatStore } from "@/stores/chat"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { flushDebouncedDraftWrites, getDraft, setDraft } from "@/lib/db/chat-drafts"
 import { createChatTemplate, listChatTemplates } from "@/lib/db/chat-templates"
+import { createCharacter, updateCharacter } from "@/lib/db/characters"
+import { createTeam } from "@/lib/db/teams"
 import { requestTemplateRerun } from "@/lib/chat/template/rerun-request"
 import type { ChatSession } from "@cognia/agent-config-types"
 
@@ -438,6 +440,69 @@ describe("Composer — reference parameters", () => {
 
     expect(textOf(sent[0])).toContain("@src/app.ts")
     expect(textOf(sent[0])).not.toContain("{{target}}")
+  }, 30_000)
+
+  /** A character team with one member, and a template that asks for one. */
+  async function seedTeamRoom() {
+    const critic = await createCharacter({ name: "Critic", systemPrompt: "critique" })
+    const team = await createTeam({
+      name: "Review room",
+      members: [{ characterId: critic.id }],
+    })
+    const template = await createChatTemplate({
+      name: "Ask a member",
+      body: "{{who}} what do you think",
+      params: [
+        { id: "who", label: "Who", required: true, kind: "resource", resourceKind: "member" },
+      ],
+    })
+    return { critic, team, template }
+  }
+
+  // A member pick inserts the character NAME, because that is what the team
+  // router matches. The picker has to offer the room's members and substitute
+  // exactly that token, or the turn would reach nobody.
+  it("picks a team room member and sends the name the router matches", async () => {
+    const { team } = await seedTeamRoom()
+    const sent: unknown[] = []
+    const { ta } = await mount((content) => sent.push(content), { kind: "team", teamId: team.id })
+
+    fireEvent.change(ta, { target: { value: "/" } })
+    fireEvent.mouseDown(await screen.findByText("Ask a member"))
+    await waitFor(() => expect(ta.value).toBe("{{who}} what do you think "))
+
+    await screen.findByTestId("template-param-search")
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300))
+    })
+    fireEvent.click(await screen.findByRole("option", { name: /Critic/ }))
+
+    await waitFor(() => expect(chips()[0]).toHaveAttribute("data-param-state", "filled"))
+    await submit(ta)
+
+    expect(textOf(sent[0])).toContain("@Critic what do you think")
+  }, 30_000)
+
+  it("flags a member whose name no longer spells the token that was bound", async () => {
+    const { critic, team, template } = await seedTeamRoom()
+    const { recordChatTemplateUse } = await import("@/lib/db/chat-templates")
+    await recordChatTemplateUse(template.id, {
+      who: {
+        kind: "resource",
+        resourceKind: "member",
+        id: critic.id,
+        label: "Critic",
+        raw: "@Critic",
+      },
+    })
+    // Renamed after the value was remembered: `@Critic` now routes to nobody.
+    await updateCharacter(critic.id, { name: "Skeptic" })
+
+    const { ta } = await mount(undefined, { kind: "team", teamId: team.id })
+    fireEvent.change(ta, { target: { value: "/" } })
+    fireEvent.mouseDown(await screen.findByText("Ask a member"))
+
+    await waitFor(() => expect(chips()[0]).toHaveAttribute("data-param-state", "unresolved"))
   }, 30_000)
 
   it("sends without a parameter the template declared optional", async () => {

@@ -10,6 +10,8 @@ import { makeUserMessage } from "@/lib/claude/adapter"
 import { clearProjectHistoryEvidence } from "@/lib/claude/project-history-evidence-registry"
 import { toast } from "sonner"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
+import { enforceVideoDeliveryForRoute } from "@/lib/chat/attachments/video/route-guard"
+import { videoRouteFacts } from "@/lib/chat/attachments/video/route-facts"
 import { prefixReplyContext, withReplyContextLines } from "@/lib/chat/reply-to"
 import type { ContextRef } from "@/lib/chat/mentions/types"
 import {
@@ -248,6 +250,7 @@ export function useClaudeChat() {
   const store = useChatStore
   const tRouting = useTranslations("providers.routingView")
   const tInlineErr = useTranslations("chat.inlineError")
+  const tVideo = useTranslations("chat.composer.attachments.video")
   // The active session id is captured per-render via a ref so the long-lived
   // event handler always sees the freshest value without resubscribing.
   const activeRef = useRef<string | null>(null)
@@ -783,13 +786,21 @@ export function useClaudeChat() {
         !callOptions?.skipUserAppend &&
         !callOptions?.steerDrain
       ) {
-        const message = makeUserMessage(
-          content,
-          crypto.randomUUID(),
-          callOptions?.attachmentManifest
-        )
-        if (Array.isArray(content)) {
-          message.parts = content.flatMap((block, index) =>
+        // A shared transcript publishes user parts to the server as they are,
+        // so a native video would upload the file itself: always its sampled
+        // payload here (the composer's gate says the same).
+        const shared = enforceVideoDeliveryForRoute(content, callOptions?.attachmentManifest, {
+          providerId: null,
+          modelId: null,
+          runtimeAdapter: null,
+          protocol: null,
+          supportsVideo: false,
+          sharedCollaboration: true,
+        })
+        const sharedManifest = shared.manifest
+        const message = makeUserMessage(shared.content, crypto.randomUUID(), sharedManifest)
+        if (Array.isArray(shared.content)) {
+          message.parts = shared.content.flatMap((block, index) =>
             block.type === "document"
               ? [
                   {
@@ -801,9 +812,7 @@ export function useClaudeChat() {
               : makeUserMessage(
                   [block],
                   undefined,
-                  callOptions?.attachmentManifest?.[index]
-                    ? [callOptions.attachmentManifest[index]]
-                    : undefined
+                  sharedManifest?.[index] ? [sharedManifest[index]] : undefined
                 ).parts
           )
         }
@@ -1140,11 +1149,44 @@ export function useClaudeChat() {
       //   • "modify" with `additionalContext` — fold into the appendSystemPrompt
       //     slot so the SDK passes it through as a system-prompt extension.
       // Errors bubble up as `proceed` (adapter-hooks swallows internally).
-      let effectiveContent: SendContent = content
+      // Native video, decided for real. The composer chose native from its
+      // guess at the route; `sendOptions` is the route that will run. A native
+      // payload that route cannot take is swapped for the sampled payload its
+      // manifest carries before anything reads the content.
+      const videoGuard = enforceVideoDeliveryForRoute(
+        content,
+        callOptions?.attachmentManifest,
+        videoRouteFacts({
+          providerId: sendOptions.provider,
+          modelId: sendOptions.model,
+          runtimeAdapter: sendOptions.execution?.runtimeAdapter,
+          providerSettings: useSettingsStore.getState().settings?.providerSettings,
+          customProviders: useSettingsStore.getState().settings?.customProviders,
+          teamRoom: session?.kind === "team",
+          sharedCollaboration: Boolean(session?.collaboration),
+          standalone: isStandaloneChatMode(),
+        })
+      )
+      const turnContent = videoGuard.content
+      const turnManifest = videoGuard.manifest
+      for (const downgrade of videoGuard.downgraded) {
+        toast.info(
+          tVideo("nativeDowngraded", {
+            filename: downgrade.filename,
+            reason: tVideo(`nativeReason.${downgrade.reason}` as never),
+          })
+        )
+      }
+      if (videoGuard.dropped > 0) {
+        toast.warning(tVideo("nativeDropped", { count: videoGuard.dropped }))
+      }
+
+      let effectiveContent: SendContent = turnContent
       const promptText =
-        typeof content === "string"
-          ? content
-          : ((content.find((b) => b.type === "text") as { text?: string } | undefined)?.text ?? "")
+        typeof turnContent === "string"
+          ? turnContent
+          : ((turnContent.find((b) => b.type === "text") as { text?: string } | undefined)?.text ??
+            "")
       const promptDecision = await dispatchPluginUserPromptSubmit(
         promptText,
         sessionId,
@@ -1165,12 +1207,12 @@ export function useClaudeChat() {
       }
       if (promptDecision.action === "modify") {
         if (typeof promptDecision.modifiedPrompt === "string") {
-          if (typeof content === "string") {
+          if (typeof turnContent === "string") {
             effectiveContent = promptDecision.modifiedPrompt
           } else {
             // Replace the first text block with the modified prompt and keep
             // the rest of the content (attachments, etc.) intact.
-            effectiveContent = content.map((block) => {
+            effectiveContent = turnContent.map((block) => {
               if (block.type === "text") {
                 return { ...block, text: promptDecision.modifiedPrompt as string } as typeof block
               }
@@ -1227,11 +1269,7 @@ export function useClaudeChat() {
       // existing user anchor stays the single source of truth for that turn.
       // Base off this session's own slice — never the focused projection.
       const previousMessages = store.getState().sessions[sessionId]?.messages ?? []
-      const userMsg = makeUserMessage(
-        effectiveContent,
-        frozenTurnId,
-        callOptions?.attachmentManifest
-      )
+      const userMsg = makeUserMessage(effectiveContent, frozenTurnId, turnManifest)
       // Structured mention capture: persist the message's inline `@…` tokens
       // as `metadata.mentions: ContextRef[]` so mentions are queryable without
       // regex re-parsing. Known subagent handles resolve to their kind; other
@@ -1326,8 +1364,8 @@ export function useClaudeChat() {
           )
         : { content: providerContent, sendOptions, messages: providerMessages }
       if (callOptions?.sharedRequest) {
-        providerPayload.messages = [makeUserMessage(content)]
-        providerPayload.content = content
+        providerPayload.messages = [makeUserMessage(turnContent)]
+        providerPayload.content = turnContent
         providerPayload.sendOptions = {
           ...providerPayload.sendOptions,
           resumeSessionId: undefined,
@@ -1348,7 +1386,7 @@ export function useClaudeChat() {
         !skipAppend &&
         typeof effectiveContent === "string" &&
         callOptions?.resourceContext === undefined &&
-        (callOptions?.attachmentManifest?.length ?? 0) === 0 &&
+        (turnManifest?.length ?? 0) === 0 &&
         runtimeRefForSession(sessionId).kind === "builtin" &&
         !session?.collaboration &&
         !isStandaloneChatMode()
@@ -3215,6 +3253,7 @@ export function useClaudeChat() {
       store,
       tRouting,
       tInlineErr,
+      tVideo,
       registry,
       releaseExternalToolHost,
       enqueueClaudeEvent,

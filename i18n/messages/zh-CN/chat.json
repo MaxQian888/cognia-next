@@ -272,13 +272,96 @@
         "empty": "未找到可读文本",
         "notDataUrl": "无法读取此文件",
         "parseFailed": "无法解析此文件",
-        "unsupportedType": "不支持的文件类型"
+        "unsupportedType": "不支持的文件类型",
+        "videoTooLarge": "过大，无法处理",
+        "videoUndecodable": "此处无法解码该视频",
+        "videoUnprocessed": "该视频未经处理"
       },
       "removeAria": "移除 {filename}",
       "reorderAria": "拖动排序 {filename}",
       "skipped": "{count, plural, =1 {1 个附件已被} other {# 个附件已被}}跳过（不支持的文件类型）。",
       "tokenBadge": "{tokens} tok",
-      "unsupported": "有 {count} 个文件不受支持。"
+      "unsupported": "有 {count} 个文件不受支持。",
+      "video": {
+        "apply": "应用",
+        "applying": "处理中…",
+        "browserFailed": "应用无法解码此文件，已改用 ffmpeg 打开。",
+        "chipFrames": "{count} 张图",
+        "chipNative": "视频",
+        "chipProgress": "{percent}%",
+        "chipStoryboard": "{count} 帧",
+        "delivery": {
+          "frames": "逐帧",
+          "framesHint": "多张独立图片：细节更多，token 更多",
+          "native": "原视频",
+          "nativeHint": "模型直接观看视频文件",
+          "storyboard": "故事板",
+          "storyboardHint": "一张带时间戳的拼图：成本最低"
+        },
+        "deliveryLabel": "发送方式",
+        "engine": {
+          "browser": "由应用解码",
+          "ffmpeg": "由 ffmpeg 解码",
+          "gif": "按 GIF 解码"
+        },
+        "error": {
+          "failed": "处理失败：{message}",
+          "ffmpegFailed": "应用和 ffmpeg 都无法解码此视频。",
+          "ffmpegMissing": "应用无法解码这种格式，且未安装 ffmpeg。请安装 ffmpeg，或将视频转为 MP4。",
+          "tooLarge": "视频过大，无法在此处理（上限 {max} MB）。",
+          "undecodable": "此设备无法解码该视频。请在桌面端打开，或将其转为 MP4。"
+        },
+        "estimate": "约 {tokens} 图片 tokens · {size}",
+        "frameAlt": "{time} 处的画面",
+        "frameCountLabel": "帧数",
+        "nativeDowngraded": "{filename} 已改为故事板发送：{reason}。",
+        "nativeDropped": "有 {count} 个视频无法发送给此模型，已被略过。",
+        "nativeFailure": {
+          "failed": "无法准备视频文件。",
+          "ffmpeg-missing": "未安装 ffmpeg，无法截取片段。",
+          "format": "这种格式无法作为视频文件发送。",
+          "too-large": "文件超过 10 MB。请缩短时间段，或改为发送帧。",
+          "trim-unavailable": "为「原视频」截取片段需要桌面端的 ffmpeg。如需截取时间段，请改用故事板或逐帧。"
+        },
+        "nativeFallbackNote": "如果实际运行的模型不支持视频，会改为发送故事板。",
+        "nativeGifUnavailable": "无法使用原视频：GIF 会以帧的形式发送。",
+        "nativeReady": "原视频 · {size}",
+        "nativeReason": {
+          "auto-routing": "自动路由要在发送后才确定模型",
+          "external-agent": "外部智能体不接受视频文件",
+          "model": "该模型不支持视频输入",
+          "platform": "此会话把文件发给人而不是模型",
+          "protocol": "该服务商的 API 不接受视频文件",
+          "runtime": "该模型所用的运行时不接受视频文件",
+          "shared": "共享会话会原样保存你发送的内容",
+          "standalone": "本地（自带密钥）模式无法发送视频文件",
+          "team": "团队房间的成员使用不同模型",
+          "too-large": "原视频必须小于 10 MB"
+        },
+        "nativeUnavailable": "无法使用原视频：{reason}。",
+        "outputTitle": "模型将收到的内容",
+        "panelTitle": "视频",
+        "pendingChanges": "点击应用后查看结果。",
+        "playerLabel": "{filename} 的视频预览",
+        "processing": "正在抽帧…",
+        "rangeEndAria": "结束时间",
+        "rangeLabel": "时间段",
+        "rangeStartAria": "开始时间",
+        "rangeValue": "{start} – {end}",
+        "rangeWhole": "整段",
+        "reset": "重置",
+        "retry": "重试",
+        "sceneNoCuts": "没有找到明显的场景切换，已均匀取帧。",
+        "sourceGif": "{duration} · {frames} 帧 · {width}×{height}",
+        "sourceVideo": "{duration} · {width}×{height}",
+        "storyboardAlt": "{filename} 的故事板",
+        "strategy": {
+          "scene": "按场景切换",
+          "uniform": "均匀间隔"
+        },
+        "strategyLabel": "取帧方式"
+      },
+      "videoSizeExceeded": "有 {count} 个视频超过 {max} MB，无法在此处理。"
     },
     "camera": {
       "captureAria": "拍照或添加照片",
@@ -1722,7 +1805,18 @@
     "saveAsIssueEmpty": "这条回复里没有可记录的内容。",
     "saveAsIssueFailed": "创建失败：{reason}",
     "replyLabel": "回复",
-    "replyTooltip": "回复这条消息"
+    "replyTooltip": "回复这条消息",
+    "videoCard": {
+      "gif": "GIF",
+      "notStored": "原文件未保存。",
+      "range": "{start}–{end}",
+      "strategyScene": "按场景切换",
+      "strategyUniform": "均匀间隔",
+      "summaryFrames": "{count} 帧（{strategy}）",
+      "summaryNative": "以原视频发送",
+      "summaryStoryboard": "{count} 帧故事板（{strategy}）",
+      "video": "视频"
+    }
   },
   "messageDisplay": {
     "assistant": "助手",

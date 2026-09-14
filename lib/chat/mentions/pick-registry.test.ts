@@ -21,7 +21,7 @@ function makeCtx(overrides: Partial<MentionPickContext> = {}): MentionPickContex
     toggleEphemeralSkill: jest.fn(),
     addReferencedWorkflowElement: jest.fn(),
     applyPreset: jest.fn().mockResolvedValue(undefined),
-    stageRemoteDoc: jest.fn().mockResolvedValue(undefined),
+    stageRemoteDoc: jest.fn().mockResolvedValue(null),
     stageEntity: jest.fn().mockResolvedValue({ kind: "entity" }),
     recordMention: jest.fn(),
     session: null,
@@ -167,9 +167,9 @@ describe("built-in handlers", () => {
 
 // ---------------------------------------------------------------------------
 // Chip-style picks. They leave NO token in the message text, so
-// `resolve-mentions.ts` can never recover them by re-parsing. A doc pick
-// records its citation through `recordMention`; an entity's is read at send
-// time off the chip it staged (`selection-citations.ts`).
+// `resolve-mentions.ts` can never recover them by re-parsing. Their citations
+// are read at send time off what they staged: the context chip
+// (`selection-citations.ts`) or the attachment (`attachment-citations.ts`).
 // ---------------------------------------------------------------------------
 
 const docItem = {
@@ -189,17 +189,23 @@ const entityItem = {
   },
 } as unknown as PopoverItem
 
-describe("doc picks record a citation", () => {
-  it("records `<providerId>:<documentId>` after staging", async () => {
-    const ctx = makeCtx()
+describe("doc picks", () => {
+  // The citation rides the staged file and is read off the files a turn
+  // submits (`attachment-citations.ts`). Recording it on pick cited fetches
+  // that failed and documents whose chip was removed before sending.
+  it("stages the document and records no citation of its own", async () => {
+    const staged = new File(["body"], "Release plan.md", { type: "text/markdown" })
+    const ctx = makeCtx({ stageRemoteDoc: jest.fn().mockResolvedValue(staged) })
     await getMentionPickHandler("doc")!.onPick(docItem as never, ctx)
-    expect(ctx.stageRemoteDoc).toHaveBeenCalled()
-    expect(ctx.recordMention).toHaveBeenCalledWith({
-      kind: "doc",
-      id: "lark:doc_1",
-      label: "Release plan",
-      raw: "https://x.feishu.cn/docx/doc_1",
-    })
+    expect(ctx.stageRemoteDoc).toHaveBeenCalledWith(docItem)
+    expect(ctx.recordMention).not.toHaveBeenCalled()
+  })
+
+  it("records nothing when the fetch failed or the gate refused the file", async () => {
+    const ctx = makeCtx({ stageRemoteDoc: jest.fn().mockResolvedValue(null) })
+    await getMentionPickHandler("doc")!.onPick(docItem as never, ctx)
+    expect(ctx.recordMention).not.toHaveBeenCalled()
+    expect(ctx.insertReplacement).not.toHaveBeenCalled()
   })
 
   it("drops the `@lark:…` token before the fetch, so a failure leaves it clean", async () => {

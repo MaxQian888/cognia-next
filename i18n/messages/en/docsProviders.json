@@ -25,6 +25,7 @@
   },
   "picker": {
     "accountLabel": "Account",
+    "attachFailed": "Could not attach “{title}”.",
     "attached": "Attached “{title}”",
     "fetching": "Fetching “{title}”…",
     "hostUnsupported": "Remote documents are available on the desktop app only.",

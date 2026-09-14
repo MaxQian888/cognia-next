@@ -71,6 +71,29 @@ describe("draftAttachmentsFromFiles", () => {
       expect(rows[0]).toMatchObject({ extractedText: "extracted body", tokens: 42 })
     })
 
+    it("carries a video's sampling settings, not its frames", () => {
+      const settings = {
+        delivery: "frames" as const,
+        strategy: "scene" as const,
+        frameCount: 4,
+        range: { startSec: 1, endSec: 5 },
+      }
+      const states = new Map<string, DraftSourceState>([
+        ["v", { sizeBytes: 9, extracted: { tokens: 12 }, video: { settings } }],
+      ])
+      const rows = draftAttachmentsFromFiles(
+        [{ id: "v", filename: "clip.mp4", mediaType: "video/mp4" }],
+        states
+      )
+      expect(rows[0]).toEqual({
+        name: "clip.mp4",
+        mediaType: "video/mp4",
+        size: 9,
+        tokens: 12,
+        videoSettings: settings,
+      })
+    })
+
     it("omits absent optional fields rather than writing undefined into Dexie", () => {
       const states = new Map<string, DraftSourceState>([["a", { sizeBytes: 1 }]])
       const rows = draftAttachmentsFromFiles([{ id: "a", filename: "a.txt" }], states)
@@ -83,6 +106,23 @@ describe("draftAttachmentsFromFiles", () => {
         new Map()
       )
       expect(rows[0]!.size).toBe(3)
+    })
+  })
+
+  describe("with citations", () => {
+    const citation = { kind: "doc" as const, id: "lark:doc_1", label: "Plan" }
+
+    it("carries what an attachment cites, so a restored document is cited again", () => {
+      const rows = draftAttachmentsFromFiles(
+        [
+          { id: "doc", filename: "Plan.md", mediaType: "text/markdown" },
+          { id: "mine", filename: "notes.txt", mediaType: "text/plain" },
+        ],
+        new Map(),
+        (id) => (id === "doc" ? citation : undefined)
+      )
+      expect(rows[0]!.citation).toEqual(citation)
+      expect(rows[1]).not.toHaveProperty("citation")
     })
   })
 })

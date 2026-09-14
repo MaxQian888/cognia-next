@@ -46,6 +46,26 @@ describe("normalizeMessageMedia", () => {
     expect(await getDb().messageMedia.count()).toBe(1)
   })
 
+  it("keeps a video's descriptor on the frame it ingests", async () => {
+    // The transcript's video card is built from this field; losing it at the
+    // persistence boundary would scatter a storyboard back into loose images.
+    const videoAttachment = { groupId: "v1", filename: "demo.mp4", delivery: "storyboard" }
+    const source = message([
+      {
+        type: "file",
+        url: "data:image/jpeg;base64,aGVsbG8=",
+        mediaType: "image/jpeg",
+        filename: "demo.mp4",
+        videoAttachment,
+      },
+    ] as unknown as UIMessage["parts"])
+
+    const normalized = await normalizeMessageMedia(source)
+    const part = normalized.parts[0] as { url: string; videoAttachment?: unknown }
+    expect(isMediaRef(part.url)).toBe(true)
+    expect(part.videoAttachment).toEqual(videoAttachment)
+  })
+
   it("preserves object identity when no image data URL needs ingestion", async () => {
     const remote = message([
       { type: "file", url: "https://example.com/a.png", mediaType: "image/png" },

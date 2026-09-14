@@ -23,11 +23,14 @@ import {
   buildSendContent,
   estimateDocumentTokens,
   extractAttachment,
+  extractedFromVideoResult,
   formatDocumentText,
   IMAGE_MAX_LONG_EDGE,
   withImageOcrText,
+  type ExtractedAttachment,
   type SubmittedFile,
 } from "./dispatch"
+import type { VideoPreprocessResult } from "./video/preprocess"
 
 const processMock = processDocumentAsync as jest.Mock
 
@@ -496,5 +499,183 @@ describe("formatDocumentText / helpers", () => {
     expect(estimateDocumentTokens("")).toBe(0)
     expect(estimateDocumentTokens("hello world")).toBeGreaterThan(0)
     expect(IMAGE_MAX_LONG_EDGE).toBeGreaterThan(0)
+  })
+})
+
+describe("videos", () => {
+  function videoResult(overrides: Partial<VideoPreprocessResult> = {}): VideoPreprocessResult {
+    return {
+      engine: "browser",
+      source: { kind: "video", mediaType: "video/mp4", durationSec: 30, width: 1280, height: 720 },
+      settings: {
+        delivery: "native",
+        strategy: "scene",
+        frameCount: 4,
+        range: { startSec: 2, endSec: 20 },
+      },
+      sampled: {
+        delivery: "storyboard",
+        frames: [
+          { timeSec: 2, reason: "start" },
+          { timeSec: 9, reason: "scene" },
+        ],
+        grid: { columns: 2, rows: 1 },
+        images: [],
+        description: 'Attached video "demo.mp4" (30.0s, 1280×720).',
+        blocks: [
+          { type: "text", text: 'Attached video "demo.mp4" (30.0s, 1280×720).' },
+          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "Qk9BUkQ=" } },
+        ],
+        estimatedImageTokens: 900,
+      },
+      native: {
+        mediaType: "video/mp4",
+        bytes: 3,
+        description: "Sent as the original video file.",
+        blocks: [
+          { type: "text", text: "Sent as the original video file." },
+          { type: "document", source: { type: "base64", media_type: "video/mp4", data: "AAAA" } },
+        ],
+      },
+      nativeFailure: null,
+      nativeTrimSupported: true,
+      poster: { mediaType: "image/jpeg", base64: "UE9TVEVS", bytes: 6, width: 512, height: 288 },
+      ...overrides,
+    }
+  }
+
+  const staged = (extracted: ExtractedAttachment) =>
+    new Map<string, ExtractedAttachment>([["v1", extracted]])
+  const file: SubmittedFile = { id: "v1", filename: "demo.mp4", mediaType: "video/mp4" }
+
+  it("wraps a preprocessing result with one descriptor per payload", () => {
+    const extracted = extractedFromVideoResult(videoResult(), {
+      filename: "demo.mp4",
+      groupId: "v1",
+    })
+    expect(extracted.kind).toBe("video")
+    expect(extracted.block).toEqual(videoResult().sampled.blocks[0])
+    expect(extracted.tokens).toBeGreaterThan(0)
+    expect(extracted.video!.sampled.info).toMatchObject({
+      groupId: "v1",
+      filename: "demo.mp4",
+      delivery: "storyboard",
+      strategy: "scene",
+      range: { startSec: 2, endSec: 20 },
+      frameTimes: [2, 9],
+      grid: { columns: 2, rows: 1 },
+      engine: "browser",
+    })
+    expect(extracted.video!.native!.info).toMatchObject({ delivery: "native", frameTimes: [] })
+    expect(extracted.video!.poster.base64).toBe("UE9TVEVS")
+    expect(
+      extractedFromVideoResult(videoResult({ native: null }), {
+        filename: "demo.mp4",
+        groupId: "v1",
+      }).video!.native
+    ).toBeNull()
+  })
+
+  it("sends the sampled payload unless native video is allowed", async () => {
+    const extracted = extractedFromVideoResult(videoResult(), {
+      filename: "demo.mp4",
+      groupId: "v1",
+    })
+    const sampled = await buildAttachmentBlocks([file], { precomputed: staged(extracted) })
+    expect(sampled.blocks.map((b) => b.type)).toEqual(["text", "image"])
+    expect(sampled.manifest).toHaveLength(2)
+    expect(sampled.manifest[0]).toBe(sampled.manifest[1])
+    expect(sampled.manifest[0]).toEqual({
+      filename: "demo.mp4",
+      mediaType: "video/mp4",
+      kind: "video",
+      video: { info: extracted.video!.sampled.info },
+    })
+
+    const native = await buildAttachmentBlocks([file], {
+      precomputed: staged(extracted),
+      allowNativeVideo: true,
+    })
+    expect(native.blocks.map((b) => b.type)).toEqual(["text", "document"])
+    const entry = native.manifest[1]!
+    expect(entry.video!.info.delivery).toBe("native")
+    expect(entry.video!.poster).toEqual(extracted.video!.poster)
+    expect(entry.video!.fallback!.blocks.map((b) => b.type)).toEqual(["text", "image"])
+  })
+
+  it("falls back to sampled when native is allowed but was never prepared", async () => {
+    const extracted = extractedFromVideoResult(videoResult({ native: null }), {
+      filename: "demo.mp4",
+      groupId: "v1",
+    })
+    const { blocks, manifest } = await buildAttachmentBlocks([file], {
+      precomputed: staged(extracted),
+      allowNativeVideo: true,
+    })
+    expect(blocks.map((b) => b.type)).toEqual(["text", "image"])
+    expect(manifest[0]!.video!.fallback).toBeUndefined()
+  })
+
+  it("re-gates the description text for PII at the outbound boundary", async () => {
+    const leaky = videoResult({
+      sampled: {
+        ...videoResult().sampled,
+        blocks: [
+          { type: "text", text: 'Attached video "alice@example.com.mp4".' },
+          videoResult().sampled.blocks[1]!,
+        ],
+      },
+    })
+    const extracted = extractedFromVideoResult(leaky, { filename: "x.mp4", groupId: "v1" })
+    const { blocks } = await buildAttachmentBlocks([file], { precomputed: staged(extracted) })
+    expect((blocks[0] as { text: string }).text).not.toContain("alice@example.com")
+  })
+
+  it("refuses a cached video whose blocks are not the pipeline's shapes", async () => {
+    const extracted = extractedFromVideoResult(videoResult(), {
+      filename: "demo.mp4",
+      groupId: "v1",
+    })
+    extracted.video!.sampled.blocks = [
+      { type: "document", source: { type: "base64", media_type: "application/pdf", data: "JVBE" } },
+    ]
+    const { blocks, rejected } = await buildAttachmentBlocks([file], {
+      precomputed: staged(extracted),
+    })
+    expect(blocks).toEqual([])
+    expect(rejected).toEqual([{ filename: "demo.mp4", reason: "empty" }])
+  })
+
+  it("never guesses at a video that was not preprocessed", async () => {
+    const unprocessed = await extractAttachment({
+      url: dataUrl("video/mp4", "not really a video"),
+      mediaType: "video/mp4",
+      filename: "clip.mp4",
+    })
+    expect(unprocessed).toMatchObject({
+      kind: "video",
+      block: null,
+      rejectReason: "video-unprocessed",
+    })
+    const byExtension = await extractAttachment({ url: dataUrl("", "x"), filename: "clip.mov" })
+    expect(byExtension.rejectReason).toBe("video-unprocessed")
+    const { rejected } = await buildAttachmentBlocks([
+      { url: dataUrl("video/webm", "x"), mediaType: "video/webm", filename: "a.webm" },
+    ])
+    expect(rejected).toEqual([{ filename: "a.webm", reason: "video-unprocessed" }])
+  })
+
+  it("keeps attachment blocks ahead of the user text with a video in the turn", async () => {
+    const extracted = extractedFromVideoResult(videoResult(), {
+      filename: "demo.mp4",
+      groupId: "v1",
+    })
+    const { content, manifest } = await buildSendContent("what happens at 0:09?", [file], {
+      precomputed: staged(extracted),
+    })
+    const blocks = content as Array<{ type: string; text?: string }>
+    expect(blocks.map((b) => b.type)).toEqual(["text", "image", "text"])
+    expect(blocks[2]!.text).toBe("what happens at 0:09?")
+    expect(manifest).toHaveLength(2)
   })
 })

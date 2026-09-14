@@ -111,6 +111,7 @@ import {
   SubagentMentionRow,
   filterMentionables,
   filterSubagents,
+  filterTeamMembers,
 } from "@/components/agent/workspace/agent-mention-picker"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
 import type { SubagentMentionTarget } from "@/lib/claude/agents/chat-mention-targets"
@@ -1222,18 +1223,6 @@ function CommandCategoryIcon({ command }: { command: SlashCommand }) {
     default:
       return <SquareTerminalIcon className={className} />
   }
-}
-
-/**
- * Rank team members for the `@` panel with the same fuzzy scorer the slash
- * picker and the subagent picker use, so every list in this popover ranks
- * candidates the same way. Matches the character name first and its
- * description second.
- */
-function filterTeamMembers(members: readonly Character[], query: string): Character[] {
-  return fuzzyFilterSort(members, query, (member) => member.name, {
-    secondaryText: (member) => member.description ?? "",
-  })
 }
 
 function itemKey(item: PopoverItem, idx: number): string {

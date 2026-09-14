@@ -1,6 +1,8 @@
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { DEFAULT_VIDEO_SETTINGS } from "@/lib/chat/attachments/video/settings"
+import type { VideoPreprocessResult } from "@/lib/chat/attachments/video/preprocess"
 import { AttachmentPreviewSheet, type PreviewTarget } from "./attachment-preview-sheet"
 import type { StagedAttachmentState } from "./staged-attachment-store"
 
@@ -38,6 +40,8 @@ function renderSheet(props: Partial<React.ComponentProps<typeof AttachmentPrevie
         onOpenChange={jest.fn()}
         target={DOC}
         state={ready()}
+        videoRoute={{ available: false, reason: "runtime" }}
+        onApplyVideoSettings={jest.fn()}
         {...props}
       />
     </TooltipProvider>
@@ -254,5 +258,122 @@ describe("AttachmentPreviewSheet — OCR layer", () => {
     expect(onViewOcrDetail).toHaveBeenCalled()
     await user().click(screen.getByRole("button", { name: "Add text to message" }))
     expect(onExtractOcrToInput).toHaveBeenCalledWith("i")
+  })
+})
+
+describe("AttachmentPreviewSheet — videos and GIFs", () => {
+  const CLIP: PreviewTarget = {
+    id: "v",
+    filename: "clip.mp4",
+    mediaType: "video/mp4",
+    url: "blob:clip",
+  }
+  const LOOP: PreviewTarget = {
+    id: "g",
+    filename: "loop.gif",
+    mediaType: "image/gif",
+    url: "blob:loop",
+  }
+  const image = { mediaType: "image/jpeg", base64: "AAAA", bytes: 3, width: 16, height: 9 }
+  const videoResult: VideoPreprocessResult = {
+    engine: "browser",
+    source: { kind: "video", mediaType: "video/mp4", durationSec: 12, width: 640, height: 360 },
+    settings: DEFAULT_VIDEO_SETTINGS,
+    sampled: {
+      delivery: "storyboard",
+      frames: [{ timeSec: 0.5, reason: "uniform" }],
+      images: [image],
+      description: "d",
+      blocks: [],
+      estimatedImageTokens: 90,
+    },
+    native: null,
+    nativeFailure: null,
+    nativeTrimSupported: false,
+    poster: image,
+  }
+  const motionReady = (): StagedAttachmentState => ({
+    status: "ready",
+    sizeBytes: 4096,
+    video: { settings: DEFAULT_VIDEO_SETTINGS, result: videoResult },
+  })
+
+  it("plays a video from its blob URL in the file tab", () => {
+    renderSheet({ target: CLIP, state: motionReady() })
+    const player = screen.getByLabelText("Video preview of clip.mp4")
+    expect(player.tagName).toBe("VIDEO")
+    expect(player).toHaveAttribute("src", "blob:clip")
+    expect(screen.queryByTestId("file-preview-pdf")).not.toBeInTheDocument()
+  })
+
+  it("puts the sampling controls in the model tab and applies them for this chip", async () => {
+    const onApplyVideoSettings = jest.fn()
+    renderSheet({
+      target: CLIP,
+      state: motionReady(),
+      videoRoute: { available: true },
+      onApplyVideoSettings,
+    })
+    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    const panel = screen.getByTestId("video-preprocess-panel")
+    expect(within(panel).getByAltText("Storyboard of clip.mp4")).toBeInTheDocument()
+    expect(within(panel).getByRole("radio", { name: "Original video" })).toBeEnabled()
+
+    await user().click(within(panel).getByRole("radio", { name: "Frames" }))
+    await user().click(within(panel).getByRole("button", { name: "Apply" }))
+    expect(onApplyVideoSettings).toHaveBeenCalledWith(
+      "v",
+      expect.objectContaining({ delivery: "frames" })
+    )
+  })
+
+  it("passes the conversation's route verdict through", async () => {
+    renderSheet({ target: CLIP, state: motionReady() })
+    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    expect(screen.getByRole("radio", { name: "Original video" })).toBeDisabled()
+    expect(screen.getByTestId("native-blocked")).toHaveTextContent(
+      "this model's runtime doesn't accept video files"
+    )
+  })
+
+  it("shows the panel's progress rather than the document spinner while a video waits", async () => {
+    renderSheet({ target: CLIP, state: { status: "extracting", sizeBytes: 0 } })
+    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    expect(screen.getByTestId("video-preprocess-panel")).toBeInTheDocument()
+    expect(screen.queryByText("Reading…")).not.toBeInTheDocument()
+  })
+
+  it("treats a GIF the pipeline claimed as motion, and keeps it an animated image in the file tab", async () => {
+    const gifResult = {
+      ...videoResult,
+      engine: "gif" as const,
+      source: {
+        ...videoResult.source,
+        kind: "gif" as const,
+        mediaType: "image/gif",
+        frameCount: 8,
+      },
+    }
+    renderSheet({
+      target: LOOP,
+      state: {
+        status: "ready",
+        sizeBytes: 10,
+        video: { settings: DEFAULT_VIDEO_SETTINGS, result: gifResult },
+      },
+    })
+    expect(screen.getByAltText("loop.gif")).toHaveAttribute("src", "blob:loop")
+    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    expect(screen.getByTestId("video-preprocess-panel")).toBeInTheDocument()
+  })
+
+  it("keeps a GIF the pipeline did not claim on the image path", async () => {
+    renderSheet({
+      target: LOOP,
+      state: ready({ extracted: { kind: "image", block: null, tokens: 0 } }),
+    })
+    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    expect(screen.queryByTestId("video-preprocess-panel")).not.toBeInTheDocument()
+    expect(screen.getByTestId("model-view-image")).toBeInTheDocument()
   })
 })

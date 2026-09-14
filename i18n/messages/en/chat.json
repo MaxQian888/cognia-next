@@ -272,13 +272,96 @@
         "empty": "No readable text found",
         "notDataUrl": "Couldn't read this file",
         "parseFailed": "Couldn't parse this file",
-        "unsupportedType": "Unsupported file type"
+        "unsupportedType": "Unsupported file type",
+        "videoTooLarge": "Too large to process",
+        "videoUndecodable": "Can't decode this video here",
+        "videoUnprocessed": "This video wasn't processed"
       },
       "removeAria": "Remove {filename}",
       "reorderAria": "Reorder {filename}",
       "skipped": "{count, plural, =1 {1 attachment was} other {# attachments were}} skipped (unsupported file type).",
       "tokenBadge": "{tokens} tok",
-      "unsupported": "{count, plural, =1 {1 file isn't supported} other {# files aren't supported}}."
+      "unsupported": "{count, plural, =1 {1 file isn't supported} other {# files aren't supported}}.",
+      "video": {
+        "apply": "Apply",
+        "applying": "Processing…",
+        "browserFailed": "The app couldn't decode this file, so ffmpeg opened it.",
+        "chipFrames": "{count} images",
+        "chipNative": "Video",
+        "chipProgress": "{percent}%",
+        "chipStoryboard": "{count} frames",
+        "delivery": {
+          "frames": "Frames",
+          "framesHint": "Separate images: more detail, more tokens",
+          "native": "Original video",
+          "nativeHint": "The model watches the file itself",
+          "storyboard": "Storyboard",
+          "storyboardHint": "One image of timestamped frames: the lowest cost"
+        },
+        "deliveryLabel": "Send as",
+        "engine": {
+          "browser": "Decoded in the app",
+          "ffmpeg": "Decoded with ffmpeg",
+          "gif": "Decoded as a GIF"
+        },
+        "error": {
+          "failed": "Processing failed: {message}",
+          "ffmpegFailed": "Neither the app nor ffmpeg could decode this video.",
+          "ffmpegMissing": "The app can't decode this format and ffmpeg isn't installed. Install ffmpeg, or convert the video to MP4.",
+          "tooLarge": "This video is too large to process here (limit {max} MB).",
+          "undecodable": "This device can't decode this video. Open it in the desktop app, or convert it to MP4."
+        },
+        "estimate": "~{tokens} image tokens · {size}",
+        "frameAlt": "Frame at {time}",
+        "frameCountLabel": "Frames",
+        "nativeDowngraded": "{filename} was sent as a storyboard: {reason}.",
+        "nativeDropped": "{count, plural, =1 {1 video} other {# videos}} couldn't be sent to this model and {count, plural, =1 {was} other {were}} left out.",
+        "nativeFailure": {
+          "failed": "The video file couldn't be prepared.",
+          "ffmpeg-missing": "ffmpeg isn't installed, so the clip can't be cut.",
+          "format": "This format can't be sent as a video file.",
+          "too-large": "The file is over 10 MB. Pick a shorter range or send frames instead.",
+          "trim-unavailable": "Cutting a clip for the original-video option needs ffmpeg in the desktop app. Switch to storyboard or frames to use a range."
+        },
+        "nativeFallbackNote": "If the model that runs can't take video, the storyboard is sent instead.",
+        "nativeGifUnavailable": "Original video isn't available: a GIF is sent as frames.",
+        "nativeReady": "Original video · {size}",
+        "nativeReason": {
+          "auto-routing": "auto routing picks the model only after you send",
+          "external-agent": "external agents don't accept video files",
+          "model": "this model doesn't accept video input",
+          "platform": "this conversation sends files to a person, not a model",
+          "protocol": "this provider's API doesn't accept video files",
+          "runtime": "this model's runtime doesn't accept video files",
+          "shared": "shared conversations store exactly what you send",
+          "standalone": "local (BYOK) mode can't send video files",
+          "team": "team rooms answer with different models",
+          "too-large": "an original video must be under 10 MB"
+        },
+        "nativeUnavailable": "Original video isn't available: {reason}.",
+        "outputTitle": "What the model receives",
+        "panelTitle": "Video",
+        "pendingChanges": "Apply to see the result.",
+        "playerLabel": "Video preview of {filename}",
+        "processing": "Sampling frames…",
+        "rangeEndAria": "Range end",
+        "rangeLabel": "Range",
+        "rangeStartAria": "Range start",
+        "rangeValue": "{start} – {end}",
+        "rangeWhole": "Whole clip",
+        "reset": "Reset",
+        "retry": "Try again",
+        "sceneNoCuts": "No clear scene changes were found, so frames are evenly spaced.",
+        "sourceGif": "{duration} · {frames} frames · {width}×{height}",
+        "sourceVideo": "{duration} · {width}×{height}",
+        "storyboardAlt": "Storyboard of {filename}",
+        "strategy": {
+          "scene": "At scene changes",
+          "uniform": "Evenly spaced"
+        },
+        "strategyLabel": "Pick frames"
+      },
+      "videoSizeExceeded": "{count, plural, =1 {1 video is} other {# videos are}} over {max} MB and can't be processed here."
     },
     "camera": {
       "captureAria": "Take or attach a photo",
@@ -1722,7 +1805,18 @@
     "saveAsIssueEmpty": "There is nothing readable in this reply to file.",
     "saveAsIssueFailed": "Could not file it: {reason}",
     "replyLabel": "Reply",
-    "replyTooltip": "Reply to this message"
+    "replyTooltip": "Reply to this message",
+    "videoCard": {
+      "gif": "GIF",
+      "notStored": "The original file isn't saved.",
+      "range": "{start}–{end}",
+      "strategyScene": "at scene changes",
+      "strategyUniform": "evenly spaced",
+      "summaryFrames": "{count} frames {strategy}",
+      "summaryNative": "Sent as the original video",
+      "summaryStoryboard": "Storyboard of {count} frames {strategy}",
+      "video": "Video"
+    }
   },
   "messageDisplay": {
     "assistant": "Assistant",

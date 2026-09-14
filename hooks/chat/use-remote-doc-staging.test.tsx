@@ -9,6 +9,7 @@ jest.mock("sonner", () => ({
     success: jest.fn(),
     error: jest.fn(),
     warning: jest.fn(),
+    dismiss: jest.fn(),
   },
 }))
 jest.mock("@/lib/docs-providers", () => ({
@@ -52,7 +53,12 @@ function readFile(file: File): Promise<string> {
   })
 }
 
-function renderStaging(acceptFiles = jest.fn()) {
+/** Stages everything it is handed, like a gate with room to spare. */
+function stagingEverything() {
+  return jest.fn(async (files: File[]) => files)
+}
+
+function renderStaging(acceptFiles: jest.Mock = stagingEverything()) {
   const { result } = renderHook(() => useRemoteDocStaging({ acceptFiles }), { wrapper })
   return { stage: result.current, acceptFiles }
 }
@@ -104,14 +110,37 @@ describe("useRemoteDocStaging", () => {
     getProviderMock.mockReturnValue({ fetch: fetchDoc })
     const { stage, acceptFiles } = renderStaging()
 
-    await stage({ providerId: "lark", accountId: "cai_1", doc: REF })
+    const result = await stage({ providerId: "lark", accountId: "cai_1", doc: REF })
 
     expect(fetchDoc).toHaveBeenCalledWith(REF, { accountId: "cai_1" })
     expect(acceptFiles).toHaveBeenCalledTimes(1)
     const [staged] = acceptFiles.mock.calls[0][0] as File[]
     expect(staged.name).toBe("Q3 Plan.md")
+    expect(result).toBe(staged)
     expect(toast.success).toHaveBeenCalledWith(expect.stringContaining("Q3 Plan"), {
       id: "toast-1",
+    })
+  })
+
+  // The citation travels WITH the file into the gate, which binds it to the
+  // attachment it stages. It is never recorded on its own.
+  it("hands the gate the document's citation, keyed by the staged file", async () => {
+    getProviderMock.mockReturnValue({
+      fetch: async () => content({ title: "Q3 Plan (final)" }),
+    })
+    const { stage, acceptFiles } = renderStaging()
+
+    await stage({ providerId: "lark", accountId: "cai_1", doc: REF })
+
+    const [[files, options]] = acceptFiles.mock.calls as [
+      [File[], { citations: ReadonlyMap<File, unknown> }],
+    ]
+    expect(options.citations.size).toBe(1)
+    expect(options.citations.get(files[0]!)).toEqual({
+      kind: "doc",
+      id: "lark:doxcn1",
+      label: "Q3 Plan (final)",
+      raw: "@lark:doxcn1",
     })
   })
 
@@ -129,6 +158,36 @@ describe("useRemoteDocStaging", () => {
     expect(toast.warning).not.toHaveBeenCalled()
   })
 
+  // The gate toasts its own reason (no headroom, too large). Saying "Attached"
+  // over it, or reporting the file as staged, would be the same lie the
+  // citation used to tell.
+  it("reports nothing staged, and claims no attachment, when the gate refuses the file", async () => {
+    getProviderMock.mockReturnValue({ fetch: async () => content({ truncated: true }) })
+    const { stage } = renderStaging(jest.fn(async () => []))
+
+    const result = await stage({ providerId: "lark", accountId: "cai_1", doc: REF })
+
+    expect(result).toBeNull()
+    expect(toast.success).not.toHaveBeenCalled()
+    expect(toast.warning).not.toHaveBeenCalled()
+    expect(toast.dismiss).toHaveBeenCalledWith("toast-1")
+  })
+
+  it("says the attach failed, not the fetch, when staging throws", async () => {
+    getProviderMock.mockReturnValue({ fetch: async () => content() })
+    const { stage } = renderStaging(
+      jest.fn(async () => {
+        throw new Error("quota")
+      })
+    )
+
+    const result = await stage({ providerId: "lark", accountId: "cai_1", doc: REF })
+
+    expect(result).toBeNull()
+    expect(toast.success).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith("Could not attach “Q3 Plan”.", { id: "toast-1" })
+  })
+
   it("shows the localized reason for a typed provider failure and stages nothing", async () => {
     getProviderMock.mockReturnValue({
       fetch: async () => {
@@ -136,7 +195,8 @@ describe("useRemoteDocStaging", () => {
       },
     })
     const { stage, acceptFiles } = renderStaging()
-    await stage({ providerId: "lark", accountId: "cai_1", doc: REF })
+    const result = await stage({ providerId: "lark", accountId: "cai_1", doc: REF })
+    expect(result).toBeNull()
     expect(acceptFiles).not.toHaveBeenCalled()
     expect(toast.error).toHaveBeenCalledWith("You do not have access to this document.", {
       id: "toast-1",
@@ -150,7 +210,7 @@ describe("useRemoteDocStaging", () => {
       },
     })
     const { stage } = renderStaging()
-    await stage({ providerId: "lark", accountId: "cai_1", doc: REF })
+    await expect(stage({ providerId: "lark", accountId: "cai_1", doc: REF })).resolves.toBeNull()
     expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("Could not reach"), {
       id: "toast-1",
     })
@@ -159,7 +219,7 @@ describe("useRemoteDocStaging", () => {
   it("reports an unregistered provider instead of throwing", async () => {
     getProviderMock.mockReturnValue(undefined)
     const { stage, acceptFiles } = renderStaging()
-    await expect(stage({ providerId: "ghost", accountId: "x", doc: REF })).resolves.toBeUndefined()
+    await expect(stage({ providerId: "ghost", accountId: "x", doc: REF })).resolves.toBeNull()
     expect(acceptFiles).not.toHaveBeenCalled()
     expect(toast.error).toHaveBeenCalled()
   })

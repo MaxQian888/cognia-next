@@ -1,3 +1,4 @@
+import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { setAgentTraceWriter } from "@cognia/agent-trace/emitter"
 import type { UIMessage } from "ai"
 
@@ -2480,5 +2481,98 @@ describe("applySdkEvent — inline A2UI spans", () => {
   it("leaves unrelated and malformed code unchanged when no UI parses", () => {
     const text = '```json\n{"answer":42}\n```\n```a2ui\n{broken}\n```'
     expect(partsFor(text)).toMatchObject([{ type: "text", text, providerMetadata: metadata }])
+  })
+})
+
+describe("makeUserMessage — videos", () => {
+  const info = {
+    groupId: "v1",
+    filename: "demo.mp4",
+    sourceMediaType: "video/mp4",
+    kind: "video" as const,
+    durationSec: 30,
+    width: 1280,
+    height: 720,
+    delivery: "storyboard" as const,
+    strategy: "uniform" as const,
+    range: null,
+    frameTimes: [5, 15, 25],
+    grid: { columns: 3, rows: 1 },
+    engine: "browser" as const,
+  }
+
+  it("tags a sampled video's description and images with one descriptor", () => {
+    const entry: AttachmentManifestEntry = {
+      filename: "demo.mp4",
+      mediaType: "video/mp4",
+      kind: "video",
+      video: { info },
+    }
+    const msg = makeUserMessage(
+      [
+        { type: "text", text: 'Attached video "demo.mp4"' },
+        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "Qk9BUkQ=" } },
+        { type: "text", text: "what happens?" },
+      ],
+      "u-video",
+      [entry, entry]
+    )
+    expect(msg.parts).toEqual([
+      { type: "text", text: 'Attached video "demo.mp4"', state: "done", videoAttachment: info },
+      {
+        type: "file",
+        url: "data:image/jpeg;base64,Qk9BUkQ=",
+        mediaType: "image/jpeg",
+        filename: "demo.mp4",
+        videoAttachment: info,
+      },
+      { type: "text", text: "what happens?", state: "done" },
+    ])
+  })
+
+  it("leaves the poster in place of a native video, never the file", () => {
+    const nativeInfo = { ...info, delivery: "native" as const, frameTimes: [], grid: undefined }
+    const entry: AttachmentManifestEntry = {
+      filename: "demo.mp4",
+      mediaType: "video/mp4",
+      kind: "video",
+      video: {
+        info: nativeInfo,
+        poster: { mediaType: "image/jpeg", base64: "UE9TVEVS", width: 512, height: 288 },
+      },
+    }
+    const msg = makeUserMessage(
+      [
+        { type: "text", text: "Sent as the original video file." },
+        { type: "document", source: { type: "base64", media_type: "video/mp4", data: "VklERU8=" } },
+      ],
+      "u-native",
+      [entry, entry]
+    )
+    expect(msg.parts).toHaveLength(2)
+    const poster = msg.parts[1] as unknown as {
+      url: string
+      mediaType: string
+      videoAttachment: unknown
+    }
+    expect(poster.url).toBe("data:image/jpeg;base64,UE9TVEVS")
+    expect(poster.mediaType).toBe("image/jpeg")
+    expect(poster.videoAttachment).toEqual(nativeInfo)
+    expect(JSON.stringify(msg)).not.toContain("VklERU8=")
+  })
+
+  it("drops a native video block with no poster rather than persisting bytes", () => {
+    const entry: AttachmentManifestEntry = {
+      filename: "demo.mp4",
+      mediaType: "video/mp4",
+      kind: "video",
+      video: { info: { ...info, delivery: "native" as const } },
+    }
+    const msg = makeUserMessage(
+      [{ type: "document", source: { type: "base64", media_type: "video/mp4", data: "VklERU8=" } }],
+      "u-nopost",
+      [entry]
+    )
+    expect(msg.parts).toEqual([])
   })
 })

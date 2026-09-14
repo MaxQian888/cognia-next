@@ -60,7 +60,7 @@ export type ContextChipBarProps = AttachmentPreviewProps & {
   onRemoveCommand?: (start: number, end: number) => void
 }
 
-export function ContextChipBar(props: ContextChipBarProps = {}) {
+export function ContextChipBar(props: ContextChipBarProps) {
   const t = useTranslations("chat.composer.context")
   const staged = useStagedAttachments()
   const flowRef = useRef<HTMLDivElement>(null)

@@ -16,6 +16,7 @@ import { RuntimeBadge } from "./runtime-badge"
 import { AgentTeamAvatar, mentionTargetAvatarSubject } from "./agent-team-avatar"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
 import type { SubagentMentionTarget } from "@/lib/claude/agents/chat-mention-targets"
+import type { Character } from "@cognia/agent-config-types"
 
 export interface AgentMentionRowProps {
   target: MentionTarget
@@ -127,5 +128,17 @@ export function filterMentionables(
 ): MentionTarget[] {
   return fuzzyFilterSort(mentionables, query, (t) => t.name, {
     secondaryText: (t) => t.description,
+  })
+}
+
+/**
+ * Rank a team room's members with the same fuzzy scorer, matching the character
+ * name first (what a member pick inserts) and its description second. Shared by
+ * the composer's `@` panel and a `{{parameter}}` bound to a member, so both
+ * offer the same people in the same order.
+ */
+export function filterTeamMembers(members: readonly Character[], query: string): Character[] {
+  return fuzzyFilterSort(members, query, (member) => member.name, {
+    secondaryText: (member) => member.description ?? "",
   })
 }

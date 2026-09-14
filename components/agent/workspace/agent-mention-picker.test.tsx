@@ -5,9 +5,11 @@ import {
   SubagentMentionRow,
   filterMentionables,
   filterSubagents,
+  filterTeamMembers,
 } from "./agent-mention-picker"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
 import type { SubagentMentionTarget } from "@/lib/claude/agents/chat-mention-targets"
+import type { Character } from "@cognia/agent-config-types"
 
 const i18n = {
   agentTeamsWorkspace: {
@@ -193,5 +195,28 @@ describe("filterSubagents", () => {
 
   it("returns empty when nothing matches", () => {
     expect(filterSubagents(all, "zzzz")).toEqual([])
+  })
+})
+
+describe("filterTeamMembers", () => {
+  const all = [
+    { id: "c1", name: "Critic", description: "Pokes holes", avatarColor: "#000" },
+    { id: "c2", name: "Researcher", avatarColor: "#111" },
+  ] as Character[]
+
+  it("keeps room order on an empty query", () => {
+    expect(filterTeamMembers(all, "")).toEqual(all)
+  })
+
+  it("matches by the character name, which is what a member pick inserts", () => {
+    expect(filterTeamMembers(all, "res").map((m) => m.id)).toEqual(["c2"])
+  })
+
+  it("falls through to the description, and tolerates a member without one", () => {
+    expect(filterTeamMembers(all, "holes").map((m) => m.id)).toEqual(["c1"])
+  })
+
+  it("returns empty when nothing matches", () => {
+    expect(filterTeamMembers(all, "zzzz")).toEqual([])
   })
 })

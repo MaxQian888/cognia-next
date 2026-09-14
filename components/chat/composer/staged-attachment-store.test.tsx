@@ -9,6 +9,9 @@ jest.mock("@/lib/chat/attachments/dispatch", () => ({
   ...jest.requireActual("@/lib/chat/attachments/dispatch"),
   extractAttachment: jest.fn(),
 }))
+jest.mock("@/lib/chat/attachments/video/preprocess", () => ({
+  preprocessMotionAttachment: jest.fn(),
+}))
 
 import { act, render, screen, waitFor } from "@testing-library/react"
 import { useEffect } from "react"
@@ -18,12 +21,22 @@ import {
 } from "@/components/ai-elements/prompt-input"
 import { extractAttachment, type ExtractedAttachment } from "@/lib/chat/attachments/dispatch"
 import {
+  preprocessMotionAttachment,
+  type MotionPreprocessRequest,
+  type VideoPreprocessResult,
+} from "@/lib/chat/attachments/video/preprocess"
+import { VideoPreprocessError } from "@/lib/chat/attachments/video/frame-source"
+import { DEFAULT_VIDEO_SETTINGS } from "@/lib/chat/attachments/video/settings"
+import {
   StagedAttachmentsProvider,
   useStagedAttachments,
   type StagedAttachmentsValue,
 } from "./staged-attachment-store"
 
 const extractMock = extractAttachment as jest.MockedFunction<typeof extractAttachment>
+const preprocessMock = preprocessMotionAttachment as jest.MockedFunction<
+  typeof preprocessMotionAttachment
+>
 
 function docResult(text: string, tokens = 7): ExtractedAttachment {
   return { kind: "document", block: { type: "text", text }, tokens, text }
@@ -80,10 +93,10 @@ function Probe() {
   )
 }
 
-function mount() {
+function mount({ motion }: { motion?: boolean } = {}) {
   return render(
     <PromptInputProvider>
-      <StagedAttachmentsProvider>
+      <StagedAttachmentsProvider {...(motion === undefined ? {} : { motion })}>
         <Probe />
       </StagedAttachmentsProvider>
     </PromptInputProvider>
@@ -95,6 +108,7 @@ const originalRevoke = URL.revokeObjectURL
 const originalFetch = global.fetch
 
 beforeEach(() => {
+  preprocessMock.mockReset()
   extractMock.mockReset()
   extractMock.mockResolvedValue(docResult('Attached file "a.txt":\n\nbody'))
 
@@ -229,6 +243,27 @@ describe("StagedAttachmentsProvider — extraction lifecycle", () => {
       </PromptInputProvider>
     )
     expect(extractMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("lands a slow extraction even when another file is staged while it runs", async () => {
+    let release!: (r: ExtractedAttachment) => void
+    extractMock.mockImplementationOnce(
+      () => new Promise<ExtractedAttachment>((resolve) => (release = resolve))
+    )
+    mount()
+    await act(async () => {
+      captured.addFiles([txt("slow.txt")])
+    })
+    await waitFor(() => expect(extractMock).toHaveBeenCalledTimes(1))
+    await act(async () => {
+      captured.addFiles([txt("fast.txt")])
+    })
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("extracting,ready"))
+    await act(async () => {
+      release(docResult("slow body", 5))
+    })
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("ready,ready"))
+    expect(screen.getByTestId("extracting")).toHaveTextContent("false")
   })
 
   it("extracts every file of a multi-file drop", async () => {
@@ -433,5 +468,227 @@ describe("useStagedAttachments", () => {
     const spy = jest.spyOn(console, "error").mockImplementation(() => {})
     expect(() => render(<Bare />)).toThrow(/StagedAttachmentsProvider/)
     spy.mockRestore()
+  })
+})
+
+describe("StagedAttachmentsProvider — videos", () => {
+  function videoResult(overrides: Partial<VideoPreprocessResult> = {}): VideoPreprocessResult {
+    return {
+      engine: "browser",
+      source: { kind: "video", mediaType: "video/mp4", durationSec: 20, width: 640, height: 360 },
+      settings: DEFAULT_VIDEO_SETTINGS,
+      sampled: {
+        delivery: "storyboard",
+        frames: [{ timeSec: 1, reason: "uniform" }],
+        grid: { columns: 1, rows: 1 },
+        images: [
+          { mediaType: "image/jpeg", base64: "Qk9BUkQ=", bytes: 5, width: 640, height: 360 },
+        ],
+        description: 'Attached video "clip.mp4" (20.0s, 640×360).',
+        blocks: [
+          { type: "text", text: 'Attached video "clip.mp4" (20.0s, 640×360).' },
+          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "Qk9BUkQ=" } },
+        ],
+        estimatedImageTokens: 308,
+      },
+      native: null,
+      nativeFailure: null,
+      nativeTrimSupported: false,
+      poster: { mediaType: "image/jpeg", base64: "UE9TVEVS", bytes: 6, width: 512, height: 288 },
+      ...overrides,
+    }
+  }
+  const clip = (name = "clip.mp4", size = 16) =>
+    new File([new Uint8Array(size)], name, { type: "video/mp4" })
+
+  it("samples a video through the motion pipeline, never as a data URL", async () => {
+    const readAsDataURL = jest.spyOn(FileReader.prototype, "readAsDataURL")
+    preprocessMock.mockResolvedValue({ kind: "motion", result: videoResult() })
+    mount()
+    await act(async () => {
+      captured.addFiles([clip()])
+    })
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("ready"))
+    expect(extractMock).not.toHaveBeenCalled()
+    expect(readAsDataURL).not.toHaveBeenCalled()
+    readAsDataURL.mockRestore()
+
+    const request = preprocessMock.mock.calls[0]![0] as MotionPreprocessRequest
+    expect(request).toMatchObject({ filename: "clip.mp4", mediaType: "video/mp4" })
+    expect(request.settings).toEqual(DEFAULT_VIDEO_SETTINGS)
+    const id = captured.store.order[0]!
+    const state = captured.store.byId.get(id)!
+    expect(state.extracted?.kind).toBe("video")
+    expect(state.extracted?.video?.sampled.info.groupId).toBe(id)
+    expect(state.video?.result).toBeDefined()
+    expect(state.bytes?.byteLength).toBe(16)
+    expect(captured.store.precomputed.get(id)?.kind).toBe("video")
+  })
+
+  it("keeps no draft bytes for a source above the native ceiling", async () => {
+    preprocessMock.mockResolvedValue({ kind: "motion", result: videoResult() })
+    mount()
+    const big = { size: 10 * 1024 * 1024 + 1 }
+    await act(async () => {
+      const file = clip()
+      Object.defineProperty(file, "size", { value: big.size })
+      captured.addFiles([file])
+    })
+    // The fetch stub serves the staged File back, so its patched size carries.
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("ready"))
+    expect(captured.store.byId.get(captured.store.order[0]!)?.bytes).toBeUndefined()
+  })
+
+  it("reports progress while a run is in flight and holds the send", async () => {
+    let finish!: () => void
+    preprocessMock.mockImplementation(async (request) => {
+      request.onProgress?.(0.5)
+      await new Promise<void>((resolve) => (finish = resolve))
+      return { kind: "motion", result: videoResult() }
+    })
+    mount()
+    await act(async () => {
+      captured.addFiles([clip()])
+    })
+    await waitFor(() =>
+      expect(captured.store.byId.get(captured.store.order[0]!)?.video?.progress).toBe(0.5)
+    )
+    expect(screen.getByTestId("status")).toHaveTextContent("extracting")
+    expect(screen.getByTestId("extracting")).toHaveTextContent("true")
+    await act(async () => {
+      finish()
+    })
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("ready"))
+  })
+
+  it("re-runs with applied settings and ignores the run it replaced", async () => {
+    const releases: Array<() => void> = []
+    const signals: AbortSignal[] = []
+    preprocessMock.mockImplementation(async (request) => {
+      signals.push(request.signal!)
+      await new Promise<void>((resolve) => releases.push(resolve))
+      return {
+        kind: "motion",
+        result: videoResult({ settings: request.settings }),
+      }
+    })
+    mount()
+    await act(async () => {
+      captured.addFiles([clip()])
+    })
+    await waitFor(() => expect(preprocessMock).toHaveBeenCalledTimes(1))
+    const id = captured.store.order[0]!
+    const frames = { ...DEFAULT_VIDEO_SETTINGS, delivery: "frames" as const, frameCount: 3 }
+    await act(async () => {
+      captured.store.applyVideoSettings(id, frames)
+    })
+    await waitFor(() => expect(preprocessMock).toHaveBeenCalledTimes(2))
+    expect(signals[0]!.aborted).toBe(true)
+    await act(async () => {
+      releases[0]!()
+      releases[1]!()
+    })
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("ready"))
+    expect(captured.store.byId.get(id)?.video?.settings).toEqual(frames)
+  })
+
+  it("marks an undecodable video rejected with the reason and the ffmpeg verdict", async () => {
+    preprocessMock.mockRejectedValue(
+      new VideoPreprocessError("undecodable", "no codec", "not-available-here")
+    )
+    mount()
+    await act(async () => {
+      captured.addFiles([clip("x.mkv")])
+    })
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("rejected"))
+    const state = captured.store.byId.get(captured.store.order[0]!)!
+    expect(state.extracted).toMatchObject({ kind: "video", rejectReason: "video-undecodable" })
+    expect(state.video?.error).toEqual({
+      reason: "undecodable",
+      ffmpeg: "not-available-here",
+      message: "no codec",
+    })
+  })
+
+  it("maps a too-large source and a generic failure to their reasons", async () => {
+    preprocessMock
+      .mockRejectedValueOnce(new VideoPreprocessError("too-large", "big"))
+      .mockRejectedValueOnce(new Error("boom"))
+    mount()
+    await act(async () => {
+      captured.addFiles([clip("a.mp4"), clip("b.mp4")])
+    })
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("rejected,rejected"))
+    const reasons = captured.store.order.map(
+      (id) => captured.store.byId.get(id)?.extracted?.rejectReason
+    )
+    expect(reasons.sort()).toEqual(["parse-failed", "video-too-large"])
+  })
+
+  it("sends a still GIF down the image path", async () => {
+    preprocessMock.mockResolvedValue({ kind: "still-gif" })
+    extractMock.mockResolvedValue(imageResult())
+    mount()
+    await act(async () => {
+      captured.addFiles([new File(["GIF89a"], "still.gif", { type: "image/gif" })])
+    })
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("ready"))
+    expect(extractMock).toHaveBeenCalledTimes(1)
+    expect(captured.store.byId.get(captured.store.order[0]!)?.video).toBeUndefined()
+  })
+
+  it("forwards a GIF as a picture when the motion pipeline is off", async () => {
+    extractMock.mockResolvedValue(imageResult())
+    mount({ motion: false })
+    await act(async () => {
+      captured.addFiles([new File(["GIF89a"], "loop.gif", { type: "image/gif" })])
+    })
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("ready"))
+    expect(preprocessMock).not.toHaveBeenCalled()
+    expect(extractMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("cancels the run of a chip that is removed", async () => {
+    let signal!: AbortSignal
+    preprocessMock.mockImplementation(async (request) => {
+      signal = request.signal!
+      await new Promise(() => {})
+      return { kind: "still-gif" }
+    })
+    mount()
+    await act(async () => {
+      captured.addFiles([clip()])
+    })
+    await waitFor(() => expect(preprocessMock).toHaveBeenCalled())
+    await act(async () => {
+      captured.removeFile(captured.fileIds[0]!)
+    })
+    expect(signal.aborted).toBe(true)
+  })
+
+  it("re-runs a restored draft video with the settings it was saved with", async () => {
+    preprocessMock.mockResolvedValue({ kind: "motion", result: videoResult() })
+    const saved = { ...DEFAULT_VIDEO_SETTINGS, strategy: "scene" as const, frameCount: 12 }
+    mount()
+    await act(async () => {
+      captured.store.seedIncoming([
+        {
+          filename: "clip.mp4",
+          sizeBytes: 16,
+          state: { status: "ready", sizeBytes: 16, video: { settings: saved } },
+        },
+      ])
+      captured.addFiles([clip()])
+    })
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("ready"))
+    expect(preprocessMock.mock.calls[0]![0].settings).toEqual(saved)
+  })
+
+  it("ignores applied settings for an unknown id", async () => {
+    mount()
+    await act(async () => {
+      captured.store.applyVideoSettings("ghost", DEFAULT_VIDEO_SETTINGS)
+    })
+    expect(preprocessMock).not.toHaveBeenCalled()
   })
 })

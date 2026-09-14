@@ -51,6 +51,7 @@ import { REMOVE_BACKGROUND_PROMPT } from "@/lib/chat/image-edit/prompts"
 import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { useSettingsStore } from "@/stores"
 import { isTauri } from "@/lib/utils"
+import { decodeNativeVideoFrame } from "@/lib/media/native-video-frame"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
 import { createApiGuardedAPI } from "./api-permission-gate"
 import { assertNoLeakingPii } from "./plugin-pii-gate"
@@ -710,23 +711,7 @@ function requireClip(clipId: string): LocalVideoClipEntry {
 }
 
 function frameResponseToImageData(response: ArrayBuffer | Uint8Array | number[]): ImageData {
-  const bytes = response instanceof Uint8Array ? response : new Uint8Array(response)
-  if (bytes.byteLength < 8) {
-    throw new Error("Native video frame response is missing its dimension header")
-  }
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  const width = view.getUint32(0, true)
-  const height = view.getUint32(4, true)
-  if (width === 0 || height === 0) {
-    throw new Error("Native video frame response has invalid dimensions")
-  }
-  const expectedLength = width * height * 4
-  if (bytes.byteLength !== expectedLength + 8) {
-    throw new Error(
-      `Native video frame response has ${bytes.byteLength - 8} pixels bytes; expected ${expectedLength}`
-    )
-  }
-  const data = new Uint8ClampedArray(bytes.slice(8))
+  const { data, width, height } = decodeNativeVideoFrame(response)
   // The headless plugin runtime can consume pixel buffers without a DOM constructor.
   return typeof ImageData === "undefined"
     ? { data, width, height, colorSpace: "srgb" }

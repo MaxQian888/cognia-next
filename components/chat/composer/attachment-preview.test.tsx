@@ -3,12 +3,16 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import type { ExtractedAttachment } from "@/lib/chat/attachments/dispatch"
+import type { VideoPreprocessResult } from "@/lib/chat/attachments/video/preprocess"
+import { DEFAULT_VIDEO_SETTINGS } from "@/lib/chat/attachments/video/settings"
 import { AttachmentPreview } from "./attachment-preview"
 import type { StagedAttachmentState, StagedAttachmentsValue } from "./staged-attachment-store"
 
 const mockRemove = jest.fn()
 const mockToggleIncludeOcr = jest.fn()
 const mockReorder = jest.fn()
+const mockApplyVideoSettings = jest.fn()
+const ROUTE = { available: false, reason: "runtime" } as const
 
 const mockState: {
   files: Array<{
@@ -38,6 +42,7 @@ jest.mock("./staged-attachment-store", () => ({
     reorder: mockReorder,
     setOcrText: jest.fn(),
     toggleIncludeOcr: mockToggleIncludeOcr,
+    applyVideoSettings: mockApplyVideoSettings,
     seedIncoming: jest.fn(),
   }),
 }))
@@ -73,6 +78,7 @@ beforeEach(() => {
   mockRemove.mockClear()
   mockToggleIncludeOcr.mockClear()
   mockReorder.mockClear()
+  mockApplyVideoSettings.mockClear()
   stage([])
 })
 
@@ -82,7 +88,7 @@ describe("AttachmentPreview — chip rendering", () => {
       { id: "a", mediaType: "image/png", filename: "pic.png", url: "blob:x" },
       { id: "b", mediaType: "application/pdf", filename: "doc.pdf" },
     ])
-    renderPreview(<AttachmentPreview />)
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     expect(screen.getByAltText("pic.png")).toBeInTheDocument()
     expect(screen.getByText("doc.pdf")).toBeInTheDocument()
     expect(screen.getAllByTestId("composer-attachment-chip")).toHaveLength(2)
@@ -98,7 +104,7 @@ describe("AttachmentPreview — chip rendering", () => {
       ["a", ready()],
       ["b", ready()],
     ])
-    renderPreview(<AttachmentPreview />)
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     const chips = screen.getAllByTestId("composer-attachment-chip")
     expect(within(chips[0]!).getByText("second.txt")).toBeInTheDocument()
     expect(within(chips[1]!).getByText("first.txt")).toBeInTheDocument()
@@ -106,7 +112,7 @@ describe("AttachmentPreview — chip rendering", () => {
 
   it("removes an attachment when its remove button is clicked", () => {
     stage([{ id: "b", mediaType: "application/pdf", filename: "doc.pdf" }])
-    renderPreview(<AttachmentPreview />)
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     fireEvent.click(screen.getByRole("button", { name: /Remove doc\.pdf/i }))
     expect(mockRemove).toHaveBeenCalledWith("b")
   })
@@ -115,7 +121,7 @@ describe("AttachmentPreview — chip rendering", () => {
   // absolutely positioned over the filename and hidden until hover.
   it("keeps the remove button visible rather than hover-gated", () => {
     stage([{ id: "b", filename: "doc.pdf" }])
-    renderPreview(<AttachmentPreview />)
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     const remove = screen.getByRole("button", { name: /Remove doc\.pdf/i })
     expect(remove.className).not.toContain("opacity-0")
     expect(remove.className).not.toContain("absolute")
@@ -127,7 +133,7 @@ describe("AttachmentPreview — extraction status badges", () => {
     stage([{ id: "a", filename: "big.pdf" }], {
       a: { status: "extracting", sizeBytes: 0 },
     })
-    renderPreview(<AttachmentPreview />)
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     expect(screen.getByTestId("attachment-extracting")).toBeInTheDocument()
     expect(screen.queryByTestId("attachment-tokens")).not.toBeInTheDocument()
   })
@@ -138,7 +144,7 @@ describe("AttachmentPreview — extraction status badges", () => {
     stage([{ id: "a", mediaType: "image/png", filename: "p.png", url: "blob:x" }], {
       a: { status: "extracting", sizeBytes: 0 },
     })
-    renderPreview(<AttachmentPreview />)
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     expect(screen.getByTestId("attachment-analyzing-image")).toBeInTheDocument()
     expect(screen.queryByTestId("attachment-extracting")).not.toBeInTheDocument()
   })
@@ -147,7 +153,7 @@ describe("AttachmentPreview — extraction status badges", () => {
     stage([{ id: "a", mediaType: "application/pdf", filename: "doc.pdf" }], {
       a: { status: "extracting", sizeBytes: 0 },
     })
-    renderPreview(<AttachmentPreview />)
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     expect(screen.getByTestId("attachment-extracting")).toBeInTheDocument()
     expect(screen.queryByTestId("attachment-analyzing-image")).not.toBeInTheDocument()
   })
@@ -156,13 +162,13 @@ describe("AttachmentPreview — extraction status badges", () => {
     mockState.files = [{ id: "a", type: "file", filename: "new.pdf" }]
     mockState.order = ["a"]
     mockState.byId = new Map()
-    renderPreview(<AttachmentPreview />)
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     expect(screen.getByTestId("attachment-extracting")).toBeInTheDocument()
   })
 
   it("shows the token cost once a document settles", () => {
     stage([{ id: "a", filename: "notes.txt" }], { a: ready({ tokens: 1234 }) })
-    renderPreview(<AttachmentPreview />)
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     expect(screen.getByTestId("attachment-tokens")).toHaveTextContent("1234")
   })
 
@@ -170,7 +176,7 @@ describe("AttachmentPreview — extraction status badges", () => {
     stage([{ id: "a", mediaType: "image/png", filename: "p.png", url: "blob:x" }], {
       a: { status: "ready", sizeBytes: 10, extracted: { kind: "image", block: null, tokens: 0 } },
     })
-    renderPreview(<AttachmentPreview />)
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     expect(screen.queryByTestId("attachment-tokens")).not.toBeInTheDocument()
   })
 
@@ -187,7 +193,7 @@ describe("AttachmentPreview — extraction status badges", () => {
         },
       },
     })
-    renderPreview(<AttachmentPreview />)
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     const badge = screen.getByTestId("attachment-rejected")
     expect(badge).toBeInTheDocument()
     expect(screen.getByLabelText("Unsupported file type")).toBeInTheDocument()
@@ -218,7 +224,7 @@ describe("AttachmentPreview — extraction status badges", () => {
         },
       }
     )
-    renderPreview(<AttachmentPreview />)
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     expect(screen.getByLabelText("No readable text found")).toBeInTheDocument()
     expect(screen.getByLabelText("Couldn't parse this file")).toBeInTheDocument()
     expect(screen.getByLabelText("Couldn't read this file")).toBeInTheDocument()
@@ -230,7 +236,7 @@ describe("AttachmentPreview — preview panel", () => {
     stage([{ id: "a", filename: "notes.txt", url: "data:text/plain;base64,eA==" }], {
       a: ready({ text: 'Attached file "notes.txt":\n\nbody', tokens: 12 }),
     })
-    renderPreview(<AttachmentPreview />)
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     fireEvent.click(screen.getByRole("button", { name: /Preview notes\.txt/i }))
     const dialog = screen.getByRole("dialog")
     expect(within(dialog).getByRole("heading", { name: "notes.txt" })).toBeInTheDocument()
@@ -241,7 +247,7 @@ describe("AttachmentPreview — preview panel", () => {
     stage([{ id: "a", filename: "notes.txt", url: "data:text/plain;base64,eA==" }], {
       a: ready({ text: 'Attached file "notes.txt":\n\nsecret body', tokens: 12 }),
     })
-    renderPreview(<AttachmentPreview />)
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     fireEvent.click(screen.getByRole("button", { name: /Preview notes\.txt/i }))
     await user().click(screen.getByRole("tab", { name: "Model view" }))
     expect(screen.getByText(/secret body/)).toBeInTheDocument()
@@ -251,7 +257,7 @@ describe("AttachmentPreview — preview panel", () => {
     stage([{ id: "a", filename: "c.txt", url: "data:text/plain;base64,eA==" }], {
       a: ready({ text: "Contact <EMAIL_001> now", tokens: 5 }),
     })
-    renderPreview(<AttachmentPreview />)
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     fireEvent.click(screen.getByRole("button", { name: /Preview c\.txt/i }))
     await user().click(screen.getByRole("tab", { name: "Model view" }))
     expect(screen.getByTestId("redacted-span")).toHaveTextContent("<EMAIL_001>")
@@ -272,7 +278,7 @@ describe("AttachmentPreview — preview panel", () => {
         },
       },
     })
-    renderPreview(<AttachmentPreview onRunOcr={onRunOcr} />)
+    renderPreview(<AttachmentPreview onRunOcr={onRunOcr} videoRoute={ROUTE} />)
     fireEvent.click(screen.getByRole("button", { name: /Preview p\.png/i }))
     await user().click(screen.getByRole("tab", { name: "Model view" }))
     expect(screen.getByTestId("model-view-image")).toBeInTheDocument()
@@ -296,6 +302,7 @@ describe("AttachmentPreview — preview panel", () => {
       <AttachmentPreview
         onViewOcrDetail={onViewOcrDetail}
         onExtractOcrToInput={onExtractOcrToInput}
+        videoRoute={ROUTE}
       />
     )
     fireEvent.click(screen.getByRole("button", { name: /Preview p\.png/i }))
@@ -319,7 +326,7 @@ describe("AttachmentPreview — preview panel", () => {
         extracted: { kind: "document", block: null, tokens: 0, rejectReason: "empty" },
       },
     })
-    renderPreview(<AttachmentPreview />)
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     fireEvent.click(screen.getByRole("button", { name: /Preview scan\.pdf/i }))
     await user().click(screen.getByRole("tab", { name: "Model view" }))
     expect(screen.getByText("Nothing was extracted from this file.")).toBeInTheDocument()
@@ -330,27 +337,27 @@ describe("AttachmentPreview — container modes", () => {
   // The presence boundary must survive an empty list, otherwise the LAST chip
   // to be removed unmounts before it can play its exit animation.
   it("keeps the chip container mounted with no attachments", () => {
-    const { container } = renderPreview(<AttachmentPreview />)
+    const { container } = renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     expect(container.firstChild).not.toBeNull()
     expect(screen.queryAllByTestId("composer-attachment-chip")).toHaveLength(0)
   })
 
   it("standalone mode applies padding only while a chip is present", () => {
     stage([{ id: "b", filename: "doc.pdf" }])
-    const { container } = renderPreview(<AttachmentPreview />)
+    const { container } = renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     expect((container.firstChild as HTMLElement).className).toContain("has-[>*]:pt-2")
   })
 
   it("bare mode omits the padded container so a parent bar can lay chips out", () => {
     stage([{ id: "b", filename: "doc.pdf" }])
-    const { container } = renderPreview(<AttachmentPreview bare />)
+    const { container } = renderPreview(<AttachmentPreview bare videoRoute={ROUTE} />)
     expect((container.firstChild as HTMLElement)?.className ?? "").not.toContain("has-[>*]:pt-2")
     expect(screen.getByText("doc.pdf")).toBeInTheDocument()
   })
 
   it("falls back to a generic label for a file with no filename", () => {
     stage([{ id: "e" }])
-    renderPreview(<AttachmentPreview />)
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     expect(screen.getByRole("button", { name: /Preview attachment/i })).toBeInTheDocument()
   })
 })
@@ -365,7 +372,7 @@ describe("AttachmentPreview — reorder wiring", () => {
       { id: "a", filename: "one.txt" },
       { id: "b", filename: "two.txt" },
     ])
-    renderPreview(<AttachmentPreview />)
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     const handles = screen.getAllByLabelText(/Reorder (one|two)\.txt/)
     expect(handles).toHaveLength(2)
     // dnd-kit marks draggables with a roledescription for assistive tech.
@@ -376,7 +383,7 @@ describe("AttachmentPreview — reorder wiring", () => {
   // drag sensor swallows the click and the preview panel can never open.
   it("keeps a chip clickable even though it is draggable", () => {
     stage([{ id: "a", filename: "one.txt", url: "data:text/plain;base64,eA==" }])
-    renderPreview(<AttachmentPreview />)
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     fireEvent.click(screen.getByRole("button", { name: /Preview one\.txt/i }))
     expect(screen.getByRole("dialog")).toBeInTheDocument()
   })
@@ -389,7 +396,7 @@ describe("AttachmentPreview — reorder wiring", () => {
       { id: "a", filename: "one.txt" },
       { id: "b", filename: "two.txt" },
     ])
-    renderPreview(<AttachmentPreview />)
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     const handle = screen.getAllByLabelText(/Reorder/)[0]!
     handle.focus()
     fireEvent.keyDown(handle, { key: " ", code: "Space" })
@@ -405,7 +412,7 @@ describe("AttachmentPreview — reorder wiring", () => {
       { id: "a", filename: "one.txt" },
       { id: "b", filename: "two.txt" },
     ])
-    renderPreview(<AttachmentPreview />)
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     const handle = screen.getAllByLabelText(/Reorder/)[0]!
     handle.focus()
     fireEvent.keyDown(handle, { key: " ", code: "Space" })
@@ -419,11 +426,140 @@ describe("AttachmentPreview — reorder wiring", () => {
 describe("AttachmentPreview — preview panel lifecycle", () => {
   it("closes the panel and forgets the target", async () => {
     stage([{ id: "a", filename: "one.txt", url: "data:text/plain;base64,eA==" }])
-    renderPreview(<AttachmentPreview />)
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     fireEvent.click(screen.getByRole("button", { name: /Preview one\.txt/i }))
     expect(screen.getByRole("dialog")).toBeInTheDocument()
 
     await user().keyboard("{Escape}")
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+  })
+})
+
+describe("AttachmentPreview — videos", () => {
+  const poster = { mediaType: "image/jpeg", base64: "UE9TVEVS", bytes: 6, width: 16, height: 9 }
+  function videoResult(over: Partial<VideoPreprocessResult> = {}): VideoPreprocessResult {
+    return {
+      engine: "browser",
+      source: { kind: "video", mediaType: "video/mp4", durationSec: 8, width: 640, height: 360 },
+      settings: DEFAULT_VIDEO_SETTINGS,
+      sampled: {
+        delivery: "storyboard",
+        frames: Array.from({ length: 9 }, (_, i) => ({ timeSec: i, reason: "uniform" as const })),
+        images: [poster],
+        description: "d",
+        blocks: [],
+        estimatedImageTokens: 900,
+      },
+      native: null,
+      nativeFailure: null,
+      nativeTrimSupported: false,
+      poster,
+      ...over,
+    }
+  }
+  const clip = { id: "v", mediaType: "video/mp4", filename: "clip.mp4", url: "blob:clip" }
+  const readyVideo = (result: VideoPreprocessResult): StagedAttachmentState => ({
+    status: "ready",
+    sizeBytes: 1000,
+    extracted: { kind: "video", block: null, tokens: 12 },
+    video: { settings: result.settings, result },
+  })
+
+  it("shows the sampled poster instead of loading the source into a thumbnail", () => {
+    stage([clip], { v: readyVideo(videoResult()) })
+    const { container } = renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
+    expect(container.querySelector("video")).toBeNull()
+    const thumb = screen.getByTestId("attachment-video-thumb")
+    expect(thumb.querySelector("img")).toHaveAttribute("src", "data:image/jpeg;base64,UE9TVEVS")
+  })
+
+  it("falls back to a video glyph before the first run lands", () => {
+    stage([clip], { v: { status: "extracting", sizeBytes: 0 } })
+    const { container } = renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
+    expect(container.querySelector("video")).toBeNull()
+    expect(screen.getByTestId("attachment-video-thumb").querySelector("img")).toBeNull()
+    expect(screen.getByTestId("attachment-extracting")).toBeInTheDocument()
+  })
+
+  it("reports a run's progress as a percentage", () => {
+    stage([clip], {
+      v: {
+        status: "extracting",
+        sizeBytes: 0,
+        video: { settings: DEFAULT_VIDEO_SETTINGS, progress: 0.456 },
+      },
+    })
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
+    expect(screen.getByTestId("attachment-video-progress")).toHaveTextContent("46%")
+    expect(screen.queryByTestId("attachment-extracting")).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ["a storyboard", videoResult(), "9 frames"],
+    [
+      "separate frames",
+      videoResult({
+        settings: { ...DEFAULT_VIDEO_SETTINGS, delivery: "frames", frameCount: 3 },
+        sampled: {
+          ...videoResult().sampled,
+          delivery: "frames",
+          frames: [0, 1, 2].map((timeSec) => ({ timeSec, reason: "uniform" as const })),
+        },
+      }),
+      "3 images",
+    ],
+    [
+      "a prepared original",
+      videoResult({
+        settings: { ...DEFAULT_VIDEO_SETTINGS, delivery: "native" },
+        native: { mediaType: "video/mp4", bytes: 10, description: "d", blocks: [] },
+      }),
+      "Video",
+    ],
+    [
+      "an original that fell back to the storyboard",
+      videoResult({
+        settings: { ...DEFAULT_VIDEO_SETTINGS, delivery: "native" },
+        nativeFailure: "too-large",
+      }),
+      "9 frames",
+    ],
+  ])("says what goes out for %s, not the description's text tokens", (_label, result, text) => {
+    stage([clip], { v: readyVideo(result) })
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
+    expect(screen.getByTestId("attachment-video-summary")).toHaveTextContent(
+      new RegExp(`^${text}$`)
+    )
+    expect(screen.queryByTestId("attachment-tokens")).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ["video-undecodable", "Can't decode this video here"],
+    ["video-too-large", "Too large to process"],
+    ["video-unprocessed", "This video wasn't processed"],
+  ] as const)("names the %s rejection", (rejectReason, label) => {
+    stage([clip], {
+      v: {
+        status: "rejected",
+        sizeBytes: 0,
+        extracted: { kind: "video", block: null, tokens: 0, rejectReason },
+      },
+    })
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
+    expect(screen.getByLabelText(label)).toBeInTheDocument()
+  })
+
+  it("wires the panel's Apply to the store for the clicked chip, with the route verdict", async () => {
+    stage([clip], { v: readyVideo(videoResult()) })
+    renderPreview(<AttachmentPreview videoRoute={{ available: true }} />)
+    fireEvent.click(screen.getByRole("button", { name: /Preview clip\.mp4/i }))
+    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    expect(screen.getByRole("radio", { name: "Original video" })).toBeEnabled()
+    await user().click(screen.getByRole("radio", { name: "Frames" }))
+    await user().click(screen.getByRole("button", { name: "Apply" }))
+    expect(mockApplyVideoSettings).toHaveBeenCalledWith(
+      "v",
+      expect.objectContaining({ delivery: "frames" })
+    )
   })
 })

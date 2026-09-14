@@ -178,6 +178,7 @@
     "0176-every-clone-shares-one-object-cache",
     "0177-a-room-is-one-conversation-shape",
     "0178-pointing-at-a-rendered-element",
+    "0180-a-video-reaches-the-model-as-what-it-can-read",
     "0181-what-the-user-staged-is-what-the-model-reads"
   ]
 }

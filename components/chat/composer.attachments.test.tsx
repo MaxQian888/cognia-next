@@ -33,6 +33,17 @@ jest.mock("@/hooks/use-platform", () => ({ usePlatform: jest.fn(() => "web") }))
 jest.mock("@/lib/chat/attachments/dispatch", () => ({
   INLINE_TOKEN_CEILING: 12_000,
   buildSendContent: jest.fn(),
+  extractedFromVideoResult: jest.fn(() => ({ kind: "video", block: null, tokens: 0 })),
+}))
+jest.mock("@/lib/chat/attachments/video/preprocess", () => ({
+  preprocessMotionAttachment: jest.fn(),
+}))
+// The verdict itself is the hook's own suite; here it only has to reach the send.
+jest.mock("./composer/hooks/use-composer-video-route", () => ({
+  useComposerVideoRoute: jest.fn(() => ({
+    facts: {},
+    verdict: { available: false, reason: "runtime" },
+  })),
 }))
 // Passthrough by default — one test below overrides it with a deferred promise
 // to hold preparation open and inspect the in-flight placeholder chip.
@@ -63,7 +74,10 @@ import { useSettingsStore } from "@/stores/settings"
 import { buildSendContent } from "@/lib/chat/attachments/dispatch"
 import { prepareComposerAttachments } from "@/lib/chat/attachments/prepare"
 import { buildLinkContextBlocks } from "@/lib/chat/link-context"
-import { clearDraft } from "@/lib/db/chat-drafts"
+import { clearDraft, getDraft } from "@/lib/db/chat-drafts"
+import { preprocessMotionAttachment } from "@/lib/chat/attachments/video/preprocess"
+import { DEFAULT_VIDEO_SETTINGS } from "@/lib/chat/attachments/video/settings"
+import { useComposerVideoRoute } from "./composer/hooks/use-composer-video-route"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 const buildSendContentMock = buildSendContent as jest.Mock
@@ -434,5 +448,119 @@ describe("Composer — attachment send contract", () => {
     })
 
     expect(screen.getByAltText("shots/a.png")).toBeInTheDocument()
+  })
+})
+
+describe("Composer — videos", () => {
+  const preprocessMock = preprocessMotionAttachment as jest.Mock
+  const videoRouteMock = useComposerVideoRoute as jest.Mock
+  const originalFetch = global.fetch
+
+  beforeEach(() => {
+    preprocessMock.mockReset()
+    preprocessMock.mockResolvedValue({
+      kind: "motion",
+      result: { settings: DEFAULT_VIDEO_SETTINGS, sampled: { frames: [] } },
+    })
+    // The motion pipeline reads the staged file back from its blob URL.
+    global.fetch = jest.fn(async () => ({
+      blob: async () => new Blob(["frames"], { type: "video/mp4" }),
+    })) as unknown as typeof fetch
+  })
+
+  afterEach(() => {
+    global.fetch = originalFetch
+    jest.mocked(getDraft).mockImplementation(async () => null)
+    videoRouteMock.mockReturnValue({ facts: {}, verdict: { available: false, reason: "runtime" } })
+  })
+
+  async function stageVideo(name = "clip.mp4") {
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    await act(async () => {
+      fireEvent.change(input, {
+        target: { files: [new File(["frames"], name, { type: "video/mp4" })] },
+      })
+      await new Promise((r) => setTimeout(r, 0))
+    })
+  }
+
+  it("offers videos in the file picker", () => {
+    renderComposer(jest.fn(async () => undefined))
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    expect(input.accept).toContain("video/*")
+  })
+
+  it("samples a staged video and sends it by reference with the route's native verdict", async () => {
+    buildSendContentMock.mockResolvedValue({ content: "hi", rejected: [], tokens: 0, manifest: [] })
+    const ta = renderComposer(jest.fn(async () => undefined))
+
+    await stageVideo()
+    await waitFor(() => expect(preprocessMock).toHaveBeenCalled())
+    expect(preprocessMock.mock.calls[0][0]).toMatchObject({
+      filename: "clip.mp4",
+      settings: DEFAULT_VIDEO_SETTINGS,
+    })
+
+    await typeAndEnter(ta, "hi")
+    await waitFor(() => expect(buildSendContentMock).toHaveBeenCalled())
+    const [, files, options] = buildSendContentMock.mock.calls[0]
+    // Still the blob URL: the source was never read into a data URL.
+    expect(files).toEqual([expect.objectContaining({ filename: "clip.mp4", url: "blob:mock" })])
+    // The route verdict here says no original video.
+    expect(options).toMatchObject({ allowNativeVideo: false })
+    expect(options.precomputed).toBeInstanceOf(Map)
+  })
+
+  it("allows the original video when the conversation's route can take one", async () => {
+    videoRouteMock.mockReturnValue({ facts: {}, verdict: { available: true } })
+    buildSendContentMock.mockResolvedValue({ content: "hi", rejected: [], tokens: 0, manifest: [] })
+    const ta = renderComposer(jest.fn(async () => undefined))
+
+    await typeAndEnter(ta, "hi")
+    await waitFor(() => expect(buildSendContentMock).toHaveBeenCalled())
+    expect(buildSendContentMock.mock.calls[0][2]).toMatchObject({ allowNativeVideo: true })
+    expect(videoRouteMock).toHaveBeenCalledWith(expect.objectContaining({ id: "ses_1" }))
+  })
+
+  it("re-samples a restored draft video with the settings it was saved with", async () => {
+    const saved = { ...DEFAULT_VIDEO_SETTINGS, delivery: "frames" as const, frameCount: 4 }
+    // Not `Once`: the hydration effect re-runs during mount and reads again.
+    jest.mocked(getDraft).mockResolvedValue({
+      sessionId: "ses_1",
+      text: "",
+      updatedAt: 0,
+      attachments: [
+        {
+          name: "clip.mp4",
+          mediaType: "video/mp4",
+          size: 6,
+          bytes: new Uint8Array([1, 2, 3, 4, 5, 6]),
+          videoSettings: saved,
+        },
+      ],
+    })
+    renderComposer(jest.fn(async () => undefined))
+    await waitFor(() => expect(preprocessMock).toHaveBeenCalled())
+    expect(preprocessMock.mock.calls[0][0]).toMatchObject({ filename: "clip.mp4", settings: saved })
+  })
+
+  it("falls back to the default settings for a draft row this build cannot read", async () => {
+    jest.mocked(getDraft).mockResolvedValue({
+      sessionId: "ses_1",
+      text: "",
+      updatedAt: 0,
+      attachments: [
+        {
+          name: "clip.mp4",
+          mediaType: "video/mp4",
+          size: 6,
+          bytes: new Uint8Array([1, 2, 3, 4, 5, 6]),
+          videoSettings: { delivery: "hologram" } as never,
+        },
+      ],
+    })
+    renderComposer(jest.fn(async () => undefined))
+    await waitFor(() => expect(preprocessMock).toHaveBeenCalled())
+    expect(preprocessMock.mock.calls[0][0].settings).toEqual(DEFAULT_VIDEO_SETTINGS)
   })
 })

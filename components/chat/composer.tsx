@@ -74,9 +74,13 @@ import {
   type ExtractedAttachment,
   type SubmittedFile,
 } from "@/lib/chat/attachments/dispatch"
+import { isVideoDescriptor } from "@/lib/chat/attachments/video/classify"
+import type { NativeVideoVerdict } from "@/lib/chat/attachments/video/delivery-gate"
+import { isVideoPreprocessSettings } from "@/lib/chat/attachments/video/settings"
 import { applyOrder } from "@/lib/chat/attachments/reorder"
 import { StagedAttachmentsProvider, useStagedAttachments } from "./composer/staged-attachment-store"
 import { useAttachmentIntake } from "./composer/hooks/use-attachment-intake"
+import { useComposerVideoRoute } from "./composer/hooks/use-composer-video-route"
 import { ComposerBox } from "./composer/composer-box"
 import {
   resolveComposerSkin,
@@ -114,6 +118,11 @@ import {
   type MentionMode,
 } from "./composer-trigger"
 import type { RemoteDocStagingItem } from "@/hooks/chat/use-remote-doc-staging"
+import {
+  createAttachmentCitations,
+  type AttachmentCitations,
+} from "@/lib/chat/mentions/attachment-citations"
+import { isContextRef } from "@/lib/chat/mentions/read"
 import { useEntityMentionStaging } from "@/hooks/chat/use-entity-mention-staging"
 import { ComposerPopover, type ComposerPopoverHandle, type PopoverItem } from "./composer-popover"
 import { getMentionPickHandler } from "@/lib/chat/mentions/pick-registry"
@@ -385,6 +394,10 @@ const COMPOSER_MAX_HEIGHT_PX = COMPOSER_MAX_HEIGHT_REM * 16
 // demand); only a *dropped* folder is flattened into this attachment input,
 // since a drop carries no absolute path.
 const ATTACHMENT_ACCEPT = ["image/*", ...getDocumentAcceptExtensions("chat")].join(",")
+// Plus videos, which are sampled into frames at staging time. Not offered in a
+// conversation bound to an IM platform: those files go to a person as they
+// are, and the intake refuses a video there anyway.
+const MOTION_ATTACHMENT_ACCEPT = [ATTACHMENT_ACCEPT, "video/*"].join(",")
 
 const blobUrlToDataUrl = async (url: string): Promise<string | null> => {
   try {
@@ -424,6 +437,13 @@ interface InnerProps {
     templateRun?: ChatTemplateRun | null,
     submission?: { replyTo: MessageReplyTo | null }
   ) => boolean | Promise<boolean>
+  /**
+   * Binds a picked document's citation to the attachment it staged. Owned by
+   * the outer `Composer` for the same reason `precomputed` is threaded through
+   * `onSubmit`: `handleSubmit` reads it, and cannot reach the provider whose
+   * attachment list binds it.
+   */
+  attachmentCitations: AttachmentCitations
   onStop: () => void | Promise<void>
   commandRunning?: boolean
   onCommand: (cmd: SlashCommand, args: string) => Promise<boolean>
@@ -450,6 +470,11 @@ interface InnerProps {
   /** Resolved by the outer `Composer` so one read feeds the whole tree. */
   skin: ResolvedComposerSkin
   toolbar?: ReactNode
+  /**
+   * Whether this conversation could take an original video file. Resolved by
+   * the outer `Composer`, whose `handleSubmit` reads the same verdict.
+   */
+  videoRoute: NativeVideoVerdict
 }
 
 function ComposerInner(props: InnerProps) {
@@ -485,6 +510,14 @@ function ComposerInner(props: InnerProps) {
   const attachments = usePromptInputAttachments()
   // Extraction results / chip order / OCR opt-in for the staged attachments.
   const staged = useStagedAttachments()
+  const { attachmentCitations } = props
+  // Binds each newly staged file to the citation announced for it, and notices
+  // removed chips. Declared ahead of the draft-persist effect on purpose:
+  // effects run in declaration order, so a save in the same commit as a new
+  // chip already sees its citation.
+  useEffect(() => {
+    attachmentCitations.observe(attachments.files)
+  }, [attachmentCitations, attachments.files])
   const ocr = useOcr(() => buildOcrDeps())
   const [ocrBubbleOpen, setOcrBubbleOpen] = useState(false)
   const [ocrBubbleResult, setOcrBubbleResult] = useState<OcrResult | null>(null)
@@ -610,12 +643,14 @@ function ComposerInner(props: InnerProps) {
     stageRemoteDoc,
   } = useAttachmentIntake({
     attachments,
+    attachmentCitations,
     textInput: controller.textInput,
     textareaRef,
     setCaret,
     isDesktop,
     t,
     tAttach,
+    acceptMotion: !props.session?.platformBinding,
   })
   // Per-command failures from the last multi-command submit. Surfaced as
   // failed-state pills on the command queue bar; cleared when the user edits.
@@ -978,9 +1013,19 @@ function ComposerInner(props: InnerProps) {
         const list = props.mentionables ?? []
         return list.length === 0 || list.some((target) => target.name === value.id)
       }
+      if (value.resourceKind === "member") {
+        // Empty outside a team room: no evidence either way. Inside one, the
+        // member must still be here AND still answer to the name that was
+        // inserted, because the router matches `@Name`; a renamed character
+        // leaves a token that routes to nobody.
+        return (
+          teamMembers.length === 0 ||
+          teamMembers.some((member) => member.id === value.id && `@${member.name}` === value.raw)
+        )
+      }
       return true
     },
-    [chatAgents, props.mentionables]
+    [chatAgents, props.mentionables, teamMembers]
   )
   const paramPillState = useCallback(
     (paramId: string) => paramStateOfValue(effectiveBinding?.params[paramId], isResourceResolvable),
@@ -1009,6 +1054,7 @@ function ComposerInner(props: InnerProps) {
     cwd,
     chatAgents,
     mentionables: props.mentionables,
+    teamMembers,
   })
   /** The parameter token containing `caret`, or null. */
   const paramTokenAt = useCallback(
@@ -1399,8 +1445,8 @@ function ComposerInner(props: InnerProps) {
   // on every attachment add. The ref keeps the pick handler stable while still
   // reaching the current implementation. Written from an effect, never during
   // render.
-  const stageRemoteDocRef = useRef<(item: RemoteDocStagingItem) => Promise<void>>(
-    async () => undefined
+  const stageRemoteDocRef = useRef<(item: RemoteDocStagingItem) => Promise<File | null>>(
+    async () => null
   )
   useEffect(() => {
     stageRemoteDocRef.current = stageRemoteDoc
@@ -1779,7 +1825,15 @@ function ComposerInner(props: InnerProps) {
         snapshotAttachmentInputs.map(async (item) => {
           // A file whose extraction is cached never needs its bytes again —
           // skip the blob→data-URL round trip entirely.
-          if (!props.session?.platformBinding && precomputed.has(item.id)) return item
+          if (!props.session?.platformBinding) {
+            if (precomputed.has(item.id)) return item
+            // A video is sampled from its blob URL at staging time and only
+            // ever sent as those samples: reading a 500 MB source into a data
+            // URL here would buy nothing and could exhaust the webview.
+            if (isVideoDescriptor({ name: item.filename ?? "", mediaType: item.mediaType ?? "" })) {
+              return item
+            }
+          }
           if (item.url?.startsWith("blob:")) {
             const dataUrl = await blobUrlToDataUrl(item.url)
             return { ...item, url: dataUrl ?? item.url }
@@ -2480,12 +2534,24 @@ function ComposerInner(props: InnerProps) {
                       },
                     }
                   : {}),
+                // A video's frames are re-sampled with the settings it was saved
+                // with; a row this build cannot read falls back to the default.
+                ...(isVideoPreprocessSettings(a.videoSettings)
+                  ? { video: { settings: a.videoSettings } }
+                  : {}),
               },
             }))
           )
-          attachments.add(
-            revivable.map((a) => new File([a.bytes as BlobPart], a.name, { type: a.mediaType }))
-          )
+          const revived = revivable.map((a) => ({
+            citation: a.citation,
+            file: new File([a.bytes as BlobPart], a.name, { type: a.mediaType }),
+          }))
+          // A restored document cites what it cited before the switch. The
+          // row may come from another build, so its citation is checked first.
+          for (const { citation, file } of revived) {
+            if (isContextRef(citation)) attachmentCitations.expect(file, citation)
+          }
+          attachments.add(revived.map(({ file }) => file))
         }
         // Reminder chips are now only for the ones we could NOT bring back.
         const reminders = restored.filter((a) => !a.bytes)
@@ -2510,6 +2576,7 @@ function ComposerInner(props: InnerProps) {
     setFoldedLinks,
     controller.textInput,
     attachments,
+    attachmentCitations,
     staged,
     setPastedBlocks,
   ])
@@ -2552,18 +2619,21 @@ function ComposerInner(props: InnerProps) {
     void submit()
   }, [controller.textInput.value, submit])
 
-  // Memoised on the file list + staged state so the persist effect below — which
-  // also depends on the text value — doesn't rebuild these rows on every
-  // keystroke. The blobs come from `staged`, which already holds the bytes it
-  // fetched for extraction, so persisting a draft costs no extra reads.
-  const draftAttachments = useMemo(
-    () => draftAttachmentsFromFiles(attachments.files, staged.byId),
-    [attachments.files, staged.byId]
-  )
   useEffect(() => {
     if (!persistDrafts) return
     if (!sessionId) return
     if (draftHydratedFor !== sessionId) return
+    // Built here, not memoised during render. A chip's citation is bound by the
+    // observe effect near the top of this component, which runs after render,
+    // so rows computed in the render that added the chip would save it
+    // uncited. Rebuilding is a map over a handful of files, and the blobs come
+    // from `staged`, which already holds the bytes it fetched for extraction,
+    // so a save still costs no extra reads.
+    const draftAttachments = draftAttachmentsFromFiles(
+      attachments.files,
+      staged.byId,
+      attachmentCitations.citationOf
+    )
     try {
       // `undefined` keeps the default debounce. The binding is passed on every
       // save (never omitted) so clearing the last parameter actually clears the
@@ -2579,7 +2649,9 @@ function ComposerInner(props: InnerProps) {
     }
   }, [
     controller.textInput.value,
-    draftAttachments,
+    attachments.files,
+    staged.byId,
+    attachmentCitations,
     sessionId,
     draftHydratedFor,
     persistDrafts,
@@ -2702,6 +2774,7 @@ function ComposerInner(props: InnerProps) {
               @-references, artifacts — plus any command that FAILED. Commands
               and links show up in the text itself. */}
           <ContextChipBar
+            videoRoute={props.videoRoute}
             onRunOcr={handleRunOcrForPanel}
             ocrBusy={ocr.status === "running"}
             onExtractOcrToInput={handleExtractOcrToInput}
@@ -2853,7 +2926,9 @@ function ComposerInner(props: InnerProps) {
           ghostSourceLabel={ghostSourceLabel}
           acceptGhost={acceptGhost}
           fileInputRef={fileInputRef}
-          attachmentAccept={ATTACHMENT_ACCEPT}
+          attachmentAccept={
+            props.session?.platformBinding ? ATTACHMENT_ACCEPT : MOTION_ATTACHMENT_ACCEPT
+          }
           onFilePick={onFilePick}
           openFileDialog={openFileDialog}
           onPlusAttach={onPlusAttach}
@@ -3140,6 +3215,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const tPlatformName = useTranslations("inbox.platformBadge.names")
   const tWebSearch = useTranslations("webSearchToggle")
   const tDraftReview = useTranslations("chat.composer.draftReview")
+  // One prediction for the panel and the send: the controller still re-checks
+  // the route the turn actually resolves.
+  const { verdict: videoRoute } = useComposerVideoRoute(session)
+  // One per composer, like the attachment provider it follows: ids are minted
+  // per provider, and a binding is only ever looked up by one of them.
+  const [attachmentCitations] = useState(createAttachmentCitations)
   const composerBehavior = useSettingsStore((s) => s.settings?.composerBehavior)
   const stylePack = useSettingsStore((s) => s.settings?.stylePack)
   const isMobileShell = usePlatform() === "mobile"
@@ -3587,7 +3668,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       const linkContext = await buildLinkContextBlocks(text)
       // `precomputed` makes this a map lookup for anything already extracted at
       // staging time; files it doesn't cover still extract inline here.
-      const attachmentResult = await buildSendContent(augmented, files, { precomputed })
+      const attachmentResult = await buildSendContent(augmented, files, {
+        precomputed,
+        allowNativeVideo: videoRoute.available,
+      })
       const content = mergeContextBlocks(attachmentResult.content, linkContext.blocks)
       const rejected = attachmentResult.rejected
       // The envelope counts too. The ceiling used to see attachments and links
@@ -3670,6 +3754,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       tPlatformName,
       tWebSearch,
       session,
+      videoRoute.available,
     ]
   )
 
@@ -3710,7 +3795,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           {/* Owns per-attachment extraction / order / OCR opt-in. Must sit INSIDE
               the prompt-input provider: it derives everything from that
               provider's file list. */}
-          <StagedAttachmentsProvider>
+          <StagedAttachmentsProvider motion={!session?.platformBinding}>
             {session?.platformBinding && (
               <div className="mb-1 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
                 <PlatformBadge platform={session.platformBinding.platform} />
@@ -3773,9 +3858,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             )}
             <ComposerInner
               session={session}
+              videoRoute={videoRoute}
               status={promptStatus}
               disabled={disabled}
               onSubmit={handleSubmit}
+              attachmentCitations={attachmentCitations}
               onStop={commandProgress ? cancelPluginCommand : onStop}
               commandRunning={!!commandProgress}
               onCommand={handleSlashCommand}

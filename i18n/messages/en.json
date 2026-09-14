@@ -2246,8 +2246,10 @@
       "pending": "Pending"
     },
     "botApproval": {
-      "agentReported": "Test results below are reported by the agent. Inspect the command evidence before approving.",
+      "agentReported": "These command results are reported by the agent and have not been independently verified.",
       "baseSha": "Approved target SHA",
+      "command": "Exact command request",
+      "commandTitle": "Review Bot command",
       "detailUnavailable": "Approval details are unavailable. Refresh this run before approving.",
       "fileMode": "File mode",
       "headSha": "Workspace HEAD",
@@ -2339,7 +2341,10 @@
     "outcome": {
       "action_unavailable": "That action is no longer available — the run has moved on.",
       "already_retried": "This run has already been retried.",
+      "consentCode": "Host authorization code:",
+      "control_failed": "The Host could not apply this action. Check the connection and try again.",
       "forbidden": "You are not authorized to control this run.",
+      "host_consent_required": "Authorize this device on the Host, then try the action again.",
       "interrupt_expired": "The approval expired before it was answered.",
       "interrupt_not_found": "That approval no longer exists.",
       "interrupt_resolved": "That approval was already answered.",
@@ -2462,6 +2467,7 @@
     },
     "tests": {
       "counts": "{passed} passed · {failed} failed · {skipped} skipped",
+      "exitCode": "Exit code",
       "failed": "Failed",
       "inconclusive": "Inconclusive",
       "inconclusiveHint": "The output could not be parsed — this is not a pass.",
@@ -4708,6 +4714,10 @@
     },
     "attentionCount": "{count, plural, =1 {1 needs attention} other {# need attention}}",
     "config": {
+      "allowAutomaticPublication": "Allow automatic publication of PRs and reviews",
+      "allowUnattended": "Allow commands without asking",
+      "authorityHint": "These permissions apply when the Bot requests unattended execution or automatic publication. Saving grants access for this installation; stricter host policies still apply. Automatic publication does not authorize merging.",
+      "authorityTitle": "Host permissions",
       "description": "What this installation passes to every run.",
       "emptyBody": "This Bot ships no settings form. Everything it needs comes from its triggers and credentials.",
       "emptyTitle": "Nothing to configure",
@@ -4745,7 +4755,10 @@
       "description": "The queue behind this Bot. A delivery that never ran has no run to show anywhere else.",
       "emptyBody": "Nothing has been delivered to this Bot yet. Arm a trigger, or run it once by hand.",
       "emptyTitle": "No deliveries",
-      "replay": "Replay",
+      "previousRun": "Previous run",
+      "replay": "Retry",
+      "retryQueued": "Retry queued",
+      "retryRun": "Retry run",
       "status": {
         "deadletter": "Gave up",
         "dismissed": "Dismissed",
@@ -4756,7 +4769,8 @@
         "running": "Running",
         "succeeded": "Done"
       },
-      "title": "Deliveries"
+      "title": "Deliveries",
+      "viewRun": "View run"
     },
     "description": "Installed Bots: what wakes each one up, what runs it, and what it is allowed to do.",
     "detail": {
@@ -4980,7 +4994,7 @@
     },
     "write": {
       "alreadyQueued": "That run is already queued.",
-      "alreadyReplayed": "That delivery is no longer dead-lettered.",
+      "alreadyReplayed": "A retry already exists or this delivery cannot be retried.",
       "armed": "Trigger armed",
       "disarmed": "Trigger switched off",
       "failed": "The change could not be saved",
@@ -5008,7 +5022,10 @@
         "vault-locked": "Unlock the vault to make changes."
       },
       "replayed": "Delivery queued again",
+      "retrySubmitted": "Retry request queued for the Host.",
+      "retryUnavailable": "Enable this Bot on its owning Host and restore its definition and original run before retrying.",
       "started": "Run started",
+      "submitted": "Request queued for the Host.",
       "unavailable": "That change cannot be made from here"
     }
   },
@@ -6121,13 +6138,96 @@
           "empty": "No readable text found",
           "notDataUrl": "Couldn't read this file",
           "parseFailed": "Couldn't parse this file",
-          "unsupportedType": "Unsupported file type"
+          "unsupportedType": "Unsupported file type",
+          "videoTooLarge": "Too large to process",
+          "videoUndecodable": "Can't decode this video here",
+          "videoUnprocessed": "This video wasn't processed"
         },
         "removeAria": "Remove {filename}",
         "reorderAria": "Reorder {filename}",
         "skipped": "{count, plural, =1 {1 attachment was} other {# attachments were}} skipped (unsupported file type).",
         "tokenBadge": "{tokens} tok",
-        "unsupported": "{count, plural, =1 {1 file isn't supported} other {# files aren't supported}}."
+        "unsupported": "{count, plural, =1 {1 file isn't supported} other {# files aren't supported}}.",
+        "video": {
+          "apply": "Apply",
+          "applying": "Processing…",
+          "browserFailed": "The app couldn't decode this file, so ffmpeg opened it.",
+          "chipFrames": "{count} images",
+          "chipNative": "Video",
+          "chipProgress": "{percent}%",
+          "chipStoryboard": "{count} frames",
+          "delivery": {
+            "frames": "Frames",
+            "framesHint": "Separate images: more detail, more tokens",
+            "native": "Original video",
+            "nativeHint": "The model watches the file itself",
+            "storyboard": "Storyboard",
+            "storyboardHint": "One image of timestamped frames: the lowest cost"
+          },
+          "deliveryLabel": "Send as",
+          "engine": {
+            "browser": "Decoded in the app",
+            "ffmpeg": "Decoded with ffmpeg",
+            "gif": "Decoded as a GIF"
+          },
+          "error": {
+            "failed": "Processing failed: {message}",
+            "ffmpegFailed": "Neither the app nor ffmpeg could decode this video.",
+            "ffmpegMissing": "The app can't decode this format and ffmpeg isn't installed. Install ffmpeg, or convert the video to MP4.",
+            "tooLarge": "This video is too large to process here (limit {max} MB).",
+            "undecodable": "This device can't decode this video. Open it in the desktop app, or convert it to MP4."
+          },
+          "estimate": "~{tokens} image tokens · {size}",
+          "frameAlt": "Frame at {time}",
+          "frameCountLabel": "Frames",
+          "nativeDowngraded": "{filename} was sent as a storyboard: {reason}.",
+          "nativeDropped": "{count, plural, =1 {1 video} other {# videos}} couldn't be sent to this model and {count, plural, =1 {was} other {were}} left out.",
+          "nativeFailure": {
+            "failed": "The video file couldn't be prepared.",
+            "ffmpeg-missing": "ffmpeg isn't installed, so the clip can't be cut.",
+            "format": "This format can't be sent as a video file.",
+            "too-large": "The file is over 10 MB. Pick a shorter range or send frames instead.",
+            "trim-unavailable": "Cutting a clip for the original-video option needs ffmpeg in the desktop app. Switch to storyboard or frames to use a range."
+          },
+          "nativeFallbackNote": "If the model that runs can't take video, the storyboard is sent instead.",
+          "nativeGifUnavailable": "Original video isn't available: a GIF is sent as frames.",
+          "nativeReady": "Original video · {size}",
+          "nativeReason": {
+            "auto-routing": "auto routing picks the model only after you send",
+            "external-agent": "external agents don't accept video files",
+            "model": "this model doesn't accept video input",
+            "platform": "this conversation sends files to a person, not a model",
+            "protocol": "this provider's API doesn't accept video files",
+            "runtime": "this model's runtime doesn't accept video files",
+            "shared": "shared conversations store exactly what you send",
+            "standalone": "local (BYOK) mode can't send video files",
+            "team": "team rooms answer with different models",
+            "too-large": "an original video must be under 10 MB"
+          },
+          "nativeUnavailable": "Original video isn't available: {reason}.",
+          "outputTitle": "What the model receives",
+          "panelTitle": "Video",
+          "pendingChanges": "Apply to see the result.",
+          "playerLabel": "Video preview of {filename}",
+          "processing": "Sampling frames…",
+          "rangeEndAria": "Range end",
+          "rangeLabel": "Range",
+          "rangeStartAria": "Range start",
+          "rangeValue": "{start} – {end}",
+          "rangeWhole": "Whole clip",
+          "reset": "Reset",
+          "retry": "Try again",
+          "sceneNoCuts": "No clear scene changes were found, so frames are evenly spaced.",
+          "sourceGif": "{duration} · {frames} frames · {width}×{height}",
+          "sourceVideo": "{duration} · {width}×{height}",
+          "storyboardAlt": "Storyboard of {filename}",
+          "strategy": {
+            "scene": "At scene changes",
+            "uniform": "Evenly spaced"
+          },
+          "strategyLabel": "Pick frames"
+        },
+        "videoSizeExceeded": "{count, plural, =1 {1 video is} other {# videos are}} over {max} MB and can't be processed here."
       },
       "camera": {
         "captureAria": "Take or attach a photo",
@@ -7571,7 +7671,18 @@
       "usageCost": "Cost: ${cost}",
       "usageInput": "Input: {n}",
       "usageOutput": "Output: {n}",
-      "usageReasoning": "Reasoning: {n}"
+      "usageReasoning": "Reasoning: {n}",
+      "videoCard": {
+        "gif": "GIF",
+        "notStored": "The original file isn't saved.",
+        "range": "{start}–{end}",
+        "strategyScene": "at scene changes",
+        "strategyUniform": "evenly spaced",
+        "summaryFrames": "{count} frames {strategy}",
+        "summaryNative": "Sent as the original video",
+        "summaryStoryboard": "Storyboard of {count} frames {strategy}",
+        "video": "Video"
+      }
     },
     "messageDisplay": {
       "assistant": "Assistant",
@@ -8451,6 +8562,7 @@
     "repoReadOnly": "Read-only",
     "resourceAgent": "Team member",
     "resourceFile": "Workspace file",
+    "resourceMember": "Team room member",
     "resourceSubagent": "Subagent",
     "save": "Save",
     "saveToRepo": "Save to repository",
@@ -12686,6 +12798,7 @@
     },
     "picker": {
       "accountLabel": "Account",
+      "attachFailed": "Could not attach “{title}”.",
       "attached": "Attached “{title}”",
       "fetching": "Fetching “{title}”…",
       "hostUnsupported": "Remote documents are available on the desktop app only.",
@@ -16963,7 +17076,36 @@
       "preparing": "Preparing the import…",
       "title": "Import messages"
     },
-    "title": "Cognia entry"
+    "title": "Cognia entry",
+    "workbench": {
+      "account": "Team account",
+      "description": "Open your personal console or choose a team workspace. Existing device and team permissions apply.",
+      "devices": "Connect a device",
+      "errors": {
+        "adapter_missing": "Open the workbench from the configured Feishu app homepage.",
+        "forbidden": "You no longer have access to this workspace.",
+        "host_mismatch": "The connected device or profile does not match this bot. Switch to the matching device and profile.",
+        "host_required": "Connect the device running this bot to open your personal console.",
+        "identity_mismatch": "Your Feishu and Cognia accounts do not match. Sign in with the linked account.",
+        "intent_expired": "This access check expired. Please retry.",
+        "mode_forbidden": "This console mode is no longer enabled. Refresh the workbench.",
+        "principal_legacy": "This bot needs identity binding before the workbench can be used.",
+        "principal_unbound": "Your Feishu identity is not linked to a Cognia user. Ask the administrator to link it.",
+        "session_expired": "Your Feishu session expired. Retry to sign in again.",
+        "team_sign_in_required": "Sign in to the team account before choosing a workspace.",
+        "team_unavailable": "Could not load your team workspaces. Check your team account and try again.",
+        "timeout": "The bot did not answer in time. Check that it is online and retry.",
+        "workbench_disabled": "This bot has not enabled the workbench and Feishu web sign-in.",
+        "workbench_unavailable": "The workbench is unavailable. Please try again."
+      },
+      "issues": "Open issue board",
+      "loading": "Verifying access…",
+      "login": "Redirecting to Feishu sign-in…",
+      "personal": "Personal console",
+      "retry": "Retry",
+      "team": "Team workspaces",
+      "title": "Cognia workbench"
+    }
   },
   "loading": {
     "cancel": "Cancel",
@@ -33929,7 +34071,17 @@
           "title": "Web entry & Lark surfaces",
           "webBaseHelp": "Public https URL of the Cognia web app reachable from inside Lark clients. Chat Tab / menu links and SSO bounces are built on it; leave empty to keep external links disabled.",
           "webBaseLabel": "Web entry base URL",
-          "webBasePlaceholder": "https://cognia.example.com"
+          "webBasePlaceholder": "https://cognia.example.com",
+          "workbenchHelp": "Set this URL as the Feishu app desktop and mobile homepage. Personal access requires the matching paired device; team access requires the linked team account. This setting does not grant permissions.",
+          "workbenchMode": {
+            "both": "Personal and team",
+            "disabled": "Disabled",
+            "personal": "Personal",
+            "team": "Team"
+          },
+          "workbenchModeLabel": "Workbench access",
+          "workbenchSaveFailed": "Could not save the workbench mode. Please retry.",
+          "workbenchUrlLabel": "App homepage URL"
         },
         "openCompanion": "Open Companion settings",
         "openCompanionAria": "Open Mobile Companion → Tunnel",

@@ -30,14 +30,17 @@ jest.mock("./staged-attachment-store", () => ({
     reorder: jest.fn(),
     setOcrText: jest.fn(),
     toggleIncludeOcr: jest.fn(),
+    applyVideoSettings: jest.fn(),
     seedIncoming: jest.fn(),
   }),
 }))
 
+const ROUTE = { available: false, reason: "runtime" } as const
+
 const renderBar = () =>
   render(
     <TooltipProvider>
-      <ContextChipBar />
+      <ContextChipBar videoRoute={ROUTE} />
     </TooltipProvider>
   )
 
@@ -121,7 +124,7 @@ describe("ContextChipBar", () => {
   it("holds a placeholder for images that are still being prepared", () => {
     render(
       <TooltipProvider>
-        <ContextChipBar preparingImageCount={2} />
+        <ContextChipBar preparingImageCount={2} videoRoute={ROUTE} />
       </TooltipProvider>
     )
     expect(screen.getByTestId("composer-preparing-images")).toBeInTheDocument()
@@ -141,7 +144,7 @@ describe("ContextChipBar", () => {
   it("does not chip a link that the text already shows", () => {
     render(
       <TooltipProvider>
-        <ContextChipBar />
+        <ContextChipBar videoRoute={ROUTE} />
       </TooltipProvider>
     )
     expect(screen.queryByTestId("composer-link-chip")).toBeNull()
@@ -156,6 +159,7 @@ describe("ContextChipBar — only what the text cannot show", () => {
     render(
       <TooltipProvider>
         <ContextChipBar
+          videoRoute={ROUTE}
           segments={parse("/compact /clear")}
           commandErrors={[{ name: "clear", message: "boom" }]}
           onRemoveCommand={jest.fn()}
@@ -169,7 +173,11 @@ describe("ContextChipBar — only what the text cannot show", () => {
   it("keeps staged commands out of the row — each is a pill on its own token", () => {
     render(
       <TooltipProvider>
-        <ContextChipBar segments={parse("/compact /clear")} onRemoveCommand={jest.fn()} />
+        <ContextChipBar
+          segments={parse("/compact /clear")}
+          onRemoveCommand={jest.fn()}
+          videoRoute={ROUTE}
+        />
       </TooltipProvider>
     )
     expect(screen.queryByTestId("failed-command-pill-clear")).toBeNull()
@@ -181,7 +189,11 @@ describe("ContextChipBar — only what the text cannot show", () => {
   it("shows no fold toggle when nothing overflows", () => {
     render(
       <TooltipProvider>
-        <ContextChipBar segments={parse("/compact /clear")} onRemoveCommand={jest.fn()} />
+        <ContextChipBar
+          segments={parse("/compact /clear")}
+          onRemoveCommand={jest.fn()}
+          videoRoute={ROUTE}
+        />
       </TooltipProvider>
     )
     expect(screen.queryByTestId("composer-context-fold")).toBeNull()

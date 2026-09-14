@@ -40,6 +40,7 @@
   "repoReadOnly": "只读",
   "resourceAgent": "团队成员",
   "resourceFile": "工作区文件",
+  "resourceMember": "团队房间成员",
   "resourceSubagent": "子智能体",
   "save": "保存",
   "saveToRepo": "保存到仓库",

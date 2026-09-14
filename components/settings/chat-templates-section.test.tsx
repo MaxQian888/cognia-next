@@ -35,6 +35,9 @@ import {
   serializeChatTemplate,
   type RepoChatTemplate,
 } from "@/lib/chat/template/repo-templates"
+import { RESOURCE_PARAM_KINDS } from "@/lib/chat/template/resource-kinds"
+import enSettings from "@/i18n/messages/en/chatTemplatesSettings.json"
+import zhSettings from "@/i18n/messages/zh-CN/chatTemplatesSettings.json"
 
 const dbFixture = createDbTestFixture()
 
@@ -159,6 +162,36 @@ describe("ChatTemplatesSection — parameter declarations", () => {
     const saved = await getChatTemplate(row.id)
     expect(saved?.params[0].label).toBe("Which module")
     expect(saved?.body).toBe("please review {{module}} today")
+  })
+})
+
+// The "Picks from" select labels each kind with a DYNAMIC key
+// (`resource${Kind}`), which `pnpm lint:i18n` does not see. Walked from the
+// runtime list, so a new parameter kind fails here instead of shipping an option
+// that reads `resourceWhatever`.
+describe("ChatTemplatesSection — resource kind labels", () => {
+  const catalogues = {
+    en: enSettings as Record<string, string>,
+    "zh-CN": zhSettings as Record<string, string>,
+  }
+  const keyOf = (kind: string) => `resource${kind.charAt(0).toUpperCase()}${kind.slice(1)}`
+
+  it.each(Object.keys(catalogues))("%s labels every parameter kind", (locale) => {
+    const catalogue = catalogues[locale as keyof typeof catalogues]
+    const missing = RESOURCE_PARAM_KINDS.filter(
+      (kind) => typeof catalogue[keyOf(kind)] !== "string"
+    )
+    expect(missing).toEqual([])
+  })
+
+  it("gives each kind a distinct label", () => {
+    // An Agent Team teammate (`agent`) and a team room member (`member`) are
+    // different pickers over different sources; one word for both would leave
+    // the author guessing which one they declared.
+    for (const catalogue of Object.values(catalogues)) {
+      const labels = RESOURCE_PARAM_KINDS.map((kind) => catalogue[keyOf(kind)])
+      expect(new Set(labels).size).toBe(labels.length)
+    }
   })
 })
 

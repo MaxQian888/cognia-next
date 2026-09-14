@@ -40,6 +40,7 @@
   "repoReadOnly": "Read-only",
   "resourceAgent": "Team member",
   "resourceFile": "Workspace file",
+  "resourceMember": "Team room member",
   "resourceSubagent": "Subagent",
   "save": "Save",
   "saveToRepo": "Save to repository",

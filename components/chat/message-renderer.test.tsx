@@ -146,6 +146,20 @@ jest.mock("@/components/chat/renderers/message-image-gallery", () => ({
     }),
 }))
 
+jest.mock("@/components/chat/renderers/message-video-attachment-card", () => ({
+  ...jest.requireActual("@/components/chat/renderers/message-video-attachment-card"),
+  MessageVideoAttachmentCard: ({
+    attachment,
+  }: {
+    attachment: { info: { filename: string }; images: unknown[] }
+  }) =>
+    ReactForMocks.createElement(
+      "div",
+      { "data-testid": "message-video-card", "data-images": attachment.images.length },
+      attachment.info.filename
+    ),
+}))
+
 jest.mock("@/components/chat/message-parts/attachment-text-card", () => ({
   AttachmentTextCard: ({ filename, text }: { filename: string; text: string }) =>
     ReactForMocks.createElement(
@@ -797,6 +811,58 @@ describe("file parts", () => {
     expect(screen.getByText("archive.bin")).toBeInTheDocument()
   })
 
+  it("folds a sent video's parts into one card, apart from the message's own images", () => {
+    const videoAttachment = {
+      groupId: "att-1",
+      filename: "clip.mp4",
+      sourceMediaType: "video/mp4",
+      kind: "video",
+      durationSec: 12,
+      width: 640,
+      height: 360,
+      delivery: "frames",
+      strategy: "uniform",
+      range: null,
+      frameTimes: [2, 6],
+      engine: "browser",
+    }
+    const msg = {
+      id: "f-video",
+      role: "user",
+      parts: [
+        { type: "text", text: "what happens here?" },
+        { type: "text", text: 'Attached video "clip.mp4" (0:12.0, 640×360).', videoAttachment },
+        {
+          type: "file",
+          url: "data:image/jpeg;base64,f1",
+          mediaType: "image/jpeg",
+          videoAttachment,
+        },
+        {
+          type: "file",
+          url: "data:image/png;base64,shot",
+          mediaType: "image/png",
+          filename: "s.png",
+        },
+        {
+          type: "file",
+          url: "data:image/jpeg;base64,f2",
+          mediaType: "image/jpeg",
+          videoAttachment,
+        },
+      ],
+    } as unknown as UIMessage
+    render(<MessageRenderer message={msg} />)
+
+    expect(screen.getAllByTestId("message-video-card")).toHaveLength(1)
+    expect(screen.getByTestId("message-video-card")).toHaveAttribute("data-images", "2")
+    // The frames belong to the card; only the unrelated screenshot is in the gallery.
+    expect(screen.getByTestId("message-image-gallery")).toHaveAttribute("data-count", "1")
+    // The description is what the model read; the card replaces it.
+    expect(screen.queryByText(/Attached video/)).not.toBeInTheDocument()
+    expect(screen.getByText("what happens here?")).toBeInTheDocument()
+  })
+
   it("renders non-image file as a download link", () => {
     const msg: UIMessage = {
       id: "f2",
@@ -1426,6 +1492,34 @@ describe("edit flow", () => {
     fireEvent.click(screen.getByText("editingSubmit"))
 
     expect(onEditResend).toHaveBeenCalledWith("e1", "edited text")
+  })
+
+  it("does not bring a video's description back into the edit box", () => {
+    const videoAttachment = {
+      groupId: "att-1",
+      filename: "clip.mp4",
+      sourceMediaType: "video/mp4",
+      kind: "video",
+      durationSec: 12,
+      width: 640,
+      height: 360,
+      delivery: "storyboard",
+      strategy: "uniform",
+      range: null,
+      frameTimes: [6],
+      engine: "browser",
+    }
+    const msg = {
+      id: "e-video",
+      role: "user",
+      parts: [
+        { type: "text", text: "describe this" },
+        { type: "text", text: 'Attached video "clip.mp4".', videoAttachment },
+      ],
+    } as unknown as UIMessage
+    render(<MessageRenderer message={msg} onEditResend={jest.fn()} />)
+    fireEvent.click(screen.getByLabelText("editTooltip"))
+    expect(screen.getByRole("textbox")).toHaveValue("describe this")
   })
 
   it("cancels edit on cancel button click", () => {

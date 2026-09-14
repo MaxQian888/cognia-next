@@ -68,6 +68,7 @@ jest.mock("./staged-attachment-store", () => ({
     reorder: mockReorder,
     setOcrText: jest.fn(),
     toggleIncludeOcr: jest.fn(),
+    applyVideoSettings: jest.fn(),
     seedIncoming: jest.fn(),
   }),
 }))
@@ -94,7 +95,7 @@ function stage(files: Array<{ id: string; filename?: string }>) {
 function mount() {
   return render(
     <TooltipProvider>
-      <AttachmentPreview />
+      <AttachmentPreview videoRoute={{ available: false, reason: "runtime" }} />
     </TooltipProvider>
   )
 }

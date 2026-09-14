@@ -40,8 +40,13 @@ export interface MentionPickContext {
    * attachment. Bound by the composer to `useRemoteDocStaging`, which owns the
    * toast lifecycle because the fetch is a network round-trip whose outcome the
    * user has to see.
+   *
+   * Resolves to the staged file, or `null` when nothing was staged (a failed
+   * fetch, a file the attachment gate refused). The document's citation rides
+   * that file (`lib/chat/mentions/attachment-citations.ts`), so it exists
+   * exactly as long as the attachment does.
    */
-  stageRemoteDoc(item: Extract<PopoverItem, { kind: "doc" }>): Promise<void>
+  stageRemoteDoc(item: Extract<PopoverItem, { kind: "doc" }>): Promise<File | null>
   /**
    * Read a picked record's body and stage it as a context-selection chip.
    * Bound by the composer to `useEntityMentionStaging`, which owns the toast
@@ -80,9 +85,11 @@ export interface MentionPickHandler<K extends MentionPickKind = MentionPickKind>
    * an equivalence `resource-kinds.test.ts` pins by walking this registry.
    *
    * NOT the same question as "was this cited?". A chip-style pick returns null
-   * here (it produces no characters at a sentence position) and still records
-   * a citation through {@link MentionPickContext.recordMention}. Conflating the
-   * two is what left `doc` with a documented ContextRef that nothing wrote.
+   * here (it produces no characters at a sentence position) and is still cited:
+   * the send path reads that citation off what the pick staged, a context chip
+   * (`selection-citations.ts`) or an attachment (`attachment-citations.ts`).
+   * Conflating the two questions is what once left `doc` with a documented
+   * ContextRef that nothing wrote.
    */
   toContextRef(item: Extract<PopoverItem, { kind: K }>): ContextRef | null
 }
@@ -123,21 +130,6 @@ export function __resetMentionPickHandlersForTests(): void {
 // ---------------------------------------------------------------------------
 // Built-in handlers — behavior ported verbatim from the composer's branches.
 // ---------------------------------------------------------------------------
-
-/**
- * `<providerId>:<documentId>`, the id shape `types.ts` documents for `doc`.
- * A ref is only produced once the account is known, because without it the
- * fetch that the ref claims happened could not have run.
- */
-function docContextRef(item: Extract<PopoverItem, { kind: "doc" }>): ContextRef | null {
-  if (!item.accountId) return null
-  return {
-    kind: "doc",
-    id: `${item.providerId}:${item.doc.id}`,
-    label: item.doc.title,
-    raw: item.doc.url ?? `@${item.providerId}:${item.doc.id}`,
-  }
-}
 
 function registerBuiltinMentionPickHandlers(): void {
   registerMentionPickHandler({
@@ -229,15 +221,18 @@ function registerBuiltinMentionPickHandlers(): void {
       // composer clean even when the fetch then fails — the user gets a toast,
       // not a half-typed `@lark:https://…` to delete by hand.
       ctx.removeTriggerToken()
+      // No citation is recorded here. It rides the staged file and is read off
+      // the files the turn actually submits (`attachment-citations.ts`).
+      // Recording it on pick cited a fetch that failed, and kept citing a
+      // document whose chip was removed before sending: `metadata.mentions`
+      // then claimed a document the model never saw.
       await ctx.stageRemoteDoc(item)
-      const ref = docContextRef(item)
-      if (ref) ctx.recordMention(ref)
     },
-    // Still null, and that is not the same statement as "this turn did not
-    // cite a document" — `recordMention` above makes that record. This hook
-    // answers a narrower question with one consumer: may this pick be a
-    // `{{parameter}}` VALUE? A parameter occupies a position in a sentence, and
-    // a staged attachment contributes no characters there, so it may not.
+    // Null, and that is not the same statement as "this turn did not cite a
+    // document". This hook answers a narrower question with one consumer: may
+    // this pick be a `{{parameter}}` VALUE? A parameter occupies a position in
+    // a sentence, and a staged attachment contributes no characters there, so
+    // it may not.
     toContextRef: () => null,
   })
 

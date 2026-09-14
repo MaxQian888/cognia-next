@@ -12,6 +12,8 @@
  *     `lib/chat/attachments/dispatch`, images are downscaled to
  *     `IMAGE_MAX_LONG_EDGE`, and both are run through the PII gate. None of
  *     that was visible before sending; this tab is the audit surface for it.
+ *     A video or animated GIF is sampled instead, so its model tab is also
+ *     where the sampling is chosen (`VideoPreprocessPanel`).
  *
  * Shell mirrors `ocr-result-bubble.tsx` (right side, 640px) so the two panels
  * the composer can raise feel like one system.
@@ -38,10 +40,14 @@ import { AnalyzingImage } from "@/components/loading-ui/analyzing-image"
 import { FilePartPreview } from "@/components/chat/message-parts/file-part-preview"
 import { ImageLightbox } from "@/components/chat/renderers/image-lightbox"
 import { IMAGE_MAX_LONG_EDGE } from "@/lib/chat/attachments/dispatch"
+import { isVideoDescriptor } from "@/lib/chat/attachments/video/classify"
+import type { NativeVideoVerdict } from "@/lib/chat/attachments/video/delivery-gate"
+import type { VideoPreprocessSettings } from "@/lib/chat/attachments/video/settings"
 import { countRedactions, splitRedactionSpans } from "@/lib/chat/attachments/redaction-spans"
 import { formatBytesCompact } from "@/lib/observability/format-utils"
 import { cn } from "@/lib/utils"
 import type { StagedAttachmentState } from "./staged-attachment-store"
+import { VideoPreprocessPanel } from "./video-preprocess-panel"
 
 export interface PreviewTarget {
   id: string
@@ -64,6 +70,10 @@ export interface AttachmentPreviewSheetProps {
   /** Appends the OCR text to the draft instead of attaching it to the payload. */
   onExtractOcrToInput?: (attachmentId: string) => void | Promise<void>
   onToggleIncludeOcr?: (attachmentId: string) => void
+  /** Whether this conversation could take an original video file. */
+  videoRoute: NativeVideoVerdict
+  /** Re-samples a staged video or animated GIF with new settings. */
+  onApplyVideoSettings: (attachmentId: string, settings: VideoPreprocessSettings) => void
 }
 
 /** Renders extracted text with the PII gate's substitutions marked. */
@@ -98,6 +108,11 @@ export function AttachmentPreviewSheet(props: AttachmentPreviewSheetProps) {
 
   const { target, state } = props
   const isImage = (target?.mediaType ?? "").startsWith("image/")
+  const descriptor = { name: target?.filename ?? "", mediaType: target?.mediaType ?? "" }
+  const isVideo = isVideoDescriptor(descriptor)
+  // A GIF is a motion attachment once the pipeline has claimed it; a still GIF
+  // (or any GIF in a conversation with the pipeline off) stays a picture.
+  const isMotion = isVideo || state?.video !== undefined
   const extracted = state?.extracted
   const modelText = extracted?.text
   const redactionCount = modelText ? countRedactions(modelText) : 0
@@ -147,6 +162,15 @@ export function AttachmentPreviewSheet(props: AttachmentPreviewSheetProps) {
               <ScrollArea className="max-h-[65vh] pr-2">
                 {!target?.url ? (
                   <AttachmentEmpty>{t("preview.empty")}</AttachmentEmpty>
+                ) : isVideo ? (
+                  // The source plays from its blob URL; it never becomes a data URL.
+                  <video
+                    src={target.url}
+                    controls
+                    preload="metadata"
+                    aria-label={t("video.playerLabel", { filename: displayName })}
+                    className="max-h-[50vh] w-full rounded-md border bg-black object-contain"
+                  />
                 ) : isImage ? (
                   <div className="space-y-2">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -182,7 +206,14 @@ export function AttachmentPreviewSheet(props: AttachmentPreviewSheetProps) {
             <TabsContent value="model">
               <p className="mb-2 text-xs text-muted-foreground">{t("preview.modelHint")}</p>
               <ScrollArea className="max-h-[60vh] pr-2">
-                {state?.status === "extracting" ? (
+                {isMotion && target ? (
+                  <VideoPreprocessPanel
+                    filename={displayName}
+                    state={state}
+                    routeVerdict={props.videoRoute}
+                    onApply={(settings) => props.onApplyVideoSettings(target.id, settings)}
+                  />
+                ) : state?.status === "extracting" ? (
                   // A <div>, not a <p>: the image indicator is itself a div, and
                   // React rejects that nesting.
                   <div className="flex items-center gap-1.5 text-xs text-muted-foreground">

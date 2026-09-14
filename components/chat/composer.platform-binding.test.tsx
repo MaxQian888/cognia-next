@@ -329,6 +329,15 @@ it("keeps input when platform sending fails", async () => {
   expect(onSend).not.toHaveBeenCalled()
 })
 
+// A bound conversation forwards files to a person as they are: no video
+// sampling, so the picker does not offer videos in the first place.
+it("does not offer videos in a platform conversation's file picker", () => {
+  renderComposer(boundSession())
+  const input = document.querySelector('input[type="file"]') as HTMLInputElement
+  expect(input.accept).toContain("image/*")
+  expect(input.accept).not.toContain("video/*")
+})
+
 it("explains unsupported platform attachments and preserves the input", async () => {
   ;(sendManualMessageToConversation as jest.Mock).mockRejectedValueOnce(
     new UnsupportedPlatformAttachmentsError("telegram")

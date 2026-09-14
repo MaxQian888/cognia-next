@@ -15,12 +15,16 @@
  * early return. Returning null first would unmount the presence boundary along
  * with the chip that is trying to leave, so removing the LAST attachment popped
  * instead of animating out while removing any other one animated correctly.
+ *
+ * A video chip shows the sampled poster rather than the vendored inline
+ * `<video>`: that element points at the source blob, and a 500 MB file does not
+ * need a second decoder running for a 20px thumbnail.
  */
 
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { AnimatePresence, motion } from "motion/react"
-import { AlertTriangleIcon, Loader2Icon } from "lucide-react"
+import { AlertTriangleIcon, FileVideoIcon, Loader2Icon } from "lucide-react"
 import {
   DndContext,
   KeyboardSensor,
@@ -50,6 +54,8 @@ import { usePromptInputAttachments } from "@/components/ai-elements/prompt-input
 import { AnalyzingImage } from "@/components/loading-ui/analyzing-image"
 import { applyOrder, resolveDragEnd } from "@/lib/chat/attachments/reorder"
 import type { RejectReason } from "@/lib/chat/attachments/dispatch"
+import { isVideoDescriptor } from "@/lib/chat/attachments/video/classify"
+import type { NativeVideoVerdict } from "@/lib/chat/attachments/video/delivery-gate"
 import { cn } from "@/lib/utils"
 import { mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
 import { useStagedAttachments, type StagedAttachmentState } from "./staged-attachment-store"
@@ -69,6 +75,12 @@ export interface AttachmentPreviewProps {
    * lay attachments and references out in a single flex flow.
    */
   bare?: boolean
+  /**
+   * Whether this conversation could take an original video file, as the
+   * composer predicts it (`useComposerVideoRoute`). Drives the preview panel's
+   * delivery options; the send path re-checks the resolved route.
+   */
+  videoRoute: NativeVideoVerdict
 }
 
 /** i18n key suffix for a machine-readable rejection reason. */
@@ -77,9 +89,12 @@ const REJECT_KEY: Record<RejectReason, string> = {
   "unsupported-type": "unsupportedType",
   empty: "empty",
   "parse-failed": "parseFailed",
+  "video-undecodable": "videoUndecodable",
+  "video-too-large": "videoTooLarge",
+  "video-unprocessed": "videoUnprocessed",
 }
 
-export function AttachmentPreview(props: AttachmentPreviewProps = {}) {
+export function AttachmentPreview(props: AttachmentPreviewProps) {
   const t = useTranslations("chat.composer.attachments")
   const attachments = usePromptInputAttachments()
   const staged = useStagedAttachments()
@@ -159,6 +174,8 @@ export function AttachmentPreview(props: AttachmentPreviewProps = {}) {
       onViewOcrDetail={props.onViewOcrDetail}
       onExtractOcrToInput={props.onExtractOcrToInput}
       onToggleIncludeOcr={staged.toggleIncludeOcr}
+      videoRoute={props.videoRoute}
+      onApplyVideoSettings={staged.applyVideoSettings}
     />
   )
 
@@ -215,6 +232,10 @@ function SortableChip({
     isDragging,
   } = useSortable({ id: file.id })
   const displayName = ("filename" in file ? file.filename : undefined) ?? t("fallbackName")
+  const isVideo = isVideoDescriptor({
+    name: ("filename" in file ? file.filename : undefined) ?? "",
+    mediaType: file.mediaType ?? "",
+  })
 
   return (
     <motion.div
@@ -244,7 +265,11 @@ function SortableChip({
             onClick={onOpenPreview}
             className="flex min-w-0 flex-1 items-center gap-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
           >
-            <AttachmentMediaPreview />
+            {isVideo ? (
+              <VideoThumb poster={state?.video?.result?.poster} />
+            ) : (
+              <AttachmentMediaPreview />
+            )}
             <AttachmentInfo />
           </button>
           <StatusBadge state={state} isImage={(file.mediaType ?? "").startsWith("image/")} t={t} />
@@ -260,6 +285,42 @@ function SortableChip({
   )
 }
 
+/** Same box as the vendored inline preview, holding the sampled poster. */
+function VideoThumb({ poster }: { poster?: { mediaType: string; base64: string } }) {
+  return (
+    <div
+      className="flex size-5 shrink-0 items-center justify-center overflow-hidden rounded bg-background"
+      data-testid="attachment-video-thumb"
+    >
+      {poster ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={`data:${poster.mediaType};base64,${poster.base64}`}
+          alt=""
+          className="size-full object-cover"
+        />
+      ) : (
+        <FileVideoIcon className="size-3 text-muted-foreground" aria-hidden />
+      )}
+    </div>
+  )
+}
+
+/**
+ * What a sampled video will be sent as, e.g. "9 frames", once its run lands.
+ * `native` only when the original file was actually prepared: a failed
+ * preparation sends the storyboard, so the chip says so.
+ */
+function videoChipLabel(state: StagedAttachmentState, t: ChipTranslator): string | null {
+  const result = state.video?.result
+  if (!result) return null
+  if (result.settings.delivery === "native" && result.native) return t("video.chipNative")
+  const count = result.sampled.frames.length
+  return result.sampled.delivery === "frames"
+    ? t("video.chipFrames", { count })
+    : t("video.chipStoryboard", { count })
+}
+
 /** Extraction state as a compact trailing badge: spinner → token count → error. */
 function StatusBadge({
   state,
@@ -270,6 +331,20 @@ function StatusBadge({
   isImage: boolean
   t: ChipTranslator
 }) {
+  if (state?.status === "extracting" && state.video) {
+    // A motion run reports how far it got; a spinner would hide a long seek.
+    const percent = Math.round((state.video.progress ?? 0) * 100)
+    return (
+      <span
+        className="flex shrink-0 items-center gap-1 tabular-nums text-[10px] text-muted-foreground"
+        title={t("video.processing")}
+        data-testid="attachment-video-progress"
+      >
+        <Loader2Icon className="size-3 animate-spin" aria-hidden />
+        {t("video.chipProgress", { percent })}
+      </span>
+    )
+  }
   if (!state || state.status === "extracting") {
     // An image's wait is a different wait: the blob is re-read, decoded and
     // downscaled rather than parsed for text, and it is the slowest of the two
@@ -306,6 +381,19 @@ function StatusBadge({
         data-testid="attachment-rejected"
       >
         <AlertTriangleIcon className="size-3" aria-label={label} />
+      </span>
+    )
+  }
+  // A video's text tokens are its one-line description; the frames' image
+  // cost is estimated in the panel. The chip says what goes out instead.
+  const videoLabel = videoChipLabel(state, t)
+  if (videoLabel) {
+    return (
+      <span
+        className="shrink-0 tabular-nums text-[10px] text-muted-foreground"
+        data-testid="attachment-video-summary"
+      >
+        {videoLabel}
       </span>
     )
   }

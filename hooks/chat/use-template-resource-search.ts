@@ -27,9 +27,11 @@ import type { PopoverItem } from "@/components/chat/composer-popover"
 import {
   filterMentionables,
   filterSubagents,
+  filterTeamMembers,
 } from "@/components/agent/workspace/agent-mention-picker"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
 import type { SubagentMentionTarget } from "@/lib/claude/agents/chat-mention-targets"
+import type { Character } from "@cognia/agent-config-types"
 import { loggers } from "@cognia/logging"
 
 export interface TemplateResourceSources {
@@ -39,6 +41,8 @@ export interface TemplateResourceSources {
   chatAgents?: readonly SubagentMentionTarget[]
   /** Team runtime targets (team composer `@`). */
   mentionables?: readonly MentionTarget[]
+  /** The people in this team room (the `@` panel's Members section). */
+  teamMembers?: readonly Character[]
 }
 
 export type TemplateResourceSearch = (
@@ -65,6 +69,7 @@ export function useTemplateResourceSearch({
   cwd,
   chatAgents,
   mentionables,
+  teamMembers,
 }: TemplateResourceSources): TemplateResourceSearch {
   return useCallback(
     async (kind, query) => {
@@ -92,12 +97,21 @@ export function useTemplateResourceSearch({
             .map((target) => ({ kind: "subagent" as const, target }))
         )
       }
+      if (kind === "member") {
+        // Outside a team room there is nobody to offer; the composer passes an
+        // empty list there, the same "no source" case as the other kinds.
+        return toOptions(
+          filterTeamMembers(teamMembers ?? [], query)
+            .slice(0, LIMIT)
+            .map((target) => ({ kind: "member" as const, target }))
+        )
+      }
       return toOptions(
         filterMentionables(mentionables ?? [], query)
           .slice(0, LIMIT)
           .map((target) => ({ kind: "agent" as const, target }))
       )
     },
-    [cwd, chatAgents, mentionables]
+    [cwd, chatAgents, mentionables, teamMembers]
   )
 }

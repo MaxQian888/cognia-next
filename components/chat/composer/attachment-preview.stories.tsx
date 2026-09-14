@@ -56,6 +56,9 @@ const meta = {
   title: "Chat/Composer/AttachmentPreview",
   component: AttachmentPreview,
   parameters: { layout: "padded" },
+  // The default Claude route: a staged video offers storyboard and frames, and
+  // explains why the original file is unavailable.
+  args: { videoRoute: { available: false, reason: "runtime" } },
 } satisfies Meta<typeof AttachmentPreview>
 
 export default meta

@@ -52,8 +52,31 @@ describe("useTemplateResourceSearch", () => {
     expect(options).toEqual([{ id: "reviewer", label: "Reviewer", raw: "@reviewer" }])
   })
 
+  it("binds a team room member to its id and inserts the name the router matches", async () => {
+    const members = [
+      { id: "c1", name: "Critic", avatarColor: "#000" },
+      { id: "c2", name: "Researcher", avatarColor: "#111" },
+    ] as never[]
+    const { result } = renderHook(() =>
+      useTemplateResourceSearch({ cwd: null, teamMembers: members, mentionables: [] })
+    )
+    expect(await result.current("member", "crit")).toEqual([
+      { id: "c1", label: "Critic", raw: "@Critic" },
+    ])
+  })
+
   it("offers nothing for a kind this composer has no source for", async () => {
     const { result } = renderHook(() => useTemplateResourceSearch({ cwd: null }))
     expect(await result.current("agent", "")).toEqual([])
+    // A member never falls through to the agent source, even when one exists.
+    const teamOnly = renderHook(() =>
+      useTemplateResourceSearch({
+        cwd: null,
+        mentionables: [
+          { kind: "virtual", id: "claude", name: "Claude", description: "Claude" },
+        ] as never[],
+      })
+    )
+    expect(await teamOnly.result.current("member", "")).toEqual([])
   })
 })

@@ -4,7 +4,8 @@
 // registry already has. A parameter occupies a position in a sentence, so its
 // value has to produce text AT that position. `lib/chat/mentions/pick-registry`
 // already splits its handlers exactly along that line: `toContextRef` returns a
-// handle for the picks that insert a token (`@src/app.ts`, `@reviewer`) and
+// handle for the picks that insert a token (`@src/app.ts`, `@reviewer`, a team
+// room member's `@Critic`) and
 // null for the picks whose whole effect is a side effect — enabling a skill,
 // applying a preset, staging a remote document, citing a workflow node. Those
 // contribute no characters, so as a parameter they would leave a hole in the
@@ -17,7 +18,7 @@ import type { ContextRef } from "@/lib/chat/mentions/types"
 import type { ChatTemplateParamValue } from "./binding"
 
 /** Mention kinds a parameter may be bound to. */
-export const RESOURCE_PARAM_KINDS = ["file", "agent", "subagent"] as const
+export const RESOURCE_PARAM_KINDS = ["file", "agent", "subagent", "member"] as const
 
 export type ResourceParamKind = (typeof RESOURCE_PARAM_KINDS)[number]
 
@@ -27,7 +28,12 @@ export function isResourceParamKind(value: string | undefined): value is Resourc
 
 /** One candidate in the parameter's picker. */
 export interface ResourceOption {
-  /** Stable handle: relPath for a file, name for an agent, handle for a subagent. */
+  /**
+   * Stable handle: relPath for a file, name for an agent, handle for a subagent,
+   * character id for a team room member. A member is the one kind whose handle
+   * is not the text it inserts: the turn router matches the character NAME, so
+   * the name lives in `raw` and the id is only the identity.
+   */
   id: string
   /** What the row reads as. Falls back to the id when a kind has no separate name. */
   label: string

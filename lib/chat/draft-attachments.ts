@@ -6,10 +6,13 @@
  * binary — which meant switching sessions silently destroyed whatever the user
  * had staged. The binary is now carried too (subject to
  * `DRAFT_ATTACHMENT_QUOTA_BYTES`), along with the cached extraction so a
- * restored document is not re-parsed.
+ * restored document is not re-parsed. A video keeps its sampling settings
+ * instead of its frames, and is re-sampled on restore.
  */
 
+import type { VideoPreprocessSettings } from "@/lib/chat/attachments/video/settings"
 import type { DraftAttachmentMeta } from "@/lib/db/chat-drafts"
+import type { ContextRef } from "@/lib/chat/mentions/types"
 
 export interface DraftSourceFile {
   id: string
@@ -23,6 +26,7 @@ export interface DraftSourceState {
   sizeBytes: number
   bytes?: Uint8Array
   extracted?: { text?: string; tokens: number }
+  video?: { settings: VideoPreprocessSettings }
 }
 
 /**
@@ -42,12 +46,19 @@ export function estimateDataUrlBytes(url: string | undefined): number {
   return Math.max(0, Math.floor((payload.length * 3) / 4) - padding)
 }
 
+/**
+ * @param citationOf What a staged attachment cites, by id. Persisted with the
+ *   row so a restored document is re-bound to its citation instead of being
+ *   sent uncited (`lib/chat/mentions/attachment-citations.ts`).
+ */
 export function draftAttachmentsFromFiles(
   files: readonly DraftSourceFile[],
-  states?: ReadonlyMap<string, DraftSourceState>
+  states?: ReadonlyMap<string, DraftSourceState>,
+  citationOf?: (id: string) => ContextRef | undefined
 ): DraftAttachmentMeta[] {
   return files.map((f) => {
     const state = states?.get(f.id)
+    const citation = citationOf?.(f.id)
     // Fall back to the URL estimate only when there is no staged state (e.g. a
     // caller outside the composer); it yields 0 for blob: URLs.
     const size = state?.sizeBytes ?? estimateDataUrlBytes(f.url)
@@ -58,6 +69,8 @@ export function draftAttachmentsFromFiles(
       ...(state?.bytes ? { bytes: state.bytes } : {}),
       ...(state?.extracted?.text ? { extractedText: state.extracted.text } : {}),
       ...(state?.extracted?.tokens ? { tokens: state.extracted.tokens } : {}),
+      ...(state?.video ? { videoSettings: state.video.settings } : {}),
+      ...(citation ? { citation } : {}),
     }
   })
 }

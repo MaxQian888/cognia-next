@@ -441,6 +441,32 @@ describe("draft attachment binaries + quota", () => {
     expect(att.tokens).toBe(7)
   })
 
+  it("round-trips a video's sampling settings and keeps them off the wire", async () => {
+    const videoSettings = {
+      delivery: "storyboard" as const,
+      strategy: "scene" as const,
+      frameCount: 12,
+      range: { startSec: 2, endSec: 8 },
+    }
+    await setDraft("ses_a", "", [
+      { name: "clip.mp4", mediaType: "video/mp4", size: 64, bytes: bytesOf(), videoSettings },
+    ])
+    const row = await getDraft("ses_a")
+    expect(row!.attachments![0]!.videoSettings).toEqual(videoSettings)
+    // The shared projection carries names and sizes only.
+    expect(row!.attachmentRefs).toEqual([{ name: "clip.mp4", mediaType: "video/mp4", size: 64 }])
+  })
+
+  it("round-trips an attachment's citation and keeps it off the wire", async () => {
+    const citation = { kind: "doc" as const, id: "lark:doc_1", label: "Plan", raw: "@lark:doc_1" }
+    await setDraft("ses_a", "", [
+      { name: "Plan.md", mediaType: "text/markdown", size: 4, bytes: bytesOf(), citation },
+    ])
+    const row = await getDraft("ses_a")
+    expect(row!.attachments![0]!.citation).toEqual(citation)
+    expect(row!.attachmentRefs).toEqual([{ name: "Plan.md", mediaType: "text/markdown", size: 4 }])
+  })
+
   it("leaves everything alone while under the quota", async () => {
     await setDraft("ses_a", "x", [
       { name: "a.png", mediaType: "image/png", size: 8, bytes: bytesOf() },
