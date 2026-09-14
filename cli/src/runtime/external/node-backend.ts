@@ -281,6 +281,30 @@ function validateCwd(root: string, requested?: string): string {
   return canonical
 }
 
+/** Shared by child environment construction and sandbox directory provisioning. */
+export function botRuntimeEnvironment(
+  overrides: Record<string, string> | undefined
+): Record<string, string> {
+  if (overrides?.COGNIA_BOT_ISOLATION !== "1") return {}
+  const state = overrides.COGNIA_BOT_STATE_DIR
+  if (!state || !path.isAbsolute(state))
+    throw new Error("Bot isolation requires an owned state directory")
+  return Object.fromEntries(
+    Object.entries({
+      XDG_DATA_HOME: "data",
+      XDG_CACHE_HOME: "cache",
+      XDG_STATE_HOME: "state",
+      TMPDIR: "tmp",
+      TMP: "tmp",
+      TEMP: "tmp",
+      npm_config_cache: "cache/npm",
+      npm_config_store_dir: "cache/pnpm-store",
+      pnpm_config_store_dir: "cache/pnpm-store",
+      pnpm_config_cache_dir: "cache/pnpm",
+    }).map(([key, relative]) => [key, path.join(state, relative)])
+  )
+}
+
 export function buildExternalAgentChildEnv(
   ambient: NodeJS.ProcessEnv,
   overrides: Record<string, string> | undefined,
@@ -334,11 +358,7 @@ export function buildExternalAgentChildEnv(
       env[key] = value
     }
   }
-  if (overrides?.COGNIA_BOT_ISOLATION === "1" && overrides.COGNIA_BOT_STATE_DIR) {
-    env.XDG_DATA_HOME = path.join(overrides.COGNIA_BOT_STATE_DIR, "data")
-    env.XDG_CACHE_HOME = path.join(overrides.COGNIA_BOT_STATE_DIR, "cache")
-    env.XDG_STATE_HOME = path.join(overrides.COGNIA_BOT_STATE_DIR, "state")
-  }
+  Object.assign(env, botRuntimeEnvironment(overrides))
   return env
 }
 

@@ -1625,6 +1625,24 @@ describe("AcpClientAdapter — terminal/write", () => {
 })
 
 describe("AcpClientAdapter — current terminal wire shape", () => {
+  it("rejects direct terminal delegation from a strictly isolated Bot", async () => {
+    mockIsTauri.mockReturnValue(true)
+    const a = new AcpClientAdapter()
+    ;(a as unknown as { _config: ExternalAgentConfig })._config = {
+      ...stdioConfig(),
+      process: { command: "devin", env: { COGNIA_BOT_ISOLATION: "1" } },
+    }
+    seedSession(a, "s", "acceptEdits")
+    await expect(
+      dispatchAgentRequest(a, "terminal/create", {
+        sessionId: "s",
+        command: "sh",
+        args: ["-c", "env"],
+        cwd: "/work",
+      })
+    ).rejects.toThrow("inside their isolated agent process")
+    expect(mockTerminalCreate).not.toHaveBeenCalled()
+  })
   it("converts ACP env entries to the native terminal map", async () => {
     mockIsTauri.mockReturnValue(true)
     const a = new AcpClientAdapter()
@@ -1931,6 +1949,23 @@ describe("AcpClientAdapter — JsonRpcPeer integration over stdio", () => {
       (init.params as { clientCapabilities: Record<string, unknown> }).clientCapabilities
     ).not.toHaveProperty("plan")
     expect(adapter.isConnected()).toBe(true)
+    await adapter.disconnect()
+  })
+
+  it("advertises owned file access but no ambient terminal or terminal auth for a Bot", async () => {
+    const { adapter, sent, connected } = connectWithStdio({
+      ...stdioConfig(),
+      process: { command: "devin", env: { COGNIA_BOT_ISOLATION: "1" } },
+    })
+    await connected
+    const capabilities = (
+      sent.find((frame) => frame.method === "initialize")!.params as {
+        clientCapabilities: Record<string, unknown>
+      }
+    ).clientCapabilities
+    expect(capabilities.fs).toEqual({ readTextFile: true, writeTextFile: true })
+    expect(capabilities).not.toHaveProperty("terminal")
+    expect(capabilities).not.toHaveProperty("auth")
     await adapter.disconnect()
   })
 

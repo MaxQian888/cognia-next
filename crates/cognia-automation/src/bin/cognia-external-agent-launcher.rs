@@ -171,7 +171,8 @@ fn bot_environment(env: impl IntoIterator<Item = (String, String)>) -> std::coll
         "PATH" | "HOME" | "USER" | "LOGNAME" | "SHELL" | "LANG" | "LC_ALL" | "LC_CTYPE" | "TZ" | "TERM" | "TMPDIR" | "TMP" | "TEMP" |
         "XDG_CONFIG_HOME" | "XDG_DATA_HOME" | "XDG_CACHE_HOME" | "XDG_STATE_HOME" | "SSL_CERT_FILE" | "SSL_CERT_DIR" | "NODE_EXTRA_CA_CERTS" |
         "HTTP_PROXY" | "HTTPS_PROXY" | "NO_PROXY" | "http_proxy" | "https_proxy" | "no_proxy" | "DEVIN_API_KEY" | "DEVIN_TOKEN" | "DEVIN_BASE_URL" |
-        "DISABLE_AUTO_UPDATE" | "NO_COLOR" | "FORCE_COLOR" | "NVM_BIN" | "NVM_DIR" | "PNPM_HOME" | "BUN_INSTALL"
+        "DISABLE_AUTO_UPDATE" | "NO_COLOR" | "FORCE_COLOR" | "NVM_BIN" | "NVM_DIR" | "PNPM_HOME" | "BUN_INSTALL" |
+        "npm_config_cache" | "npm_config_store_dir" | "pnpm_config_store_dir" | "pnpm_config_cache_dir"
     )).collect();
     result.insert("GIT_CONFIG_GLOBAL".into(), "/dev/null".into());
     result.insert("GIT_CONFIG_NOSYSTEM".into(), "1".into());
@@ -249,6 +250,30 @@ mod tests {
         assert_eq!(env["GIT_TERMINAL_PROMPT"], "0");
         let args = parse_args(["--bot-isolation", "--cwd", "/work", "--deny-readable", "/home/user", "--", "devin", "acp"].into_iter().map(str::to_string)).unwrap();
         assert!(args.bot_isolation);
+    }
+
+    #[test]
+    fn bot_scope_retains_owned_temp_and_package_cache_environment_only() {
+        let entries = [
+            ("TMPDIR", "/work/state/tmp"),
+            ("TMP", "/work/state/tmp"),
+            ("TEMP", "/work/state/tmp"),
+            ("npm_config_cache", "/work/state/cache/npm"),
+            ("npm_config_store_dir", "/work/state/cache/pnpm-store"),
+            ("pnpm_config_store_dir", "/work/state/cache/pnpm-store"),
+            ("pnpm_config_cache_dir", "/work/state/cache/pnpm"),
+        ];
+        let env = bot_environment(entries.into_iter().chain([
+            ("npm_config_userconfig", "/private/credentials"),
+            ("NODE_OPTIONS", "--require injected.js"),
+            ("GITHUB_TOKEN", "private"),
+        ]).map(|(key, value)| (key.into(), value.into())));
+        for (key, value) in entries {
+            assert_eq!(env[key], value);
+        }
+        for key in ["npm_config_userconfig", "NODE_OPTIONS", "GITHUB_TOKEN"] {
+            assert!(!env.contains_key(key));
+        }
     }
 
     #[cfg(target_os = "macos")]

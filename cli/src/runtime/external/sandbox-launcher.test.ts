@@ -10,6 +10,7 @@ import {
   findSandboxLauncher,
   isDevCheckout,
   launcherName,
+  launcherSupportsBotIsolation,
   resolveSandboxedExternalAgentLaunch,
   sandboxLauncherUnavailableMessage,
   sandboxSupportsPlatform,
@@ -17,6 +18,41 @@ import {
 import { toolHostRuntimeDir } from "../../agent/tool-host/protocol"
 
 describe("external-agent sandbox launcher", () => {
+  it("provisions all Bot environment directories without adding writable roots", async () => {
+    const ensureDir = jest.fn()
+    const launch = await resolveSandboxedExternalAgentLaunch(
+      {
+        id: "bot-cache",
+        command: "devin",
+        args: ["acp"],
+        cwd: "/work/repo",
+        env: { COGNIA_BOT_ISOLATION: "1", COGNIA_BOT_STATE_DIR: "/work/state" },
+      },
+      {
+        platform: "darwin",
+        homedir: "/home/user",
+        candidates: ["/launcher"],
+        isExecutable: () => true,
+        supportsBotIsolation: () => true,
+        ensureDir,
+      }
+    )
+    for (const relative of [
+      "data",
+      "cache",
+      "state",
+      "tmp",
+      "cache/npm",
+      "cache/pnpm-store",
+      "cache/pnpm",
+    ])
+      expect(ensureDir).toHaveBeenCalledWith(`/work/state/${relative}`)
+    const writable = launch.args.flatMap((arg, index) =>
+      arg === "--writable" ? [launch.args[index + 1]] : []
+    )
+    expect(writable).toEqual(["/work/repo", "/work/state", toolHostRuntimeDir()])
+  })
+
   it("requires Bot isolation and keeps ambient home out of readable and writable roots", () => {
     const args = buildSandboxLauncherArgs(
       {
@@ -278,6 +314,56 @@ describe("external-agent sandbox launcher", () => {
 })
 
 describe("sandbox readiness reporting", () => {
+  it("probes Bot support without a target and rejects old or broken launchers", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-launcher-capability-"))
+    const launcher = path.join(root, "launcher")
+    try {
+      fs.writeFileSync(
+        launcher,
+        '#!/bin/sh\n[ "$#" = 1 ] && [ "$1" = --bot-isolation ] || exit 2\nprintf "%s\\n" "cognia-external-agent-launcher: missing -- target separator" >&2\nexit 1\n',
+        { mode: 0o700 }
+      )
+      expect(launcherSupportsBotIsolation(launcher)).toBe(true)
+      fs.writeFileSync(
+        launcher,
+        '#!/bin/sh\nprintf "%s\\n" "cognia-external-agent-launcher: unknown argument: --bot-isolation" >&2\nexit 1\n'
+      )
+      expect(launcherSupportsBotIsolation(launcher)).toBe(false)
+      fs.writeFileSync(launcher, "#!/bin/sh\nexit 0\n")
+      expect(launcherSupportsBotIsolation(launcher)).toBe(false)
+      expect(launcherSupportsBotIsolation(path.join(root, "missing"))).toBe(false)
+      expect(launcherSupportsBotIsolation(null as never)).toBe(false)
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it("refuses a stale selected launcher before provisioning and does not silently switch binaries", async () => {
+    const supportsBotIsolation = jest.fn(() => false)
+    const ensureDir = jest.fn()
+    await expect(
+      resolveSandboxedExternalAgentLaunch(
+        {
+          id: "bot",
+          command: "devin",
+          cwd: "/work/repo",
+          env: { COGNIA_BOT_ISOLATION: "1", COGNIA_BOT_STATE_DIR: "/work/state" },
+        },
+        {
+          platform: "darwin",
+          homedir: "/home/user",
+          candidates: ["/stale", "/fresh"],
+          isExecutable: () => true,
+          supportsBotIsolation,
+          ensureDir,
+        }
+      )
+    ).rejects.toThrow("BOT_ISOLATION_LAUNCHER_UNSUPPORTED")
+    expect(supportsBotIsolation).toHaveBeenCalledTimes(1)
+    expect(supportsBotIsolation).toHaveBeenCalledWith("/stale")
+    expect(ensureDir).not.toHaveBeenCalled()
+  })
+
   it("reports the first executable candidate, or nothing", () => {
     expect(
       findSandboxLauncher({

@@ -693,14 +693,18 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         ? (metadata.acpPreviewFeatures as AcpPreviewEnablement)
         : undefined
     const host = getAcpHostCapabilities()
+    const botIsolation = this._config?.process?.env?.COGNIA_BOT_ISOLATION === "1"
     const durableInteraction =
       host.elicitation.durableInteraction || metadata?.acpDurableInteractionController === true
     return resolveAcpFeatureProfile({
       role: "client",
       host: {
         ...host,
+        // The native Devin process already runs inside the Bot sandbox. Never
+        // delegate commands to the generic host terminal outside that boundary.
+        terminal: host.terminal && !botIsolation,
         fs: { read: supportsAgentFs(), write: supportsAgentFs() },
-        terminalAuth: host.terminal && this._config?.transport === "stdio",
+        terminalAuth: host.terminal && !botIsolation && this._config?.transport === "stdio",
         elicitation: {
           form: host.elicitation.form || durableInteraction,
           url: host.elicitation.url || durableInteraction,
@@ -3410,6 +3414,9 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   private async handleTerminalCreate(
     params: AcpTerminalCreateParams
   ): Promise<{ terminalId: string }> {
+    if (this._config?.process?.env?.COGNIA_BOT_ISOLATION === "1") {
+      throw new Error("Bot commands must execute inside their isolated agent process")
+    }
     if (!supportsAgentTerminal()) {
       throw new Error("Terminal support requires the Tauri desktop environment")
     }

@@ -18,9 +18,13 @@ import type {
   ExternalAgentExecutionOptions,
 } from "@/types/agent/external-agent"
 
-const MODEL = "swe-2-medium"
+const BOT_UNATTENDED_SMOKE = process.env.COGNIA_DEVIN_BOT_UNATTENDED_SMOKE === "1"
+const MODEL = BOT_UNATTENDED_SMOKE ? "swe-2-max" : "swe-2-medium"
 const TURN_TIMEOUT_MS = 120_000
 const CANCEL_TIMEOUT_MS = 30_000
+const BOT_WORK_SMOKE = BOT_UNATTENDED_SMOKE || process.env.COGNIA_DEVIN_BOT_WORK_SMOKE === "1"
+const BOT_WORK_MODE = BOT_UNATTENDED_SMOKE ? "bypassPermissions" : "acceptEdits"
+const BOT_TEST_COMMAND = "node verify.cjs"
 
 class SmokeFailure extends Error {}
 
@@ -65,11 +69,16 @@ async function prompt(
     if (event.type === "message_delta" && event.delta.type === "text") reply += event.delta.text
     if (event.type === "done") stopReason = event.stopReason
     if (event.type === "permission_request") {
-      // Only the purpose-built read-only MCP probe needs explicit approval.
+      // Approve only the exact local fixture command or read-only MCP probe.
       // Native file operations use acceptEdits; unexpected actions stay denied.
       await adapter.respondToPermission(sessionId, {
         requestId: event.request.requestId ?? event.request.id,
-        granted: event.request.toolInfo.name === "mcp__cognia-isolation__verify_session",
+        granted:
+          !BOT_UNATTENDED_SMOKE &&
+          (event.request.toolInfo.name === "mcp__cognia-isolation__verify_session" ||
+            (BOT_WORK_SMOKE &&
+              event.request.toolInfo.name === "exec" &&
+              (event.request.rawInput as { command?: string })?.command === BOT_TEST_COMMAND)),
         scope: "once",
       })
     }
@@ -211,7 +220,11 @@ async function main(): Promise<void> {
     await adapter.connect(config)
     check(await adapter.healthCheck(), "A responsive Devin connection failed its health check")
     stage = "create"
-    const session = await adapter.createSession({ cwd: scratch, mcpServers: [firstServer] })
+    const session = await adapter.createSession({
+      cwd: scratch,
+      mcpServers: BOT_WORK_SMOKE ? [] : [firstServer],
+      ...(BOT_WORK_SMOKE ? { permissionMode: BOT_WORK_MODE } : {}),
+    })
     sessionId = session.id
     const models = adapter.getSessionModels(sessionId)
     check(
@@ -220,6 +233,68 @@ async function main(): Promise<void> {
     )
     stage = "select-model-and-mode"
     await adapter.setSessionModel(sessionId, MODEL)
+    if (BOT_WORK_SMOKE) {
+      check(botIsolation, "Bot work smoke requires strict Bot isolation")
+      await adapter.setSessionMode(sessionId, BOT_WORK_MODE)
+      check(
+        adapter.getSession(sessionId)?.permissionMode === BOT_WORK_MODE,
+        "Bot work permission mode was not applied"
+      )
+      const outside = path.join(
+        os.homedir(),
+        `.cognia-bot-work-probe-${randomBytes(8).toString("hex")}`
+      )
+      fs.writeFileSync(outside, "synthetic-private-fixture", { mode: 0o600 })
+      const script = `const fs = require('node:fs'); const assert = require('node:assert/strict');
+const outside = ${JSON.stringify(outside)};
+assert.equal(fs.readFileSync('output.txt', 'utf8'), fs.readFileSync('input.txt', 'utf8'));
+for (const key of ['GH_TOKEN', 'GITHUB_TOKEN', 'SSH_AUTH_SOCK']) assert.ok(!process.env[key]);
+assert.throws(() => fs.readFileSync(outside));
+assert.throws(() => fs.writeFileSync(outside + '.write', 'forbidden'));
+fs.writeFileSync('execution-proof.json', JSON.stringify({passed:true,node:process.version}));
+console.log('BOT_FIXTURE_PASS');\n`
+      fs.writeFileSync(path.join(scratch, "verify.cjs"), script)
+      try {
+        stage = BOT_UNATTENDED_SMOKE ? "bot-unattended-work" : "bot-local-work"
+        const probe = await bounded(
+          prompt(
+            adapter,
+            sessionId,
+            `Read input.txt then create output.txt containing exactly its contents using your file editing tool. Then execute exactly ${BOT_TEST_COMMAND} to check the result and sandbox. Do not modify verify.cjs or create execution-proof.json yourself. Do not use MCP or network.`,
+            { permissionMode: BOT_WORK_MODE }
+          ),
+          TURN_TIMEOUT_MS + 5000,
+          stage
+        )
+        check(probe.stopReason === "end_turn", "Bot work turn did not complete")
+        if (BOT_UNATTENDED_SMOKE)
+          check(
+            !probe.events.permission_request,
+            "Unattended work requested interactive permission"
+          )
+        check(
+          fs.readFileSync(path.join(scratch, "output.txt"), "utf8") === `${token}\n`,
+          "Native edit did not preserve exact contents"
+        )
+        check(
+          fs.readFileSync(path.join(scratch, "verify.cjs"), "utf8") === script,
+          "Fixture verification script was changed"
+        )
+        check(
+          JSON.parse(fs.readFileSync(path.join(scratch, "execution-proof.json"), "utf8")).passed ===
+            true,
+          "Native test command did not complete"
+        )
+        check(!fs.existsSync(`${outside}.write`), "Native command escaped workspace write scope")
+        process.stdout.write(
+          `${JSON.stringify({ result: "PASS", stage, model: MODEL, mode: BOT_WORK_MODE, command: BOT_TEST_COMMAND, fileWrite: true, nativeExec: true, credentialRead: "denied", outsideWrite: "denied", events: probe.events })}\n`
+        )
+      } finally {
+        fs.rmSync(outside, { force: true })
+        fs.rmSync(`${outside}.write`, { force: true })
+      }
+      return
+    }
     await adapter.setSessionMode(sessionId, "acceptEdits")
     check(
       adapter.getSessionModels(sessionId)?.currentModelId === MODEL,

@@ -36,6 +36,98 @@ function nextEvent<T>(
 }
 
 describe("NodeExternalAgentBackend", () => {
+  it("derives writable Bot temp and package caches from the owned runtime state", () => {
+    const env = buildExternalAgentChildEnv(
+      { TMPDIR: "/ambient/tmp", pnpm_config_store_dir: "/ambient/store" },
+      { COGNIA_BOT_ISOLATION: "1", COGNIA_BOT_STATE_DIR: "/owned/state" }
+    )
+    expect(env).toMatchObject({
+      TMPDIR: "/owned/state/tmp",
+      TMP: "/owned/state/tmp",
+      TEMP: "/owned/state/tmp",
+      npm_config_cache: "/owned/state/cache/npm",
+      npm_config_store_dir: "/owned/state/cache/pnpm-store",
+      pnpm_config_store_dir: "/owned/state/cache/pnpm-store",
+      pnpm_config_cache_dir: "/owned/state/cache/pnpm",
+    })
+  })
+
+  it.each([undefined, "relative/state"])("rejects an invalid owned state directory %s", (state) => {
+    expect(() =>
+      buildExternalAgentChildEnv(
+        {},
+        {
+          COGNIA_BOT_ISOLATION: "1",
+          ...(state ? { COGNIA_BOT_STATE_DIR: state } : {}),
+        }
+      )
+    ).toThrow("Bot isolation requires an owned state directory")
+  })
+
+  const nativeBotTest =
+    process.env.COGNIA_EXTERNAL_AGENT_LAUNCHER && process.platform === "darwin" ? it : it.skip
+  nativeBotTest("launches a real confined child with writable owned caches and temp", async () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "cognia-bot-cache-launch-")))
+    const workspace = path.join(root, "checkout")
+    const state = path.join(root, "state")
+    fs.mkdirSync(workspace)
+    const stub = path.join(workspace, "stub-acp-agent.mjs")
+    const keys = [
+      "TMPDIR",
+      "TMP",
+      "TEMP",
+      "npm_config_cache",
+      "npm_config_store_dir",
+      "pnpm_config_store_dir",
+      "pnpm_config_cache_dir",
+    ]
+    fs.writeFileSync(
+      stub,
+      `import fs from "node:fs"; import path from "node:path";
+const values = Object.fromEntries(${JSON.stringify(keys)}.map(key => [key, process.env[key]]));
+for (const [key, value] of Object.entries(values)) fs.writeFileSync(path.join(value, key + ".txt"), "fixture");
+console.log(JSON.stringify({values, githubTokenPresent: !!process.env.GITHUB_TOKEN, botStatePresent: !!process.env.COGNIA_BOT_STATE_DIR}));`
+    )
+    const backend = new NodeExternalAgentBackend({ workspacesRoot: root, allowSmokeAgent: true })
+    const stdout: string[] = []
+    const stderr: string[] = []
+    backend.listen<{ data: string }>("external-agent://stdout", (event) => stdout.push(event.data))
+    backend.listen<{ data: string }>("external-agent://stderr", (event) => stderr.push(event.data))
+    const exited = nextEvent(backend, "external-agent://exit")
+    try {
+      await backend.invoke("spawn_external_agent", {
+        config: {
+          id: "bot-cache-fixture",
+          command: "node",
+          args: [stub],
+          cwd: workspace,
+          env: {
+            COGNIA_BOT_ISOLATION: "1",
+            COGNIA_BOT_STATE_DIR: state,
+            GITHUB_TOKEN: "fixture-not-a-secret",
+          },
+        },
+      })
+      await exited
+      expect(stderr).toEqual([])
+      expect(stdout).toHaveLength(1)
+      const result = JSON.parse(stdout[0])
+      expect(result.githubTokenPresent).toBe(false)
+      expect(result.botStatePresent).toBe(false)
+      for (const key of keys) {
+        expect(result.values[key]).toMatch(new RegExp(`^${state}/`))
+        expect(fs.readFileSync(path.join(result.values[key], `${key}.txt`), "utf8")).toBe("fixture")
+      }
+    } finally {
+      await backend
+        .invoke("kill_external_agent", { agentId: "bot-cache-fixture" })
+        .catch((error: Error) => {
+          if (!error.message.includes("agent not running")) throw error
+        })
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it("rejects a Devin MCP payload on another runtime before resolving a launch", async () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-agent-payload-"))
     const resolveLaunch = jest.fn(async () => ({ command: "must-not-run", args: [] }))

@@ -431,7 +431,18 @@ pub fn wrap_with_sandbox(
     let mut env = config.env.clone();
     if bot_isolation {
         let state = Path::new(&config.env["COGNIA_BOT_STATE_DIR"]);
-        for (key, relative) in [("XDG_DATA_HOME", "data"), ("XDG_CACHE_HOME", "cache"), ("XDG_STATE_HOME", "state")] {
+        for (key, relative) in [
+            ("XDG_DATA_HOME", "data"),
+            ("XDG_CACHE_HOME", "cache"),
+            ("XDG_STATE_HOME", "state"),
+            ("TMPDIR", "tmp"),
+            ("TMP", "tmp"),
+            ("TEMP", "tmp"),
+            ("npm_config_cache", "cache/npm"),
+            ("npm_config_store_dir", "cache/pnpm-store"),
+            ("pnpm_config_store_dir", "cache/pnpm-store"),
+            ("pnpm_config_cache_dir", "cache/pnpm"),
+        ] {
             let root = state.join(relative);
             host.ensure_dir(&root);
             env.insert(key.into(), root.to_string_lossy().into_owned());
@@ -689,12 +700,24 @@ mod tests {
         let mut original = config("devin", &["acp"], Some("/work/project"));
         original.env.insert("COGNIA_BOT_ISOLATION".into(), "1".into());
         original.env.insert("COGNIA_BOT_STATE_DIR".into(), "/work/state".into());
+        original.env.insert("TMPDIR".into(), "/ambient/tmp".into());
+        original.env.insert("pnpm_config_store_dir".into(), "/ambient/store".into());
         let wrapped = wrap_with_sandbox(original, &host).unwrap();
         assert!(wrapped.args.iter().any(|arg| arg == "--bot-isolation"));
         assert!(wrapped.args.windows(2).any(|pair| pair == ["--deny-readable", "/home/dev"]));
         assert!(!wrapped.args.windows(2).any(|pair| pair == ["--readable", "/home/dev"]));
         assert!(!wrapped.args.windows(2).any(|pair| pair == ["--writable", "/home/dev/.local/share/devin"]));
         assert_eq!(wrapped.env["XDG_DATA_HOME"], "/work/state/data");
+        for key in ["TMPDIR", "TMP", "TEMP"] {
+            assert_eq!(wrapped.env[key], "/work/state/tmp");
+        }
+        assert_eq!(wrapped.env["npm_config_cache"], "/work/state/cache/npm");
+        assert_eq!(wrapped.env["npm_config_store_dir"], "/work/state/cache/pnpm-store");
+        assert_eq!(wrapped.env["pnpm_config_store_dir"], "/work/state/cache/pnpm-store");
+        assert_eq!(wrapped.env["pnpm_config_cache_dir"], "/work/state/cache/pnpm");
+        for directory in ["tmp", "cache/npm", "cache/pnpm-store", "cache/pnpm"] {
+            assert!(host.dirs.borrow().contains(&PathBuf::from("/work/state").join(directory)));
+        }
     }
 
     #[test]

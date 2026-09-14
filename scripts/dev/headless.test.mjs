@@ -626,6 +626,7 @@ process.stdout.write(JSON.stringify({
     "COGNIA_DATA_DIR",
     "COGNIA_EXEC_BACKEND",
     "COGNIA_GATEWAY",
+    "COGNIA_EXTERNAL_AGENT_LAUNCHER",
     "COGNIA_MASTER_KEY_FILE",
     "COGNIA_MCP_SIDECAR_PATH",
     "COGNIA_SIDECAR_SCRIPT",
@@ -640,6 +641,7 @@ process.stdout.write(JSON.stringify({
     COGNIA_MASTER_KEY_FILE: "",
     COGNIA_HEADLESS_SERVER_BIN: server,
     COGNIA_BRAIN_ENTRY: await artifact("brain.mjs"),
+    COGNIA_EXTERNAL_AGENT_LAUNCHER: await artifact("selected-launcher"),
     COGNIA_SIDECAR_SCRIPT: await artifact("sidecar.mjs"),
     COGNIA_MCP_SIDECAR_PATH: await artifact("mcp.mjs"),
     COGNIA_VSCODE_EXT_HOST_SCRIPT: await artifact("vscode-host.js"),
@@ -669,6 +671,7 @@ process.stdout.write(JSON.stringify({
   )
   assert.equal(capture.env.COGNIA_EXEC_BACKEND, "local-process")
   assert.equal(capture.env.COGNIA_GATEWAY, "1")
+  assert.equal(capture.env.COGNIA_EXTERNAL_AGENT_LAUNCHER, env.COGNIA_EXTERNAL_AGENT_LAUNCHER)
   assert.equal(capture.env.COGNIA_MASTER_KEY_FILE, path.join(dataDir, "master.key"))
   assert.equal(capture.env.COGNIA_BRAIN_ENTRY, env.COGNIA_BRAIN_ENTRY)
   assert.equal(capture.env.COGNIA_SIDECAR_SCRIPT, env.COGNIA_SIDECAR_SCRIPT)

@@ -1,6 +1,7 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { spawnSync } from "node:child_process"
 
 import {
   bundledCandidates,
@@ -11,7 +12,11 @@ import {
   nativeBinaryName,
 } from "../native-binary"
 
-import type { ExternalAgentLaunch, NodeExternalAgentSpawnConfig } from "./node-backend"
+import {
+  botRuntimeEnvironment,
+  type ExternalAgentLaunch,
+  type NodeExternalAgentSpawnConfig,
+} from "./node-backend"
 import { devinOwnedConfigRoot, devinOriginalConfigRoot } from "./devin-mcp-config"
 import { toolHostRuntimeDir } from "../../agent/tool-host/protocol"
 import {
@@ -32,6 +37,8 @@ export interface SandboxLauncherRuntime {
   ensureFile?: (candidate: string) => void
   /** True when running from a repo checkout, which unlocks the build hint. */
   isDevCheckout?: () => boolean
+  /** Probe only the selected host launcher; never execute a target command. */
+  supportsBotIsolation?: (launcher: string) => boolean
 }
 
 /** Platform-correct launcher filename. `platform` is a parameter so the Windows
@@ -87,6 +94,25 @@ export function findSandboxLauncher(
   }
 ): string | undefined {
   return findNativeBinary(runtime.candidates, runtime.isExecutable)
+}
+
+/** An omitted target keeps this a parser-only capability check, before any sandbox or agent starts. */
+export function launcherSupportsBotIsolation(launcher: string): boolean {
+  try {
+    const probe = spawnSync(launcher, ["--bot-isolation"], {
+      encoding: "utf8",
+      timeout: 5_000,
+      maxBuffer: 16_384,
+      env: { PATH: process.env.PATH },
+    })
+    return (
+      !probe.error &&
+      probe.status === 1 &&
+      probe.stderr.trim() === "cognia-external-agent-launcher: missing -- target separator"
+    )
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -226,11 +252,20 @@ export async function resolveSandboxedExternalAgentLaunch(
       sandboxLauncherUnavailableMessage(config.command, runtime.isDevCheckout?.() ?? false)
     )
   }
+  if (
+    config.env?.COGNIA_BOT_ISOLATION === "1" &&
+    !(runtime.supportsBotIsolation ?? launcherSupportsBotIsolation)(launcher)
+  ) {
+    throw new Error(
+      `BOT_ISOLATION_LAUNCHER_UNSUPPORTED: Selected launcher ${launcher} does not support Bot isolation. ` +
+        "Rebuild or reinstall the external-agent launcher and set COGNIA_EXTERNAL_AGENT_LAUNCHER to that executable."
+    )
+  }
   for (const root of agentStateDirectoryRoots(config, runtime.homedir)) runtime.ensureDir?.(root)
-  if (config.env?.COGNIA_BOT_ISOLATION === "1" && config.env.COGNIA_BOT_STATE_DIR) {
+  const botRuntime = botRuntimeEnvironment(config.env)
+  if (config.env?.COGNIA_BOT_ISOLATION === "1") {
     runtime.ensureDir?.(config.env.COGNIA_BOT_STATE_DIR)
-    for (const name of ["data", "cache", "state"])
-      runtime.ensureDir?.(path.join(config.env.COGNIA_BOT_STATE_DIR, name))
+    for (const root of new Set(Object.values(botRuntime))) runtime.ensureDir?.(root)
   }
   runtime.ensureDir?.(toolHostRuntimeDir())
   for (const root of agentStateFileRoots(config, runtime.homedir)) runtime.ensureFile?.(root)
