@@ -146,7 +146,10 @@ export function toUnifiedBackup(cfg: BackupAutoSchedule | undefined): UnifiedSch
     kind: "backup",
     sourceId: BACKUP_SOURCE_ID,
     name: "Automatic backup",
+    nameKey: "unifiedNames.backup",
     description: resolved.dirPath ? `Encrypted backup to ${resolved.dirPath}` : undefined,
+    descriptionKey: resolved.dirPath ? "unifiedNames.backupDescription" : undefined,
+    nameValues: resolved.dirPath ? { path: resolved.dirPath } : undefined,
     status: mapBackupStatus(resolved),
     triggerSummary: {
       type: "interval",

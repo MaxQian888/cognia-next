@@ -308,7 +308,10 @@ export function toUnifiedOutboundQueue(queueLength: number): UnifiedScheduledIte
     kind: "connector",
     sourceId: CONNECTOR_QUEUE_SOURCE_ID,
     name: `Outbound queue (${queueLength})`,
+    nameKey: "unifiedNames.outboundQueue",
+    nameValues: { count: queueLength },
     description: "Connector outbound delivery queue",
+    descriptionKey: "unifiedNames.outboundQueueDescription",
     status: queueLength > 0 ? "active" : "unknown",
     triggerSummary: { type: "event", eventType: "outbound.queue" },
     origin: {

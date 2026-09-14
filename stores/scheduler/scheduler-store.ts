@@ -14,18 +14,17 @@ import type {
   TaskFilter,
   TaskStatistics,
   SchedulerPermissionPolicy,
-  TaskCreationSource,
-  ScheduledTaskType,
   TaskExecutionTriggerSource,
 } from "@/types/scheduler"
 import { DEFAULT_PERMISSION_POLICY } from "@/types/scheduler"
+import type { ScheduledItemKind } from "@/types/scheduler/unified"
+import type { UnifiedStatusFilter } from "@/lib/scheduler/unified-filter"
 import { getSchedulerDataSource } from "@/lib/scheduler/scheduler-data-source"
 import type { CancelExecutionOutcome } from "@/lib/scheduler/task-scheduler"
 import { isRemoteHostActive, subscribeActiveRemoteTransport } from "@/lib/tauri/transport-routing"
 import { subscribeSchedulerHostTarget } from "@/lib/scheduler/scheduler-host-target"
 import {
   cancelPluginTaskExecution,
-  getActivePluginTaskCount,
   isPluginTaskExecutionActive,
 } from "@/lib/scheduler/executors/plugin-executor"
 import { loggers } from "@cognia/logging"
@@ -46,12 +45,25 @@ let schedulerHostGeneration = 0
 // Scheduler system status
 export type SchedulerStatus = "idle" | "running" | "stopped"
 
+/** The unified list's filter. See `listFilter` on the state. */
+export interface SchedulerListFilter {
+  search: string
+  status: UnifiedStatusFilter
+  kinds: ScheduledItemKind[]
+  loopOnly: boolean
+}
+
+export const DEFAULT_SCHEDULER_LIST_FILTER: SchedulerListFilter = Object.freeze({
+  search: "",
+  status: "all",
+  kinds: [],
+  loopOnly: false,
+}) as SchedulerListFilter
+
 interface SchedulerState {
   // Data
   tasks: ScheduledTask[]
   executions: TaskExecution[]
-  recentExecutions: TaskExecution[]
-  upcomingTasks: ScheduledTask[]
   statistics: TaskStatistics | null
 
   // UI State
@@ -64,6 +76,14 @@ interface SchedulerState {
    */
   multiSelection: string[]
   filter: TaskFilter
+  /**
+   * The unified list's own filter (ADR-0179 §2): search, status bucket, the
+   * pinned kinds and the `/loop` toggle. Persisted, and shared by `/scheduler`
+   * and `/me/scheduler`, which used to keep a copy each in component state
+   * and so could not agree on a count. `kinds` is an array because the
+   * persist middleware cannot round-trip a `Set`.
+   */
+  listFilter: SchedulerListFilter
   isLoading: boolean
   error: string | null
   hasMoreExecutions: boolean
@@ -113,8 +133,6 @@ interface SchedulerActions {
   loadTaskExecutions: (taskId: string) => Promise<void>
   loadMoreExecutions: () => Promise<void>
   loadStatistics: () => Promise<void>
-  loadRecentExecutions: (limit?: number) => Promise<void>
-  loadUpcomingTasks: (limit?: number) => Promise<void>
   refreshAll: () => Promise<void>
 
   // Bulk Operations
@@ -135,18 +153,11 @@ interface SchedulerActions {
   /**
    * Stop a running execution of any task type.
    *
-   * Supersedes `cancelPluginExecution` as the surface the panel calls. A
-   * plugin run still ends through the plugin executor's own controller, which
-   * is what {@link cancelPluginExecution} reaches, but every other type has
-   * only ever been reachable through the scheduler's abort controller and so
-   * had no cancel at all.
+   * The one cancel surface the panels call. A plugin run still ends through
+   * the plugin executor's own controller; every other type goes through the
+   * scheduler's abort controller.
    */
   cancelExecution: (executionId: string) => Promise<CancelExecutionOutcome>
-
-  // Plugin Execution Management
-  cancelPluginExecution: (executionId: string) => boolean
-  getActivePluginCount: () => number
-  isPluginExecutionActive: (executionId: string) => boolean
 
   // Permission Management
   /** Hydrate {@link permissionPolicy} from `AppSettings`. Idempotent. */
@@ -171,10 +182,14 @@ interface SchedulerActions {
 
   // UI Actions
   selectTask: (taskId: string | null) => void
-  setTasks: (tasks: ScheduledTask[]) => void
   setFilter: (filter: Partial<TaskFilter>) => void
   clearFilter: () => void
-  clearSelection: () => void
+  /** Merge into the unified list filter. */
+  setListFilter: (patch: Partial<SchedulerListFilter>) => void
+  /** Pin or unpin one kind. */
+  toggleListKind: (kind: ScheduledItemKind) => void
+  /** Back to every item: no search, every status, every kind, loops included. */
+  resetListFilter: () => void
   /** Toggle the unifiedId in/out of the multi-select set. */
   toggleMultiSelection: (unifiedId: string) => void
   /** Clear the multi-select set. */
@@ -196,12 +211,11 @@ type SchedulerStore = SchedulerState & SchedulerActions
 const initialState: SchedulerState = {
   tasks: [],
   executions: [],
-  recentExecutions: [],
-  upcomingTasks: [],
   statistics: null,
   selectedTaskId: null,
   multiSelection: [],
   filter: {},
+  listFilter: DEFAULT_SCHEDULER_LIST_FILTER,
   isLoading: false,
   error: null,
   hasMoreExecutions: true,
@@ -524,24 +538,6 @@ export const useSchedulerStore = create<SchedulerStore>()(
         }
       },
 
-      loadRecentExecutions: async (limit = 50) => {
-        try {
-          const recentExecutions = await getSchedulerDataSource().getRecentExecutions(limit)
-          set({ recentExecutions })
-        } catch (error) {
-          log.error("SchedulerStore: Load recent executions failed", error as Error)
-        }
-      },
-
-      loadUpcomingTasks: async (limit = 10) => {
-        try {
-          const upcomingTasks = await getSchedulerDataSource().getUpcomingTasks(limit)
-          set({ upcomingTasks })
-        } catch (error) {
-          log.error("SchedulerStore: Load upcoming tasks failed", error as Error)
-        }
-      },
-
       refreshAll: async () => {
         // Deduplicate concurrent refreshAll calls
         if (refreshPromise) return refreshPromise
@@ -553,21 +549,18 @@ export const useSchedulerStore = create<SchedulerStore>()(
             const source = getSchedulerDataSource()
 
             // Fetch all data in parallel
-            const [tasks, statistics, executions, recentExecutions, upcomingTasks] =
-              await Promise.all([
-                source.listTasks(filter),
-                source.getStatistics(),
-                selectedTaskId
-                  ? source.getTaskExecutions(
-                      selectedTaskId,
-                      EXECUTIONS_PAGE_SIZE,
-                      undefined,
-                      get().tasks.find((task) => task.id === selectedTaskId)?.type
-                    )
-                  : Promise.resolve(get().executions),
-                source.getRecentExecutions(50),
-                source.getUpcomingTasks(10),
-              ])
+            const [tasks, statistics, executions] = await Promise.all([
+              source.listTasks(filter),
+              source.getStatistics(),
+              selectedTaskId
+                ? source.getTaskExecutions(
+                    selectedTaskId,
+                    EXECUTIONS_PAGE_SIZE,
+                    undefined,
+                    get().tasks.find((task) => task.id === selectedTaskId)?.type
+                  )
+                : Promise.resolve(get().executions),
+            ])
 
             const cursor =
               executions.length > 0
@@ -579,8 +572,6 @@ export const useSchedulerStore = create<SchedulerStore>()(
               tasks: sortTasksBySchedulerPriority(tasks),
               statistics,
               executions,
-              recentExecutions,
-              upcomingTasks,
               hasMoreExecutions: executions.length >= EXECUTIONS_PAGE_SIZE,
               executionsCursor: cursor,
               isLoading: false,
@@ -617,12 +608,21 @@ export const useSchedulerStore = create<SchedulerStore>()(
         void get().refreshAll()
       },
 
-      setTasks: (tasks) => {
-        set({ tasks })
+      setListFilter: (patch) => {
+        set((state) => ({ listFilter: { ...state.listFilter, ...patch } }))
       },
 
-      clearSelection: () => {
-        set({ selectedTaskId: null, executions: [] })
+      toggleListKind: (kind) => {
+        set((state) => {
+          const kinds = state.listFilter.kinds.includes(kind)
+            ? state.listFilter.kinds.filter((k) => k !== kind)
+            : [...state.listFilter.kinds, kind]
+          return { listFilter: { ...state.listFilter, kinds } }
+        })
+      },
+
+      resetListFilter: () => {
+        set({ listFilter: DEFAULT_SCHEDULER_LIST_FILTER })
       },
 
       toggleMultiSelection: (unifiedId: string) => {
@@ -757,20 +757,6 @@ export const useSchedulerStore = create<SchedulerStore>()(
           log.error("SchedulerStore: Cancel execution failed", error as Error)
           return { cancelled: false, reason: "not-found" }
         }
-      },
-
-      // ========== Plugin Execution Management ==========
-
-      cancelPluginExecution: (executionId) => {
-        return cancelPluginTaskExecution(executionId)
-      },
-
-      getActivePluginCount: () => {
-        return getActivePluginTaskCount()
-      },
-
-      isPluginExecutionActive: (executionId) => {
-        return isPluginTaskExecutionActive(executionId)
       },
 
       // ========== Permission Management ==========
@@ -915,7 +901,18 @@ export const useSchedulerStore = create<SchedulerStore>()(
       partialize: (state) => ({
         autoRefreshInterval: state.autoRefreshInterval,
         filter: state.filter,
+        listFilter: state.listFilter,
       }),
+      // A persisted `listFilter` from before a field existed is merged over
+      // the defaults, so a new axis reads as "unset" rather than `undefined`.
+      merge: (persisted, current) => {
+        const stored = (persisted ?? {}) as Partial<SchedulerState>
+        return {
+          ...current,
+          ...stored,
+          listFilter: { ...DEFAULT_SCHEDULER_LIST_FILTER, ...(stored.listFilter ?? {}) },
+        }
+      },
     }
   )
 )
@@ -944,50 +941,6 @@ export const selectIsInitialized = (state: SchedulerStore) => state.isInitialize
 
 export const selectSelectedTask = (state: SchedulerStore): ScheduledTask | undefined =>
   state.tasks.find((t) => t.id === state.selectedTaskId)
-
-/**
- * Generic memoized selector factory — caches derived result based on source array reference.
- * Returns the same result array when the source hasn't changed, preventing infinite re-render loops.
- */
-function createDerivedSelector<TSource, TResult>(
-  getSource: (state: SchedulerStore) => TSource[],
-  derive: (source: TSource[]) => TResult[]
-): (state: SchedulerStore) => TResult[] {
-  let cachedSource: TSource[] = []
-  let cachedResult: TResult[] = []
-  return (state: SchedulerStore) => {
-    const source = getSource(state)
-    if (source !== cachedSource) {
-      cachedSource = source
-      cachedResult = derive(source)
-    }
-    return cachedResult
-  }
-}
-
-export const selectActiveTasks = createDerivedSelector(
-  (s) => s.tasks,
-  (tasks) => tasks.filter((t) => t.status === "active")
-)
-
-export const selectPausedTasks = createDerivedSelector(
-  (s) => s.tasks,
-  (tasks) => tasks.filter((t) => t.status === "paused")
-)
-
-export const selectUpcomingTasks = createDerivedSelector(
-  (s) => s.tasks,
-  (tasks) => {
-    const now = new Date()
-    return tasks
-      .filter((t) => t.status === "active" && t.nextRunAt && t.nextRunAt > now)
-      .sort((a, b) => (a.nextRunAt?.getTime() || 0) - (b.nextRunAt?.getTime() || 0))
-      .slice(0, 5)
-  }
-)
-
-export const selectRecentExecutions = (state: SchedulerStore): TaskExecution[] =>
-  state.recentExecutions
 
 export const selectSchedulerStatus = (state: SchedulerStore): SchedulerStatus =>
   state.schedulerStatus

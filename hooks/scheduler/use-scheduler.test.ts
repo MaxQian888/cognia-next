@@ -9,10 +9,6 @@ interface FakeStore {
   statistics: unknown
   selectedTaskId: string | null
   selectedTask: unknown
-  activeTasks: unknown[]
-  pausedTasks: unknown[]
-  upcomingTasks: unknown[]
-  recentExecutions: unknown[]
   schedulerStatus: string
   filter: string
   isLoading: boolean
@@ -33,12 +29,7 @@ interface FakeStore {
   clearFilter: jest.Mock
   clearError: jest.Mock
   loadMoreExecutions: jest.Mock
-  loadRecentExecutions: jest.Mock
-  loadUpcomingTasks: jest.Mock
   cleanupOldExecutions: jest.Mock
-  cancelPluginExecution: jest.Mock
-  getActivePluginCount: jest.Mock
-  isPluginExecutionActive: jest.Mock
   exportTasks: jest.Mock
   importTasks: jest.Mock
   cloneTask: jest.Mock
@@ -53,10 +44,6 @@ function makeStore(): FakeStore {
     statistics: null,
     selectedTaskId: null,
     selectedTask: null,
-    activeTasks: [],
-    pausedTasks: [],
-    upcomingTasks: [],
-    recentExecutions: [],
     schedulerStatus: "stopped",
     filter: "all",
     isLoading: false,
@@ -77,12 +64,7 @@ function makeStore(): FakeStore {
     clearFilter: jest.fn(),
     clearError: jest.fn(),
     loadMoreExecutions: jest.fn(),
-    loadRecentExecutions: jest.fn(),
-    loadUpcomingTasks: jest.fn(),
     cleanupOldExecutions: jest.fn(),
-    cancelPluginExecution: jest.fn(),
-    getActivePluginCount: jest.fn(),
-    isPluginExecutionActive: jest.fn(),
     exportTasks: jest.fn(),
     importTasks: jest.fn(),
     cloneTask: jest.fn(),
@@ -97,10 +79,6 @@ jest.mock("@/stores/scheduler", () => ({
   selectStatistics: (s: FakeStore) => s.statistics,
   selectSelectedTaskId: (s: FakeStore) => s.selectedTaskId,
   selectSelectedTask: (s: FakeStore) => s.selectedTask,
-  selectActiveTasks: (s: FakeStore) => s.activeTasks,
-  selectPausedTasks: (s: FakeStore) => s.pausedTasks,
-  selectUpcomingTasks: (s: FakeStore) => s.upcomingTasks,
-  selectRecentExecutions: (s: FakeStore) => s.recentExecutions,
   selectSchedulerStatus: (s: FakeStore) => s.schedulerStatus,
   selectFilter: (s: FakeStore) => s.filter,
   selectIsLoading: (s: FakeStore) => s.isLoading,

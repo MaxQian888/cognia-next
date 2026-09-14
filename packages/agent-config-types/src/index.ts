@@ -4574,11 +4574,10 @@ export interface AppSettings {
    */
   executionMonitorPrefs?: import("@/lib/execution/monitor-prefs").StoredExecutionMonitorPrefs
   /**
-   * Active view mode for the `/scheduler` dashboard (`overview` | `calendar` |
-   * `timeline`). `overview` is the default static dashboard; `calendar` shows a
-   * month grid of projected runs; `timeline` shows a day-grouped agenda. Lives
-   * in settings JSON (same pattern as `discoverViewByCategory`) so it syncs
-   * cross-device without a Dexie migration.
+   * @deprecated Retired by ADR-0179: the `/scheduler` overview merged its
+   * calendar and timeline into one agenda, so there is no view to choose. The
+   * field stays so a settings document written before that still parses;
+   * nothing reads or writes it.
    */
   schedulerDashboardView?: "overview" | "calendar" | "timeline"
   /**

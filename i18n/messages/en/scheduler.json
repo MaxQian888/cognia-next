@@ -5,7 +5,6 @@
   "actionFailed": "Could not update “{name}”",
   "actionScript": "Script",
   "active": "active",
-  "activePlugins": "{count} plugin(s)",
   "activeTasks": "Active",
   "adapter": "Adapter",
   "additionalDirectories": {
@@ -25,8 +24,6 @@
   "allowConcurrent": "Allow Concurrent",
   "appArgs": "Application Arguments",
   "appPath": "Application Path",
-  "appScheduler": "App Scheduler",
-  "appTasks": "App Tasks",
   "authority": {
     "graceLabel": "Grace",
     "graceMinutes": "{minutes} min",
@@ -126,10 +123,6 @@
   "bulkDeleteTitle": "Delete selected tasks?",
   "bulkPartialFailure": "{count, plural, =1 {1 item could not be updated} other {# items could not be updated}}",
   "bulkPartialFailureMore": "{hidden, plural, =1 {and 1 more} other {and # more}}",
-  "bulkPause": "Pause",
-  "bulkResume": "Resume",
-  "bulkSelect": "Select",
-  "bulkSelectTooltip": "Toggle multi-select mode",
   "calendar": {
     "aria": "Scheduled runs calendar",
     "dayAria": "Day {day}, {count} scheduled run(s)",
@@ -197,15 +190,12 @@
     "onWeekends": "on weekends"
   },
   "cronExpression": "Cron Expression",
-  "cronHelp": "Format: minute hour day month weekday",
-  "cronMatchingNow": "Cron matches current time",
   "cronPreset": {
     "custom": "Custom",
     "daily": "Daily at 9:00 AM",
     "hourly": "Every hour",
     "weeklyMon": "Mondays at 9:00 AM"
   },
-  "cronPresets": "Quick Schedules",
   "cronRequired": "Cron expression required",
   "cronTriggerLabel": "Cron trigger",
   "dashboard": {
@@ -216,12 +206,6 @@
     "noRunsYet": "No runs recorded yet",
     "running": "Running",
     "title": "Dashboard"
-  },
-  "dashboardView": {
-    "aria": "Dashboard view",
-    "calendar": "Calendar",
-    "overview": "Overview",
-    "timeline": "Timeline"
   },
   "date": "Date",
   "dateInPast": "Scheduled time must be in the future",
@@ -251,7 +235,6 @@
     "title": "Dependencies"
   },
   "dependsOn": "Depends On",
-  "dependsOnDescription": "Tasks that must complete before this task runs",
   "description": "Description",
   "descriptionPlaceholder": "Describe what this task does",
   "destination": "Destination",
@@ -276,9 +259,7 @@
   "errorDescription": "The scheduler encountered an unexpected error. This may be caused by a database issue or corrupted data.",
   "errorTitle": "Something went wrong",
   "eventSource": "Event source filter (optional)",
-  "eventSourceHelp": "When set, the task only runs if the event was emitted from this source.",
   "eventSourceLiteralPlaceholder": "Source",
-  "eventSourcePlaceholder": "leave empty to fire on every source",
   "eventType": "Event Type",
   "eventTypeCustomLabel": "Custom event type…",
   "eventTypePlaceholder": "e.g., message.created, workflow.completed",
@@ -308,7 +289,6 @@
     "retryAt": "Retry at",
     "scheduledFor": "Scheduled"
   },
-  "executionConfig": "Execution Config",
   "executionStatuses": {
     "cancelled": "Cancelled",
     "completed": "Completed",
@@ -343,7 +323,6 @@
     "loopOnly": "Only /loop tasks"
   },
   "finishedAt": "Finished at",
-  "footerSuccess": "Success",
   "formatExpression": "Format expression",
   "handler": "Handler",
   "host": {
@@ -394,16 +373,10 @@
     "replaceWarning": "This will delete all existing tasks before importing",
     "selectFile": "Select JSON file"
   },
-  "importMerge": "Merge",
-  "importModeDescription": "Choose how to handle existing tasks",
-  "importModeTitle": "Import Mode",
-  "importReplace": "Replace All",
   "importSuccess": "{count} task(s) imported successfully",
   "importTasks": "Import Tasks",
   "initializing": "Initializing scheduler...",
-  "inspectDegradedTask": "Inspect Degraded Task",
   "interval": "Interval",
-  "intervalDuration": "Run Every",
   "intervalMinutes": "Interval (minutes)",
   "intervalSeconds": "Interval (seconds)",
   "intervalTooShort": "Interval must be at least 1 minute",
@@ -458,8 +431,6 @@
     },
     "serverListLabel": "Available MCP servers"
   },
-  "metadataDegraded": "Task metadata is incomplete; editing is limited",
-  "metadataDegradedEditHint": "Task metadata is incomplete and cannot be edited safely",
   "mobile": {
     "fabCreateAria": "Create scheduled task",
     "statStripLabels": {
@@ -479,15 +450,8 @@
   "noDependencies": "No dependencies",
   "noExecutions": "No executions yet",
   "noExecutionsYet": "No executions yet",
-  "noRecentDispatches": "No recent dispatches.",
-  "noRecentExecutions": "No recent executions",
-  "noRecentRuns": "No recent runs.",
   "noSchedule": "No schedule",
-  "noScheduledRun": "No scheduled run",
-  "noSystemTasks": "No system tasks",
   "noTasks": "No scheduled tasks",
-  "noTasksDescription": "Create a scheduled task to automate your workflows",
-  "noUpcomingTasks": "No upcoming tasks",
   "notificationChannels": "Notification Channels",
   "notificationConfig": "Notifications",
   "notificationSettings": {
@@ -518,10 +482,6 @@
   "notifyOnProgress": "Notify on progress",
   "notifyOnProgressHint": "Only task types that report mid-run progress raise this (plugin tasks today).",
   "notifyOnStart": "Notify on start",
-  "occurrenceList": {
-    "moreTimes": "+{count} more",
-    "rowAria": "{name}, {count, plural, one {# upcoming time} other {# upcoming times}}"
-  },
   "onBootDelaySeconds": "Boot Delay (seconds)",
   "onEventId": "Event ID",
   "onEventSource": "Event Source",
@@ -716,7 +676,6 @@
       "maxRuntimeHelp": "Kill the process if it is still running after this long. Leave blank to let it run until it finishes or the app closes."
     }
   },
-  "payloadDescription": "Data passed to the task executor",
   "payloadEditorMode": {
     "toJson": "Edit as JSON",
     "toStructured": "Use structured editor"
@@ -793,17 +752,14 @@
     "scheduleBackup": "Schedule Backup",
     "scheduleWorkflow": "Schedule Workflow"
   },
-  "quickActionsLabel": "Quick Actions",
   "quickCreateWorkflowTrigger": "Create workflow trigger",
   "quickCreateWorkflowTriggerDescription": "Add a cron trigger to an existing workflow without leaving the scheduler.",
-  "recentDispatches": "Recent dispatches",
   "recentExecutions": "Recent Executions",
   "recentRuns": "Recent runs",
   "recoveryHint": "Use Run Now or Edit to recover from this state.",
   "refresh": "Refresh",
   "remaining": "remaining",
   "requestElevation": "Request Elevation",
-  "requestElevationDescription": "Administrator privileges are required for this task",
   "requesting": "Requesting...",
   "resize": {
     "detailHandle": "Resize detail pane",
@@ -829,24 +785,17 @@
   "save": "Save Task",
   "saving": "Saving...",
   "schedule": "Schedule",
-  "scheduleBackup": "Schedule Backup",
-  "scheduleWorkflow": "Schedule Workflow",
-  "scheduleWorkflowAction": "Schedule Workflow",
-  "scheduleWorkflowDescription": "Set up automatic execution for {name}",
   "schedulerIdle": "Scheduler idle",
   "schedulerRunning": "Running",
   "schedulerStopped": "Scheduler stopped",
   "scheduling": "Scheduling...",
   "scriptPreview": "Script Preview",
   "scriptTask": "Script Task",
-  "scriptTaskDescription": "Configure a script to run as a custom task",
   "searchTasks": "Search tasks...",
-  "selectDependency": "Select a dependency task",
   "selectPreset": "Select a preset",
   "selectRow": "Select row",
   "selectSchedule": "Select a schedule",
   "selectTask": "Select a task",
-  "selectTaskDescription": "Choose a task from the list to view details",
   "selected": "selected",
   "settings": {
     "defaults": {
@@ -974,7 +923,6 @@
     "none": "No success chain configured",
     "title": "Run on success"
   },
-  "successFailed": "Success/Failed",
   "successRate": "Success Rate",
   "successful": "Successful",
   "systemAction": "Action",
@@ -984,7 +932,6 @@
   "systemRunLevel": "Run Level",
   "systemScheduler": "System Scheduler",
   "systemSchedulerDescription": "Manage OS-level scheduled tasks",
-  "systemSchedulerUnavailable": "System scheduler is unavailable in this environment",
   "systemTaskDescription": "Task Description",
   "systemTaskName": "Task Name",
   "systemTaskNotFound": "System task not found.",
@@ -1042,7 +989,6 @@
   "testChannel": "Test",
   "testFailed": "Test failed",
   "testSuccess": "Test passed",
-  "testWebhookFailed": "Webhook test failed",
   "testing": "Testing...",
   "time": "Time",
   "timeline": {
@@ -1071,13 +1017,6 @@
   "totalTasks": "Total Tasks",
   "trigger": "Trigger",
   "triggerConfig": "Trigger Configuration",
-  "triggerDescCronInvalid": "Invalid cron expression",
-  "triggerDescEvent": "On event: {type}",
-  "triggerDescEventNotConfigured": "Not configured",
-  "triggerDescInterval": "Every {minutes} minute(s)",
-  "triggerDescOnce": "Once at {time}",
-  "triggerDescOnceNoDate": "One-time (no date set)",
-  "triggerDescUnknown": "Unknown trigger type",
   "triggerKind": "Trigger kind",
   "triggerOnBoot": "On Boot",
   "triggerOnEvent": "On Event",
@@ -1114,19 +1053,9 @@
     "succeeded": "Succeeded"
   },
   "unknownKind": "No detail view for this kind.",
-  "unknownKindAppNote": "App tasks render via the task detail view.",
   "upcoming": "Upcoming",
-  "upcomingRail": {
-    "ariaLabel": "Upcoming and recent runs",
-    "empty": "Nothing scheduled",
-    "recentTitle": "Recent",
-    "title": "Upcoming"
-  },
-  "upcomingRuns": "Upcoming Runs",
   "upcomingTasks": "Upcoming Tasks",
   "useCustomCron": "Use custom cron expression",
-  "useScriptEditor": "Use script editor",
-  "viewTasks": "View Tasks",
   "warnings": "Warnings",
   "webhookPath": "Webhook path",
   "workflow": "Workflow",
@@ -1165,5 +1094,123 @@
     "plugin": "Plugin",
     "pluginHint": "A plugin set this up. You can pause or delete it here."
   },
-  "createTaskFailed": "The task could not be created."
+  "createTaskFailed": "The task could not be created.",
+  "outcome": {
+    "cellLabel": "{date}: {succeeded} succeeded, {failed} failed, {running} running",
+    "failed": "{count} failed",
+    "noRuns": "No finished runs",
+    "rate": "{rate}% success",
+    "stripLabel": "Outcomes over the last {days} days",
+    "succeeded": "{count} succeeded"
+  },
+  "runRow": {
+    "daysAgo": "{count}d ago",
+    "hoursAgo": "{count}h ago",
+    "justNow": "just now",
+    "minutesAgo": "{count}m ago"
+  },
+  "attention": {
+    "actions": {
+      "managePaired": "Manage the paired host",
+      "openPolicy": "Open policy",
+      "retry": "Retry",
+      "stop": "Stop"
+    },
+    "block": {
+      "autoPaused": "{name} paused itself after {count} consecutive failures",
+      "awaitingConfirmation": "{count, plural, one {# system task is waiting for your confirmation} other {# system tasks are waiting for your confirmation}}",
+      "consecutiveFailures": "{name} has failed {count} times in a row",
+      "hostSuspended": "This device's schedule is suspended while a paired host runs it",
+      "lastRunFailed": "{name} failed its last run",
+      "lastRunFailedWith": "{name} failed its last run: {error}",
+      "quotaNearLimit": "Tasks created by {source} are at {count} of the {limit} allowed",
+      "running": "{name} is running now",
+      "runningWithProcesses": "{name} is running now with {count} live processes",
+      "sourceFailed": "The {kind} source failed to load: {error}",
+      "unsupportedType": "{name} cannot run on this host"
+    },
+    "emptyNext": "Next up: {name} at {when}",
+    "emptyNothingScheduled": "Nothing is scheduled to run.",
+    "emptyTitle": "Nothing needs you",
+    "row": {
+      "autoPaused": "Paused itself after {count} failures",
+      "consecutiveFailures": "{count} failures in a row",
+      "lastRunFailed": "Last run failed",
+      "lastRunFailedWith": "Last run failed: {error}",
+      "running": "Running now",
+      "runningWithProcesses": "Running now, {count} live processes",
+      "unsupportedType": "Cannot run on this host"
+    }
+  },
+  "hostPopover": {
+    "firesTitle": "Timing authority",
+    "readsTitle": "This page manages",
+    "trigger": "Host"
+  },
+  "list": {
+    "checkAll": "Select every visible row",
+    "checkedCount": "{count} selected"
+  },
+  "agenda": {
+    "densityCell": "{date}: {count} runs",
+    "densityLabel": "Runs per day over the next {days} days",
+    "empty": "Nothing scheduled in the next two weeks",
+    "emptyDay": "Nothing scheduled that day",
+    "runsCount": "{count, plural, one {# run} other {# runs}}",
+    "today": "Today",
+    "tomorrow": "Tomorrow"
+  },
+  "kindSummary": {
+    "activeOfTotal": "{active}/{total} active"
+  },
+  "overviewPage": {
+    "agendaTitle": "Next {days} days",
+    "attentionTitle": "Needs you",
+    "kindsTitle": "By kind",
+    "noRuns": "No runs recorded yet",
+    "outcomesTitle": "Outcomes",
+    "recentRunsTitle": "Recent runs",
+    "stat": {
+      "active": "Active",
+      "running": "Running now",
+      "runs": "Runs, {days} days",
+      "successRate": "Success"
+    }
+  },
+  "detail": {
+    "cannot": {
+      "delete": "This kind is managed elsewhere and cannot be deleted here",
+      "edit": "This kind cannot be edited",
+      "pause": "This kind cannot be paused",
+      "runNow": "This kind cannot be run on demand"
+    },
+    "createdBy": "Created by",
+    "createdByUser": "You",
+    "degradedReasons": "The platform reports this task as degraded",
+    "identifier": "Identifier",
+    "metadataState": "Metadata",
+    "nextRunIn": "next {when}",
+    "noOsRunHistory": "The operating system keeps no run history for this task.",
+    "noSelectionBody": "Pick something from the list to see what it does, when it runs and what it has done.",
+    "noSelectionTitle": "Select a scheduled item",
+    "originTitle": "Origin",
+    "outcomesTitle": "Outcomes, 14 days",
+    "storage": "Stored in",
+    "tagsTitle": "Tags",
+    "updatedAt": "Updated",
+    "workspaceTitle": "Workspace"
+  },
+  "runSheet": {
+    "next": "Next run",
+    "position": "{index} of {total}",
+    "previous": "Previous run",
+    "progress": "{percent}% done",
+    "stillRunning": "still running"
+  },
+  "unifiedNames": {
+    "backup": "Automatic backup",
+    "backupDescription": "Encrypted backup to {path}",
+    "outboundQueue": "Outbound queue ({count})",
+    "outboundQueueDescription": "Connector outbound delivery queue"
+  }
 }

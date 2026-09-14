@@ -13,10 +13,6 @@ import {
   selectStatistics,
   selectSelectedTaskId,
   selectSelectedTask,
-  selectActiveTasks,
-  selectPausedTasks,
-  selectUpcomingTasks,
-  selectRecentExecutions,
   selectSchedulerStatus,
   selectFilter,
   selectIsLoading,
@@ -34,10 +30,6 @@ export function useScheduler() {
   const statistics = useSchedulerStore(selectStatistics)
   const selectedTaskId = useSchedulerStore(selectSelectedTaskId)
   const selectedTask = useSchedulerStore(selectSelectedTask)
-  const activeTasks = useSchedulerStore(selectActiveTasks)
-  const pausedTasks = useSchedulerStore(selectPausedTasks)
-  const upcomingTasks = useSchedulerStore(selectUpcomingTasks)
-  const recentExecutions = useSchedulerStore(selectRecentExecutions)
   const schedulerStatus = useSchedulerStore(selectSchedulerStatus)
   const filter = useSchedulerStore(selectFilter)
   const isLoading = useSchedulerStore(selectIsLoading)
@@ -136,10 +128,6 @@ export function useScheduler() {
     statistics,
     selectedTaskId,
     selectedTask,
-    activeTasks,
-    pausedTasks,
-    upcomingTasks,
-    recentExecutions,
     schedulerStatus,
     filter,
     isLoading,
@@ -164,13 +152,8 @@ export function useScheduler() {
     refresh: store.refreshAll,
     clearError: store.clearError,
     loadMoreExecutions: store.loadMoreExecutions,
-    loadRecentExecutions: store.loadRecentExecutions,
-    loadUpcomingTasks: store.loadUpcomingTasks,
     cleanupOldExecutions: store.cleanupOldExecutions,
     cancelExecution: store.cancelExecution,
-    cancelPluginExecution: store.cancelPluginExecution,
-    getActivePluginCount: store.getActivePluginCount,
-    isPluginExecutionActive: store.isPluginExecutionActive,
 
     // Import/Export & Clone
     exportTasks: store.exportTasks,

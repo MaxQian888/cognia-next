@@ -4,23 +4,7 @@
  */
 
 import { act, renderHook } from "@testing-library/react"
-import {
-  useSchedulerStore,
-  selectSelectedTask,
-  selectActiveTasks,
-  selectPausedTasks,
-  selectUpcomingTasks,
-  selectRecentExecutions,
-  selectSchedulerStatus,
-  selectTasks,
-  selectExecutions,
-  selectStatistics,
-  selectSelectedTaskId,
-  selectFilter,
-  selectIsLoading,
-  selectError,
-  selectIsInitialized,
-} from "./scheduler-store"
+import { useSchedulerStore, selectSelectedTask, selectSchedulerStatus } from "./scheduler-store"
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 
 // Mock the scheduler modules. Variables prefixed with `mock` are allowed in
@@ -338,36 +322,38 @@ describe("useSchedulerStore", () => {
 
       // Add a mock task first
       act(() => {
-        result.current.setTasks([
-          {
-            id: "task-to-delete",
-            name: "Task to Delete",
-            type: "workflow",
-            status: "active",
-            trigger: { type: "cron", cronExpression: "0 9 * * *" },
-            payload: {},
-            config: {
-              timeout: 300000,
-              maxRetries: 3,
-              retryDelay: 5000,
-              runMissedOnStartup: false,
-              maxMissedRuns: 1,
-              allowConcurrent: false,
+        useSchedulerStore.setState({
+          tasks: [
+            {
+              id: "task-to-delete",
+              name: "Task to Delete",
+              type: "workflow",
+              status: "active",
+              trigger: { type: "cron", cronExpression: "0 9 * * *" },
+              payload: {},
+              config: {
+                timeout: 300000,
+                maxRetries: 3,
+                retryDelay: 5000,
+                runMissedOnStartup: false,
+                maxMissedRuns: 1,
+                allowConcurrent: false,
+              },
+              notification: {
+                onStart: false,
+                onComplete: true,
+                onError: true,
+                onProgress: false,
+                channels: ["toast"],
+              },
+              runCount: 0,
+              successCount: 0,
+              failureCount: 0,
+              createdAt: new Date(),
+              updatedAt: new Date(),
             },
-            notification: {
-              onStart: false,
-              onComplete: true,
-              onError: true,
-              onProgress: false,
-              channels: ["toast"],
-            },
-            runCount: 0,
-            successCount: 0,
-            failureCount: 0,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          },
-        ])
+          ],
+        })
       })
 
       await act(async () => {
@@ -411,7 +397,7 @@ describe("useSchedulerStore", () => {
       }
 
       act(() => {
-        result.current.setTasks([mockTask])
+        useSchedulerStore.setState({ tasks: [mockTask] })
         result.current.selectTask("task-1")
       })
 
@@ -426,10 +412,56 @@ describe("useSchedulerStore", () => {
       })
 
       act(() => {
-        result.current.clearSelection()
+        result.current.selectTask(null)
       })
 
       expect(result.current.selectedTaskId).toBeNull()
+    })
+  })
+
+  describe("Unified list filter", () => {
+    it("starts unset, merges patches, toggles kinds, and resets", () => {
+      const { result } = renderHook(() => useSchedulerStore())
+      expect(result.current.listFilter).toEqual({
+        search: "",
+        status: "all",
+        kinds: [],
+        loopOnly: false,
+      })
+
+      act(() => {
+        result.current.setListFilter({ search: "nightly", status: "paused" })
+      })
+      expect(result.current.listFilter).toMatchObject({ search: "nightly", status: "paused" })
+
+      act(() => {
+        result.current.toggleListKind("workflow")
+        result.current.toggleListKind("backup")
+        result.current.toggleListKind("workflow")
+      })
+      expect(result.current.listFilter.kinds).toEqual(["backup"])
+
+      act(() => {
+        result.current.resetListFilter()
+      })
+      expect(result.current.listFilter.kinds).toEqual([])
+      expect(result.current.listFilter.search).toBe("")
+    })
+
+    it("does not re-query the app scheduler on a list-filter change", async () => {
+      const { result } = renderHook(() => useSchedulerStore())
+      const reads = () =>
+        mockedDb.getAllTasks.mock.calls.length + mockedDb.getFilteredTasks.mock.calls.length
+      const before = reads()
+      act(() => {
+        result.current.setListFilter({ search: "x" })
+        result.current.toggleListKind("app")
+        result.current.resetListFilter()
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(reads()).toBe(before)
     })
   })
 
@@ -486,124 +518,7 @@ describe("useSchedulerStore", () => {
     })
   })
 
-  describe("Selectors", () => {
-    it("should select active tasks", () => {
-      const { result } = renderHook(() => useSchedulerStore())
-
-      const activeTasks: ScheduledTask[] = [
-        {
-          id: "active-1",
-          name: "Active Task",
-          type: "workflow",
-          status: "active",
-          trigger: { type: "cron", cronExpression: "0 9 * * *" },
-          payload: {},
-          config: {
-            timeout: 300000,
-            maxRetries: 3,
-            retryDelay: 5000,
-            runMissedOnStartup: false,
-            maxMissedRuns: 1,
-            allowConcurrent: false,
-          },
-          notification: {
-            onStart: false,
-            onComplete: true,
-            onError: true,
-            onProgress: false,
-            channels: ["toast"],
-          },
-          runCount: 0,
-          successCount: 0,
-          failureCount: 0,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-        {
-          id: "paused-1",
-          name: "Paused Task",
-          type: "workflow",
-          status: "paused",
-          trigger: { type: "cron", cronExpression: "0 9 * * *" },
-          payload: {},
-          config: {
-            timeout: 300000,
-            maxRetries: 3,
-            retryDelay: 5000,
-            runMissedOnStartup: false,
-            maxMissedRuns: 1,
-            allowConcurrent: false,
-          },
-          notification: {
-            onStart: false,
-            onComplete: true,
-            onError: true,
-            onProgress: false,
-            channels: ["toast"],
-          },
-          runCount: 0,
-          successCount: 0,
-          failureCount: 0,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      ]
-
-      act(() => {
-        result.current.setTasks(activeTasks)
-      })
-
-      const active = result.current.tasks.filter((t) => t.status === "active")
-      expect(active.length).toBe(1)
-      expect(active[0].id).toBe("active-1")
-    })
-
-    it("should select upcoming tasks", () => {
-      const { result } = renderHook(() => useSchedulerStore())
-
-      const futureDate = new Date()
-      futureDate.setHours(futureDate.getHours() + 1)
-
-      const tasks: ScheduledTask[] = [
-        {
-          id: "upcoming-1",
-          name: "Upcoming Task",
-          type: "workflow",
-          status: "active",
-          trigger: { type: "cron", cronExpression: "0 9 * * *" },
-          payload: {},
-          config: {
-            timeout: 300000,
-            maxRetries: 3,
-            retryDelay: 5000,
-            runMissedOnStartup: false,
-            maxMissedRuns: 1,
-            allowConcurrent: false,
-          },
-          notification: {
-            onStart: false,
-            onComplete: true,
-            onError: true,
-            onProgress: false,
-            channels: ["toast"],
-          },
-          runCount: 0,
-          successCount: 0,
-          failureCount: 0,
-          nextRunAt: futureDate,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      ]
-
-      act(() => {
-        result.current.setTasks(tasks)
-      })
-
-      const upcoming = result.current.tasks.filter((t) => t.nextRunAt && t.nextRunAt > new Date())
-      expect(upcoming.length).toBe(1)
-    })
-  })
+  describe("Selectors", () => {})
 
   describe("Statistics", () => {
     it("should load statistics", async () => {
@@ -811,7 +726,7 @@ describe("useSchedulerStore", () => {
     it("clears the selected task and refreshes when the deletion succeeds", async () => {
       const { result } = renderHook(() => useSchedulerStore())
       act(() => {
-        result.current.setTasks([sampleTask({ id: "task-1" })])
+        useSchedulerStore.setState({ tasks: [sampleTask({ id: "task-1" })] })
         result.current.selectTask("task-1")
       })
 
@@ -847,7 +762,7 @@ describe("useSchedulerStore", () => {
     it("does not clear unrelated selection on success", async () => {
       const { result } = renderHook(() => useSchedulerStore())
       act(() => {
-        result.current.setTasks([sampleTask({ id: "other" })])
+        useSchedulerStore.setState({ tasks: [sampleTask({ id: "other" })] })
         result.current.selectTask("other")
       })
       await act(async () => {
@@ -1235,48 +1150,6 @@ describe("useSchedulerStore", () => {
       })
       expect(result.current.statistics).toBeNull()
     })
-
-    it("loadRecentExecutions stores executions and uses default limit", async () => {
-      mockedDb.getRecentExecutions.mockResolvedValueOnce([
-        { id: "r-1", taskId: "a", status: "completed", startedAt: new Date() },
-      ])
-      const { result } = renderHook(() => useSchedulerStore())
-      await act(async () => {
-        await result.current.loadRecentExecutions()
-      })
-      expect(mockedDb.getRecentExecutions).toHaveBeenCalledWith(50)
-      expect(result.current.recentExecutions).toHaveLength(1)
-    })
-
-    it("loadRecentExecutions accepts a custom limit and swallows errors", async () => {
-      mockedDb.getRecentExecutions.mockRejectedValueOnce(new Error("db"))
-      const { result } = renderHook(() => useSchedulerStore())
-      await act(async () => {
-        await result.current.loadRecentExecutions(5)
-      })
-      expect(mockedDb.getRecentExecutions).toHaveBeenCalledWith(5)
-      expect(result.current.recentExecutions).toEqual([])
-    })
-
-    it("loadUpcomingTasks stores tasks with default limit", async () => {
-      mockedDb.getUpcomingTasks.mockResolvedValueOnce([sampleTask({ id: "u-1" })])
-      const { result } = renderHook(() => useSchedulerStore())
-      await act(async () => {
-        await result.current.loadUpcomingTasks()
-      })
-      expect(mockedDb.getUpcomingTasks).toHaveBeenCalledWith(10)
-      expect(result.current.upcomingTasks).toHaveLength(1)
-    })
-
-    it("loadUpcomingTasks honors a custom limit and swallows errors", async () => {
-      mockedDb.getUpcomingTasks.mockRejectedValueOnce(new Error("db"))
-      const { result } = renderHook(() => useSchedulerStore())
-      await act(async () => {
-        await result.current.loadUpcomingTasks(3)
-      })
-      expect(mockedDb.getUpcomingTasks).toHaveBeenCalledWith(3)
-      expect(result.current.upcomingTasks).toEqual([])
-    })
   })
 
   describe("refreshAll", () => {
@@ -1586,25 +1459,6 @@ describe("useSchedulerStore", () => {
     })
   })
 
-  describe("Plugin execution helpers", () => {
-    it("cancelPluginExecution delegates to the plugin executor", () => {
-      const { result } = renderHook(() => useSchedulerStore())
-      const ok = result.current.cancelPluginExecution("exec-1")
-      expect(ok).toBe(true)
-      expect(pluginExecutorMock.cancelPluginTaskExecution).toHaveBeenCalledWith("exec-1")
-    })
-
-    it("getActivePluginCount delegates to the plugin executor", () => {
-      const { result } = renderHook(() => useSchedulerStore())
-      expect(result.current.getActivePluginCount()).toBe(2)
-    })
-
-    it("isPluginExecutionActive delegates to the plugin executor", () => {
-      const { result } = renderHook(() => useSchedulerStore())
-      expect(result.current.isPluginExecutionActive("exec-1")).toBe(true)
-    })
-  })
-
   describe("Permission management", () => {
     it("updatePermissionPolicy merges patches", () => {
       const { result } = renderHook(() => useSchedulerStore())
@@ -1770,46 +1624,11 @@ describe("Scheduler selectors", () => {
     expect(selectSelectedTask(useSchedulerStore.getState())).toEqual(task)
   })
 
-  it("selectActiveTasks / selectPausedTasks / selectUpcomingTasks derive correctly", async () => {
-    // selectors imported statically
-    const future = new Date(Date.now() + 60_000)
-    const past = new Date(Date.now() - 60_000)
-    const tasks: ScheduledTask[] = [
-      sampleTask({ id: "a", status: "active", nextRunAt: future }),
-      sampleTask({ id: "b", status: "paused" }),
-      sampleTask({ id: "c", status: "active", nextRunAt: past }),
-    ]
+  it("selectSchedulerStatus reads the status", () => {
     act(() => {
-      useSchedulerStore.setState({
-        tasks,
-        recentExecutions: [
-          { id: "r-1", taskId: "a", status: "completed", startedAt: new Date() } as TaskExecution,
-        ],
-        schedulerStatus: "running",
-        statistics: null,
-      })
+      useSchedulerStore.setState({ schedulerStatus: "running" })
     })
-    const state = useSchedulerStore.getState()
-    expect(
-      selectActiveTasks(state)
-        .map((t) => t.id)
-        .sort()
-    ).toEqual(["a", "c"])
-    expect(selectPausedTasks(state).map((t) => t.id)).toEqual(["b"])
-    expect(selectUpcomingTasks(state).map((t) => t.id)).toEqual(["a"])
-    // Caching: same source → same reference returned
-    expect(selectUpcomingTasks(state)).toBe(selectUpcomingTasks(state))
-    expect(selectRecentExecutions(state)).toHaveLength(1)
-    expect(selectSchedulerStatus(state)).toBe("running")
-    // The remaining cheap selectors return the same identity:
-    expect(selectTasks(state)).toBe(state.tasks)
-    expect(selectExecutions(state)).toBe(state.executions)
-    expect(selectStatistics(state)).toBe(state.statistics)
-    expect(selectSelectedTaskId(state)).toBe(state.selectedTaskId)
-    expect(selectFilter(state)).toBe(state.filter)
-    expect(selectIsLoading(state)).toBe(state.isLoading)
-    expect(selectError(state)).toBe(state.error)
-    expect(selectIsInitialized(state)).toBe(state.isInitialized)
+    expect(selectSchedulerStatus(useSchedulerStore.getState())).toBe("running")
   })
 })
 
@@ -1818,10 +1637,6 @@ describe("stores/scheduler index barrel", () => {
     const barrel = jest.requireMock("./index")
     expect(typeof barrel.useSchedulerStore).toBe("function")
     expect(typeof barrel.selectTasks).toBe("function")
-    expect(typeof barrel.selectActiveTasks).toBe("function")
-    expect(typeof barrel.selectPausedTasks).toBe("function")
-    expect(typeof barrel.selectUpcomingTasks).toBe("function")
-    expect(typeof barrel.selectRecentExecutions).toBe("function")
     expect(typeof barrel.selectSchedulerStatus).toBe("function")
     expect(typeof barrel.selectSelectedTask).toBe("function")
   })

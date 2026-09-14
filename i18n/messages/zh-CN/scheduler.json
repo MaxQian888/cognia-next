@@ -5,7 +5,6 @@
   "actionFailed": "无法更新“{name}”",
   "actionScript": "脚本",
   "active": "活跃",
-  "activePlugins": "{count} 个插件",
   "activeTasks": "运行中",
   "adapter": "适配器",
   "additionalDirectories": {
@@ -25,8 +24,6 @@
   "allowConcurrent": "允许并发",
   "appArgs": "应用参数",
   "appPath": "应用路径",
-  "appScheduler": "应用调度器",
-  "appTasks": "应用任务",
   "authority": {
     "graceLabel": "宽限期",
     "graceMinutes": "{minutes} 分钟",
@@ -126,10 +123,6 @@
   "bulkDeleteTitle": "删除已选任务？",
   "bulkPartialFailure": "{count, plural, other {# 个条目未能更新}}",
   "bulkPartialFailureMore": "{hidden, plural, other {等另外 # 个}}",
-  "bulkPause": "暂停",
-  "bulkResume": "恢复",
-  "bulkSelect": "多选",
-  "bulkSelectTooltip": "切换多选模式",
   "calendar": {
     "aria": "运行计划月历",
     "dayAria": "{day} 日，{count} 个运行计划",
@@ -197,15 +190,12 @@
     "onWeekends": "在周末"
   },
   "cronExpression": "Cron 表达式",
-  "cronHelp": "格式：分钟 小时 日 月 周",
-  "cronMatchingNow": "Cron 匹配当前时间",
   "cronPreset": {
     "custom": "自定义",
     "daily": "每天 9:00",
     "hourly": "每小时",
     "weeklyMon": "每周一 9:00"
   },
-  "cronPresets": "快速时间表",
   "cronRequired": "请填写 Cron 表达式",
   "cronTriggerLabel": "Cron 触发器",
   "dashboard": {
@@ -216,12 +206,6 @@
     "noRunsYet": "尚无运行记录",
     "running": "运行中",
     "title": "仪表盘"
-  },
-  "dashboardView": {
-    "aria": "仪表盘视图",
-    "calendar": "月历",
-    "overview": "总览",
-    "timeline": "时间线"
   },
   "date": "日期",
   "dateInPast": "计划时间必须在未来",
@@ -251,7 +235,6 @@
     "title": "依赖关系"
   },
   "dependsOn": "依赖任务",
-  "dependsOnDescription": "必须在此任务运行前完成的任务",
   "description": "描述",
   "descriptionPlaceholder": "描述此任务的用途",
   "destination": "目标位置",
@@ -276,9 +259,7 @@
   "errorDescription": "调度器遇到意外错误。这可能是数据库问题或数据损坏导致的。",
   "errorTitle": "出了点问题",
   "eventSource": "事件来源过滤（可选）",
-  "eventSourceHelp": "设置后，仅当事件由该来源派发时任务才会触发。",
   "eventSourceLiteralPlaceholder": "来源",
-  "eventSourcePlaceholder": "留空则匹配任意来源",
   "eventType": "事件类型",
   "eventTypeCustomLabel": "自定义事件类型…",
   "eventTypePlaceholder": "例如 message.created、workflow.completed",
@@ -308,7 +289,6 @@
     "retryAt": "重试时间",
     "scheduledFor": "计划时间"
   },
-  "executionConfig": "执行配置",
   "executionStatuses": {
     "cancelled": "已取消",
     "completed": "已完成",
@@ -343,7 +323,6 @@
     "loopOnly": "仅 /loop 任务"
   },
   "finishedAt": "结束时间",
-  "footerSuccess": "成功率",
   "formatExpression": "格式化表达式",
   "handler": "处理函数",
   "host": {
@@ -394,16 +373,10 @@
     "replaceWarning": "导入前将删除所有现有任务",
     "selectFile": "选择 JSON 文件"
   },
-  "importMerge": "合并",
-  "importModeDescription": "选择如何处理已有任务",
-  "importModeTitle": "导入模式",
-  "importReplace": "替换全部",
   "importSuccess": "成功导入 {count} 个任务",
   "importTasks": "导入任务",
   "initializing": "正在初始化调度器...",
-  "inspectDegradedTask": "查看降级任务",
   "interval": "间隔",
-  "intervalDuration": "运行频率",
   "intervalMinutes": "间隔（分钟）",
   "intervalSeconds": "间隔（秒）",
   "intervalTooShort": "间隔至少为 1 分钟",
@@ -458,8 +431,6 @@
     },
     "serverListLabel": "可用 MCP 服务器"
   },
-  "metadataDegraded": "任务元数据不完整，编辑能力受限",
-  "metadataDegradedEditHint": "任务元数据不完整，无法安全编辑",
   "mobile": {
     "fabCreateAria": "新建计划任务",
     "statStripLabels": {
@@ -479,15 +450,8 @@
   "noDependencies": "无依赖",
   "noExecutions": "暂无执行记录",
   "noExecutionsYet": "暂无执行记录",
-  "noRecentDispatches": "暂无最近发送。",
-  "noRecentExecutions": "暂无执行记录",
-  "noRecentRuns": "暂无最近运行。",
   "noSchedule": "未设置计划",
-  "noScheduledRun": "暂无计划运行",
-  "noSystemTasks": "暂无系统任务",
   "noTasks": "暂无定时任务",
-  "noTasksDescription": "创建一个定时任务以自动化你的工作流",
-  "noUpcomingTasks": "暂无即将执行的任务",
   "notificationChannels": "通知渠道",
   "notificationConfig": "通知配置",
   "notificationSettings": {
@@ -518,10 +482,6 @@
   "notifyOnProgress": "进度更新时通知",
   "notifyOnProgressHint": "只有会上报中途进度的任务类型才会触发（目前是插件任务）。",
   "notifyOnStart": "开始时通知",
-  "occurrenceList": {
-    "moreTimes": "另有 {count} 次",
-    "rowAria": "{name}，未来 {count} 次执行"
-  },
   "onBootDelaySeconds": "开机延迟（秒）",
   "onEventId": "事件 ID",
   "onEventSource": "事件来源",
@@ -716,7 +676,6 @@
       "maxRuntimeHelp": "超过这个时长仍在运行的进程会被结束。留空表示一直运行到自然结束或应用关闭。"
     }
   },
-  "payloadDescription": "传递给执行器的数据",
   "payloadEditorMode": {
     "toJson": "切换到 JSON 编辑",
     "toStructured": "使用结构化编辑器"
@@ -793,17 +752,14 @@
     "scheduleBackup": "安排备份",
     "scheduleWorkflow": "安排工作流"
   },
-  "quickActionsLabel": "快捷操作",
   "quickCreateWorkflowTrigger": "创建工作流触发器",
   "quickCreateWorkflowTriggerDescription": "无需打开工作流编辑器，直接为已有工作流添加 cron 触发器。",
-  "recentDispatches": "最近发送",
   "recentExecutions": "最近执行记录",
   "recentRuns": "最近运行",
   "recoveryHint": "可使用“立即运行”或“编辑”进行恢复。",
   "refresh": "刷新",
   "remaining": "剩余",
   "requestElevation": "请求提权",
-  "requestElevationDescription": "该任务需要管理员权限",
   "requesting": "请求中...",
   "resize": {
     "detailHandle": "调整详情面板宽度",
@@ -829,24 +785,17 @@
   "save": "保存任务",
   "saving": "保存中...",
   "schedule": "计划",
-  "scheduleBackup": "安排备份",
-  "scheduleWorkflow": "安排工作流",
-  "scheduleWorkflowAction": "安排工作流",
-  "scheduleWorkflowDescription": "为 {name} 设置自动执行",
   "schedulerIdle": "调度器空闲",
   "schedulerRunning": "运行中",
   "schedulerStopped": "调度器已停止",
   "scheduling": "正在安排...",
   "scriptPreview": "脚本预览",
   "scriptTask": "脚本任务",
-  "scriptTaskDescription": "配置脚本作为自定义任务执行",
   "searchTasks": "搜索任务...",
-  "selectDependency": "选择依赖任务",
   "selectPreset": "选择预设",
   "selectRow": "选择此行",
   "selectSchedule": "选择时间表",
   "selectTask": "选择任务",
-  "selectTaskDescription": "从列表中选择任务以查看详情",
   "selected": "已选",
   "settings": {
     "defaults": {
@@ -974,7 +923,6 @@
     "none": "未配置成功链",
     "title": "成功后运行"
   },
-  "successFailed": "成功/失败",
   "successRate": "成功率",
   "successful": "成功",
   "systemAction": "动作",
@@ -984,7 +932,6 @@
   "systemRunLevel": "运行级别",
   "systemScheduler": "系统调度器",
   "systemSchedulerDescription": "管理系统级定时任务",
-  "systemSchedulerUnavailable": "当前环境不可用系统调度器",
   "systemTaskDescription": "任务描述",
   "systemTaskName": "任务名称",
   "systemTaskNotFound": "未找到该系统任务。",
@@ -1042,7 +989,6 @@
   "testChannel": "测试",
   "testFailed": "测试失败",
   "testSuccess": "测试通过",
-  "testWebhookFailed": "Webhook 测试失败",
   "testing": "测试中...",
   "time": "时间",
   "timeline": {
@@ -1071,13 +1017,6 @@
   "totalTasks": "任务总数",
   "trigger": "触发器",
   "triggerConfig": "触发配置",
-  "triggerDescCronInvalid": "无效的 Cron 表达式",
-  "triggerDescEvent": "事件触发：{type}",
-  "triggerDescEventNotConfigured": "未配置",
-  "triggerDescInterval": "每 {minutes} 分钟",
-  "triggerDescOnce": "在 {time} 执行一次",
-  "triggerDescOnceNoDate": "单次执行（未设置日期）",
-  "triggerDescUnknown": "未知触发类型",
   "triggerKind": "触发器类型",
   "triggerOnBoot": "开机触发",
   "triggerOnEvent": "事件触发",
@@ -1114,19 +1053,9 @@
     "succeeded": "已成功"
   },
   "unknownKind": "该类型暂无详情视图。",
-  "unknownKindAppNote": "应用任务通过任务详情视图渲染。",
   "upcoming": "即将执行",
-  "upcomingRail": {
-    "ariaLabel": "即将执行与最近运行",
-    "empty": "暂无计划",
-    "recentTitle": "最近运行",
-    "title": "即将执行"
-  },
-  "upcomingRuns": "即将执行",
   "upcomingTasks": "即将执行的任务",
   "useCustomCron": "使用自定义 Cron 表达式",
-  "useScriptEditor": "使用脚本编辑器",
-  "viewTasks": "查看任务",
   "warnings": "警告",
   "webhookPath": "Webhook 路径",
   "workflow": "工作流",
@@ -1165,5 +1094,123 @@
     "plugin": "插件",
     "pluginHint": "这是插件设置的。你可以在这里暂停或删除它。"
   },
-  "createTaskFailed": "无法创建这个任务。"
+  "createTaskFailed": "无法创建这个任务。",
+  "outcome": {
+    "cellLabel": "{date}：成功 {succeeded}，失败 {failed}，运行中 {running}",
+    "failed": "失败 {count}",
+    "noRuns": "暂无已完成的运行",
+    "rate": "成功率 {rate}%",
+    "stripLabel": "最近 {days} 天的运行结果",
+    "succeeded": "成功 {count}"
+  },
+  "runRow": {
+    "daysAgo": "{count} 天前",
+    "hoursAgo": "{count} 小时前",
+    "justNow": "刚刚",
+    "minutesAgo": "{count} 分钟前"
+  },
+  "attention": {
+    "actions": {
+      "managePaired": "管理配对主机",
+      "openPolicy": "打开策略",
+      "retry": "重试",
+      "stop": "停止"
+    },
+    "block": {
+      "autoPaused": "{name} 连续失败 {count} 次后已自动暂停",
+      "awaitingConfirmation": "{count} 个系统任务等待你确认",
+      "consecutiveFailures": "{name} 已连续失败 {count} 次",
+      "hostSuspended": "配对主机接管期间，本设备的计划表已挂起",
+      "lastRunFailed": "{name} 上次运行失败",
+      "lastRunFailedWith": "{name} 上次运行失败：{error}",
+      "quotaNearLimit": "由 {source} 创建的任务已达 {count}/{limit}",
+      "running": "{name} 正在运行",
+      "runningWithProcesses": "{name} 正在运行，有 {count} 个活动进程",
+      "sourceFailed": "{kind} 数据源加载失败：{error}",
+      "unsupportedType": "{name} 无法在此主机上运行"
+    },
+    "emptyNext": "下一个：{name}，{when}",
+    "emptyNothingScheduled": "没有计划中的运行。",
+    "emptyTitle": "没有需要你处理的事",
+    "row": {
+      "autoPaused": "连续失败 {count} 次后已自动暂停",
+      "consecutiveFailures": "已连续失败 {count} 次",
+      "lastRunFailed": "上次运行失败",
+      "lastRunFailedWith": "上次运行失败：{error}",
+      "running": "正在运行",
+      "runningWithProcesses": "正在运行，{count} 个活动进程",
+      "unsupportedType": "此主机无法运行"
+    }
+  },
+  "hostPopover": {
+    "firesTitle": "计时权",
+    "readsTitle": "本页管理的是",
+    "trigger": "主机"
+  },
+  "list": {
+    "checkAll": "选择所有可见行",
+    "checkedCount": "已选 {count} 项"
+  },
+  "agenda": {
+    "densityCell": "{date}：{count} 次运行",
+    "densityLabel": "未来 {days} 天每天的运行次数",
+    "empty": "未来两周没有计划中的运行",
+    "emptyDay": "这一天没有计划中的运行",
+    "runsCount": "{count} 次运行",
+    "today": "今天",
+    "tomorrow": "明天"
+  },
+  "kindSummary": {
+    "activeOfTotal": "{active}/{total} 活动"
+  },
+  "overviewPage": {
+    "agendaTitle": "未来 {days} 天",
+    "attentionTitle": "需要处理",
+    "kindsTitle": "按类型",
+    "noRuns": "尚无运行记录",
+    "outcomesTitle": "运行结果",
+    "recentRunsTitle": "最近运行",
+    "stat": {
+      "active": "活动",
+      "running": "运行中",
+      "runs": "{days} 天运行数",
+      "successRate": "成功率"
+    }
+  },
+  "detail": {
+    "cannot": {
+      "delete": "此类型在别处管理，不能在此删除",
+      "edit": "此类型不能编辑",
+      "pause": "此类型不能暂停",
+      "runNow": "此类型不能手动运行"
+    },
+    "createdBy": "创建者",
+    "createdByUser": "你",
+    "degradedReasons": "平台报告此任务处于降级状态",
+    "identifier": "标识",
+    "metadataState": "元数据",
+    "nextRunIn": "下次 {when}",
+    "noOsRunHistory": "操作系统不保留此任务的运行记录。",
+    "noSelectionBody": "从列表中选择一项，查看它做什么、何时运行以及运行记录。",
+    "noSelectionTitle": "选择一个计划项",
+    "originTitle": "来源",
+    "outcomesTitle": "14 天运行结果",
+    "storage": "存储位置",
+    "tagsTitle": "标签",
+    "updatedAt": "更新时间",
+    "workspaceTitle": "工作区"
+  },
+  "runSheet": {
+    "next": "下一次运行",
+    "position": "第 {index} / {total} 条",
+    "previous": "上一次运行",
+    "progress": "已完成 {percent}%",
+    "stillRunning": "仍在运行"
+  },
+  "unifiedNames": {
+    "backup": "自动备份",
+    "backupDescription": "加密备份到 {path}",
+    "outboundQueue": "出站队列（{count}）",
+    "outboundQueueDescription": "连接器出站投递队列"
+  }
 }

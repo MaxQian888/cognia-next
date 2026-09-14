@@ -70,11 +70,23 @@ export function toUnifiedFromBackupHistory(row: BackupHistoryRow): UnifiedExecut
   }
 }
 
+/**
+ * The outbound queue's rollup item id, spelled here rather than imported from
+ * `connector-source.ts` (which imports this module).
+ */
+export const CONNECTOR_QUEUE_ITEM_ID = makeUnifiedId("connector", "outbound:queue")
+
+/**
+ * An audit row is a delivery the outbound queue made or failed to make, so it
+ * belongs to the queue rollup item. It used to point at `connector:<adapterId>`,
+ * an id no item has ever carried, so no detail could show these runs and the
+ * run sheet had nothing to open.
+ */
 export function toUnifiedFromAudit(row: ConnectorAuditRow): UnifiedExecutionRun {
   return {
     unifiedId: makeUnifiedId("connector", row.id),
     kind: "connector",
-    itemUnifiedId: makeUnifiedId("connector", row.adapterId),
+    itemUnifiedId: CONNECTOR_QUEUE_ITEM_ID,
     itemName: row.adapterId,
     status: mapAuditKind(row.kind),
     startedAt: row.at,

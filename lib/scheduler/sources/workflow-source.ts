@@ -122,7 +122,7 @@ export function createWorkflowSource(
     kind: "workflow",
 
     subscribe(observer: ScheduledItemSourceObserver): ScheduledItemSubscription {
-      const sub = observe(() => db.workflowTriggers.toArray()).subscribe({
+      const sub = observe(() => listTriggersWithNames(db)).subscribe({
         next: (rows: WorkflowTriggerRow[]) => observer.next(rows.map(toUnifiedTrigger)),
         error: (err: unknown) => observer.error?.(err),
       })
@@ -130,7 +130,7 @@ export function createWorkflowSource(
     },
 
     async list(): Promise<UnifiedScheduledItem[]> {
-      const rows = await db.workflowTriggers.toArray()
+      const rows = await listTriggersWithNames(db)
       return rows.map(toUnifiedTrigger)
     },
 
@@ -140,7 +140,9 @@ export function createWorkflowSource(
 
     async get(sourceId: string): Promise<UnifiedScheduledItem | undefined> {
       const row = await db.workflowTriggers.get(sourceId)
-      return row ? toUnifiedTrigger(row) : undefined
+      if (!row) return undefined
+      const workflow = await db.workflows.get(row.workflowId)
+      return toUnifiedTrigger({ ...row, workflowName: workflow?.name })
     },
 
     create(): Promise<UnifiedScheduledItem> {
@@ -188,13 +190,34 @@ export function createWorkflowSource(
   }
 }
 
-export function toUnifiedTrigger(row: WorkflowTriggerRow): UnifiedScheduledItem {
+/** A trigger row with its workflow's name resolved, so the list can say "Deploy" rather than an id. */
+export type WorkflowTriggerRowWithName = WorkflowTriggerRow & { workflowName?: string }
+
+/**
+ * Every trigger with its workflow's name. One `workflows.get` per distinct
+ * workflow; under `Dexie.liveQuery` both tables are tracked, so a renamed
+ * workflow re-emits.
+ */
+async function listTriggersWithNames(db: WorkflowSourceDb): Promise<WorkflowTriggerRowWithName[]> {
+  const rows = await db.workflowTriggers.toArray()
+  const ids = Array.from(new Set(rows.map((row) => row.workflowId)))
+  const names = new Map<string, string | undefined>()
+  await Promise.all(
+    ids.map(async (id) => {
+      const workflow = await db.workflows.get(id)
+      names.set(id, workflow?.name)
+    })
+  )
+  return rows.map((row) => ({ ...row, workflowName: names.get(row.workflowId) }))
+}
+
+export function toUnifiedTrigger(row: WorkflowTriggerRowWithName): UnifiedScheduledItem {
   return {
     unifiedId: makeUnifiedId("workflow", row.id),
     kind: "workflow",
     sourceId: row.id,
     name: workflowTriggerName(row),
-    description: row.kind,
+    description: row.workflowName ? row.kind : undefined,
     status: mapWorkflowStatus(row),
     triggerSummary: {
       type: row.kind === "trigger.cron" ? "cron" : "event",
@@ -216,9 +239,9 @@ export function toUnifiedTrigger(row: WorkflowTriggerRow): UnifiedScheduledItem 
   }
 }
 
-function workflowTriggerName(row: WorkflowTriggerRow): string {
+function workflowTriggerName(row: WorkflowTriggerRowWithName): string {
   const head = row.cron ? row.cron : row.webhookPath ? `webhook ${row.webhookPath}` : row.kind
-  return `${row.workflowId} · ${head}`
+  return `${row.workflowName ?? row.workflowId} · ${head}`
 }
 
 function mapWorkflowStatus(row: WorkflowTriggerRow): UnifiedItemStatus {

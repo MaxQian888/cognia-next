@@ -12,7 +12,7 @@
  *
  * Persisted on `AppSettings.mcpPanel` via `useSettingsStore.save()` — the same
  * cross-device settings singleton that backs `useGoalConsoleView` /
- * `useSchedulerDashboardView`, so the chosen layout follows the user across
+ * `useGoalConsoleView`, so the chosen layout follows the user across
  * devices (no localStorage, no Dexie migration). Favorites mirror the
  * `discoverFavorites` / `pinnedWorkflowIds` JSON-array pattern.
  */

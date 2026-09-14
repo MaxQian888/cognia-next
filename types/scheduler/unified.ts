@@ -117,6 +117,16 @@ export interface UnifiedScheduledItem {
    * this up on my behalf" without opening it.
    */
   createdBySource?: "user" | "agent" | "plugin"
+  /**
+   * An i18n key under `scheduler` that names this item, for sources whose
+   * rows have no user-given name (the backup schedule, the outbound queue).
+   * The UI resolves it in the viewer's locale; `name` stays the English
+   * fallback for non-UI readers (skills, logs). `nameValues` interpolates.
+   */
+  nameKey?: string
+  nameValues?: Record<string, string | number>
+  /** Same contract for `description`. */
+  descriptionKey?: string
   origin: UnifiedItemOrigin
   capabilities: UnifiedItemCapabilities
 }
