@@ -3,9 +3,11 @@ import {
   __resetMcpServerPresetsForTesting,
   getMcpServerPreset,
   getMcpServerPresetEntry,
+  getMcpServerPresetsRevision,
   listMcpServerPresetEntries,
   listMcpServerPresetIds,
   registerMcpServerPreset,
+  subscribeMcpServerPresets,
   unregisterMcpServerPresetById,
   unregisterMcpServerPresetsByPlugin,
 } from "./mcp-server-preset-registry"
@@ -88,5 +90,25 @@ describe("mcp-server-preset-registry", () => {
 
     expect(listMcpServerPresetIds()).toEqual([])
     expect(listMcpServerPresetEntries()).toEqual([])
+  })
+
+  it("subscribeMcpServerPresets + getMcpServerPresetsRevision expose the overlay revision stream", () => {
+    // The pair `useSyncExternalStore` consumers (Discover) need: a subscribe
+    // fn that fires on mutation and a monotonic snapshot.
+    const listener = jest.fn()
+    const unsubscribe = subscribeMcpServerPresets(listener)
+    const start = getMcpServerPresetsRevision()
+
+    registerMcpServerPreset("a", makePreset("a"), { pluginId: "p1" })
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(getMcpServerPresetsRevision()).toBe(start + 1)
+
+    unregisterMcpServerPresetsByPlugin("p1")
+    expect(listener).toHaveBeenCalledTimes(2)
+    expect(getMcpServerPresetsRevision()).toBe(start + 2)
+
+    unsubscribe()
+    registerMcpServerPreset("b", makePreset("b"))
+    expect(listener).toHaveBeenCalledTimes(2)
   })
 })

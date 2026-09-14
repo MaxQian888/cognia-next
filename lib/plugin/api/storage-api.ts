@@ -1,10 +1,13 @@
 /**
  * Plugin Storage API Implementation
  *
- * Provides per-plugin persistent key-value storage backed by localStorage.
+ * Provides per-plugin storage: localStorage on browser/desktop, owned plugin
+ * records on Headless so acknowledged writes participate in host durability.
  * Each plugin gets an isolated namespace to prevent conflicts.
  */
 
+import { getDb } from "@/lib/db/schema"
+import { isHeadlessHost } from "@/lib/platform/detect"
 import { createPluginSystemLogger } from "../core/logger"
 import { deriveKey, deriveInstallKey, encrypt, decrypt } from "./crypto-helpers"
 
@@ -47,20 +50,58 @@ function getPluginPrefix(pluginId: string): string {
   return `${STORAGE_PREFIX}${pluginId}:`
 }
 
+/** Reads and changes serialize with plugin discovery; no credentials or global Storage are copied. */
+async function withHeadlessStorage<T>(
+  pluginId: string,
+  mutate: boolean,
+  fn: (values: Record<string, string>) => T
+): Promise<T> {
+  const db = getDb()
+  return db.transaction("rw", db.plugins, async () => {
+    const plugin = await db.plugins.get(pluginId)
+    if (!plugin) throw new Error("Plugin storage owner is not installed")
+    const values = Object.assign(Object.create(null) as Record<string, string>, plugin.storage)
+    if (plugin.storage === undefined && typeof localStorage !== "undefined") {
+      const prefix = getPluginPrefix(pluginId)
+      for (let index = 0; index < localStorage.length; index++) {
+        const key = localStorage.key(index)
+        if (!key?.startsWith(prefix)) continue
+        const raw = localStorage.getItem(key)
+        if (raw !== null) values[key.slice(prefix.length)] = raw
+      }
+    }
+    const result = fn(values)
+    if (mutate || plugin.storage === undefined) {
+      const size = Object.entries(values).reduce(
+        (total, [key, value]) => total + 2 * (getStorageKey(pluginId, key).length + value.length),
+        0
+      )
+      if (size > MAX_PLUGIN_STORAGE_BYTES)
+        throw new Error(`Plugin storage limit exceeded (${MAX_PLUGIN_STORAGE_BYTES} bytes)`)
+      await db.plugins.update(pluginId, { storage: values })
+    }
+    return result
+  })
+}
+
 /**
  * Create the Storage API for a plugin
  */
 export function createStorageAPI(pluginId: string): PluginStorageAPI {
   const logger = createPluginSystemLogger(pluginId)
   const prefix = getPluginPrefix(pluginId)
+  const durable = isHeadlessHost()
 
   return {
     async get<T = unknown>(key: string): Promise<T | undefined> {
       try {
-        const raw = localStorage.getItem(getStorageKey(pluginId, key))
+        const raw = durable
+          ? await withHeadlessStorage(pluginId, false, (values) => values[key] ?? null)
+          : localStorage.getItem(getStorageKey(pluginId, key))
         if (raw === null) return undefined
         return JSON.parse(raw) as T
-      } catch {
+      } catch (error) {
+        if (durable) throw error
         logger.warn(`Failed to read storage key: ${key}`)
         return undefined
       }
@@ -74,6 +115,13 @@ export function createStorageAPI(pluginId: string): PluginStorageAPI {
     async set<T = unknown>(key: string, value: T): Promise<void> {
       try {
         const serialized = JSON.stringify(value)
+        if (durable) {
+          if (serialized === undefined) throw new TypeError("Plugin storage requires a JSON value")
+          await withHeadlessStorage(pluginId, true, (values) => {
+            values[key] = serialized
+          })
+          return
+        }
 
         // Check size limit
         const currentUsage = await this.getUsage()
@@ -92,7 +140,7 @@ export function createStorageAPI(pluginId: string): PluginStorageAPI {
 
         localStorage.setItem(getStorageKey(pluginId, key), serialized)
       } catch (err) {
-        if (err instanceof Error && err.message.includes("storage limit")) {
+        if (durable || (err instanceof Error && err.message.includes("storage limit"))) {
           throw err
         }
         logger.error(`Failed to write storage key: ${key}`, err)
@@ -100,14 +148,21 @@ export function createStorageAPI(pluginId: string): PluginStorageAPI {
     },
 
     async remove(key: string): Promise<void> {
+      if (durable)
+        return withHeadlessStorage(pluginId, true, (values) => {
+          delete values[key]
+        })
       localStorage.removeItem(getStorageKey(pluginId, key))
     },
 
     async has(key: string): Promise<boolean> {
+      if (durable)
+        return withHeadlessStorage(pluginId, false, (values) => Object.hasOwn(values, key))
       return localStorage.getItem(getStorageKey(pluginId, key)) !== null
     },
 
     async keys(): Promise<string[]> {
+      if (durable) return withHeadlessStorage(pluginId, false, (values) => Object.keys(values))
       const result: string[] = []
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i)
@@ -123,6 +178,10 @@ export function createStorageAPI(pluginId: string): PluginStorageAPI {
     },
 
     async clear(): Promise<void> {
+      if (durable)
+        return withHeadlessStorage(pluginId, true, (values) => {
+          for (const key of Object.keys(values)) delete values[key]
+        })
       const keysToRemove: string[] = []
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i)
@@ -137,6 +196,14 @@ export function createStorageAPI(pluginId: string): PluginStorageAPI {
     },
 
     async getUsage(): Promise<number> {
+      if (durable)
+        return withHeadlessStorage(pluginId, false, (values) =>
+          Object.entries(values).reduce(
+            (total, [key, value]) =>
+              total + 2 * (getStorageKey(pluginId, key).length + value.length),
+            0
+          )
+        )
       let totalBytes = 0
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i)

@@ -55,7 +55,11 @@ import {
 import { getSharedOcrRegistry } from "@/lib/ocr/registry"
 import { listCopilotTemplates } from "@/lib/workflow/copilot-templates"
 import type { McpPreset } from "@/lib/claude/mcp-presets"
-import { MCP_PRESETS } from "@/lib/claude/mcp-presets"
+import { listMcpPresetCatalog } from "@/lib/mcp/preset-catalog"
+import {
+  getMcpServerPresetsRevision,
+  subscribeMcpServerPresets,
+} from "@/lib/plugin/registries/mcp-server-preset-registry"
 import type { SlashCommandDefinition } from "@/lib/slash-commands/registry"
 import {
   getSlashCommandsVersion,
@@ -296,6 +300,16 @@ export function useDiscoverQuery(
     subscribeIntegrationRegistry,
     getIntegrationRegistryRevision,
     () => 0
+  )
+
+  // Same again for the MCP-preset overlay: plugin presets land in a
+  // module-level registry at enable time, and `listMcpPresetCatalog` is a
+  // snapshot — without the revision dep a plugin enabled after first paint
+  // would never show up in the mcpPresets category.
+  const mcpPresetRevision = useSyncExternalStore(
+    subscribeMcpServerPresets,
+    getMcpServerPresetsRevision,
+    getMcpServerPresetsRevision
   )
 
   // Every call site is unconditional so React hook order stays the same on
@@ -555,7 +569,10 @@ export function useDiscoverQuery(
           return arr.map<DiscoverItem>((data) => ({ kind: "slashCommand", id: data.id, data }))
         }
         case "mcpPresets": {
-          const arr = MCP_PRESETS.filter(
+          // Not dead code: `listMcpPresetCatalog()` reads a mutable overlay
+          // registry, so the revision counter must participate in the memo.
+          void mcpPresetRevision
+          const arr = listMcpPresetCatalog().filter(
             (p) =>
               matchesQuery(p.name, trimmed) ||
               matchesQuery(p.description, trimmed) ||
@@ -665,7 +682,11 @@ export function useDiscoverQuery(
               id: data.id,
               data,
             })),
-            ...MCP_PRESETS.map<DiscoverItem>((data) => ({ kind: "mcpPreset", id: data.id, data })),
+            ...listMcpPresetCatalog().map<DiscoverItem>((data) => ({
+              kind: "mcpPreset",
+              id: data.id,
+              data,
+            })),
             ...buildTeamTemplates(catalogTeamTemplates).map<DiscoverItem>((data) => ({
               kind: "teamTemplate",
               id: data.id,
@@ -708,6 +729,7 @@ export function useDiscoverQuery(
     slashVersion,
     serviceCatalogVersion,
     integrationVersion,
+    mcpPresetRevision,
     serviceConnectionsRaw,
     trimmed,
     sort,

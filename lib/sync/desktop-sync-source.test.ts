@@ -767,6 +767,22 @@ describe("readDexieDelta", () => {
     )
   })
 
+  it("keeps host-owned plugin storage out of paired registry sync", async () => {
+    const db = getDb()
+    await db.plugins.put({
+      id: "private-owner",
+      updatedAt: 100,
+      storage: {
+        cursor: '"private cursor"',
+        "__encrypted:token": '"ciphertext"',
+      },
+    } as never)
+    const delta = await readDexieDelta("plugins", 0)
+    const row = delta.rows.find((item) => (item as { id: string }).id === "private-owner")
+    expect(row).toEqual({ id: "private-owner", updatedAt: 100 })
+    expect((await db.plugins.get("private-owner"))?.storage).toBeDefined()
+  })
+
   it("returns workflow runs whose start OR completion is past the cursor, cursored on max(startedAt, completedAt)", async () => {
     const db = getDb()
     await db.workflowRuns.bulkPut([

@@ -206,6 +206,57 @@ describe("createOverlayRegistry", () => {
     })
   })
 
+  describe("subscribe / getRevision", () => {
+    it("bumps the revision and notifies listeners on every mutation that changes the store", () => {
+      const listener = jest.fn()
+      const unsubscribe = registry.subscribe(listener)
+      const start = registry.getRevision()
+
+      registry.register("a", { value: "one" })
+      registry.unregisterById("a")
+      registry.register("b", { value: "two" }, { pluginId: "p1" })
+      registry.unregisterByPlugin("p1")
+
+      expect(listener).toHaveBeenCalledTimes(4)
+      expect(registry.getRevision()).toBe(start + 4)
+
+      unsubscribe()
+      registry.register("c", { value: "three" })
+      expect(listener).toHaveBeenCalledTimes(4)
+    })
+
+    it("does not bump for mutations that changed nothing", () => {
+      const listener = jest.fn()
+      registry.subscribe(listener)
+      const start = registry.getRevision()
+
+      expect(registry.unregisterById("never-existed")).toBe(false)
+      expect(registry.unregisterByPlugin("nobody")).toBe(0)
+
+      const rejecting = createOverlayRegistry<TestEntry>({
+        conflictPolicy: "first-wins-cross-plugin",
+      })
+      const rejectingListener = jest.fn()
+      rejecting.subscribe(rejectingListener)
+      rejecting.register("a", { value: "one" }, { pluginId: "p1" })
+      const mid = rejecting.getRevision()
+      // Rejected cross-plugin registration: store untouched, no notify.
+      rejecting.register("a", { value: "two" }, { pluginId: "p2" })
+      expect(rejecting.getRevision()).toBe(mid)
+      expect(rejectingListener).toHaveBeenCalledTimes(1)
+
+      expect(registry.getRevision()).toBe(start)
+      expect(listener).not.toHaveBeenCalled()
+    })
+
+    it("bumps on __resetForTesting so test-suite consumers re-derive too", () => {
+      registry.register("a", { value: "one" })
+      const start = registry.getRevision()
+      registry.__resetForTesting()
+      expect(registry.getRevision()).toBe(start + 1)
+    })
+  })
+
   describe("isolation between instances", () => {
     it("two registries created from the factory share no state", () => {
       const a = createOverlayRegistry<TestEntry>()

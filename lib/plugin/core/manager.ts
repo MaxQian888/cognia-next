@@ -1737,6 +1737,7 @@ export class PluginManager {
   private isAutomaticActivationBlocked(
     plugin: Plugin,
     pluginsById: ReadonlyMap<string, Plugin>,
+    intents?: ReadonlyMap<string, PluginIntent>,
     visiting: Set<string> = new Set()
   ): boolean {
     if (
@@ -1744,7 +1745,8 @@ export class PluginManager {
       this.applyCompatibilityPolicy(plugin.manifest, "enable").blocked ||
       this.isRetiredBuiltin(plugin) ||
       this.requiresExplicitFrontendTrust(plugin) ||
-      MANUAL_ENABLE_ONLY_BUILTINS.has(plugin.manifest.id)
+      (MANUAL_ENABLE_ONLY_BUILTINS.has(plugin.manifest.id) &&
+        intents?.get(plugin.manifest.id) !== "enabled")
     ) {
       return true
     }
@@ -1755,7 +1757,7 @@ export class PluginManager {
       return Object.keys(plugin.manifest.dependencies ?? {}).some((dependencyId) => {
         const dependency = pluginsById.get(dependencyId)
         return dependency
-          ? this.isAutomaticActivationBlocked(dependency, pluginsById, visiting)
+          ? this.isAutomaticActivationBlocked(dependency, pluginsById, intents, visiting)
           : false
       })
     } finally {
@@ -2230,11 +2232,13 @@ export class PluginManager {
           (plugin) =>
             plugin.status === "installed" &&
             intents.get(plugin.manifest.id) !== "disabled" &&
-            (this.config.autoEnable || this.shouldActivateOnStartup(plugin.manifest)) &&
+            (intents.get(plugin.manifest.id) === "enabled" ||
+              this.config.autoEnable ||
+              this.shouldActivateOnStartup(plugin.manifest)) &&
             // Preflight both the plugin and every required dependency. A
             // compatible parent with a host-blocked dependency must remain
             // installed/visible instead of being reported as a load failure.
-            !this.isAutomaticActivationBlocked(plugin, pluginsById)
+            !this.isAutomaticActivationBlocked(plugin, pluginsById, intents)
         )
         .map((plugin) => plugin.manifest.id)
     )

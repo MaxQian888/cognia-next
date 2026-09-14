@@ -11,6 +11,8 @@ import {
   listPluginsByCapability,
   listPluginsBySource,
   getPlugin,
+  getPythonHostSettings,
+  setPythonHostSettings,
   upsertPlugin,
   upsertPlugins,
   updatePlugin,
@@ -46,6 +48,7 @@ import {
   clearReviewsForPlugin,
   averageRatingForPlugin,
 } from "./plugin-reviews"
+import { getDb } from "./schema"
 import { createDbTestFixture } from "./test-fixture"
 import type { PluginRow } from "./plugin-types"
 
@@ -90,6 +93,15 @@ describe("plugins CRUD", () => {
     expect(second.createdAt).toBe(first.createdAt)
     expect(second.updatedAt).toBeGreaterThanOrEqual(first.updatedAt)
     expect(second.name).toBe("Renamed")
+  })
+
+  it("preserves durable plugin storage through both single and batch rediscovery", async () => {
+    await upsertPlugin(makeDraft())
+    await updatePlugin("p1", { storage: { published: '{"number":26}' } })
+    await upsertPlugin(makeDraft({ version: "2.0.0" }))
+    expect((await getPlugin("p1"))?.storage).toEqual({ published: '{"number":26}' })
+    await upsertPlugins([makeDraft({ version: "3.0.0" })])
+    expect((await getPlugin("p1"))?.storage).toEqual({ published: '{"number":26}' })
   })
 
   it("skips the write when re-discovery would change nothing", async () => {
@@ -424,4 +436,17 @@ describe("plugin-reviews CRUD", () => {
     expect(result?.average).toBe(4)
     expect(result?.count).toBe(2)
   })
+})
+
+it("preserves durable storage when host settings and discovery update the same plugin", async () => {
+  const row = await upsertPlugin(makeDraft())
+  await getDb().plugins.update(row.id, { storage: { cursor: '"kept"' } })
+  await setPythonHostSettings(row.id, { interpreterPath: "/usr/bin/python3", useVenv: true })
+  expect(await getPythonHostSettings(row.id)).toEqual({
+    interpreterPath: "/usr/bin/python3",
+    useVenv: true,
+  })
+  expect(await getPythonHostSettings("missing")).toBeUndefined()
+  await upsertPlugin(makeDraft({ id: row.id, version: "2.0.0" }))
+  expect((await getPlugin(row.id))?.storage).toEqual({ cursor: '"kept"' })
 })

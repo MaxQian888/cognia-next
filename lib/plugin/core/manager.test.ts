@@ -3483,6 +3483,50 @@ describe("PluginManager", () => {
   })
 
   describe("restorePluginStates runtime-profile gating", () => {
+    it("restores explicit enabled intent without a startup declaration, while retaining host compatibility", async () => {
+      const plugin = (id: string, blocked = false): Plugin => ({
+        manifest: {
+          ...createManifest(id),
+          activationEvents: [],
+          runtimeCompatibility: {
+            headless: blocked
+              ? { availability: "blocked", reason: "needs desktop" }
+              : { availability: "supported" },
+          },
+        },
+        status: "installed",
+        source: "builtin",
+        path: `builtin://${id}`,
+        config: {},
+      })
+      const lifecycleStateAdapter = new InMemoryPluginLifecycleStateAdapter()
+      await lifecycleStateAdapter.write("github-delivery", 0, { intent: "enabled" })
+      await lifecycleStateAdapter.write("cognia-computer-use", 0, { intent: "enabled" })
+      mockGetState.mockReturnValue({
+        plugins: {
+          "github-delivery": plugin("github-delivery"),
+          "cognia-web-tools": plugin("cognia-web-tools"),
+          "cognia-computer-use": plugin("cognia-computer-use", true),
+          "github-devin-bot": {
+            ...plugin("github-devin-bot"),
+            manifest: {
+              ...plugin("github-devin-bot").manifest,
+              activationEvents: ["startup"],
+              dependencies: { "github-delivery": "*" },
+            },
+          },
+        },
+      })
+      const manager = new PluginManager({
+        pluginDirectory: "",
+        runtimeProfile: "headless",
+        lifecycleStateAdapter,
+      })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+      await (manager as unknown as { restorePluginStates(): Promise<void> }).restorePluginStates()
+      expect(enableSpy.mock.calls).toEqual([["github-delivery"], ["github-devin-bot"]])
+    })
+
     it("auto-enables runtime-compatible builtins but skips browser-blocked ones", async () => {
       // Reproduces the mobile/web boot flood: a mix of startup builtins where
       // only the browser-supported one should be auto-enabled. The blocked one

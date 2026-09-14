@@ -52,5 +52,13 @@ export const getMcpServerPresetEntry = registry.getEntry
 export const listMcpServerPresetIds = registry.list
 /** List every registered entry (id + preset + pluginId) in registration order. */
 export const listMcpServerPresetEntries = registry.entries
+/**
+ * Subscribe to dynamic-preset mutations (register/unregister/reset); pairs
+ * with `getMcpServerPresetsRevision` under `useSyncExternalStore` so merged
+ * catalog consumers (Discover) re-derive when a plugin (un)registers.
+ */
+export const subscribeMcpServerPresets = registry.subscribe
+/** Monotonic revision of the dynamic overlay, bumped on every mutation. */
+export const getMcpServerPresetsRevision = registry.getRevision
 /** Test-only: clear every dynamically registered preset. */
 export const __resetMcpServerPresetsForTesting = registry.__resetForTesting

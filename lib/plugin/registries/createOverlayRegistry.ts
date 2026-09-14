@@ -85,6 +85,19 @@ export interface OverlayRegistry<T> {
    * `unregisterByPlugin` for normal cleanup.
    */
   __resetForTesting(): void
+
+  /**
+   * Subscribe to mutations; returns an unsubscribe fn. Listeners fire after
+   * every register/unregister/reset that actually changed the store — React
+   * consumers pair this with `getRevision` under `useSyncExternalStore` so
+   * late-arriving plugin contributions re-derive their projection instead of
+   * freezing at whatever was registered on first paint (the pattern
+   * `use-discover-query` already uses for slash commands and integrations).
+   */
+  subscribe(listener: () => void): () => void
+
+  /** Monotonic version, bumped on every mutation that changed the store. */
+  getRevision(): number
 }
 
 /** Information passed to `onConflict` when a registration is rejected. */
@@ -152,6 +165,13 @@ export function createOverlayRegistry<T>(
   const onConflict = options?.onConflict
   const metadata = options?.metadata
 
+  let revision = 0
+  const listeners = new Set<() => void>()
+  function notifyChanged(): void {
+    revision += 1
+    for (const cb of listeners) cb()
+  }
+
   return {
     register(id, entry, opts) {
       const key = keyFn ? keyFn(id, entry, opts) : id
@@ -164,7 +184,9 @@ export function createOverlayRegistry<T>(
       ) {
         // A different plugin already owns this key — the incumbent wins.
         // Report and leave the store untouched; the caller gets the
-        // incumbent back as the collision signal.
+        // incumbent back as the collision signal. No mutation happened, so
+        // no revision bump — subscribers must not re-derive on a rejected
+        // registration.
         onConflict?.({
           name: options?.name,
           key,
@@ -179,11 +201,14 @@ export function createOverlayRegistry<T>(
         pluginId: opts?.pluginId,
         meta: metadata?.(entry, opts),
       })
+      notifyChanged()
       return previous
     },
 
     unregisterById(id) {
-      return store.delete(id)
+      const removed = store.delete(id)
+      if (removed) notifyChanged()
+      return removed
     },
 
     unregisterByPlugin(pluginId) {
@@ -194,6 +219,7 @@ export function createOverlayRegistry<T>(
           removed += 1
         }
       }
+      if (removed > 0) notifyChanged()
       return removed
     },
 
@@ -220,6 +246,18 @@ export function createOverlayRegistry<T>(
 
     __resetForTesting() {
       store.clear()
+      notifyChanged()
+    },
+
+    subscribe(listener) {
+      listeners.add(listener)
+      return () => {
+        listeners.delete(listener)
+      }
+    },
+
+    getRevision() {
+      return revision
     },
   }
 }

@@ -64,6 +64,8 @@ export interface PluginRow {
   manifest: Record<string, unknown>
   /** Persisted plugin configuration (the user's settings). */
   config?: Record<string, unknown>
+  /** Host-owned JSON strings for ctx.storage; excluded from plugin configuration. */
+  storage?: Record<string, string>
   /**
    * Host-level python runtime settings (python/hybrid plugins only).
    * Structurally identical to `types/plugin/plugin.ts:PythonHostSettings`

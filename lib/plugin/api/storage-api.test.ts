@@ -3,6 +3,16 @@
  * Plugin Storage API Tests
  */
 
+import "fake-indexeddb/auto"
+import { getDb, __resetDbForTesting } from "@/lib/db/schema"
+import { upsertPlugin } from "@/lib/db/plugins"
+import { serializeSources, restoreMultiSnapshot } from "@/cli/src/db/snapshot"
+let headless = false
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  isHeadlessHost: () => headless,
+}))
+
 // Mock crypto-helpers to avoid Web Crypto API dependency in jsdom
 jest.mock("./crypto-helpers", () => {
   // Simple XOR-based mock encryption for testing (not real crypto)
@@ -55,6 +65,7 @@ Object.defineProperty(global, "localStorage", { value: localStorageMock })
 describe("PluginStorageAPI", () => {
   beforeEach(() => {
     localStorageMock.clear()
+    headless = false
   })
 
   describe("basic operations", () => {
@@ -288,5 +299,101 @@ describe("PluginStorageAPI", () => {
       const api = createStorageAPI("enc-check")
       expect(await api.isEncrypted("nonexistent")).toBe(false)
     })
+  })
+})
+
+describe("Headless durable plugin storage", () => {
+  beforeEach(async () => {
+    headless = true
+    localStorageMock.clear()
+    __resetDbForTesting()
+    await getDb().plugins.clear()
+    for (const id of ["owner", "other"])
+      await upsertPlugin({
+        id,
+        name: id,
+        version: "1",
+        type: "frontend",
+        source: "builtin",
+        path: id,
+        manifest: { id },
+      })
+  })
+
+  it("restores values through the existing CLI table snapshot after losing all Storage shims", async () => {
+    const api = createStorageAPI("owner")
+    await api.set("published:v1:installation:repo:26", {
+      headSha: "a".repeat(40),
+      parentNumber: 25,
+    })
+    await api.setSecure("encrypted", { sensitive: "fixture" })
+    const db = getDb()
+    const sources = [{ name: "CogniaDB", db: { verno: db.verno, tables: [db.plugins] } }]
+    const snapshot = JSON.parse(JSON.stringify(await serializeSources(sources)))
+    await db.plugins.clear()
+    localStorageMock.clear()
+    await restoreMultiSnapshot(sources, snapshot)
+    await upsertPlugin({
+      id: "owner",
+      name: "Updated",
+      version: "2",
+      type: "frontend",
+      source: "builtin",
+      path: "owner",
+      manifest: { id: "owner" },
+    })
+    const restored = createStorageAPI("owner")
+    expect(await restored.get("published:v1:installation:repo:26")).toEqual({
+      headSha: "a".repeat(40),
+      parentNumber: 25,
+    })
+    expect(await restored.getSecure("encrypted")).toEqual({ sensitive: "fixture" })
+    expect(await restored.isEncrypted("encrypted")).toBe(true)
+    expect(JSON.stringify((await db.plugins.get("owner"))?.storage)).not.toContain("fixture")
+    expect(await createStorageAPI("other").keys()).toEqual([])
+  })
+
+  it("migrates only the owner's legacy namespace once and does not resurrect deleted values", async () => {
+    localStorageMock.setItem("cognia:plugin:storage:owner:legacy", "7")
+    localStorageMock.setItem("cognia:plugin:storage:other:legacy", "9")
+    localStorageMock.setItem("unrelated-credential", "never copied")
+    const api = createStorageAPI("owner")
+    expect(await api.get("legacy")).toBe(7)
+    await api.delete("legacy")
+    expect(await api.has("legacy")).toBe(false)
+    expect(await api.getOrDefault("legacy", 42)).toBe(42)
+    await api.set("__proto__", { safe: true })
+    expect(await api.keys()).toEqual(["__proto__"])
+    expect(await api.getUsage()).toBeGreaterThan(0)
+    await api.clear()
+    expect(await createStorageAPI("owner").keys()).toEqual([])
+    expect(JSON.stringify((await getDb().plugins.get("owner"))?.storage)).not.toContain(
+      "never copied"
+    )
+    expect(await createStorageAPI("other").get("legacy")).toBe(9)
+  })
+
+  it("serializes quota and concurrent writes without losing unrelated keys", async () => {
+    const api = createStorageAPI("owner")
+    await Promise.all([api.set("one", 1), api.set("two", 2)])
+    expect((await api.keys()).sort()).toEqual(["one", "two"])
+    const result = await Promise.allSettled([
+      api.set("large1", "x".repeat(1_400_000)),
+      api.set("large2", "y".repeat(1_400_000)),
+    ])
+    expect(result.filter((item) => item.status === "fulfilled")).toHaveLength(1)
+    expect(result.filter((item) => item.status === "rejected")).toHaveLength(1)
+    await api.set("large1", "small")
+    expect(await api.getUsage()).toBeLessThan(5 * 1024 * 1024)
+  })
+
+  it("propagates missing-owner and persistence failures instead of reporting a successful sync", async () => {
+    const missing = createStorageAPI("missing")
+    await expect(missing.get("key")).rejects.toThrow("not installed")
+    await expect(missing.set("key", 1)).rejects.toThrow("not installed")
+    const api = createStorageAPI("owner")
+    await expect(api.set("undefined", undefined)).rejects.toThrow("JSON value")
+    await getDb().plugins.update("owner", { storage: { broken: "not json" } })
+    await expect(api.get("broken")).rejects.toThrow()
   })
 })

@@ -184,6 +184,11 @@ jest.mock("dexie-react-hooks", () => {
 })
 
 import { useDiscoverQuery } from "./use-discover-query"
+import {
+  __resetMcpServerPresetsForTesting,
+  registerMcpServerPreset,
+  unregisterMcpServerPresetsByPlugin,
+} from "@/lib/plugin/registries/mcp-server-preset-registry"
 
 const mkChar = (id: string, name: string, description = ""): Character =>
   ({
@@ -654,6 +659,46 @@ describe("useDiscoverQuery", () => {
       expect(all.result.current.items.map((i) => i.id)).toEqual(["filesystem", "github"])
       const dev = renderHook(() => useDiscoverQuery("mcpPresets", "dev"))
       expect(dev.result.current.items.map((i) => i.id)).toEqual(["github"])
+    })
+
+    it("mcpPresets follows the merged catalog — plugin presets appear on register and drop on unregister", async () => {
+      // The category reads `listMcpPresetCatalog()` (static ⊕ dynamic overlay)
+      // and subscribes to the overlay's revision — a plugin enabled AFTER
+      // first paint must still surface here, and disabling it must remove it.
+      __resetMcpServerPresetsForTesting()
+
+      const { result, rerender } = renderHook(() => useDiscoverQuery("mcpPresets", ""))
+      expect(result.current.items.map((i) => i.id)).toEqual(["filesystem", "github"])
+
+      act(() => {
+        registerMcpServerPreset(
+          "playwright-isolated",
+          {
+            id: "playwright-isolated",
+            name: "Playwright — Isolated",
+            description: "Disposable headless profile",
+            transport: "stdio",
+            config: { command: "npx", args: ["-y", "@playwright/mcp@latest", "--isolated"] },
+            tags: ["browser"],
+          },
+          { pluginId: "cognia-playwright-mcp" }
+        )
+      })
+      rerender()
+      expect(result.current.items.map((i) => i.id)).toEqual([
+        "filesystem",
+        "github",
+        "playwright-isolated",
+      ])
+      expect(result.current.items[2]).toEqual(
+        expect.objectContaining({ kind: "mcpPreset", id: "playwright-isolated" })
+      )
+
+      act(() => {
+        unregisterMcpServerPresetsByPlugin("cognia-playwright-mcp")
+      })
+      rerender()
+      expect(result.current.items.map((i) => i.id)).toEqual(["filesystem", "github"])
     })
 
     it("lists team templates (built-in) with a normalized shape", () => {

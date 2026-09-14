@@ -742,7 +742,9 @@ async function readTwinProfileDelta(since: number): Promise<SyncDelta<unknown>> 
 async function readPluginsDelta(since: number): Promise<SyncDelta<unknown>> {
   const all = await getDb().plugins.toArray()
   const rows = all.filter((row) => Number((row as { updatedAt?: number }).updatedAt ?? 0) > since)
-  return finalizeDelta("plugins", rows as UpdatedAtRow[], since)
+  // Plugin storage belongs to the execution host, including encrypted values.
+  const publicRows = rows.map(({ storage: _storage, ...row }) => row)
+  return finalizeDelta("plugins", publicRows as UpdatedAtRow[], since)
 }
 
 async function readAdapterInstancesDelta(since: number): Promise<SyncDelta<unknown>> {

@@ -85,6 +85,7 @@ function mergeDraft(draft: PluginDraft, existing: PluginRow | undefined, now: nu
     path: draft.path,
     manifest: draft.manifest,
     config: draft.config ?? existing?.config,
+    storage: existing?.storage,
     readme: draft.readme ?? existing?.readme,
     licenseText: draft.licenseText ?? existing?.licenseText,
     sourceUrl: draft.sourceUrl ?? existing?.sourceUrl,
@@ -146,12 +147,15 @@ function stableStringify(value: unknown): string | null {
 }
 
 export async function upsertPlugin(draft: PluginDraft): Promise<PluginRow> {
-  const now = Date.now()
-  const existing = await getDb().plugins.get(draft.id)
-  const row = mergeDraft(draft, existing, now)
-  if (isUnchanged(row, existing)) return existing as PluginRow
-  await getDb().plugins.put(row)
-  return row
+  const db = getDb()
+  return db.transaction("rw", db.plugins, async () => {
+    const now = Date.now()
+    const existing = await db.plugins.get(draft.id)
+    const row = mergeDraft(draft, existing, now)
+    if (isUnchanged(row, existing)) return existing as PluginRow
+    await db.plugins.put(row)
+    return row
+  })
 }
 
 /**
