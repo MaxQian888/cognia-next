@@ -1,5 +1,6 @@
 import { useMemo } from "react"
 import type { UIMessage } from "ai"
+import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 
 /**
  * One navigable anchor in the conversation timeline — a user turn plus the
@@ -36,7 +37,8 @@ const LABEL_MAX = 40
 const PREVIEW_MAX = 280
 
 function plainText(m: UIMessage): string {
-  return m.parts
+  // Labels and previews name the turn by what the user typed.
+  return stripPromptPreambleFromParts(m.parts)
     .map((p) => {
       const part = p as { type?: string; text?: string }
       return part.type === "text" && typeof part.text === "string" ? part.text : ""

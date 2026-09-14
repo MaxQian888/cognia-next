@@ -14,6 +14,7 @@
 
 import type { UIMessage } from "ai"
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
+import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 
 export interface MessageSearchHit {
   /** Message id — the `data-msg-id` anchor for document-flow jumps. */
@@ -65,7 +66,9 @@ export function buildMessageSearchIndex(messages: UIMessage[]): MessageSearchInd
   return messages.map((message, index) => ({
     id: message.id,
     index,
-    text: extractPlainText(message.parts).toLowerCase(),
+    // Find-in-conversation matches what is shown in the bubble, which no longer
+    // includes the composer's context envelope.
+    text: extractPlainText(stripPromptPreambleFromParts(message.parts)).toLowerCase(),
   }))
 }
 

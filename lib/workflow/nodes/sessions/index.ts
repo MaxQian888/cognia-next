@@ -42,6 +42,7 @@ import type { UIMessage } from "ai"
 import type { StepExecutionContext } from "@/types/workflow/visual"
 import { registerNodeExecutor } from "../registry"
 import { nonRetryable } from "../shared/executor-support"
+import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 
 /** Cap on messages a single node may pull into a step output. */
 const MESSAGE_LIMIT_DEFAULT = 50
@@ -92,7 +93,11 @@ function toSessionSummary(session: ChatSession) {
 
 /** Plain-text rendering of a message's text parts. */
 function messageText(message: UIMessage): string {
-  const parts = (message as { parts?: Array<{ type?: string; text?: string }> }).parts ?? []
+  // Typed text: a workflow summarising a session reads what was said, not the
+  // context envelope the composer put in front of a turn.
+  const parts = stripPromptPreambleFromParts(
+    (message as { parts?: Array<{ type?: string; text?: string }> }).parts ?? []
+  )
   return parts
     .filter((part) => part?.type === "text" && typeof part.text === "string")
     .map((part) => part.text as string)

@@ -1,6 +1,7 @@
 import type { ChatSearchTextRow } from "@/lib/db/chat-search-text"
 import { buildCorpus, type Corpus } from "./corpus"
 import {
+  DIRTY_DRAIN_DELAY_MS,
   __resetSearchIndexerForTesting,
   drainSearchIndex,
   hasPendingIndexWork,
@@ -33,6 +34,10 @@ function deps(over: Partial<SearchIndexerDeps> = {}): Partial<SearchIndexerDeps>
     corpus: () => null,
     // Synchronous so a scheduled drain is observable without timers.
     schedule: (run) => run(),
+    loadLastDrainAt: async () => null,
+    recordDrainAt: async () => {},
+    sessionsTouchedSince: async () => [],
+    now: () => 5_000,
     ...over,
   }
 }
@@ -381,5 +386,99 @@ describe("scheduleSearchIndexDrain", () => {
     expect(() => scheduleSearchIndexDrain()).not.toThrow()
     // Still queued: nothing ran, so nothing was consumed.
     expect(pendingDirtySessionIds()).toEqual(["s1"])
+  })
+})
+
+describe("recovering a queue lost to a reload", () => {
+  it("re-queues sessions touched since the last drain that did work", async () => {
+    const reproject = jest.fn(async (_sessionId: string) => ({ written: [], removed: [] }))
+    const sessionsTouchedSince = jest.fn(async () => ["s-lost", "s-other"])
+    await drainSearchIndex(
+      deps({ reproject, sessionsTouchedSince, loadLastDrainAt: async () => 1_234 })
+    )
+    expect(sessionsTouchedSince).toHaveBeenCalledWith(1_234)
+    expect(reproject.mock.calls.map(([id]) => id).sort()).toEqual(["s-lost", "s-other"])
+  })
+
+  it("recovers only once per process", async () => {
+    const sessionsTouchedSince = jest.fn(async () => ["s1"])
+    const d = deps({ sessionsTouchedSince, loadLastDrainAt: async () => 1 })
+    await drainSearchIndex(d)
+    await drainSearchIndex(d)
+    expect(sessionsTouchedSince).toHaveBeenCalledTimes(1)
+  })
+
+  // Before the first drain there is nothing to compare against, and the
+  // backfill has not latched `complete`, so it reaches those messages itself.
+  it("does not scan before any drain has been recorded", async () => {
+    const sessionsTouchedSince = jest.fn(async () => ["s1"])
+    await drainSearchIndex(deps({ sessionsTouchedSince }))
+    expect(sessionsTouchedSince).not.toHaveBeenCalled()
+  })
+
+  it("does not resurrect a session queued for removal", async () => {
+    const reproject = jest.fn(async () => ({ written: [], removed: [] }))
+    markSessionRemoved("gone")
+    await drainSearchIndex(
+      deps({
+        reproject,
+        loadLastDrainAt: async () => 1,
+        sessionsTouchedSince: async () => ["gone"],
+      })
+    )
+    expect(reproject).not.toHaveBeenCalled()
+  })
+
+  it("records the START of a drain that did work, and nothing for an idle one", async () => {
+    const recordDrainAt = jest.fn(async () => {})
+    await drainSearchIndex(deps({ recordDrainAt }))
+    expect(recordDrainAt).not.toHaveBeenCalled()
+
+    markSessionDirty("s1")
+    let clock = 10
+    await drainSearchIndex(
+      deps({
+        recordDrainAt,
+        now: () => clock,
+        reproject: async () => {
+          clock = 99
+          return { written: [], removed: [] }
+        },
+      })
+    )
+    expect(recordDrainAt).toHaveBeenCalledWith(10)
+  })
+})
+
+describe("draining after writes", () => {
+  const realWindow = (globalThis as { window?: unknown }).window
+
+  beforeEach(() => {
+    jest.useFakeTimers()
+  })
+
+  afterEach(() => {
+    jest.useRealTimers()
+    if (realWindow === undefined) delete (globalThis as { window?: unknown }).window
+    else (globalThis as { window?: unknown }).window = realWindow
+  })
+
+  it("requests one idle drain after a quiet period, however many marks land", () => {
+    const idle = jest.fn()
+    ;(globalThis as { window?: unknown }).window = { requestIdleCallback: idle }
+    markSessionDirty("s1")
+    jest.advanceTimersByTime(DIRTY_DRAIN_DELAY_MS - 1)
+    markSessionDirty("s1")
+    markSessionDirty("s2")
+    jest.advanceTimersByTime(DIRTY_DRAIN_DELAY_MS - 1)
+    expect(idle).not.toHaveBeenCalled()
+    jest.advanceTimersByTime(1)
+    expect(idle).toHaveBeenCalledTimes(1)
+  })
+
+  it("arms nothing without a window", () => {
+    expect((globalThis as { window?: unknown }).window).toBeUndefined()
+    markSessionDirty("s1")
+    expect(jest.getTimerCount()).toBe(0)
   })
 })

@@ -24,6 +24,7 @@ jest.mock("@/lib/db/messages", () => ({
 
 import { SteerStatusBadge } from "./steer-status-badge"
 import { useChatStore, makeSessionSlice, type SessionChatSlice } from "@/stores/chat"
+import { composeTurnText } from "@/lib/chat/prompt-preamble"
 
 const SID = "s1"
 
@@ -142,6 +143,25 @@ describe("SteerStatusBadge", () => {
     // Both move or the transcript starts lying about what was requested.
     expect(slice?.steerQueue[0]?.text).toBe("use Rust")
     expect((slice?.messages[0].parts[0] as { text: string }).text).toBe("use Rust")
+  })
+
+  it("drafts an edit from the typed text, without the context envelope", () => {
+    // The user edits their own words. The envelope is machine-written and put
+    // back by `editPendingSteer` on commit, so showing it here would invite the
+    // user to edit (or delete) a snapshot they never typed.
+    const { text } = composeTurnText(
+      "typed words",
+      [{ kind: "references", text: "SECRET SNAPSHOT" }],
+      { nonce: "abcdef0123" }
+    )
+    const msg = steerMessage("e1", "queued", text)
+    seed({ status: "streaming", steerQueue: [{ id: "e1", text }], messages: [msg] })
+    render(<SteerStatusBadge message={msg} sessionId={SID} />)
+    fireEvent.click(screen.getByLabelText("ariaEdit"))
+    const input = screen.getByTestId("steer-edit-input") as HTMLTextAreaElement
+    expect(input.value).toBe("typed words")
+    expect(input.value).not.toContain("SECRET SNAPSHOT")
+    expect(input.value).not.toContain("cognia_context_")
   })
 
   it("Escape abandons an edit without touching the queue", () => {

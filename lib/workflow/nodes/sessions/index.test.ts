@@ -9,6 +9,7 @@ jest.mock("@/lib/plugin/api/session-seed", () => ({
 }))
 
 import type { ChatSession } from "@cognia/agent-config-types"
+import { composeTurnText } from "@/lib/chat/prompt-preamble"
 import { listMessages, persistMessages } from "@/lib/db/messages"
 import { getSession } from "@/lib/db/sessions"
 import "."
@@ -278,6 +279,27 @@ describe("action.session.export", () => {
     expect(out.content).toContain("## user")
     expect(out.content).toContain("answer")
     expect(out).toMatchObject({ messageCount: 2 })
+  })
+
+  it("exports the typed text, not the context envelope in front of a turn", async () => {
+    // A workflow summarising a session reads what was said. The envelope is a
+    // snapshot the composer attached for the model, and a graph that forwards
+    // this export (to an IM channel, a file) would publish it as the user's words.
+    const { text } = composeTurnText(
+      "typed words",
+      [{ kind: "references", text: "SECRET SNAPSHOT" }],
+      { nonce: "abcdef0123" }
+    )
+    await seedSession()
+    await persistMessages("sess1", [
+      { id: "m1", role: "user", parts: [{ type: "text", text }] },
+    ] as never)
+    const out = (await run("action.session.export", { sessionId: "sess1" })).output as {
+      content: string
+    }
+    expect(out.content).toContain("typed words")
+    expect(out.content).not.toContain("SECRET SNAPSHOT")
+    expect(out.content).not.toContain("cognia_context_")
   })
 
   it("renders json when asked", async () => {

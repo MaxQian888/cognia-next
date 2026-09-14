@@ -26,6 +26,8 @@
  */
 
 import type { ChatTemplateRun } from "@/lib/chat/template/run"
+import type { ContextRef } from "@/lib/chat/mentions/types"
+import type { PromptPreambleSummary } from "@/lib/chat/prompt-preamble"
 import { useCallback, useEffect, useMemo } from "react"
 import { useTranslations } from "next-intl"
 import type { UnlistenFn } from "@tauri-apps/api/event"
@@ -70,6 +72,10 @@ export interface TeamSendOptions {
   replyTo?: MessageReplyTo
   /** The members the composer picked to answer (ADR-0177 batch 3), in pick order. */
   targetMemberIds?: readonly string[]
+  /** What the context envelope carries (`lib/chat/prompt-preamble.ts`). */
+  promptPreamble?: PromptPreambleSummary
+  /** The records this turn cites, from the composer's sent chips. */
+  citations?: readonly ContextRef[]
 }
 
 type TeamSendFn = (content: SendContent, opts?: TeamSendOptions) => Promise<void>
@@ -125,6 +131,13 @@ export function useTeamChat() {
             senderKind: "user",
             ...(opts?.replyTo ? { replyTo: opts.replyTo } : {}),
             ...(opts?.templateRun ? { templateRun: opts.templateRun } : {}),
+            // Optimistic only: the Host persists the row from the content, and
+            // the envelope inside it is what keeps the bubble honest after the
+            // sync mirror replaces this one.
+            ...(opts?.promptPreamble ? { promptPreamble: opts.promptPreamble } : {}),
+            ...(opts?.citations && opts.citations.length > 0
+              ? { mentions: [...opts.citations] }
+              : {}),
           }
         )
         const before = useChatStore.getState().sessions[sessionId]?.messages ?? []

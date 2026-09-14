@@ -2,6 +2,7 @@ import type { UIMessage } from "ai"
 
 import { decodeDataUrl } from "@/lib/ocr/image-prep"
 import { renderSafeInlineMarkdown } from "@/lib/export/html/safe-inline-markdown"
+import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 
 export interface MessageShareContent {
   plainText: string
@@ -67,7 +68,9 @@ export function buildMessageShareContent(message: UIMessage): MessageShareConten
   const shareFiles: File[] = []
   let imageIndex = 0
 
-  for (const part of message.parts) {
+  // Copy and share hand over what the user wrote, not the context envelope the
+  // composer put in front of it (`lib/chat/prompt-preamble.ts`).
+  for (const part of stripPromptPreambleFromParts(message.parts)) {
     if (part.type === "text") {
       const text = (part as { text?: string }).text ?? ""
       if (text) {

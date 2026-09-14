@@ -15,8 +15,12 @@
  * — the chip's link, the permalink in the prompt, the backlink index.
  */
 
-import { projectSearchText } from "@/lib/chat/search/project-text"
+import type { UIMessage } from "ai"
+import { normalizeToolName, type ToolPartLike } from "@/lib/chat/tool-summary"
+import { promptPreambleOfParts, stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 import { isToolPart, projectToolOutputText } from "./tool-output-text"
+
+export { contentFingerprint } from "./content-fingerprint"
 
 /**
  * Separator between the session and the message in a `@msg:` id.
@@ -73,29 +77,121 @@ interface BodyMessage {
   parts: unknown
 }
 
+/** Longest tool input echoed into a reference. The output is what matters. */
+export const REFERENCE_TOOL_INPUT_MAX_CHARS = 1_000
+
 /**
- * One message as the model should read it.
+ * Said in place of the context block a referenced user turn carried.
  *
- * `projectSearchText` plus every tool output — a superset, in document order,
- * built by walking the parts once. It is NOT a widening of the search
- * projection: search must keep dropping outputs (see `tool-output-text.ts`),
- * and the two callers want opposite things from the same parts.
+ * The block is stripped because it is the app's framing, not the user's words —
+ * and inlining another turn's references into this one would nest references
+ * inside references. But silently dropping it would let the model read a
+ * question like "compare these two" as if it had been asked about nothing.
+ */
+export const REFERENCE_PREAMBLE_OMITTED_NOTE =
+  "[This message was sent with attached context, which is not included here.]"
+
+function asString(value: unknown): string {
+  return typeof value === "string" ? value : ""
+}
+
+function toolInputText(input: unknown): string {
+  if (input === undefined || input === null) return ""
+  if (typeof input === "string") return input.slice(0, REFERENCE_TOOL_INPUT_MAX_CHARS)
+  try {
+    const json = JSON.stringify(input)
+    if (!json || json === "{}") return ""
+    return json.length > REFERENCE_TOOL_INPUT_MAX_CHARS
+      ? `${json.slice(0, REFERENCE_TOOL_INPUT_MAX_CHARS)}…`
+      : json
+  } catch {
+    return ""
+  }
+}
+
+/**
+ * One part as a reference reads it.
+ *
+ * Not `projectSearchText`, which this used to be. That projection collapses all
+ * whitespace (a search haystack has no use for newlines) and cuts each message
+ * at 8k characters without saying so — both right for an index and both wrong
+ * for text a model is asked to reason about: a code reply turned into one line,
+ * and a long answer silently lost its end. The snapshot's own clamp
+ * (`clampEntitySnapshot`) bounds the total and says when it cut.
+ *
+ * Reasoning is left out on purpose. It is the model's scratch work, frequently
+ * longer than the answer, and the turn's conclusion is already in its text; the
+ * message "quote" action has always excluded it for the same reason.
+ */
+export function projectReferencePart(part: unknown): string {
+  if (!part || typeof part !== "object") return ""
+  const p = part as Record<string, unknown>
+  switch (p.type) {
+    case "text":
+      return asString(p.text).trim()
+    case "markdown":
+      return asString(p.md).trim()
+    case "code": {
+      const text = asString(p.text) || asString(p.code)
+      const language = asString(p.language)
+      return text ? `\`\`\`${language}\n${text}\n\`\`\`` : ""
+    }
+    case "image": {
+      const alt = asString(p.alt)
+      return alt ? `[image: ${alt}]` : "[image]"
+    }
+    case "file": {
+      const name = asString(p.filename) || asString(p.mediaType) || "file"
+      return `[attached file: ${name}]`
+    }
+    case "a2ui":
+      return (asString(p.plainTextMirror) || asString(p.text)).trim()
+    case "sources": {
+      const sources = Array.isArray(p.sources) ? p.sources : []
+      const lines = sources.flatMap((s) => {
+        if (!s || typeof s !== "object") return []
+        const { title, url } = s as { title?: unknown; url?: unknown }
+        const label = asString(title) || asString(url)
+        if (!label) return []
+        return [asString(url) && asString(url) !== label ? `- ${label} (${url})` : `- ${label}`]
+      })
+      return lines.length > 0 ? `Sources:\n${lines.join("\n")}` : ""
+    }
+    default:
+      if (isToolPart(p)) {
+        const name = normalizeToolName(p as unknown as ToolPartLike)
+        const input = toolInputText(p.input)
+        return input ? `[tool ${name}] ${input}` : `[tool ${name}]`
+      }
+      return ""
+  }
+}
+
+/**
+ * One message as the model should read it: its readable parts plus every tool
+ * output, in document order, newlines intact.
+ *
+ * The composer's context envelope is stripped from a user turn (see
+ * {@link REFERENCE_PREAMBLE_OMITTED_NOTE} for why it is noted rather than
+ * silently dropped).
  */
 export function projectMessageBody(parts: unknown): string {
   if (!Array.isArray(parts)) return ""
+  const hadPreamble = promptPreambleOfParts(parts) !== null
   const buf: string[] = []
-  for (const part of parts) {
+  for (const part of stripPromptPreambleFromParts(parts)) {
     if (!part || typeof part !== "object") continue
-    const readable = projectSearchText([part])
+    const readable = projectReferencePart(part)
     if (readable) buf.push(readable)
     if (isToolPart(part as { type?: unknown })) {
       const output = projectToolOutputText(part as { output?: unknown; state?: unknown })
-      // Labelled, because the input harvest above already contributed the tool
-      // name and its arguments — without the label the two run together and the
-      // model cannot tell what was asked from what came back.
+      // Labelled, because the line above already contributed the tool name and
+      // its arguments — without the label the two run together and the model
+      // cannot tell what was asked from what came back.
       if (output) buf.push(`→ ${output}`)
     }
   }
+  if (hadPreamble && buf.length > 0) buf.push(REFERENCE_PREAMBLE_OMITTED_NOTE)
   return buf.join("\n").trim()
 }
 
@@ -189,8 +285,42 @@ export async function buildMessageReferenceText({
       : []
 
   const window = [...earlier, anchor, ...later]
+  if (!window.some(hasBranchMetadata)) {
+    return formatMessageReference(
+      window.map((row) => ({ role: row.role, parts: row.parts })),
+      earlier.length
+    )
+  }
+
+  // The window touched an edited or regenerated turn. Its hidden siblings share
+  // the timeline with the visible one, so a time-ordered walk would read "the
+  // turn before" as a version the user never sees. Visibility can only be
+  // decided over the whole conversation — a sibling's owner may sit outside the
+  // window — so only this case pays for the full read.
+  const [{ selectVisibleMessages, useChatStore }, rows] = await Promise.all([
+    import("@/stores/chat/chat-store"),
+    table.between([sessionId, 0], [sessionId, Number.MAX_SAFE_INTEGER], true, true).toArray(),
+  ])
+  const activeBranches = useChatStore.getState().sessions[sessionId]?.activeBranchByGroup ?? {}
+  const visible = selectVisibleMessages(rows as unknown as UIMessage[], activeBranches)
+  const at = visible.findIndex((row) => row.id === messageId)
+  // The anchor is itself a hidden version (a search hit on an older answer).
+  // Its own time-ordered neighbours are the honest context for it.
+  if (at < 0) {
+    return formatMessageReference(
+      window.map((row) => ({ role: row.role, parts: row.parts })),
+      earlier.length
+    )
+  }
+  const start = Math.max(0, at - before)
+  const slice = visible.slice(start, at + after + 1)
   return formatMessageReference(
-    window.map((row) => ({ role: row.role, parts: row.parts })),
-    earlier.length
+    slice.map((row) => ({ role: row.role, parts: row.parts })),
+    at - start
   )
+}
+
+function hasBranchMetadata(row: { metadata?: unknown }): boolean {
+  const meta = row.metadata as { branchGroupId?: unknown; branchOwnerId?: unknown } | undefined
+  return Boolean(meta && (meta.branchGroupId !== undefined || meta.branchOwnerId !== undefined))
 }

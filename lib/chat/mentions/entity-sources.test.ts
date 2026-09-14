@@ -51,6 +51,10 @@ jest.mock("@/lib/db/schema", () => ({
   getDb: () => ({ sessions: { bulkGet: (ids: string[]) => bulkGetMock(ids) } }),
 }))
 jest.mock("@/lib/chat/search/pending-rows", () => ({ pendingSearchRows: () => [] }))
+const drainMock = jest.fn(async (..._args: unknown[]) => ({}))
+jest.mock("@/lib/chat/search/indexer", () => ({
+  drainSearchIndex: (...args: unknown[]) => drainMock(...args),
+}))
 
 const loadNewestResultsMock = jest.fn()
 const searchResultsMock = jest.fn()
@@ -593,7 +597,7 @@ describe("@msg: candidates", () => {
       // Pre-isolation rows carry no workspace stamp and must stay reachable.
       { messageId: "c", sessionId: "sc", projectId: "", role: "user", createdAt: 0, text: "x" },
     ])
-    bulkGetMock.mockResolvedValue([])
+    bulkGetMock.mockImplementation(async (ids: string[]) => ids.map((id) => ({ id, title: id })))
     const rows = await searchEntityMentionCandidates(source(), "", { projectId: "p" })
     expect(rows.map((r) => r.id)).toEqual(["sa#a", "sc#c"])
   })
@@ -602,9 +606,45 @@ describe("@msg: candidates", () => {
     loadNewestMock.mockResolvedValue([
       { messageId: "m", sessionId: "s", projectId: "", role: "user", createdAt: 0, text: "x" },
     ])
-    bulkGetMock.mockResolvedValue([undefined])
+    bulkGetMock.mockResolvedValue([{ id: "s", title: "" }])
     const [row] = await searchEntityMentionCandidates(source(), "", {})
     expect(row.title).toBe("s")
+  })
+
+  // The index rows know nothing about exposure or archiving; the same rule
+  // `@chat:` and the engine apply has to be applied here too.
+  it("leaves out conversations that are gone, embedded, or archived", async () => {
+    loadNewestMock.mockResolvedValue(
+      ["live", "gone", "aside", "old"].map((sessionId) => ({
+        messageId: `m-${sessionId}`,
+        sessionId,
+        projectId: "",
+        role: "user",
+        createdAt: 0,
+        text: "x",
+      }))
+    )
+    bulkGetMock.mockResolvedValue([
+      { id: "live", title: "Live" },
+      undefined,
+      { id: "aside", title: "Aside", kind: "subagent", parentSessionId: "live" },
+      { id: "old", title: "Old", archivedAt: 5 },
+    ])
+    const rows = await searchEntityMentionCandidates(source(), "", {})
+    expect(rows.map((r) => r.id)).toEqual(["live#m-live"])
+  })
+
+  // What `^` and `@msg:` read trails persistence by an idle drain; the message
+  // the user just saw must be pickable now.
+  it("flushes the index queue, without a backfill step, before reading", async () => {
+    await searchEntityMentionCandidates(source(), "", {})
+    expect(drainMock).toHaveBeenCalledWith(undefined, { backfill: false })
+  })
+
+  it("carries the owning conversation onto the candidate", async () => {
+    searchChatHistoryMock.mockResolvedValue({ results: [hit()], moreOlderHistory: false })
+    const [row] = await searchEntityMentionCandidates(source(), "restack", {})
+    expect(row.sourceSessionId).toBe("s1")
   })
 
   it("caps the offered rows", async () => {
@@ -651,6 +691,25 @@ describe("@result: candidates", () => {
     invalidateEntityMentionCaches()
     loadNewestResultsMock.mockReset().mockResolvedValue([])
     searchResultsMock.mockReset().mockResolvedValue([])
+    bulkGetMock
+      .mockReset()
+      .mockImplementation(async (ids: string[]) => ids.map((id) => ({ id, title: id })))
+  })
+
+  it("leaves out results from embedded or archived conversations", async () => {
+    loadNewestResultsMock.mockResolvedValue([
+      resultRow({ resultId: "keep", sessionId: "s1" }),
+      resultRow({ resultId: "sub", sessionId: "s2" }),
+      resultRow({ resultId: "arch", sessionId: "s3" }),
+    ])
+    bulkGetMock.mockResolvedValue([
+      { id: "s1", title: "One" },
+      { id: "s2", title: "Two", kind: "subagent", parentSessionId: "s1" },
+      { id: "s3", title: "Three", archivedAt: 1 },
+    ])
+    const rows = await searchEntityMentionCandidates(source(), "", {})
+    expect(rows.map((r) => r.id)).toEqual(["keep"])
+    expect(rows[0].sourceSessionId).toBe("s1")
   })
 
   // The empty query IS the `^` case: the most recent results, by index walk.

@@ -89,6 +89,40 @@ const ENTITY_NOUNS: Record<EntitySelectionKind, string> = {
 }
 
 /**
+ * The nouns for a record that lives in the conversation being written in.
+ *
+ * `ENTITY_NOUNS` said "from another conversation" for every message and result,
+ * which was false the moment a reference could be made from the transcript the
+ * user is looking at — and a model told a turn came from elsewhere reasons about
+ * it as context it has not seen, rather than as something earlier in this thread.
+ */
+const SAME_CONVERSATION_NOUNS: Partial<Record<EntitySelectionKind, string>> = {
+  message: "A message from earlier in this conversation",
+  result: "A result produced earlier in this conversation",
+}
+
+/** Plural headings for a combined reference, by where its members came from. */
+const MEMBER_NOUNS: Partial<Record<EntitySelectionKind, { same: string; other: string }>> = {
+  message: {
+    same: "messages from earlier in this conversation, in order",
+    other: "messages from another conversation, in order",
+  },
+}
+
+/** What the formatter needs to know about the turn it is writing for. */
+export interface SelectionFormatContext {
+  /** The conversation this turn is sent in. Absent when it does not exist yet. */
+  sessionId?: string | null
+}
+
+function isSameConversation(
+  sel: { sourceSessionId?: string },
+  ctx: SelectionFormatContext
+): boolean {
+  return Boolean(sel.sourceSessionId && ctx.sessionId && sel.sourceSessionId === ctx.sessionId)
+}
+
+/**
  * How a picked element is NAMED in the heading above.
  *
  * Component name first when there is one: `<SubmitButton>` identifies the thing
@@ -144,7 +178,7 @@ function elementFacts(element: ElementSelectionCore): string[] {
   return facts
 }
 
-function headingFor(sel: ContextSelectionRef): string {
+function headingFor(sel: ContextSelectionRef, ctx: SelectionFormatContext): string {
   switch (sel.kind) {
     case "artifact":
       // An element pick names the element, because "lines 40-44" is the least
@@ -179,8 +213,17 @@ function headingFor(sel: ContextSelectionRef): string {
       return `Selection from app "${sel.sourceApp}"${sourceTitle}${origin}${truncation}${sourceUrl}${capturedAt}:`
     }
     case "entity": {
-      const noun = ENTITY_NOUNS[sel.entityKind]
+      const same = isSameConversation(sel, ctx)
       const detail = sel.subtitle ? ` (${sel.subtitle})` : ""
+      const members = sel.members ?? []
+      const plural = MEMBER_NOUNS[sel.entityKind]
+      if (members.length > 1 && plural) {
+        // The body carries each member's own label and link; the heading only
+        // has to say how many there are and where they came from.
+        return `${members.length} ${same ? plural.same : plural.other}:`
+      }
+      const noun =
+        (same ? SAME_CONVERSATION_NOUNS[sel.entityKind] : undefined) ?? ENTITY_NOUNS[sel.entityKind]
       // A message reference names WHERE it came from, because the assistant can
       // hand that link back: `hooks/chat/use-message-permalink.ts` consumes
       // `?session=&message=` and lands on the exact turn. Only this kind — the
@@ -223,8 +266,24 @@ function stalenessNote(sel: ContextSelectionRef): string | null {
   return `[This copy was taken at ${new Date(sel.capturedAt).toISOString()}; the record has changed since. Treat it as a snapshot, not as the current state.]`
 }
 
-function formatOne(sel: ContextSelectionRef): string {
-  const lines = [headingFor(sel), "```", sel.snapshot, "```"]
+/**
+ * A fence the snapshot cannot close.
+ *
+ * A fixed three-backtick fence broke on the first code block inside a
+ * referenced message or file: the snapshot's own fence ended the block, and
+ * everything after it read to the model as loose prompt text. CommonMark closes
+ * a fence only with a run at least as long as the opener, so one backtick more
+ * than the longest run inside is always enough.
+ */
+export function fenceFor(text: string): string {
+  let longest = 0
+  for (const run of text.match(/`+/g) ?? []) longest = Math.max(longest, run.length)
+  return "`".repeat(Math.max(3, longest + 1))
+}
+
+function formatOne(sel: ContextSelectionRef, ctx: SelectionFormatContext): string {
+  const fence = fenceFor(sel.snapshot)
+  const lines = [headingFor(sel, ctx), fence, sel.snapshot, fence]
   if (sel.kind === "artifact" && sel.element) lines.push(...elementFacts(sel.element))
   const note = stalenessNote(sel)
   if (note) lines.push(note)
@@ -284,9 +343,12 @@ export function wholeFileSelection(file: {
  * Returns a markdown context block, or an empty string when there are no
  * selections (so callers can prepend unconditionally without adding noise).
  */
-export function formatContextSelectionsForLLM(selections: ContextSelectionRef[]): string {
+export function formatContextSelectionsForLLM(
+  selections: readonly ContextSelectionRef[],
+  ctx: SelectionFormatContext = {}
+): string {
   if (selections.length === 0) {
     return ""
   }
-  return ["Referenced context:", ...selections.map(formatOne)].join("\n\n")
+  return ["Referenced context:", ...selections.map((sel) => formatOne(sel, ctx))].join("\n\n")
 }

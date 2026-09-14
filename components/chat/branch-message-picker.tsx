@@ -19,12 +19,15 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
 import { cn } from "@/lib/utils"
+import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 
 /** Longest preview shown per row before elision. */
 const PREVIEW_MAX = 90
 
 export function previewOf(message: UIMessage): string {
-  const text = extractPlainText(message.parts).replace(/\s+/g, " ").trim()
+  const text = extractPlainText(stripPromptPreambleFromParts(message.parts))
+    .replace(/\s+/g, " ")
+    .trim()
   if (!text) return ""
   return text.length <= PREVIEW_MAX ? text : `${text.slice(0, PREVIEW_MAX).trimEnd()}…`
 }

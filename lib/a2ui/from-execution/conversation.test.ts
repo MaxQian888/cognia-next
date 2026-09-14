@@ -1,5 +1,6 @@
 import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 
+import { composeTurnText } from "@/lib/chat/prompt-preamble"
 import { buildConversationPage, extractMessageText, previewText, toolNameOf } from "./conversation"
 import type { ExecutionPageLabels } from "./types"
 
@@ -67,6 +68,21 @@ describe("extractMessageText", () => {
       toolPart("bash"),
     ]
     expect(extractMessageText(parts)).toBe("Hello\nthinking")
+  })
+
+  it("returns the typed text without the context envelope", () => {
+    // "Visible" is what the bubble shows. The generated page previews each turn
+    // with this text, so the envelope would print a referenced snapshot as the
+    // user's question.
+    const { text } = composeTurnText(
+      "typed words",
+      [{ kind: "references", text: "SECRET SNAPSHOT" }],
+      { nonce: "abcdef0123" }
+    )
+    const out = extractMessageText([textPart(text)])
+    expect(out).toBe("typed words")
+    expect(out).not.toContain("SECRET SNAPSHOT")
+    expect(out).not.toContain("cognia_context_")
   })
 })
 

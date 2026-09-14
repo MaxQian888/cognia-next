@@ -27,8 +27,9 @@ import { useChatStore, selectVisibleMessages } from "@/stores/chat/chat-store"
 import { useSettingsStore } from "@/stores/settings"
 import { useProjectStore } from "@/stores/project/project-store"
 import { getSession, updateSession } from "@/lib/db/sessions"
-import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
-import { summarizeConversation } from "@/lib/ai/generation/summarizer"
+import { buildAgentBackedLlmClient } from "@/lib/ai/generation/agent-backed-client"
+import { renderConversationSegments, structuralSummary } from "@/lib/ai/generation/summarizer"
+import { summarizeMaterial, type SummaryOutcome } from "@/lib/ai/generation/summarize-material"
 import { branchSessionAtMessage, type BranchMode } from "@/lib/chat/branch-session"
 import { surfaceBindingKey } from "@/lib/context-workbench/resource-session"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
@@ -39,6 +40,20 @@ import { usePlatform } from "@/hooks/use-platform"
 import { createLogger } from "@cognia/logging"
 
 const log = createLogger("chat-branch")
+
+/** Broker lease label for the headless fallback — what the runs console shows. */
+const SUMMARY_TURN_LABEL = "Branch summary"
+
+/** Why the preview holds a digest rather than a model summary. */
+type SummaryFallbackReason = Extract<SummaryOutcome, { kind: "unavailable" }>["reason"]
+
+/** Message key per reason (next-intl keys stay camelCase). */
+const SUMMARY_FALLBACK_KEYS = {
+  empty: "summary.fallback.empty",
+  "no-client": "summary.fallback.noClient",
+  "no-output": "summary.fallback.noOutput",
+  pii: "summary.fallback.pii",
+} as const satisfies Record<SummaryFallbackReason, string>
 
 /** Where a branch lands: its own conversation, or an aside in the dock. */
 type BranchTarget = "session" | "aside"
@@ -69,6 +84,7 @@ export function BranchDialog({ sessionId, messageId, open, onOpenChange }: Props
   const [picked, setPicked] = useState<Set<string> | null>(null)
   const [generating, setGenerating] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [summaryFallback, setSummaryFallback] = useState<SummaryFallbackReason | null>(null)
 
   // Reset transient state on close so the next open starts fresh — avoids a
   // setState-in-effect cascade (the desktop toolbar keeps this dialog mounted).
@@ -78,6 +94,7 @@ export function BranchDialog({ sessionId, messageId, open, onOpenChange }: Props
       setTarget("session")
       setPicked(null)
       setSummaryText("")
+      setSummaryFallback(null)
       setGenerating(false)
       setCreating(false)
     }
@@ -121,13 +138,31 @@ export function BranchDialog({ sessionId, messageId, open, onOpenChange }: Props
     try {
       const session = await getSession(sessionId)
       const appSettings = useSettingsStore.getState().settings
-      const client = buildUtilityLlmClient({
+      // The utility model, then a headless turn. The utility client alone is
+      // null on a subscription account (no renderer key), which made every
+      // summary there a silent head/tail digest.
+      const client = await buildAgentBackedLlmClient({
         session,
         appSettings,
         featureId: "conversation-summary",
+        label: SUMMARY_TURN_LABEL,
       })
-      const summary = await summarizeConversation(keptUpToMessage(), { client, locale })
-      setSummaryText(summary)
+      const messages = keptUpToMessage()
+      const outcome = await summarizeMaterial({
+        segments: renderConversationSegments(messages),
+        purpose: "branch-seed",
+        client,
+        locale,
+      })
+      if (outcome.kind === "summary") {
+        setSummaryText(outcome.text)
+        setSummaryFallback(null)
+      } else {
+        // Still a usable seed, but the preview now SAYS it is not a summary —
+        // and why — instead of passing a digest off as one.
+        setSummaryText(outcome.reason === "empty" ? "" : structuralSummary(messages))
+        setSummaryFallback(outcome.reason)
+      }
     } catch (err) {
       log.error("branch-summary-failed", { sessionId, error: String(err) })
       toast.error(t("summaryError"))
@@ -334,6 +369,15 @@ export function BranchDialog({ sessionId, messageId, open, onOpenChange }: Props
                 placeholder={generating ? t("summary.generating") : t("summary.placeholder")}
                 disabled={generating}
               />
+              {summaryFallback && !generating ? (
+                <p
+                  className="text-xs text-amber-700 dark:text-amber-400"
+                  role="status"
+                  data-testid="branch-summary-fallback"
+                >
+                  {t(SUMMARY_FALLBACK_KEYS[summaryFallback])}
+                </p>
+              ) : null}
             </div>
           )}
         </div>

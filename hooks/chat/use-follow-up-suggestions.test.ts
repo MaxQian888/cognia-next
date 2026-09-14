@@ -1,4 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
+import { composeTurnText } from "@/lib/chat/prompt-preamble"
 import { useFollowUpSuggestions } from "./use-follow-up-suggestions"
 
 type Msg = { id: string; role: string; parts: unknown }
@@ -55,6 +56,31 @@ describe("useFollowUpSuggestions", () => {
     const { result } = renderHook(() => useFollowUpSuggestions(session))
     await waitFor(() => expect(result.current.suggestions).toEqual(["Tell me more", "Why?"]))
     expect(mockSuggest).toHaveBeenCalledTimes(1)
+  })
+
+  it("sends the generator the typed text, not the context envelope", async () => {
+    // A suggestion keys off what was said. The envelope can be a page of web
+    // results — a lot of tokens for a one-line suggestion, and material the
+    // user never wrote.
+    const { text } = composeTurnText(
+      "typed words",
+      [{ kind: "references", text: "SECRET SNAPSHOT" }],
+      { nonce: "abcdef0123" }
+    )
+    mockChatState.messages = [
+      { id: "u1", role: "user", parts: [{ type: "text", text }] },
+      { id: "a1", role: "assistant", parts: [{ type: "text", text: "hello" }] },
+    ]
+    const { result } = renderHook(() => useFollowUpSuggestions(session))
+    await waitFor(() => expect(result.current.suggestions).toHaveLength(2))
+
+    const [{ recentMessages }] = mockSuggest.mock.calls[0] as [
+      { recentMessages: Array<{ role: string; text: string }> },
+    ]
+    expect(recentMessages[0]).toEqual({ role: "user", text: "typed words" })
+    const sent = JSON.stringify(recentMessages)
+    expect(sent).not.toContain("SECRET SNAPSHOT")
+    expect(sent).not.toContain("cognia_context_")
   })
 
   it("returns nothing while streaming", async () => {

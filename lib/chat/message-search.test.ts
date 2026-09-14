@@ -1,4 +1,5 @@
 import type { UIMessage } from "ai"
+import { composeTurnText } from "@/lib/chat/prompt-preamble"
 import {
   buildMessageSearchIndex,
   findIndexedMessageHits,
@@ -80,6 +81,22 @@ describe("findMessageHits", () => {
     expect(findIndexedMessageHits(index, "deploy")).toHaveLength(1)
     expect(findIndexedMessageHits(index, "worker")).toHaveLength(1)
     expect(partsReads).toBe(1)
+  })
+
+  it("indexes the typed text, not the context envelope in front of it", () => {
+    // Find-in-conversation matches what the bubble shows. A hit inside the
+    // envelope would jump to a message whose visible text has no such word.
+    const { text } = composeTurnText(
+      "typed words",
+      [{ kind: "references", text: "SECRET SNAPSHOT" }],
+      { nonce: "abcdef0123" }
+    )
+    const [entry] = buildMessageSearchIndex([textMsg("a", text)])
+
+    expect(entry.text).toContain("typed words")
+    expect(entry.text).not.toContain("secret snapshot")
+    expect(entry.text).not.toContain("cognia_context_")
+    expect(findIndexedMessageHits([entry], "SECRET")).toEqual([])
   })
 })
 

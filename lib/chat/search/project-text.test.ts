@@ -3,6 +3,7 @@ import {
   TOOL_INPUT_FIELD_MAX_CHARS,
   projectSearchText,
 } from "./project-text"
+import { composeTurnText } from "@/lib/chat/prompt-preamble"
 
 describe("projectSearchText", () => {
   it("returns an empty string for non-array input", () => {
@@ -188,5 +189,16 @@ describe("projectSearchText", () => {
       { type: "text", text: "never-reached" },
     ])
     expect(text).not.toContain("never-reached")
+  })
+
+  // A turn that referenced a document is not a turn in which the user wrote it.
+  it("indexes the typed text, not the composer's context envelope", () => {
+    const { text } = composeTurnText(
+      "why did this fail",
+      [{ kind: "webSearch", text: "an unrelated web page about kittens" }],
+      { nonce: "0123456789" }
+    )
+    const projected = projectSearchText([{ type: "text", text }])
+    expect(projected).toBe("why did this fail")
   })
 })

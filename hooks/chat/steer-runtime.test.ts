@@ -76,6 +76,11 @@ import {
   steerArmed,
 } from "./steer-runtime"
 import { steerMetaOf, type SteerState } from "@/lib/claude/steer"
+import {
+  composeTurnText,
+  promptPreambleOfParts,
+  stripPromptPreamble,
+} from "@/lib/chat/prompt-preamble"
 
 /** A user message carrying steer metadata, as `send`'s optimistic append makes. */
 function steerMessage(entryId: string, stateValue: SteerState, text = entryId): UIMessage {
@@ -328,6 +333,33 @@ describe("editPendingSteer", () => {
     expect(state.updateSteerEntry).toHaveBeenCalledWith("s1", "a", "new")
     expect(textOf(state.sessions["s1"].messages?.[0])).toBe("new")
     expect(mockPersistMessages).toHaveBeenCalled()
+  })
+
+  it("puts the original context envelope back in front of the edited text", () => {
+    // The edit draft is the typed text alone, because the bubble strips the
+    // envelope. Writing the draft over the whole first part would silently drop
+    // every reference the follow-up was sent with — from the bubble AND from the
+    // replay the queue entry drives. The envelope is reused verbatim: it is the
+    // snapshot the user approved when they sent it.
+    const { text, preamble } = composeTurnText(
+      "typed words",
+      [{ kind: "references", text: "SECRET SNAPSHOT" }],
+      { nonce: "abcdef0123" }
+    )
+    state.sessions["s1"] = {
+      steerQueue: [{ id: "a", text }],
+      messages: [steerMessage("a", "queued", text)],
+    }
+    editPendingSteer("s1", "a", "edited words")
+
+    const expected = `${preamble}\n\nedited words`
+    expect(state.updateSteerEntry).toHaveBeenCalledWith("s1", "a", expected)
+    expect(state.sessions["s1"].steerQueue[0].text).toBe(expected)
+    const bubble = state.sessions["s1"].messages?.[0]
+    expect(textOf(bubble)).toBe(expected)
+    expect(promptPreambleOfParts(bubble?.parts)).toBe(preamble)
+    expect(stripPromptPreamble(textOf(bubble) ?? "")).toBe("edited words")
+    expect(textOf(bubble)).not.toContain("typed words")
   })
 
   it("adds a text part when the message carried only attachments", () => {

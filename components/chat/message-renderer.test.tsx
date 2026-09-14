@@ -378,6 +378,7 @@ import { HOVER_REVEAL_CLASS, MessageRenderer } from "./message-renderer"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useChatStore } from "@/stores/chat"
 import { resolveMessageDisplayOptions } from "@/lib/chat/message-display"
+import { composeTurnText } from "@/lib/chat/prompt-preamble"
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -546,6 +547,52 @@ describe("text parts", () => {
 })
 
 // ── usage breakdown ───────────────────────────────────────────────────────────
+
+// The composer's context envelope is persisted in the user row, and the bubble
+// used to print it as though the user had typed it.
+describe("a user turn that carried attached context", () => {
+  const turn = composeTurnText(
+    "compare these two",
+    [{ kind: "references", text: "Referenced context:\n\nSECRET SNAPSHOT" }],
+    { nonce: "beadfeed01" }
+  )
+
+  it("shows the typed text and folds the envelope into a card", () => {
+    render(
+      <MessageRenderer
+        message={
+          {
+            ...userMsg("u9", turn.text),
+            metadata: {
+              promptPreamble: {
+                sections: ["references"],
+                references: [{ kind: "entity", entityKind: "issue", title: "COG-1" }],
+              },
+            },
+          } as UIMessage
+        }
+      />
+    )
+    expect(screen.getByText("compare these two")).toBeInTheDocument()
+    expect(screen.getByTestId("prompt-preamble-card")).toBeInTheDocument()
+    expect(document.body.textContent).not.toContain("SECRET SNAPSHOT")
+    expect(document.body.textContent).not.toContain("cognia_context_")
+  })
+
+  it("shows only the card when references were sent without typed text", () => {
+    const onlyRefs = composeTurnText("", [{ kind: "references", text: "SECRET" }], {
+      nonce: "beadfeed02",
+    })
+    render(<MessageRenderer message={userMsg("u10", onlyRefs.text)} />)
+    expect(screen.getByTestId("prompt-preamble-card")).toBeInTheDocument()
+    expect(document.querySelector("[data-test='markdown']")).toBeNull()
+  })
+
+  it("leaves an assistant message that happens to start with a tag alone", () => {
+    render(<MessageRenderer message={assistantMsg("a9", turn.text)} />)
+    expect(screen.queryByTestId("prompt-preamble-card")).toBeNull()
+  })
+})
 
 describe("usage breakdown", () => {
   function withUsage(usage: Record<string, number>): UIMessage {

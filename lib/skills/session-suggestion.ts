@@ -7,6 +7,7 @@ import { checkpointRecording, createRecording } from "@/lib/db/skill-recordings"
 import { getDb } from "@/lib/db/schema"
 import type { StepEdits } from "@/lib/skills/recording/step-model"
 import { useRecorderStore } from "@/stores/skills/recorder-store"
+import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 
 const log = loggers.agent.child("skill-suggestion")
 const MAX_SOURCE_STEPS = 80
@@ -34,7 +35,8 @@ export function isSkillSuggestionEligible(outcome: SkillSuggestionOutcome): bool
 
 function textParts(message: UIMessage): string[] {
   const labels: string[] = []
-  for (const raw of message.parts ?? []) {
+  // A skill intent is the user's request, not the context attached to it.
+  for (const raw of stripPromptPreambleFromParts(message.parts ?? [])) {
     const part = raw as { type?: string; text?: string; state?: string }
     if (part.type === "text" && typeof part.text === "string" && part.text.trim()) {
       labels.push(part.text.trim())

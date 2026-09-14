@@ -20,6 +20,7 @@ import { extractPlainText } from "@/lib/inbox/extract-plain-text"
 import { suggestFollowUps } from "@/lib/chat/completion/suggestions"
 import type { GhostMessage } from "@/lib/chat/completion/ghost-prompt"
 import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
+import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 
 const RECENT = 6
 
@@ -34,7 +35,10 @@ function recentMessages(): GhostMessage[] {
   const msgs = useChatStore.getState().messages
   return msgs.slice(-RECENT).map((m) => ({
     role: m.role === "assistant" ? "assistant" : "user",
-    text: extractPlainText(m.parts),
+    // Typed text: a suggestion keys off what was said, not off the context the
+    // composer attached (and a page of web results is a lot of tokens to pay
+    // for a one-line suggestion).
+    text: extractPlainText(stripPromptPreambleFromParts(m.parts)),
   }))
 }
 

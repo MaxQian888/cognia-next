@@ -2,6 +2,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { useComposerGhostText } from "./use-composer-ghost-text"
 import type { InlineCommandInfo } from "@/lib/chat/completion/inline/types"
+import { composeTurnText } from "@/lib/chat/prompt-preamble"
 
 /**
  * Let timers + provider promises settle inside `act`, so a late state update
@@ -133,6 +134,31 @@ describe("useComposerGhostText — model tier", () => {
     act(() => result.current.feed("now then"))
     await waitFor(() => expect(result.current.ghost).toBe(" continuation"))
     expect(seenPrompt).toContain("earlier answer")
+  })
+
+  it("feeds the typed text of a recent turn, not its context envelope", async () => {
+    // A continuation keys off what was said. A referenced snapshot or a page of
+    // web results is a lot of tokens to pay per keystroke-debounce, and it is
+    // not the user's writing to continue.
+    const { text } = composeTurnText(
+      "typed words",
+      [{ kind: "references", text: "SECRET SNAPSHOT" }],
+      { nonce: "abcdef0123" }
+    )
+    mockChatState.messages = [{ role: "user", parts: [{ type: "text", text }] }]
+    let seenPrompt = ""
+    mockBuildClient.mockReturnValue({
+      complete: async (p: string) => {
+        seenPrompt = p
+        return " continuation"
+      },
+    })
+    const { result } = render()
+    act(() => result.current.feed("now then"))
+    await waitFor(() => expect(result.current.ghost).toBe(" continuation"))
+    expect(seenPrompt).toContain("typed words")
+    expect(seenPrompt).not.toContain("SECRET SNAPSHOT")
+    expect(seenPrompt).not.toContain("cognia_context_")
   })
 
   it("dismiss() clears any visible ghost", async () => {

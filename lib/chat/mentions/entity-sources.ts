@@ -42,7 +42,7 @@ import { truncationMarker } from "@/lib/docs-providers/limits"
 // is type-only at the top level, so it stays off the trigger detector's
 // runtime path.
 import { CONTENT_SEARCH_MIN_QUERY } from "@/lib/chat/conversation-search-scope"
-import { wrapUntrustedContent } from "@/lib/web/untrusted-content"
+import { wrapUntrustedRecord } from "@/lib/web/untrusted-content"
 // Statically imported even though this module is on the pure trigger
 // detector's path: `entity-cache` pulls only `lib/global-search/cache.ts`,
 // which imports nothing at all. A dynamic import here would buy nothing and
@@ -72,6 +72,12 @@ export interface EntityMentionCandidate {
   subtitle?: string
   /** In-app route the staged chip links back to, when the kind has one. */
   href?: string
+  /**
+   * The conversation the record lives in, for `message` and `result`. Carried
+   * onto the staged selection so the prompt can tell "earlier in this
+   * conversation" from "another conversation".
+   */
+  sourceSessionId?: string
   /** Pre-lowercased haystack for fuzzy matching (title + subtitle + id). */
   searchText: string
 }
@@ -276,7 +282,7 @@ const UNTRUSTED_ENTITY_KINDS: ReadonlySet<EntitySelectionKind> = new Set([
 
 export function entitySnapshotBody(kind: EntitySelectionKind, text: string): string {
   const clamped = clampEntitySnapshot(text)
-  return UNTRUSTED_ENTITY_KINDS.has(kind) ? wrapUntrustedContent(clamped) : clamped
+  return UNTRUSTED_ENTITY_KINDS.has(kind) ? wrapUntrustedRecord(clamped) : clamped
 }
 
 /** Build the staged selection for a picked candidate. */
@@ -296,6 +302,7 @@ export function entitySelectionFrom(
     ...(fingerprint != null ? { fingerprint } : {}),
     ...(candidate.subtitle ? { subtitle: candidate.subtitle } : {}),
     ...(candidate.href ? { href: candidate.href } : {}),
+    ...(candidate.sourceSessionId ? { sourceSessionId: candidate.sourceSessionId } : {}),
   }
 }
 
@@ -397,8 +404,51 @@ function messageCandidate(input: MessageCandidateInput): EntityMentionCandidate 
     // The permalink, so the chip opens the exact message rather than the
     // conversation's tail — `hooks/chat/use-message-permalink.ts` consumes it.
     href: `/?session=${encodeURIComponent(input.sessionId)}&message=${encodeURIComponent(input.messageId)}`,
+    sourceSessionId: input.sessionId,
     searchText: haystack(input.sessionTitle, input.excerpt, input.role),
   }
+}
+
+/**
+ * Titles of the conversations a list surface may show, keyed by id.
+ *
+ * The two index-backed sources read rows (`chatSearchText`, `chatResultIndex`)
+ * that know nothing about session exposure or archiving, so without this the
+ * empty `@msg:` list and every `^` query offered subagent inner transcripts,
+ * workbench asides and archived conversations — the defect ADR-0157 fixed for
+ * `@chat:`, reopened one layer down. The content search path already applies
+ * the same two rules inside the engine (`lib/chat/search/engine.ts`).
+ */
+async function listableSessionTitles(sessionIds: readonly string[]): Promise<Map<string, string>> {
+  const unique = [...new Set(sessionIds)]
+  if (unique.length === 0) return new Map()
+  const [{ getDb }, { isSessionExposed }] = await Promise.all([
+    import("@/lib/db/schema"),
+    import("@/lib/chat/session-exposure"),
+  ])
+  const sessions = await getDb().sessions.bulkGet(unique)
+  const titles = new Map<string, string>()
+  for (const session of sessions) {
+    if (!session) continue
+    if (!isSessionExposed(session, "global-search")) continue
+    if ((session as { archivedAt?: unknown }).archivedAt != null) continue
+    titles.set(session.id, session.title || session.id)
+  }
+  return titles
+}
+
+/**
+ * Flush the index before reading it.
+ *
+ * Both index-backed sources read derived tables that trail persistence by an
+ * idle drain. A result the user saw a moment ago — the thing `^` exists to
+ * reach — could otherwise be missing from its own picker. Queue-only
+ * (`backfill: false`): widening coverage into old history is the idle
+ * scheduler's job and must not be paid for per keystroke.
+ */
+async function flushSearchIndex(): Promise<void> {
+  const { drainSearchIndex } = await import("@/lib/chat/search/indexer")
+  await drainSearchIndex(undefined, { backfill: false }).catch(() => undefined)
 }
 
 // ---------------------------------------------------------------------------
@@ -581,27 +631,28 @@ function registerBuiltinEntityMentionSources(): void {
       // "the most recent messages", which the index answers directly.
       if (query.length > 0 && query.length < CONTENT_SEARCH_MIN_QUERY) return []
 
+      await flushSearchIndex()
+
       if (query.length === 0) {
         const { loadNewestChatSearchText } = await import("@/lib/db/chat-search-text")
-        const { getDb } = await import("@/lib/db/schema")
-        const rows = (await loadNewestChatSearchText(ENTITY_MENTION_RESULT_LIMIT * 3))
-          .filter((row) => !ctx.projectId || !row.projectId || row.projectId === ctx.projectId)
+        const rows = (await loadNewestChatSearchText(ENTITY_MENTION_RESULT_LIMIT * 3)).filter(
+          (row) => !ctx.projectId || !row.projectId || row.projectId === ctx.projectId
+        )
+        const titles = await listableSessionTitles(rows.map((row) => row.sessionId))
+        return rows
+          .filter((row) => titles.has(row.sessionId))
           .slice(0, ENTITY_MENTION_RESULT_LIMIT)
-        const sessions = await getDb().sessions.bulkGet(rows.map((row) => row.sessionId))
-        const titles = new Map(
-          sessions.filter(Boolean).map((s) => [s!.id, s!.title || s!.id] as const)
-        )
-        return rows.map((row) =>
-          messageCandidate({
-            sessionId: row.sessionId,
-            messageId: row.messageId,
-            sessionTitle: titles.get(row.sessionId) ?? row.sessionId,
-            role: row.role,
-            createdAt: row.createdAt,
-            excerpt: row.text,
-            refId: messageRefId(row.sessionId, row.messageId),
-          })
-        )
+          .map((row) =>
+            messageCandidate({
+              sessionId: row.sessionId,
+              messageId: row.messageId,
+              sessionTitle: titles.get(row.sessionId) ?? row.sessionId,
+              role: row.role,
+              createdAt: row.createdAt,
+              excerpt: row.text,
+              refId: messageRefId(row.sessionId, row.messageId),
+            })
+          )
       }
 
       const { searchChatHistory } = await import("@/lib/chat/search/engine")
@@ -642,10 +693,11 @@ function registerBuiltinEntityMentionSources(): void {
       const { getDb } = await import("@/lib/db/schema")
       const row = await getDb().messages.get(parsed.messageId)
       if (!row || row.sessionId !== parsed.sessionId) return null
-      // A message row has no version column, so the body's own length stands in
-      // — it is what an edit changes, and it costs nothing beyond the read the
-      // deletion check already makes.
-      return `${row.createdAt}:${JSON.stringify(row.parts).length}`
+      // A message row has no version column, so a digest of its parts stands in.
+      // It used to be their serialized LENGTH, which missed the edit people make
+      // most — correcting a word.
+      const { contentFingerprint } = await import("./content-fingerprint")
+      return `${row.createdAt}:${contentFingerprint(JSON.stringify(row.parts))}`
     },
   })
 
@@ -664,11 +716,15 @@ function registerBuiltinEntityMentionSources(): void {
       // Over-fetch, then filter by workspace: `projectId` is on the row, but a
       // second compound index just for this would buy nothing at these sizes,
       // and a pre-isolation row (`projectId: ""`) must stay reachable.
-      const rows = query
-        ? await searchChatResults(query, ENTITY_MENTION_RESULT_LIMIT * 3)
-        : await loadNewestChatResults(ENTITY_MENTION_RESULT_LIMIT * 3)
+      await flushSearchIndex()
+      const rows = (
+        query
+          ? await searchChatResults(query, ENTITY_MENTION_RESULT_LIMIT * 3)
+          : await loadNewestChatResults(ENTITY_MENTION_RESULT_LIMIT * 3)
+      ).filter((r) => !ctx.projectId || !r.projectId || r.projectId === ctx.projectId)
+      const titles = await listableSessionTitles(rows.map((r) => r.sessionId))
       return rows
-        .filter((r) => !ctx.projectId || !r.projectId || r.projectId === ctx.projectId)
+        .filter((r) => titles.has(r.sessionId))
         .slice(0, ENTITY_MENTION_RESULT_LIMIT)
         .map((r) => ({
           entityKind: "result" as const,
@@ -679,6 +735,7 @@ function registerBuiltinEntityMentionSources(): void {
           title: r.title,
           subtitle: `${r.toolName} · ${formatResultSize(r.bytes)} · ${r.preview}`.slice(0, 200),
           href: `/?session=${encodeURIComponent(r.sessionId)}&message=${encodeURIComponent(r.messageId)}`,
+          sourceSessionId: r.sessionId,
           searchText: r.searchText,
         }))
     },
@@ -687,12 +744,16 @@ function registerBuiltinEntityMentionSources(): void {
       return resultBodyText(candidate.id)
     },
     async fingerprint(candidate) {
-      // The body itself, hashed by length. A tool result is immutable once its
-      // turn finishes, so the only changes worth catching are the message being
-      // deleted, edited, or its parts reordered — all of which move this.
-      const { resultBodyText } = await import("./result-reference")
+      // A digest of the body. A tool result is immutable once its turn
+      // finishes, so the changes worth catching are the message being deleted,
+      // edited, or its parts reordered — all of which move this. (It was the
+      // body's length, which a same-length edit slipped past.)
+      const [{ resultBodyText }, { contentFingerprint }] = await Promise.all([
+        import("./result-reference"),
+        import("./content-fingerprint"),
+      ])
       const body = await resultBodyText(candidate.id)
-      return body === null ? null : String(body.length)
+      return body === null ? null : contentFingerprint(body)
     },
   })
 

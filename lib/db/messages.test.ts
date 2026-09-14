@@ -27,6 +27,7 @@ import {
   IMAGE_EDIT_SCHEMA_VERSION,
   type ImageEditVersionV1,
 } from "@/lib/chat/image-edit/version"
+import { composeTurnText } from "@/lib/chat/prompt-preamble"
 
 jest.setTimeout(30_000)
 
@@ -564,6 +565,23 @@ describe("last-message preview denormalization", () => {
     const row = await getDb().sessions.get("s-prev")
     expect(row?.lastMessagePreview).toBe("hello world")
     expect(typeof row?.lastMessageAt).toBe("number")
+  })
+
+  it("previews the typed text, not the context envelope in front of it", async () => {
+    // The sidebar row shows what was said. The envelope opens the text, so the
+    // capped preview would otherwise be the tag and framing line for every turn
+    // that carried references — and could surface a snapshot in the list.
+    const { text } = composeTurnText(
+      "typed words",
+      [{ kind: "references", text: "SECRET SNAPSHOT" }],
+      { nonce: "abcdef0123" }
+    )
+    await putSession("s-prev")
+    await persistMessages("s-prev", [msg("a", "user", text)])
+    const row = await getDb().sessions.get("s-prev")
+    expect(row?.lastMessagePreview).toBe("typed words")
+    expect(row?.lastMessagePreview).not.toContain("SECRET SNAPSHOT")
+    expect(row?.lastMessagePreview).not.toContain("cognia_context_")
   })
 
   it("updates the preview on a new message boundary but not on in-place growth", async () => {

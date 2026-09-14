@@ -32,6 +32,7 @@ import {
   type ProjectMiningBackfillDeps,
   type ProjectMiningStepOutcome,
 } from "./project-mining-backfill"
+import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 
 /** This renderer's identity for the run lease. One per window, stable. */
 let workerId: string | null = null
@@ -92,7 +93,9 @@ function backfillDeps(): ProjectMiningBackfillDeps {
               {
                 id: message.id,
                 role: message.role,
-                text: extractPlainText(message.parts),
+                // The extractor must not credit the user with context the
+                // composer attached to their turn.
+                text: extractPlainText(stripPromptPreambleFromParts(message.parts ?? [])),
                 parts: Array.isArray(message.parts) ? message.parts : undefined,
               },
             ]

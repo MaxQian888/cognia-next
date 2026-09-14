@@ -14,6 +14,7 @@ import {
   type MessageReplyTo,
   type SendContent,
 } from "@cognia/agent-config-types"
+import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 
 /** The fields a reply needs from the message it targets. */
 export interface ReplyTargetLike {
@@ -23,7 +24,11 @@ export interface ReplyTargetLike {
 
 /** The reference a reply to `target` carries. */
 export function buildReplyTo(target: ReplyTargetLike): MessageReplyTo {
-  return { messageId: target.id, preview: buildReplyPreview(target.parts) }
+  // Previewed from what the target's author typed. A reply to a turn that
+  // carried references would otherwise quote the opening of the app's context
+  // envelope instead of the words being answered.
+  const parts = target.parts ? stripPromptPreambleFromParts(target.parts) : target.parts
+  return { messageId: target.id, preview: buildReplyPreview(parts) }
 }
 
 /** The reference on a message, or `null` when it is absent or malformed. */
@@ -66,4 +71,39 @@ export function prefixReplyContext(content: SendContent, replyTo: MessageReplyTo
   const line = replyContextLine(replyTo)
   if (typeof content === "string") return `${line}\n\n${content}`
   return [{ type: "text", text: line }, ...content]
+}
+
+interface ProviderMessageLike {
+  role: string
+  parts: readonly unknown[]
+  metadata?: unknown
+}
+
+/**
+ * A transcript with every reply line put back in front of its user turn, for a
+ * provider that is handed the WHOLE conversation each turn.
+ *
+ * `prefixReplyContext` only reaches the content of the turn being sent. The
+ * standalone engine never reads that content: it converts the message list
+ * (`lib/ai/chat/standalone-engine.ts`), whose rows keep the typed text alone —
+ * so on a BYOK provider the model never learned which message a reply
+ * answered, on the turn itself or on any later one. Rebuilding the line from
+ * `metadata.replyTo` for every row is what the Agent SDK's own transcript
+ * already holds, since it recorded the prefixed content when it was sent.
+ *
+ * Returns the same array when no row carries a reply, and never mutates a row.
+ */
+export function withReplyContextLines<T extends ProviderMessageLike>(messages: readonly T[]): T[] {
+  let changed = false
+  const out = messages.map((message) => {
+    if (message.role !== "user") return message
+    const replyTo = readReplyTo(message)
+    if (!replyTo) return message
+    changed = true
+    return {
+      ...message,
+      parts: [{ type: "text", text: replyContextLine(replyTo) }, ...message.parts],
+    } as T
+  })
+  return changed ? out : (messages as T[])
 }

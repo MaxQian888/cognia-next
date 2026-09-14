@@ -1,6 +1,7 @@
 import type { UIMessage } from "ai"
 
 import { analyzeSession, buildAssessments } from "@/lib/analysis/session-report"
+import { composeTurnText } from "@/lib/chat/prompt-preamble"
 import type { SessionUsageRow } from "@/lib/db/session-usage"
 
 // Deterministic pricing: $1 / 1M input, $1 / 1M output, no cache rates.
@@ -97,6 +98,21 @@ describe("analyzeSession", () => {
     expect(r.frictionTotal).toBeGreaterThanOrEqual(2)
     expect(r.commitCount).toBe(1)
     expect(r.testSnapshots).toEqual([{ messageIndex: 1, passed: 12, failed: 1 }])
+  })
+
+  it("detects friction in the typed text only, never inside the context envelope", () => {
+    // Friction means the user course-correcting the assistant. A referenced
+    // document that happens to say "actually, undo that and stop" is not the
+    // user being frustrated, and counting it would skew every report for a
+    // session that leaned on references.
+    const { text } = composeTurnText(
+      "typed words",
+      [{ kind: "references", text: "SECRET SNAPSHOT: actually undo that, wait, stop" }],
+      { nonce: "abcdef0123" }
+    )
+    const r = analyzeSession({ messages: [user("u1", text)], usageRows: [] }, { resolve })
+    expect(r.friction).toEqual([])
+    expect(r.frictionTotal).toBe(0)
   })
 
   it("derives idle gaps from usage-row wall-clock", () => {

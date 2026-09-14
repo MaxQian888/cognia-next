@@ -136,6 +136,7 @@ import { Composer } from "./composer"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
 import { composerReadSlice, useChatStore } from "@/stores/chat"
+import { stripPromptPreamble } from "@/lib/chat/prompt-preamble"
 import { useComposerIntentStore } from "@/stores/chat/composer-intent-store"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useSettingsStore } from "@/stores/settings"
@@ -1130,6 +1131,73 @@ describe("Composer — review receipts survive a send that never commits", () =>
     // The message never landed, so the assistant was never told — the verdict
     // has to still be there for the retry.
     expect(useArtifactStore.getState().peekReviewReceipts("ses_42")).toHaveLength(1)
+  })
+})
+
+// The new-chat composer has no conversation yet. Its staged references used to
+// be formatted only `if (session?.id)` and then cleared, so the first message of
+// a conversation started FROM a reference went out without it.
+describe("Composer — references staged before a conversation exists", () => {
+  afterEach(() => {
+    act(() => useChatStore.getState().clearContextSelections(null))
+  })
+
+  it("sends the references in the envelope and hands the citations over with the turn", async () => {
+    act(() =>
+      useChatStore.getState().addContextSelection(
+        {
+          kind: "entity",
+          entityKind: "issue",
+          entityId: "i1",
+          title: "Broker race",
+          snapshot: "ISSUE BODY",
+          comment: "",
+          capturedAt: 1,
+        },
+        null
+      )
+    )
+    const onSend = jest.fn(async (..._args: unknown[]) => undefined)
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <Composer
+          placement="hero"
+          session={null}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={onSend}
+          onStop={async () => undefined}
+        />
+      </Wrapper>
+    )
+    const ta = document.querySelector("textarea") as HTMLTextAreaElement
+    fireEvent.change(ta, { target: { value: "what is left to fix?" } })
+    await act(async () => {
+      fireEvent.click(document.querySelector('button[aria-label="Send"]') as HTMLButtonElement)
+      await Promise.resolve()
+    })
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1))
+    const [content, , , turnMetadata] = onSend.mock.calls[0] as [
+      string,
+      unknown,
+      unknown,
+      Record<string, unknown>,
+    ]
+    expect(content).toContain("ISSUE BODY")
+    expect(stripPromptPreamble(content)).toBe("what is left to fix?")
+    expect(turnMetadata).toMatchObject({
+      citations: [{ kind: "entity", id: "issue:i1", label: "Broker race" }],
+      promptPreamble: {
+        sections: ["references"],
+        references: [{ kind: "entity", entityKind: "issue", title: "Broker race" }],
+      },
+    })
+    // Consumed by exactly this turn.
+    await waitFor(() =>
+      expect(composerReadSlice(useChatStore.getState(), null).contextSelections).toEqual([])
+    )
   })
 })
 

@@ -6,6 +6,7 @@ import { AccountContentCipher, activateAccountContentCipher } from "@/lib/accoun
 import { computeSequenceDigest } from "@cognia/agent-config-types/canonical-session"
 import { sessionStateChannel, type HostStateAction } from "@cognia/agent-config-types/host-state"
 import { activateAccountDatabase, __resetDbForTesting, getDb } from "@/lib/db/schema"
+import { composeTurnText } from "@/lib/chat/prompt-preamble"
 import {
   acquireHostStateLease,
   commitHostStateAction,
@@ -371,6 +372,44 @@ describe("HostState durable store", () => {
       })
     ).rejects.toThrow("host_state_message_not_found")
     await expect(getDb().hostStateActions.count()).resolves.toBe(0)
+  })
+
+  // The kept tail's last row becomes the list preview. A user turn that carried
+  // references persists the composer's context envelope in its text; the
+  // preview is what the user typed, not the envelope.
+  it("previews what the user typed after truncating back to a turn with references", async () => {
+    await acquireWritableLease()
+    const { text } = composeTurnText("compare these", [{ kind: "references", text: "SNAPSHOT" }], {
+      nonce: "abcdef1234",
+    })
+    await getDb().messages.bulkPut([
+      {
+        id: "m-user",
+        sessionId: "session-1",
+        role: "user",
+        parts: [{ type: "text", text }],
+        createdAt: 5,
+      },
+      {
+        id: "m-assistant",
+        sessionId: "session-1",
+        role: "assistant",
+        parts: [{ type: "text", text: "answer" }],
+        createdAt: 6,
+      },
+    ] as never)
+    await commitHostStateAction({
+      action: draftAction({
+        actionId: "truncate-action",
+        action: { kind: "transcript.truncate", afterMessageId: "m-user" },
+      }),
+      mutation: { kind: "transcript.revised", transcriptRevision: 1, revision: 1 },
+      now: 10,
+    })
+    await expect(getDb().messages.get("m-assistant")).resolves.toBeUndefined()
+    const session = await getDb().sessions.get("session-1")
+    expect(session?.lastMessagePreview).toBe("compare these")
+    expect(session?.lastMessagePreview).not.toContain("SNAPSHOT")
   })
 
   it("commits a client action on the strength of the lease alone", async () => {

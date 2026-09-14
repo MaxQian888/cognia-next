@@ -254,6 +254,29 @@ export interface EntitySelectionRef extends ContextSelectionBase {
   subtitle?: string
   /** In-app route the chip links back to, when the kind has one. */
   href?: string
+  /**
+   * The conversation the record belongs to, for the kinds that live inside one
+   * (`message`, `result`). Lets the prompt say "from this conversation" rather
+   * than claiming every such reference came from somewhere else.
+   */
+  sourceSessionId?: string
+  /**
+   * Several records staged as ONE reference — a transcript multi-select.
+   *
+   * `entityId` is then the first member's id and `snapshot` holds all of them in
+   * transcript order. Every member is cited on send, so each one gets its own
+   * backlink even though the composer shows a single chip. Absent (or one
+   * member) means the ordinary single-record reference.
+   */
+  members?: EntityReferenceMember[]
+}
+
+/** One record folded into a combined {@link EntitySelectionRef}. */
+export interface EntityReferenceMember {
+  entityId: string
+  /** How the member reads in the chip's expanded list. */
+  title: string
+  href?: string
 }
 
 /**

@@ -9,6 +9,20 @@ import {
   proposeWorkspaceBackfill,
   tickWorkspaceBackfill,
 } from "./backfill-service"
+import { composeTurnText } from "@/lib/chat/prompt-preamble"
+import { enqueueProjectMiningJobs } from "@/lib/memory/write/project-mining-enqueue"
+
+// Pass-through: the real queue still runs; the spy only lets a test read the
+// transcript the production deps built.
+jest.mock("@/lib/memory/write/project-mining-enqueue", () => {
+  const actual = jest.requireActual("@/lib/memory/write/project-mining-enqueue")
+  return {
+    ...actual,
+    enqueueProjectMiningJobs: jest.fn((...args: unknown[]) =>
+      actual.enqueueProjectMiningJobs(...args)
+    ),
+  }
+})
 
 const dbFixture = createDbTestFixture()
 beforeAll(dbFixture.initialize)
@@ -98,6 +112,32 @@ describe("the background tick", () => {
     // The page is newest-first, so the watermark lands on the OLDEST row it saw.
     expect(after?.cursorSessionId).toBe("s1")
     expect(after?.sessionsScanned).toBe(2)
+  })
+
+  // A user turn that carried references persists the composer's context
+  // envelope in its text. The miner must read what the user wrote, or it would
+  // credit them with every snapshot they ever attached.
+  it("hands the miner what the user typed, not the context envelope", async () => {
+    await seedSession("s1", "p1", 100)
+    const { text } = composeTurnText(
+      "we standardised on pnpm workspaces",
+      [{ kind: "references", text: "SNAPSHOT FROM ANOTHER CHAT" }],
+      { nonce: "abcdef1234" }
+    )
+    await getDb().messages.put({
+      id: "m1",
+      sessionId: "s1",
+      projectId: "p1",
+      role: "user",
+      parts: [{ type: "text", text }],
+      createdAt: 100,
+    } as never)
+    const run = await proposeWorkspaceBackfill("p1")
+    await confirmWorkspaceBackfill(run.id)
+    jest.mocked(enqueueProjectMiningJobs).mockClear()
+    await tickWorkspaceBackfill("p1")
+    const [params] = jest.mocked(enqueueProjectMiningJobs).mock.calls[0]!
+    expect(params.transcript.map((m) => m.text)).toEqual(["we standardised on pnpm workspaces"])
   })
 
   it("finishes when nothing older remains", async () => {

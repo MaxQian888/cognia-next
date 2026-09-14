@@ -13,6 +13,7 @@ import {
   TRANSCRIPT_SUMMARY_BYTE_LIMIT,
   TRANSCRIPT_SUMMARY_MEDIA_LIMIT,
 } from "@cognia/agent-config-types"
+import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 
 interface ProjectTimelineOptions {
   sessionId: string
@@ -62,7 +63,8 @@ function truncateUtf8(value: string, maxBytes: number): { text: string; truncate
 
 function messageText(message: StoredMessage): string {
   const chunks: string[] = []
-  for (const part of message.parts) {
+  // A companion's turn preview shows the typed text, not the context envelope.
+  for (const part of stripPromptPreambleFromParts(message.parts)) {
     const candidate = part as { type?: unknown; text?: unknown }
     if (candidate.type === "text" && typeof candidate.text === "string") {
       chunks.push(candidate.text)

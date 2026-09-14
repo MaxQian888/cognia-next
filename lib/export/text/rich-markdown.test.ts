@@ -10,6 +10,7 @@ import {
   type RichExportData,
 } from "./rich-markdown"
 import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
+import { composeTurnText } from "@/lib/chat/prompt-preamble"
 
 const session: ChatSession = {
   id: "s1",
@@ -120,6 +121,53 @@ describe("exportToPlainText", () => {
     expect(text).toContain("What's 1+1?")
     expect(text).toContain("It's 2.")
     expect(text).not.toContain("```")
+  })
+})
+
+describe("the composer's context envelope", () => {
+  it("is folded in markdown and omitted from plain text, never printed as the user's words", () => {
+    const { text } = composeTurnText(
+      "typed words",
+      [{ kind: "references", text: "SECRET SNAPSHOT" }],
+      { nonce: "abcdef0123" }
+    )
+    const envelopeData: RichExportData = {
+      session,
+      messages: [
+        {
+          id: "u-env",
+          sessionId: "s1",
+          role: "user",
+          parts: [{ type: "text", text }],
+          createdAt: 1_700_000_000_000,
+        },
+      ],
+      exportedAt: data.exportedAt,
+    }
+
+    // A transcript export is a record of the conversation, so the context the
+    // question was asked about is kept — but folded and labelled, never mixed
+    // into what the user typed. The nonce tags are wire format and stay out.
+    const md = exportToRichMarkdown(envelopeData)
+    const open = md.indexOf("<details><summary>📎 Attached context</summary>")
+    const close = md.indexOf("</details>", open)
+    expect(open).toBeGreaterThanOrEqual(0)
+    expect(close).toBeGreaterThan(open)
+
+    const folded = md.slice(open, close)
+    expect(folded).toContain("SECRET SNAPSHOT")
+    expect(folded).not.toContain("typed words")
+    expect(md.slice(close)).toContain("typed words")
+    expect(md.split("SECRET SNAPSHOT")).toHaveLength(2)
+    expect(md).not.toContain("cognia_context_")
+
+    // Plain text is the diffing/pasting format: there is no fold to tuck a
+    // document into, so it is left out — with a marker, not silently.
+    const plain = exportToPlainText(envelopeData)
+    expect(plain).toContain("[attached context omitted]")
+    expect(plain).toContain("typed words")
+    expect(plain).not.toContain("SECRET SNAPSHOT")
+    expect(plain).not.toContain("cognia_context_")
   })
 })
 

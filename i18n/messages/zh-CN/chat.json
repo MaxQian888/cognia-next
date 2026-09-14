@@ -120,7 +120,13 @@
       "label": "总结后分支",
       "placeholder": "摘要将显示在这里——你可以在分支前编辑它。",
       "previewLabel": "摘要（可编辑）",
-      "regenerate": "重新生成"
+      "regenerate": "重新生成",
+      "fallback": {
+        "empty": "到这条消息为止没有可以总结的文字。",
+        "noClient": "这里没有可用的模型来生成总结，下面是会话的提纲，分支前可以修改。",
+        "noOutput": "模型返回了空的总结，下面是会话的提纲，可以重试或手动修改。",
+        "pii": "这段会话包含不会发送给模型的个人数据，下面改为会话的提纲。"
+      }
     },
     "summaryEmpty": "请先填写摘要再分支",
     "summaryError": "生成摘要失败",
@@ -2338,5 +2344,25 @@
     "title": "信任此工作区？",
     "trust": "信任工作区",
     "workspaceLabel": "工作区"
+  },
+  "promptPreamble": {
+    "combinedTitle": "{title}（{count} 条消息）",
+    "generic": "附加的上下文",
+    "hideText": "收起发给模型的原文",
+    "kinds": {
+      "artifact": "Artifact",
+      "comment": "评论",
+      "entity": "记录",
+      "external": "选中内容",
+      "file": "文件",
+      "plugin": "插件",
+      "web": "网页"
+    },
+    "references": "{count, plural, =1 {附加了 1 项引用} other {附加了 # 项引用}}",
+    "sections": {
+      "reviewReceipts": "评审结果",
+      "webSearch": "联网搜索结果"
+    },
+    "showText": "查看发给模型的原文"
   }
 }

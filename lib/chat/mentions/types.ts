@@ -22,6 +22,9 @@
  *     respectively — so no `@…` token survives and this ref is the only record
  *     that the turn cited that document or record. `doc` ids are
  *     `<providerId>:<documentId>`; `entity` ids are `<entityKind>:<recordId>`.
+ *     A `doc` pick records its citation through `recordMention`; an `entity`
+ *     citation is derived from the chips actually sent
+ *     (`selection-citations.ts`), so it cannot outlive a removed chip.
  */
 
 export type ContextRefKind =

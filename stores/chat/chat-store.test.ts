@@ -1737,7 +1737,9 @@ describe("contextSelections", () => {
   it("adds, removes by index, and clears selections", () => {
     act(() => {
       useChatStore.getState().addContextSelection(sel({ title: "one" }))
-      useChatStore.getState().addContextSelection(sel({ title: "two" }))
+      useChatStore
+        .getState()
+        .addContextSelection(sel({ title: "two", range: { startLine: 5, endLine: 6 } }))
     })
     expect(useChatStore.getState().contextSelections).toHaveLength(2)
 
@@ -1780,10 +1782,25 @@ describe("contextSelections", () => {
     ])
   })
 
+  // ⌘K after `@`, or a multi-select overlapping an earlier pick, used to send
+  // the same body twice.
+  it("refreshes a re-staged reference in place instead of adding a second chip", () => {
+    act(() => {
+      useChatStore.getState().addContextSelection(sel({ title: "one", artifactId: "a1" }))
+      useChatStore.getState().addContextSelection(sel({ title: "two", artifactId: "a2" }))
+      useChatStore
+        .getState()
+        .addContextSelection(sel({ title: "one again", artifactId: "a1", snapshot: "newer" }))
+    })
+    const staged = useChatStore.getState().contextSelections
+    expect(staged.map((s) => s.title)).toEqual(["one again", "two"])
+    expect(staged[0].snapshot).toBe("newer")
+  })
+
   it("promoteContextSelection is a no-op for index 0 and out-of-range (stable reference)", () => {
     act(() => {
       useChatStore.getState().addContextSelection(sel({ title: "one" }))
-      useChatStore.getState().addContextSelection(sel({ title: "two" }))
+      useChatStore.getState().addContextSelection(sel({ title: "two", artifactId: "a2" }))
     })
     const before = useChatStore.getState().contextSelections
 

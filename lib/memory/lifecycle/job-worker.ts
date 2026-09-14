@@ -27,6 +27,7 @@ import {
 } from "@/lib/memory/consolidate/consolidator"
 import { hashContent } from "@/lib/project-knowledge/ingest/ingest-file"
 import { hasNoLeakingPii } from "@cognia/redact"
+import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 
 export interface MemoryJobWorkerDeps {
   claimNext: (workerId: string) => Promise<MemoryJob | undefined>
@@ -211,7 +212,8 @@ async function loadJobContext(job: MemoryJob): Promise<{
   const fullTranscript = messages.map((message) => ({
     id: message.id,
     role: message.role,
-    text: extractPlainText(message.parts),
+    // Typed text only: context the composer attached is not something the user said.
+    text: extractPlainText(stripPromptPreambleFromParts(message.parts ?? [])),
     createdAt: messageCreatedAt(message),
     parts: message.parts,
   }))

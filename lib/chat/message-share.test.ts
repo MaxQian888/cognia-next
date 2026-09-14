@@ -1,5 +1,6 @@
 import type { UIMessage } from "ai"
 
+import { composeTurnText } from "@/lib/chat/prompt-preamble"
 import { buildMessageShareContent, writeMessageToClipboard } from "./message-share"
 
 describe("buildMessageShareContent", () => {
@@ -70,6 +71,28 @@ describe("buildMessageShareContent", () => {
     }
 
     expect(buildMessageShareContent(message).hasContent).toBe(true)
+  })
+
+  it("copies and shares the typed text without the composer's context envelope", () => {
+    // Copy hands over what the user wrote. The referenced snapshot rides in the
+    // persisted text for the model, but pasting it elsewhere would leak a
+    // document the user only pointed at, under their name.
+    const { text } = composeTurnText(
+      "typed words",
+      [{ kind: "references", text: "SECRET SNAPSHOT" }],
+      { nonce: "abcdef0123" }
+    )
+    const content = buildMessageShareContent({
+      id: "with-envelope",
+      role: "user",
+      parts: [{ type: "text", text }],
+    })
+
+    for (const out of [content.plainText, content.nativeShareText, content.html]) {
+      expect(out).toContain("typed words")
+      expect(out).not.toContain("SECRET SNAPSHOT")
+      expect(out).not.toContain("cognia_context_")
+    }
   })
 
   it("keeps malformed image data copyable without crashing message rendering", () => {

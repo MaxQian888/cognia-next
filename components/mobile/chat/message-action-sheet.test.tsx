@@ -5,6 +5,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import type { UIMessage } from "ai"
 
+import { composeTurnText } from "@/lib/chat/prompt-preamble"
 import { MessageActionSheet, extractPlainText } from "./message-action-sheet"
 
 jest.mock("@/lib/capacitor/share", () => ({
@@ -211,6 +212,22 @@ describe("extractPlainText", () => {
   it("returns empty string for an empty parts array", () => {
     const msg = { id: "x", role: "assistant", parts: [] } as UIMessage
     expect(extractPlainText(msg)).toBe("")
+  })
+
+  it("returns the typed text without the composer's context envelope", () => {
+    // Copy, quote, share, read-aloud and the edit draft all read this. Each of
+    // them wants the user's words; the envelope is a snapshot attached for the
+    // model, and read aloud or pasted it would be someone else's document.
+    const { text } = composeTurnText(
+      "typed words",
+      [{ kind: "references", text: "SECRET SNAPSHOT" }],
+      { nonce: "abcdef0123" }
+    )
+    const msg = { id: "x", role: "user", parts: [{ type: "text", text }] } as UIMessage
+    const out = extractPlainText(msg)
+    expect(out).toBe("typed words")
+    expect(out).not.toContain("SECRET SNAPSHOT")
+    expect(out).not.toContain("cognia_context_")
   })
 })
 

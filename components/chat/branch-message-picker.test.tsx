@@ -2,6 +2,7 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import type { UIMessage } from "ai"
+import { composeTurnText } from "@/lib/chat/prompt-preamble"
 import { BranchMessagePicker, previewOf } from "./branch-message-picker"
 
 const messages = {
@@ -45,6 +46,20 @@ describe("previewOf", () => {
     const p = previewOf(msg("m", "user", "x".repeat(200)))
     expect(p.endsWith("…")).toBe(true)
     expect(p.length).toBeLessThanOrEqual(91)
+  })
+
+  it("previews the typed text, not the context envelope in front of it", () => {
+    // The row has 90 characters. Spending them on the envelope's tag and
+    // framing line would make every referenced turn look the same.
+    const { text } = composeTurnText(
+      "typed words",
+      [{ kind: "references", text: "SECRET SNAPSHOT" }],
+      { nonce: "abcdef0123" }
+    )
+    const p = previewOf(msg("m", "user", text))
+    expect(p).toBe("typed words")
+    expect(p).not.toContain("SECRET SNAPSHOT")
+    expect(p).not.toContain("cognia_context_")
   })
 
   it("returns empty for a tool-only turn", () => {

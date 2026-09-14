@@ -52,13 +52,22 @@ const MAX_TRANSCRIPT_CHARS = 24_000
  * (tool-only assistant steps) are skipped. Exported for tests.
  */
 export function renderConversation(messages: UIMessage[]): string {
+  return renderConversationSegments(messages).join("\n\n")
+}
+
+/**
+ * The same transcript, one role-labelled entry per message — the unit
+ * `summarizeMaterial` packs chunks on, so a long conversation is split between
+ * messages rather than through one.
+ */
+export function renderConversationSegments(messages: readonly UIMessage[]): string[] {
   const lines: string[] = []
   for (const m of messages) {
     const text = extractPlainText(m.parts)
     if (!text) continue
     lines.push(`${ROLE_LABEL[m.role] ?? m.role}: ${text}`)
   }
-  return lines.join("\n\n")
+  return lines
 }
 
 /**

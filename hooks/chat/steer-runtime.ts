@@ -25,6 +25,7 @@ import { buildSteerPayload, steerMetaOf, type SteerState } from "@/lib/claude/st
 import { persistMessages } from "@/lib/db/messages"
 import type { MessageReplyTo, SendContent, SendOptions } from "@cognia/agent-config-types"
 import type { UIMessage } from "ai"
+import { promptPreambleOfParts } from "@/lib/chat/prompt-preamble"
 
 /** Sessions whose imminent settle must drain the steer queue even if the turn
  * ended via interrupt/error (set by `interruptAndSteer`). A natural clean end
@@ -220,11 +221,18 @@ function withText(message: UIMessage, text: string): UIMessage {
  */
 export function editPendingSteer(sessionId: string, entryId: string, text: string): void {
   const store = useChatStore.getState()
-  store.updateSteerEntry(sessionId, entryId, text)
   const messages = store.sessions[sessionId]?.messages
+  // The edit draft is the typed text alone (the bubble strips the composer's
+  // context envelope), so the envelope is put back in front of the edit here.
+  // Replacing the whole first part with the draft silently dropped every
+  // reference the follow-up was sent with — from the bubble AND from the replay.
+  const original = messages?.find((message) => steerMetaOf(message.metadata)?.entryId === entryId)
+  const preamble = original ? promptPreambleOfParts(original.parts) : null
+  const full = preamble ? `${preamble}\n\n${text}` : text
+  store.updateSteerEntry(sessionId, entryId, full)
   if (!messages) return
   const next = messages.map((message) =>
-    steerMetaOf(message.metadata)?.entryId === entryId ? withText(message, text) : message
+    steerMetaOf(message.metadata)?.entryId === entryId ? withText(message, full) : message
   )
   store.replaceSessionMessages(sessionId, next)
   void persistMessages(sessionId, next).catch((err) =>

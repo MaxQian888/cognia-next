@@ -120,7 +120,13 @@
       "label": "Branch from summary",
       "placeholder": "The summary will appear here — you can edit it before branching.",
       "previewLabel": "Summary (editable)",
-      "regenerate": "Regenerate"
+      "regenerate": "Regenerate",
+      "fallback": {
+        "empty": "There is nothing readable to summarize up to this message.",
+        "noClient": "No model is available to summarize here, so this is an outline of the conversation. Edit it before branching.",
+        "noOutput": "The model returned an empty summary, so this is an outline of the conversation. Try again or edit it.",
+        "pii": "This conversation contains personal data that is not sent to a model, so this is an outline of it instead."
+      }
     },
     "summaryEmpty": "Add a summary before branching",
     "summaryError": "Failed to generate summary",
@@ -2338,5 +2344,25 @@
     "title": "Trust this workspace?",
     "trust": "Trust workspace",
     "workspaceLabel": "Workspace"
+  },
+  "promptPreamble": {
+    "combinedTitle": "{title} ({count} messages)",
+    "generic": "Attached context",
+    "hideText": "Hide the text the model received",
+    "kinds": {
+      "artifact": "Artifact",
+      "comment": "Comment",
+      "entity": "Record",
+      "external": "Selection",
+      "file": "File",
+      "plugin": "Plugin",
+      "web": "Web page"
+    },
+    "references": "{count, plural, =1 {1 reference attached} other {# references attached}}",
+    "sections": {
+      "reviewReceipts": "Review outcomes",
+      "webSearch": "Web results"
+    },
+    "showText": "Show the text the model received"
   }
 }

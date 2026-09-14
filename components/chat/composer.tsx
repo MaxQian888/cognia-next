@@ -37,6 +37,7 @@ import {
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
+  selectComposerCitedRefs,
   selectComposerContextSelections,
   selectComposerPermissionMode,
   selectComposerReplyTo,
@@ -53,6 +54,10 @@ import { resolveWebAccess } from "@/lib/chat/web-access"
 import { wrapUntrustedContent } from "@/lib/web/untrusted-content"
 import { formatContextSelectionsForLLM } from "@/lib/artifacts/format-selection-context"
 import { refreshSelectionFreshness } from "@/lib/chat/mentions/selection-freshness"
+import { citationsForSelections } from "@/lib/chat/mentions/selection-citations"
+import { mergeContextRefs } from "@/lib/chat/mentions/merge-refs"
+import { composeTurnText, summarizeSelectionForPreamble } from "@/lib/chat/prompt-preamble"
+import { estimateFallbackTokens } from "@/lib/ai/tokens/fallback-estimator"
 import { formatReviewReceiptsForLLM } from "@/lib/artifacts/format-review-receipt"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import type {
@@ -3453,7 +3458,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       // the configured provider before forwarding to the SDK and prepend the
       // formatted results as a system block. We don't fail the send on
       // search errors — fall back to the original message instead.
-      let augmented = text
+      // The three things that can ride in front of the typed text. Each is built
+      // as its own section and assembled once by `composeTurnText`, which wraps
+      // them in the envelope every "what did the user type" reader strips.
+      let webSearchSection = ""
       let webSearchContext: SendOptions["webSearchContext"]
       // THIS composer's conversation, matching where `WebSearchToggle` writes
       // it. The bare projection is the focused pane, so an unfocused pane's
@@ -3481,8 +3489,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       if (webOn && proactiveSearchEnabled && trimmed) {
         try {
           const resp = await searchWithAppSettings(trimmed)
-          const ctx = wrapUntrustedContent(formatSearchResultsForLLM(resp))
-          augmented = `${ctx}\n\n---\n\nUser question: ${text}`
+          webSearchSection = wrapUntrustedContent(formatSearchResultsForLLM(resp))
           webSearchContext = {
             provider: resp.provider,
             results: resp.results.map(({ title, url, content, score }) => ({
@@ -3531,9 +3538,14 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       // approved these — only the divergence is recorded, so
       // `formatContextSelectionsForLLM` can say the copy is behind.
       const contextSelections = (await refreshSelectionFreshness(stagedSelections)).selections
+      // Formatted whether or not a conversation exists yet. The block used to be
+      // gated on `session?.id`, and the new-chat composer has none — so the chips
+      // of a first message were silently dropped and then cleared, which is the
+      // main way a conversation gets started FROM a reference.
+      const referencesSection = formatContextSelectionsForLLM(contextSelections, {
+        sessionId: session?.id ?? null,
+      })
       if (contextSelections.length > 0 && session?.id) {
-        const selectionCtx = formatContextSelectionsForLLM(contextSelections)
-        augmented = augmented.trim() ? `${selectionCtx}\n\n---\n\n${augmented}` : selectionCtx
         // The first *artifact*, not the first selection. A file, comment or web
         // reference has nothing for a revision proposal to diff against, so
         // reading index 0 blindly would let a staged workspace file silently
@@ -3559,12 +3571,15 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       const sentReceipts = session?.id
         ? useArtifactStore.getState().peekReviewReceipts(session.id)
         : []
-      if (sentReceipts.length > 0) {
-        const receiptCtx = formatReviewReceiptsForLLM(sentReceipts)
-        if (receiptCtx) {
-          augmented = augmented.trim() ? `${receiptCtx}\n\n---\n\n${augmented}` : receiptCtx
-        }
-      }
+      const turn = composeTurnText(text, [
+        {
+          kind: "reviewReceipts",
+          text: sentReceipts.length > 0 ? formatReviewReceiptsForLLM(sentReceipts) : "",
+        },
+        { kind: "references", text: referencesSection },
+        { kind: "webSearch", text: webSearchSection },
+      ])
+      const augmented = turn.text
 
       const linkContext = await buildLinkContextBlocks(text)
       // `precomputed` makes this a map lookup for anything already extracted at
@@ -3572,7 +3587,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       const attachmentResult = await buildSendContent(augmented, files, { precomputed })
       const content = mergeContextBlocks(attachmentResult.content, linkContext.blocks)
       const rejected = attachmentResult.rejected
-      const tokens = attachmentResult.tokens + linkContext.tokens
+      // The envelope counts too. The ceiling used to see attachments and links
+      // only, so twenty staged references went out with no confirmation at all.
+      const tokens =
+        attachmentResult.tokens + linkContext.tokens + estimateFallbackTokens(turn.preamble)
       const isEmpty =
         (typeof content === "string" && !content.trim()) ||
         (Array.isArray(content) && content.length === 0)
@@ -3601,10 +3619,26 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       // team room until the user clears it, so it is read, not consumed.
       const targetMemberIds =
         session?.kind === "team" && session.teamId ? roomTargetsOf(session.id) : []
+      // Read from THIS composer's slice, like the chips, and handed over with
+      // the turn: the destination conversation of a first message does not
+      // exist yet, so the send path cannot find these by looking it up.
+      const citations = mergeContextRefs(
+        citationsForSelections(contextSelections),
+        selectComposerCitedRefs(useChatStore.getState(), session?.id ?? null)
+      )
       const turnMetadata: ComposerTurnMetadata = {
         ...(webSearchContext ? { webSearchContext } : {}),
         ...(replyTo ? { replyTo } : {}),
         ...(targetMemberIds.length > 0 ? { targetMemberIds } : {}),
+        ...(turn.preamble
+          ? {
+              promptPreamble: {
+                sections: turn.sections,
+                references: contextSelections.map(summarizeSelectionForPreamble),
+              },
+            }
+          : {}),
+        ...(citations.length > 0 ? { citations } : {}),
       }
       if (Object.keys(turnMetadata).length > 0) {
         await onSend(content, attachmentResult.manifest, templateRun, turnMetadata)

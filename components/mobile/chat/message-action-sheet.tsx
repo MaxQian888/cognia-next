@@ -76,6 +76,7 @@ import type { MessageMotion } from "@/types/appearance"
 import { QuoteCardDialog } from "@/components/share/quote-card-dialog"
 import { TruncateFromDialog } from "@/components/chat/truncate-from-dialog"
 import { runMetadataOf } from "@/lib/chat/message-run-metadata"
+import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 
 export interface MessageActionSheetProps {
   message: UIMessage | null
@@ -630,7 +631,9 @@ function Row({ icon, label, onClick, disabled, testid }: RowProps) {
  */
 export function extractPlainText(message: UIMessage): string {
   const out: string[] = []
-  for (const part of message.parts ?? []) {
+  // Copy, quote, share, read-aloud and the edit draft all want the typed text,
+  // not the context envelope the composer put in front of it.
+  for (const part of stripPromptPreambleFromParts(message.parts ?? [])) {
     const type = (part as { type?: string }).type
     if (type === "text" || type === "reasoning") {
       const text = (part as { text?: string }).text ?? ""

@@ -70,7 +70,9 @@ describe("ArtifactSelectionChips", () => {
   it("renders one chip per staged selection", () => {
     act(() => {
       useChatStore.getState().addContextSelection(sel({ title: "one" }))
-      useChatStore.getState().addContextSelection(sel({ title: "two" }))
+      useChatStore
+        .getState()
+        .addContextSelection(sel({ title: "two", range: { startLine: 9, endLine: 9 } }))
     })
     render(<ArtifactSelectionChips />)
     expect(screen.getAllByTestId("artifact-selection-chip")).toHaveLength(2)
@@ -247,8 +249,12 @@ describe("ArtifactSelectionChips", () => {
     act(() => {
       useChatStore.getState().setActiveSession("ses_focused")
       useChatStore.getState().addContextSelection(sel({ title: "Focused only" }))
-      useChatStore.getState().addContextSelection(sel({ title: "Background A" }), "ses_background")
-      useChatStore.getState().addContextSelection(sel({ title: "Background B" }), "ses_background")
+      useChatStore
+        .getState()
+        .addContextSelection(sel({ title: "Background A", artifactId: "bg-a" }), "ses_background")
+      useChatStore
+        .getState()
+        .addContextSelection(sel({ title: "Background B", artifactId: "bg-b" }), "ses_background")
     })
 
     render(
@@ -523,6 +529,38 @@ describe("stale snapshots", () => {
     )
     expect(useChatStore.getState().contextSelections[0].comment).toBe("check this")
     expect(useChatStore.getState().contextSelections[0].span).toEqual({ before: 1, after: 1 })
+  })
+
+  // `source.snapshot` knows nothing about spans; refreshing through it narrowed
+  // a widened chip back to one message while the label still said N turns.
+  it("re-reads a widened message reference at its span", async () => {
+    buildMessageReferenceTextMock.mockReset().mockResolvedValue("user: a\n\nassistant: b")
+    act(() =>
+      useChatStore.getState().addContextSelection(
+        staleSel({
+          entityKind: "message",
+          entityId: "s1#m1",
+          stale: true,
+          span: { before: 1, after: 0 },
+          sourceSessionId: "s1",
+        })
+      )
+    )
+    render(<ArtifactSelectionChips />)
+    fireEvent.click(screen.getByTestId("context-selection-refresh"))
+    await waitFor(() =>
+      expect(buildMessageReferenceTextMock).toHaveBeenCalledWith({
+        sessionId: "s1",
+        messageId: "m1",
+        span: { before: 1, after: 0 },
+      })
+    )
+    await waitFor(() =>
+      expect(useChatStore.getState().contextSelections[0].snapshot).toContain("assistant: b")
+    )
+    expect(snapshotMock).not.toHaveBeenCalled()
+    const next = useChatStore.getState().contextSelections[0] as { sourceSessionId?: string }
+    expect(next.sourceSessionId).toBe("s1")
   })
 
   // Gone, not merely changed. Leaving the old body and saying so beats

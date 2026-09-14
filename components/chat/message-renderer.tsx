@@ -76,6 +76,12 @@ import { userBubbleClass } from "@/lib/chat/message-bubble"
 import { resolveToolDisplayTitle } from "@/lib/chat/tool-summary"
 import { buildReplyTo, readReplyTo } from "@/lib/chat/reply-to"
 import { ReplyToQuote } from "@/components/chat/message-parts/reply-to-quote"
+import { PromptPreambleCard } from "@/components/chat/message-parts/prompt-preamble-card"
+import {
+  locatePromptPreamble,
+  readPromptPreambleSummary,
+  stripPromptPreambleFromParts,
+} from "@/lib/chat/prompt-preamble"
 import { MessageReactionAdd, MessageReactionPills } from "@/components/chat/message-reactions"
 import type { AgentFlowMode } from "@/types/appearance"
 import type { ResolvedMessageDisplayOptions } from "@/lib/chat/message-display"
@@ -366,14 +372,35 @@ function MessageRendererInner({
   // Segment the parts into tool-activity groups + standalone parts. Memoized on
   // `message.parts` so it doesn't re-run on every token or on unrelated local
   // state (editing/draft/shared/branchOpen) before the memoized children skip.
+  // The composer's context envelope is persisted in the user row (a BYOK
+  // provider rebuilds later turns from the saved rows), so the bubble shows the
+  // typed text and folds the envelope into `PromptPreambleCard`. The part keeps
+  // its index — anchors, the gallery and tool groups all key by position — and
+  // becomes a step marker when nothing was typed alongside the references.
+  const promptPreamble = useMemo(
+    () => (message.role === "user" ? locatePromptPreamble(message.parts) : null),
+    [message.role, message.parts]
+  )
+  const promptPreambleSummary = useMemo(
+    () =>
+      promptPreamble
+        ? readPromptPreambleSummary((message as { metadata?: unknown }).metadata)
+        : null,
+    [message, promptPreamble]
+  )
   const presentationParts = useMemo(
     () =>
-      message.parts.map((part) =>
-        shouldHideMessagePart(part, display)
+      message.parts.map((part, index) => {
+        if (promptPreamble && index === promptPreamble.index) {
+          return promptPreamble.body.length > 0
+            ? ({ ...part, text: promptPreamble.body } as UIMessage["parts"][number])
+            : ({ type: "step-start" } as UIMessage["parts"][number])
+        }
+        return shouldHideMessagePart(part, display)
           ? ({ type: "step-start" } as UIMessage["parts"][number])
           : part
-      ),
-    [display, message.parts]
+      }),
+    [display, message.parts, promptPreamble]
   )
   const segments = useMemo(
     () => groupAgentParts(presentationParts, agentFlowMode),
@@ -747,6 +774,12 @@ function MessageRendererInner({
                 )}
               >
                 {replyTo ? <ReplyToQuote replyTo={replyTo} sessionId={branchSessionId} /> : null}
+                {promptPreamble ? (
+                  <PromptPreambleCard
+                    preamble={promptPreamble.preamble}
+                    summary={promptPreambleSummary}
+                  />
+                ) : null}
                 {(() => {
                   const inboundA2UI = (
                     message as {
@@ -1462,7 +1495,9 @@ function highlightMentions(
 }
 
 function extractText(message: UIMessage): string {
-  return message.parts
+  // Edit, quote, bring-back, read-aloud and forward all hand over what the
+  // user typed; the context envelope is the app's framing for the model.
+  return stripPromptPreambleFromParts(message.parts)
     .filter((p): p is { type: "text"; text: string } => (p as { type?: string }).type === "text")
     .map((p) => p.text)
     .join("\n\n")

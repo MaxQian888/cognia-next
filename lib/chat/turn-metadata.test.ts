@@ -23,3 +23,13 @@ it("carries the picked room members only when there are any (ADR-0177 batch 3)",
   })
   expect(turnMetadataSendOptions({ targetMemberIds: [] })).toEqual({})
 })
+
+it("carries the preamble summary and the turn's citations when present", () => {
+  const promptPreamble = { sections: ["references" as const], references: [] }
+  const citations = [{ kind: "entity" as const, id: "issue:i1", label: "Bug" }]
+  expect(turnMetadataSendOptions({ promptPreamble, citations })).toEqual({
+    promptPreamble,
+    citations,
+  })
+  expect(turnMetadataSendOptions({ citations: [] })).toEqual({})
+})

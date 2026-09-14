@@ -24,7 +24,10 @@ import {
   backfillChatSearchTextStep,
   deleteChatSearchTextForMessages,
   deleteChatSearchTextForSession,
+  getLastIndexDrainAt,
+  listSessionIdsUpdatedSince,
   reprojectSession,
+  setLastIndexDrainAt,
   type ChatSearchTextRow,
 } from "@/lib/db/chat-search-text"
 import { peekResidentCorpus } from "./engine"
@@ -38,6 +41,13 @@ export interface SearchIndexerDeps {
   corpus: () => Corpus | null
   /** Defer work off the hot path. Tests pass a synchronous runner. */
   schedule: (run: () => void) => void
+  /** When the last drain that did work started, or null before the first. */
+  loadLastDrainAt: () => Promise<number | null>
+  recordDrainAt: (at: number) => Promise<void>
+  /** Sessions touched after `since` — see {@link recoverLostQueue}. */
+  sessionsTouchedSince: (since: number) => Promise<string[]>
+  /** Clock, injectable so a test can pin it. */
+  now: () => number
 }
 
 export interface DrainReport {
@@ -53,6 +63,18 @@ const removedSessions = new Set<string>()
 const removedMessages = new Set<string>()
 let draining = false
 let scheduled = false
+let recovered = false
+let dirtyTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * Quiet period after the last dirty mark before a drain is requested.
+ *
+ * Longer than the streaming persist debounce (250ms) by an order of magnitude,
+ * so a streaming answer — which re-marks its session on every persist — asks for
+ * one drain after it settles instead of one per chunk. The drain itself still
+ * waits for an idle callback on top of this.
+ */
+export const DIRTY_DRAIN_DELAY_MS = 3_000
 
 function defaultSchedule(run: () => void): void {
   if (typeof window === "undefined") return
@@ -70,13 +92,37 @@ function defaultDeps(): SearchIndexerDeps {
     backfillStep: backfillChatSearchTextStep,
     corpus: peekResidentCorpus,
     schedule: defaultSchedule,
+    loadLastDrainAt: getLastIndexDrainAt,
+    recordDrainAt: setLastIndexDrainAt,
+    sessionsTouchedSince: listSessionIdsUpdatedSince,
+    now: () => Date.now(),
   }
 }
 
-/** Queue a session whose messages changed. Cheap and synchronous. */
+/**
+ * Queue a session whose messages changed. Cheap and synchronous.
+ *
+ * Also arms a trailing drain. Until this did, the queue was only ever drained
+ * by a search surface running a query — so the result index behind `^` and the
+ * backlink index stayed behind for as long as nobody opened ⌘K, and a reload in
+ * that window dropped the queue entirely (see {@link recoverLostQueue}).
+ */
 export function markSessionDirty(sessionId: string): void {
   if (!sessionId) return
   dirtySessions.add(sessionId)
+  armDirtyDrain()
+}
+
+function armDirtyDrain(): void {
+  // No window means SSR or the headless brain, where `defaultSchedule` cannot
+  // run anything and a request would only latch `scheduled`. Those hosts drain
+  // explicitly in front of their reads.
+  if (typeof window === "undefined") return
+  if (dirtyTimer !== null) clearTimeout(dirtyTimer)
+  dirtyTimer = setTimeout(() => {
+    dirtyTimer = null
+    scheduleSearchIndexDrain()
+  }, DIRTY_DRAIN_DELAY_MS)
 }
 
 /** Queue a session whose rows are gone, so its projections go too. */
@@ -165,7 +211,15 @@ export async function drainSearchIndex(
   draining = true
 
   const report = { ...empty }
+  // Taken before any work, so a write that lands while this drain runs is newer
+  // than the recorded instant and survives a reload.
+  const startedAt = deps.now()
   try {
+    if (!recovered) {
+      recovered = true
+      await recoverLostQueue(deps)
+    }
+
     // Removals first: a stale projection is a wrong answer, an un-projected
     // message is only a late one.
     const goneSessions = [...removedSessions]
@@ -209,6 +263,13 @@ export async function drainSearchIndex(
       report.backfilled = step.projected
       report.backfillComplete = step.complete
     }
+
+    // Only a drain that did something moves the clock. The read path drains on
+    // every debounced keystroke, and a state write per keystroke would be the
+    // cost this whole module exists to avoid.
+    if (report.sessions > 0 || report.removedSessions > 0 || report.removedMessages > 0) {
+      await deps.recordDrainAt(startedAt)
+    }
   } finally {
     draining = false
   }
@@ -223,6 +284,23 @@ export async function drainSearchIndex(
   return report
 }
 
+/**
+ * Re-queue what a previous run may have left un-projected.
+ *
+ * Runs once per process, inside the first drain. A session touched after the
+ * last drain that did work may have had its dirty mark in a queue that died
+ * with the page. Before the first such drain there is no instant to compare
+ * against — and nothing to recover, because the backfill has not latched
+ * `complete` yet and will reach those messages on its own.
+ */
+async function recoverLostQueue(deps: SearchIndexerDeps): Promise<void> {
+  const since = await deps.loadLastDrainAt()
+  if (since === null) return
+  for (const sessionId of await deps.sessionsTouchedSince(since)) {
+    if (!removedSessions.has(sessionId)) dirtySessions.add(sessionId)
+  }
+}
+
 /** Test hook — clear the queues and the in-flight guard. */
 export function __resetSearchIndexerForTesting(): void {
   dirtySessions.clear()
@@ -230,4 +308,7 @@ export function __resetSearchIndexerForTesting(): void {
   removedMessages.clear()
   draining = false
   scheduled = false
+  recovered = false
+  if (dirtyTimer !== null) clearTimeout(dirtyTimer)
+  dirtyTimer = null
 }

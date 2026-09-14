@@ -7,6 +7,7 @@ import { exportToBeautifulHtml } from "./beautiful-html"
 import { exportToAnimatedHtml } from "./animated-html"
 import { THEMES } from "./syntax-themes"
 import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
+import { composeTurnText } from "@/lib/chat/prompt-preamble"
 
 const session: ChatSession = {
   id: "s1",
@@ -214,6 +215,40 @@ describe("exportToBeautifulHtml — additional rendering branches", () => {
     })
     expect(html).toContain("💭 Thinking")
     expect(html).toContain("let me think...")
+  })
+
+  it("folds the composer's context envelope apart from the typed text", () => {
+    // The export keeps what the question was asked about, but folded and
+    // labelled — the text div is the user's own words. The snapshot is
+    // escaped like any other body: a referenced page can carry markup.
+    const { text } = composeTurnText(
+      "typed words",
+      [{ kind: "references", text: "SECRET SNAPSHOT <b>bold</b>" }],
+      { nonce: "abcdef0123" }
+    )
+    const html = exportToBeautifulHtml({
+      session,
+      messages: [
+        {
+          id: "u-env",
+          sessionId: "s1",
+          role: "user",
+          parts: [{ type: "text", text }],
+          createdAt: 1_700_000_000_000,
+        },
+      ],
+      exportedAt,
+    })
+
+    const folded = /<details [^>]*class="attached-context">([\s\S]*?)<\/details>/.exec(html)
+    expect(folded).not.toBeNull()
+    expect(folded![1]).toContain("📎 Attached context")
+    expect(folded![1]).toContain("SECRET SNAPSHOT &lt;b&gt;bold&lt;/b&gt;")
+    expect(html).not.toContain("<b>bold</b>")
+
+    const textDivs = [...html.matchAll(/<div class="text">([\s\S]*?)<\/div>/g)].map((m) => m[1])
+    expect(textDivs).toEqual(["typed words"])
+    expect(html).not.toContain("cognia_context_")
   })
 
   it("renders file parts with and without a download URL", () => {

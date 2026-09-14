@@ -8,6 +8,11 @@ import { getStylePreset } from "./style-presets"
 import { buildWallpaperBackdropCss } from "./theme-wallpaper"
 import { renderSafeInlineMarkdown } from "./safe-inline-markdown"
 import { isImageFile } from "../file-utils"
+import {
+  promptPreambleInnerText,
+  promptPreambleOfParts,
+  stripPromptPreambleFromParts,
+} from "@/lib/chat/prompt-preamble"
 
 export interface BeautifulHtmlOptions {
   session: ChatSession
@@ -102,7 +107,11 @@ function renderMessage(
     ${ts}
   </header>
   <div class="parts">
-    ${message.parts.map((p) => renderPart(p, opts.expandDetails)).join("\n")}
+    ${renderAttachedContext(message.parts, opts.expandDetails)}${stripPromptPreambleFromParts(
+      message.parts
+    )
+      .map((p) => renderPart(p, opts.expandDetails))
+      .join("\n")}
   </div>
 </article>`
 }
@@ -162,6 +171,16 @@ function roleLabel(role: string): string {
     default:
       return role
   }
+}
+
+/** What the composer attached to a turn, folded — not printed as the user's words. */
+function renderAttachedContext(parts: UIMessage["parts"], expandDetails: boolean): string {
+  const preamble = promptPreambleOfParts(parts)
+  if (!preamble) return ""
+  return `<details ${expandDetails ? "open" : ""} class="attached-context">
+      <summary>📎 Attached context</summary>
+      <pre>${escapeHtml(promptPreambleInnerText(preamble))}</pre>
+    </details>\n`
 }
 
 function escapeHtml(text: string): string {

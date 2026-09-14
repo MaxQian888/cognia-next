@@ -22,6 +22,7 @@
 
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
 import { isToolPart, projectToolOutputText } from "@/lib/chat/mentions/tool-output-text"
+import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 
 /**
  * Per-tool-part budget, applied ON TOP of `projectToolOutputText`'s own 8k cap.
@@ -49,8 +50,11 @@ export function projectMiningMessageText(
   parts: unknown,
   options: ProjectMiningTextOptions = {}
 ): string {
-  const base = extractPlainText(parts)
-  if (!Array.isArray(parts)) return base
+  if (!Array.isArray(parts)) return extractPlainText(parts)
+  // The text half skips the composer's context envelope — a referenced document
+  // is not a statement the user made. Tool parts below still walk the ORIGINAL
+  // array, because their index is half of an evidence id.
+  const base = extractPlainText(stripPromptPreambleFromParts(parts))
 
   const maxToolChars = Math.max(1, options.maxToolChars ?? MINING_TOOL_OUTPUT_MAX_CHARS)
   const segments: string[] = base ? [base] : []

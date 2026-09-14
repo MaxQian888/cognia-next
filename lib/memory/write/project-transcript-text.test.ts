@@ -1,4 +1,5 @@
 /** @jest-environment node */
+import { composeTurnText } from "@/lib/chat/prompt-preamble"
 import { MINING_TOOL_OUTPUT_MAX_CHARS, projectMiningMessageText } from "./project-transcript-text"
 
 const TEXT = { type: "text", text: "Running the suite now." }
@@ -22,6 +23,27 @@ describe("projectMiningMessageText", () => {
     const text = projectMiningMessageText(parts)
     expect(text).toContain("[tool 1] file body")
     expect(text).toContain("[tool 2] mcp body")
+  })
+
+  it("skips the context envelope but keeps tool labels on their original part index", () => {
+    // A referenced document is not a statement the user made, so the text half
+    // must not see it. Stripping drops an envelope-only first part, which would
+    // shift every later index — and the index is half of an evidence id, so a
+    // mined claim would cite the wrong part.
+    const { preamble } = composeTurnText("", [{ kind: "references", text: "SECRET SNAPSHOT" }], {
+      nonce: "abcdef0123",
+    })
+    const parts = [
+      { type: "text", text: preamble },
+      { type: "text", text: "typed words" },
+      { type: "tool-Read", state: "output-available", output: "file body" },
+    ]
+    const text = projectMiningMessageText(parts)
+
+    expect(text).toContain("typed words")
+    expect(text).not.toContain("SECRET SNAPSHOT")
+    expect(text).not.toContain("cognia_context_")
+    expect(text).toContain("[tool 2] file body")
   })
 
   it("announces truncation instead of eliding silently", () => {

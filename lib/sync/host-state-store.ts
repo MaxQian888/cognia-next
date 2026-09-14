@@ -25,6 +25,7 @@ import {
 } from "@cognia/agent-config-types/canonical-session"
 import { isPlaceholderTitle } from "@/lib/ai/generation/run-title-task"
 import { markSessionDirty } from "@/lib/chat/search/indexer"
+import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 
 export const HOST_STATE_META_ID = "singleton" as const
 export const HOST_STATE_LEASE_TTL_MS = 30_000
@@ -843,7 +844,7 @@ async function persistBusinessProjection(
       }
       const last = keepThrough >= 0 ? messages[keepThrough] : undefined
       const lastText = last
-        ? last.parts
+        ? stripPromptPreambleFromParts(last.parts)
             .filter((part) => part && typeof part === "object" && part.type === "text")
             .map((part) => (part as { text?: unknown }).text)
             .filter((value): value is string => typeof value === "string")

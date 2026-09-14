@@ -23,6 +23,10 @@ import type { SendContent, SendOptions } from "@cognia/agent-config-types"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import type { UIMessage } from "ai"
+import {
+  stripPromptPreambleFromContent,
+  stripPromptPreambleFromParts,
+} from "@/lib/chat/prompt-preamble"
 
 /**
  * Pull plain assistant text out of a UIMessage's parts. Used to feed the
@@ -40,10 +44,17 @@ export function extractAssistantText(message: UIMessage | undefined): string {
     .join("\n")
 }
 
-/** Pull plain text out of any UIMessage's `text` parts (role-agnostic). */
+/**
+ * Pull plain text out of any UIMessage's `text` parts (role-agnostic).
+ *
+ * Without the composer's context envelope: every caller here — the generated
+ * title, the timeline label, the memory extractor — is asking what the user
+ * SAID. A title distilled from a referenced document, or a memory crediting the
+ * user with a page of web results, is the failure that skipping it prevents.
+ */
 export function extractPlainText(message: UIMessage | undefined): string {
   if (!message) return ""
-  return message.parts
+  return stripPromptPreambleFromParts(message.parts)
     .map((part) => {
       const p = part as { type?: string; text?: string }
       return p.type === "text" && typeof p.text === "string" ? p.text : ""
@@ -76,7 +87,9 @@ export const SIDECAR_EXITED_TRACE_MESSAGE =
  * stale snapshot. Shared by both the external-agent and SDK send paths.
  */
 export async function applyInstantTitle(sessionId: string, content: SendContent): Promise<void> {
-  const preview = smartContentPreview(content, 40)
+  // The typed text, not the context envelope: every chat started from a
+  // reference would otherwise be titled after the envelope's opening tag.
+  const preview = smartContentPreview(stripPromptPreambleFromContent(content), 40)
   if (!preview) return
   const fresh = await getSession(sessionId).catch(() => undefined)
   if (fresh && !isPlaceholderTitle(fresh.title)) return

@@ -33,6 +33,7 @@ import {
   isGitCommit,
   parseTestSummary,
 } from "@/lib/analysis/session-signals"
+import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 
 export type AssessmentLevel = "critical" | "warning" | "info" | "healthy"
 
@@ -145,7 +146,9 @@ function partsOf(message: UIMessage): AnyPart[] {
 }
 
 function textOf(message: UIMessage): string {
-  return partsOf(message)
+  // Friction is detected in what the user WROTE; a referenced document full of
+  // "error" and "wrong" is not the user being frustrated.
+  return stripPromptPreambleFromParts(partsOf(message))
     .filter((p) => p.type === "text" && typeof p.text === "string")
     .map((p) => p.text as string)
     .join("\n")

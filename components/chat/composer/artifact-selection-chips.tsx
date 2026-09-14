@@ -50,6 +50,7 @@ import {
   getEntityMentionSource,
 } from "@/lib/chat/mentions/entity-sources"
 import { refreshSelectionFreshness } from "@/lib/chat/mentions/selection-freshness"
+import { contextSelectionIdentity } from "@/lib/chat/mentions/selection-identity"
 import type { ContextSelectionRef } from "@/types/artifact/artifact"
 import { useComposerSessionId } from "./composer-session-context"
 
@@ -67,26 +68,6 @@ const KIND_ICONS = {
   plugin: PuzzleIcon,
   entity: DatabaseIcon,
 } as const
-
-/** Stable-ish identity for the React key; the index disambiguates repeats. */
-function selectionKey(sel: ContextSelectionRef): string {
-  switch (sel.kind) {
-    case "artifact":
-      return `artifact:${sel.artifactId}`
-    case "file":
-      return `file:${sel.relPath}`
-    case "web":
-      return `web:${sel.url}`
-    case "comment":
-      return `comment:${sel.title}`
-    case "external":
-      return `external:${sel.candidateId}`
-    case "plugin":
-      return `plugin:${sel.pluginId}:${sel.ref ?? sel.title}`
-    case "entity":
-      return `entity:${sel.entityKind}:${sel.entityId}`
-  }
-}
 
 export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsProps = {}) {
   const t = useTranslations("artifacts.review")
@@ -148,9 +129,19 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
         searchText: "",
         ...(sel.subtitle ? { subtitle: sel.subtitle } : {}),
         ...(sel.href ? { href: sel.href } : {}),
+        ...(sel.sourceSessionId ? { sourceSessionId: sel.sourceSessionId } : {}),
       }
       try {
-        const body = await source.snapshot(candidate)
+        // A widened message reference is re-read AT its span. `source.snapshot`
+        // knows nothing about spans, so refreshing through it silently narrowed
+        // the body back to one message while the chip kept saying "N turns".
+        const span = sel.span
+        const widened = sel.entityKind === "message" && span && (span.before > 0 || span.after > 0)
+        const parsed = widened ? parseMessageRefId(sel.entityId) : null
+        const body =
+          widened && parsed
+            ? await buildMessageReferenceText({ ...parsed, span })
+            : await source.snapshot(candidate)
         // Gone, not merely changed. Leaving the old body in place and saying so
         // beats replacing it with nothing.
         if (!body?.trim()) {
@@ -304,7 +295,7 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
           (sel.span?.before ?? 0) < MAX_MESSAGE_SPAN
         return (
           <div
-            key={`${selectionKey(sel)}:${index}`}
+            key={contextSelectionIdentity(sel)}
             data-testid="artifact-selection-chip"
             data-selection-kind={sel.kind}
             data-edit-target={showEditTarget && isTarget ? "true" : undefined}

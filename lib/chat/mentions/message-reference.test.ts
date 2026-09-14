@@ -3,6 +3,7 @@
 import {
   MAX_MESSAGE_SPAN,
   MESSAGE_REF_SEPARATOR,
+  REFERENCE_PREAMBLE_OMITTED_NOTE,
   buildMessageReferenceText,
   clampSpan,
   formatMessageReference,
@@ -10,6 +11,7 @@ import {
   parseMessageRefId,
   projectMessageBody,
 } from "./message-reference"
+import { composeTurnText } from "@/lib/chat/prompt-preamble"
 import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 
@@ -90,6 +92,43 @@ describe("projectMessageBody", () => {
   it("is empty for parts that are not an array", () => {
     expect(projectMessageBody(undefined)).toBe("")
     expect(projectMessageBody("nope")).toBe("")
+  })
+
+  // The search projection collapses whitespace and cuts at 8k; a reference is
+  // text a model reasons about, so a code reply must keep its lines.
+  it("keeps newlines and does not cut a long message short", () => {
+    const long = `line one\n  indented\n${"x".repeat(12_000)}`
+    const body = projectMessageBody([textPart(long)])
+    expect(body.startsWith("line one\n  indented\n")).toBe(true)
+    expect(body.length).toBeGreaterThan(12_000)
+  })
+
+  it("fences code parts and leaves reasoning out", () => {
+    const body = projectMessageBody([
+      { type: "reasoning", text: "scratch work" },
+      { type: "code", language: "ts", code: "const a = 1" },
+    ])
+    expect(body).toBe("```ts\nconst a = 1\n```")
+  })
+
+  it("names attached files and cited sources", () => {
+    const body = projectMessageBody([
+      { type: "file", filename: "report.pdf" },
+      { type: "sources", sources: [{ title: "Docs", url: "https://x.dev" }] },
+    ])
+    expect(body).toContain("[attached file: report.pdf]")
+    expect(body).toContain("- Docs (https://x.dev)")
+  })
+
+  // A referenced user turn is the user's words, not the app's framing around
+  // them — but the model should still know something was attached.
+  it("strips the composer's context envelope and says it did", () => {
+    const { text } = composeTurnText("compare these", [{ kind: "references", text: "SECRET" }], {
+      nonce: "abcdef1234",
+    })
+    const body = projectMessageBody([textPart(text)])
+    expect(body).not.toContain("SECRET")
+    expect(body).toBe(`compare these\n${REFERENCE_PREAMBLE_OMITTED_NOTE}`)
   })
 })
 
@@ -223,6 +262,56 @@ describe("buildMessageReferenceText", () => {
       span: { before: 2, after: 2 },
     })
     expect(out!.match(/turn 1/g)).toHaveLength(1)
+  })
+
+  // A regenerated answer leaves its older sibling in the table, on the same
+  // timeline. The turn "after" the question is the version the user sees, not
+  // whichever sibling happens to sort next.
+  it("skips hidden branch siblings when widening", async () => {
+    await getDb().messages.bulkPut([
+      {
+        id: "q",
+        sessionId: "b",
+        projectId: "p",
+        role: "user",
+        parts: [textPart("question")],
+        createdAt: 1,
+      },
+      {
+        id: "a0",
+        sessionId: "b",
+        projectId: "p",
+        role: "assistant",
+        parts: [textPart("old answer")],
+        createdAt: 2,
+        metadata: { branchGroupId: "g", branchIndex: 0 },
+      },
+      {
+        id: "a1",
+        sessionId: "b",
+        projectId: "p",
+        role: "assistant",
+        parts: [textPart("new answer")],
+        createdAt: 3,
+        metadata: { branchGroupId: "g", branchIndex: 1 },
+      },
+      {
+        id: "f",
+        sessionId: "b",
+        projectId: "p",
+        role: "user",
+        parts: [textPart("follow-up")],
+        createdAt: 4,
+      },
+    ] as never)
+    const out = await buildMessageReferenceText({
+      sessionId: "b",
+      messageId: "q",
+      span: { before: 0, after: 2 },
+    })
+    expect(out).toContain("new answer")
+    expect(out).toContain("follow-up")
+    expect(out).not.toContain("old answer")
   })
 
   it("returns null for a message that is gone", async () => {

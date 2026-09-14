@@ -23,6 +23,7 @@ import {
   type ImageEditVersionV1,
 } from "@/lib/chat/image-edit/version"
 import { assertSessionWritable } from "@/lib/chat/session-write-guard"
+import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 
 function newId() {
   return "m_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -45,7 +46,11 @@ function messageText(parts: StoredMessage["parts"]): string {
 
 /** One-line, length-capped preview derived from a message's text parts. */
 function previewOf(parts: StoredMessage["parts"]): string {
-  return messageText(parts).replace(/\s+/g, " ").trim().slice(0, PREVIEW_MAX)
+  // The sidebar previews what was said, not the context envelope in front of it.
+  return messageText(stripPromptPreambleFromParts(parts ?? []) as StoredMessage["parts"])
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, PREVIEW_MAX)
 }
 
 async function bumpTranscriptRevision(

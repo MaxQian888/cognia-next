@@ -1,7 +1,8 @@
 import type { UIMessage } from "ai"
+import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 
 function visibleText(message: UIMessage): string {
-  return message.parts
+  return stripPromptPreambleFromParts(message.parts)
     .filter(
       (part): part is Extract<UIMessage["parts"][number], { type: "text" }> => part.type === "text"
     )

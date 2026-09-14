@@ -1,5 +1,6 @@
 import type { UIMessage } from "ai"
 
+import { composeTurnText } from "@/lib/chat/prompt-preamble"
 import { isSkillSuggestionEligible, prepareSkillRecordingFromSource } from "./session-suggestion"
 
 const mockCreateRecording = jest.fn()
@@ -127,6 +128,28 @@ describe("prepareSkillRecordingFromSource", () => {
       })
     )
     expect(mockDispatch).toHaveBeenCalledWith({ type: "OPEN", source: "session-suggestion" })
+  })
+
+  it("derives the user's request from the typed text, not the context envelope", async () => {
+    // A skill intent is what the user asked for. A referenced snapshot would
+    // become a recorded step (and be stored on the recording) as if requested.
+    const { text } = composeTurnText(
+      "typed words",
+      [{ kind: "references", text: "SECRET SNAPSHOT" }],
+      { nonce: "abcdef0123" }
+    )
+    mockListMessages.mockResolvedValue([
+      message("user", text),
+      message("assistant", "Release completed successfully"),
+    ])
+
+    const result = await prepareSkillRecordingFromSource({ kind: "session", sessionId: "s1" })
+
+    expect(result.stepCount).toBe(2)
+    const edits = JSON.stringify(mockCheckpointRecording.mock.calls[0][1].edits)
+    expect(edits).toContain("typed words")
+    expect(edits).not.toContain("SECRET SNAPSHOT")
+    expect(edits).not.toContain("cognia_context_")
   })
 
   it("loads a successful run result only after confirmation", async () => {

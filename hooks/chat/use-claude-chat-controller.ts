@@ -10,7 +10,15 @@ import { makeUserMessage } from "@/lib/claude/adapter"
 import { clearProjectHistoryEvidence } from "@/lib/claude/project-history-evidence-registry"
 import { toast } from "sonner"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
-import { prefixReplyContext } from "@/lib/chat/reply-to"
+import { prefixReplyContext, withReplyContextLines } from "@/lib/chat/reply-to"
+import type { ContextRef } from "@/lib/chat/mentions/types"
+import {
+  carryPromptPreamble,
+  chipCitationsOf,
+  readPromptPreambleSummary,
+  stripPromptPreamble,
+  type PromptPreambleSummary,
+} from "@/lib/chat/prompt-preamble"
 import { createDiagnostic, type CogniaDiagnostic } from "@cognia/diagnostics"
 import { createSilenceWatchdog, type SilenceWatchdog } from "@/lib/chat/silence-watchdog"
 import { resolveTurnSquad } from "@/lib/ai/agent/team/resolve-turn-squad"
@@ -712,6 +720,20 @@ export function useClaudeChat() {
          * what the user is recorded as having typed.
          */
         replyTo?: MessageReplyTo
+        /**
+         * What the context envelope in front of the typed text carries
+         * (`lib/chat/prompt-preamble.ts`). Persisted as
+         * `metadata.promptPreamble` so the bubble can name the references.
+         */
+        promptPreamble?: PromptPreambleSummary
+        /**
+         * The records this turn cites, assembled by the composer from the
+         * chips it sent. Preferred over the store's `citedRefs`, which are
+         * keyed by conversation and so empty for a first message staged in
+         * the new-chat composer. Absent for sends that do not come from a
+         * composer.
+         */
+        citations?: readonly ContextRef[]
         /** The executor chosen for THIS turn only (ADR-0117 axes).
          *
          *  Deliberately not persisted: a sticky override would quietly become
@@ -973,10 +995,14 @@ export function useClaudeChat() {
       // multimodal path (array of blocks) finds the first text block; if
       // none we leave userMessage undefined and the runtime falls back to
       // the no-context path.
-      const userMessageText =
+      // The composer's context envelope is stripped: recall, routing and skill
+      // intent must key off what the user ASKED, not off a referenced document
+      // or a page of web results the app put in front of it.
+      const firstText =
         typeof content === "string"
           ? content
           : (content.find((b) => b.type === "text") as { text?: string } | undefined)?.text
+      const userMessageText = firstText === undefined ? undefined : stripPromptPreamble(firstText)
       let sendOptions: SendOptions
       try {
         sendOptions =
@@ -1213,12 +1239,14 @@ export function useClaudeChat() {
       // Markdown-agent handles need async discovery and resolve as `file`
       // here — a documented v1 narrowing, not a routing change (routing still
       // uses the full union in resolveTargetAgentId below).
+      // Parsed from the TYPED text only. An `@path` inside a referenced message
+      // or a fetched page is quoted material, not a mention this turn made.
       const mentionSourceText =
         typeof effectiveContent === "string"
-          ? effectiveContent
+          ? stripPromptPreamble(effectiveContent)
           : effectiveContent
               .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")
-              .map((b) => b.text)
+              .map((b, index) => (index === 0 ? stripPromptPreamble(b.text) : b.text))
               .join("\n")
       const parsedMentionRefs = mentionSourceText.includes("@")
         ? resolveMentions(mentionSourceText, {
@@ -1232,12 +1260,19 @@ export function useClaudeChat() {
       // plan / conversation / artifact) leave NO token behind, so re-parsing the
       // text can never recover them — this list is their only route in. Read
       // before the composer clears it, which it does after `onSend` resolves.
-      const citedRefs = selectComposerCitedRefs(store.getState(), sessionId)
+      const citedRefs =
+        callOptions?.citations ?? selectComposerCitedRefs(store.getState(), sessionId)
       const mentionRefs = mergeContextRefs(parsedMentionRefs, citedRefs)
       if (mentionRefs.length > 0) {
         ;(userMsg as { metadata?: Record<string, unknown> }).metadata = {
           ...((userMsg as { metadata?: Record<string, unknown> }).metadata ?? {}),
           mentions: mentionRefs,
+        }
+      }
+      if (callOptions?.promptPreamble) {
+        ;(userMsg as { metadata?: Record<string, unknown> }).metadata = {
+          ...((userMsg as { metadata?: Record<string, unknown> }).metadata ?? {}),
+          promptPreamble: callOptions.promptPreamble,
         }
       }
       if (callOptions?.templateRun) {
@@ -1280,12 +1315,16 @@ export function useClaudeChat() {
         : displayContent
       const shouldGateWorkbenchPayload =
         callOptions?.resourceContext !== undefined || isEmbeddedSession(session ?? {})
+      // The transcript a provider reads whole (the standalone engine) gets every
+      // reply line rebuilt from `metadata.replyTo`; `providerContent` above only
+      // reaches a provider that reads the content of the turn being sent.
+      const providerMessages = withReplyContextLines(next)
       const providerPayload = shouldGateWorkbenchPayload
         ? gateWorkbenchProviderPayload(
-            { content: providerContent, sendOptions, messages: next },
+            { content: providerContent, sendOptions, messages: providerMessages },
             callOptions?.resourceContext
           )
-        : { content: providerContent, sendOptions, messages: next }
+        : { content: providerContent, sendOptions, messages: providerMessages }
       if (callOptions?.sharedRequest) {
         providerPayload.messages = [makeUserMessage(content)]
         providerPayload.content = content
@@ -3878,12 +3917,21 @@ export function useClaudeChat() {
       const editedIdx = messages.findIndex((m) => m.id === messageId)
       if (editedIdx < 0) return
 
+      const edited = messages[editedIdx]
       const { merged, groupId, nextIndex } = tagEditSibling(messages, editedIdx)
       store.getState().replaceSessionMessages(sessionId, merged)
       await persistMessages(sessionId, merged)
 
-      await send(newContent, undefined, {
+      // Every edit surface drafts from the typed text, so the context envelope
+      // the question was originally sent with — and the citations it made —
+      // are carried over from the original row. Passing the citations (even
+      // an empty list) also stops the send path from reading whatever chips
+      // happen to be staged in the composer right now.
+      const promptPreamble = readPromptPreambleSummary(edited.metadata)
+      await send(carryPromptPreamble(edited.parts, newContent), undefined, {
         sessionId,
+        citations: chipCitationsOf(edited.metadata),
+        ...(promptPreamble ? { promptPreamble } : {}),
         resourceContext: resourceContext ?? lastResourceContextRef.current.get(sessionId),
         // The replacement is a *user* message, created inside `send` itself,
         // so it is tagged there rather than through the assistant-event path

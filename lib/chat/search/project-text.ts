@@ -29,6 +29,7 @@
 
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
 import { normalizeToolName, type ToolPartLike } from "@/lib/chat/tool-summary"
+import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 
 /**
  * Hard ceiling on one message's projected text.
@@ -130,7 +131,12 @@ export function projectSearchText(parts: unknown): string {
 
   const buf: string[] = []
   let length = 0
-  for (const raw of parts) {
+  // The composer's context envelope is the app's framing, not the user's words.
+  // Indexing it made a turn that REFERENCED a document findable as though the
+  // user had written the document — and every staged web result matched too.
+  // What was referenced stays findable through `metadata.mentions`, which the
+  // row builder folds in separately.
+  for (const raw of stripPromptPreambleFromParts(parts)) {
     if (!isObject(raw)) continue
     // Delegate per-part rather than calling `extractPlainText(parts)` once up
     // front: a single ordered pass is what keeps snippets readable.

@@ -1,5 +1,6 @@
 import {
   commentAnchorLabel,
+  fenceFor,
   formatContextSelectionsForLLM,
   wholeArtifactSelection,
   wholeFileSelection,
@@ -569,5 +570,69 @@ describe("element picks", () => {
     ])
     expect(out).toContain('Selection from artifact "Landing" (lines 1-2):')
     expect(out).not.toContain("Selected element")
+  })
+})
+
+describe("where a referenced turn came from", () => {
+  const message = {
+    kind: "entity" as const,
+    entityKind: "message" as const,
+    entityId: "s1#m1",
+    title: "Restacking",
+    snapshot: "assistant: done",
+    comment: "",
+    capturedAt: 1,
+    href: "/?session=s1&message=m1",
+    sourceSessionId: "s1",
+  }
+
+  it("says 'this conversation' when the message lives in the one being written in", () => {
+    const out = formatContextSelectionsForLLM([message], { sessionId: "s1" })
+    expect(out).toContain("A message from earlier in this conversation")
+    expect(out).not.toContain("another conversation")
+  })
+
+  it("keeps 'another conversation' for a different one, or when none exists yet", () => {
+    expect(formatContextSelectionsForLLM([message], { sessionId: "s2" })).toContain(
+      "A message from another conversation"
+    )
+    expect(formatContextSelectionsForLLM([message])).toContain(
+      "A message from another conversation"
+    )
+  })
+
+  it("heads a combined reference with its count", () => {
+    const out = formatContextSelectionsForLLM(
+      [
+        {
+          ...message,
+          title: "3 messages",
+          members: [
+            { entityId: "s1#a", title: "a" },
+            { entityId: "s1#b", title: "b" },
+            { entityId: "s1#c", title: "c" },
+          ],
+        },
+      ],
+      { sessionId: "s1" }
+    )
+    expect(out).toContain("3 messages from earlier in this conversation, in order:")
+  })
+})
+
+describe("fenceFor", () => {
+  it("uses three backticks for plain text", () => {
+    expect(fenceFor("no code here")).toBe("```")
+  })
+
+  // The snapshot's own fence used to end the block early.
+  it("outgrows any backtick run inside the snapshot", () => {
+    expect(fenceFor("```ts\nconst a = 1\n```")).toBe("````")
+    expect(fenceFor("````md\n```\n````")).toBe("`````")
+  })
+
+  it("wraps a snapshot that contains a fence without breaking out of it", () => {
+    const out = formatContextSelectionsForLLM([sel({ snapshot: "```js\nx()\n```" })])
+    expect(out).toContain("````\n```js\nx()\n```\n````")
   })
 })

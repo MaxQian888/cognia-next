@@ -15,13 +15,15 @@ import type { A2UIChartDataPoint, A2UITableColumn } from "@/types/a2ui/schema"
 
 import { PageAssembler } from "./builders"
 import type { ConversationPageSource, ExecutionPageLabels } from "./types"
+import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 
 type MessagePart = StoredMessage["parts"][number]
 
 /** Concatenate text + reasoning parts into a single visible string. */
 export function extractMessageText(parts: StoredMessage["parts"]): string {
   const chunks: string[] = []
-  for (const part of parts) {
+  // "Visible" means what the bubble shows, which excludes the context envelope.
+  for (const part of stripPromptPreambleFromParts(parts)) {
     if (part.type === "text" || part.type === "reasoning") {
       const text = (part as { text?: string }).text
       if (text) chunks.push(text)

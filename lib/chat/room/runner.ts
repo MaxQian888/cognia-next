@@ -83,6 +83,16 @@ import {
   textFromParts,
   type TeamTranscriptMessage,
 } from "@/lib/chat/team-transcript"
+import type { ContextRef } from "@/lib/chat/mentions/types"
+import {
+  carryPromptPreamble,
+  chipCitationsOf,
+  readPromptPreambleSummary,
+  stripPromptPreamble,
+  stripPromptPreambleFromContent,
+  stripPromptPreambleFromParts,
+  type PromptPreambleSummary,
+} from "@/lib/chat/prompt-preamble"
 import {
   attachRunMetadataToLastAssistant,
   buildCompletedRunMetadata,
@@ -165,6 +175,10 @@ export interface RoomSendOptions {
    * an explicit `@` does. This is how a `manual` team gets its reply.
    */
   targetMemberIds?: readonly string[]
+  /** What the context envelope carries (`lib/chat/prompt-preamble.ts`). */
+  promptPreamble?: PromptPreambleSummary
+  /** The records this turn cites, from the composer's sent chips. */
+  citations?: readonly ContextRef[]
 }
 
 interface SubResolver {
@@ -377,6 +391,7 @@ export class RoomRunner {
             senderKind: "user",
             steer: steerMeta,
             ...replyMetadata(opts),
+            ...referenceMetadata(opts),
             ...authorMetadata(opts),
             ...(opts.templateRun ? { templateRun: opts.templateRun } : {}),
           }
@@ -422,7 +437,9 @@ export class RoomRunner {
     const memberIds = team.members.map((m) => m.characterId)
     const members = await deps.db.listCharactersByIds(memberIds)
     const memberByCharId = new Map<string, TeamMember>(team.members.map((m) => [m.characterId, m]))
-    const userText = asPlainText(content)
+    // Routing, the twin embedding, `@member` parsing and memory all key off what
+    // the user typed — never off a referenced document in front of it.
+    const userText = stripPromptPreamble(asPlainText(content))
     this.lastUserContent.set(sessionId, content)
 
     // Embed the user message ONCE per turn so twin-bound members can share the
@@ -467,6 +484,7 @@ export class RoomRunner {
         senderKind: "user",
         ...(opts.templateRun ? { templateRun: opts.templateRun } : {}),
         ...replyMetadata(opts),
+        ...referenceMetadata(opts),
         ...authorMetadata(opts),
       })
       if (opts.branchTag) {
@@ -484,7 +502,7 @@ export class RoomRunner {
         await deps.db.persistMessages(sessionId, after)
         await deps.db.touchSession(sessionId)
         if (isPlaceholderTitle(session.title)) {
-          const title = smartContentPreview(content, 40)
+          const title = smartContentPreview(stripPromptPreambleFromContent(content), 40)
           if (title) {
             instantPreviewTitle = title
             await deps.db.updateSession(sessionId, { title, titleAuto: true })
@@ -613,7 +631,9 @@ export class RoomRunner {
           transcript: finalMessages.map((m) => ({
             id: m.id,
             role: m.role,
-            text: textFromParts(m.parts),
+            // The memory extractor must not credit the user with material the
+            // composer attached to their turn.
+            text: textFromParts(stripPromptPreambleFromParts(m.parts)),
             parts: m.parts,
           })),
         })
@@ -632,7 +652,9 @@ export class RoomRunner {
       ) {
         const firstUser = finalMessages.find((m) => m.role === "user")
         const firstAssistant = finalMessages.find((m) => m.role === "assistant")
-        const sourceText = firstUser ? textFromParts(firstUser.parts) : userText
+        const sourceText = firstUser
+          ? textFromParts(stripPromptPreambleFromParts(firstUser.parts))
+          : userText
         const resultText = firstAssistant ? textFromParts(firstAssistant.parts) : undefined
         const locale = settings?.language
         void deps.ai
@@ -809,11 +831,18 @@ export class RoomRunner {
       this.sinks.messages.read(sessionId) ?? (await this.deps.db.listMessages(sessionId))
     const editedIdx = messages.findIndex((message) => message.id === messageId)
     if (editedIdx < 0 || messages[editedIdx].role !== "user") return
+    const edited = messages[editedIdx]
     const { merged, groupId, nextIndex } = tagEditSibling(messages, editedIdx)
     this.sinks.messages.commit(sessionId, merged)
     await this.deps.db.persistMessages(sessionId, merged)
-    await this.sendTurn(newContent, {
+    // Same carry as the direct-chat edit: the draft is the typed text, so the
+    // original envelope and its citations come from the row being replaced.
+    const promptPreamble = readPromptPreambleSummary(edited.metadata)
+    const citations = chipCitationsOf(edited.metadata)
+    await this.sendTurn(carryPromptPreamble(edited.parts, newContent), {
       ...options,
+      ...(promptPreamble ? { promptPreamble } : {}),
+      ...(citations.length > 0 ? { citations } : {}),
       sessionId,
       branchTag: { groupId, index: nextIndex },
     })
@@ -1690,6 +1719,18 @@ export function withMetadata(msg: UIMessage, extra: Record<string, unknown>): UI
 /** The `replyTo` stamp for a user turn that answers an earlier message. */
 function replyMetadata(opts: RoomSendOptions): Record<string, unknown> {
   return opts.replyTo ? { replyTo: opts.replyTo } : {}
+}
+
+/**
+ * The citations and the envelope summary for a user turn, stamped the way the
+ * direct-chat send path stamps them. A room never recorded `metadata.mentions`
+ * at all, so a record referenced into a room had no backlink to it.
+ */
+function referenceMetadata(opts: RoomSendOptions): Record<string, unknown> {
+  return {
+    ...(opts.citations && opts.citations.length > 0 ? { mentions: [...opts.citations] } : {}),
+    ...(opts.promptPreamble ? { promptPreamble: opts.promptPreamble } : {}),
+  }
 }
 
 /** The `collaboration.author` stamp for a user turn written by another principal. */

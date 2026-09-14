@@ -44,6 +44,7 @@ jest.mock("@/lib/chat/attachments/dispatch", () => ({
 }))
 
 import { fireEvent, render, waitFor } from "@testing-library/react"
+import { stripPromptPreamble } from "@/lib/chat/prompt-preamble"
 import type { ReactNode } from "react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Composer } from "./composer"
@@ -265,9 +266,14 @@ describe("composer web pre-search", () => {
               },
             ],
           },
+          // The results ride in the context envelope, which the bubble folds
+          // away and every "what did the user type" reader strips.
+          promptPreamble: { sections: ["webSearch"], references: [] },
         }
       )
     )
+    const sent = (onSend.mock.calls[0] as unknown as [string])[0]
+    expect(stripPromptPreamble(sent)).toBe("latest Cognia")
   })
 
   it("does not run a previously armed pre-search after web tools are turned off", async () => {

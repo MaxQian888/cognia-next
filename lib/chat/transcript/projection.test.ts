@@ -9,6 +9,7 @@ import {
   TRANSCRIPT_TIMELINE_PAGE_MAX,
 } from "@cognia/agent-config-types"
 
+import { composeTurnText } from "@/lib/chat/prompt-preamble"
 import {
   encodeTimelineCursor,
   encodeTurnDetailCursor,
@@ -90,6 +91,31 @@ describe("transcript projection", () => {
       finalResponse: { id: "a1", text: "working" },
       collapsed: { messageCount: 3, trailingCount: 1 },
     })
+  })
+
+  it("previews a user message by its typed text, not the context envelope", () => {
+    // A companion renders this preview as the user's question. The envelope
+    // would also eat the summary byte budget before the typed words appear.
+    const envelope = composeTurnText(
+      "typed words",
+      [{ kind: "references", text: "SECRET SNAPSHOT" }],
+      { nonce: "abcdef0123" }
+    )
+    const items = projectTranscriptTimeline({
+      sessionId: "session-1",
+      revision: 3,
+      messages: [
+        message("u1", "user", [text(envelope.text)], { createdAt: 1 }),
+        message("a1", "assistant", [text("answer")], { createdAt: 2 }),
+      ],
+    })
+    const turn = items[0]
+    if (turn.kind !== "completed-turn") throw new Error("expected a completed turn")
+
+    expect(turn.userMessages[0].text).toBe("typed words")
+    const serialized = JSON.stringify(turn)
+    expect(serialized).not.toContain("SECRET SNAPSHOT")
+    expect(serialized).not.toContain("cognia_context_")
   })
 
   it("respects persisted turn keys, exposes active turns in full, and projects assistant-only rows", () => {

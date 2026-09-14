@@ -9,6 +9,7 @@
  */
 
 import type { UIMessage } from "ai"
+import { composeTurnText } from "@/lib/chat/prompt-preamble"
 import type {
   ChatSession,
   Character,
@@ -540,6 +541,29 @@ describe("a linear turn", () => {
     expect(w.steerAppended.at(-1)?.metadata).toMatchObject({ replyTo })
   })
 
+  // A room never recorded citations, so a record referenced into a room had no
+  // backlink; and routing read the whole envelope as the user's question.
+  it("stamps citations and the envelope summary, and routes on the typed text", async () => {
+    const w = createWorld()
+    const citations = [{ kind: "entity" as const, id: "issue:i1", label: "Bug" }]
+    const promptPreamble = {
+      sections: ["references" as const],
+      references: [{ kind: "entity" as const, entityKind: "issue" as const, title: "Bug" }],
+    }
+    const { text } = composeTurnText("please look", [{ kind: "references", text: "ctx" }], {
+      nonce: "0a1b2c3d4e",
+    })
+    await w.runner.send(text, { sessionId: ROOM, citations, promptPreamble })
+    expect(w.db.get(ROOM)?.[0].metadata).toEqual({
+      senderKind: "user",
+      mentions: citations,
+      promptPreamble,
+    })
+    w.status.set(ROOM, "streaming")
+    await w.runner.send(text, { sessionId: ROOM, citations, promptPreamble })
+    expect(w.steerAppended.at(-1)?.metadata).toMatchObject({ mentions: citations, promptPreamble })
+  })
+
   it("stamps the author a companion turn arrived with", async () => {
     const w = createWorld()
     await w.runner.send("from my phone", {
@@ -746,6 +770,36 @@ describe("regenerate and edit", () => {
     expect(users[1].metadata).toMatchObject({
       branchGroupId: users[0].metadata?.branchGroupId,
       branchIndex: 1,
+    })
+  })
+})
+
+describe("editing a turn that carried references", () => {
+  // The edit draft is the typed text; the references and citations the
+  // question was sent with must survive the re-send.
+  it("re-sends the original envelope and citations with the edited text", async () => {
+    const w = createWorld({ team: { members: [{ characterId: "a" }] } })
+    const original = composeTurnText("compare", [{ kind: "references", text: "A vs B" }], {
+      nonce: "feedface01",
+    })
+    const citations = [{ kind: "entity", id: "issue:i1", label: "Bug" }]
+    w.seed([
+      {
+        id: "u-0",
+        role: "user",
+        parts: [{ type: "text", text: original.text }],
+        metadata: {
+          mentions: citations,
+          promptPreamble: { sections: ["references"], references: [] },
+        },
+      } as Msg,
+    ])
+    await w.runner.editAndResend(ROOM, "u-0", "compare again")
+    expect(w.calls.sendPrompt[0].content).toBe(`${original.preamble}\n\ncompare again`)
+    const users = w.db.get(ROOM)!.filter((m) => m.role === "user")
+    expect(users[1].metadata).toMatchObject({
+      mentions: citations,
+      promptPreamble: { sections: ["references"], references: [] },
     })
   })
 })

@@ -11,6 +11,7 @@ import type {
 } from "@cognia/agent-config-types"
 import type { CogniaDiagnostic } from "@cognia/diagnostics"
 import type { ContextSelectionRef } from "@/types/artifact/artifact"
+import { contextSelectionIdentity } from "@/lib/chat/mentions/selection-identity"
 import type { ContextRef } from "@/lib/chat/mentions/types"
 import { nextNavEpoch } from "@/lib/ui/nav-epoch"
 import { decodeSubSession } from "@/lib/claude/team-session-id"
@@ -1175,11 +1176,21 @@ export const useChatStore = create<ChatState>((set) => ({
         : patchComposerState(s, sessionId, { referencedPaths: [...current, ref] })
     }),
   addContextSelection: (selection, sessionId) =>
-    set((s) =>
-      patchComposerState(s, sessionId, {
-        contextSelections: [...composerSlice(s, sessionId).contextSelections, selection],
-      })
-    ),
+    set((s) => {
+      const current = composerSlice(s, sessionId).contextSelections
+      // Staging the same reference again (⌘K after `@`, a multi-select that
+      // overlaps an earlier pick) refreshes it in place instead of sending its
+      // body twice. Position is kept, so the artifact edit-target order and the
+      // user's arrangement of the chips survive.
+      const identity = contextSelectionIdentity(selection)
+      const at = current.findIndex((existing) => contextSelectionIdentity(existing) === identity)
+      if (at < 0) {
+        return patchComposerState(s, sessionId, { contextSelections: [...current, selection] })
+      }
+      const next = [...current]
+      next[at] = selection
+      return patchComposerState(s, sessionId, { contextSelections: next })
+    }),
   removeContextSelection: (index, sessionId) =>
     set((s) => {
       const current = composerSlice(s, sessionId).contextSelections

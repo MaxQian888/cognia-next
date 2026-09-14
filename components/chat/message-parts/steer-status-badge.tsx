@@ -35,6 +35,7 @@ import { discardPendingSteer, editPendingSteer } from "@/hooks/chat/steer-runtim
 import { dispatchComposerAppend } from "@/components/chat/composer"
 import { useSessionStatus, useSessionSteerQueue } from "@/stores/chat"
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
+import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 
 export function SteerStatusBadge({
   message,
@@ -140,7 +141,11 @@ export function SteerStatusBadge({
           <>
             <button
               type="button"
-              onClick={() => setDraft(stripSteerPrefix(extractPlainText(message.parts)))}
+              onClick={() =>
+                setDraft(
+                  stripSteerPrefix(extractPlainText(stripPromptPreambleFromParts(message.parts)))
+                )
+              }
               aria-label={t("ariaEdit")}
               className="opacity-0 transition-opacity hover:text-foreground group-hover/steer:opacity-100 focus-visible:opacity-100"
             >
@@ -166,7 +171,9 @@ export function SteerStatusBadge({
               type="button"
               onClick={() => {
                 dispatchComposerAppend({
-                  text: stripSteerPrefix(extractPlainText(message.parts)),
+                  text: stripSteerPrefix(
+                    extractPlainText(stripPromptPreambleFromParts(message.parts))
+                  ),
                   sessionId,
                 })
                 discardPendingSteer(sessionId, meta.entryId)

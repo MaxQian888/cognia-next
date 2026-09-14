@@ -23,6 +23,7 @@ import { getDb } from "./schema"
 import { markSessionDirty } from "@/lib/chat/search/indexer"
 import { invalidatePersistSnapshot } from "./messages"
 import { assertSessionWritable } from "@/lib/chat/session-write-guard"
+import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 
 /**
  * Proxy that lazy-resolves Dexie tables. Plugin code that hooks
@@ -45,7 +46,9 @@ export const db = new Proxy(
  */
 function partsToContent(parts: StoredMessage["parts"]): string {
   if (!Array.isArray(parts)) return ""
-  return parts
+  // A plugin reading a message gets what its author wrote; the composer's
+  // context envelope is the app's framing for the model, not message content.
+  return stripPromptPreambleFromParts(parts)
     .map((p) => {
       const part = p as { type?: string; text?: string }
       if (part?.type === "text" && typeof part.text === "string") return part.text

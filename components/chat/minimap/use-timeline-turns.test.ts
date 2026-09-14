@@ -1,5 +1,6 @@
 import { deriveTimelineTurns } from "./use-timeline-turns"
 import type { UIMessage } from "ai"
+import { composeTurnText } from "@/lib/chat/prompt-preamble"
 
 function userMsg(id: string, text: string, extra: Record<string, unknown> = {}): UIMessage {
   return { id, role: "user", parts: [{ type: "text", text }], ...extra } as unknown as UIMessage
@@ -25,6 +26,23 @@ describe("deriveTimelineTurns", () => {
   it("uses the first non-empty line as the label", () => {
     const [turn] = deriveTimelineTurns([userMsg("u1", "\n\n  Refactor list  \nmore")])
     expect(turn.label).toBe("Refactor list")
+  })
+
+  it("labels and previews a turn by the typed text, not the context envelope", () => {
+    // The envelope opens with its tag and a framing line, so without stripping
+    // every turn that carried references would be labelled by that boilerplate.
+    const { text } = composeTurnText(
+      "typed words",
+      [{ kind: "references", text: "SECRET SNAPSHOT" }],
+      { nonce: "abcdef0123" }
+    )
+    const [turn] = deriveTimelineTurns([userMsg("u1", text)])
+    expect(turn.label).toBe("typed words")
+    expect(turn.preview).toContain("typed words")
+    for (const out of [turn.label, turn.preview]) {
+      expect(out).not.toContain("SECRET SNAPSHOT")
+      expect(out).not.toContain("cognia_context_")
+    }
   })
 
   it("prefers a cached minimapLabel over the raw text", () => {

@@ -6,6 +6,12 @@ import type { UIMessage } from "ai"
 import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 
 import { isImageFile } from "../file-utils"
+import {
+  promptPreambleInnerText,
+  promptPreambleOfParts,
+  stripPromptPreambleFromParts,
+} from "@/lib/chat/prompt-preamble"
+import { fenceFor } from "@/lib/artifacts/format-selection-context"
 
 export interface RichExportData {
   session: ChatSession
@@ -107,7 +113,8 @@ export function exportToPlainText(data: RichExportData): string {
   const lines: string[] = [session.title, ""]
   for (const message of messages) {
     lines.push(`[${message.role}] ${new Date(message.createdAt).toLocaleString()}`)
-    for (const part of message.parts) {
+    if (promptPreambleOfParts(message.parts)) lines.push("[attached context omitted]")
+    for (const part of stripPromptPreambleFromParts(message.parts)) {
       const text = textOfPart(part)
       if (text) lines.push(text)
     }
@@ -133,7 +140,25 @@ function roleLabel(role: string): string {
 
 function renderMessageParts(parts: UIMessage["parts"]): string {
   const out: string[] = []
-  for (const part of parts) {
+  // What the composer attached to a turn is kept, folded, rather than printed
+  // as though the user had typed it.
+  const preamble = promptPreambleOfParts(parts)
+  if (preamble) {
+    const inner = promptPreambleInnerText(preamble)
+    const fence = fenceFor(inner)
+    out.push(
+      [
+        "<details><summary>📎 Attached context</summary>",
+        "",
+        fence,
+        inner,
+        fence,
+        "",
+        "</details>",
+      ].join("\n")
+    )
+  }
+  for (const part of stripPromptPreambleFromParts(parts)) {
     out.push(renderPart(part))
   }
   return out.filter(Boolean).join("\n\n")

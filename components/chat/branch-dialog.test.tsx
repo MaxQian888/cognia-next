@@ -13,13 +13,14 @@ jest.mock("@/lib/chat/branch-session", () => ({
   __esModule: true,
   branchSessionAtMessage: jest.fn(),
 }))
-jest.mock("@/lib/ai/generation/summarizer", () => ({
+jest.mock("@/lib/ai/generation/summarize-material", () => ({
   __esModule: true,
-  summarizeConversation: jest.fn(),
+  summarizeMaterial: jest.fn(),
 }))
-jest.mock("@/lib/ai/generation/utility-client", () => ({
+const buildClientMock = jest.fn(async (..._args: unknown[]) => ({ complete: jest.fn() }))
+jest.mock("@/lib/ai/generation/agent-backed-client", () => ({
   __esModule: true,
-  buildUtilityLlmClient: jest.fn(() => null),
+  buildAgentBackedLlmClient: (...args: unknown[]) => buildClientMock(...args),
 }))
 jest.mock("@/lib/db/sessions", () => ({
   __esModule: true,
@@ -39,15 +40,16 @@ jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: { getState: () => ({ activeProjectId: null, addSessionToProject }) },
 }))
 
+import enChat from "@/i18n/messages/en/chat.json"
 import { BranchDialog } from "./branch-dialog"
 import { branchSessionAtMessage } from "@/lib/chat/branch-session"
-import { summarizeConversation } from "@/lib/ai/generation/summarizer"
+import { summarizeMaterial } from "@/lib/ai/generation/summarize-material"
 import { toast } from "sonner"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { usePlatform } from "@/hooks/use-platform"
 
 const mockBranch = branchSessionAtMessage as jest.Mock
-const mockSummarize = summarizeConversation as jest.Mock
+const mockSummarize = summarizeMaterial as jest.Mock
 const mockToastError = toast.error as jest.Mock
 const mockToastSuccess = toast.success as jest.Mock
 
@@ -116,7 +118,7 @@ beforeEach(() => {
   useChatStore.setState({ splitSessionId: null, openSessionIds: [], activeSessionId: "src1" })
   setMessages()
   mockBranch.mockResolvedValue({ id: "child1" })
-  mockSummarize.mockResolvedValue("Generated summary")
+  mockSummarize.mockResolvedValue({ kind: "summary", text: "Generated summary", chunks: 1 })
 })
 
 describe("BranchDialog — reads the branched session's own thread", () => {
@@ -243,7 +245,7 @@ describe("BranchDialog", () => {
   })
 
   it("blocks a summary branch with empty summary", async () => {
-    mockSummarize.mockResolvedValue("")
+    mockSummarize.mockResolvedValue({ kind: "unavailable", reason: "empty" })
     renderDialog()
     fireEvent.click(screen.getByRole("radio", { name: /Branch from summary/ }))
     await waitFor(() => expect(mockSummarize).toHaveBeenCalled())
@@ -265,6 +267,34 @@ describe("BranchDialog", () => {
     renderDialog()
     fireEvent.click(screen.getByText("Create branch"))
     await waitFor(() => expect(mockToastError).toHaveBeenCalled())
+  })
+
+  // A subscription account has no renderer key; the utility client alone was
+  // null there, so every summary silently became a digest.
+  it("asks for an agent-backed client and summarizes the whole kept thread", async () => {
+    renderDialog()
+    fireEvent.click(screen.getByRole("radio", { name: /Branch from summary/ }))
+    await waitFor(() => expect(mockSummarize).toHaveBeenCalledTimes(1))
+    expect(buildClientMock).toHaveBeenCalledWith(
+      expect.objectContaining({ featureId: "conversation-summary", label: expect.any(String) })
+    )
+    expect(mockSummarize).toHaveBeenCalledWith(
+      expect.objectContaining({ purpose: "branch-seed", segments: ["User: q", "Assistant: a"] })
+    )
+    expect(screen.queryByTestId("branch-summary-fallback")).toBeNull()
+  })
+
+  it("says so when the preview is an outline rather than a model summary", async () => {
+    mockSummarize.mockResolvedValue({ kind: "unavailable", reason: "no-client" })
+    renderDialog()
+    fireEvent.click(screen.getByRole("radio", { name: /Branch from summary/ }))
+    // Asserted against the split source: the global intl mock reads it through
+    // the generated bundle, so the visible string is the real English copy.
+    expect(await screen.findByTestId("branch-summary-fallback")).toHaveTextContent(
+      enChat.branch.summary.fallback.noClient
+    )
+    // Still a usable, editable seed.
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toContain("2 messages")
   })
 
   it("surfaces a summary generation error", async () => {

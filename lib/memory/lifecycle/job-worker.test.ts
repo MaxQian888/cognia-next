@@ -1,4 +1,5 @@
 import type { MemoryJob } from "@/types/memory/governance"
+import { composeTurnText } from "@/lib/chat/prompt-preamble"
 
 const mockGetSettings = jest.fn()
 const mockGetSession = jest.fn()
@@ -325,6 +326,32 @@ describe("memory job worker", () => {
       })
     )
     expect(mockUpdateMemory).not.toHaveBeenCalledWith("m1", expect.anything())
+  })
+
+  it("reconstructs the user's side of a turn from the typed text, not the context envelope", async () => {
+    // The extractor learns facts about the user from what they said. A snapshot
+    // the composer attached ("SECRET SNAPSHOT: I always use yarn") is not a
+    // preference the user stated, and must not be mined as one on recovery.
+    // `parts` still carry the original text, since evidence ids index into them.
+    const { text } = composeTurnText(
+      "typed words",
+      [{ kind: "references", text: "SECRET SNAPSHOT: I always use yarn" }],
+      { nonce: "abcdef0123" }
+    )
+    mockListMessages.mockResolvedValue([
+      { id: "u1", role: "user", parts: [{ type: "text", text }] },
+      { id: "a1", role: "assistant", parts: [{ type: "text", text: "Noted." }] },
+    ])
+    await processMemoryJob({ ...job("turn"), sessionId: "s1", projectId: "p1" })
+
+    const [input] = mockRunExtraction.mock.calls[0] as [
+      { newPair: { userText: string }; recentMessages: Array<{ text: string }> },
+    ]
+    expect(input.newPair.userText).toBe("typed words")
+    for (const out of [input.newPair.userText, ...input.recentMessages.map((m) => m.text)]) {
+      expect(out).not.toContain("SECRET SNAPSHOT")
+      expect(out).not.toContain("cognia_context_")
+    }
   })
 
   it("processes session distillation and vector reconciliation jobs", async () => {

@@ -84,6 +84,16 @@ export interface ChatSearchStateRow {
   /** True once the walk reached the oldest message. */
   complete: boolean
   updatedAt: number
+  /**
+   * When the last drain that processed work STARTED. Epoch ms; absent until the
+   * first such drain.
+   *
+   * The dirty-session queue is in memory, so a reload between a write and the
+   * next drain used to lose it — and the backfill cannot recover those messages
+   * once it has latched `complete`. A boot pass re-queues every session updated
+   * after this instant. Not indexed, so adding it needed no schema bump.
+   */
+  lastDrainAt?: number
 }
 
 export const DEFAULT_CHAT_SEARCH_STATE: ChatSearchStateRow = {
@@ -249,6 +259,36 @@ export async function setChatSearchState(
     id: "singleton",
     updatedAt: Date.now(),
   })
+}
+
+/** See {@link ChatSearchStateRow.lastDrainAt}. `null` before the first drain. */
+export async function getLastIndexDrainAt(): Promise<number | null> {
+  const { lastDrainAt } = await getChatSearchState()
+  return typeof lastDrainAt === "number" && Number.isFinite(lastDrainAt) ? lastDrainAt : null
+}
+
+export async function setLastIndexDrainAt(at: number): Promise<void> {
+  await setChatSearchState({ lastDrainAt: at })
+}
+
+/**
+ * Sessions touched after `since` — the ones a lost in-memory queue may have held.
+ *
+ * Two clocks, because persisting a message does not move `updatedAt`
+ * (`lib/db/messages.ts` bumps `lastMessageAt` and `transcriptRevision`), while a
+ * rename or a truncate does not move `lastMessageAt`. A filter scan rather than
+ * an index probe for the same reason: only `updatedAt` is indexed. Session rows
+ * carry no `parts`, and this runs once per boot.
+ */
+export async function listSessionIdsUpdatedSince(since: number): Promise<string[]> {
+  return (await getDb()
+    .sessions.filter((s) => {
+      const row = s as { updatedAt?: unknown; lastMessageAt?: unknown }
+      const updated = typeof row.updatedAt === "number" ? row.updatedAt : 0
+      const lastMessage = typeof row.lastMessageAt === "number" ? row.lastMessageAt : 0
+      return updated > since || lastMessage > since
+    })
+    .primaryKeys()) as string[]
 }
 
 /**

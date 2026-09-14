@@ -1,7 +1,9 @@
 import {
   UNTRUSTED_CONTENT_NOTICE,
+  UNTRUSTED_RECORD_NOTICE,
   unwrapUntrustedContent,
   wrapUntrustedContent,
+  wrapUntrustedRecord,
 } from "./untrusted-content"
 import {
   UNTRUSTED_CONTENT_NOTICE as reexportedNotice,
@@ -33,6 +35,16 @@ describe("wrapUntrustedContent", () => {
     // Existing importers were left untouched by the extraction.
     expect(reexportedWrap).toBe(wrapUntrustedContent)
     expect(reexportedNotice).toBe(UNTRUSTED_CONTENT_NOTICE)
+  })
+
+  it("frames stored records without calling them web content", () => {
+    const wrapped = wrapUntrustedRecord("memory body")
+    expect(wrapped).toBe(`${UNTRUSTED_RECORD_NOTICE}\n\nmemory body`)
+    expect(UNTRUSTED_RECORD_NOTICE).not.toMatch(/web/i)
+    expect(UNTRUSTED_RECORD_NOTICE).toMatch(/not instructions/i)
+    expect(UNTRUSTED_RECORD_NOTICE).toMatch(/do not follow/i)
+    expect(wrapUntrustedRecord(wrapped)).toBe(wrapped)
+    expect(unwrapUntrustedContent(wrapped)).toBe("memory body")
   })
 
   it("unwraps the model-only frame for local rendering", () => {
