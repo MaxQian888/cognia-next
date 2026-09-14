@@ -139,17 +139,6 @@ function docContextRef(item: Extract<PopoverItem, { kind: "doc" }>): ContextRef 
   }
 }
 
-/** `<entityKind>:<recordId>` — one namespace per source, ids unique within it. */
-function entityContextRef(item: Extract<PopoverItem, { kind: "entity" }>): ContextRef {
-  const { candidate } = item
-  return {
-    kind: "entity",
-    id: `${candidate.entityKind}:${candidate.id}`,
-    label: candidate.title,
-    raw: `@${candidate.entityKind}:${candidate.id}`,
-  }
-}
-
 function registerBuiltinMentionPickHandlers(): void {
   registerMentionPickHandler({
     kind: "file",
@@ -258,15 +247,14 @@ function registerBuiltinMentionPickHandlers(): void {
       // Same order and same reason as `doc`: drop the token first so a read
       // that comes back empty leaves a clean composer, not `@issue:foo`.
       ctx.removeTriggerToken()
-      const staged = await ctx.stageEntity(item)
-      // Only record what actually got staged. A record deleted between the
-      // pick and the read contributes no context, so claiming the turn cited
-      // it would make `metadata.mentions` lie in the one direction that
-      // matters — asserting context the model never saw.
-      if (staged) ctx.recordMention(entityContextRef(item))
+      // No `recordMention`: an entity's citation is read off the chip at send
+      // time (`lib/chat/mentions/selection-citations.ts`). Recording it here as
+      // well kept a second list that drifted from the chips — a chip removed
+      // before sending stayed cited, and a reference staged from ⌘K (which
+      // never passes through this handler) was never cited at all.
+      await ctx.stageEntity(item)
     },
-    // Chip-style, same as `doc` — see the note there. The citation is carried
-    // by `recordMention`, not by this.
+    // Chip-style, same as `doc` — see the note there.
     toContextRef: () => null,
   })
 

@@ -166,9 +166,10 @@ describe("built-in handlers", () => {
 })
 
 // ---------------------------------------------------------------------------
-// Chip-style citations. These picks leave NO token in the message text, so
-// `resolve-mentions.ts` can never recover them by re-parsing — `recordMention`
-// is their only route into `metadata.mentions`.
+// Chip-style picks. They leave NO token in the message text, so
+// `resolve-mentions.ts` can never recover them by re-parsing. A doc pick
+// records its citation through `recordMention`; an entity's is read at send
+// time off the chip it staged (`selection-citations.ts`).
 // ---------------------------------------------------------------------------
 
 const docItem = {
@@ -215,24 +216,13 @@ describe("doc picks record a citation", () => {
   })
 })
 
-describe("entity picks record a citation", () => {
-  it("records `<entityKind>:<recordId>` once the record actually staged", async () => {
+describe("entity picks", () => {
+  // The citation is read off the staged chip at send time, so the handler
+  // must not keep a second list that can drift from the chips.
+  it("stages the record and records no citation of its own", async () => {
     const ctx = makeCtx()
     await getMentionPickHandler("entity")!.onPick(entityItem as never, ctx)
-    expect(ctx.recordMention).toHaveBeenCalledWith({
-      kind: "entity",
-      id: "issue:iss_1",
-      label: "Fix the broker race",
-      raw: "@issue:iss_1",
-    })
-  })
-
-  it("records NOTHING when the record could not be read", async () => {
-    // A record deleted between the pick and the read contributes no context.
-    // Claiming the turn cited it would make `metadata.mentions` assert context
-    // the model never saw — the one direction of lie that matters.
-    const ctx = makeCtx({ stageEntity: jest.fn().mockResolvedValue(null) })
-    await getMentionPickHandler("entity")!.onPick(entityItem as never, ctx)
+    expect(ctx.stageEntity).toHaveBeenCalledWith(entityItem)
     expect(ctx.recordMention).not.toHaveBeenCalled()
   })
 
