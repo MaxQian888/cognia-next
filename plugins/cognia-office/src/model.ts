@@ -3,6 +3,10 @@ import * as XLSX from "xlsx"
 export const WORKBOOK_SCHEMA_VERSION = 1 as const
 export const WORKBOOK_ARTIFACT_KIND = "cognia-office/workbook"
 
+/** Excel worksheet limits (1-based): 1,048,576 rows and 16,384 columns (XFD). */
+export const WORKBOOK_MAX_ROW = 1_048_576
+export const WORKBOOK_MAX_COLUMN = 16_384
+
 export type WorkbookCellType = "string" | "number" | "boolean" | "date" | "blank" | "error"
 
 export interface WorkbookCellStyle {
@@ -56,6 +60,10 @@ export type WorkbookOperation =
   | { op: "setFreeze"; sheet: string; rows?: number; columns?: number }
   | { op: "setRowDimension"; sheet: string; row: number; height?: number; hidden?: boolean }
   | { op: "setColumnDimension"; sheet: string; column: string; width?: number; hidden?: boolean }
+  | { op: "insertRows"; sheet: string; row: number; count?: number }
+  | { op: "deleteRows"; sheet: string; row: number; count?: number }
+  | { op: "insertColumns"; sheet: string; column: string; count?: number }
+  | { op: "deleteColumns"; sheet: string; column: string; count?: number }
 
 export interface WorkbookValidationFinding {
   severity: "error" | "warning"
@@ -136,7 +144,7 @@ export function validateWorkbook(workbook: WorkbookDocument): WorkbookValidation
         )
       )
     }
-    const titleKey = sheet.title.toLocaleLowerCase()
+    const titleKey = sheet.title.toLowerCase()
     if (titles.has(titleKey)) {
       findings.push(
         error(
@@ -260,12 +268,16 @@ function applyOperation(workbook: WorkbookDocument, operation: WorkbookOperation
       workbook.sheets.splice(operation.index, 0, sheet)
       break
     }
-    case "setCell":
-      if (!isCellRef(operation.cell)) throw new Error(`invalid cell reference: ${operation.cell}`)
-      sheet.cells[operation.cell.toUpperCase()] = normalizeCell(operation.value)
+    case "setCell": {
+      const ref = operation.cell.toUpperCase()
+      if (!isCellRef(ref)) throw new Error(`invalid cell reference: ${operation.cell}`)
+      sheet.cells[ref] = normalizeCell(operation.value)
       break
+    }
     case "setRange": {
-      const range = XLSX.utils.decode_range(operation.range)
+      const rangeRef = operation.range.toUpperCase()
+      if (!isRangeRef(rangeRef)) throw new Error(`invalid range: ${operation.range}`)
+      const range = XLSX.utils.decode_range(rangeRef)
       const expectedRows = range.e.r - range.s.r + 1
       const expectedColumns = range.e.c - range.s.c + 1
       if (
@@ -283,24 +295,30 @@ function applyOperation(workbook: WorkbookDocument, operation: WorkbookOperation
       )
       break
     }
-    case "merge":
-      if (!isRangeRef(operation.range)) throw new Error(`invalid merge range: ${operation.range}`)
-      if (!sheet.merges.includes(operation.range)) sheet.merges.push(operation.range)
+    case "merge": {
+      const range = operation.range.toUpperCase()
+      if (!isRangeRef(range)) throw new Error(`invalid merge range: ${operation.range}`)
+      if (!sheet.merges.includes(range)) sheet.merges.push(range)
       break
+    }
     case "unmerge":
-      sheet.merges = sheet.merges.filter((range) => range !== operation.range)
+      sheet.merges = sheet.merges.filter((range) => range !== operation.range.toUpperCase())
       break
-    case "setFilter":
-      if (operation.range !== undefined && !isRangeRef(operation.range))
+    case "setFilter": {
+      const range = operation.range?.toUpperCase()
+      if (range !== undefined && !isRangeRef(range))
         throw new Error(`invalid filter range: ${operation.range}`)
-      sheet.filter = operation.range
+      sheet.filter = range
       break
+    }
     case "setFreeze":
-      sheet.freeze = { rows: nonNegative(operation.rows), columns: nonNegative(operation.columns) }
+      sheet.freeze = {
+        rows: nonNegative(operation.rows, WORKBOOK_MAX_ROW),
+        columns: nonNegative(operation.columns, WORKBOOK_MAX_COLUMN),
+      }
       break
     case "setRowDimension":
-      if (!Number.isInteger(operation.row) || operation.row < 1)
-        throw new Error("row must be a positive integer")
+      rowIndex(operation.row)
       sheet.rowDimensions ??= {}
       sheet.rowDimensions[String(operation.row)] = {
         height: positive(operation.height),
@@ -309,7 +327,7 @@ function applyOperation(workbook: WorkbookDocument, operation: WorkbookOperation
       break
     case "setColumnDimension": {
       const column = operation.column.toUpperCase()
-      if (!/^[A-Z]{1,3}$/.test(column)) throw new Error(`invalid column: ${operation.column}`)
+      columnIndex(column)
       sheet.columnDimensions ??= {}
       sheet.columnDimensions[column] = {
         width: positive(operation.width),
@@ -317,7 +335,151 @@ function applyOperation(workbook: WorkbookDocument, operation: WorkbookOperation
       }
       break
     }
+    case "insertRows":
+      shiftSheetAxis(sheet, "r", rowIndex(operation.row), operationCount(operation.count), "insert")
+      break
+    case "deleteRows":
+      shiftSheetAxis(sheet, "r", rowIndex(operation.row), operationCount(operation.count), "delete")
+      break
+    case "insertColumns":
+      shiftSheetAxis(
+        sheet,
+        "c",
+        columnIndex(operation.column),
+        operationCount(operation.count),
+        "insert"
+      )
+      break
+    case "deleteColumns":
+      shiftSheetAxis(
+        sheet,
+        "c",
+        columnIndex(operation.column),
+        operationCount(operation.count),
+        "delete"
+      )
+      break
   }
+}
+
+/**
+ * Insert `count` empty rows/columns at index `at` (0-based) or delete the
+ * `[at, at+count)` span, remapping cell keys, merges, filter, freeze and
+ * dimension entries to match Excel's behavior.
+ */
+function shiftSheetAxis(
+  sheet: WorkbookSheet,
+  axis: "r" | "c",
+  at: number,
+  count: number,
+  mode: "insert" | "delete"
+): void {
+  const limit = axis === "r" ? WORKBOOK_MAX_ROW : WORKBOOK_MAX_COLUMN
+  const delta = mode === "insert" ? count : -count
+  // On delete, coordinates inside [at, at+count) are dropped; on insert,
+  // coordinates at/after `at` shift up by `count`.
+  const mapCoordinate = (value: number): number | null => {
+    if (mode === "delete" && value >= at && value < at + count) return null
+    const next = value >= at ? value + delta : value
+    if (next >= limit) {
+      throw new Error("operation pushes content beyond the worksheet bounds")
+    }
+    return next
+  }
+
+  const cells: Record<string, WorkbookCell> = {}
+  for (const [ref, cell] of Object.entries(sheet.cells)) {
+    const decoded = XLSX.utils.decode_cell(ref)
+    const next = mapCoordinate(decoded[axis])
+    if (next === null) continue
+    decoded[axis] = next
+    cells[XLSX.utils.encode_cell(decoded)] = cell
+  }
+  sheet.cells = cells
+
+  sheet.merges = sheet.merges.flatMap((ref) => {
+    const remapped = remapRangeAxis(ref, axis, at, count, mode)
+    if (!remapped) return []
+    // A merge that shrinks to a single cell is degenerate — drop it.
+    const range = XLSX.utils.decode_range(remapped)
+    return range.s.r === range.e.r && range.s.c === range.e.c ? [] : [remapped]
+  })
+  if (sheet.filter) {
+    const remapped = remapRangeAxis(sheet.filter, axis, at, count, mode)
+    if (remapped) {
+      sheet.filter = remapped
+    } else {
+      delete sheet.filter
+    }
+  }
+
+  if (sheet.freeze) {
+    const frozen = axis === "r" ? sheet.freeze.rows : sheet.freeze.columns
+    if (frozen !== undefined && frozen > 0) {
+      const next =
+        mode === "insert"
+          ? at < frozen
+            ? frozen + count
+            : frozen
+          : frozen - Math.max(0, Math.min(at + count, frozen) - at)
+      if (axis === "r") sheet.freeze.rows = next
+      else sheet.freeze.columns = next
+    }
+  }
+
+  const dimensions = axis === "r" ? sheet.rowDimensions : sheet.columnDimensions
+  if (dimensions) {
+    const remapped: typeof dimensions = {}
+    for (const [key, dimension] of Object.entries(dimensions)) {
+      const index = axis === "r" ? Number(key) - 1 : XLSX.utils.decode_col(key)
+      if (!Number.isInteger(index) || index < 0) continue
+      const next = mapCoordinate(index)
+      if (next === null) continue
+      remapped[axis === "r" ? String(next + 1) : XLSX.utils.encode_col(next)] = dimension
+    }
+    if (axis === "r") sheet.rowDimensions = remapped
+    else sheet.columnDimensions = remapped
+  }
+}
+
+/**
+ * Shift one axis of an A1 range across an insert/delete boundary. Deletion
+ * clamps the range ends onto the surviving rows/columns — a start inside the
+ * deleted span lands on the first survivor, an end inside it lands on the
+ * last. Returns null when the span was fully deleted.
+ */
+function remapRangeAxis(
+  ref: string,
+  axis: "r" | "c",
+  at: number,
+  count: number,
+  mode: "insert" | "delete"
+): string | null {
+  const range = XLSX.utils.decode_range(ref)
+  const shiftStart = (value: number): number =>
+    mode === "insert"
+      ? value >= at
+        ? value + count
+        : value
+      : value >= at + count
+        ? value - count
+        : value >= at
+          ? at
+          : value
+  const shiftEnd = (value: number): number =>
+    mode === "insert"
+      ? value >= at
+        ? value + count
+        : value
+      : value >= at + count
+        ? value - count
+        : value >= at
+          ? at - 1
+          : value
+  range.s[axis] = shiftStart(range.s[axis])
+  range.e[axis] = shiftEnd(range.e[axis])
+  if (range.s[axis] > range.e[axis]) return null
+  return XLSX.utils.encode_range(range)
 }
 
 function createSheet(title: string, id: number): WorkbookSheet {
@@ -345,7 +507,13 @@ function requireText(value: string, label: string): string {
 function isCellRef(value: string): boolean {
   try {
     const decoded = XLSX.utils.decode_cell(value)
-    return XLSX.utils.encode_cell(decoded) === value.toUpperCase()
+    return (
+      decoded.r >= 0 &&
+      decoded.c >= 0 &&
+      decoded.r < WORKBOOK_MAX_ROW &&
+      decoded.c < WORKBOOK_MAX_COLUMN &&
+      XLSX.utils.encode_cell(decoded) === value
+    )
   } catch {
     return false
   }
@@ -354,10 +522,37 @@ function isCellRef(value: string): boolean {
 function isRangeRef(value: string): boolean {
   try {
     const range = XLSX.utils.decode_range(value)
-    return range.s.r <= range.e.r && range.s.c <= range.e.c
+    return (
+      range.s.r >= 0 &&
+      range.s.c >= 0 &&
+      range.s.r <= range.e.r &&
+      range.s.c <= range.e.c &&
+      range.e.r < WORKBOOK_MAX_ROW &&
+      range.e.c < WORKBOOK_MAX_COLUMN
+    )
   } catch {
     return false
   }
+}
+
+function rowIndex(value: number): number {
+  if (!Number.isInteger(value) || value < 1 || value > WORKBOOK_MAX_ROW)
+    throw new Error(`row must be an integer between 1 and ${WORKBOOK_MAX_ROW}`)
+  return value - 1
+}
+
+function columnIndex(value: string): number {
+  const column = value.toUpperCase()
+  if (!/^[A-Z]{1,3}$/.test(column)) throw new Error(`invalid column: ${value}`)
+  const index = XLSX.utils.decode_col(column)
+  if (index < 0 || index >= WORKBOOK_MAX_COLUMN) throw new Error(`invalid column: ${value}`)
+  return index
+}
+
+function operationCount(value: number | undefined): number {
+  const count = value ?? 1
+  if (!Number.isInteger(count) || count < 1) throw new Error("count must be a positive integer")
+  return count
 }
 
 function positive(value: number | undefined): number | undefined {
@@ -366,10 +561,10 @@ function positive(value: number | undefined): number | undefined {
   return value
 }
 
-function nonNegative(value: number | undefined): number | undefined {
+function nonNegative(value: number | undefined, limit: number): number | undefined {
   if (value === undefined) return undefined
-  if (!Number.isInteger(value) || value < 0)
-    throw new Error("freeze count must be a non-negative integer")
+  if (!Number.isInteger(value) || value < 0 || value > limit)
+    throw new Error(`freeze count must be an integer between 0 and ${limit}`)
   return value
 }
 

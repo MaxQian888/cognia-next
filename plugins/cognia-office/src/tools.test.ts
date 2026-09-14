@@ -87,8 +87,11 @@ it("executes every namespaced Office tool through the runtime", async () => {
   )
   expect(mockRuntime.exportXlsx).toHaveBeenCalledWith("a1", "workbook.xlsx", true)
 
-  await tools[7].execute({ artifactId: "a1" }, execution)
-  expect(mockRuntime.syncLark).toHaveBeenCalledWith("a1", "session-1", execution.signal)
+  await tools[7].execute({ artifactId: "a1", folderToken: "fld-1" }, execution)
+  expect(mockRuntime.syncLark).toHaveBeenCalledWith("a1", "session-1", {
+    folderToken: "fld-1",
+    signal: execution.signal,
+  })
 })
 
 it("requires a session before synchronizing to Lark", async () => {
@@ -97,4 +100,31 @@ it("requires a session before synchronizing to Lark", async () => {
     "requires a chat session"
   )
   expect(mockRuntime.syncLark).not.toHaveBeenCalled()
+})
+
+it("declares JSON schemas for the structural row and column operations", () => {
+  const tools = createOfficeTools(context())
+  interface OpSchema {
+    properties: Record<string, { const?: string } & Record<string, unknown>>
+    required: string[]
+  }
+  const operations = (
+    tools[3].definition.parametersSchema as {
+      properties: { operations: { items: { oneOf: OpSchema[] } } }
+    }
+  ).properties.operations
+  const ops = new Map(operations.items.oneOf.map((entry) => [entry.properties.op.const, entry]))
+  for (const op of ["insertRows", "deleteRows"]) {
+    expect(ops.get(op)?.required).toEqual(["op", "sheet", "row"])
+    expect(ops.get(op)?.properties.row).toMatchObject({ type: "integer", minimum: 1 })
+  }
+  for (const op of ["insertColumns", "deleteColumns"]) {
+    expect(ops.get(op)?.required).toEqual(["op", "sheet", "column"])
+    expect(ops.get(op)?.properties.column).toMatchObject({ type: "string" })
+  }
+  // office_sync_lark exposes the Lark Drive folder passthrough.
+  const syncSchema = tools[7].definition.parametersSchema as {
+    properties: Record<string, unknown>
+  }
+  expect(syncSchema.properties.folderToken).toMatchObject({ type: "string", minLength: 1 })
 })

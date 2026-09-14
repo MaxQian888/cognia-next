@@ -149,7 +149,9 @@ function importSheet(sheet: WorkSheet, title: string, index: number): WorkbookSh
       ? {
           rowDimensions: Object.fromEntries(
             sheet["!rows"].flatMap((row, rowIndex) =>
-              row ? [[String(rowIndex + 1), { height: row.hpt, hidden: row.hidden }]] : []
+              row && (row.hpt !== undefined || row.hidden !== undefined)
+                ? [[String(rowIndex + 1), { height: row.hpt, hidden: row.hidden }]]
+                : []
             )
           ),
         }
@@ -158,7 +160,7 @@ function importSheet(sheet: WorkSheet, title: string, index: number): WorkbookSh
       ? {
           columnDimensions: Object.fromEntries(
             sheet["!cols"].flatMap((column, columnIndex) =>
-              column
+              column && (column.wch !== undefined || column.hidden !== undefined)
                 ? [
                     [
                       XLSX.utils.encode_col(columnIndex),
@@ -188,6 +190,11 @@ function writeSheet(workbook: ExcelJS.Workbook, sheet: WorkbookSheet): void {
       cell.value = toExcelValue(source)
     }
     applyStyle(cell, source.style)
+    // A date cell without an explicit format renders as a raw serial number in
+    // Excel — fall back to a plain ISO date format.
+    if (source.type === "date" && !source.style?.numberFormat) {
+      cell.numFmt = DEFAULT_DATE_FORMAT
+    }
   }
   for (const merge of sheet.merges) worksheet.mergeCells(merge)
   if (sheet.filter) worksheet.autoFilter = sheet.filter
@@ -207,8 +214,18 @@ function toExcelValue(
   cell: WorkbookCell
 ): null | string | number | boolean | Date | ExcelJS.CellErrorValue {
   if (cell.type === "blank" || cell.value === undefined) return null
-  if (cell.type === "date") return new Date(String(cell.value))
-  if (cell.type === "error") return { error: String(cell.value) as ExcelJS.ErrorValue }
+  if (cell.type === "date") {
+    const date = new Date(String(cell.value))
+    return Number.isNaN(date.getTime()) ? String(cell.value) : date
+  }
+  if (cell.type === "error") {
+    const literal = String(cell.value)
+    // ExcelJS only accepts the fixed set of OOXML error literals — anything
+    // else would serialize a corrupt cell, so normalize to #VALUE!.
+    return {
+      error: (EXCEL_ERROR_VALUES.has(literal) ? literal : "#VALUE!") as ExcelJS.ErrorValue,
+    }
+  }
   return cell.value
 }
 
@@ -272,6 +289,21 @@ function importStyle(cell: XLSX.CellObject): WorkbookCellStyle | undefined {
   return Object.keys(style).length ? style : undefined
 }
 
+const EXCEL_ERROR_VALUES = new Set([
+  "#NULL!",
+  "#DIV/0!",
+  "#VALUE!",
+  "#REF!",
+  "#NAME?",
+  "#NUM!",
+  "#N/A",
+  "#GETTING_DATA",
+  "#SPILL!",
+  "#CALC!",
+])
+
+const DEFAULT_DATE_FORMAT = "yyyy-mm-dd"
+
 async function detectUnsupportedFeatures(bytes: Uint8Array, workbook: WorkBook): Promise<string[]> {
   const warnings: string[] = []
   if (workbook.vbaraw)
@@ -279,16 +311,69 @@ async function detectUnsupportedFeatures(bytes: Uint8Array, workbook: WorkBook):
   try {
     const zip = await JSZip.loadAsync(bytes)
     const paths = Object.keys(zip.files)
-    if (paths.some((path) => path.startsWith("xl/pivotTables/")))
+    const has = (prefix: string) => paths.some((path) => path.startsWith(prefix))
+    if (has("xl/pivotTables/") || has("xl/pivotCache/") || has("xl/model/"))
       warnings.push("Pivot tables are present and cannot be edited or preserved losslessly.")
-    if (paths.some((path) => path.startsWith("xl/charts/")))
+    if (has("xl/charts/") || has("xl/chartsheets/"))
       warnings.push("Complex charts are present and cannot be edited or preserved losslessly.")
-    if (paths.some((path) => path.startsWith("xl/externalLinks/")))
+    if (has("xl/externalLinks/"))
       warnings.push("External workbook links are present and will not be preserved.")
+    if (has("xl/media/") || has("xl/drawings/"))
+      warnings.push("Embedded images or drawing shapes are present and will not be preserved.")
+    if (has("xl/comments") || has("xl/threadedComments/") || has("xl/persons/"))
+      warnings.push("Cell comments are present and will not be preserved.")
+    if (has("xl/tables/"))
+      warnings.push("Structured tables are present and will be flattened to plain cell ranges.")
+    if (has("xl/slicerCaches/") || has("xl/timelineCaches/"))
+      warnings.push("Slicers or timelines are present and will not be preserved.")
+    if (has("xl/queryTables/") || has("xl/connections"))
+      warnings.push("External data connections are present and will not be preserved.")
+    if (has("xl/ctrlProps/") || has("xl/activeX/"))
+      warnings.push("Form or ActiveX controls are present and will not be preserved.")
+    if (has("xl/vbaProject") && !workbook.vbaraw)
+      warnings.push("Macros are present and will not be preserved when this workbook is exported.")
+
+    const sheetWarnings = await inspectWorksheetXml(zip, paths)
+    warnings.push(...sheetWarnings)
   } catch {
     warnings.push("The workbook package could not be inspected for unsupported OOXML features.")
   }
   return warnings
+}
+
+/** Scan worksheet XML for cell-level features the model cannot round-trip. */
+async function inspectWorksheetXml(zip: JSZip, paths: string[]): Promise<string[]> {
+  const checks: Array<{ pattern: RegExp; warning: string }> = [
+    {
+      pattern: /<conditionalFormatting[\s/>]/,
+      warning: "Conditional formatting is present and will not be preserved.",
+    },
+    {
+      pattern: /<dataValidation[\s/>]/,
+      warning: "Cell data validation rules are present and will not be preserved.",
+    },
+    {
+      pattern: /<hyperlink[\s/>]/,
+      warning: "Cell hyperlinks are present and will not be preserved.",
+    },
+    {
+      pattern: /<sheetProtection[\s/>]/,
+      warning: "Sheet protection is present and will not be preserved.",
+    },
+    {
+      pattern: /<legacyDrawing[\s/>]/,
+      warning: "Legacy comment drawings are present and will not be preserved.",
+    },
+  ]
+  const found = new Set<string>()
+  for (const path of paths) {
+    if (!/^xl\/worksheets\/[^/]+\.xml$/.test(path)) continue
+    const xml = await zip.files[path].async("string")
+    for (const check of checks) {
+      if (!found.has(check.warning) && check.pattern.test(xml)) found.add(check.warning)
+    }
+  }
+  return [...found]
 }
 
 function color(value: string): string {

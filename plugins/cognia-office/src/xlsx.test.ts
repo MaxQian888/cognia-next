@@ -198,3 +198,84 @@ it("imports sparse SheetJS dimensions and detects embedded macros", async () => 
     "Macros are present and will not be preserved when this workbook is exported."
   )
 })
+
+it("warns about cell-level and package-level features it cannot round-trip", async () => {
+  const bytes = await exportWorkbookXlsx(createWorkbook("Features", "Data"))
+  const zip = await JSZip.loadAsync(bytes)
+  const sheetPath = "xl/worksheets/sheet1.xml"
+  const xml = await zip.files[sheetPath].async("string")
+  zip.file(
+    sheetPath,
+    xml.replace(
+      "</worksheet>",
+      '<dataValidations count="1"><dataValidation type="list" sqref="A1"/></dataValidations>' +
+        '<hyperlinks><hyperlink ref="A1" r:id="rId9"/></hyperlinks>' +
+        '<conditionalFormatting sqref="A1"/>' +
+        "<sheetProtection/>" +
+        "</worksheet>"
+    )
+  )
+  zip.file("xl/media/image1.png", new Uint8Array([1]))
+  zip.file("xl/comments1.xml", "<comments/>")
+  zip.file("xl/tables/table1.xml", "<table/>")
+  const augmented = await zip.generateAsync({ type: "uint8array" })
+
+  const imported = await importWorkbookXlsx(augmented, "Features")
+  expect(imported.unsupportedFeatures).toEqual(
+    expect.arrayContaining([
+      expect.stringContaining("data validation"),
+      expect.stringContaining("hyperlinks"),
+      expect.stringContaining("Conditional formatting"),
+      expect.stringContaining("Sheet protection"),
+      expect.stringContaining("images or drawing"),
+      expect.stringContaining("comments"),
+      expect.stringContaining("tables"),
+    ])
+  )
+})
+
+it("writes a default date format and sanitizes unsafe date/error values", async () => {
+  const workbook = applyWorkbookOperations(createWorkbook("Dates", "Data"), [
+    {
+      op: "setCell",
+      sheet: "Data",
+      cell: "A1",
+      value: { type: "date", value: "2026-01-15T00:00:00.000Z" },
+    },
+    {
+      op: "setCell",
+      sheet: "Data",
+      cell: "A2",
+      value: {
+        type: "date",
+        value: "2026-01-15T00:00:00.000Z",
+        style: { numberFormat: "dd/mm/yyyy" },
+      },
+    },
+    { op: "setCell", sheet: "Data", cell: "B1", value: { type: "error", value: "#N/A" } },
+    { op: "setCell", sheet: "Data", cell: "B2", value: { type: "error", value: "bogus" } },
+    { op: "setCell", sheet: "Data", cell: "B3", value: { type: "date", value: "not-a-date" } },
+  ])
+  const bytes = await exportWorkbookXlsx(workbook)
+  const loaded = new ExcelJS.Workbook()
+  await loaded.xlsx.load(Uint8Array.from(bytes).buffer)
+  const sheet = loaded.getWorksheet("Data")!
+  expect(sheet.getCell("A1").numFmt).toBe("yyyy-mm-dd")
+  expect(sheet.getCell("A1").value).toBeInstanceOf(Date)
+  expect(sheet.getCell("A2").numFmt).toBe("dd/mm/yyyy")
+  expect(sheet.getCell("B1").value).toMatchObject({ error: "#N/A" })
+  expect(sheet.getCell("B2").value).toMatchObject({ error: "#VALUE!" })
+  expect(sheet.getCell("B3").value).toBe("not-a-date")
+})
+
+it("drops dimension entries that carry no height, width, or hidden flag", async () => {
+  const workbook = createWorkbook("Noise", "Data")
+  workbook.sheets[0].cells.A1 = { type: "string", value: "x" }
+  workbook.sheets[0].rowDimensions = { 2: { height: undefined, hidden: undefined } }
+  workbook.sheets[0].columnDimensions = { B: { width: undefined, hidden: undefined } }
+  // Exported/re-imported noise entries never reach the model.
+  const bytes = await exportWorkbookXlsx(workbook)
+  const imported = await importWorkbookXlsx(bytes, "Noise")
+  expect(imported.sheets[0].rowDimensions ?? {}).toEqual({})
+  expect(imported.sheets[0].columnDimensions ?? {}).toEqual({})
+})

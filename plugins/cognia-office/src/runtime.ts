@@ -160,18 +160,23 @@ export function createOfficeRuntime(ctx: OfficePluginContext) {
       return { ok: result.saved, artifactId, byteLength: bytes.byteLength, findings }
     },
 
-    syncLark: async (artifactId: string, sessionId: string, signal?: AbortSignal) => {
+    syncLark: async (
+      artifactId: string,
+      sessionId: string,
+      options: { folderToken?: string; signal?: AbortSignal } = {}
+    ) => {
       const { workbook } = readArtifact(artifactId)
       const result = await ctx.skills.invokeBuiltIn(
         "lark.sheets.create",
         {
           title: workbook.title,
+          ...(options.folderToken ? { folderToken: options.folderToken } : {}),
           sheets: workbook.sheets.map((sheet) => ({
             title: sheet.title,
             values: sheetToValues(sheet),
           })),
         },
-        { sessionId, signal }
+        { sessionId, signal: options.signal }
       )
       if (result.status !== "ok") return { ok: false as const, artifactId, result }
       return { ok: true as const, artifactId, result: result.data }
@@ -182,15 +187,16 @@ export function createOfficeRuntime(ctx: OfficePluginContext) {
 function sheetToValues(sheet: WorkbookDocument["sheets"][number]): unknown[][] {
   let maxRow = -1
   let maxColumn = -1
-  const decoded = Object.entries(sheet.cells).map(([ref, cell]) => {
+  const decoded = Object.entries(sheet.cells).flatMap(([ref, cell]) => {
     const match = /^([A-Z]+)(\d+)$/.exec(ref)
-    if (!match) return { row: 0, column: 0, cell }
+    // Skip non-canonical refs instead of collapsing them onto A1.
+    if (!match) return []
     const column =
       match[1].split("").reduce((value, char) => value * 26 + char.charCodeAt(0) - 64, 0) - 1
     const row = Number(match[2]) - 1
     maxRow = Math.max(maxRow, row)
     maxColumn = Math.max(maxColumn, column)
-    return { row, column, cell }
+    return [{ row, column, cell }]
   })
   const values = Array.from({ length: maxRow + 1 }, () => Array<unknown>(maxColumn + 1).fill(null))
   for (const { row, column, cell } of decoded)

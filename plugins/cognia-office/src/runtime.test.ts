@@ -122,6 +122,14 @@ it("syncs all workbook sheets through the allowlisted Lark built-in seam", async
     expect.objectContaining({ title: "Inventory", sheets: [{ title: "Sheet1", values: [] }] }),
     expect.objectContaining({ sessionId: "s1" })
   )
+  expect(invokeBuiltIn.mock.calls[0][1]).not.toHaveProperty("folderToken")
+
+  await runtime.syncLark(created.artifactId, "s1", { folderToken: "fld-2" })
+  expect(invokeBuiltIn).toHaveBeenLastCalledWith(
+    "lark.sheets.create",
+    expect.objectContaining({ title: "Inventory", folderToken: "fld-2" }),
+    expect.objectContaining({ sessionId: "s1" })
+  )
 })
 
 it("requires explicit acknowledgement before exporting unsupported imported features", async () => {

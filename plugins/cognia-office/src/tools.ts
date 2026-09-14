@@ -142,14 +142,26 @@ export function createOfficeTools(ctx: OfficePluginContext): PluginTool[] {
     tool(
       OFFICE_TOOL_NAMES[7],
       "Create a Lark Sheets workbook through the audited built-in Lark skill bridge.",
-      artifactOnlySchema,
+      {
+        type: "object",
+        properties: {
+          artifactId: artifactIdSchema,
+          folderToken: {
+            type: "string",
+            minLength: 1,
+            description: "Optional Lark Drive folder token to create the spreadsheet in.",
+          },
+        },
+        required: ["artifactId"],
+        additionalProperties: false,
+      },
       (args, toolCtx) => {
         if (!toolCtx.sessionId) throw new Error("office_sync_lark requires a chat session")
-        return runtime.syncLark(
-          (args as { artifactId: string }).artifactId,
-          toolCtx.sessionId,
-          toolCtx.signal
-        )
+        const input = args as { artifactId: string; folderToken?: string }
+        return runtime.syncLark(input.artifactId, toolCtx.sessionId, {
+          folderToken: input.folderToken,
+          signal: toolCtx.signal,
+        })
       }
     ),
   ]
@@ -365,6 +377,36 @@ const operationArraySchema = {
         required: ["op", "sheet", "column"],
         additionalProperties: false,
       },
+      ...(["insertRows", "deleteRows"] as const).map((op) => ({
+        type: "object",
+        properties: {
+          ...operationBaseProperties,
+          op: { const: op },
+          row: {
+            type: "integer",
+            minimum: 1,
+            description: `1-based row index to ${op === "insertRows" ? "insert before" : "start deleting from"}.`,
+          },
+          count: { type: "integer", minimum: 1, description: "Number of rows (default 1)." },
+        },
+        required: ["op", "sheet", "row"],
+        additionalProperties: false,
+      })),
+      ...(["insertColumns", "deleteColumns"] as const).map((op) => ({
+        type: "object",
+        properties: {
+          ...operationBaseProperties,
+          op: { const: op },
+          column: {
+            type: "string",
+            pattern: "^[A-Za-z]{1,3}$",
+            description: `Column letter to ${op === "insertColumns" ? "insert before" : "start deleting from"}.`,
+          },
+          count: { type: "integer", minimum: 1, description: "Number of columns (default 1)." },
+        },
+        required: ["op", "sheet", "column"],
+        additionalProperties: false,
+      })),
     ],
   },
 }
