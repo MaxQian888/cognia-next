@@ -39,10 +39,27 @@ declare const self: ServiceWorkerGlobalScope & {
 }
 
 const serwist = new Serwist({
+  // `__SW_MANIFEST` is injected at build time and already covers `public/`
+  // files — including `offline.html` with a content-hash revision. Adding it
+  // manually here would throw `add-to-cache-list-conflicting-entries` during
+  // script evaluation (same URL, different revision) and kill registration.
   precacheEntries: self.__SW_MANIFEST,
   skipWaiting: true,
   clientsClaim: true,
   navigationPreload: true,
+  // A navigation the runtime caches can't answer (offline first visit to a
+  // route, or a post-deploy chunk-mismatch on a cached page) gets the static
+  // offline shell instead of a browser error page — which for a
+  // `standalone` PWA window is a white screen with no way back.
+  fallbacks: {
+    entries: [
+      {
+        url: "/offline.html",
+        // Document requests only — a failed image/script must never get HTML.
+        matcher: ({ request }) => request.destination === "document",
+      },
+    ],
+  },
   runtimeCaching: [
     {
       matcher: ({ url }) => url.pathname.startsWith("/api/_rpc/sync_pull"),

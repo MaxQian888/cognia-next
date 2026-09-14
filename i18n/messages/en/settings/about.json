@@ -19,6 +19,16 @@
   },
   "description": "App version, build details, diagnostics, updates, and credits.",
   "iconAlt": "{name} app icon",
+  "install": {
+    "action": "Install Cognia",
+    "description": "Install the web app on this device for a dedicated window, a dock icon, an offline fallback, and the share-sheet entry. It stays a client of this Cognia server — the desktop app remains the host.",
+    "installed": "Installed — Cognia opens in its own window.",
+    "iosStepAdd": "Tap “Add to Home Screen”.",
+    "iosStepShare": "Tap the Share button in Safari.",
+    "title": "Install the app",
+    "unavailable": "This browser cannot be prompted in-app — use its “Install app” / “Add to Home Screen” menu entry if present.",
+    "updateReady": "A new version was applied in the background and takes effect on the next launch."
+  },
   "legal": {
     "acknowledgements": "Built with open source",
     "copyright": "© {year} {holder}. All rights reserved.",

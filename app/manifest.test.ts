@@ -53,4 +53,46 @@ describe("manifest()", () => {
     // so this pins the two sides together.
     expect(params).toEqual({ title: "title", text: "text", url: "url" })
   })
+
+  it("pins an explicit app identity so start_url churn cannot orphan installs", () => {
+    // Without `id`, Chrome derives identity from start_url — changing it later
+    // would register a brand-new app (fresh storage, lost window state).
+    expect(manifest().id).toBe("/")
+  })
+
+  it("focuses the existing window on launch instead of multiplying windows", () => {
+    expect(manifest().launch_handler).toEqual({ client_mode: "focus-existing" })
+  })
+
+  it("scopes the app to the deployment root", () => {
+    const m = manifest()
+    expect(m.start_url).toBe("/")
+    expect(m.scope).toBe("/")
+  })
+
+  it("declares shortcuts only to routes that exist in the static export", () => {
+    const shortcuts = manifest().shortcuts ?? []
+    expect(shortcuts.length).toBeGreaterThan(0)
+    for (const shortcut of shortcuts) {
+      // Guard: a shortcut to a missing route 404s inside the installed window.
+      expect(shortcut.url).toMatch(/^\/[a-z-]*$/u)
+      expect(shortcut.icons?.length).toBeGreaterThan(0)
+    }
+  })
+
+  it("ships screenshots for the rich install dialog (wide + narrow)", () => {
+    const shots = manifest().screenshots ?? []
+    // Chrome's rich install UI needs both form factors to look right.
+    expect(shots.some((s) => s.form_factor === "wide")).toBe(true)
+    expect(shots.some((s) => s.form_factor === "narrow")).toBe(true)
+    for (const shot of shots) {
+      expect(shot.src).toMatch(/^\/pwa\/screenshots\/.+\.png$/u)
+      expect(shot.sizes).toMatch(/^\d+x\d+$/u)
+    }
+  })
+
+  it("registers web+cognia protocol handling through the existing deep-link page", () => {
+    const handlers = manifest().protocol_handlers ?? []
+    expect(handlers).toEqual([{ protocol: "web+cognia", url: "/deep-link?u=%s" }])
+  })
 })

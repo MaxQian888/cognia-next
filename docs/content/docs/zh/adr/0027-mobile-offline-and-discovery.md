@@ -111,3 +111,47 @@ messages 的不透明游标升级为 version 2。收到 version-1 游标时，�
 准备工作完成之后。迟到结果不能写入新选中 Host 的数据库。启动流程清理时取消
 其同步任务。定向失效通知和分阶段拉取共用每个 Host 的并发预算，新增定向任务
 不会额外获得一套独立并发额度。
+
+## PWA 安装链路修订（2026-09-14）
+
+Wave-4 的 PWA 层停在"技术上可安装"：manifest 与 Serwist worker 已产出，
+但产品侧从未捕获 `beforeinstallprompt`。本修订记录现已交付的产品化安装
+链路：
+
+- `lib/pwa/install-state.ts` 将单次性的安装提示事件捕获进一个不依赖
+  React 的外部 store。`PwaLifecycleInitializer` 挂在 `LocaleGate` 内、
+  `AccountGate` 之上——事件可能在保管库锁屏挡住 gate 时触发，错过捕获
+  会让安装入口直到刷新前都不可用。`hooks/use-install-prompt.ts` 是其
+  `useSyncExternalStore` 视图。
+- 唯一的应用内入口是 设置 → 关于（`InstallAppCard`），以
+  `detectPlatform() === "web"` 门控。四种状态：`installable`（原生
+  对话框按钮）、`installed`、`ios-manual`（"分享 → 添加到主屏幕"
+  步骤——iOS Safari 永不触发 `beforeinstallprompt`）、`unavailable`
+  （引导浏览器菜单的文案）。卡片文案明确说明 PWA 是该部署的客户端，
+  而非桌面宿主。
+- `app/manifest.ts` 新增 `id`（显式身份——缺失时 Chrome 用
+  `start_url` 推导，日后变更会使既有安装全部失联）、`lang`、`dir`、
+  `categories`、`launch_handler: focus-existing`、`shortcuts`、
+  `screenshots` 与 `protocol_handlers`（`web+cognia` →
+  `/deep-link?u=%s`，复用现有深链页面）。单一静态 manifest 保持英文
+  身份文案——相对按 locale 拆 manifest 路由是刻意的取舍。
+- `app/sw.ts` 预缓存 `public/offline.html`（revision 取应用版本号，每次
+  发版重新预缓存），并为 `destination: "document"` 注册 Serwist
+  `fallbacks` 条目。离线时未缓存的导航现在得到双语离线页，而非浏览器
+  错误页——后者在 `standalone` 窗口中没有退路。
+- `PwaBadgeInitializer` 挂在 gate 之内（需要解锁后的 Dexie），在
+  `display-mode: standalone` 下将移动端未读会话数镜像到
+  `navigator.setAppBadge`。
+- 遥测：`app` 类别下新增 `app.pwa.install.shown|accepted|dismissed` 与
+  `app.pwa.installed`。`app/layout.tsx` 的 metadata 修正为 Cognia 品牌
+  文案，并补齐 `appleWebApp` 与 `themeColor` viewport 项。
+- 截图素材由 `pnpm screenshots:pwa`
+  （`scripts/screenshots/capture-pwa-screenshots.mjs`）基于
+  `NEXT_PUBLIC_E2E=1` 静态导出、用一次性 E2E 账户生成——绝不含真实
+  用户数据。
+
+定位不变：已安装的 PWA 是 headless 部署的客户端（`web-standalone`
+宿主档案）。它不会获得 sidecar、文件系统、MCP 或 connector 运行时能力
+——卡片文案已写明。Web Push 仍不在范围内（需要 VAPID 密钥与服务端订阅
+存储）。`window-controls-overlay` 标题栏复用是刻意的后续项，不属于本次
+交付。Tauri SW 注册验证仍是上方的开放项。

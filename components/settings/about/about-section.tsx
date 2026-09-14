@@ -6,6 +6,7 @@ import { InfoIcon } from "lucide-react"
 import { Label } from "@/components/ui/label"
 
 import { AboutHero } from "./about-hero"
+import { InstallAppCard } from "./install-app-card"
 import { LegalCreditsCard } from "./legal-credits-card"
 import { ResourcesCard } from "./resources-card"
 import { SystemDiagnosticsCard } from "./system-diagnostics-card"
@@ -51,6 +52,7 @@ export function AboutSection() {
         </div>
         <WhatsNewCard />
         <ResourcesCard />
+        <InstallAppCard />
         <div className="xl:col-span-2">
           <LegalCreditsCard />
         </div>

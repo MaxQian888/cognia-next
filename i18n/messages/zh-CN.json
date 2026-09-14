@@ -5964,18 +5964,18 @@
       },
       "pointCount": "{count, plural, other {此处分出 # 条}}",
       "summary": {
-        "generating": "正在生成摘要……",
-        "hint": "总结目前为止的对话并作为分支起点（让上下文更精简）。",
-        "label": "总结后分支",
-        "placeholder": "摘要将显示在这里——你可以在分支前编辑它。",
-        "previewLabel": "摘要（可编辑）",
-        "regenerate": "重新生成",
         "fallback": {
           "empty": "到这条消息为止没有可以总结的文字。",
           "noClient": "这里没有可用的模型来生成总结，下面是会话的提纲，分支前可以修改。",
           "noOutput": "模型返回了空的总结，下面是会话的提纲，可以重试或手动修改。",
           "pii": "这段会话包含不会发送给模型的个人数据，下面改为会话的提纲。"
-        }
+        },
+        "generating": "正在生成摘要……",
+        "hint": "总结目前为止的对话并作为分支起点（让上下文更精简）。",
+        "label": "总结后分支",
+        "placeholder": "摘要将显示在这里——你可以在分支前编辑它。",
+        "previewLabel": "摘要（可编辑）",
+        "regenerate": "重新生成"
       },
       "summaryEmpty": "请先填写摘要再分支",
       "summaryError": "生成摘要失败",
@@ -7660,6 +7660,26 @@
       "banner": "计划模式——只读调研；智能体将在修改前先提出计划。",
       "hint": "Shift+Tab"
     },
+    "promptPreamble": {
+      "combinedTitle": "{title}（{count} 条消息）",
+      "generic": "附加的上下文",
+      "hideText": "收起发给模型的原文",
+      "kinds": {
+        "artifact": "Artifact",
+        "comment": "评论",
+        "entity": "记录",
+        "external": "选中内容",
+        "file": "文件",
+        "plugin": "插件",
+        "web": "网页"
+      },
+      "references": "{count, plural, =1 {附加了 1 项引用} other {附加了 # 项引用}}",
+      "sections": {
+        "reviewReceipts": "评审结果",
+        "webSearch": "联网搜索结果"
+      },
+      "showText": "查看发给模型的原文"
+    },
     "reactions": {
       "add": "添加表情回应",
       "mirrorFailed": "已在本地记录，但平台未接受这个回应。",
@@ -8262,26 +8282,6 @@
       "title": "信任此工作区？",
       "trust": "信任工作区",
       "workspaceLabel": "工作区"
-    },
-    "promptPreamble": {
-      "combinedTitle": "{title}（{count} 条消息）",
-      "generic": "附加的上下文",
-      "hideText": "收起发给模型的原文",
-      "kinds": {
-        "artifact": "Artifact",
-        "comment": "评论",
-        "entity": "记录",
-        "external": "选中内容",
-        "file": "文件",
-        "plugin": "插件",
-        "web": "网页"
-      },
-      "references": "{count, plural, =1 {附加了 1 项引用} other {附加了 # 项引用}}",
-      "sections": {
-        "reviewReceipts": "评审结果",
-        "webSearch": "联网搜索结果"
-      },
-      "showText": "查看发给模型的原文"
     }
   },
   "chatCollaboration": {
@@ -9989,7 +9989,7 @@
       "runtimeStatus": "运行时",
       "saveState": "保存状态",
       "sessionId": "会话 ID",
-      "sessionTitle": "会话",
+      "sessionTitle": "任务概览",
       "unknown": "未知",
       "updatedAt": "更新时间",
       "version": "版本",
@@ -9997,6 +9997,12 @@
     },
     "mobileDescription": "当前资源的 AI、评论、检查、审阅与预览工具。",
     "mobileTitle": "上下文工作台",
+    "navigation": {
+      "closePanel": "关闭{name}",
+      "compactRail": "紧凑图标栏",
+      "openPanel": "打开面板",
+      "tabs": "文字标签页"
+    },
     "panelError": "面板暂不可用",
     "panelErrorDescription": "此面板意外停止，其他工作内容未受影响。",
     "projectProposal": {
@@ -10168,6 +10174,71 @@
       "unboundDescription": "在输入框的执行体控件里选一个小队，即可把这个会话交给团队。",
       "unboundTitle": "由单个 Agent 承担",
       "working": "{count, plural, =0 {空闲} other {# 个在跑}}"
+    },
+    "taskOverview": {
+      "capabilities": {
+        "character": "角色",
+        "configured": "下次发送配置的技能",
+        "configuredCount": "{count} 项技能配置",
+        "configuredHint": "角色技能和临时附件遵循本会话的禁用设置。已配置不代表运行时已加载。",
+        "disabled": "已禁用",
+        "inventoryUnavailable": "主机快照未提供能力明细。",
+        "manage": "管理能力",
+        "nextMessage": "下条消息",
+        "noneConfigured": "尚未配置角色技能或下条消息的技能附件。",
+        "refresh": "刷新快照",
+        "runtime": "运行时能力快照",
+        "runtimeCount": "{count} 项运行时能力",
+        "runtimeHint": "最近的主机快照区分已加载和延迟加载的能力。下轮运行后可能发生变化。",
+        "snapshotUnavailable": "暂时没有运行时快照。请在已连接且支持的主机上运行一轮后刷新。",
+        "title": "扩展能力",
+        "unresolved": "不可用或仍在加载"
+      },
+      "currentState": "当前任务",
+      "description": "查看本会话的状态、能力和结果。",
+      "execution": "执行模式",
+      "manage": "管理任务",
+      "noOpenItems": "尚未记录待解决问题或子任务。",
+      "openContext": "打开运行上下文",
+      "openItems": "待解决问题与子任务",
+      "openItemsMore": "还有 {count} 项，见运行上下文",
+      "results": {
+        "artifacts": "产物",
+        "emptyFiles": "尚未记录文件变更。",
+        "failed": "无法加载变更记录，缓存结果可能已过时。",
+        "fileCount": "已记录 {count} 项文件变更",
+        "files": "文件变更",
+        "loading": "正在加载变更记录…",
+        "openWorkspace": "打开工作区",
+        "outputs": "输出文件",
+        "retry": "重试",
+        "sharedLinks": "助手分享的链接",
+        "sharedLinksDescription": "回复中提及的链接；尚未验证是否新建及外部状态。",
+        "title": "关键结果",
+        "unavailable": "此会话暂未提供文件追踪信息。"
+      },
+      "rows": {
+        "directory": "工作目录",
+        "environment": "运行环境",
+        "mode": "模式",
+        "runtime": "智能体",
+        "sharing": "协作"
+      },
+      "statusHints": {
+        "awaiting_approval": "请在会话中处理待响应的请求，以继续运行。",
+        "error": "上一轮在完成前中断。",
+        "streaming": "正在执行当前轮次。"
+      },
+      "statuses": {
+        "awaiting_approval": "等待你处理",
+        "error": "失败",
+        "idle": "待命",
+        "streaming": "运行中"
+      },
+      "summaryTitle": "任务摘要",
+      "technicalDetails": "技术详情",
+      "untitled": "未命名任务",
+      "viewDetails": "查看详情"
     },
     "teamMembersPanel": {
       "title": "团队成员"
@@ -11364,6 +11435,7 @@
       },
       "maximize": "最大化",
       "minimize": "最小化",
+      "navigationMenu": "导航",
       "openMenus": "打开菜单",
       "quickActions": {
         "capture": "内容采集",
@@ -30259,6 +30331,16 @@
       },
       "description": "应用版本、构建详情、诊断信息、更新与致谢。",
       "iconAlt": "{name} 应用图标",
+      "install": {
+        "action": "安装 Cognia",
+        "description": "将网页应用安装到本设备，获得独立窗口、坞栏图标、离线兜底页与分享面板入口。它仍是当前 Cognia 服务的客户端——桌面端才是宿主。",
+        "installed": "已安装——Cognia 将在独立窗口中打开。",
+        "iosStepAdd": "点击“添加到主屏幕”。",
+        "iosStepShare": "在 Safari 中轻点“分享”按钮。",
+        "title": "安装应用",
+        "unavailable": "当前浏览器不支持应用内安装——如浏览器菜单中有“安装应用”或“添加到主屏幕”，请从那里操作。",
+        "updateReady": "新版本已在后台应用，将在下次启动时生效。"
+      },
       "legal": {
         "acknowledgements": "基于开源构建",
         "copyright": "© {year} {holder}。保留所有权利。",
@@ -52375,6 +52457,7 @@
       "actions": "操作",
       "adopt": "接管已导入环境",
       "archive": "归档环境",
+      "bandFilterLabel": "按状态筛选执行环境",
       "bands": {
         "active": "使用中",
         "attention": "需要处理",
@@ -52392,6 +52475,8 @@
       "branchName": "分支名称",
       "branchNamePlaceholder": "feature/my-branch",
       "cancel": "取消",
+      "clearFilters": "清除全部筛选",
+      "clearSearch": "清除搜索词",
       "confirmCreateBranch": "创建分支",
       "confirmDelete": "删除环境",
       "confirmRemove": "移除工作树",
@@ -52407,6 +52492,7 @@
       "description": "此设备上的 Git 工作树和 Registry 受管执行环境。",
       "emptyDescription": "创建工作树或启动隔离的 Worktree 会话后，环境会显示在这里。",
       "emptyTitle": "暂无工作区环境",
+      "filterAll": "全部",
       "forceRemove": "丢弃未提交更改",
       "kind": "类型",
       "kinds": {
@@ -52419,6 +52505,8 @@
       "locked": "已锁定",
       "makePermanent": "设为永久环境",
       "neverUsed": "从未使用",
+      "noMatchesDescription": "当前筛选条件下没有结果。清除筛选即可看到完整清单。",
+      "noMatchesTitle": "没有匹配的执行环境",
       "open": "打开环境",
       "openOwner": "打开{owner}",
       "otherWorkspaces": "{count, plural, other {另有 # 个环境不属于本工作区}}",
@@ -52453,7 +52541,9 @@
       "removeDescription": "移除位于 {path} 的关联工作树？",
       "removeTitle": "移除工作树？",
       "restore": "恢复环境",
+      "rowActions": "更多操作",
       "scopeToWorkspace": "只看本工作区",
+      "searchPlaceholder": "按路径、分支、提交或所属筛选…",
       "state": "状态",
       "stateNone": "—",
       "states": {
@@ -52477,14 +52567,21 @@
       "additionalDirsHint": "挂载到该工作区的额外文件夹，便于智能体读取和编辑。",
       "additionalDirsLabel": "附加目录",
       "browseServer": "浏览服务器",
+      "cancelDelete": "取消",
+      "clearSearch": "清除搜索",
       "confirmDelete": "移除并删除全部内容",
       "confirmDetach": "移除，保留会话",
       "defaultName": "新工作区",
       "delete": "删除",
       "deleteFailed": "无法移除工作区，工作区仍然保留。请在能够处理其数据及外部 Agent 会话后重试。",
+      "deleteQuestion": "要移除这个工作区吗？",
       "deleted": "工作区已删除",
       "description": "工作区包含一个主目录和额外挂载的文件夹。活动工作区决定工作目录、源代码管理面板和终端范围。",
       "detached": "工作区已移除——其会话已迁到 Default",
+      "discardCancel": "继续编辑",
+      "discardConfirm": "放弃并切换",
+      "discardDescription": "你改动的名称和文件夹还没有保存。现在切换工作区会丢弃这些改动。",
+      "discardTitle": "放弃未保存的修改？",
       "empty": "暂无工作区",
       "knowledge": {
         "addFile": "上传文件",
@@ -52515,6 +52612,8 @@
       "nameLabel": "名称",
       "namePlaceholder": "工作区名称",
       "newWorkspace": "新建工作区",
+      "noMatches": "未找到匹配的工作区",
+      "noSelectionTitle": "尚未选择工作区",
       "pickDir": "选择目录",
       "pickDirTitle": "选择一个目录",
       "primaryBadge": "主",
@@ -52549,12 +52648,14 @@
       "rootsLabel": "文件夹",
       "save": "保存",
       "saved": "工作区已保存",
+      "searchPlaceholder": "搜索工作区…",
       "selectHint": "选择一个工作区进行编辑，或新建一个。",
       "setActive": "设为活动",
       "setPrimary": "设为主文件夹",
       "title": "工作区",
       "trustRoot": "信任",
       "trustedBadge": "已信任",
+      "unsaved": "有未保存的修改",
       "untrustedBadge": "未信任"
     },
     "members": {

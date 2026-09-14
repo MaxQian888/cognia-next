@@ -49,6 +49,8 @@ import { DeferredBootInitializers } from "@/components/providers/initializers/de
 import { BootCapabilityRouteActivator } from "@/components/providers/initializers/boot-capability-route-activator"
 import { BootProfileStartupProbe } from "@/components/providers/initializers/boot-profile-startup-probe"
 import { WindowLivenessInitializers } from "@/components/providers/initializers/window-liveness-initializers"
+import { PwaLifecycleInitializer } from "@/components/providers/initializers/pwa-lifecycle-initializer"
+import { PwaBadgeInitializer } from "@/components/providers/initializers/pwa-badge-initializer"
 import { RendererPerfInitializer } from "@/components/providers/initializers/renderer-perf-initializer"
 import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler-provider"
 import { WebDavStartupPromptProvider } from "@/components/providers/webdav-startup-prompt-provider"
@@ -114,8 +116,16 @@ import { SkillRecorderRoot } from "@/components/skills/recorder/recorder-root"
 import "./globals.css"
 
 export const metadata: Metadata = {
-  title: "Cognia · Claude Code",
-  description: "Claude Code web client built on top of the Claude Agent SDK",
+  title: "Cognia",
+  description: "Local-first AI companion — chat, workflows, twin, and connectors.",
+  // iOS "Add to Home Screen": pre-16.4 Safari reads these meta tags instead of
+  // the web app manifest. `capable` + icon (app/apple-icon.png convention)
+  // give the iOS PWA a standalone window and the right splash name.
+  appleWebApp: {
+    capable: true,
+    title: "Cognia",
+    statusBarStyle: "black-translucent",
+  },
 }
 
 // `viewport-fit: cover` lets the Capacitor WebView paint into the iPhone notch
@@ -127,6 +137,12 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  // Browser chrome tint (Safari status bar, Android task switcher). Matches
+  // the manifest's background/theme pair rather than a single fixed color.
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+  ],
   // Keyboard avoidance (pure-CSS dvh strategy): on Android Chromium WebViews
   // this makes the on-screen keyboard *resize* the layout viewport (so
   // `100dvh` shrinks and the composer rides above the keyboard) instead of
@@ -191,6 +207,12 @@ export default async function RootLayout({
                   immediately instead of an 8-second black window. Inside
                   LocaleGate because the heartbeat consumes i18n. */}
               <WindowLivenessInitializers />
+              {/* Captures the browser's single-shot `beforeinstallprompt` into
+                  lib/pwa/install-state. Must sit ABOVE AccountGate: the event
+                  can fire while a locked vault holds the gate closed, and a
+                  missed capture strands the About "Install" button until
+                  reload. Web-only — returns null elsewhere. */}
+              <PwaLifecycleInitializer />
               {/* A stuck Dexie schema upgrade hangs boot before AccountGate ever
                   renders its children, so this sits ABOVE the gate for the same
                   reason WindowLivenessInitializers does — otherwise the one
@@ -260,6 +282,11 @@ export default async function RootLayout({
                               <StorageRetentionInitializer />
                               <OnlineEvalInitializer />
                               <StoragePersistenceInitializer />
+                              {/* Badges the installed PWA icon with the unread
+                                  chat count. Needs the post-unlock Dexie, so it
+                                  lives in this cluster — not with its sibling
+                                  PwaLifecycleInitializer above the gate. */}
+                              <PwaBadgeInitializer />
                               <ProjectStoreInitializer />
                               <IssueTrackerInitializer />
                               {/* Handler for the Approve / Discard buttons on a

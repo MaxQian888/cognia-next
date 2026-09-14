@@ -5964,18 +5964,18 @@
       },
       "pointCount": "{count, plural, =1 {1 branch from here} other {# branches from here}}",
       "summary": {
-        "generating": "Generating summary…",
-        "hint": "Summarize the conversation so far and seed the branch with it (keeps context small).",
-        "label": "Branch from summary",
-        "placeholder": "The summary will appear here — you can edit it before branching.",
-        "previewLabel": "Summary (editable)",
-        "regenerate": "Regenerate",
         "fallback": {
           "empty": "There is nothing readable to summarize up to this message.",
           "noClient": "No model is available to summarize here, so this is an outline of the conversation. Edit it before branching.",
           "noOutput": "The model returned an empty summary, so this is an outline of the conversation. Try again or edit it.",
           "pii": "This conversation contains personal data that is not sent to a model, so this is an outline of it instead."
-        }
+        },
+        "generating": "Generating summary…",
+        "hint": "Summarize the conversation so far and seed the branch with it (keeps context small).",
+        "label": "Branch from summary",
+        "placeholder": "The summary will appear here — you can edit it before branching.",
+        "previewLabel": "Summary (editable)",
+        "regenerate": "Regenerate"
       },
       "summaryEmpty": "Add a summary before branching",
       "summaryError": "Failed to generate summary",
@@ -7660,6 +7660,26 @@
       "banner": "Plan mode — read-only research; the agent will propose a plan before making changes.",
       "hint": "Shift+Tab"
     },
+    "promptPreamble": {
+      "combinedTitle": "{title} ({count} messages)",
+      "generic": "Attached context",
+      "hideText": "Hide the text the model received",
+      "kinds": {
+        "artifact": "Artifact",
+        "comment": "Comment",
+        "entity": "Record",
+        "external": "Selection",
+        "file": "File",
+        "plugin": "Plugin",
+        "web": "Web page"
+      },
+      "references": "{count, plural, =1 {1 reference attached} other {# references attached}}",
+      "sections": {
+        "reviewReceipts": "Review outcomes",
+        "webSearch": "Web results"
+      },
+      "showText": "Show the text the model received"
+    },
     "reactions": {
       "add": "Add a reaction",
       "mirrorFailed": "Saved here, but the platform did not take the reaction.",
@@ -8262,26 +8282,6 @@
       "title": "Trust this workspace?",
       "trust": "Trust workspace",
       "workspaceLabel": "Workspace"
-    },
-    "promptPreamble": {
-      "combinedTitle": "{title} ({count} messages)",
-      "generic": "Attached context",
-      "hideText": "Hide the text the model received",
-      "kinds": {
-        "artifact": "Artifact",
-        "comment": "Comment",
-        "entity": "Record",
-        "external": "Selection",
-        "file": "File",
-        "plugin": "Plugin",
-        "web": "Web page"
-      },
-      "references": "{count, plural, =1 {1 reference attached} other {# references attached}}",
-      "sections": {
-        "reviewReceipts": "Review outcomes",
-        "webSearch": "Web results"
-      },
-      "showText": "Show the text the model received"
     }
   },
   "chatCollaboration": {
@@ -9989,7 +9989,7 @@
       "runtimeStatus": "Runtime",
       "saveState": "Save state",
       "sessionId": "Conversation ID",
-      "sessionTitle": "Conversation",
+      "sessionTitle": "Task overview",
       "unknown": "Unknown",
       "updatedAt": "Updated",
       "version": "Version",
@@ -9997,6 +9997,12 @@
     },
     "mobileDescription": "AI, comments, inspection, review, and preview tools for the current resource.",
     "mobileTitle": "Context Workbench",
+    "navigation": {
+      "closePanel": "Close {name}",
+      "compactRail": "Compact icon rail",
+      "openPanel": "Open panel",
+      "tabs": "Labeled tabs"
+    },
     "panelError": "Panel unavailable",
     "panelErrorDescription": "This panel stopped unexpectedly. The rest of your work is unchanged.",
     "projectProposal": {
@@ -10168,6 +10174,71 @@
       "unboundDescription": "Pick a Squad from the executor control in the composer to hand this conversation to a team.",
       "unboundTitle": "Runs on a single agent",
       "working": "{count, plural, =0 {Idle} =1 {1 working} other {# working}}"
+    },
+    "taskOverview": {
+      "capabilities": {
+        "character": "Character",
+        "configured": "Skills configured for the next send",
+        "configuredCount": "{count} configured skills",
+        "configuredHint": "Character skills and attachments follow session disable settings. Configuration does not confirm runtime loading.",
+        "disabled": "Disabled",
+        "inventoryUnavailable": "The host snapshot does not report capability details.",
+        "manage": "Manage capabilities",
+        "nextMessage": "Next message",
+        "noneConfigured": "No character skills or next-message skill attachments configured.",
+        "refresh": "Refresh snapshot",
+        "runtime": "Runtime capability snapshot",
+        "runtimeCount": "{count} runtime entries",
+        "runtimeHint": "The latest host snapshot distinguishes loaded and deferred capabilities. Entries may change after the next turn.",
+        "snapshotUnavailable": "No runtime snapshot is available yet. Start a turn on a supported connected host, then refresh.",
+        "title": "Capabilities",
+        "unresolved": "Unavailable or still loading"
+      },
+      "currentState": "Current task",
+      "description": "Status, capabilities, and results for this conversation.",
+      "execution": "Execution mode",
+      "manage": "Manage task",
+      "noOpenItems": "No open questions or subtasks recorded.",
+      "openContext": "Open run context",
+      "openItems": "Open questions and subtasks",
+      "openItemsMore": "{count} more in the run context",
+      "results": {
+        "artifacts": "Artifacts",
+        "emptyFiles": "No file changes have been recorded.",
+        "failed": "Could not load recorded changes. Cached results may be out of date.",
+        "fileCount": "{count} recorded file changes",
+        "files": "Changed files",
+        "loading": "Loading recorded changes…",
+        "openWorkspace": "Open workspace",
+        "outputs": "Output files",
+        "retry": "Retry",
+        "sharedLinks": "Links shared by assistant",
+        "sharedLinksDescription": "Links mentioned in replies; creation and external status are not verified.",
+        "title": "Key results",
+        "unavailable": "File tracking is not available for this session yet."
+      },
+      "rows": {
+        "directory": "Directory",
+        "environment": "Environment",
+        "mode": "Mode",
+        "runtime": "Agent",
+        "sharing": "Sharing"
+      },
+      "statusHints": {
+        "awaiting_approval": "Respond to the pending request in the conversation to continue.",
+        "error": "The last turn stopped before it finished.",
+        "streaming": "Working through the current turn."
+      },
+      "statuses": {
+        "awaiting_approval": "Waiting for you",
+        "error": "Failed",
+        "idle": "Idle",
+        "streaming": "Working"
+      },
+      "summaryTitle": "Task summary",
+      "technicalDetails": "Technical details",
+      "untitled": "Untitled task",
+      "viewDetails": "View details"
     },
     "teamMembersPanel": {
       "title": "Team members"
@@ -11364,6 +11435,7 @@
       },
       "maximize": "Maximize",
       "minimize": "Minimize",
+      "navigationMenu": "Navigation",
       "openMenus": "Open menus",
       "quickActions": {
         "capture": "Content capture",
@@ -30259,6 +30331,16 @@
       },
       "description": "App version, build details, diagnostics, updates, and credits.",
       "iconAlt": "{name} app icon",
+      "install": {
+        "action": "Install Cognia",
+        "description": "Install the web app on this device for a dedicated window, a dock icon, an offline fallback, and the share-sheet entry. It stays a client of this Cognia server — the desktop app remains the host.",
+        "installed": "Installed — Cognia opens in its own window.",
+        "iosStepAdd": "Tap “Add to Home Screen”.",
+        "iosStepShare": "Tap the Share button in Safari.",
+        "title": "Install the app",
+        "unavailable": "This browser cannot be prompted in-app — use its “Install app” / “Add to Home Screen” menu entry if present.",
+        "updateReady": "A new version was applied in the background and takes effect on the next launch."
+      },
       "legal": {
         "acknowledgements": "Built with open source",
         "copyright": "© {year} {holder}. All rights reserved.",
@@ -52375,6 +52457,7 @@
       "actions": "Actions",
       "adopt": "Adopt imported environment",
       "archive": "Archive environment",
+      "bandFilterLabel": "Filter environments by state",
       "bands": {
         "active": "Active",
         "attention": "Needs attention",
@@ -52392,6 +52475,8 @@
       "branchName": "Branch name",
       "branchNamePlaceholder": "feature/my-branch",
       "cancel": "Cancel",
+      "clearFilters": "Clear all filters",
+      "clearSearch": "Clear the search text",
       "confirmCreateBranch": "Create branch",
       "confirmDelete": "Delete environment",
       "confirmRemove": "Remove worktree",
@@ -52407,6 +52492,7 @@
       "description": "Git worktrees and Registry-managed execution environments on this device.",
       "emptyDescription": "Create a worktree or start an isolated Worktree chat to add one.",
       "emptyTitle": "No workspace environments",
+      "filterAll": "All",
       "forceRemove": "Discard uncommitted changes",
       "kind": "Kind",
       "kinds": {
@@ -52419,6 +52505,8 @@
       "locked": "Locked",
       "makePermanent": "Make environment permanent",
       "neverUsed": "Never used",
+      "noMatchesDescription": "Nothing here matches the current filter. Clear it to see the whole inventory.",
+      "noMatchesTitle": "No environment matches",
       "open": "Open environment",
       "openOwner": "Open {owner}",
       "otherWorkspaces": "{count, plural, one {# environment outside this workspace} other {# environments outside this workspace}}",
@@ -52453,7 +52541,9 @@
       "removeDescription": "Remove the linked worktree at {path}?",
       "removeTitle": "Remove worktree?",
       "restore": "Restore environment",
+      "rowActions": "More actions",
       "scopeToWorkspace": "Show only this workspace",
+      "searchPlaceholder": "Filter by path, branch, commit or owner…",
       "state": "State",
       "stateNone": "—",
       "states": {
@@ -52477,14 +52567,21 @@
       "additionalDirsHint": "Extra folders mounted into this workspace so the agent can read and edit them.",
       "additionalDirsLabel": "Additional directories",
       "browseServer": "Browse server",
+      "cancelDelete": "Keep it",
+      "clearSearch": "Clear the search",
       "confirmDelete": "Remove and delete everything",
       "confirmDetach": "Remove, keep conversations",
       "defaultName": "New Workspace",
       "delete": "Delete",
       "deleteFailed": "The workspace could not be removed. It is still available; retry after its data and external agent sessions can be processed.",
+      "deleteQuestion": "Remove this workspace?",
       "deleted": "Workspace deleted",
       "description": "A workspace bundles a primary directory and extra mounted folders. The active workspace drives the working directory, the Source Control panel, and the terminal scope.",
       "detached": "Workspace removed — its conversations moved to Default",
+      "discardCancel": "Keep editing",
+      "discardConfirm": "Discard and switch",
+      "discardDescription": "The name and folders you edited have not been saved. Switching workspace now throws those edits away.",
+      "discardTitle": "Discard unsaved changes?",
       "empty": "No workspaces yet",
       "knowledge": {
         "addFile": "Upload files",
@@ -52515,6 +52612,8 @@
       "nameLabel": "Name",
       "namePlaceholder": "Workspace name",
       "newWorkspace": "New workspace",
+      "noMatches": "No workspace matches that search",
+      "noSelectionTitle": "No workspace selected",
       "pickDir": "Choose directory",
       "pickDirTitle": "Select a directory",
       "primaryBadge": "Primary",
@@ -52549,12 +52648,14 @@
       "rootsLabel": "Folders",
       "save": "Save",
       "saved": "Workspace saved",
+      "searchPlaceholder": "Search workspaces…",
       "selectHint": "Select a workspace to edit, or create a new one.",
       "setActive": "Set active",
       "setPrimary": "Set as primary",
       "title": "Workspaces",
       "trustRoot": "Trust",
       "trustedBadge": "Trusted",
+      "unsaved": "Unsaved changes",
       "untrustedBadge": "Untrusted"
     },
     "members": {

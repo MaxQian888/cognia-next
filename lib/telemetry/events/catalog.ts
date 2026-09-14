@@ -177,6 +177,15 @@ export interface TelemetryEventCatalog {
     /** Which stage produced the outcome, e.g. `install` / `config` / `permissions`. */
     stage?: string
   }
+  // --- PWA install lifecycle (web shell only — Tauri/Capacitor never emit) ---
+  /** The Settings → About install entry rendered its native-prompt button (a deferred `beforeinstallprompt` was captured). */
+  "app.pwa.install.shown": Record<string, never>
+  /** The browser's install dialog resolved `accepted`. Install itself is confirmed separately by `app.pwa.installed`. */
+  "app.pwa.install.accepted": Record<string, never>
+  /** The browser's install dialog resolved `dismissed`. */
+  "app.pwa.install.dismissed": Record<string, never>
+  /** `appinstalled` fired — the PWA reached the device's app list. */
+  "app.pwa.installed": Record<string, never>
   "telemetry.preference.changed": { enabled: boolean }
   "telemetry.posthog.test": { source: "settings" }
   /** ADR-0090 Phase 6: an authoritative resolver decision drove an execution. */
@@ -245,6 +254,10 @@ export const TELEMETRY_EVENT_CATALOG: Readonly<
   "app.search.opened": { category: "app" },
   "app.search.activated": { category: "app" },
   "app.plugin.installed": { category: "app" },
+  "app.pwa.install.shown": { category: "app" },
+  "app.pwa.install.accepted": { category: "app" },
+  "app.pwa.install.dismissed": { category: "app" },
+  "app.pwa.installed": { category: "app" },
   "telemetry.preference.changed": { category: "system" },
   "telemetry.posthog.test": { category: "system" },
   "agent.execution.resolved": { category: "system" },

@@ -31,6 +31,21 @@ describe("parseDeepLink", () => {
     expect(parseDeepLink("https://plugin/acme")).toBeNull()
   })
 
+  it("normalizes the web+cognia protocol-handler scheme", () => {
+    const raw = "web+cognia://plugin/acme.todo/auth/callback?code=abc"
+    const p = parseDeepLink(raw)
+    expect(p).toMatchObject({
+      pluginId: "acme.todo",
+      path: "auth/callback",
+      query: { code: "abc" },
+      raw,
+    })
+  })
+
+  it("returns null for a web+cognia URL that is not a plugin link", () => {
+    expect(parseDeepLink("web+cognia://connector/oauth/lark")).toBeNull()
+  })
+
   it("returns null when the plugin id is missing", () => {
     expect(parseDeepLink("cognia://plugin/")).toBeNull()
     expect(parseDeepLink("cognia://plugin")).toBeNull()

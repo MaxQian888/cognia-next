@@ -19,9 +19,14 @@ const PLUGIN_HOST_RE = /^cognia:\/\/plugin\/([^/?#]+)(?:\/([^?#]*))?/
 /**
  * Parse a `cognia://plugin/<id>/...` URL. Returns `null` for any URL that is
  * not a plugin deep-link (wrong scheme/host, missing plugin id).
+ *
+ * `web+cognia://` — the scheme the manifest's `protocol_handlers` registers,
+ * since `cognia://` is not an allowed `web+*` target — is normalized to
+ * `cognia://` before matching. `raw` in the result keeps the original.
  */
 export function parseDeepLink(raw: string): ParsedDeepLink | null {
-  const match = PLUGIN_HOST_RE.exec(raw)
+  const link = raw.startsWith("web+cognia://") ? raw.slice(4) : raw
+  const match = PLUGIN_HOST_RE.exec(link)
   if (!match) return null
   const pluginId = decodeURIComponent(match[1])
   if (!pluginId) return null
@@ -29,7 +34,7 @@ export function parseDeepLink(raw: string): ParsedDeepLink | null {
 
   let query: Record<string, string> = {}
   try {
-    const url = new URL(raw.replace(/^cognia:\/\//, "https://cognia-placeholder/"))
+    const url = new URL(link.replace(/^cognia:\/\//, "https://cognia-placeholder/"))
     query = Object.fromEntries(url.searchParams.entries())
   } catch {
     query = {}

@@ -19,6 +19,16 @@
   },
   "description": "应用版本、构建详情、诊断信息、更新与致谢。",
   "iconAlt": "{name} 应用图标",
+  "install": {
+    "action": "安装 Cognia",
+    "description": "将网页应用安装到本设备，获得独立窗口、坞栏图标、离线兜底页与分享面板入口。它仍是当前 Cognia 服务的客户端——桌面端才是宿主。",
+    "installed": "已安装——Cognia 将在独立窗口中打开。",
+    "iosStepAdd": "点击“添加到主屏幕”。",
+    "iosStepShare": "在 Safari 中轻点“分享”按钮。",
+    "title": "安装应用",
+    "unavailable": "当前浏览器不支持应用内安装——如浏览器菜单中有“安装应用”或“添加到主屏幕”，请从那里操作。",
+    "updateReady": "新版本已在后台应用，将在下次启动时生效。"
+  },
   "legal": {
     "acknowledgements": "基于开源构建",
     "copyright": "© {year} {holder}。保留所有权利。",

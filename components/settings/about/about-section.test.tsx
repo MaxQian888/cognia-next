@@ -11,6 +11,9 @@ jest.mock("./system-diagnostics-card", () => ({
   SystemDiagnosticsCard: () => <div data-testid="s-system" />,
 }))
 jest.mock("./update-card", () => ({ UpdateCard: () => <div data-testid="s-update" /> }))
+jest.mock("./install-app-card", () => ({
+  InstallAppCard: () => <div data-testid="s-install" />,
+}))
 jest.mock("./whats-new-card", () => ({ WhatsNewCard: () => <div data-testid="s-whatsnew" /> }))
 jest.mock("./resources-card", () => ({ ResourcesCard: () => <div data-testid="s-resources" /> }))
 jest.mock("./legal-credits-card", () => ({ LegalCreditsCard: () => <div data-testid="s-legal" /> }))
@@ -26,6 +29,7 @@ describe("<AboutSection />", () => {
       "s-version",
       "s-system",
       "s-update",
+      "s-install",
       "s-whatsnew",
       "s-resources",
       "s-legal",
