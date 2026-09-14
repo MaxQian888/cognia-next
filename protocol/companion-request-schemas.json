@@ -909,7 +909,7 @@
     },
     "bot_delivery_replay": {
       "type": "object",
-      "description": "Requeue a dead-lettered Bot delivery. The host refuses a row that is no longer dead-lettered, so a replayed request is a no-op rather than a second run.",
+      "description": "Retry a Bot delivery. Terminal failed or cancelled executions create one linked successor while retaining prior results and approvals; resumable dead letters keep their identity. Repeated requests for the same delivery do not create another successor.",
       "required": [
         "deliveryId"
       ],
@@ -1038,6 +1038,34 @@
             "config": {
               "type": "object",
               "additionalProperties": true
+            },
+            "policyGrant": {
+              "type": "object",
+              "properties": {
+                "maxAuthority": {
+                  "type": "string",
+                  "enum": [
+                    "acceptEdits",
+                    "bypassPermissions"
+                  ]
+                },
+                "maxAutonomy": {
+                  "type": "string",
+                  "enum": [
+                    "confirm",
+                    "autopilot"
+                  ]
+                },
+                "requireApprovalForWrites": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "maxAuthority",
+                "maxAutonomy",
+                "requireApprovalForWrites"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -7356,6 +7384,24 @@
       },
       "additionalProperties": false
     },
+    "integration_github_account_connect_from_secret": {
+      "type": "object",
+      "properties": {
+        "operationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "expectedLogin": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,38})$"
+        }
+      },
+      "required": [
+        "operationId",
+        "expectedLogin"
+      ],
+      "additionalProperties": false
+    },
     "integration_ingress_ack": {
       "type": "object",
       "required": [
@@ -10190,6 +10236,12 @@
         "href": {
           "type": "string",
           "pattern": "^/(?!/)"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_:-]+$"
         }
       },
       "additionalProperties": false

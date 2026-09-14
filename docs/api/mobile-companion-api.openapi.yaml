@@ -8427,8 +8427,9 @@ paths:
           application/json:
             schema:
               type: object
-              description: Requeue a dead-lettered Bot delivery. The host refuses a row that is no longer dead-lettered, so a replayed
-                request is a no-op rather than a second run.
+              description: Retry a Bot delivery. Terminal failed or cancelled executions create one linked successor while retaining
+                prior results and approvals; resumable dead letters keep their identity. Repeated requests for the same
+                delivery do not create another successor.
               required:
                 - deliveryId
               properties:
@@ -8698,6 +8699,26 @@ paths:
                       type: object
                       additionalProperties: {}
                       example: {}
+                    policyGrant:
+                      type: object
+                      properties:
+                        maxAuthority:
+                          type: string
+                          enum:
+                            - acceptEdits
+                            - bypassPermissions
+                        maxAutonomy:
+                          type: string
+                          enum:
+                            - confirm
+                            - autopilot
+                        requireApprovalForWrites:
+                          type: boolean
+                      required:
+                        - maxAuthority
+                        - maxAutonomy
+                        - requireApprovalForWrites
+                      additionalProperties: false
                   required:
                     - operationId
                     - operation
@@ -113850,9 +113871,9 @@ x-cognia-generated:
     - protocol/companion-request-schemas.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  publicCommandCount: 555
-  generatedRequestSchemaCount: 555
+  publicCommandCount: 553
+  generatedRequestSchemaCount: 553
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 555
+  contractRequestSchemaCount: 553
   genericRequestSchemaCount: 0
   legacyCompatibility: false

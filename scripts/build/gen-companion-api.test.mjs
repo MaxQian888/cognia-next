@@ -5,6 +5,19 @@ import Ajv2020 from "ajv/dist/2020.js"
 import { parse as parseYaml } from "yaml"
 import { buildCompanionRequestSchemaContracts } from "./companion-request-schema-contracts.mjs"
 
+test("Headless notifications admit the native bounded source field", () => {
+  const inspected = inspectCommittedContract()
+  const schema = inspected.desiredHeadlessSpec.paths["/internal/_rpc/remote_notification_publish"].post.requestBody.content["application/json"].schema
+  const validate = new Ajv2020({ strict: false }).compile(schema)
+  const body = { id: "notification-1", title: "Bot failed", body: "Inspect the retained result.", level: "error", href: "/bots" }
+  for (const source of [undefined, "scheduler", "bot:github-devin", "x".repeat(64)]) {
+    assert.equal(validate({ ...body, ...(source ? { source } : {}) }), true, JSON.stringify(validate.errors))
+  }
+  for (const source of ["", "x".repeat(65), "bad source", "../other", null]) {
+    assert.equal(validate({ ...body, source }), false)
+  }
+})
+
 test("IM relay admits transcript provenance on both protocol planes", () => {
   const inspected = inspectCommittedContract()
   const schemas = [
@@ -1211,6 +1224,20 @@ test("gateway task deletion is granted as agent control and validates task ident
   }
   const responses = JSON.parse(readFileSync(new URL("../../protocol/companion-response-schemas.json", import.meta.url), "utf8"))
   assert.equal(responses.commands[name].$ref, "#/$defs/NullResult")
+})
+
+test("Bot configuration admits explicit bounded authority grants on both API planes", () => {
+  const inspected = inspectCommittedContract()
+  for (const [spec, prefix] of [[inspected.desiredPublicSpec, "/api/_rpc/"], [inspected.desiredHeadlessSpec, "/internal/_rpc/"]]) {
+    const operation = spec.paths[`${prefix}bot_installation_mutate`].post
+    const validate = new Ajv2020({ strict: false }).compile(operation.requestBody.content["application/json"].schema)
+    const input = { operation: "config", operationId: "123e4567-e89b-42d3-a456-426614174000", installationId: "bot-1", config: {} }
+    const grant = { maxAuthority: "bypassPermissions", maxAutonomy: "autopilot", requireApprovalForWrites: false }
+    assert.equal(validate(input), true)
+    assert.equal(validate({ ...input, policyGrant: grant }), true, JSON.stringify(validate.errors))
+    assert.equal(validate({ ...input, policyGrant: { ...grant, maxConcurrentRuns: 99 } }), false)
+    assert.equal(validate({ ...input, policyGrant: { ...grant, maxAuthority: "anything" } }), false)
+  }
 })
 
 

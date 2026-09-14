@@ -293,6 +293,7 @@ mod tests {
         ("workflow_handoff_create", OutputShape::Declared(RootType::Object)),
         ("twin_ingest_source", OutputShape::Opaque(RootType::Any)),
         ("bot_installation_mutate", OutputShape::Opaque(RootType::Object)),
+        ("integration_github_account_connect_from_secret", OutputShape::Opaque(RootType::Object)),
         ("bot_console_read", OutputShape::Opaque(RootType::Object)),
         ("bot_trigger_set_armed", OutputShape::Declared(RootType::Object)),
         ("bot_run_manual", OutputShape::Declared(RootType::Object)),

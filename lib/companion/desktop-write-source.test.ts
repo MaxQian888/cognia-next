@@ -15,6 +15,10 @@ jest.mock("@/lib/thread-handoff/host-dispatch", () => {
 
 const mockBotLifecycleMutation = jest.fn()
 const mockBotConsoleRead = jest.fn()
+const mockGithubAccountSetup = jest.fn()
+jest.mock("@/lib/integrations/github-account-setup", () => ({
+  connectGithubAccountFromSecret: (input: unknown) => mockGithubAccountSetup(input),
+}))
 jest.mock("@/lib/bot/control-writes/lifecycle-host", () => ({
   mutateBotInstallationOnHost: (input: unknown) => mockBotLifecycleMutation(input),
   readBotConsoleOnHost: (input: unknown) => mockBotConsoleRead(input),
@@ -169,14 +173,10 @@ jest.mock("@/lib/companion/agent-task-write-handlers", () => ({
   handleAgentTaskMove: (...args: unknown[]) => mockAgentTaskMove(...args),
 }))
 
-// Stub the plugin runtime store so plugin_set_enabled exercises the live
-// enable/disable wiring without spinning up a real PluginManager.
-const mockEnablePlugin = jest.fn().mockResolvedValue(undefined)
-const mockDisablePlugin = jest.fn().mockResolvedValue(undefined)
-jest.mock("@/stores/plugin-runtime/plugin-store", () => ({
-  usePluginStore: {
-    getState: () => ({ enablePlugin: mockEnablePlugin, disablePlugin: mockDisablePlugin }),
-  },
+// The remote toggle must persist lifecycle intent through the canonical manager.
+const mockSetPluginIntent = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/plugin/core/manager", () => ({
+  getPluginManager: () => ({ setPluginIntent: mockSetPluginIntent }),
 }))
 
 // Stub the external-agent Zustand store so the external_agent_* arms exercise
@@ -1123,21 +1123,19 @@ describe("dispatchCommand: twin_ingest_source", () => {
 })
 
 describe("dispatchCommand: plugin_set_enabled", () => {
-  it("drives the live PluginManager enablePlugin when enabling", async () => {
+  it("persists enabled intent through the live PluginManager", async () => {
     await dispatchCommand("plugin_set_enabled", { id: "p1", enabled: true })
-    expect(mockEnablePlugin).toHaveBeenCalledWith("p1")
-    expect(mockDisablePlugin).not.toHaveBeenCalled()
+    expect(mockSetPluginIntent).toHaveBeenCalledWith("p1", "enabled", "remote-toggle")
   })
 
-  it("drives the live PluginManager disablePlugin when disabling", async () => {
+  it("persists disabled intent through the live PluginManager", async () => {
     await dispatchCommand("plugin_set_enabled", { id: "p1", enabled: false })
-    expect(mockDisablePlugin).toHaveBeenCalledWith("p1")
-    expect(mockEnablePlugin).not.toHaveBeenCalled()
+    expect(mockSetPluginIntent).toHaveBeenCalledWith("p1", "disabled", "remote-toggle")
   })
 
   it("falls back to a flag write when no manager is initialized", async () => {
-    mockEnablePlugin.mockRejectedValueOnce(
-      new Error("Verified plugin lifecycle action requires an initialized PluginManager for enable")
+    mockSetPluginIntent.mockRejectedValueOnce(
+      new Error("Plugin manager not initialized. Call initializePluginManager first.")
     )
     await getDb().plugins.add({
       id: "p2",
@@ -1151,7 +1149,7 @@ describe("dispatchCommand: plugin_set_enabled", () => {
   })
 
   it("re-throws a genuine enable failure (dependency error)", async () => {
-    mockEnablePlugin.mockRejectedValueOnce(new Error("Required dependency dep-x is disabled"))
+    mockSetPluginIntent.mockRejectedValueOnce(new Error("Required dependency dep-x is disabled"))
     await expect(
       dispatchCommand("plugin_set_enabled", { id: "p3", enabled: true })
     ).rejects.toThrow(/Required dependency/)
@@ -2481,6 +2479,22 @@ it("routes Bot lifecycle and live console reads through the authoritative domain
     dispatchCommand("bot_console_read", { view: "installations" })
   ).resolves.toMatchObject({ rows: [{ id: "installed" }] })
   expect(mockBotConsoleRead).toHaveBeenCalledWith({ view: "installations" })
+})
+
+it("routes reference-only GitHub setup to the host credential boundary", async () => {
+  const payload = {
+    operationId: "55555555-5555-4555-8555-555555555555",
+    expectedLogin: "MaxQian888",
+  }
+  mockGithubAccountSetup.mockResolvedValue({
+    accountId: "github",
+    login: "MaxQian888",
+    health: "healthy",
+  })
+  await expect(
+    dispatchCommand("integration_github_account_connect_from_secret", payload)
+  ).resolves.toEqual({ accountId: "github", login: "MaxQian888", health: "healthy" })
+  expect(mockGithubAccountSetup).toHaveBeenCalledWith(payload)
 })
 
 it("serializes successful undefined command results as explicit JSON null", async () => {

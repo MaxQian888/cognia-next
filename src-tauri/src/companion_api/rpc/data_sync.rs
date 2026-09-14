@@ -57,6 +57,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "twin_ingest_source",
     "bot_trigger_set_armed",
     "bot_installation_mutate",
+    "integration_github_account_connect_from_secret",
     "bot_console_read",
     "bot_run_manual",
     "bot_delivery_replay",
@@ -755,6 +756,7 @@ pub(super) async fn dispatch(
         // the arm and hand to every name in it.
         | "bot_trigger_set_armed"
         | "bot_installation_mutate"
+        | "integration_github_account_connect_from_secret"
         | "bot_console_read"
         | "bot_run_manual"
         | "bot_delivery_replay"
@@ -1081,6 +1083,33 @@ fn bridged_page_result(name: &str, paging: Option<BridgedPaging>, result: Value)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn github_credential_setup_is_internal_and_only_accepts_a_reference() {
+        let name = "integration_github_account_connect_from_secret";
+        assert!(COMMANDS.contains(&name));
+        let manifest: Value =
+            serde_json::from_str(include_str!("../../../../protocol/companion-commands.json"))
+                .unwrap();
+        let command = manifest["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["name"] == name)
+            .unwrap();
+        assert_eq!(command["capability"], "service.internal");
+        assert_eq!(command["transports"], serde_json::json!(["internal"]));
+        assert_eq!(command["idempotency"], "required");
+        let schemas: Value = serde_json::from_str(include_str!(
+            "../../../../protocol/companion-request-schemas.json"
+        ))
+        .unwrap();
+        let schema = &schemas["commands"][name];
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(schema["properties"].as_object().unwrap().len(), 2);
+        assert!(schema["properties"].get("operationId").is_some());
+        assert!(schema["properties"].get("expectedLogin").is_some());
+    }
 
     #[test]
     fn bridged_paging_translates_the_wire_shape_and_wraps_the_legacy_answer() {

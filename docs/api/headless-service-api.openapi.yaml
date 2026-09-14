@@ -7160,8 +7160,9 @@ paths:
           application/json:
             schema:
               type: object
-              description: Requeue a dead-lettered Bot delivery. The host refuses a row that is no longer dead-lettered, so a replayed
-                request is a no-op rather than a second run.
+              description: Retry a Bot delivery. Terminal failed or cancelled executions create one linked successor while retaining
+                prior results and approvals; resumable dead letters keep their identity. Repeated requests for the same
+                delivery do not create another successor.
               required:
                 - deliveryId
               properties:
@@ -7427,6 +7428,26 @@ paths:
                       type: object
                       additionalProperties: {}
                       example: {}
+                    policyGrant:
+                      type: object
+                      properties:
+                        maxAuthority:
+                          type: string
+                          enum:
+                            - acceptEdits
+                            - bypassPermissions
+                        maxAutonomy:
+                          type: string
+                          enum:
+                            - confirm
+                            - autopilot
+                        requireApprovalForWrites:
+                          type: boolean
+                      required:
+                        - maxAuthority
+                        - maxAutonomy
+                        - requireApprovalForWrites
+                      additionalProperties: false
                   required:
                     - operationId
                     - operation
@@ -67832,6 +67853,191 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/integration_github_account_connect_from_secret:
+    post:
+      operationId: internalRpcIntegrationGithubAccountConnectFromSecret
+      tags:
+        - headless-rpc
+      summary: integration_github_account_connect_from_secret (service.internal)
+      description: "Loopback service-token command. Target: service; risk: critical."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                operationId:
+                  type: string
+                  format: uuid
+                expectedLogin:
+                  type: string
+                  pattern: ^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,38})$
+              required:
+                - operationId
+                - expectedLogin
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accountId:
+                    type: string
+                  login:
+                    type: string
+                  health:
+                    type: string
+                required:
+                  - accountId
+                  - login
+                  - health
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/integration_ingress_ack:
     post:
       operationId: internalRpcIntegrationIngressAck
@@ -96210,6 +96416,11 @@ paths:
                 href:
                   type: string
                   pattern: ^/(?!/)
+                source:
+                  type: string
+                  minLength: 1
+                  maxLength: 64
+                  pattern: ^[A-Za-z0-9_:-]+$
               additionalProperties: false
       responses:
         "200":
@@ -146116,6 +146327,7 @@ components:
           - host_state_snapshot
           - host_state_status
           - host_state_submit
+          - integration_github_account_connect_from_secret
           - integration_ingress_ack
           - integration_ingress_deadletter
           - integration_ingress_deadletters
@@ -146730,10 +146942,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 699
-  generatedRequestSchemaCount: 699
+  internalCommandCount: 698
+  generatedRequestSchemaCount: 698
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 699
+  contractRequestSchemaCount: 698
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 699
+  generatedResponseSchemaCount: 698
   loopbackOnly: true

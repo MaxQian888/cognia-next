@@ -39,7 +39,7 @@
     },
     "AgentReadResult": {
       "type": "object",
-      "x-cognia-wire-source": "crate::agents::commands::AgentReadResult. NOTE: no rename_all — the fields stay snake_case on the wire, and only parse_error is renamed (to parseError) alongside skip_serializing_if.",
+      "x-cognia-wire-source": "crate::agents::commands::AgentReadResult. NOTE: no rename_all \u2014 the fields stay snake_case on the wire, and only parse_error is renamed (to parseError) alongside skip_serializing_if.",
       "required": ["path", "exists", "writable", "format", "raw", "parsed"],
       "properties": {
         "path": {
@@ -58,7 +58,7 @@
           "type": "string"
         },
         "parsed": {
-          "x-cognia-opaque-reason": "serde_json::Value — the agent's own config tree, whose shape is owned by that vendor's format, not by this contract. Deliberately unconstrained; the envelope around it is not."
+          "x-cognia-opaque-reason": "serde_json::Value \u2014 the agent's own config tree, whose shape is owned by that vendor's format, not by this contract. Deliberately unconstrained; the envelope around it is not."
         },
         "parseError": {
           "type": "string"
@@ -1786,7 +1786,7 @@
     },
     "FleetSnapshot": {
       "type": "object",
-      "x-cognia-wire-source": "crate::fleet::registry::FleetSnapshot (rename_all = camelCase), via rpc/diagnostics.rs `to_json(runtime().snapshot_for_tenant(..))`. hosts and runtimeCapabilities carry skip_serializing_if = Vec::is_empty, so both are absent — not empty arrays — on a quiet host.",
+      "x-cognia-wire-source": "crate::fleet::registry::FleetSnapshot (rename_all = camelCase), via rpc/diagnostics.rs `to_json(runtime().snapshot_for_tenant(..))`. hosts and runtimeCapabilities carry skip_serializing_if = Vec::is_empty, so both are absent \u2014 not empty arrays \u2014 on a quiet host.",
       "x-cognia-fixes": "Previously LegacyList, which requires an ARRAY. FleetSnapshot is a struct and always serializes as an object, so the enforced output contract rejected every fleet_get_snapshot response with contract_output_violation. The helper directly above the dispatch arm (fleet_event_payload) already asserted 'fleet snapshot must serialize as an object'.",
       "required": ["sessions", "liveness", "generatedAt"],
       "properties": {
@@ -2437,7 +2437,7 @@
     },
     "GitStackBranchPairList": {
       "type": "array",
-      "x-cognia-wire-source": "Vec<(String, String)> — a Rust tuple serialises as a two-element JSON array, not an object.",
+      "x-cognia-wire-source": "Vec<(String, String)> \u2014 a Rust tuple serialises as a two-element JSON array, not an object.",
       "items": {
         "type": "array",
         "items": {
@@ -3216,7 +3216,7 @@
     },
     "LarkEntryToken": {
       "type": "object",
-      "x-cognia-wire-source": "lark_entry::rpc_entry_issue. Two branches: kind=entry returns token+jti+expiresAt, kind=surface returns token alone — so only `token` is guaranteed.",
+      "x-cognia-wire-source": "lark_entry::rpc_entry_issue. Two branches: kind=entry returns token+jti+expiresAt, kind=surface returns token alone \u2014 so only `token` is guaranteed.",
       "required": ["token"],
       "properties": {
         "token": {
@@ -3233,7 +3233,7 @@
     },
     "LarkMetricAck": {
       "type": "object",
-      "x-cognia-wire-source": "lark_entry::rpc_metrics_record — json!({ \"ok\": true }). An unknown metric name is an Err, so `ok` is only ever literal true.",
+      "x-cognia-wire-source": "lark_entry::rpc_metrics_record \u2014 json!({ \"ok\": true }). An unknown metric name is an Err, so `ok` is only ever literal true.",
       "required": ["ok"],
       "properties": {
         "ok": {
@@ -3244,7 +3244,7 @@
     },
     "LarkResultAck": {
       "type": "object",
-      "x-cognia-wire-source": "lark_entry::rpc_result_complete — json!({ \"accepted\": bool }).",
+      "x-cognia-wire-source": "lark_entry::rpc_result_complete \u2014 json!({ \"accepted\": bool }).",
       "required": ["accepted"],
       "properties": {
         "accepted": {
@@ -3640,7 +3640,7 @@
                 "type": "string"
               },
               "fields": {
-                "x-cognia-opaque-reason": "serde_json::Value — arbitrary structured fields captured at the log call site."
+                "x-cognia-opaque-reason": "serde_json::Value \u2014 arbitrary structured fields captured at the log call site."
               }
             },
             "additionalProperties": false
@@ -3916,7 +3916,7 @@
     },
     "NullableStringResult": {
       "type": ["string", "null"],
-      "x-cognia-wire-source": "Option<String> — null means absent-at-that-ref or binary, which is an ordinary answer rather than an error."
+      "x-cognia-wire-source": "Option<String> \u2014 null means absent-at-that-ref or binary, which is an ordinary answer rather than an error."
     },
     "OcrModelFileStatus": {
       "type": "object",
@@ -4441,7 +4441,7 @@
     },
     "PluginRuntimeSnapshot": {
       "type": "object",
-      "x-cognia-wire-source": "crates/cognia-plugin-runtime/src/lib.rs PluginRuntimeSnapshot. NOTE: no rename_all — the fields stay snake_case on the wire. The two Option fields carry no skip_serializing_if, so they are always present as null.",
+      "x-cognia-wire-source": "crates/cognia-plugin-runtime/src/lib.rs PluginRuntimeSnapshot. NOTE: no rename_all \u2014 the fields stay snake_case on the wire. The two Option fields carry no skip_serializing_if, so they are always present as null.",
       "required": ["plugin_id", "version", "status", "last_error", "loaded_at", "install_path"],
       "properties": {
         "plugin_id": {
@@ -4568,7 +4568,7 @@
     "RawWorkspaceEntry": {
       "type": "object",
       "x-cognia-wire-source": "lib/files/types.ts RawWorkspaceEntry",
-      "description": "snake_case on the wire — the Rust side does not rename these; the client maps them via fromRawWorkspaceEntry.",
+      "description": "snake_case on the wire \u2014 the Rust side does not rename these; the client maps them via fromRawWorkspaceEntry.",
       "required": ["rel_path", "absolute_path", "is_dir", "size"],
       "properties": {
         "rel_path": {
@@ -4868,7 +4868,7 @@
     },
     "SecretValue": {
       "type": ["string", "null"],
-      "x-cognia-wire-source": "Option<String> from cognia_secrets::keyring_secrets::get, via rpc/chat.rs `to_json(value)`. null means the key is absent — a successful read, not an error.",
+      "x-cognia-wire-source": "Option<String> from cognia_secrets::keyring_secrets::get, via rpc/chat.rs `to_json(value)`. null means the key is absent \u2014 a successful read, not an error.",
       "x-cognia-fixes": "Previously LegacyRecord, which requires an object. Every successful secret_store_get / keyring_secret_get response is a bare string or null, so the enforced output contract rejected all of them with contract_output_violation."
     },
     "SessionAttachmentUploadChunk": {
@@ -5046,7 +5046,7 @@
     },
     "SidecarStatus": {
       "type": "object",
-      "x-cognia-wire-source": "crate::claude::commands::SidecarStatus — derives Serialize with NO rename_all, and has exactly one field.",
+      "x-cognia-wire-source": "crate::claude::commands::SidecarStatus \u2014 derives Serialize with NO rename_all, and has exactly one field.",
       "required": ["ready"],
       "properties": {
         "ready": {
@@ -5502,7 +5502,7 @@
     },
     "TerminalHostStatus": {
       "type": "object",
-      "x-cognia-wire-source": "crate::terminal_host_bridge::TerminalHostStatus (serde rename_all = camelCase). `descriptor` is skipped for the remote arms — provisioning a device descriptor has no remote path.",
+      "x-cognia-wire-source": "crate::terminal_host_bridge::TerminalHostStatus (serde rename_all = camelCase). `descriptor` is skipped for the remote arms \u2014 provisioning a device descriptor has no remote path.",
       "required": ["running", "endpoint", "settings"],
       "properties": {
         "running": {
@@ -5519,7 +5519,7 @@
     },
     "TerminalKilledPidList": {
       "type": "array",
-      "x-cognia-wire-source": "Vec<u32> from cognia_terminal::commands::terminal_kill_port — the PIDs actually signalled, possibly empty when nothing was listening.",
+      "x-cognia-wire-source": "Vec<u32> from cognia_terminal::commands::terminal_kill_port \u2014 the PIDs actually signalled, possibly empty when nothing was listening.",
       "items": {
         "type": "integer",
         "minimum": 0
@@ -5545,7 +5545,7 @@
     "TerminalPathExecutableList": {
       "type": "object",
       "description": "One page of executable names found on PATH (ADR-0175 B3).",
-      "x-cognia-wire-source": "Vec<String> — cognia_terminal::path_scan::list_path_executables_inner, paged by companion_api::paging::Page::slice_all.",
+      "x-cognia-wire-source": "Vec<String> \u2014 cognia_terminal::path_scan::list_path_executables_inner, paged by companion_api::paging::Page::slice_all.",
       "required": ["items"],
       "properties": {
         "items": {
@@ -5562,7 +5562,7 @@
     },
     "TerminalProfileSyncResult": {
       "type": "object",
-      "x-cognia-wire-source": "rpc/terminal.rs `terminal_host_sync_profiles` — how many profiles the device now owns on the host.",
+      "x-cognia-wire-source": "rpc/terminal.rs `terminal_host_sync_profiles` \u2014 how many profiles the device now owns on the host.",
       "required": ["installed"],
       "properties": {
         "installed": {
@@ -5574,7 +5574,7 @@
     },
     "TerminalSession": {
       "type": "object",
-      "x-cognia-wire-source": "cognia_terminal::host::HostSessionInfo (serde rename_all = camelCase), returned by rpc/terminal.rs via DispatchHost::terminal_list_all. Option fields carry no skip_serializing_if, so they are always present as null — the two ssh_host_key_* fields are the exception and do skip.",
+      "x-cognia-wire-source": "cognia_terminal::host::HostSessionInfo (serde rename_all = camelCase), returned by rpc/terminal.rs via DispatchHost::terminal_list_all. Option fields carry no skip_serializing_if, so they are always present as null \u2014 the two ssh_host_key_* fields are the exception and do skip.",
       "required": [
         "id",
         "hostId",
@@ -7450,7 +7450,7 @@
       "description": "Outcome of one reconcile pass. Callers persist the changes; the\nplanner itself does not mutate.",
       "properties": {
         "imported": {
-          "description": "Worktrees on disk that Registry did not create. Callers store these\nas `Imported` — they must never be auto-pruned.",
+          "description": "Worktrees on disk that Registry did not create. Callers store these\nas `Imported` \u2014 they must never be auto-pruned.",
           "items": {
             "$ref": "#/$defs/ImportedWorkspaceHint"
           },
@@ -8698,7 +8698,7 @@
       "type": "object"
     },
     "WorkspaceOwnerType": {
-      "description": "Who created this managed workspace. Ownership determines whether the\nRegistry may prune or unlock the workspace during reconciliation.\n\n`Imported` is reserved for worktrees discovered on disk that the Registry\ncannot verify as its own — those rows never participate in auto-prune.",
+      "description": "Who created this managed workspace. Ownership determines whether the\nRegistry may prune or unlock the workspace during reconciliation.\n\n`Imported` is reserved for worktrees discovered on disk that the Registry\ncannot verify as its own \u2014 those rows never participate in auto-prune.",
       "enum": ["user", "imported", "session", "team", "scheduled"],
       "type": "string"
     },
@@ -8749,7 +8749,7 @@
           "type": "boolean"
         },
         "projectId": {
-          "description": "Owning Workspace (the frontend `Project.id`), when it is known.\n\nThe crate addresses rows by path and `(owner_type, owner_ref)`, neither\nof which can answer \"which execution slots does this project own\" —\nseveral worktrees of one repository share a `git_common_dir`, and an\nowner ref is a session or a team, never a project. Without it, deleting\na workspace cannot find the directories it produced and the inventory\ncan only be shown machine-wide.\n\nOptional because the frontend owns the Project table: rows created\nbefore this column, or found on disk with no matching project, stay\n`None` and are classified `imported` — never auto-pruned (ADR-0111).",
+          "description": "Owning Workspace (the frontend `Project.id`), when it is known.\n\nThe crate addresses rows by path and `(owner_type, owner_ref)`, neither\nof which can answer \"which execution slots does this project own\" \u2014\nseveral worktrees of one repository share a `git_common_dir`, and an\nowner ref is a session or a team, never a project. Without it, deleting\na workspace cannot find the directories it produced and the inventory\ncan only be shown machine-wide.\n\nOptional because the frontend owns the Project table: rows created\nbefore this column, or found on disk with no matching project, stay\n`None` and are classified `imported` \u2014 never auto-pruned (ADR-0111).",
           "type": ["string", "null"]
         },
         "sizeBytes": {
@@ -8786,7 +8786,7 @@
     },
     "WorkspaceRootLease": {
       "additionalProperties": false,
-      "description": "One logical root inside a Bundle, resolved to its physical execution\nlocation.\n\n`alias_path` is the path executors see. Multiple leases may point at the\nsame physical worktree when they share a Git common dir — the Bundle\ncomposer collapses roots by `git_common_dir` before creating worktrees.",
+      "description": "One logical root inside a Bundle, resolved to its physical execution\nlocation.\n\n`alias_path` is the path executors see. Multiple leases may point at the\nsame physical worktree when they share a Git common dir \u2014 the Bundle\ncomposer collapses roots by `git_common_dir` before creating worktrees.",
       "properties": {
         "aliasPath": {
           "type": "string"
@@ -8813,7 +8813,7 @@
       "type": "string"
     },
     "WorkspaceState": {
-      "description": "Managed workspace lifecycle state. Transitions outside the Registry's\ncontrolled paths are rejected fail-closed.\n\nLegal transitions (all others error):\n\n- `Provisioning → Active | Removing`\n- `Active → Archived | Conflict | Removing`\n- `Archived → Restorable | Removing`\n- `Restorable → Active | Removing`\n- `Conflict → Active | Removing`   (via `ConflictResolution`)\n- `Removing → Removed`\n\n`Removed` is terminal.",
+      "description": "Managed workspace lifecycle state. Transitions outside the Registry's\ncontrolled paths are rejected fail-closed.\n\nLegal transitions (all others error):\n\n- `Provisioning \u2192 Active | Removing`\n- `Active \u2192 Archived | Conflict | Removing`\n- `Archived \u2192 Restorable | Removing`\n- `Restorable \u2192 Active | Removing`\n- `Conflict \u2192 Active | Removing`   (via `ConflictResolution`)\n- `Removing \u2192 Removed`\n\n`Removed` is terminal.",
       "enum": [
         "provisioning",
         "active",
@@ -9326,7 +9326,7 @@
     },
     "connector_enqueue_outbound": {
       "type": "object",
-      "description": "What the host did with the relayed reply (ADR-0131). `reused` is true when the idempotency key matched an existing job — i.e. this was a retry replay, not a second send.",
+      "description": "What the host did with the relayed reply (ADR-0131). `reused` is true when the idempotency key matched an existing job \u2014 i.e. this was a retry replay, not a second send.",
       "required": ["jobId", "messageId", "reused"],
       "properties": {
         "jobId": {
@@ -11827,6 +11827,22 @@
           }
         }
       },
+      "additionalProperties": false
+    },
+    "integration_github_account_connect_from_secret": {
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "login": {
+          "type": "string"
+        },
+        "health": {
+          "type": "string"
+        }
+      },
+      "required": ["accountId", "login", "health"],
       "additionalProperties": false
     }
   }

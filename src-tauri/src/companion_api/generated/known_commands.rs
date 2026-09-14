@@ -19,7 +19,7 @@ use super::{
 pub const CONTRACT_VERSION: u32 = 3;
 
 /// The sha256 of the Headless command catalog rendered from this contract.
-pub const CATALOG_HASH: &str = "2413274247bb5c6ba71300ffa1c31107e95d2d70b9a2fcbcfe2bc236336f95ff";
+pub const CATALOG_HASH: &str = "1b8ce32da1ffb1a060831adcc0bf8ac211746abf819f76e766cebbb8b27ab8d5";
 
 /// Every command in the contract, in contract order.
 #[rustfmt::skip]
@@ -1365,6 +1365,7 @@ pub static WIRE_COMMANDS: &[WireCommand] = &[
     WireCommand { name: "plugin_media_read_chunk", arm: "plugin_media_read_chunk", resource: "media", verb: "read_chunk", target: CommandTarget::Execution, operation: CommandOperation::Read, capability: "host.observe", risk: CommandRisk::Low, approval: CommandApproval::None, idempotency: CommandIdempotency::Structural, transports: &[CommandTransport::Http, CommandTransport::Websocket, CommandTransport::Webrtc], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::ByteRange, long_running: false },
     WireCommand { name: "room_send", arm: "room_send", resource: "room", verb: "send", target: CommandTarget::Execution, operation: CommandOperation::SideEffect, capability: "agent.run", risk: CommandRisk::Low, approval: CommandApproval::None, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Http, CommandTransport::Websocket, CommandTransport::Webrtc], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
     WireCommand { name: "room_stop", arm: "room_stop", resource: "room", verb: "stop", target: CommandTarget::Execution, operation: CommandOperation::SideEffect, capability: "agent.run", risk: CommandRisk::Low, approval: CommandApproval::None, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Http, CommandTransport::Websocket, CommandTransport::Webrtc], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
+    WireCommand { name: "integration_github_account_connect_from_secret", arm: "integration_github_account_connect_from_secret", resource: "integration.account", verb: "connect", target: CommandTarget::Service, operation: CommandOperation::Write, capability: "service.internal", risk: CommandRisk::Critical, approval: CommandApproval::SignedPolicy, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Internal], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
 ];
 
 /// Old wire name to its replacement, sorted by old name.

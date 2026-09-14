@@ -203,6 +203,11 @@
       "category": "system"
     },
     {
+      "id": "integration",
+      "title": "Integration",
+      "category": "connectors"
+    },
+    {
       "id": "integration-ingress",
       "title": "Integration Ingress",
       "category": "connectors"
@@ -3770,7 +3775,7 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "description": "Requeue a dead-lettered Bot delivery. The host refuses a row that is no longer dead-lettered, so a replayed request is a no-op rather than a second run.",
+        "description": "Retry a Bot delivery. Terminal failed or cancelled executions create one linked successor while retaining prior results and approvals; resumable dead letters keep their identity. Repeated requests for the same delivery do not create another successor.",
         "required": [
           "deliveryId"
         ],
@@ -3935,6 +3940,34 @@
                 "type": "object",
                 "additionalProperties": {},
                 "example": {}
+              },
+              "policyGrant": {
+                "type": "object",
+                "properties": {
+                  "maxAuthority": {
+                    "type": "string",
+                    "enum": [
+                      "acceptEdits",
+                      "bypassPermissions"
+                    ]
+                  },
+                  "maxAutonomy": {
+                    "type": "string",
+                    "enum": [
+                      "confirm",
+                      "autopilot"
+                    ]
+                  },
+                  "requireApprovalForWrites": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "maxAuthority",
+                  "maxAutonomy",
+                  "requireApprovalForWrites"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
@@ -23245,6 +23278,60 @@
       "outputTyped": true
     },
     {
+      "name": "integration_github_account_connect_from_secret",
+      "category": "connectors",
+      "resource": "integration",
+      "target": "service",
+      "operation": "write",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "integration_github_account_connect_from_secret (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "operationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedLogin": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,38})$"
+          }
+        },
+        "required": [
+          "operationId",
+          "expectedLogin"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "accountId": {
+            "type": "string"
+          },
+          "login": {
+            "type": "string"
+          },
+          "health": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "accountId",
+          "login",
+          "health"
+        ],
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "integration_ingress_ack",
       "category": "connectors",
       "resource": "integration-ingress",
@@ -34014,6 +34101,12 @@
           "href": {
             "type": "string",
             "pattern": "^/(?!/)"
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9_:-]+$"
           }
         },
         "additionalProperties": false
@@ -60413,5 +60506,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "2413274247bb5c6ba71300ffa1c31107e95d2d70b9a2fcbcfe2bc236336f95ff"
+  "catalogHash": "1b8ce32da1ffb1a060831adcc0bf8ac211746abf819f76e766cebbb8b27ab8d5"
 }

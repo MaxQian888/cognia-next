@@ -423,6 +423,11 @@ export async function dispatchCommand(
     // The Bot control plane. A paired device can arm, run and replay, and the
     // installation lifecycle deliberately has no arm here: an install carries
     // a config blob and credential ids, and stays a Host-side action.
+    case "integration_github_account_connect_from_secret": {
+      const { connectGithubAccountFromSecret } =
+        await import("@/lib/integrations/github-account-setup")
+      return connectGithubAccountFromSecret(payload)
+    }
     case "bot_installation_mutate": {
       const { mutateBotInstallationOnHost } =
         await import("@/lib/bot/control-writes/lifecycle-host")
@@ -1369,7 +1374,7 @@ async function skillSetEnabled(payload: Record<string, unknown>): Promise<null> 
  *  must surface to the caller, not be masked by a silent flag flip. */
 function isPluginManagerUnavailable(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error)
-  return /initialized PluginManager|Plugin not found/i.test(message)
+  return /initialized PluginManager|Plugin manager not initialized|Plugin not found/i.test(message)
 }
 
 async function pluginSetEnabled(payload: Record<string, unknown>): Promise<null> {
@@ -1378,20 +1383,11 @@ async function pluginSetEnabled(payload: Record<string, unknown>): Promise<null>
   if (!id) throw new Error("plugin_set_enabled.id is required")
   if (typeof enabled !== "boolean") throw new Error("plugin_set_enabled.enabled must be boolean")
 
-  // Mirror the desktop toggle: drive the live PluginManager through the plugin
-  // runtime store so the plugin actually loads/unloads, its required
-  // dependencies are resolved, contributions register/unregister, and the
-  // enabled flag is persisted to Dexie + the Rust backend by the manager's
-  // `syncBackendStatus`. A bare Dexie flag write (the previous behavior) only
-  // took effect on the next renderer reload and skipped dependency resolution.
+  // Persist the same canonical intent as the desktop toggle. Runtime enable
+  // alone does not survive restart, and cannot clear a previous disabled intent.
   try {
-    const { usePluginStore } = await import("@/stores/plugin-runtime/plugin-store")
-    const store = usePluginStore.getState()
-    if (enabled) {
-      await store.enablePlugin(id)
-    } else {
-      await store.disablePlugin(id)
-    }
+    const { getPluginManager } = await import("@/lib/plugin/core/manager")
+    await getPluginManager().setPluginIntent(id, enabled ? "enabled" : "disabled", "remote-toggle")
     return null
   } catch (error) {
     // No live manager (headless / uninitialized) or unknown-to-store plugin:

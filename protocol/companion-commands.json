@@ -22798,6 +22798,23 @@
       "longRunning": false,
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "integration_github_account_connect_from_secret",
+      "resource": "integration.account",
+      "verb": "connect",
+      "arm": "integration_github_account_connect_from_secret",
+      "target": "service",
+      "operation": "write",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "pagination": "none",
+      "longRunning": false,
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
     }
   ]
 }
