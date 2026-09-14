@@ -322,18 +322,51 @@ export interface EntitySelectionStamp {
  * would train people to ignore the badge.
  */
 export async function isEntitySelectionStale(
-  selection: Pick<EntitySelectionRef, "entityKind" | "entityId" | "title" | "fingerprint">
+  selection: Pick<
+    EntitySelectionRef,
+    "entityKind" | "entityId" | "title" | "fingerprint" | "members"
+  >
 ): Promise<boolean> {
   if (selection.fingerprint === undefined) return false
-  const source = getEntityMentionSource(selection.entityKind)
-  if (!source?.fingerprint) return false
-  const current = await source.fingerprint({
-    entityKind: selection.entityKind,
-    id: selection.entityId,
-    title: selection.title,
-    searchText: "",
-  })
+  const current = await fingerprintEntityRecords(
+    selection.entityKind,
+    referencedEntityIds(selection)
+  )
+  if (current === undefined) return false
   return current !== selection.fingerprint
+}
+
+/**
+ * Every record a staged selection reads: its members when it folds several, or
+ * the one it names.
+ */
+export function referencedEntityIds(
+  selection: Pick<EntitySelectionRef, "entityId" | "members">
+): string[] {
+  const members = selection.members ?? []
+  return members.length > 1 ? members.map((member) => member.entityId) : [selection.entityId]
+}
+
+/**
+ * The fingerprint of one or several records of a kind, or `undefined` when the
+ * kind's source cannot fingerprint (so staleness is un-checkable, not false).
+ *
+ * One record reads exactly as `source.fingerprint` does, so a single reference
+ * staged before this existed still compares equal. Several are joined in order,
+ * with a marker for a record that is gone: a selection across three messages is
+ * stale when ANY of them changed, not only the first.
+ */
+export async function fingerprintEntityRecords(
+  kind: EntitySelectionKind,
+  entityIds: readonly string[]
+): Promise<string | null | undefined> {
+  const source = getEntityMentionSource(kind)
+  if (!source?.fingerprint || entityIds.length === 0) return undefined
+  const read = (id: string) =>
+    source.fingerprint!({ entityKind: kind, id, title: "", searchText: "" })
+  if (entityIds.length === 1) return read(entityIds[0]!)
+  const parts = await Promise.all(entityIds.map(read))
+  return parts.map((part) => part ?? "∅").join("\n")
 }
 
 /** Lowercased haystack, skipping the blanks so `undefined` never matches. */

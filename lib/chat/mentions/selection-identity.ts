@@ -49,7 +49,15 @@ export function contextSelectionIdentity(selection: ContextSelectionRef): string
         selection.members && selection.members.length > 1
           ? selection.members.map((m) => m.entityId).join(",")
           : ""
-      return ["entity", selection.entityKind, selection.entityId, members].join(":")
+      const key = ["entity", selection.entityKind, selection.entityId, members]
+      // Two selections inside one message are two references, and so are a
+      // quote and a summary of it. An excerpt is identified by what was
+      // selected (a derived body is regenerated text, so it is not the key).
+      const excerpt = selection.excerpt
+      if (excerpt) {
+        key.push(excerpt.derivation, contentFingerprint(excerpt.quote), excerpt.language ?? "")
+      }
+      return key.join(":")
     }
   }
 }

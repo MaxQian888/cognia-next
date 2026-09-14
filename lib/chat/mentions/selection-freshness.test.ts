@@ -1,5 +1,6 @@
 import {
   __resetEntityMentionSourcesForTests,
+  fingerprintEntityRecords,
   registerEntityMentionSource,
   unregisterEntityMentionSource,
 } from "./entity-sources"
@@ -140,5 +141,64 @@ describe("refreshSelectionFreshness", () => {
     ])
     expect((pass.selections[0] as { stale?: boolean }).stale).toBeUndefined()
     expect((pass.selections[1] as { stale?: boolean }).stale).toBe(true)
+  })
+})
+
+// A selection across several messages (and Batch 3's combined chip) reads every
+// member. A check that only asked about the first would call the chip current
+// while the third message it quotes had been edited.
+describe("a selection that reads several records", () => {
+  let versions: Record<string, string | null>
+
+  beforeEach(() => {
+    versions = { a: "a1", b: "b1", c: "c1" }
+    unregisterEntityMentionSource(CUSTOM)
+    registerEntityMentionSource({
+      entityKind: CUSTOM,
+      prefix: "custom:",
+      load: async () => [],
+      snapshot: async () => "body",
+      fingerprint: async (candidate) => versions[candidate.id] ?? null,
+    })
+  })
+
+  const members = [
+    { entityId: "a", title: "a" },
+    { entityId: "b", title: "b" },
+    { entityId: "c", title: "c" },
+  ]
+
+  async function captured(): Promise<string> {
+    return (await fingerprintEntityRecords(CUSTOM, ["a", "b", "c"]))!
+  }
+
+  it("is current while every member is", async () => {
+    const selection = entity({ entityId: "a", members, fingerprint: await captured() } as never)
+    const pass = await refreshSelectionFreshness([selection])
+    expect(pass.changed).toBe(false)
+  })
+
+  it("goes stale when a member other than the first changed", async () => {
+    const selection = entity({ entityId: "a", members, fingerprint: await captured() } as never)
+    versions.c = "c2"
+    const pass = await refreshSelectionFreshness([selection])
+    expect((pass.selections[0] as { stale?: boolean }).stale).toBe(true)
+  })
+
+  it("goes stale when a member is gone", async () => {
+    const selection = entity({ entityId: "a", members, fingerprint: await captured() } as never)
+    versions.b = null
+    const pass = await refreshSelectionFreshness([selection])
+    expect((pass.selections[0] as { stale?: boolean }).stale).toBe(true)
+  })
+
+  // A single reference staged before members existed must still compare equal.
+  it("reads one record exactly as the source fingerprints it", async () => {
+    await expect(fingerprintEntityRecords(CUSTOM, ["a"])).resolves.toBe("a1")
+  })
+
+  it("cannot fingerprint a kind whose source declares none", async () => {
+    unregisterEntityMentionSource(CUSTOM)
+    await expect(fingerprintEntityRecords(CUSTOM, ["a"])).resolves.toBeUndefined()
   })
 })

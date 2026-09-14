@@ -38,6 +38,11 @@ jest.mock("@/lib/chat/mentions/entity-sources", () => {
   }
 })
 
+const refreshExcerptMock = jest.fn()
+jest.mock("@/lib/chat/selection/message-excerpt", () => ({
+  refreshMessageExcerpt: (selection: unknown) => refreshExcerptMock(selection),
+}))
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
     vars ? `${key}:${JSON.stringify(vars)}` : key,
@@ -572,5 +577,103 @@ describe("stale snapshots", () => {
     fireEvent.click(screen.getByTestId("context-selection-refresh"))
     await waitFor(() => expect(toastErrorMock).toHaveBeenCalled())
     expect(useChatStore.getState().contextSelections[0].snapshot).toBe("the approved body")
+  })
+})
+
+describe("excerpt chips", () => {
+  const excerptSel = (over = {}) => ({
+    kind: "entity" as const,
+    entityKind: "message" as const,
+    entityId: "s1#m1",
+    title: "Keep the cache warm.",
+    snapshot: "Keep the cache warm.",
+    comment: "",
+    capturedAt: 1_000,
+    fingerprint: "v1",
+    href: "/?session=s1&message=m1",
+    sourceSessionId: "s1",
+    excerpt: { derivation: "quote" as const, quote: "Keep the cache warm." },
+    ...over,
+  })
+
+  beforeEach(() => {
+    refreshFreshnessMock.mockReset().mockResolvedValue({ selections: [], changed: false })
+    snapshotMock.mockReset().mockResolvedValue("the whole message")
+    refreshExcerptMock.mockReset()
+    toastErrorMock.mockReset()
+  })
+
+  it("says what was selected and what the body is", () => {
+    act(() =>
+      useChatStore.getState().addContextSelection(
+        excerptSel({
+          snapshot: "A summary.",
+          excerpt: { derivation: "summary", quote: "Keep the cache warm." },
+        })
+      )
+    )
+    render(<ArtifactSelectionChips />)
+    expect(screen.getByTestId("artifact-selection-chip")).toHaveTextContent(
+      'selectionChipExcerptLabel:{"derivation":"summary","title":"Keep the cache warm."}'
+    )
+  })
+
+  it("counts the messages a selection runs across", () => {
+    act(() =>
+      useChatStore.getState().addContextSelection(
+        excerptSel({
+          members: [
+            { entityId: "s1#m1", title: "a" },
+            { entityId: "s1#m2", title: "b" },
+          ],
+        })
+      )
+    )
+    render(<ArtifactSelectionChips />)
+    expect(screen.getByTestId("artifact-selection-chip")).toHaveTextContent(
+      'selectionChipExcerptAcrossLabel:{"derivation":"quote","title":"Keep the cache warm.","count":2}'
+    )
+  })
+
+  // A span counts whole turns; an excerpt is text inside one.
+  it("offers no span control", () => {
+    act(() => useChatStore.getState().addContextSelection(excerptSel()))
+    render(<ArtifactSelectionChips />)
+    expect(screen.queryByTestId("context-selection-widen")).toBeNull()
+  })
+
+  it("refreshes by re-locating the selection, never by re-reading the whole message", async () => {
+    const current = excerptSel({ fingerprint: "v2" })
+    refreshExcerptMock.mockResolvedValue({ kind: "current", selection: current })
+    act(() => useChatStore.getState().addContextSelection(excerptSel({ stale: true })))
+    render(<ArtifactSelectionChips />)
+    fireEvent.click(screen.getByTestId("context-selection-refresh"))
+    await waitFor(() =>
+      expect(useChatStore.getState().contextSelections[0]).toMatchObject({ fingerprint: "v2" })
+    )
+    expect(snapshotMock).not.toHaveBeenCalled()
+    expect(useChatStore.getState().contextSelections[0]).not.toHaveProperty("stale")
+    expect(useChatStore.getState().contextSelections[0].snapshot).toBe("Keep the cache warm.")
+  })
+
+  it("says so and keeps the chip marked when the message no longer says it", async () => {
+    refreshExcerptMock.mockResolvedValue({ kind: "changed" })
+    act(() => useChatStore.getState().addContextSelection(excerptSel({ stale: true })))
+    render(<ArtifactSelectionChips />)
+    fireEvent.click(screen.getByTestId("context-selection-refresh"))
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith("selectionExcerptChanged"))
+    expect(useChatStore.getState().contextSelections[0]).toMatchObject({ stale: true })
+  })
+
+  it("says the message is unavailable when it is gone", async () => {
+    refreshExcerptMock.mockResolvedValue({ kind: "gone" })
+    act(() => useChatStore.getState().addContextSelection(excerptSel({ stale: true })))
+    render(<ArtifactSelectionChips />)
+    fireEvent.click(screen.getByTestId("context-selection-refresh"))
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        'selectionRefreshUnavailable:{"title":"Keep the cache warm."}'
+      )
+    )
   })
 })

@@ -40,6 +40,51 @@ describe("contextSelectionIdentity", () => {
     expect(ids.size).toBe(5)
   })
 
+  it("keeps two selections inside one message, and a quote and its summary, apart", () => {
+    const excerpt = (over: Partial<Extract<ContextSelectionRef, { kind: "entity" }>>) =>
+      contextSelectionIdentity(entity({ entityKind: "message", entityId: "s#a", ...over }))
+    const quoteA = excerpt({
+      snapshot: "first part",
+      excerpt: { derivation: "quote", quote: "first part" },
+    })
+    const quoteB = excerpt({
+      snapshot: "second part",
+      excerpt: { derivation: "quote", quote: "second part" },
+    })
+    const summaryA = excerpt({
+      snapshot: "a summary",
+      excerpt: { derivation: "summary", quote: "first part" },
+    })
+    const whole = excerpt({})
+    expect(new Set([quoteA, quoteB, summaryA, whole]).size).toBe(4)
+  })
+
+  it("keys a derived excerpt by what was selected, not by the regenerated text", () => {
+    const summary = (snapshot: string) =>
+      contextSelectionIdentity(
+        entity({
+          entityKind: "message",
+          entityId: "s#a",
+          snapshot,
+          excerpt: { derivation: "summary", quote: "the selected text" },
+        })
+      )
+    expect(summary("one wording")).toBe(summary("another wording"))
+  })
+
+  it("keeps translations into different languages apart", () => {
+    const translation = (language: string) =>
+      contextSelectionIdentity(
+        entity({
+          entityKind: "message",
+          entityId: "s#a",
+          snapshot: "x",
+          excerpt: { derivation: "translation", quote: "hello", language },
+        })
+      )
+    expect(translation("fr")).not.toBe(translation("de"))
+  })
+
   it("keeps two ranges of one file, and two excerpts of one page, apart", () => {
     const file = (startLine: number) =>
       contextSelectionIdentity({

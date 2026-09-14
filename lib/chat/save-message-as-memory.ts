@@ -18,6 +18,7 @@
  */
 
 import { projectSearchText } from "@/lib/chat/search/project-text"
+import { selectionTitleFor } from "@/lib/chat/selection/selection-text"
 
 /** Longest first line used as the draft's title before it is elided. */
 const TITLE_MAX = 80
@@ -25,16 +26,12 @@ const TITLE_MAX = 80
 /**
  * Name the draft after its opening line.
  *
- * Shares the shape of `asideTitleFor` in `message-selection-toolbar.tsx` — a
- * word-boundary elision — because both name a record after a fragment of prose
+ * The same word-boundary elision a transcript selection is named with
+ * (`selectionTitleFor`), because both name a record after a fragment of prose
  * and a mid-word cut reads as corruption in both.
  */
 export function memoryDraftTitle(body: string): string {
-  const flat = body.replace(/\s+/g, " ").trim()
-  if (flat.length <= TITLE_MAX) return flat
-  const cut = flat.slice(0, TITLE_MAX)
-  const lastSpace = cut.lastIndexOf(" ")
-  return `${(lastSpace > TITLE_MAX / 2 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`
+  return selectionTitleFor(body, TITLE_MAX)
 }
 
 export interface SaveMessageAsMemoryInput {

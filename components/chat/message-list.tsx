@@ -125,13 +125,13 @@ export function MessageList({
   const lastIndex = messages.length - 1
   const sessionId = useChatStore((s) => s.activeSessionId)
   // The conversation a selection here belongs to. Prefer the messages' own
-  // session over the focused one so a split pane opens asides on ITS thread;
-  // an aside cannot own an aside, so the toolbar stays out of one.
+  // session over the focused one so a split pane references into, and opens
+  // asides on, ITS thread. An aside cannot own an aside, so a transcript that is
+  // one gets every selection action except that.
   const messageSessionId = (messages[0] as { metadata?: { sessionId?: string } } | undefined)
     ?.metadata?.sessionId
   const selectionSessionId = messageSessionId ?? sessionId
-  const supportsSelectionAside =
-    Boolean(selectionSessionId) && !selectionSessionId!.startsWith("resource-workbench:")
+  const selectionAllowsAside = !selectionSessionId?.startsWith("resource-workbench:")
 
   // Split view mounts one MessageList per pane, and the shortcut runtime keys
   // its registry by id (last mount wins) — so without this gate the split pane
@@ -719,13 +719,18 @@ export function MessageList({
                 </div>
               </div>
             </div>
-            {/* Selecting text in the transcript and asking about THAT. Scoped
-                to `contentRef` so a selection that runs into the composer or
-                the timeline rail is not treated as a question about a message.
+            {/* Selecting text in the transcript and acting on THAT: reference
+                it, ask in an aside, summarize, explain, translate. Scoped to
+                `contentRef` so a selection that runs into the composer or the
+                timeline rail is not treated as being about a message.
                 Self-hides with no selection. */}
-            {supportsSelectionAside && (
-              <MessageSelectionToolbar sessionId={selectionSessionId!} containerRef={contentRef} />
-            )}
+            {selectionSessionId ? (
+              <MessageSelectionToolbar
+                sessionId={selectionSessionId}
+                containerRef={contentRef}
+                allowAside={selectionAllowsAside}
+              />
+            ) : null}
             {/* Outside the scroller on purpose — see ConversationJumpPill. */}
             <ConversationJumpPill
               mode={resolveJumpPillMode({

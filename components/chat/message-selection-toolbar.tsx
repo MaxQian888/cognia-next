@@ -1,58 +1,125 @@
 "use client"
 
-// Floating action for a text selection inside the transcript.
+// The capsule that appears over text selected in the transcript.
 //
-// The chat surface had no selection affordance at all: the only precedent in
-// the repo is `components/artifacts/selection-comment-button.tsx`, and it is
-// bound to an artifact. Selecting a paragraph of a reply and asking about *that*
-// meant copying it, opening the dock, and pasting.
+// Selecting part of a reply used to offer one thing: ask about it in an aside —
+// and even that lost the quote whenever the aside's composer mounted after the
+// event announcing it. What people actually do with a selected passage is
+// bring it into the conversation, or find out what it says. So the capsule
+// offers exactly those:
 //
-// One action, deliberately: "ask about this in an aside". Quoting into the
-// composer is what the per-message bring-back already does, and a second way to
-// do it here would just be a smaller version of the same button.
+//   Reference   stage the passage as a chip in THIS conversation's composer
+//   Aside       open an aside seeded with the passage as a quote
+//   Summarize / Explain / Translate
+//               answer in a panel beside the selection, which can then be
+//               copied or referenced in turn
+//
+// The capsule and the panel are portaled popovers anchored to the live selection
+// range. They used to be `position: fixed` inside the transcript, whose
+// container-query ancestor establishes a containing block for fixed children,
+// so the button drifted away from the text it was about.
 
-import { useCallback, useEffect, useRef, useState } from "react"
-import { useTranslations } from "next-intl"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useLocale, useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { MessagesSquareIcon } from "lucide-react"
+import {
+  ChevronDownIcon,
+  LanguagesIcon,
+  MessagesSquareIcon,
+  QuoteIcon,
+  ScrollTextIcon,
+  SparklesIcon,
+} from "lucide-react"
 import type { SessionSurfaceBinding } from "@cognia/agent-config-types"
-import { Button } from "@/components/ui/button"
-import { createResourceWorkbenchSession } from "@/lib/db/resource-workbench-sessions"
-import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
-import { getContextResourceKey } from "@/types/context-workbench"
-import { dispatchComposerAppend } from "@/components/chat/composer"
 import { createLogger } from "@cognia/logging"
+
+import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
+import { MessageSelectionResultPanel } from "@/components/chat/message-selection-result-panel"
+import {
+  SELECTION_TRANSLATE_LOCALE_PREF,
+  TARGET_LOCALES,
+  initialTargetLocale,
+  type TargetLocale,
+} from "@/components/selection-toolbar/selection-toolbar-actions"
+import {
+  useSelectionActionRun,
+  type SelectionRunRequest,
+} from "@/hooks/chat/use-selection-action-run"
+import { createResourceWorkbenchSession } from "@/lib/db/resource-workbench-sessions"
+import { buildMessageExcerptSelection } from "@/lib/chat/selection/message-excerpt"
+import {
+  isDeliberateSelection,
+  quoteSelection,
+  selectionTitleFor,
+} from "@/lib/chat/selection/selection-text"
+import type { SelectionAction } from "@/lib/chat/selection/run-selection-action"
+import { getPref, setPref } from "@/lib/tauri/store"
+import type { EntityExcerptDerivation } from "@/types/artifact/artifact"
+import { getContextResourceKey } from "@/types/context-workbench"
+import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
+import { useChatStore } from "@/stores/chat/chat-store"
+import { useComposerIntentStore } from "@/stores/chat/composer-intent-store"
+import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 
 const log = createLogger("chat-selection")
 
-/** Longest selection used verbatim as an aside's name before it is elided. */
-const TITLE_MAX = 48
-
-/** Selection long enough to be worth an aside — below this it is a mis-drag. */
-const MIN_SELECTION = 3
+/** A viewport rectangle, detached from the DOM that produced it. */
+export interface SelectionRect {
+  left: number
+  top: number
+  right: number
+  bottom: number
+}
 
 export interface SelectionAnchor {
   text: string
-  /** Viewport coordinates of the selection's end, for placing the button. */
-  x: number
-  y: number
+  /** The selection's last line box when it was made — the fallback placement. */
+  rect: SelectionRect
+  /** Every message the selection touches, in transcript order. */
+  messageIds: string[]
+  /** Those messages' rendered text, which an explanation reads for context. */
+  context: string
+  /** The live range, so a popover follows the text as the transcript scrolls. */
+  range: Range | null
 }
 
-/** Name an aside after what was selected, elided on a word boundary. */
-export function asideTitleFor(text: string): string {
-  const flat = text.replace(/\s+/g, " ").trim()
-  if (flat.length <= TITLE_MAX) return flat
-  const cut = flat.slice(0, TITLE_MAX)
-  const lastSpace = cut.lastIndexOf(" ")
-  return `${(lastSpace > TITLE_MAX / 2 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`
+function rectOf(range: Range): SelectionRect | null {
+  // Geometry is for placement only, and it is the one part of this a non-browser
+  // DOM may not implement (jsdom has no `Range.getClientRects`). Throwing here
+  // would abort a `selectionchange` listener over a button position.
+  if (typeof range.getClientRects !== "function") return null
+  const last = Array.from(range.getClientRects()).at(-1)
+  if (!last || (last.width === 0 && last.height === 0)) return null
+  return { left: last.left, top: last.top, right: last.right, bottom: last.bottom }
+}
+
+/** The rows a range touches, in document order, each once. */
+export function messageRowsInRange(container: HTMLElement, range: Range): HTMLElement[] {
+  const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-msg-id]"))
+  const touched =
+    typeof range.intersectsNode === "function"
+      ? rows.filter((row) => range.intersectsNode(row))
+      : rows.filter((row) => row.contains(range.startContainer) || row.contains(range.endContainer))
+  // A row nested inside another row (a live tail inside its wrapper) is the same
+  // message; keep the outermost.
+  return touched.filter((row) => !touched.some((other) => other !== row && other.contains(row)))
 }
 
 /**
  * Track the current selection within `containerRef`.
  *
- * Returns null unless the selection is non-empty, long enough to be deliberate,
- * and entirely inside the transcript — a selection that starts in a message and
- * ends in the composer is not a question about a message.
+ * Null unless the selection is non-empty, long enough to be deliberate, and
+ * entirely inside the transcript — a selection that starts in a message and
+ * ends in the composer is not about a message.
  */
 export function useTranscriptSelection(
   containerRef: React.RefObject<HTMLElement | null>
@@ -73,20 +140,19 @@ export function useTranscriptSelection(
         return
       }
       const text = selection.toString().trim()
-      if (text.length < MIN_SELECTION) {
+      if (!isDeliberateSelection(text)) {
         setAnchor(null)
         return
       }
-      // Geometry is for placement only, and it is the one part of this that a
-      // non-browser DOM may not implement (jsdom has no `Range.getClientRects`
-      // at all). Throwing here would abort a `selectionchange` listener —
-      // taking every later listener on the event with it — over a button
-      // position, so degrade to the origin instead.
-      const last =
-        typeof range.getClientRects === "function"
-          ? Array.from(range.getClientRects()).at(-1)
-          : undefined
-      setAnchor({ text, x: last?.right ?? 0, y: last?.bottom ?? 0 })
+      const rows = messageRowsInRange(container, range)
+      const ids = [...new Set(rows.map((row) => row.dataset.msgId!).filter(Boolean))]
+      setAnchor({
+        text,
+        rect: rectOf(range) ?? { left: 0, top: 0, right: 0, bottom: 0 },
+        messageIds: ids,
+        context: rows.map((row) => row.textContent?.trim() ?? "").join("\n\n"),
+        range: range.cloneRange(),
+      })
     }
 
     // `selectionchange` is the only event that fires for keyboard selection and
@@ -98,40 +164,158 @@ export function useTranscriptSelection(
   return anchor
 }
 
+/** A popper anchor that follows the live range, and holds its place once the range is gone. */
+function virtualAnchorFor(anchor: SelectionAnchor) {
+  let last = anchor.rect
+  return {
+    getBoundingClientRect: () => {
+      const live = anchor.range ? rectOf(anchor.range) : null
+      if (live) last = live
+      const { left, top, right, bottom } = last
+      return {
+        x: left,
+        y: top,
+        left,
+        top,
+        right,
+        bottom,
+        width: right - left,
+        height: bottom - top,
+        toJSON: () => last,
+      } as DOMRect
+    },
+  }
+}
+
+const DERIVATIONS: Record<SelectionAction, EntityExcerptDerivation> = {
+  summarize: "summary",
+  explain: "explanation",
+  translate: "translation",
+}
+
+function mintId(): string {
+  return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `sel-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+export interface MessageSelectionToolbarProps {
+  /** The conversation the selection lives in: chips stage into its composer. */
+  sessionId: string
+  containerRef: React.RefObject<HTMLElement | null>
+  /**
+   * Whether "Ask in an aside" is offered. An aside cannot own an aside, so a
+   * transcript that IS an aside gets every other action.
+   */
+  allowAside?: boolean
+}
+
 export function MessageSelectionToolbar({
   sessionId,
   containerRef,
-}: {
-  /** The conversation the selection lives in — the aside binds to it. */
-  sessionId: string
-  containerRef: React.RefObject<HTMLElement | null>
-}) {
+  allowAside = true,
+}: MessageSelectionToolbarProps) {
   const t = useTranslations("chat.selection")
+  const tLanguage = useTranslations("selectionToolbar.languages")
+  const locale = useLocale()
   const anchor = useTranscriptSelection(containerRef)
+  const { state: run, run: start, stop, close } = useSelectionActionRun()
+  const [panelAnchor, setPanelAnchor] = useState<SelectionAnchor | null>(null)
+  const [targetLocale, setTargetLocale] = useState<TargetLocale>(() => initialTargetLocale(locale))
+  const [referencing, setReferencing] = useState(false)
   const busyRef = useRef(false)
+
+  // The desktop selection toolbar's choice, so the two surfaces agree. Outside
+  // Tauri there is no store and the UI locale's default stands.
+  useEffect(() => {
+    let alive = true
+    void getPref<string>(SELECTION_TRANSLATE_LOCALE_PREF).then((saved) => {
+      if (alive && TARGET_LOCALES.includes(saved as TargetLocale)) {
+        setTargetLocale(saved as TargetLocale)
+      }
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const chooseLocale = useCallback((next: string) => {
+    if (!TARGET_LOCALES.includes(next as TargetLocale)) return
+    setTargetLocale(next as TargetLocale)
+    void setPref(SELECTION_TRANSLATE_LOCALE_PREF, next)
+  }, [])
+
+  const stage = useCallback(
+    async (input: {
+      messageIds: readonly string[]
+      text: string
+      quote: string
+      derivation: EntityExcerptDerivation
+      language?: string
+    }): Promise<boolean> => {
+      const selection = await buildMessageExcerptSelection({
+        sessionId,
+        messageIds: input.messageIds,
+        text: input.text,
+        excerpt: {
+          derivation: input.derivation,
+          quote: input.quote,
+          ...(input.language ? { language: input.language } : {}),
+        },
+      })
+      if (!selection) {
+        toast.error(t("referenceError"))
+        return false
+      }
+      useChatStore.getState().addContextSelection(selection, sessionId)
+      toast.success(t("referenced", { title: selection.title }))
+      return true
+    },
+    [sessionId, t]
+  )
+
+  const onReference = useCallback(async () => {
+    if (!anchor || busyRef.current) return
+    busyRef.current = true
+    try {
+      const staged = await stage({
+        messageIds: anchor.messageIds,
+        text: anchor.text,
+        quote: anchor.text,
+        derivation: "quote",
+      })
+      if (staged) window.getSelection()?.removeAllRanges()
+    } catch (err) {
+      log.error("selection-reference-failed", { sessionId, error: String(err) })
+      toast.error(t("referenceError"))
+    } finally {
+      busyRef.current = false
+    }
+  }, [anchor, sessionId, stage, t])
 
   const onAsk = useCallback(async () => {
     if (!anchor || busyRef.current) return
     busyRef.current = true
     try {
       const binding: SessionSurfaceBinding = { kind: "session", sessionId }
-      const aside = await createResourceWorkbenchSession(binding, asideTitleFor(anchor.text))
-      // Point the dock at the new aside…
+      const aside = await createResourceWorkbenchSession(binding, selectionTitleFor(anchor.text))
+      // Staged against the aside's id rather than dispatched as an event: the
+      // aside's composer mounts AFTER this, and an event fired now reached no
+      // one. The composer consumes a pending intent once its draft hydrates.
+      useComposerIntentStore
+        .getState()
+        .stage(aside.id, { candidateId: mintId(), prompt: `${quoteSelection(anchor.text)}\n\n` })
       useContextWorkbenchStore
         .getState()
         .setSessionOverride(
           getContextResourceKey({ kind: "session", capabilities: ["ai"], sessionId }),
           aside.id
         )
-      // …and seed its composer with the quote, cursor after it. Not auto-sent:
-      // the selection is the subject, not the question.
-      dispatchComposerAppend({
-        text: `${anchor.text
-          .split("\n")
-          .map((line) => `> ${line}`)
-          .join("\n")}\n\n`,
-        sessionId: aside.id,
-      })
+      // The dock follows the focused conversation, so only bring it forward
+      // when that is the one the selection was made in.
+      if (useChatStore.getState().activeSessionId === sessionId) {
+        useArtifactDockLayoutStore.getState().revealSidechat()
+      }
       window.getSelection()?.removeAllRanges()
     } catch (err) {
       log.error("selection-aside-failed", { sessionId, error: String(err) })
@@ -141,28 +325,213 @@ export function MessageSelectionToolbar({
     }
   }, [anchor, sessionId, t])
 
-  if (!anchor) return null
+  const onRun = useCallback(
+    (action: SelectionAction, chosenLocale?: TargetLocale) => {
+      if (!anchor) return
+      setPanelAnchor(anchor)
+      const request: SelectionRunRequest = {
+        action,
+        quote: anchor.text,
+        sessionId,
+        messageIds: anchor.messageIds,
+        context: anchor.context,
+        ...(action === "translate" ? { targetLocale: chosenLocale ?? targetLocale } : {}),
+      }
+      void start(request)
+    },
+    [anchor, sessionId, start, targetLocale]
+  )
+
+  const onReferenceResult = useCallback(
+    async (text: string) => {
+      if (run.status === "idle" || referencing) return
+      setReferencing(true)
+      try {
+        const { request } = run
+        const staged = await stage({
+          messageIds: request.messageIds,
+          text,
+          quote: request.quote,
+          derivation: DERIVATIONS[request.action],
+          ...(request.targetLocale ? { language: request.targetLocale } : {}),
+        })
+        if (staged) {
+          close()
+          setPanelAnchor(null)
+        }
+      } catch (err) {
+        log.error("selection-result-reference-failed", { sessionId, error: String(err) })
+        toast.error(t("referenceError"))
+      } finally {
+        setReferencing(false)
+      }
+    },
+    [close, referencing, run, sessionId, stage, t]
+  )
+
+  const onClosePanel = useCallback(() => {
+    close()
+    setPanelAnchor(null)
+  }, [close])
+
+  const panelOpen = run.status !== "idle" && panelAnchor !== null
+  // The capsule steps aside while its own answer is showing for the same text;
+  // a new selection brings it back.
+  const capsuleOpen = Boolean(anchor) && !(panelOpen && panelAnchor?.text === anchor?.text)
+  const capsuleVirtual = useMemo(() => (anchor ? virtualAnchorFor(anchor) : null), [anchor])
+  const panelVirtual = useMemo(
+    () => (panelAnchor ? virtualAnchorFor(panelAnchor) : null),
+    [panelAnchor]
+  )
+  const canReference = Boolean(anchor && anchor.messageIds.length > 0)
+  const languageLabel = (tag: string | undefined) =>
+    tag && TARGET_LOCALES.includes(tag as TargetLocale) ? tLanguage(tag as TargetLocale) : tag
 
   return (
-    <div
-      data-testid="message-selection-toolbar"
-      className="fixed z-50 -translate-x-full translate-y-1"
-      style={{ left: anchor.x, top: anchor.y }}
-    >
-      <Button
-        size="sm"
-        variant="secondary"
-        className="h-7 gap-1.5 text-xs shadow-md"
-        // `onMouseDown` + preventDefault: a plain click would collapse the
-        // selection before the handler runs, and the quote would come back empty.
-        onMouseDown={(e) => {
-          e.preventDefault()
-          void onAsk()
-        }}
-      >
-        <MessagesSquareIcon className="size-3.5" />
-        {t("askInAside")}
-      </Button>
-    </div>
+    <>
+      <Popover open={capsuleOpen}>
+        {capsuleVirtual ? <PopoverAnchor virtualRef={{ current: capsuleVirtual }} /> : null}
+        <PopoverContent
+          side="bottom"
+          align="end"
+          sideOffset={6}
+          collisionPadding={16}
+          className="w-auto max-w-[min(92vw,560px)] rounded-lg p-1"
+          data-testid="message-selection-toolbar"
+          // Focus stays in the transcript: moving it would not clear the
+          // selection, but it would steal the keyboard from someone extending it.
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          onCloseAutoFocus={(event) => event.preventDefault()}
+          onEscapeKeyDown={() => window.getSelection()?.removeAllRanges()}
+        >
+          <div
+            role="toolbar"
+            aria-label={t("toolbarLabel")}
+            className="flex flex-wrap items-center gap-0.5"
+            // A mouse-down anywhere in the capsule would otherwise collapse the
+            // selection before a button's click handler reads it.
+            onMouseDown={(event) => event.preventDefault()}
+          >
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 gap-1.5 px-2 text-xs"
+              disabled={!canReference}
+              onClick={() => void onReference()}
+            >
+              <QuoteIcon className="size-3.5" />
+              {t("reference")}
+            </Button>
+            {allowAside ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 gap-1.5 px-2 text-xs"
+                onClick={() => void onAsk()}
+              >
+                <MessagesSquareIcon className="size-3.5" />
+                {t("askInAside")}
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 gap-1.5 px-2 text-xs"
+              onClick={() => onRun("summarize")}
+            >
+              <ScrollTextIcon className="size-3.5" />
+              {t("summarize")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 gap-1.5 px-2 text-xs"
+              onClick={() => onRun("explain")}
+            >
+              <SparklesIcon className="size-3.5" />
+              {t("explain")}
+            </Button>
+            <div className="flex items-center">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 gap-1.5 rounded-e-none px-2 text-xs"
+                title={t("translateInto", { language: tLanguage(targetLocale) })}
+                onClick={() => onRun("translate")}
+              >
+                <LanguagesIcon className="size-3.5" />
+                {t("translate")}
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 rounded-s-none px-1"
+                    aria-label={t("chooseLanguage")}
+                  >
+                    <ChevronDownIcon className="size-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  onCloseAutoFocus={(event) => event.preventDefault()}
+                >
+                  <DropdownMenuLabel className="text-xs">{t("chooseLanguage")}</DropdownMenuLabel>
+                  <DropdownMenuRadioGroup
+                    value={targetLocale}
+                    onValueChange={(next) => {
+                      chooseLocale(next)
+                      onRun("translate", next as TargetLocale)
+                    }}
+                  >
+                    {TARGET_LOCALES.map((tag) => (
+                      <DropdownMenuRadioItem key={tag} value={tag} className="text-xs">
+                        {tLanguage(tag)}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+        </PopoverContent>
+      </Popover>
+
+      <Popover open={panelOpen}>
+        {panelVirtual ? <PopoverAnchor virtualRef={{ current: panelVirtual }} /> : null}
+        {run.status !== "idle" ? (
+          <PopoverContent
+            side="bottom"
+            align="start"
+            sideOffset={8}
+            collisionPadding={16}
+            className="w-auto p-3"
+            onOpenAutoFocus={(event) => event.preventDefault()}
+            onCloseAutoFocus={(event) => event.preventDefault()}
+            // Reading an answer and then selecting more of the transcript must
+            // not throw the answer away; the panel closes on Escape or its ✕.
+            onInteractOutside={(event) => event.preventDefault()}
+            onEscapeKeyDown={onClosePanel}
+          >
+            <MessageSelectionResultPanel
+              run={run}
+              languageLabel={languageLabel(run.request.targetLocale)}
+              onStop={stop}
+              onRetry={() => void start(run.request)}
+              onClose={onClosePanel}
+              onReference={(text) => void onReferenceResult(text)}
+              referencing={referencing}
+            />
+          </PopoverContent>
+        ) : null}
+      </Popover>
+    </>
   )
 }

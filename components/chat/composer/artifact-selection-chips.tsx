@@ -51,6 +51,7 @@ import {
 } from "@/lib/chat/mentions/entity-sources"
 import { refreshSelectionFreshness } from "@/lib/chat/mentions/selection-freshness"
 import { contextSelectionIdentity } from "@/lib/chat/mentions/selection-identity"
+import { refreshMessageExcerpt } from "@/lib/chat/selection/message-excerpt"
 import type { ContextSelectionRef } from "@/types/artifact/artifact"
 import { useComposerSessionId } from "./composer-session-context"
 
@@ -120,6 +121,21 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
   const refresh = useCallback(
     async (index: number, sel: ContextSelectionRef) => {
       if (sel.kind !== "entity") return
+      // An excerpt is a part of a message the user chose. Re-reading the message
+      // would replace that part with the whole; the refresh asks whether the
+      // message still says what was selected instead.
+      const { excerpt } = sel
+      if (excerpt) {
+        try {
+          const outcome = await refreshMessageExcerpt({ ...sel, excerpt })
+          if (outcome.kind === "current") replace(index, outcome.selection, composerSessionId)
+          else if (outcome.kind === "changed") toast.error(t("selectionExcerptChanged"))
+          else toast.error(t("selectionRefreshUnavailable", { title: sel.title }))
+        } catch {
+          toast.error(t("selectionRefreshUnavailable", { title: sel.title }))
+        }
+        return
+      }
       const source = getEntityMentionSource(sel.entityKind)
       if (!source) return
       const candidate = {
@@ -248,6 +264,21 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
           title: sel.title,
         })
       case "entity": {
+        // What was selected, and what the body is: the selection itself or text
+        // generated from it. A chip that just said "message" would hide both.
+        if (sel.excerpt) {
+          const across = sel.members && sel.members.length > 1 ? sel.members.length : 0
+          return across
+            ? t("selectionChipExcerptAcrossLabel", {
+                derivation: sel.excerpt.derivation,
+                title: sel.title,
+                count: across,
+              })
+            : t("selectionChipExcerptLabel", {
+                derivation: sel.excerpt.derivation,
+                title: sel.title,
+              })
+        }
         // A widened `@msg:` reference is no longer "a message" — it carries the
         // turns around it, and a chip that still said "message" would understate
         // what is about to be sent.
@@ -289,9 +320,11 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
         // Recorded on the selection by the freshness pass above, not computed
         // here: the check is asynchronous and this render is not.
         const isStale = sel.kind === "entity" && Boolean(sel.stale)
+        // An excerpt is text inside a message, and a span counts whole turns.
         const canWiden =
           sel.kind === "entity" &&
           sel.entityKind === "message" &&
+          !sel.excerpt &&
           (sel.span?.before ?? 0) < MAX_MESSAGE_SPAN
         return (
           <div

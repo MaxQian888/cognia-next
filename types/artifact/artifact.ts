@@ -269,6 +269,38 @@ export interface EntitySelectionRef extends ContextSelectionBase {
    * member) means the ordinary single-record reference.
    */
   members?: EntityReferenceMember[]
+  /**
+   * The reference is PART of the record, not the whole of it — text selected
+   * inside a message — or text the app generated from that part.
+   *
+   * Changes three things about the chip: it cannot be widened (a span is a count
+   * of whole turns), a refresh re-locates the selected text instead of re-reading
+   * the record, and the prompt heading says what the body is. Absent means the
+   * snapshot is the record as its source reads it.
+   */
+  excerpt?: EntityExcerpt
+}
+
+/**
+ * How an excerpt's snapshot relates to the text the user selected.
+ *
+ * `quote` is the selection verbatim. The other three are what the app generated
+ * from it (the selection capsule's summarize / explain / translate), which the
+ * prompt must not present as something the conversation said.
+ */
+export type EntityExcerptDerivation = "quote" | "summary" | "explanation" | "translation"
+
+export interface EntityExcerpt {
+  derivation: EntityExcerptDerivation
+  /**
+   * The text the user selected, as they selected it — for a derived excerpt,
+   * what it was generated from. Kept apart from the snapshot, which is clamped
+   * and wrapped for the prompt, so a refresh can check the source still says it
+   * and so two selections inside one message stay two chips.
+   */
+  quote: string
+  /** The target language of a `translation`, as a BCP 47 tag. */
+  language?: string
 }
 
 /** One record folded into a combined {@link EntitySelectionRef}. */

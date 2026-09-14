@@ -2027,7 +2027,41 @@
   },
   "selection": {
     "askError": "无法为这段内容开旁支。",
-    "askInAside": "开旁支追问"
+    "askInAside": "开旁支追问",
+    "chooseLanguage": "翻译语言",
+    "explain": "解释",
+    "reference": "引用",
+    "referenceError": "无法引用这段选中内容。",
+    "referenced": "已加入输入框：“{title}”",
+    "result": {
+      "close": "关闭",
+      "combining": "正在合并 {total} 个部分…",
+      "copied": "已复制",
+      "copy": "复制",
+      "failed": "未能完成：{reason}",
+      "part": "第 {done} / {total} 部分",
+      "reference": "引用到对话",
+      "retry": "重试",
+      "source": "来自你选中的内容：“{title}”",
+      "stop": "停止",
+      "stopped": "已停止，已生成的内容保留。",
+      "title": {
+        "explain": "解释",
+        "summarize": "总结",
+        "translate": "译为{language}"
+      },
+      "unavailable": {
+        "empty": "选中的内容里没有可读的文字。",
+        "noClient": "此处没有可用的模型。请添加服务商密钥，或与桌面端配对。",
+        "noOutput": "模型没有返回内容。",
+        "pii": "选中内容似乎包含个人或机密信息，未发送。"
+      },
+      "working": "处理中…"
+    },
+    "summarize": "总结",
+    "toolbarLabel": "选中文本的操作",
+    "translate": "翻译",
+    "translateInto": "译为{language}"
   },
   "sessionCommunication": {
     "acceptHeld": "接受",

@@ -26,7 +26,7 @@
  */
 
 import type { ChatSession } from "@cognia/agent-config-types"
-import type { LlmClient } from "@/lib/twin/distill/llm"
+import type { LlmClient, LlmClientCallOptions } from "@/lib/twin/distill/llm"
 import { isTauri } from "@/lib/tauri"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { resolveSendOptions } from "@/lib/claude/build-options"
@@ -60,11 +60,76 @@ function mintTurnId(): string {
 }
 
 /**
+ * Turn a running total into deltas.
+ *
+ * The capture reports the reply's accumulated text, not what changed, and an
+ * `LlmClient.stream` yields deltas — so each report yields only the part past
+ * what was already yielded. A report that is not an extension of it (a chat
+ * middleware rewrote the text mid-stream) cannot be expressed as a delta and is
+ * skipped; the settled reply is reconciled the same way at the end.
+ */
+export async function* deltasFromRunningTotal(
+  start: (onTotal: (text: string) => void) => Promise<string>
+): AsyncGenerator<string> {
+  let yielded = ""
+  let pending = ""
+  let settled = false
+  let failure: { error: unknown } | null = null
+  let finalText = ""
+  let wake: (() => void) | null = null
+  const notify = () => {
+    const resume = wake
+    wake = null
+    resume?.()
+  }
+
+  const onTotal = (text: string) => {
+    const seen = yielded + pending
+    if (text.length <= seen.length || !text.startsWith(seen)) return
+    pending += text.slice(seen.length)
+    notify()
+  }
+  const run = start(onTotal).then(
+    (text) => {
+      finalText = text
+    },
+    (error: unknown) => {
+      failure = { error }
+    }
+  )
+  void run.finally(() => {
+    settled = true
+    notify()
+  })
+
+  while (true) {
+    if (pending) {
+      const next = pending
+      pending = ""
+      yielded += next
+      yield next
+      continue
+    }
+    if (settled) break
+    await new Promise<void>((resolve) => {
+      wake = resolve
+    })
+  }
+  await run
+  if (failure) throw (failure as { error: unknown }).error
+  if (finalText.length > yielded.length && finalText.startsWith(yielded)) {
+    yield finalText.slice(yielded.length)
+  }
+}
+
+/**
  * Build the fallback client, or `null` when no transport can carry a turn.
  *
- * `stream` / `getUsageSnapshot` are intentionally not implemented: the capture
- * wrapper resolves with the whole reply, and usage is already attributed to the
- * turn by the normal execution path.
+ * `getUsageSnapshot` is intentionally not implemented: usage is already
+ * attributed to the turn by the normal execution path. `stream` rides the
+ * capture's running-total callback, so a caller that shows the reply as it
+ * grows (the transcript selection capsule) does not sit on a spinner for the
+ * whole turn on a subscription install.
  */
 export function buildHeadlessTurnLlmClient({
   session,
@@ -72,48 +137,57 @@ export function buildHeadlessTurnLlmClient({
 }: BuildHeadlessTurnClientArgs): LlmClient | null {
   if (!canRunHeadlessTurn()) return null
 
-  return {
-    async complete(prompt, options) {
-      const turnSessionId = mintTurnId()
-      // The full resolver, then a clamp — same order as every other
-      // programmatic turn in the app. It is what picks the provider, the
-      // runtime and the credentials; skipping it would mean re-deriving that
-      // chain here and drifting from it.
-      const {
-        // A rewrite is not the assistant answering: `system` fully REPLACES the
-        // SDK prompt, and the two fields are mutually exclusive, so the
-        // resolver's append has to come off with it.
-        appendSystemPrompt: _appendedByResolver,
-        ...base
-      } = await resolveSendOptions({
-        session: {
-          id: turnSessionId,
-          ...(session?.model ? { model: session.model } : {}),
-          ...(session?.providerOverride ? { providerOverride: session.providerOverride } : {}),
-        } as unknown as ChatSession,
-        appSettings: useSettingsStore.getState().settings,
-      })
+  const runTurn = async (
+    prompt: string,
+    options: LlmClientCallOptions | undefined,
+    onPartial?: (accumulatedText: string) => void
+  ): Promise<string> => {
+    const turnSessionId = mintTurnId()
+    // The full resolver, then a clamp — same order as every other
+    // programmatic turn in the app. It is what picks the provider, the
+    // runtime and the credentials; skipping it would mean re-deriving that
+    // chain here and drifting from it.
+    const {
+      // A rewrite is not the assistant answering: `system` fully REPLACES the
+      // SDK prompt, and the two fields are mutually exclusive, so the
+      // resolver's append has to come off with it.
+      appendSystemPrompt: _appendedByResolver,
+      ...base
+    } = await resolveSendOptions({
+      session: {
+        id: turnSessionId,
+        ...(session?.model ? { model: session.model } : {}),
+        ...(session?.providerOverride ? { providerOverride: session.providerOverride } : {}),
+      } as unknown as ChatSession,
+      appSettings: useSettingsStore.getState().settings,
+    })
 
-      const result = await runAndCaptureAssistantReply(
-        turnSessionId,
-        prompt,
-        {
-          ...base,
-          ...(options?.system ? { systemPrompt: options.system } : {}),
-          // One shot, no tools, no MCP: the caller wants text back, and an
-          // agent that can reach for Read/Bash here would be answering the
-          // draft instead of rewriting it.
-          toolSurface: "none",
-          allowedTools: [],
-          mcpServers: {},
-          maxTurns: 1,
-        },
-        {
-          execution: { kind: "subagent", label },
-          ...(options?.abortSignal ? { signal: options.abortSignal } : {}),
-        }
-      )
-      return result.text
-    },
+    const result = await runAndCaptureAssistantReply(
+      turnSessionId,
+      prompt,
+      {
+        ...base,
+        ...(options?.system ? { systemPrompt: options.system } : {}),
+        // One shot, no tools, no MCP: the caller wants text back, and an
+        // agent that can reach for Read/Bash here would be answering the
+        // draft instead of rewriting it.
+        toolSurface: "none",
+        allowedTools: [],
+        mcpServers: {},
+        maxTurns: 1,
+      },
+      {
+        execution: { kind: "subagent", label },
+        ...(options?.abortSignal ? { signal: options.abortSignal } : {}),
+        ...(onPartial ? { onPartial } : {}),
+      }
+    )
+    return result.text
+  }
+
+  return {
+    complete: (prompt, options) => runTurn(prompt, options),
+    stream: (prompt, options) =>
+      deltasFromRunningTotal((onTotal) => runTurn(prompt, options, onTotal)),
   }
 }

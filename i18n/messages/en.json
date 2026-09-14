@@ -4002,6 +4002,8 @@
       "removeSelectionAria": "Remove selection {title}",
       "selectionChipCommentLabel": "{title} · comment",
       "selectionChipEntityLabel": "{kind}: {title}",
+      "selectionChipExcerptAcrossLabel": "{derivation, select, summary {Summary} explanation {Explanation} translation {Translation} other {Quote}}: {title} · {count} messages",
+      "selectionChipExcerptLabel": "{derivation, select, summary {Summary} explanation {Explanation} translation {Translation} other {Quote}}: {title}",
       "selectionChipExternalAppLabel": "{app}",
       "selectionChipExternalLabel": "{app} · {title}",
       "selectionChipExternalTruncatedLabel": "{app} · {title} · truncated",
@@ -4012,6 +4014,7 @@
       "selectionChipWebLabel": "{title} · page",
       "selectionChipWholeLabel": "{title} · whole artifact",
       "selectionCommentPlaceholder": "What should change here?",
+      "selectionExcerptChanged": "That message no longer says what you selected, so the existing copy was kept.",
       "selectionRefreshUnavailable": "“{title}” could not be re-read, so the existing copy was kept.",
       "selectionSpanUnavailable": "That message is no longer available, so the reference was left as it was.",
       "selectionStaleHint": "The record changed after this copy was taken. It will be sent as a snapshot unless you refresh it.",
@@ -7869,7 +7872,41 @@
     },
     "selection": {
       "askError": "Couldn't open an aside for that.",
-      "askInAside": "Ask in an aside"
+      "askInAside": "Ask in an aside",
+      "chooseLanguage": "Translation language",
+      "explain": "Explain",
+      "reference": "Reference",
+      "referenceError": "Couldn't reference that selection.",
+      "referenced": "Added to the composer: “{title}”",
+      "result": {
+        "close": "Close",
+        "combining": "Combining {total} parts…",
+        "copied": "Copied",
+        "copy": "Copy",
+        "failed": "Couldn't finish: {reason}",
+        "part": "Part {done} of {total}",
+        "reference": "Reference in chat",
+        "retry": "Try again",
+        "source": "From your selection: “{title}”",
+        "stop": "Stop",
+        "stopped": "Stopped. What arrived is kept.",
+        "title": {
+          "explain": "Explanation",
+          "summarize": "Summary",
+          "translate": "Translation into {language}"
+        },
+        "unavailable": {
+          "empty": "There's no readable text in the selection.",
+          "noClient": "No model can run here. Add a provider key, or pair with a desktop.",
+          "noOutput": "The model returned nothing.",
+          "pii": "The selection looks like it contains personal or secret information, so nothing was sent."
+        },
+        "working": "Working…"
+      },
+      "summarize": "Summarize",
+      "toolbarLabel": "Actions for the selected text",
+      "translate": "Translate",
+      "translateInto": "Translate into {language}"
     },
     "sessionCommunication": {
       "acceptHeld": "Accept",
