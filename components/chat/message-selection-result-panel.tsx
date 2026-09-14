@@ -34,6 +34,12 @@ export interface MessageSelectionResultPanelProps {
   run: ActiveRun
   /** The translation target, localized, for the title. */
   languageLabel?: string
+  /**
+   * The line naming what the run was made from, when that is not a text
+   * selection — "From 3 selected messages". Defaults to quoting the selection's
+   * opening words, which a count must not be dressed up as.
+   */
+  sourceLabel?: string
   onStop: () => void
   onRetry: () => void
   onClose: () => void
@@ -56,6 +62,7 @@ function textOf(run: ActiveRun): string {
 export function MessageSelectionResultPanel({
   run,
   languageLabel,
+  sourceLabel,
   onStop,
   onRetry,
   onClose,
@@ -86,7 +93,7 @@ export function MessageSelectionResultPanel({
         <div className="min-w-0">
           <p className="text-sm font-medium">{title}</p>
           <p className="truncate text-[11px] text-muted-foreground">
-            {t("source", { title: selectionTitleFor(run.request.quote) })}
+            {sourceLabel ?? t("source", { title: selectionTitleFor(run.request.quote) })}
           </p>
         </div>
         <Button

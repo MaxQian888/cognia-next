@@ -15,6 +15,7 @@ export type MessageActionCommandId =
   | "rerunTemplate"
   | "saveAsMemory"
   | "saveAsIssue"
+  | "select"
   | "delete"
 
 export interface MessageActionCommandContext {
@@ -42,6 +43,16 @@ export interface MessageActionCommandContext {
    * reply found that still has to be done is the thing with no path.
    */
   canSaveAsIssue?: boolean
+  /**
+   * The transcript this turn sits in can enter selection mode: tick several
+   * messages, then reference, summarize, copy or save them together.
+   *
+   * A capability the SURFACE supplies, not the message: only a surface that
+   * mounts the selection mode passes it. The desktop transcript does; the
+   * mobile long-press sheet does not yet, and without the flag it offers no
+   * "Select" row that would open nothing.
+   */
+  canSelect?: boolean
   canDelete?: boolean
   streaming?: boolean
 }
@@ -93,6 +104,10 @@ export function resolveMessageActionCommands(
   if (context.role === "assistant" && context.canSaveAsIssue && context.hasContent) {
     commands.push({ id: "saveAsIssue", disabled: context.streaming })
   }
+  // Content is not required: a turn that is only tool calls still carries the
+  // output a combined reference exists to hand over. A session is — every bulk
+  // action stages into, or files under, the conversation.
+  if (context.hasSession && context.canSelect) commands.push({ id: "select" })
   if (context.canDelete) commands.push({ id: "delete", destructive: true })
   return commands
 }

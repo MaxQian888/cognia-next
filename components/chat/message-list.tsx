@@ -37,6 +37,14 @@ import { firstUnreadMessageId } from "@/lib/chat/unread-marker"
 import { useUnreadMarker } from "@/stores/chat/unread-marker-store"
 import { ConversationJumpPill, resolveJumpPillMode } from "./conversation-jump-pill"
 import { MessageSelectionToolbar } from "./message-selection-toolbar"
+import { TranscriptSelectionBar } from "./transcript-selection-bar"
+import { Checkbox } from "@/components/ui/checkbox"
+import {
+  TranscriptSelectionHostContext,
+  useTranscriptSelection,
+  type TranscriptSelectionHost,
+} from "@/hooks/chat/use-transcript-selection"
+import { selectedInTranscriptOrder } from "@/lib/chat/selection/transcript-selection"
 import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
 import { usePlatform } from "@/hooks/use-platform"
 import { useElementWidth } from "@/hooks/use-element-width"
@@ -148,6 +156,7 @@ export function MessageList({
   const paneWidth = useElementWidth(paneRef)
   const tActions = useTranslations("mobile.messageActions")
   const tJump = useTranslations("chat.jump")
+  const tSelect = useTranslations("chat.transcriptSelection")
   // Long-press opens the action sheet on mobile, but there's no hover hint to
   // advertise it. Surface a one-line nudge early in the conversation; it
   // self-retires once the thread grows past a couple of messages, so it never
@@ -309,6 +318,97 @@ export function MessageList({
       : -1
   const hasLiveTail = liveTailIndex >= 0
   const liveTailMessage = hasLiveTail ? messages[liveTailIndex] : null
+
+  // ── Selection mode ──────────────────────────────────────────────────────
+  // Every row that is a message someone sent, in transcript order. Markers
+  // (compaction, notices) are not messages, and the reply still being written
+  // is not finished enough to reference. Keyed on a joined signature so the
+  // array keeps its identity across the many renders a stream causes.
+  const selectableKey = messages
+    .filter(
+      (m, index) =>
+        index !== liveTailIndex &&
+        !isCompactBoundaryMessage(m) &&
+        !isSessionNoticeMessage(m) &&
+        !isHookNoticeMessage(m)
+    )
+    .map((m) => m.id)
+    .join("\n")
+  const selectableIds = useMemo(
+    () => (selectableKey ? selectableKey.split("\n") : []),
+    [selectableKey]
+  )
+  const selection = useTranscriptSelection({ sessionId: selectionSessionId, selectableIds })
+  const selectedMessages = useMemo(
+    () => (selection.active ? selectedInTranscriptOrder(messages, selection.selected) : []),
+    [messages, selection.active, selection.selected]
+  )
+  // One identity for the life of the list: every message row reads it, and a
+  // value that followed the transcript would re-render all of them per frame.
+  const selectionStartRef = useRef(selection.start)
+  useEffect(() => {
+    selectionStartRef.current = selection.start
+  }, [selection.start])
+  const selectionHost = useMemo<TranscriptSelectionHost>(
+    () => ({ start: (messageId) => selectionStartRef.current(messageId) }),
+    []
+  )
+  const { active: selecting, isSelectable, toggle: toggleSelected } = selection
+  // In the mode, a click on a message ticks it — unless it landed on something
+  // that has its own job (a link, a button, a field) or ended a text selection,
+  // which the transcript's selection capsule is there to act on.
+  const handleRowClick = useCallback(
+    (event: React.MouseEvent<HTMLElement>) => {
+      if (!selecting || event.defaultPrevented) return
+      const id = event.currentTarget.dataset.msgId
+      if (!id || !isSelectable(id)) return
+      if ((event.target as HTMLElement).closest?.(ROW_INTERACTIVE_SELECTOR)) return
+      const textSelection = window.getSelection?.()
+      if (
+        textSelection &&
+        !textSelection.isCollapsed &&
+        event.currentTarget.contains(textSelection.anchorNode)
+      ) {
+        return
+      }
+      toggleSelected(id, { shiftKey: event.shiftKey })
+    },
+    [isSelectable, selecting, toggleSelected]
+  )
+  // Shift-click extends the tick range; without this it also drags a text
+  // selection from wherever the caret was.
+  const handleRowMouseDown = useCallback(
+    (event: React.MouseEvent<HTMLElement>) => {
+      if (!selecting || !event.shiftKey) return
+      if ((event.target as HTMLElement).closest?.(ROW_INTERACTIVE_SELECTOR)) return
+      event.preventDefault()
+    },
+    [selecting]
+  )
+  const rowSelectionProps = (m: UIMessage) => {
+    const selectable = isSelectable(m.id)
+    const checked = selecting && selection.selected.has(m.id)
+    return {
+      rowClassName: cn(
+        "group/msgrow",
+        selecting && selectable && "cursor-pointer pl-10 sm:pl-10",
+        checked && "bg-primary/[0.06]"
+      ),
+      rowProps: {
+        onClick: handleRowClick,
+        onMouseDown: handleRowMouseDown,
+        "data-selected": selecting && selectable ? (checked ? "true" : "false") : undefined,
+      },
+      control: selectable ? (
+        <RowSelectControl
+          checked={checked}
+          active={selecting}
+          label={tSelect("selectMessage")}
+          onToggle={(shiftKey) => toggleSelected(m.id, { shiftKey })}
+        />
+      ) : null,
+    }
+  }
   /** Rows the virtualizer owns — everything except the live tail. */
   const virtualCount = messages.length - (hasLiveTail ? 1 : 0)
   // The tail region's rendered height. Read on demand (never on the render
@@ -567,7 +667,7 @@ export function MessageList({
       />
     )
 
-  return (
+  const view = (
     <PerfBoundary id="chat:list">
       {/* `@container/message-list` scopes the timeline's CSS gate to this pane.
           Safe as a container: the box is already `position: relative`, its
@@ -612,14 +712,17 @@ export function MessageList({
                 ref={contentRef}
                 className="mx-auto w-full max-w-[52rem] py-[calc(1.25rem*var(--density-spacing,1))] sm:py-[calc(1.75rem*var(--density-spacing,1))]"
                 data-slot="conversation-reading-column"
+                data-selecting={selecting ? "" : undefined}
               >
                 {virtualize ? (
                   <div style={{ height: totalSize, position: "relative" }}>
                     {virtualItems.map((virtualItem) => {
                       const m = messages[virtualItem.index]!
+                      const rowSelection = rowSelectionProps(m)
                       return (
                         <div
                           key={m.id}
+                          {...rowSelection.rowProps}
                           data-index={virtualItem.index}
                           // Same anchor attribute the document-flow branch emits.
                           // Without it, every DOM-path jump (and the timeline's
@@ -630,6 +733,7 @@ export function MessageList({
                           ref={rowVirtualizer.measureElement}
                           className={cn(
                             "px-3 sm:px-5",
+                            rowSelection.rowClassName,
                             m.id === activeHitId &&
                               "rounded-md ring-2 ring-primary/60 ring-offset-2 ring-offset-background"
                           )}
@@ -645,6 +749,7 @@ export function MessageList({
                           {m.id === flashId && (
                             <JumpFlash nonce={flashNonce} holdMs={flashHoldMs} />
                           )}
+                          {rowSelection.control}
                           {renderRow(m, false)}
                         </div>
                       )
@@ -659,9 +764,11 @@ export function MessageList({
                       // The live tail is already in document flow here, so this
                       // branch renders it in place; only the virtualized branch
                       // lifts it into the tail region below.
+                      const rowSelection = rowSelectionProps(m)
                       return (
                         <div
                           key={m.id}
+                          {...rowSelection.rowProps}
                           data-msg-id={m.id}
                           data-search-hit={m.id === activeHitId ? "" : undefined}
                           className={cn(
@@ -669,6 +776,7 @@ export function MessageList({
                             // The virtualized branch is already a containing block
                             // via its inline `position: absolute`.
                             "relative px-3 sm:px-5",
+                            rowSelection.rowClassName,
                             m.id === activeHitId &&
                               "rounded-md ring-2 ring-primary/60 ring-offset-2 ring-offset-background"
                           )}
@@ -677,6 +785,7 @@ export function MessageList({
                           {m.id === flashId && (
                             <JumpFlash nonce={flashNonce} holdMs={flashHoldMs} />
                           )}
+                          {rowSelection.control}
                           {renderRow(m, index === liveTailIndex)}
                         </div>
                       )
@@ -731,13 +840,30 @@ export function MessageList({
                 allowAside={selectionAllowsAside}
               />
             ) : null}
+            {/* Same foot of the pane as the jump pill, and it takes the pill's
+                place while it is up: a pane that is often half the window has
+                room for one floating control, not two. */}
+            {selecting && selectionSessionId ? (
+              <TranscriptSelectionBar
+                sessionId={selectionSessionId}
+                messages={selectedMessages}
+                selectableCount={selectableIds.length}
+                onSelectAll={selection.selectAll}
+                onClear={selection.clear}
+                onExit={selection.exit}
+              />
+            ) : null}
             {/* Outside the scroller on purpose — see ConversationJumpPill. */}
             <ConversationJumpPill
-              mode={resolveJumpPillMode({
-                atBottom: isAtBottom,
-                canReturn,
-                newMessageCount: newSinceScrollUp,
-              })}
+              mode={
+                selecting
+                  ? null
+                  : resolveJumpPillMode({
+                      atBottom: isAtBottom,
+                      canReturn,
+                      newMessageCount: newSinceScrollUp,
+                    })
+              }
               newMessageCount={newSinceScrollUp}
               onReturn={returnToPreviousPosition}
               onToBottom={scrollToBottom}
@@ -813,6 +939,66 @@ export function MessageList({
         ) : null}
       </div>
     </PerfBoundary>
+  )
+  // Every message row can open selection mode from its menu, so the host wraps
+  // the whole list rather than one branch of it.
+  return (
+    <TranscriptSelectionHostContext.Provider value={selectionHost}>
+      {view}
+    </TranscriptSelectionHostContext.Provider>
+  )
+}
+
+/**
+ * What a click in selection mode leaves alone: controls inside a message that
+ * have a job of their own.
+ */
+const ROW_INTERACTIVE_SELECTOR =
+  "a,button,input,textarea,select,summary,label,[role=button],[role=link],[role=menuitem],[role=checkbox],[contenteditable=true],[data-row-select]"
+
+/**
+ * The tick beside a message.
+ *
+ * Out of the mode it shows on hovering the message, as the way in; it is not a
+ * tab stop there, because forty invisible checkboxes between every message would
+ * be forty stops a keyboard user never asked for — the message menu's "Select"
+ * is their way in. On touch there is no hover, so it only appears in the mode.
+ */
+function RowSelectControl({
+  checked,
+  active,
+  label,
+  onToggle,
+}: {
+  checked: boolean
+  active: boolean
+  label: string
+  onToggle: (shiftKey: boolean) => void
+}) {
+  return (
+    <div
+      data-row-select=""
+      className={cn(
+        "absolute top-3 z-10 flex",
+        // In the mode the row makes room for it; on hover it sits in the row's
+        // own padding so nothing shifts under the pointer.
+        active
+          ? "left-3"
+          : "left-0.5 hidden opacity-0 transition-opacity group-hover/msgrow:opacity-100 focus-within:opacity-100 sm:flex [@media(hover:none)]:hidden"
+      )}
+    >
+      <Checkbox
+        checked={checked}
+        aria-label={label}
+        tabIndex={active ? 0 : -1}
+        data-testid="transcript-row-select"
+        className="bg-background"
+        onClick={(event) => {
+          event.stopPropagation()
+          onToggle(event.shiftKey)
+        }}
+      />
+    </div>
   )
 }
 

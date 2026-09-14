@@ -49,6 +49,11 @@ export interface SelectionRunRequest {
   context: string
   /** Translate only: the target language tag. */
   targetLocale?: string
+  /**
+   * Summarize only: the material already cut per message, when whole messages
+   * were selected, so a long summary is split between them.
+   */
+  segments?: readonly string[]
 }
 
 type Unavailable = Extract<SelectionActionOutcome, { kind: "unavailable" }>["reason"]
@@ -121,6 +126,7 @@ export function useSelectionActionRun() {
         const outcome = await runSelectionAction({
           action: request.action,
           text: request.quote,
+          ...(request.segments ? { segments: request.segments } : {}),
           context: storedContext ?? request.context,
           language: promptLanguageName(
             request.action === "translate" ? (request.targetLocale ?? locale) : locale

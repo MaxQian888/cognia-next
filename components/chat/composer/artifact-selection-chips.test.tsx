@@ -43,6 +43,16 @@ jest.mock("@/lib/chat/selection/message-excerpt", () => ({
   refreshMessageExcerpt: (selection: unknown) => refreshExcerptMock(selection),
 }))
 
+const rebuildSetMock = jest.fn()
+jest.mock("@/lib/chat/selection/message-set-reference", () => {
+  const actual = jest.requireActual("@/lib/chat/selection/message-set-reference")
+  return {
+    ...actual,
+    rebuildMessageSetReference: (selection: unknown, options: unknown) =>
+      rebuildSetMock(selection, options),
+  }
+})
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
     vars ? `${key}:${JSON.stringify(vars)}` : key,
@@ -675,5 +685,110 @@ describe("excerpt chips", () => {
         'selectionRefreshUnavailable:{"title":"Keep the cache warm."}'
       )
     )
+  })
+})
+
+describe("combined message chips", () => {
+  const members = [
+    { entityId: "s1#m1", title: "user: Why is CI red?" },
+    { entityId: "s1#m2", title: "assistant: Lint fails." },
+    { entityId: "s1#m3", title: "user: Fix it." },
+  ]
+  const setSel = (over = {}) => ({
+    kind: "entity" as const,
+    entityKind: "message" as const,
+    entityId: "s1#m1",
+    title: "user: Why is CI red?",
+    snapshot: "1. user — …",
+    comment: "compare",
+    capturedAt: 1_000,
+    fingerprint: "v1",
+    href: "/?session=s1&message=m1",
+    sourceSessionId: "s1",
+    members,
+    ...over,
+  })
+
+  beforeEach(() => {
+    refreshFreshnessMock.mockReset().mockResolvedValue({ selections: [], changed: false })
+    snapshotMock.mockReset().mockResolvedValue("only the first message")
+    rebuildSetMock.mockReset()
+    toastErrorMock.mockReset()
+  })
+
+  it("counts the messages and names the first, with no span control", () => {
+    act(() => useChatStore.getState().addContextSelection(setSel()))
+    render(<ArtifactSelectionChips />)
+    expect(screen.getByTestId("artifact-selection-chip")).toHaveTextContent(
+      'selectionChipMessagesLabel:{"count":3,"title":"user: Why is CI red?"}'
+    )
+    expect(screen.queryByTestId("context-selection-widen")).toBeNull()
+  })
+
+  it("lists its messages and takes one out by reading the rest again", async () => {
+    const rebuilt = setSel({ members: [members[0], members[2]], snapshot: "rebuilt" })
+    rebuildSetMock.mockResolvedValue(rebuilt)
+    act(() => useChatStore.getState().addContextSelection(setSel()))
+    render(<ArtifactSelectionChips />)
+
+    fireEvent.click(screen.getByTestId("context-selection-members"))
+    const list = await screen.findByTestId("context-selection-member-list")
+    expect(list).toHaveTextContent("assistant: Lint fails.")
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: 'selectionMemberRemoveAria:{"title":"assistant: Lint fails."}',
+      })
+    )
+
+    await waitFor(() =>
+      expect(useChatStore.getState().contextSelections[0]).toMatchObject({ snapshot: "rebuilt" })
+    )
+    expect(rebuildSetMock).toHaveBeenCalledWith(expect.objectContaining({ entityId: "s1#m1" }), {
+      without: "s1#m2",
+    })
+    expect(useChatStore.getState().contextSelections).toHaveLength(1)
+  })
+
+  it("removes the chip when nothing is left to reference", async () => {
+    rebuildSetMock.mockResolvedValue(null)
+    act(() => useChatStore.getState().addContextSelection(setSel()))
+    render(<ArtifactSelectionChips />)
+    fireEvent.click(screen.getByTestId("context-selection-members"))
+    await screen.findByTestId("context-selection-member-list")
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: 'selectionMemberRemoveAria:{"title":"user: Fix it."}',
+      })
+    )
+    await waitFor(() => expect(useChatStore.getState().contextSelections).toHaveLength(0))
+  })
+
+  // Through the message source it would read only the first message.
+  it("refreshes by reading every message again", async () => {
+    rebuildSetMock.mockResolvedValue(setSel({ fingerprint: "v2", snapshot: "fresh" }))
+    act(() => useChatStore.getState().addContextSelection(setSel({ stale: true })))
+    render(<ArtifactSelectionChips />)
+    fireEvent.click(screen.getByTestId("context-selection-refresh"))
+    await waitFor(() =>
+      expect(useChatStore.getState().contextSelections[0]).toMatchObject({
+        fingerprint: "v2",
+        snapshot: "fresh",
+      })
+    )
+    expect(rebuildSetMock).toHaveBeenCalledWith(expect.objectContaining({ members }), undefined)
+    expect(snapshotMock).not.toHaveBeenCalled()
+  })
+
+  it("says so when none of its messages can be read any more", async () => {
+    rebuildSetMock.mockResolvedValue(null)
+    act(() => useChatStore.getState().addContextSelection(setSel({ stale: true })))
+    render(<ArtifactSelectionChips />)
+    fireEvent.click(screen.getByTestId("context-selection-refresh"))
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        'selectionRefreshUnavailable:{"title":"user: Why is CI red?"}'
+      )
+    )
+    expect(useChatStore.getState().contextSelections[0]).toMatchObject({ stale: true })
   })
 })

@@ -126,6 +126,7 @@ import {
   MoreHorizontalIcon,
   QuoteIcon,
   ReplyIcon,
+  ListChecksIcon,
 } from "lucide-react"
 import { BookmarkIcon as AnimatedBookmarkIcon } from "@/components/ui/bookmark"
 import { CheckIcon as AnimatedCheckIcon } from "@/components/ui/check"
@@ -166,6 +167,7 @@ import { saveMessageAsIssue } from "@/lib/chat/save-message-as-issue"
 import { useRouter } from "next/navigation"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useAsideTarget } from "@/components/context-workbench/aside-target"
+import { useTranscriptSelectionHost } from "@/hooks/chat/use-transcript-selection"
 import { useLiveQuery } from "dexie-react-hooks"
 import { getSession } from "@/lib/db/sessions"
 import {
@@ -288,6 +290,9 @@ function MessageRendererInner({
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   // Non-null only inside a workbench sidechat — see `AsideTargetProvider`.
   const asideTargetSessionId = useAsideTarget()
+  // Non-null only inside a transcript that mounts selection mode; a read-only
+  // transcript renders this same row and offers no "Select".
+  const selectionHost = useTranscriptSelectionHost()
   const branchSessionId =
     (typeof (message as { metadata?: { sessionId?: unknown } }).metadata?.sessionId === "string"
       ? ((message as { metadata?: { sessionId?: string } }).metadata!.sessionId as string)
@@ -458,10 +463,12 @@ function MessageRendererInner({
         canRerunTemplate: Boolean(templateRun && branchSessionId),
         canSaveAsMemory: Boolean(branchSessionId),
         canSaveAsIssue: Boolean(branchSessionId),
+        canSelect: Boolean(selectionHost),
         streaming: isStreaming,
       }),
     [
       branchSessionId,
+      selectionHost,
       handBackTargetId,
       isLastAssistant,
       isStreaming,
@@ -1142,6 +1149,15 @@ function MessageRendererInner({
                       <AnimatedBookmarkIcon className="size-4" />
                       {isBookmarked ? t("bookmarkRemoveTooltip") : t("bookmarkTooltip")}
                     </DropdownMenuItem>
+                    {hasActionCommand("select") && selectionHost && (
+                      <DropdownMenuItem
+                        onSelect={() => selectionHost.start(message.id)}
+                        data-testid="message-select-menu"
+                      >
+                        <ListChecksIcon className="size-4" />
+                        {t("selectLabel")}
+                      </DropdownMenuItem>
+                    )}
                     {hasActionCommand("branch") && branchSessionId && (
                       <DropdownMenuItem
                         disabled={actionCommand("branch")?.disabled}
@@ -1284,6 +1300,17 @@ function MessageRendererInner({
                     className={isBookmarked ? "fill-current" : undefined}
                   />
                 </MessageAction>
+
+                {hasActionCommand("select") && selectionHost && (
+                  <MessageAction
+                    tooltip={t("selectLabel")}
+                    label={t("selectLabel")}
+                    onClick={() => selectionHost.start(message.id)}
+                    data-testid="message-select"
+                  >
+                    <ListChecksIcon className="size-3.5" />
+                  </MessageAction>
+                )}
 
                 {message.role === "user" && onEditResend && (
                   <MessageAction

@@ -27,6 +27,7 @@ import {
   messageRefId,
   parseMessageRefId,
   projectMessageBody,
+  REFERENCE_PREAMBLE_OMITTED_NOTE,
 } from "@/lib/chat/mentions/message-reference"
 import { messagePermalinkQuery } from "@/lib/chat/message-permalink"
 import { selectionTitleFor } from "./selection-text"
@@ -46,7 +47,7 @@ export interface MessageExcerptInput {
   capturedAt?: number
 }
 
-interface StoredMessage {
+export interface StoredMessageRow {
   id: string
   sessionId: string
   role: string
@@ -58,12 +59,16 @@ export function messageExcerptHref(sessionId: string, messageId: string): string
   return `/${messagePermalinkQuery({ sessionId, messageId })}`
 }
 
-async function loadMessages(
+/**
+ * The stored rows for `messageIds`, in the order asked, with null for one that is
+ * missing or belongs to another conversation.
+ */
+export async function loadSessionMessages(
   sessionId: string,
   messageIds: readonly string[]
-): Promise<(StoredMessage | null)[]> {
+): Promise<(StoredMessageRow | null)[]> {
   const { getDb } = await import("@/lib/db/schema")
-  const rows = (await getDb().messages.bulkGet([...messageIds])) as (StoredMessage | undefined)[]
+  const rows = (await getDb().messages.bulkGet([...messageIds])) as (StoredMessageRow | undefined)[]
   // A row that belongs to another conversation is not this selection's message,
   // whatever its id says.
   return rows.map((row) => (row && row.sessionId === sessionId ? row : null))
@@ -80,7 +85,7 @@ export async function loadMessageBodies(
   messageIds: readonly string[]
 ): Promise<string | null> {
   if (messageIds.length === 0) return null
-  const rows = await loadMessages(sessionId, messageIds)
+  const rows = await loadSessionMessages(sessionId, messageIds)
   const bodies = rows.flatMap((row) => {
     const body = row ? projectMessageBody(row.parts) : ""
     return body ? [body] : []
@@ -88,10 +93,17 @@ export async function loadMessageBodies(
   return bodies.length > 0 ? bodies.join("\n\n") : null
 }
 
-function memberTitle(row: StoredMessage | null, messageId: string): string {
+/** How one message of a combined reference is named in the chip's list. */
+export function messageMemberTitle(row: StoredMessageRow | null, messageId: string): string {
   if (!row) return messageId
+  // The body notes a context block it left out, and that note is for the model.
+  // Named by it, a short question sent with references reads "[This message was
+  // sent with…" in the chip instead of what was asked.
   const body = projectMessageBody(row.parts)
-  return body ? `${row.role}: ${selectionTitleFor(body, EXCERPT_MEMBER_TITLE_MAX)}` : row.role
+  const words = body.endsWith(REFERENCE_PREAMBLE_OMITTED_NOTE)
+    ? body.slice(0, -REFERENCE_PREAMBLE_OMITTED_NOTE.length).trim()
+    : body
+  return words ? `${row.role}: ${selectionTitleFor(words, EXCERPT_MEMBER_TITLE_MAX)}` : row.role
 }
 
 /**
@@ -102,7 +114,7 @@ function memberTitle(row: StoredMessage | null, messageId: string): string {
  * never made — so an incomplete read stores nothing, and the chip is simply
  * un-checkable.
  */
-function storableFingerprint(value: string | null | undefined): string | undefined {
+export function storableFingerprint(value: string | null | undefined): string | undefined {
   if (value == null) return undefined
   return value.split("\n").includes("∅") ? undefined : value
 }
@@ -120,14 +132,14 @@ export async function buildMessageExcerptSelection(
 
   const refIds = messageIds.map((id) => messageRefId(input.sessionId, id))
   const [rows, fingerprint] = await Promise.all([
-    messageIds.length > 1 ? loadMessages(input.sessionId, messageIds) : Promise.resolve([]),
+    messageIds.length > 1 ? loadSessionMessages(input.sessionId, messageIds) : Promise.resolve([]),
     fingerprintEntityRecords("message", refIds).catch(() => undefined),
   ])
   const members: EntityReferenceMember[] | undefined =
     messageIds.length > 1
       ? messageIds.map((id, index) => ({
           entityId: refIds[index]!,
-          title: memberTitle(rows[index] ?? null, id),
+          title: messageMemberTitle(rows[index] ?? null, id),
           href: messageExcerptHref(input.sessionId, id),
         }))
       : undefined
@@ -191,7 +203,7 @@ export async function refreshMessageExcerpt(
   const sessionId = parsed[0]!.sessionId
   if (parsed.some((ref) => ref.sessionId !== sessionId)) return { kind: "gone" }
 
-  const rows = await loadMessages(
+  const rows = await loadSessionMessages(
     sessionId,
     parsed.map((ref) => ref.messageId)
   )

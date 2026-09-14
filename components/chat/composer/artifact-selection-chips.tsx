@@ -25,6 +25,7 @@ import {
   FileDiff,
   FileCodeIcon,
   GlobeIcon,
+  ListIcon,
   MessageSquareIcon,
   PuzzleIcon,
   ScanTextIcon,
@@ -37,6 +38,7 @@ import {
 } from "@/stores/chat"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import {
   MAX_MESSAGE_SPAN,
@@ -52,6 +54,10 @@ import {
 import { refreshSelectionFreshness } from "@/lib/chat/mentions/selection-freshness"
 import { contextSelectionIdentity } from "@/lib/chat/mentions/selection-identity"
 import { refreshMessageExcerpt } from "@/lib/chat/selection/message-excerpt"
+import {
+  isMessageSetReference,
+  rebuildMessageSetReference,
+} from "@/lib/chat/selection/message-set-reference"
 import type { ContextSelectionRef } from "@/types/artifact/artifact"
 import { useComposerSessionId } from "./composer-session-context"
 
@@ -121,6 +127,18 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
   const refresh = useCallback(
     async (index: number, sel: ContextSelectionRef) => {
       if (sel.kind !== "entity") return
+      // Several whole messages: every one is read again. Refreshing through the
+      // message source would read only the first and quietly drop the rest.
+      if (isMessageSetReference(sel)) {
+        try {
+          const next = await rebuildMessageSetReference(sel)
+          if (next) replace(index, next, composerSessionId)
+          else toast.error(t("selectionRefreshUnavailable", { title: sel.title }))
+        } catch {
+          toast.error(t("selectionRefreshUnavailable", { title: sel.title }))
+        }
+        return
+      }
       // An excerpt is a part of a message the user chose. Re-reading the message
       // would replace that part with the whole; the refresh asks whether the
       // message still says what was selected instead.
@@ -183,6 +201,25 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
       }
     },
     [replace, composerSessionId, t]
+  )
+
+  /**
+   * Take one message out of a combined reference. The rest are read again rather
+   * than the body being patched, so what is sent is what is stored now; the chip
+   * goes when nothing is left.
+   */
+  const removeMember = useCallback(
+    async (index: number, sel: ContextSelectionRef, memberId: string) => {
+      if (sel.kind !== "entity") return
+      try {
+        const next = await rebuildMessageSetReference(sel, { without: memberId })
+        if (next) replace(index, next, composerSessionId)
+        else remove(index, composerSessionId)
+      } catch {
+        toast.error(t("selectionRefreshUnavailable", { title: sel.title }))
+      }
+    },
+    [remove, replace, composerSessionId, t]
   )
 
   const widen = useCallback(
@@ -279,6 +316,13 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
                 title: sel.title,
               })
         }
+        // Several whole messages, counted: the title is only the first one's.
+        if (isMessageSetReference(sel)) {
+          return t("selectionChipMessagesLabel", {
+            count: sel.members?.length ?? 0,
+            title: sel.title,
+          })
+        }
         // A widened `@msg:` reference is no longer "a message" — it carries the
         // turns around it, and a chip that still said "message" would understate
         // what is about to be sent.
@@ -321,10 +365,13 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
         // here: the check is asynchronous and this render is not.
         const isStale = sel.kind === "entity" && Boolean(sel.stale)
         // An excerpt is text inside a message, and a span counts whole turns.
+        // A combined reference has no one anchor to widen around.
+        const isMessageSet = isMessageSetReference(sel)
         const canWiden =
           sel.kind === "entity" &&
           sel.entityKind === "message" &&
           !sel.excerpt &&
+          !isMessageSet &&
           (sel.span?.before ?? 0) < MAX_MESSAGE_SPAN
         return (
           <div
@@ -366,6 +413,52 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
               >
                 <RefreshCwIcon className="size-3" />
               </Button>
+            ) : null}
+            {isMessageSet && sel.kind === "entity" ? (
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    data-testid="context-selection-members"
+                    aria-label={t("selectionMembersAria", { title: label })}
+                    title={t("selectionMembersHint")}
+                    className="size-5 opacity-60 transition-opacity hover:opacity-100"
+                  >
+                    <ListIcon className="size-3" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  side="top"
+                  align="start"
+                  className="w-[min(92vw,320px)] p-1"
+                  data-testid="context-selection-member-list"
+                >
+                  <ul className="max-h-64 overflow-y-auto">
+                    {(sel.members ?? []).map((member) => (
+                      <li
+                        key={member.entityId}
+                        className="flex items-center gap-1.5 rounded px-2 py-1 text-xs hover:bg-muted/60"
+                      >
+                        <span className="min-w-0 flex-1 truncate" title={member.title}>
+                          {member.title}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={t("selectionMemberRemoveAria", { title: member.title })}
+                          onClick={() => void removeMember(index, sel, member.entityId)}
+                          className="size-5 shrink-0 opacity-60 transition-opacity hover:opacity-100"
+                        >
+                          <XIcon className="size-3" />
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                </PopoverContent>
+              </Popover>
             ) : null}
             {canWiden ? (
               <Button

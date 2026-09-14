@@ -145,3 +145,29 @@ describe("saveAsMemory", () => {
     expect(command?.disabled).toBe(true)
   })
 })
+
+describe("select", () => {
+  const ids = (over: Partial<Parameters<typeof resolveMessageActionCommands>[0]> = {}) =>
+    resolveMessageActionCommands({
+      role: "assistant",
+      hasContent: true,
+      hasSession: true,
+      ...over,
+    }).map((c) => c.id)
+
+  it("is offered by a surface that mounts selection mode, on either role", () => {
+    expect(ids({ canSelect: true })).toContain("select")
+    expect(ids({ role: "user", canSelect: true })).toContain("select")
+  })
+
+  // The mobile sheet does not pass the capability, so it offers no row that
+  // would open nothing.
+  it("is absent without the capability", () => {
+    expect(ids()).not.toContain("select")
+  })
+
+  it("needs a conversation to act on, not words", () => {
+    expect(ids({ hasSession: false, canSelect: true })).not.toContain("select")
+    expect(ids({ hasContent: false, canSelect: true })).toContain("select")
+  })
+})

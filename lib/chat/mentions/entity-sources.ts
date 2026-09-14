@@ -296,8 +296,18 @@ const UNTRUSTED_ENTITY_KINDS: ReadonlySet<EntitySelectionKind> = new Set([
 ])
 
 export function entitySnapshotBody(kind: EntitySelectionKind, text: string): string {
-  const clamped = clampEntitySnapshot(text)
-  return UNTRUSTED_ENTITY_KINDS.has(kind) ? wrapUntrustedRecord(clamped) : clamped
+  return wrapEntitySnapshot(kind, clampEntitySnapshot(text))
+}
+
+/**
+ * The untrusted-content wrapper for `kind`, without the clamp.
+ *
+ * For a body assembled from several records that were each clamped already: a
+ * combined reference to twelve messages is twelve records, and clamping their
+ * sum to one record's allowance would cut all but the first few away.
+ */
+export function wrapEntitySnapshot(kind: EntitySelectionKind, text: string): string {
+  return UNTRUSTED_ENTITY_KINDS.has(kind) ? wrapUntrustedRecord(text) : text
 }
 
 /** Build the staged selection for a picked candidate. */

@@ -3,7 +3,11 @@ jest.mock("@/lib/memory/agent-findings", () => ({
   submitAgentMemoryFinding: (finding: unknown) => submitMock(finding),
 }))
 
-import { memoryDraftTitle, saveMessageAsMemory } from "./save-message-as-memory"
+import {
+  memoryDraftTitle,
+  saveMessageAsMemory,
+  saveMessagesAsMemory,
+} from "./save-message-as-memory"
 
 const text = (value: string) => [{ type: "text", text: value }]
 
@@ -91,5 +95,82 @@ describe("saveMessageAsMemory", () => {
     await expect(saveMessageAsMemory({ parts: text("x"), sessionId: "s1" })).rejects.toThrow(
       "contains an email address"
     )
+  })
+})
+
+describe("saveMessagesAsMemory", () => {
+  it("files the ticked messages as ONE draft, each passage under who said it", async () => {
+    const title = await saveMessagesAsMemory({
+      messages: [
+        { role: "user", parts: text("Why does restacking drop commits?") },
+        { role: "assistant", parts: text("It needs --contained.") },
+      ],
+      sessionId: "s1",
+      projectId: "p1",
+    })
+    expect(title).toBe("Why does restacking drop commits?")
+    expect(submitMock).toHaveBeenCalledTimes(1)
+    expect(submitMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: "user: Why does restacking drop commits?\n\nassistant: It needs --contained.",
+        kind: "fact",
+        authorKind: "subagent",
+        sessionId: "s1",
+        projectId: "p1",
+      })
+    )
+  })
+
+  it("skips a message with nothing to keep, and files nothing when none has", async () => {
+    await saveMessagesAsMemory({
+      messages: [
+        { role: "assistant", parts: [] },
+        { role: "user", parts: text("only this") },
+      ],
+      sessionId: "s1",
+    })
+    expect(submitMock.mock.calls[0]![0].body).toBe("user: only this")
+
+    submitMock.mockClear()
+    expect(
+      await saveMessagesAsMemory({ messages: [{ role: "user", parts: [] }], sessionId: "s1" })
+    ).toBeNull()
+    expect(submitMock).not.toHaveBeenCalled()
+  })
+
+  // In an IM group a `user` row is another person.
+  it("names someone else by their prompt-safe name and files the draft as untrusted", async () => {
+    await saveMessagesAsMemory({
+      messages: [
+        {
+          role: "user",
+          parts: text("The deploy key rotates on Fridays."),
+          metadata: {
+            platformMessage: { sender: { id: "u_42", kind: "user", displayName: "Ana" } },
+          },
+        },
+        { role: "assistant", parts: text("Noted.") },
+      ],
+      sessionId: "s1",
+    })
+    const finding = submitMock.mock.calls[0]![0]
+    expect(finding.body).toMatch(/^Ana · \S+: The deploy key rotates on Fridays\./)
+    expect(finding.body).toContain("assistant: Noted.")
+    expect(finding.authorKind).toBe("external_agent")
+  })
+
+  it("keeps a named teammate's turn trusted", async () => {
+    await saveMessagesAsMemory({
+      messages: [{ role: "assistant", parts: text("Reviewed."), metadata: { senderId: "c-rev" } }],
+      sessionId: "s1",
+    })
+    expect(submitMock.mock.calls[0]![0].authorKind).toBe("subagent")
+  })
+
+  it("propagates a refusal from the distiller", async () => {
+    submitMock.mockRejectedValue(new Error("contains a phone number"))
+    await expect(
+      saveMessagesAsMemory({ messages: [{ role: "user", parts: text("x") }], sessionId: "s1" })
+    ).rejects.toThrow("contains a phone number")
   })
 })

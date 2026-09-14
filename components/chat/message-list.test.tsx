@@ -35,6 +35,14 @@ const measureSpy = jest.fn()
 const scrollToIndexSpy = jest.fn()
 const messageRendererProps: Array<Record<string, unknown>> = []
 const messageActionSheetProps: Array<Record<string, unknown>> = []
+// The selection host each rendered message read — what its "Select" menu item
+// would call.
+const selectionHosts: Array<{ start: (id: string) => void } | null> = []
+const selectionBarProps: Array<{
+  messages: { id: string }[]
+  selectableCount: number
+  onExit: () => void
+}> = []
 // One identity for the lifetime of the suite, mutated in place. The real
 // `useVirtualizer` hands back a stable instance; a fresh object per render would
 // re-run every effect that lists the virtualizer as a dependency, and the
@@ -104,6 +112,10 @@ jest.mock("./message-renderer", () => {
       messageDisplay?: unknown
     }) => {
       messageRendererProps.push(props)
+      selectionHosts.push(
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require("@/hooks/chat/use-transcript-selection").useTranscriptSelectionHost()
+      )
       return ReactForMocks.createElement(
         "div",
         { "data-test": `msg-${props.message.id}`, "data-project-root": props.projectRoot },
@@ -114,6 +126,22 @@ jest.mock("./message-renderer", () => {
     },
   }
 })
+
+// The bar has its own suite; here only what the list hands it.
+jest.mock("./transcript-selection-bar", () => ({
+  TranscriptSelectionBar: (props: {
+    messages: { id: string }[]
+    selectableCount: number
+    onExit: () => void
+  }) => {
+    selectionBarProps.push(props)
+    return ReactForMocks.createElement(
+      "div",
+      { "data-test": "selection-bar", "data-count": props.messages.length },
+      ReactForMocks.createElement("button", { "data-test": "bar-exit", onClick: props.onExit })
+    )
+  },
+}))
 
 jest.mock("@/hooks/use-platform", () => ({
   usePlatform: jest.fn(() => "desktop"),
@@ -2109,5 +2137,160 @@ describe("MessageList — a paused turn is still the streaming row", () => {
     )
     // Rendered through the virtualized branch, and still anchored.
     expect(container.querySelector('[data-msg-id="a-paused"]')).not.toBeNull()
+  })
+})
+
+describe("MessageList — selection mode", () => {
+  const assistantMsg = (id: string, text: string, sessionId?: string): UIMessage =>
+    ({
+      id,
+      role: "assistant",
+      parts: [{ type: "text", text }],
+      ...(sessionId ? { metadata: { sessionId } } : {}),
+    }) as UIMessage
+  const inSession = (message: UIMessage, sessionId: string): UIMessage =>
+    ({ ...message, metadata: { sessionId } }) as UIMessage
+  const compactMarker = {
+    id: "cb",
+    role: "system",
+    parts: [{ type: "compact-boundary" }],
+  } as unknown as UIMessage
+
+  const Wrapper = withAdapter(makeAdapter())
+  const row = (id: string) => document.querySelector<HTMLElement>(`[data-msg-id="${id}"]`)!
+  const tick = (id: string) =>
+    row(id)?.querySelector<HTMLElement>('[data-testid="transcript-row-select"]') ?? null
+  const bar = () => document.querySelector("[data-test='selection-bar']")
+
+  beforeEach(() => {
+    selectionHosts.length = 0
+    selectionBarProps.length = 0
+  })
+
+  const MESSAGES = [userMsg("m1", "q"), compactMarker, assistantMsg("m2", "a"), userMsg("m3", "q2")]
+
+  it("offers a tick on every message but not on a marker, out of the tab order until the mode is on", () => {
+    render(
+      <Wrapper>
+        <MessageList messages={MESSAGES} status="idle" />
+      </Wrapper>
+    )
+    expect(tick("m1")).toHaveAttribute("tabindex", "-1")
+    expect(tick("m2")).not.toBeNull()
+    expect(tick("cb")).toBeNull()
+    expect(bar()).toBeNull()
+  })
+
+  it("opens the mode from a tick, and the bar takes the jump pill's place", () => {
+    render(
+      <Wrapper>
+        <MessageList messages={MESSAGES} status="idle" />
+      </Wrapper>
+    )
+    fireEvent.click(tick("m1")!)
+    expect(bar()).toHaveAttribute("data-count", "1")
+    expect(row("m1")).toHaveAttribute("data-selected", "true")
+    expect(row("m2")).toHaveAttribute("data-selected", "false")
+    expect(tick("m1")).toHaveAttribute("tabindex", "0")
+    expect(screen.queryByTestId("conversation-jump-pill")).toBeNull()
+  })
+
+  it("ticks a message clicked in the mode, but not through a control inside it", () => {
+    render(
+      <Wrapper>
+        <MessageList messages={MESSAGES} status="idle" />
+      </Wrapper>
+    )
+    // Out of the mode a click on a message is just a click.
+    fireEvent.click(row("m2"))
+    expect(bar()).toBeNull()
+
+    fireEvent.click(tick("m1")!)
+    fireEvent.click(row("m2"))
+    expect(bar()).toHaveAttribute("data-count", "2")
+
+    const control = document.createElement("button")
+    row("m3").appendChild(control)
+    fireEvent.click(control)
+    expect(bar()).toHaveAttribute("data-count", "2")
+    expect(row("m3")).toHaveAttribute("data-selected", "false")
+  })
+
+  it("extends a range with Shift", () => {
+    render(
+      <Wrapper>
+        <MessageList messages={MESSAGES} status="idle" />
+      </Wrapper>
+    )
+    fireEvent.click(tick("m1")!)
+    fireEvent.click(row("m3"), { shiftKey: true })
+    expect(selectionBarProps.at(-1)!.messages.map((m) => m.id)).toEqual(["m1", "m2", "m3"])
+  })
+
+  it("hands the bar the ticked messages in transcript order, and ends the mode from it", () => {
+    render(
+      <Wrapper>
+        <MessageList messages={MESSAGES} status="idle" />
+      </Wrapper>
+    )
+    fireEvent.click(tick("m3")!)
+    fireEvent.click(tick("m1")!)
+    const props = selectionBarProps.at(-1)!
+    expect(props.messages.map((m) => m.id)).toEqual(["m1", "m3"])
+    expect(props.selectableCount).toBe(3)
+    fireEvent.click(document.querySelector("[data-test='bar-exit']")!)
+    expect(bar()).toBeNull()
+    expect(row("m1")).not.toHaveAttribute("data-selected")
+  })
+
+  it("opens the mode from a message's menu, through the host every row reads", () => {
+    const { rerender } = render(
+      <Wrapper>
+        <MessageList messages={MESSAGES} status="idle" />
+      </Wrapper>
+    )
+    const host = selectionHosts.at(-1)!
+    expect(host).not.toBeNull()
+    act(() => host.start("m2"))
+    expect(bar()).toHaveAttribute("data-count", "1")
+    expect(row("m2")).toHaveAttribute("data-selected", "true")
+
+    // One identity for the life of the list, however the transcript changes —
+    // a new one per frame would re-render every row while a reply streams.
+    rerender(
+      <Wrapper>
+        <MessageList messages={[...MESSAGES, userMsg("m4", "more")]} status="idle" />
+      </Wrapper>
+    )
+    expect(new Set(selectionHosts).size).toBe(1)
+  })
+
+  it("does not offer the reply still being written", () => {
+    render(
+      <Wrapper>
+        <MessageList
+          messages={[userMsg("m1", "q"), assistantMsg("tail", "typing…")]}
+          status="streaming"
+        />
+      </Wrapper>
+    )
+    expect(tick("m1")).not.toBeNull()
+    expect(tick("tail")).toBeNull()
+  })
+
+  it("ends the mode when the pane shows another conversation", () => {
+    const { rerender } = render(
+      <Wrapper>
+        <MessageList messages={[inSession(userMsg("m1", "q"), "s1")]} status="idle" />
+      </Wrapper>
+    )
+    fireEvent.click(tick("m1")!)
+    expect(bar()).not.toBeNull()
+    rerender(
+      <Wrapper>
+        <MessageList messages={[inSession(userMsg("x1", "other"), "s2")]} status="idle" />
+      </Wrapper>
+    )
+    expect(bar()).toBeNull()
   })
 })

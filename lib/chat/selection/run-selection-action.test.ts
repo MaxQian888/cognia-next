@@ -158,6 +158,30 @@ describe("summarize", () => {
     )
     expect(progress.some((p) => p.combining)).toBe(true)
   })
+
+  // Whole messages: a chunk boundary must fall between two of them, never on a
+  // blank line inside one.
+  it("splits between the segments it is given, not between paragraphs", async () => {
+    const client = completeClient(() => "part")
+    const first = `user: ${"a".repeat(300)}`
+    // Fits in one chunk on its own, but not after the first message. Split on
+    // blank lines, its first paragraph would be packed in with that message and
+    // its second sent on alone.
+    const second = `assistant: ${"b".repeat(700)}\n\n${"c".repeat(380)}`
+    await runSelectionAction(
+      input({
+        action: "summarize",
+        client,
+        text: `${first}\n\n${second}`,
+        segments: [first, second],
+        chunkChars: 1_200,
+      })
+    )
+    const [chunk1, chunk2] = client.calls.map((call) => call.prompt)
+    expect(chunk1).toContain(first)
+    expect(chunk1).not.toContain("b".repeat(10))
+    expect(chunk2).toContain(second)
+  })
 })
 
 describe("outcomes that are not results", () => {

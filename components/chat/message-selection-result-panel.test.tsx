@@ -53,6 +53,27 @@ describe("MessageSelectionResultPanel", () => {
     ).toBeInTheDocument()
   })
 
+  it("names what it was made from when that is not a text selection", () => {
+    const handlers = {
+      onStop: jest.fn(),
+      onRetry: jest.fn(),
+      onClose: jest.fn(),
+      onReference: jest.fn(),
+    }
+    render(
+      <MessageSelectionResultPanel
+        run={{ status: "running", request: request(), text: "", progress: null }}
+        sourceLabel="From 3 selected messages"
+        {...handlers}
+      />
+    )
+    expect(screen.getByText("From 3 selected messages")).toBeInTheDocument()
+    // Not quoted as if the count were the words selected.
+    expect(
+      screen.queryByText(result.source.replace("{title}", "From 3 selected messages"))
+    ).toBeNull()
+  })
+
   it("names the target language of a translation", () => {
     renderPanel(
       {

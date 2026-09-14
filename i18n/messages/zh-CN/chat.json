@@ -1684,6 +1684,7 @@
     "saveAsMemoryFailed": "保存失败：{reason}",
     "saveAsMemoryLabel": "存为记忆",
     "saveAsMemoryTooltip": "保存为待审的记忆草稿",
+    "selectLabel": "选择多条消息",
     "sendToIm": "发送到 IM…",
     "sendToImDone": "已发送到 IM 会话。",
     "sendToImFailed": "无法发送到 IM 会话。",
@@ -2310,6 +2311,36 @@
     "loadOlder": "加载更早轮次",
     "loading": "正在加载聊天记录…",
     "retry": "重试加载聊天记录"
+  },
+  "transcriptSelection": {
+    "actions": {
+      "copy": "复制",
+      "reference": "引用",
+      "saveMemory": "存为记忆",
+      "summarize": "总结"
+    },
+    "clear": "取消全选",
+    "copied": "{count, plural, other {已复制 # 条消息。}}",
+    "copyEmpty": "所选消息里没有可复制的内容。",
+    "copyFailed": "无法复制到剪贴板。",
+    "count": "{count, plural, =0 {未选择消息} other {已选 # 条}}",
+    "exit": "退出多选",
+    "memoryEmpty": "所选消息里没有可保存的内容。",
+    "memoryFailed": "无法存为记忆：{reason}",
+    "memorySaved": "已保存记忆草稿：「{title}」",
+    "referenceEmpty": "所选消息里没有可引用的内容。",
+    "referenceFailed": "无法引用这些消息。",
+    "referenced": "{count, plural, =1 {已把 1 条消息加入输入框。} other {已把 # 条消息作为一个引用加入输入框。}}",
+    "selectAll": "全选",
+    "selectMessage": "选择这条消息",
+    "sourceLabel": "{count, plural, other {来自选中的 # 条消息}}",
+    "speaker": {
+      "assistant": "助手",
+      "system": "系统",
+      "user": "我"
+    },
+    "summaryReferenced": "已把摘要加入输入框。",
+    "toolbarLabel": "所选消息的操作"
   },
   "truncateFrom": {
     "cancel": "保留",

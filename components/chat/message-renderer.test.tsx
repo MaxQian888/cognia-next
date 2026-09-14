@@ -375,6 +375,7 @@ jest.mock("@/components/chat/message-parts/tool-call-row", () => ({
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type { UIMessage } from "ai"
 import { HOVER_REVEAL_CLASS, MessageRenderer } from "./message-renderer"
+import { TranscriptSelectionHostContext } from "@/hooks/chat/use-transcript-selection"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useChatStore } from "@/stores/chat"
 import { resolveMessageDisplayOptions } from "@/lib/chat/message-display"
@@ -1356,6 +1357,40 @@ describe("branch action", () => {
     expect(action).toBeDisabled()
     fireEvent.click(action)
     expect(screen.queryByTestId("branch-dialog")).toBeNull()
+  })
+})
+
+// ── select action ───────────────────────────────────────────────────────────
+
+describe("select action", () => {
+  // A read-only transcript renders this same row with no selection mode to open.
+  it("is absent outside a transcript that mounts selection mode", () => {
+    useChatStore.setState({ activeSessionId: "sess-1" })
+    render(<MessageRenderer message={assistantMsg("sel1")} />)
+    expect(screen.queryByLabelText("selectLabel")).toBeNull()
+  })
+
+  it("opens selection mode on this message, from either role", () => {
+    useChatStore.setState({ activeSessionId: "sess-1" })
+    const start = jest.fn()
+    const { unmount } = render(
+      <TranscriptSelectionHostContext.Provider value={{ start }}>
+        <MessageRenderer message={assistantMsg("sel2")} />
+      </TranscriptSelectionHostContext.Provider>
+    )
+    fireEvent.click(screen.getByLabelText("selectLabel"))
+    expect(start).toHaveBeenCalledWith("sel2")
+    unmount()
+
+    render(
+      <TranscriptSelectionHostContext.Provider value={{ start }}>
+        <MessageRenderer
+          message={{ id: "sel3", role: "user", parts: [{ type: "text", text: "q" }] } as UIMessage}
+        />
+      </TranscriptSelectionHostContext.Provider>
+    )
+    fireEvent.click(screen.getByLabelText("selectLabel"))
+    expect(start).toHaveBeenCalledWith("sel3")
   })
 })
 

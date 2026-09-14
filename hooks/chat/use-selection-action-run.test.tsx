@@ -44,6 +44,29 @@ beforeEach(() => {
 })
 
 describe("useSelectionActionRun", () => {
+  // Whole messages: the summary reads them labelled by who said them, split
+  // between messages, rather than the unlabelled text a reference keeps.
+  it("summarizes from the per-message segments when the request carries them", async () => {
+    const llm = client(async () => "A summary.")
+    mockBuildClient.mockResolvedValue(llm)
+    const { result } = renderHook(() => useSelectionActionRun())
+
+    await act(async () => {
+      await result.current.run(
+        request({
+          action: "summarize",
+          quote: "Why is CI red?\nLint fails.",
+          segments: ["user: Why is CI red?", "assistant: Lint fails."],
+        })
+      )
+    })
+
+    const [prompt] = (llm.complete as jest.Mock).mock.calls[0]!
+    expect(prompt).toContain("user: Why is CI red?")
+    expect(prompt).toContain("assistant: Lint fails.")
+    expect(result.current.state).toMatchObject({ status: "done", text: "A summary." })
+  })
+
   it("builds the agent-backed client for the selection's conversation and shows the result", async () => {
     const llm = client(async () => "It caches the result.")
     mockBuildClient.mockResolvedValue(llm)

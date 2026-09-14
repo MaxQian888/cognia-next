@@ -90,6 +90,13 @@ export interface RunSelectionActionInput {
   action: SelectionAction
   /** The selected text. */
   text: string
+  /**
+   * Summarize: the material already cut into its natural units — one entry per
+   * message when whole messages were selected. A long summary is then split
+   * between messages instead of between paragraphs, which can land inside one.
+   * Without it the text is split on blank lines.
+   */
+  segments?: readonly string[]
   /** The message(s) the selection was made in, for explain. Clamped here. */
   context?: string
   /**
@@ -220,6 +227,7 @@ export async function runSelectionAction(
   const {
     action,
     text,
+    segments,
     client,
     locale,
     signal,
@@ -231,7 +239,7 @@ export async function runSelectionAction(
 
   if (action === "summarize") {
     const outcome = await summarizeMaterial({
-      segments: text.split(/\n{2,}/),
+      segments: segments ?? text.split(/\n{2,}/),
       purpose: "selection",
       client,
       ...(locale ? { locale } : {}),
