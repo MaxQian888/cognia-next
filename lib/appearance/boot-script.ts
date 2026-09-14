@@ -37,6 +37,8 @@ export const BOOT_MIRROR_STORAGE_KEY = "cognia.appearance.mirror"
  * head-injected script runs, and its image data-URLs can be multi-megabyte.
  */
 export type BootMirrorPayload = Partial<Record<BootMirrorKey, string>> & {
+  /** Resolved variant that produced the cached colors. Legacy colors are ignored. */
+  colorScheme?: "light" | "dark"
   /** Extra CSS custom properties (`--*`) to set on `<html>`. */
   vars?: Record<string, string>
   /** data-* attributes to set on `<html>` (e.g. `data-density`). */
@@ -59,7 +61,11 @@ export function runBootScript(): void {
     const mirror = JSON.parse(raw) as Record<string, unknown> | null
     if (!mirror || typeof mirror !== "object") return
     const root = document.documentElement
-    for (const key of BOOT_MIRROR_KEYS) {
+    // next-themes has already resolved the class before this queued script runs.
+    // A system-theme change between launches must not replay the old palette.
+    const colorScheme = root.classList.contains("dark") ? "dark" : "light"
+    const colorKeys = mirror.colorScheme === colorScheme ? BOOT_MIRROR_KEYS : []
+    for (const key of colorKeys) {
       const value = mirror[key]
       if (typeof value === "string" && value.length > 0) {
         root.style.setProperty(key, value)
@@ -105,7 +111,8 @@ export const BOOT_SCRIPT = [
   "    var mirror = JSON.parse(raw);",
   "    if (!mirror || typeof mirror !== 'object') return;",
   "    var root = document.documentElement;",
-  `    var keys = ${JSON.stringify(BOOT_MIRROR_KEYS)};`,
+  '    var colorScheme = root.classList.contains("dark") ? "dark" : "light";',
+  `    var keys = mirror.colorScheme === colorScheme ? ${JSON.stringify(BOOT_MIRROR_KEYS)} : [];`,
   "    for (var i = 0; i < keys.length; i++) {",
   "      var key = keys[i];",
   "      var value = mirror[key];",

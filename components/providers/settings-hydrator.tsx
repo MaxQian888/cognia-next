@@ -105,6 +105,7 @@ export function SettingsHydrator(): null {
         customThemes,
         accentColor,
       })
+      payload.colorScheme = variant
       payload["--background"] = shellColors.backgroundHex
       payload["--foreground"] = shellColors.foregroundHex
       payload["--primary"] = resolved.colors.primary

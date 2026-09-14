@@ -79,6 +79,7 @@ describe("SettingsHydrator", () => {
     })
     const raw = window.localStorage.getItem(BOOT_MIRROR_STORAGE_KEY) ?? "{}"
     const mirror = JSON.parse(raw) as Record<string, string>
+    expect(mirror.colorScheme).toBe("dark")
     expect(typeof mirror["--background"]).toBe("string")
     expect(typeof mirror["--foreground"]).toBe("string")
     expect(typeof mirror["--primary"]).toBe("string")

@@ -14,6 +14,7 @@ import {
 beforeEach(() => {
   window.localStorage.clear()
   document.documentElement.removeAttribute("style")
+  document.documentElement.className = "light"
 })
 
 describe("BOOT_SCRIPT", () => {
@@ -38,6 +39,7 @@ describe("BOOT_SCRIPT", () => {
     window.localStorage.setItem(
       BOOT_MIRROR_STORAGE_KEY,
       JSON.stringify({
+        colorScheme: "light",
         "--foreground": "#0f172a",
         "--background": "#ffffff",
         "--primary": "#3b82f6",
@@ -55,10 +57,7 @@ describe("BOOT_SCRIPT", () => {
   it("skips keys that are not in the boot mirror allowlist", () => {
     window.localStorage.setItem(
       BOOT_MIRROR_STORAGE_KEY,
-      JSON.stringify({
-        "--foreground": "#000",
-        "--unknown": "#fff",
-      })
+      JSON.stringify({ colorScheme: "light", "--foreground": "#000", "--unknown": "#fff" })
     )
     runBootScript()
     expect(document.documentElement.style.getPropertyValue("--foreground")).toBe("#000")
@@ -70,6 +69,7 @@ describe("BOOT_SCRIPT", () => {
     window.localStorage.setItem(
       BOOT_MIRROR_STORAGE_KEY,
       JSON.stringify({
+        colorScheme: "light",
         "--foreground": "",
         "--background": null,
         "--primary": 0,
@@ -87,6 +87,7 @@ describe("BOOT_SCRIPT", () => {
     window.localStorage.setItem(
       BOOT_MIRROR_STORAGE_KEY,
       JSON.stringify({
+        colorScheme: "light",
         vars: { "--radius": "1rem", "--line-height-scale": "1.15" },
       })
     )
@@ -99,7 +100,7 @@ describe("BOOT_SCRIPT", () => {
   it("applies extended data-* attrs (density) onto documentElement", () => {
     window.localStorage.setItem(
       BOOT_MIRROR_STORAGE_KEY,
-      JSON.stringify({ attrs: { "data-density": "spacious" } })
+      JSON.stringify({ colorScheme: "light", attrs: { "data-density": "spacious" } })
     )
     runBootScript()
     expect(document.documentElement.getAttribute("data-density")).toBe("spacious")
@@ -109,6 +110,7 @@ describe("BOOT_SCRIPT", () => {
     window.localStorage.setItem(
       BOOT_MIRROR_STORAGE_KEY,
       JSON.stringify({
+        colorScheme: "light",
         vars: { color: "red", "--ok": "#fff" },
         attrs: { onclick: "alert(1)", "data-ok": "yes" },
       })
@@ -125,6 +127,7 @@ describe("BOOT_SCRIPT", () => {
     window.localStorage.setItem(
       BOOT_MIRROR_STORAGE_KEY,
       JSON.stringify({
+        colorScheme: "light",
         "--background": "#101014",
         vars: { "--radius": "0.9rem" },
         attrs: { "data-density": "compact" },
@@ -136,11 +139,49 @@ describe("BOOT_SCRIPT", () => {
     expect(document.documentElement.getAttribute("data-density")).toBe("compact")
   })
 
+  it.each([runBootScript, () => eval(BOOT_SCRIPT)])(
+    "does not paint a light or legacy snapshot over a dark boot (%#)",
+    (run) => {
+      document.documentElement.className = "dark"
+      for (const colorScheme of ["light", undefined]) {
+        window.localStorage.setItem(
+          BOOT_MIRROR_STORAGE_KEY,
+          JSON.stringify({
+            colorScheme,
+            "--background": "#ffffff",
+            "--foreground": "#000000",
+            vars: { "--radius": "1rem" },
+          })
+        )
+        run()
+        expect(document.documentElement.style.getPropertyValue("--background")).toBe("")
+        expect(document.documentElement.style.getPropertyValue("--foreground")).toBe("")
+        expect(document.documentElement.style.getPropertyValue("--radius")).toBe("1rem")
+      }
+    }
+  )
+
+  it.each([runBootScript, () => eval(BOOT_SCRIPT)])(
+    "restores a matching dark snapshot (%#)",
+    (run) => {
+      document.documentElement.className = "dark"
+      window.localStorage.setItem(
+        BOOT_MIRROR_STORAGE_KEY,
+        JSON.stringify({
+          colorScheme: "dark",
+          "--background": "#101014",
+        })
+      )
+      run()
+      expect(document.documentElement.style.getPropertyValue("--background")).toBe("#101014")
+    }
+  )
+
   it("does NOT toggle the dark class — next-themes owns that", () => {
     document.documentElement.classList.remove("dark")
     window.localStorage.setItem(
       BOOT_MIRROR_STORAGE_KEY,
-      JSON.stringify({ "--background": "#0b1220" })
+      JSON.stringify({ colorScheme: "light", "--background": "#0b1220" })
     )
     runBootScript()
     expect(document.documentElement.classList.contains("dark")).toBe(false)
