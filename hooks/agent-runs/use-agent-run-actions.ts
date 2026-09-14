@@ -41,6 +41,7 @@ import { localConsoleActor, localConsoleOperatorIds } from "@/lib/execution/loca
 import { useHostProfile } from "@/hooks/use-host-profile"
 import { transport } from "@/lib/tauri/transport-instance"
 import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
+import { HostConsentRequiredError, issueHostAdminLease } from "@/lib/tauri/admin-lease"
 import type { UnifiedExecutionRow } from "@/lib/execution/monitor-model"
 import type { ExecutionRun, RunControlAction, SquadReviewDecision } from "@/types/execution/run"
 
@@ -57,6 +58,10 @@ export type RunControlOutcomeReason =
   | "not_controllable"
   /** The run no longer offers this action — it moved between paint and click. */
   | "action_unavailable"
+  /** A human must authorize this device's operation on the execution host. */
+  | "host_consent_required"
+  /** Transport or runtime failure; the caller can retry after checking the host. */
+  | "control_failed"
 
 export interface RunControlOutcome {
   accepted: boolean
@@ -67,6 +72,8 @@ export interface RunControlOutcome {
   retryRunId?: string
   /** True when the gate recognised this as a redelivery of a press it already took. */
   duplicate?: boolean
+  /** Host-generated short code for completing the existing consent flow. */
+  consentCode?: string
 }
 
 export interface RunControlDispatchOptions {
@@ -195,8 +202,13 @@ export function useRunControlActions(): RunControlActions {
         }
         if (remoteControlHost(hostProfile)) {
           const { actor: _actor, ...payload } = command
-          const remote = (await transport.call("execution_run_control", payload)) as
-            RunControlResult | { ok: false; reason: string } | null
+          // This dispatch is the explicit user gesture. Mint only for this
+          // command and use it immediately; never pre-grant on render or retry.
+          const lease = await issueHostAdminLease(["execution_run_control"], 120)
+          const remote = (await transport.call("execution_run_control", {
+            ...payload,
+            adminLease: lease.token,
+          })) as RunControlResult | { ok: false; reason: string } | null
           if (remote && "accepted" in remote) return outcomeFrom(remote)
           return { accepted: false, reason: "invalid_command" }
         }
@@ -204,6 +216,15 @@ export function useRunControlActions(): RunControlActions {
           operatorIds: [...localConsoleOperatorIds()],
         })
         return outcomeFrom(result)
+      } catch (error) {
+        if (error instanceof HostConsentRequiredError) {
+          return {
+            accepted: false,
+            reason: "host_consent_required",
+            ...(error.consentCode ? { consentCode: error.consentCode } : {}),
+          }
+        }
+        return { accepted: false, reason: "control_failed" }
       } finally {
         setPendingRowId((current) => (current === row.rowId ? null : current))
       }

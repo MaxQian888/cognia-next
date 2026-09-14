@@ -6,8 +6,9 @@ import {
   canonicalIntegrationValue,
 } from "../api/bot-integration-binding"
 import { getDb } from "@/lib/db/schema"
+import { assertBotPublicationAuthority } from "@/lib/bot/policy/run-authority"
 import { gitDiffRefsFiles, gitStatus, gitReadBlobAtRef, gitLog } from "@/lib/git/commands"
-import { readWorkspaceFile, statWorkspaceFile } from "@/lib/files/workspace-fs"
+import { readWorkspaceFile, statWorkspaceFile, writeWorkspaceFile } from "@/lib/files/workspace-fs"
 import { authenticatedIntegrationRequest } from "@/lib/integrations/action-runner"
 import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import { updateBotInstallation } from "@/lib/db/bot-installations"
@@ -49,6 +50,25 @@ interface OwnedWorkspace {
   handle: PluginWorkspaceHandle
 }
 const WORKSPACE_STEP = "__host:workspace"
+const GENERATED_CACHE_EXCLUDES = ["/.pnpm-store/", "/.jest-cache/", "/node_modules/.cache/"]
+
+async function excludeGeneratedBotCaches(root: string): Promise<void> {
+  const path = ".git/info/exclude"
+  const stat = await statWorkspaceFile(root, path)
+  if (stat.exists && (stat.isDir || stat.isSymlink || stat.size > 1024 * 1024))
+    throw new Error("Bot workspace Git excludes cannot be updated completely")
+  const previous = stat.exists ? await readWorkspaceFile(root, path, 1024 * 1024) : ""
+  const lines = new Set(previous.split(/\r?\n/))
+  const missing = GENERATED_CACHE_EXCLUDES.filter((pattern) => !lines.has(pattern))
+  if (!missing.length) return
+  // Repository-local Git excludes affect only untracked files. Tracked and
+  // explicitly staged cache paths still enter the complete source snapshot.
+  await writeWorkspaceFile(
+    root,
+    path,
+    `${previous}${previous && !previous.endsWith("\n") ? "\n" : ""}# Cognia Bot generated caches\n${missing.join("\n")}\n`
+  )
+}
 
 export async function assertOwnedBotWorkspace(pluginId: string, handle: PluginWorkspaceHandle) {
   if (!handle.id || !handle.runId || handle.origin !== "bot-run")
@@ -97,6 +117,7 @@ export async function acquireBotWorkspace(
     if (canonicalIntegrationValue(saved.spec) !== canonicalIntegrationValue(spec))
       throw new Error("A run cannot change its workspace acquisition")
     await assertOwnedBotWorkspace(pluginId, saved.handle)
+    await excludeGeneratedBotCaches(saved.handle.root)
     return saved.handle
   }
   // The host cache transport validates every segment. A run never writes a shared repository cache.
@@ -136,6 +157,7 @@ export async function acquireBotWorkspace(
     headRef.toLowerCase() !== spec.ref.toLowerCase()
   )
     throw new Error("Checkout did not resolve the requested immutable revision")
+  await excludeGeneratedBotCaches(root)
   const [owner, repo] = repository.split("/")
   const handle: PluginWorkspaceHandle = {
     id,
@@ -265,6 +287,7 @@ export async function publishBotWorkspace(
       canonicalIntegrationValue({ branch: input.branch, message: input.message })
   )
     throw new Error("Publication requires approval of this exact artifact and intent")
+  await assertBotPublicationAuthority(pluginId, handle.runId!, approval)
   const previous = await getBotRunStep(handle.runId!, `__host:publication:${snapshot.id}`)
   if (previous?.status === "completed")
     return previous.output as { branch: string; headSha: string }
@@ -286,6 +309,7 @@ export async function publishBotWorkspace(
         canonicalIntegrationValue(detail)
     )
       throw new Error("Publication approval changed or expired")
+    await assertBotPublicationAuthority(pluginId, handle.runId!, currentApproval)
   }
   const request = async <T>(path: string, method = "GET", body?: unknown): Promise<T> => {
     await revalidate()

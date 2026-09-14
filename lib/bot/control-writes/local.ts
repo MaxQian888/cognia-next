@@ -11,14 +11,16 @@
 
 import { dispatchManualBotRun } from "@/lib/bot/events/dispatch"
 import { buildBotEventEnvelope } from "@/lib/bot/events/envelope"
-import { resolveInstalledBot } from "@/lib/bot/installed-bot"
+import { isRunnableBot, resolveInstalledBot } from "@/lib/bot/installed-bot"
 import {
   getBotInstallation,
   isBotTriggerArmed,
   updateBotInstallation,
 } from "@/lib/db/bot-installations"
 import { getBotDelivery, replayBotDelivery } from "@/lib/db/bot-event-deliveries"
+import { getExecutionRun } from "@/lib/db/execution-runs"
 import type { BotInstallationRow } from "@/lib/db/bot-types"
+import { getDb } from "@/lib/db/schema"
 
 /** The event type a manual run carries. Named so a handler can branch on it. */
 export const MANUAL_RUN_EVENT_TYPE = "manual.run"
@@ -31,6 +33,16 @@ export class BotControlTargetMissingError extends Error {
   ) {
     super(`bot control target missing: no ${what} "${id}"`)
     this.name = "BotControlTargetMissingError"
+  }
+}
+
+export class BotDeliveryReplayUnavailableError extends Error {
+  readonly code = "bot_delivery_replay_unavailable"
+  constructor(readonly deliveryId: string) {
+    super(
+      "Bot retry requires an enabled, locally owned installation with its current definition and original execution available"
+    )
+    this.name = "BotDeliveryReplayUnavailableError"
   }
 }
 
@@ -151,20 +163,60 @@ export async function runBotManuallyLocally(
 }
 
 /**
- * Put a dead-lettered delivery back on the queue.
- *
- * Guarded on the row still being dead-lettered, which is what makes a replayed
- * relay command a no-op rather than a second run: once the first replay
- * succeeds the row is no longer `deadletter`, and the duplicate finds nothing
- * to do. `replayBotDelivery` writes absolute values and never increments, so
- * the attempt budget is reset rather than consumed.
+ * Retry through the existing queue. A terminal execution gets one deterministic
+ * successor delivery; a duplicate command finds that same successor. Further
+ * retries target the successor, never reopen the old journal or its approvals.
+ * A dead letter whose execution is still resumable keeps its original identity.
  */
 export async function replayBotDeliveryLocally(deliveryId: string): Promise<boolean> {
-  const row = await getBotDelivery(deliveryId)
-  if (!row) throw new BotControlTargetMissingError("delivery", deliveryId)
-  if (row.status !== "deadletter") return false
-  await replayBotDelivery(deliveryId)
-  return true
+  const db = getDb()
+  return db.transaction(
+    "rw",
+    [db.botEventDeliveries, db.botInstallations, db.botDefinitions, db.executionRuns],
+    async () => {
+      const row = await getBotDelivery(deliveryId)
+      if (!row) throw new BotControlTargetMissingError("delivery", deliveryId)
+      if (row.syncedFromHost) throw new BotDeliveryReplayUnavailableError(deliveryId)
+      if (!["deadletter", "dismissed", "failed"].includes(row.status)) return false
+      const installation = await getBotInstallation(row.installationId)
+      if (!installation || installation.syncedFromHost)
+        throw new BotDeliveryReplayUnavailableError(deliveryId)
+      const resolved = await resolveInstalledBot(installation)
+      if (!resolved || !isRunnableBot(resolved) || resolved.problems.length)
+        throw new BotDeliveryReplayUnavailableError(deliveryId)
+      if (!resolved.definition.triggers.some((trigger) => trigger.id === row.triggerId))
+        throw new BotControlTargetMissingError("trigger", row.triggerId)
+      const run = row.runId ? await getExecutionRun(row.runId) : undefined
+      if (row.runId && (!run || run.kind !== "bot" || run.sourceId !== installation.id))
+        throw new BotDeliveryReplayUnavailableError(deliveryId)
+      if (run?.status === "completed") return false
+      if (run && (run.status === "failed" || run.status === "cancelled")) {
+        const envelope = buildBotEventEnvelope({
+          ...row.envelope,
+          sourceRecordId: `retry:${row.id}`,
+          triggerId: row.triggerId,
+          installationId: installation.id,
+          actor: { kind: "human" },
+          receivedAt: Date.now(),
+          correlation: undefined,
+          provenance: {
+            selfProduced: false,
+            depth: 0,
+            causationEventIds: [
+              row.eventId,
+              ...(row.envelope.provenance.causationEventIds ?? []),
+            ].slice(0, 16),
+          },
+        })
+        if (await getBotDelivery(envelope.deliveryId)) return false
+        await dispatchManualBotRun({ resolved, triggerId: row.triggerId, envelope })
+        return true
+      }
+      if (row.status !== "deadletter") return false
+      await replayBotDelivery(deliveryId)
+      return true
+    }
+  )
 }
 
 export { isBotTriggerArmed }

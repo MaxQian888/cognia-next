@@ -10,7 +10,11 @@
     "orphanBody": "The definition is gone, so there is no form to render. Whatever this installation stored is still on the row.",
     "orphanTitle": "No settings to show",
     "save": "Save settings",
-    "title": "Settings"
+    "title": "Settings",
+    "authorityTitle": "Host permissions",
+    "authorityHint": "These permissions apply when the Bot requests unattended execution or automatic publication. Saving grants access for this installation; stricter host policies still apply. Automatic publication does not authorize merging.",
+    "allowUnattended": "Allow commands without asking",
+    "allowAutomaticPublication": "Allow automatic publication of PRs and reviews"
   },
   "credentials": {
     "bindAria": "Bind {slot}",
@@ -41,7 +45,7 @@
     "description": "The queue behind this Bot. A delivery that never ran has no run to show anywhere else.",
     "emptyBody": "Nothing has been delivered to this Bot yet. Arm a trigger, or run it once by hand.",
     "emptyTitle": "No deliveries",
-    "replay": "Replay",
+    "replay": "Retry",
     "status": {
       "deadletter": "Gave up",
       "dismissed": "Dismissed",
@@ -52,7 +56,11 @@
       "running": "Running",
       "succeeded": "Done"
     },
-    "title": "Deliveries"
+    "title": "Deliveries",
+    "viewRun": "View run",
+    "previousRun": "Previous run",
+    "retryRun": "Retry run",
+    "retryQueued": "Retry queued"
   },
   "description": "Installed Bots: what wakes each one up, what runs it, and what it is allowed to do.",
   "detail": {
@@ -265,7 +273,7 @@
   },
   "write": {
     "alreadyQueued": "That run is already queued.",
-    "alreadyReplayed": "That delivery is no longer dead-lettered.",
+    "alreadyReplayed": "A retry already exists or this delivery cannot be retried.",
     "armed": "Trigger armed",
     "disarmed": "Trigger switched off",
     "failed": "The change could not be saved",
@@ -294,7 +302,10 @@
     },
     "replayed": "Delivery queued again",
     "started": "Run started",
-    "unavailable": "That change cannot be made from here"
+    "unavailable": "That change cannot be made from here",
+    "retrySubmitted": "Retry request queued for the Host.",
+    "retryUnavailable": "Enable this Bot on its owning Host and restore its definition and original run before retrying.",
+    "submitted": "Request queued for the Host."
   },
   "monitor": {
     "activated": "Monitoring started",

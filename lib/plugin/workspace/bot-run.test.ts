@@ -1,4 +1,16 @@
 import { webcrypto } from "node:crypto"
+import { execFileSync } from "node:child_process"
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
+import { tmpdir } from "node:os"
+import { dirname, join } from "node:path"
 import {
   acquireBotWorkspace,
   assertOwnedBotWorkspace,
@@ -9,10 +21,14 @@ import type { BotRunWorkspaceSpec } from "./bot-run"
 import type { AcquireDeps } from "./acquire"
 import { resolveBotIntegrationBinding } from "../api/bot-integration-binding"
 import { gitReadBlobAtRef, gitLog, gitStatus, gitDiffRefsFiles } from "@/lib/git/commands"
-import { readWorkspaceFile, statWorkspaceFile } from "@/lib/files/workspace-fs"
+import { readWorkspaceFile, statWorkspaceFile, writeWorkspaceFile } from "@/lib/files/workspace-fs"
 import { authenticatedIntegrationRequest } from "@/lib/integrations/action-runner"
 import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import { updateBotInstallation } from "@/lib/db/bot-installations"
+import { assertBotPublicationAuthority } from "@/lib/bot/policy/run-authority"
+jest.mock("@/lib/bot/policy/run-authority", () => ({
+  assertBotPublicationAuthority: jest.fn(async () => undefined),
+}))
 jest.mock("@/lib/tauri/transport-routing", () => ({ isRemoteHostActive: jest.fn(() => false) }))
 jest.mock("@/lib/db/bot-installations", () => ({ updateBotInstallation: jest.fn() }))
 
@@ -44,6 +60,7 @@ jest.mock("@/lib/git/commands", () => ({
 jest.mock("@/lib/files/workspace-fs", () => ({
   readWorkspaceFile: jest.fn(),
   statWorkspaceFile: jest.fn(),
+  writeWorkspaceFile: jest.fn(),
 }))
 jest.mock("@/lib/integrations/action-runner", () => ({
   authenticatedIntegrationRequest: jest.fn(),
@@ -93,6 +110,124 @@ beforeEach(() => {
     isSymlink: false,
   })
   jest.mocked(readWorkspaceFile).mockResolvedValue("after\n")
+  jest.mocked(writeWorkspaceFile).mockResolvedValue(undefined)
+})
+
+it("preserves local Git excludes and skips rewriting an already provisioned checkout", async () => {
+  let excludes = "# existing\n/user-cache/"
+  jest
+    .mocked(readWorkspaceFile)
+    .mockImplementation(async (_root, path) =>
+      path === ".git/info/exclude" ? excludes : "after\n"
+    )
+  jest.mocked(writeWorkspaceFile).mockImplementation(async (_root, _path, content) => {
+    excludes = content
+  })
+  const handle = await acquireBotWorkspace("plugin", spec, deps)
+  expect(excludes).toContain("# existing\n/user-cache/\n")
+  expect(excludes).toContain("/.pnpm-store/\n/.jest-cache/\n/node_modules/.cache/\n")
+  await acquireBotWorkspace("plugin", spec, deps)
+  expect(writeWorkspaceFile).toHaveBeenCalledTimes(1)
+  expect(handle.runtimeStateRoot).not.toBe(handle.root)
+})
+
+it("creates missing excludes and refuses incomplete or unsafe existing Git metadata", async () => {
+  jest
+    .mocked(statWorkspaceFile)
+    .mockResolvedValueOnce({ exists: false, isDir: false, size: 0, mtimeMs: null })
+  await acquireBotWorkspace("plugin", spec, deps)
+  expect(writeWorkspaceFile).toHaveBeenCalledWith(
+    expect.any(String),
+    ".git/info/exclude",
+    expect.stringContaining("/.pnpm-store/")
+  )
+  for (const stat of [
+    { isDir: true, isSymlink: false, size: 0 },
+    { isDir: false, isSymlink: true, size: 1 },
+    { isDir: false, isSymlink: false, size: 1024 * 1024 + 1 },
+  ]) {
+    jest.mocked(statWorkspaceFile).mockResolvedValueOnce({ ...stat, exists: true, mtimeMs: null })
+    await expect(acquireBotWorkspace("plugin", spec, deps)).rejects.toThrow(
+      "excludes cannot be updated completely"
+    )
+  }
+})
+
+it("excludes generated package caches through Git while retaining tracked and staged cache files in snapshots", async () => {
+  const root = mkdtempSync(join(tmpdir(), "cognia-bot-cache-"))
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", root, ...args], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+  const write = (path: string, content: string) => {
+    const file = join(root, path)
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, content)
+  }
+  try {
+    git("init", "--quiet")
+    write(".pnpm-store/tracked.txt", "original\n")
+    git("add", ".pnpm-store/tracked.txt")
+    git(
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.invalid",
+      "commit",
+      "--quiet",
+      "-m",
+      "fixture"
+    )
+    deps.clone = jest.fn(async () => root)
+    jest.mocked(statWorkspaceFile).mockImplementation(async (directory, path) => {
+      const file = join(directory, path)
+      if (!existsSync(file)) return { exists: false, isDir: false, size: 0, mtimeMs: null }
+      const stat = lstatSync(file)
+      return {
+        exists: true,
+        isDir: stat.isDirectory(),
+        size: stat.size,
+        mtimeMs: stat.mtimeMs,
+        mode: stat.mode,
+        isSymlink: stat.isSymbolicLink(),
+      }
+    })
+    jest
+      .mocked(readWorkspaceFile)
+      .mockImplementation(async (directory, path) => readFileSync(join(directory, path), "utf8"))
+    jest
+      .mocked(writeWorkspaceFile)
+      .mockImplementation(async (_directory, path, content) => write(path, content))
+    const handle = await acquireBotWorkspace("plugin", spec, deps)
+    write(".pnpm-store/generated.bin", "package cache")
+    write(".jest-cache/generated.bin", "test cache")
+    write("node_modules/.cache/generated.bin", "tool cache")
+    write(".pnpm-store/tracked.txt", "modified source\n")
+    write(".jest-cache/staged.txt", "intentionally staged\n")
+    git("add", "--force", ".jest-cache/staged.txt")
+    const status = git("status", "--porcelain=v1", "--untracked-files=all")
+    expect(status).not.toContain("generated.bin")
+    expect(status).toContain(" M .pnpm-store/tracked.txt")
+    expect(status).toContain("A  .jest-cache/staged.txt")
+    jest.mocked(gitStatus).mockResolvedValue({
+      merge: [],
+      changes: [{ path: ".pnpm-store/tracked.txt", status: "modified" }],
+      staged: [{ path: ".jest-cache/staged.txt", status: "added" }],
+    } as never)
+    jest
+      .mocked(gitReadBlobAtRef)
+      .mockImplementation(async (_directory, _ref, path) =>
+        path === ".pnpm-store/tracked.txt" ? "original\n" : null
+      )
+    const snapshot = await captureBotWorkspace("plugin", handle)
+    expect(snapshot.files.map((file) => file.path)).toEqual([
+      ".jest-cache/staged.txt",
+      ".pnpm-store/tracked.txt",
+    ])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 it("marks an unsupported paired host needs_setup before allocating a cache", async () => {
@@ -413,4 +548,27 @@ it("fetches a fork PR immutable SHA from the bound repository before checkout", 
   await expect(acquireBotWorkspace("plugin", { ...spec, ref: sha }, deps)).rejects.toThrow(
     "immutable revision"
   )
+})
+
+it("revalidates automatic publication authority before writes and on completed-publication replay", async () => {
+  const { handle, snapshot, input } = await approved()
+  jest.mocked(assertBotPublicationAuthority).mockRejectedValueOnce(new Error("policy revoked"))
+  await expect(publishBotWorkspace("plugin", handle, input)).rejects.toThrow("policy revoked")
+  expect(authenticatedIntegrationRequest).not.toHaveBeenCalled()
+  mockSteps.set(`run:__host:publication:${snapshot.id}`, {
+    branch: input.branch,
+    headSha: "published",
+  })
+  jest.mocked(assertBotPublicationAuthority).mockRejectedValueOnce(new Error("policy revoked"))
+  await expect(publishBotWorkspace("plugin", handle, input)).rejects.toThrow("policy revoked")
+})
+
+it("stops publication if host policy is downgraded after preparing the artifact", async () => {
+  const { handle, input } = await approved()
+  jest
+    .mocked(assertBotPublicationAuthority)
+    .mockResolvedValueOnce(undefined)
+    .mockRejectedValueOnce(new Error("grant narrowed"))
+  await expect(publishBotWorkspace("plugin", handle, input)).rejects.toThrow("grant narrowed")
+  expect(authenticatedIntegrationRequest).not.toHaveBeenCalled()
 })

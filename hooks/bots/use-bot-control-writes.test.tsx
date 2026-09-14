@@ -5,11 +5,17 @@ import { act, renderHook } from "@testing-library/react"
 const setBotTriggerArmed = jest.fn(
   async (_input: { installationId: string; triggerId: string; armed: boolean }) => undefined
 )
-const runBotManually = jest.fn(async (_input: { idempotencyKey: string }) => ({
-  deliveryId: "bdl_1",
-  created: true,
-}))
-const replayBotDeliveryWrite = jest.fn(async (_deliveryId: string) => true)
+const runBotManually = jest.fn(
+  async (_input: {
+    idempotencyKey: string
+  }): Promise<{ deliveryId: string; created: boolean } | undefined> => ({
+    deliveryId: "bdl_1",
+    created: true,
+  })
+)
+const replayBotDeliveryWrite = jest.fn(
+  async (_deliveryId: string): Promise<boolean | undefined> => true
+)
 
 let route = "local"
 let availability = { state: "available", reason: "local-host" }
@@ -142,6 +148,16 @@ describe("useBotControlActions", () => {
     expect(success).toHaveBeenCalledWith("That run is already queued.")
   })
 
+  it("reports the queued Host request instead of claiming a duplicate manual run", async () => {
+    route = "remote"
+    runBotManually.mockResolvedValue(undefined)
+    const { result } = renderHook(() => useBotControlActions())
+    await act(() => result.current.runNow("installation", "scan"))
+    expect(success).toHaveBeenCalledWith("Request queued for the Host.")
+    expect(success).not.toHaveBeenCalledWith("That run is already queued.")
+    expect(result.current.pending.size).toBe(0)
+  })
+
   it("explains an unavailable write with its reason, not a generic failure", async () => {
     setBotTriggerArmed.mockRejectedValue(new FakeUnavailable("nope"))
     const { result } = renderHook(() => useBotControlActions())
@@ -167,6 +183,33 @@ describe("useBotControlActions", () => {
     expect(error).toHaveBeenCalledWith("The change could not be saved", {
       description: "QuotaExceededError",
     })
+  })
+
+  it.each([
+    [undefined, "Retry request queued for the Host."],
+    [false, "A retry already exists or this delivery cannot be retried."],
+    [true, "Delivery queued again"],
+  ] as const)(
+    "distinguishes the queued remote receipt from host result %s",
+    async (receipt, message) => {
+      replayBotDeliveryWrite.mockResolvedValue(receipt)
+      const { result } = renderHook(() => useBotControlActions())
+      await act(() => result.current.replayDelivery("delivery"))
+      expect(success).toHaveBeenCalledWith(message)
+    }
+  )
+
+  it("localizes the typed or serialized retry readiness error without showing host English text", async () => {
+    replayBotDeliveryWrite.mockRejectedValue({
+      code: "bot_delivery_replay_unavailable",
+      message: "English host implementation detail",
+    })
+    const { result } = renderHook(() => useBotControlActions())
+    await act(() => result.current.replayDelivery("delivery"))
+    expect(error).toHaveBeenCalledWith(
+      "Enable this Bot on its owning Host and restore its definition and original run before retrying."
+    )
+    expect(JSON.stringify(error.mock.calls)).not.toContain("English host")
   })
 
   it("clears the pending key even when the write throws", async () => {

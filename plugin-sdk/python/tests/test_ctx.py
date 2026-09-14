@@ -198,6 +198,23 @@ def test_keyword_and_positional_calls_reach_the_handler(fresh_runtime):
     ]
 
 
+@pytest.mark.parametrize("permission_mode", ["acceptEdits", "bypassPermissions"])
+def test_bot_external_agent_mode_crosses_the_existing_serialized_context(fresh_runtime, permission_mode):
+    options = {
+        "runId": "bot-run",
+        "workspace": {"id": "owned-workspace", "runId": "bot-run"},
+        "model": "swe-2-max",
+        "permissionMode": permission_mode,
+        "invocationId": "implementation-1",
+    }
+    seen = _record_calls(fresh_runtime, result={"status": "completed", "sessionId": "session"})
+    result = asyncio.run(cognia.ctx.agent.runExternalAgent("devin", "Run local checks", options))
+    assert result["status"] == "completed"
+    assert seen == [
+        ("agent.runExternalAgent", {"args": ["devin", "Run local checks", options]})
+    ]
+
+
 def test_async_handlers_are_awaited(fresh_runtime):
     async def handler(method, params):
         await asyncio.sleep(0)
@@ -289,3 +306,19 @@ def test_team_carries_reads_writes_and_run_control():
     # ``ctx.agent``, so a plugin holding ``ctx.team`` can act on what it reads.
     for name in ("start", "pause", "resume", "stop"):
         assert name in methods, name
+
+
+def test_bot_publication_references_survive_serialized_host_response(fresh_runtime):
+    import json
+    from cognia.bot import BotPublicationReference
+
+    reference = BotPublicationReference(
+        sourceRunId="run-owned", repository="owner/repo", branch="bot/issue-25",
+        headSha="a" * 40, snapshotId="snapshot-owned",
+        sourcePayload={"kind": "issue", "number": 25, "mode": "implement"},
+    )
+    response = json.loads(json.dumps({"id": "installation", "publications": [reference]}))
+    seen = _record_calls(fresh_runtime, result=response)
+    result = asyncio.run(cognia.ctx.bots.getInstallation(runId="monitor-run"))
+    assert result["publications"] == [reference]
+    assert seen == [("bots.getInstallation", {"runId": "monitor-run"})]

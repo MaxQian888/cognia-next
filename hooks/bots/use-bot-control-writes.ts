@@ -118,6 +118,15 @@ export function useBotControlActions(): BotControlActions {
         })
         return
       }
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        error.code === "bot_delivery_replay_unavailable"
+      ) {
+        toast.error(t("write.retryUnavailable"))
+        return
+      }
       if (error instanceof BotControlTargetMissingError) {
         toast.error(t(`write.missing.${error.what}`))
         return
@@ -155,7 +164,13 @@ export function useBotControlActions(): BotControlActions {
             // can tell that from a retry of one.
             idempotencyKey: crypto.randomUUID(),
           })
-          toast.success(result?.created ? t("write.started") : t("write.alreadyQueued"))
+          toast.success(
+            result === undefined
+              ? t("write.submitted")
+              : result.created
+                ? t("write.started")
+                : t("write.alreadyQueued")
+          )
         } catch (error) {
           report(error)
         }
@@ -169,7 +184,13 @@ export function useBotControlActions(): BotControlActions {
       await withPending(`delivery:${deliveryId}`, async () => {
         try {
           const replayed = await replayBotDeliveryWrite(deliveryId)
-          toast.success(replayed ? t("write.replayed") : t("write.alreadyReplayed"))
+          toast.success(
+            replayed === undefined
+              ? t("write.retrySubmitted")
+              : replayed
+                ? t("write.replayed")
+                : t("write.alreadyReplayed")
+          )
         } catch (error) {
           report(error)
         }

@@ -119,6 +119,12 @@ export function resolveBotPolicy(layers: readonly BotPolicyLayer[]): ResolvedBot
       note("requireApprovalForWrites", name)
     } else if (incoming.requireApprovalForWrites === false && policy.requireApprovalForWrites) {
       refuse("requireApprovalForWrites", name)
+    } else if (
+      incoming.requireApprovalForWrites === false &&
+      policy.requireApprovalForWrites === undefined
+    ) {
+      policy.requireApprovalForWrites = false
+      note("requireApprovalForWrites", name)
     }
 
     for (const field of ["maxRunDurationMs", "maxRunCostUsd", "maxConcurrentRuns"] as const) {

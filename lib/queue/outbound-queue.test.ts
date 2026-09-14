@@ -11,7 +11,7 @@ import {
 } from "@/lib/db/mobile-outbound-queue"
 import { getDb } from "@/lib/db/schema"
 import { beginMobileStepReceipt, persistMobileStepResult } from "@/lib/db/mobile-step-receipts"
-import { createOutboundRunner } from "./outbound-queue"
+import { createOutboundRunner, getQueueSummary, needsAttention, inFlight } from "./outbound-queue"
 import {
   clearActiveRuntimeTargetContext,
   setActiveRuntimeTargetContext,
@@ -26,6 +26,7 @@ jest.mock("@/lib/capacitor/network", () => ({
 
 // Stub platform detection so runner enforce-mobile branch is a no-op for tests.
 jest.mock("@/lib/capacitor/_shared", () => ({
+  ...jest.requireActual("@/lib/capacitor/_shared"),
   detectNativePlatform: () => "mobile",
 }))
 
@@ -58,6 +59,80 @@ describe("createOutboundRunner", () => {
     )
     const sent = await listByStatus("sent")
     expect(sent).toHaveLength(1)
+    await runner.stop()
+  })
+
+  it("dispatches legacy Bot retry receipts with the native UUID contract without rewriting their audit identity", async () => {
+    const call = jest.fn().mockResolvedValue({ replayed: true })
+    const runner = createOutboundRunner({ dispatcher: { call }, enforceMobile: false, scope })
+    const first = await enqueue({
+      command: "bot_delivery_replay",
+      payload: { deliveryId: "failed-delivery" },
+      idempotencyKey: "bot-replay:failed-delivery",
+    })
+    await enqueue({
+      command: "bot_delivery_replay",
+      payload: { deliveryId: "failed-delivery" },
+      idempotencyKey: "bot-replay:failed-delivery",
+    })
+    await enqueue({
+      command: "bot_trigger_set_armed",
+      payload: { installationId: "i", triggerId: "t", armed: true },
+      idempotencyKey: "bot-arm:i:t:1",
+    })
+    await enqueue({
+      command: "bot_trigger_set_armed",
+      payload: { installationId: "i", triggerId: "t", armed: false },
+      idempotencyKey: "bot-arm:i:t:0",
+    })
+    await enqueue({
+      command: "bot_trigger_set_armed",
+      payload: { installationId: "i", triggerId: "t", armed: true },
+      idempotencyKey: "bot-arm:i:t:1",
+    })
+    await runner.kick()
+    expect((await listByStatus("pending")).map((row) => row.lastError)).toEqual([])
+    const keys = call.mock.calls.map((args) => args[2].idempotencyKey as string)
+    expect(keys).toHaveLength(5)
+    for (const key of keys)
+      expect(key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-a[0-9a-f]{3}-[0-9a-f]{12}$/)
+    const replayKeys = call.mock.calls
+      .filter((args) => args[0] === "bot_delivery_replay")
+      .map((args) => args[2].idempotencyKey)
+    expect(replayKeys[0]).not.toBe(replayKeys[1])
+    expect(
+      new Set(
+        call.mock.calls
+          .filter((args) => args[0] === "bot_trigger_set_armed")
+          .map((args) => args[2].idempotencyKey)
+      ).size
+    ).toBe(3)
+    expect((await getDb().mobileOutboundQueue.get(first.id))?.idempotencyKey).toBe(
+      "bot-replay:failed-delivery"
+    )
+    expect(await listByStatus("sent")).toHaveLength(5)
+    await runner.stop()
+  })
+
+  it("passes current UUID and unrelated malformed command keys unchanged", async () => {
+    const call = jest.fn().mockResolvedValue({ ok: true })
+    const runner = createOutboundRunner({ dispatcher: { call }, enforceMobile: false, scope })
+    const uuid = crypto.randomUUID()
+    await enqueue({
+      command: "bot_delivery_replay",
+      payload: { deliveryId: "d" },
+      idempotencyKey: uuid,
+    })
+    await enqueue({ command: "connector_send", payload: {}, idempotencyKey: "bot-replay:d" })
+    await enqueue({
+      command: "bot_delivery_replay",
+      payload: { deliveryId: "d" },
+      idempotencyKey: "malformed",
+    })
+    await runner.kick()
+    expect(call.mock.calls.map((args) => args[2].idempotencyKey).sort()).toEqual(
+      [uuid, "bot-replay:d", "malformed"].sort()
+    )
     await runner.stop()
   })
 
@@ -362,6 +437,164 @@ describe("createOutboundRunner", () => {
     await enqueue({ command: "connector_send", payload: { i: 3 } })
     await runner.kick()
     expect(call).toHaveBeenCalledTimes(3)
+    await runner.stop()
+  })
+
+  it("counts recoverable and terminal outbox states without treating them as sent", async () => {
+    for (const status of [
+      "pending",
+      "sending",
+      "deadlettered",
+      "rejected",
+      "conflicted",
+    ] as const) {
+      const row = await enqueue({ command: "connector_send", payload: {} })
+      await getDb().mobileOutboundQueue.update(row.id, { status })
+    }
+    const summary = await getQueueSummary()
+    expect(summary).toEqual({ pending: 1, sending: 1, deadlettered: 1, rejected: 1, conflicted: 1 })
+    expect(needsAttention(summary)).toBe(3)
+    expect(inFlight(summary)).toBe(2)
+  })
+
+  it.each([
+    [null, {}, "malformed acknowledgement"],
+    [{ ok: false, reason: "closed" }, {}, "rejected: closed"],
+    [{ ok: true }, { requestId: 7, seq: 0 }, "payload is malformed"],
+  ])("does not ACK malformed mobile result receipts %j", async (response, payload, expected) => {
+    const runner = createOutboundRunner({
+      dispatcher: { call: async () => response },
+      enforceMobile: false,
+      scope,
+    })
+    const row = await enqueue({
+      command: "workflow_step_result",
+      payload: payload as Record<string, unknown>,
+    })
+    await runner.kick()
+    expect((await getDb().mobileOutboundQueue.get(row.id))?.lastError).toContain(expected)
+    await runner.stop()
+  })
+
+  it("keeps collaboration conflicts actionable and preserves the server revision", async () => {
+    const conflict = Object.assign(new Error("revision conflict"), {
+      status: 409,
+      authoritative: { revision: 2 },
+    })
+    const runner = createOutboundRunner({
+      dispatcher: {
+        call: async () => {
+          throw conflict
+        },
+      },
+      enforceMobile: false,
+      scope,
+    })
+    const row = await enqueue({
+      command: "collab_issue_update",
+      payload: {},
+      protocol: "collab-v1",
+    })
+    await runner.kick()
+    expect((await getDb().mobileOutboundQueue.get(row.id))?.status).toBe("conflicted")
+    await runner.stop()
+  })
+
+  it.each([
+    [{ results: [] }, "host_state_malformed_response"],
+    [
+      { results: [{ actionId: "wrong", outcome: "applied", hostGeneration: 1, hostSeq: 1 }] },
+      "host_state_malformed_response",
+    ],
+  ])("refuses an unmatched HostState receipt %j", async (response, expected) => {
+    const runner = createOutboundRunner({
+      dispatcher: { call: async () => response },
+      enforceMobile: false,
+      scope,
+    })
+    const row = await enqueue({
+      command: "host_state_submit",
+      payload: {},
+      protocol: "host-state",
+      actionId: "expected",
+    })
+    await runner.kick()
+    expect((await getDb().mobileOutboundQueue.get(row.id))?.lastError).toBe(expected)
+    await runner.stop()
+  })
+
+  it("accepts exact HostState success and coded terminal errors", async () => {
+    const call = jest
+      .fn()
+      .mockResolvedValueOnce({
+        results: [{ actionId: "a", outcome: "applied", hostGeneration: 1, hostSeq: 1 }],
+      })
+      .mockRejectedValueOnce({ code: "upgrade_required" })
+    const runner = createOutboundRunner({ dispatcher: { call }, enforceMobile: false, scope })
+    const first = await enqueue({
+      command: "host_state_submit",
+      payload: {},
+      protocol: "host-state",
+      actionId: "a",
+      nowMs: 1,
+    })
+    const second = await enqueue({
+      command: "host_state_submit",
+      payload: {},
+      protocol: "host-state",
+      actionId: "b",
+      nowMs: 2,
+    })
+    await runner.kick()
+    expect((await getDb().mobileOutboundQueue.get(first.id))?.status).toBe("sent")
+    expect((await getDb().mobileOutboundQueue.get(second.id))?.status).toBe("rejected")
+    await runner.stop()
+  })
+
+  it("cancels a delayed network subscription and makes repeated stop safe", async () => {
+    const network = jest.requireMock("@/lib/capacitor/network") as { subscribe: jest.Mock }
+    let finish!: (unsubscribe: () => void) => void
+    network.subscribe.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    const runner = createOutboundRunner({
+      dispatcher: { call: jest.fn() },
+      enforceMobile: false,
+      scope,
+    })
+    await runner.stop()
+    const unsubscribe = jest.fn(() => {
+      throw new Error("already removed")
+    })
+    finish(unsubscribe)
+    await Promise.resolve()
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+    await runner.stop()
+  })
+
+  it("responds to online events and stops cleanly when listener cleanup throws", async () => {
+    const network = jest.requireMock("@/lib/capacitor/network") as { subscribe: jest.Mock }
+    let notify!: (state: { connected: boolean }) => void
+    network.subscribe.mockImplementationOnce(async (callback) => {
+      notify = callback
+      return () => {
+        throw new Error("gone")
+      }
+    })
+    const call = jest.fn().mockResolvedValue(null)
+    const runner = createOutboundRunner({ dispatcher: { call }, enforceMobile: false, scope })
+    await enqueue({ command: "connector_send", payload: {} })
+    notify({ connected: false })
+    expect(call).not.toHaveBeenCalled()
+    notify({ connected: true })
+    await runner.kick()
+    expect(call).toHaveBeenCalledTimes(1)
+    await runner.quiesce()
+    await runner.quiesce()
+    notify({ connected: true })
     await runner.stop()
   })
 

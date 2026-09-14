@@ -23,8 +23,14 @@ import { getBotRunStep } from "@/lib/db/bot-run-steps"
 import { findBotDeliveryByCorrelation } from "@/lib/db/bot-event-deliveries"
 import { getDb } from "@/lib/db/schema"
 import { runEventJournal, semanticRunEvent } from "@/lib/db/execution-runs"
-import { createRunInterrupt, expireRunInterruptFromSource } from "@/lib/execution/run-control"
+import {
+  createRunInterrupt,
+  expireRunInterruptFromSource,
+  resolveRunInterruptFromSource,
+} from "@/lib/execution/run-control"
+import { resolveOwnedBotAuthority } from "@/lib/bot/policy/run-authority"
 import { getActionReviewChannelAdapter } from "@/lib/policy/action-review/registry"
+import { sha256Hex } from "@/lib/share/hash"
 import type { BotEventEnvelopeV1 } from "@/types/bot/event"
 import type {
   BotApprovalDecisionV1,
@@ -86,8 +92,10 @@ export class BotRunParkedError extends Error {
  * already on somebody's screen instead of asking again. Two questions for one
  * step is how an approval queue fills with duplicates nobody can tell apart.
  */
-export function botApprovalInterruptId(runId: string, stepName: string): string {
-  return `bot-approval:${runId}:${stepName}`
+export async function botApprovalInterruptId(runId: string, stepName: string): Promise<string> {
+  // Control IDs cross redacted projections. Keep the authority reference short,
+  // opaque, and collision-resistant rather than embedding event text or paths.
+  return `bot-approval:${await sha256Hex(JSON.stringify([runId, stepName]))}`
 }
 
 export interface BotStepDeps {
@@ -187,12 +195,19 @@ export function createBotStepApi(input: {
   ): Promise<BotApprovalDecisionV1> {
     assertPublicStepName(name)
     assertLive(signal, runId)
-    const prior = await getDb().executionRunInterrupts.get(botApprovalInterruptId(runId, name))
+    if (request.decisionMode !== undefined && !["human", "policy"].includes(request.decisionMode))
+      throw new Error("Invalid Bot approval decision mode")
+    const generatedId = await botApprovalInterruptId(runId, name)
+    const prior =
+      (await getDb().executionRunInterrupts.get(generatedId)) ??
+      (await getDb().executionRunInterrupts.get(`bot-approval:${runId}:${name}`))
+    if (prior && prior.runId !== runId) throw new Error("Approval belongs to another run")
     if (
       prior &&
       (JSON.stringify(prior.approvalDetail) !== JSON.stringify(request.detail) ||
         prior.title !== request.title ||
-        prior.approvalMessage !== request.message)
+        prior.approvalMessage !== request.message ||
+        (prior.approvalDecisionMode === "policy" && request.decisionMode !== "policy"))
     ) {
       await getDb().executionRunInterrupts.update(prior.id, {
         status: "expired",
@@ -203,7 +218,8 @@ export function createBotStepApi(input: {
     const begun = await beginBotRunStep(runId, name, now())
     if (begun.memoized) return begun.value as BotApprovalDecisionV1
 
-    const interruptId = botApprovalInterruptId(runId, name)
+    // Existing decisions remain bound to their original exact row and content.
+    const interruptId = prior?.id ?? generatedId
     const adapter = getActionReviewChannelAdapter("bot-step")
     const ttl = Math.min(request.timeoutMs ?? adapter.defaultTtlMs, adapter.defaultTtlMs)
     const step = await getBotRunStep(runId, name)
@@ -217,11 +233,25 @@ export function createBotStepApi(input: {
       type: adapter.interruptType ?? "bot_approval",
       status: "pending",
       title: request.title,
+      approvalDecisionMode:
+        prior?.approvalDecisionMode ?? (prior ? "human" : (request.decisionMode ?? "human")),
       ...(request.detail ? { approvalDetail: structuredClone(request.detail) } : {}),
       ...(request.message ? { approvalMessage: request.message } : {}),
       expiresAt,
       createdAt: now(),
       ...(input.projectId ? { projectId: input.projectId } : {}),
+    }
+    // An existing human request never becomes automatic when configuration changes.
+    if (!prior && request.decisionMode === "policy") {
+      const authority = await resolveOwnedBotAuthority(undefined, runId)
+      if (authority.automatedPublicationAllowed) {
+        interrupt.approvalPolicy = {
+          kind: "bot-installation",
+          installationId: authority.installation.id,
+        }
+      } else {
+        interrupt.approvalDecisionMode = "human"
+      }
     }
     await createRunInterrupt(interrupt).catch(async (error) => {
       // A re-entry finds its own interrupt already there. Anything else is real.
@@ -229,6 +259,46 @@ export function createBotStepApi(input: {
       if (!existing) throw error
       return existing
     })
+
+    if (request.decisionMode === "policy") {
+      const db = getDb()
+      // Compare-and-resolve under the existing stores' transaction. A concurrent
+      // denial, cancellation, or grant change must win before publication authority exists.
+      await db.transaction(
+        "rw",
+        [
+          db.executionRunInterrupts,
+          db.executionRuns,
+          db.executionRunEvents,
+          db.botInstallations,
+          db.botRunSteps,
+        ],
+        async () => {
+          const pending = await db.executionRunInterrupts.get(interruptId)
+          if (
+            pending?.status !== "pending" ||
+            pending.approvalDecisionMode !== "policy" ||
+            pending.approvalPolicy?.kind !== "bot-installation" ||
+            now() >= pending.expiresAt
+          )
+            return
+          const authority = await resolveOwnedBotAuthority(undefined, runId)
+          assertLive(signal, runId)
+          if (
+            authority.automatedPublicationAllowed &&
+            pending.approvalPolicy.installationId === authority.installation.id
+          ) {
+            await resolveRunInterruptFromSource(
+              runId,
+              interruptId,
+              "approve",
+              { displayName: "Host policy" },
+              now()
+            )
+          }
+        }
+      )
+    }
 
     if (!begun.memoized) {
       await journal("step.started", name, { interruptId, waiting: "approval" })
@@ -241,7 +311,10 @@ export function createBotStepApi(input: {
     if (!decision) throw new BotRunParkedError(runId, name, resumeAt(expiresAt), interruptId)
 
     await completeBotRunStep(runId, name, decision, now())
-    await journal("step.completed", name, { outcome: decision.outcome })
+    await journal("step.completed", name, {
+      outcome: decision.outcome,
+      decisionMode: decision.decisionMode,
+    })
     return decision
   }
 
@@ -265,6 +338,7 @@ export function createBotStepApi(input: {
   function decisionFromInterrupt(row: ExecutionRunInterrupt): BotApprovalDecisionV1 {
     return {
       approvalId: row.id,
+      ...(row.approvalDecisionMode === "policy" ? { decisionMode: "policy" as const } : {}),
       outcome:
         row.status === "approved" ? "approved" : row.status === "denied" ? "denied" : "expired",
       decidedAt: row.resolvedAt ?? now(),
@@ -279,7 +353,7 @@ export function createBotStepApi(input: {
     }
   }
 
-  /** Block until the decision lands. Only the detached Squad delegate uses this. */
+  /** Block for detached Squad delegates and live external-agent command decisions. */
   async function pollInterrupt(
     interruptId: string,
     expiresAt: number

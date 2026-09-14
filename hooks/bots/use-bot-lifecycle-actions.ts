@@ -40,6 +40,7 @@ import type { OperationAvailability } from "@/lib/runtime/operation-availability
 import { subscribeRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
 import { subscribeActiveRemoteTransport } from "@/lib/tauri/transport-routing"
 import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
+import type { BotPolicyGrantInput } from "@/lib/bot/control-writes/lifecycle"
 
 function subscribeRouteInputs(onChange: () => void): () => void {
   const unsubscribeRemote = subscribeActiveRemoteTransport(onChange)
@@ -79,7 +80,11 @@ export interface BotLifecycleActions {
   pending: ReadonlySet<string>
   /** Resolves to the new installation id, or undefined when it failed. */
   install: (input: InstallBotFromCatalogInput) => Promise<string | undefined>
-  saveConfig: (installationId: string, config: Record<string, unknown>) => Promise<boolean>
+  saveConfig: (
+    installationId: string,
+    config: Record<string, unknown>,
+    policyGrant?: BotPolicyGrantInput
+  ) => Promise<boolean>
   bindCredential: (
     installationId: string,
     slotId: string,
@@ -156,10 +161,15 @@ export function useBotLifecycleActions(): BotLifecycleActions {
   )
 
   const saveConfig = useCallback(
-    async (installationId: string, config: Record<string, unknown>) =>
+    async (
+      installationId: string,
+      config: Record<string, unknown>,
+      policyGrant?: BotPolicyGrantInput
+    ) =>
       withPending(`config:${installationId}`, async () => {
         try {
-          await updateBotConfig(installationId, config)
+          if (policyGrant) await updateBotConfig(installationId, config, policyGrant)
+          else await updateBotConfig(installationId, config)
           toast.success(t("lifecycle.configSaved"))
           return true
         } catch (error) {

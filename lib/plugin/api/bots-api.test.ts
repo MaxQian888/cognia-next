@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import { getDb, __resetDbForTesting } from "@/lib/db/schema"
+import { completeBotRunStep } from "@/lib/db/bot-run-steps"
 import { createExecutionRun } from "@/lib/db/execution-runs"
 import { enqueueBotDelivery } from "@/lib/db/bot-event-deliveries"
 import { buildBotEventEnvelope } from "@/lib/bot/events/envelope"
@@ -37,6 +38,7 @@ beforeEach(async () => {
   const db = getDb()
   await Promise.all([
     db.botInstallations.clear(),
+    db.botRunSteps.clear(),
     db.integrationSubscriptions.clear(),
     db.botEventDeliveries.clear(),
     db.executionRuns.clear(),
@@ -157,4 +159,152 @@ it("cancels obsolete resource runs and approval while preserving the current rev
   expect((await getDb().executionRuns.get("old"))?.status).toBe("cancelled")
   expect((await getDb().executionRunInterrupts.get("approval"))?.status).toBe("expired")
   expect((await getDb().executionRuns.get("current"))?.status).toBe("waiting")
+})
+
+it("projects only owned, completed publication checkpoints with matching snapshots", async () => {
+  const api = createBotsAPI("p", () => true)
+  for (const name of [
+    "valid",
+    "foreign",
+    "mirrored",
+    "missing-run",
+    "missing-snapshot",
+    "invalid-sha",
+    "running",
+    "wrong-repo",
+  ]) {
+    const envelope = buildBotEventEnvelope({
+      source: "bot",
+      sourceRecordId: name,
+      installationId: "install",
+      triggerId: "work",
+      type: "issue",
+      payload: { kind: "issue", mode: "implement", number: 25 },
+      occurredAt: 1,
+    })
+    const delivery = await enqueueBotDelivery({ envelope })
+    await getDb().botEventDeliveries.update(delivery.id, {
+      runId: name,
+      ...(name === "mirrored" ? { syncedFromHost: true } : {}),
+    })
+    if (name !== "missing-run")
+      await createExecutionRun({
+        id: name,
+        kind: "bot",
+        sourceId: name === "foreign" ? "other" : "install",
+        status: "completed",
+        title: name,
+        currentRevision: 0,
+        startedAt: 1,
+        updatedAt: 1,
+      })
+    if (name !== "missing-snapshot")
+      await completeBotRunStep(name, `__host:snapshot:${name}`, {
+        id: name,
+        runId: name,
+        diff: "must not leave host projection",
+      })
+    await completeBotRunStep(name, `__host:publication:${name}`, {
+      snapshotId: name,
+      repository: name === "wrong-repo" ? "other/repo" : "owner/repo",
+      branch: `bot/${name}`,
+      headSha: name === "invalid-sha" ? "invalid" : "a".repeat(40),
+    })
+    if (name === "running")
+      await getDb().botRunSteps.update(`${name}::__host:publication:${name}`, { status: "running" })
+  }
+  own.mockResolvedValue({
+    installation: { ...installation, config: { repository: "owner/repo" } },
+    resolved,
+  })
+  const result = await api.getInstallation("monitor")
+  expect(result.publications).toEqual([
+    {
+      sourceRunId: "valid",
+      snapshotId: "valid",
+      repository: "owner/repo",
+      branch: "bot/valid",
+      headSha: "a".repeat(40),
+      sourcePayload: { kind: "issue", mode: "implement", number: 25 },
+    },
+  ])
+  expect(JSON.stringify(result)).not.toContain("must not leave host projection")
+})
+
+it("pages past empty poll history without per-poll joins or losing resource-less publications", async () => {
+  const db = getDb()
+  const count = 1200
+  await db.botRunSteps.bulkPut(
+    Array.from({ length: count }, (_, index) => ({
+      id: `000-poll-${index}::__host:result`,
+      runId: `poll-${index}`,
+      name: "__host:result",
+      status: "completed",
+      output: { status: "no_changes" },
+    })) as never
+  )
+  await db.botEventDeliveries.bulkPut(
+    Array.from({ length: count }, (_, index) => ({
+      id: `poll-${index}`,
+      dedupKey: `poll-${index}`,
+      installationId: "install",
+      runId: `poll-${index}`,
+      status: "completed",
+      updatedAt: Date.now(),
+    })) as never
+  )
+  const envelope = buildBotEventEnvelope({
+    source: "bot",
+    sourceRecordId: "old-publisher",
+    installationId: "install",
+    triggerId: "publish",
+    type: "scheduled-publication",
+    occurredAt: 1,
+    payload: { original: true },
+  })
+  const delivery = await enqueueBotDelivery({ envelope })
+  await db.botEventDeliveries.update(delivery.id, { runId: "zzz-old-publisher", updatedAt: 1 })
+  await createExecutionRun({
+    id: "zzz-old-publisher",
+    kind: "bot",
+    sourceId: "install",
+    status: "completed",
+    title: "Old publication",
+    currentRevision: 0,
+    startedAt: 1,
+    updatedAt: 1,
+  })
+  await completeBotRunStep("zzz-old-publisher", "__host:snapshot:snapshot", {
+    id: "snapshot",
+    runId: "zzz-old-publisher",
+  })
+  await completeBotRunStep("zzz-old-publisher", "__host:publication:snapshot", {
+    snapshotId: "snapshot",
+    repository: "owner/repo",
+    branch: "bot/old",
+    headSha: "b".repeat(40),
+  })
+  const readRun = jest.spyOn(db.executionRuns, "get")
+  const readDelivery = jest.spyOn(db.botEventDeliveries, "where")
+  const readCheckpoints = jest.spyOn(db.botRunSteps, "bulkGet")
+  try {
+    const result = await createBotsAPI("p", () => true).getInstallation("monitor")
+    expect(result.publications).toEqual([
+      expect.objectContaining({
+        sourceRunId: "zzz-old-publisher",
+        sourcePayload: { original: true },
+      }),
+    ])
+    expect(readRun).toHaveBeenCalledTimes(1)
+    expect(readRun).toHaveBeenCalledWith("zzz-old-publisher")
+    expect(readDelivery).toHaveBeenCalledTimes(1)
+    expect(readDelivery).toHaveBeenCalledWith("runId")
+    expect(readCheckpoints.mock.calls.flatMap(([keys]) => keys)).toEqual([
+      "zzz-old-publisher::__host:publication:snapshot",
+    ])
+  } finally {
+    readRun.mockRestore()
+    readDelivery.mockRestore()
+    readCheckpoints.mockRestore()
+  }
 })

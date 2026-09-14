@@ -110,6 +110,8 @@ export interface BotConsoleRow {
    * limits" rather than "nothing to limit".
    */
   policy?: ResolvedBotPolicy
+  /** Explicit user grant; definition defaults never grant unattended authority. */
+  policyGrant?: BotInstallationRow["policyGrant"]
   /**
    * The definition's per-installation form, when it ships one. Absent means
    * this Bot has nothing to configure, which the pane states rather than
@@ -226,6 +228,7 @@ export function buildBotRow(input: BotRowInput): BotConsoleRow {
       }
     }),
     ...(resolved ? { policy: resolved.policyResolution } : {}),
+    ...(installation.policyGrant ? { policyGrant: installation.policyGrant } : {}),
     ...(definition?.configSchema ? { configSchema: definition.configSchema } : {}),
     config: installation.config,
     ...(installation.monitor ? { monitor: installation.monitor } : {}),

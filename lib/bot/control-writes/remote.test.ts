@@ -18,58 +18,146 @@ jest.mock("@/lib/db/mobile-outbound-queue", () => ({
 import { BOT_WRITE_COMMANDS } from "./route"
 import {
   botWriteIdempotencyKey,
+  normalizeLegacyBotWriteKey,
   replayBotDeliveryRemotely,
   runBotManuallyRemotely,
   setBotTriggerArmedRemotely,
 } from "./remote"
 import { hasPendingBotInstallationMutation } from "./pending-installations"
 
-const fresh = () => "uuid-1"
-
 describe("botWriteIdempotencyKey", () => {
-  it("derives an arming key that names the VALUE, not the act of toggling", () => {
-    // The relay replays a queued command after a reconnect. arm, disarm, arm
-    // is three distinct rows, and replaying the first still leaves the Host
-    // armed. A toggle command would land on disarmed and could not be fixed
-    // by any key.
-    const arm = botWriteIdempotencyKey(
-      BOT_WRITE_COMMANDS.setTriggerArmed,
-      { installationId: "boti_1", triggerId: "nightly", armed: true },
-      fresh
-    )
-    const disarm = botWriteIdempotencyKey(
-      BOT_WRITE_COMMANDS.setTriggerArmed,
-      { installationId: "boti_1", triggerId: "nightly", armed: false },
-      fresh
-    )
-    expect(arm).toBe("bot-arm:boti_1:nightly:1")
-    expect(disarm).toBe("bot-arm:boti_1:nightly:0")
-    expect(arm).not.toBe(disarm)
+  it("gives arm/disarm/arm different UUIDs while a queue retry retains its receipt", async () => {
+    const keys: string[] = []
+    for (const armed of [true, false, true]) {
+      keys.push(
+        await botWriteIdempotencyKey(
+          BOT_WRITE_COMMANDS.setTriggerArmed,
+          { installationId: "boti_1", triggerId: "nightly", armed },
+          () => crypto.randomUUID()
+        )
+      )
+    }
+    expect(new Set(keys).size).toBe(3)
+    for (const key of keys) expect(key).toMatch(/^[0-9a-f-]{36}$/)
   })
 
-  it("keys a replay on the delivery, so a duplicate finds nothing to do", () => {
-    expect(
-      botWriteIdempotencyKey(BOT_WRITE_COMMANDS.replayDelivery, { deliveryId: "bdl_9" }, fresh)
-    ).toBe("bot-replay:bdl_9")
+  it("gives an explicit retry a new UUID after the prior request received a cached 503", async () => {
+    const first = await botWriteIdempotencyKey(
+      BOT_WRITE_COMMANDS.replayDelivery,
+      { deliveryId: "bdl_9" },
+      () => crypto.randomUUID()
+    )
+    const next = await botWriteIdempotencyKey(
+      BOT_WRITE_COMMANDS.replayDelivery,
+      { deliveryId: "bdl_9" },
+      () => crypto.randomUUID()
+    )
+    expect(first).toMatch(/^[0-9a-f-]{36}$/)
+    expect(next).not.toBe(first)
   })
 
-  it("mints a FRESH key per manual run, because two presses are two runs", () => {
+  it("normalizes only exact legacy Bot receipts, preserving unrelated or malformed keys", async () => {
+    const replay = {
+      id: "old-row",
+      command: "bot_delivery_replay" as const,
+      payload: { deliveryId: "bdl_9" },
+      idempotencyKey: "bot-replay:bdl_9",
+    }
+    expect(await normalizeLegacyBotWriteKey(replay)).toMatch(/^[0-9a-f-]{36}$/)
+    expect(await normalizeLegacyBotWriteKey(replay)).toBe(await normalizeLegacyBotWriteKey(replay))
+    expect(await normalizeLegacyBotWriteKey({ ...replay, id: "next-click" })).not.toBe(
+      await normalizeLegacyBotWriteKey(replay)
+    )
+    expect(await normalizeLegacyBotWriteKey({ ...replay, idempotencyKey: "malformed" })).toBe(
+      "malformed"
+    )
+    expect(await normalizeLegacyBotWriteKey({ ...replay, command: "connector_send" })).toBe(
+      replay.idempotencyKey
+    )
+    expect(await normalizeLegacyBotWriteKey({ ...replay, payload: {} })).toBe(replay.idempotencyKey)
+    const arm = {
+      id: "first-arm",
+      command: "bot_trigger_set_armed" as const,
+      payload: { installationId: "i", triggerId: "t", armed: true },
+      idempotencyKey: "bot-arm:i:t:1",
+    }
+    expect(await normalizeLegacyBotWriteKey(arm)).not.toBe(
+      await normalizeLegacyBotWriteKey({ ...arm, id: "last-arm" })
+    )
+    expect(await normalizeLegacyBotWriteKey(arm)).toBe(await normalizeLegacyBotWriteKey(arm))
+    expect(await normalizeLegacyBotWriteKey({ ...arm, payload: {} })).toBe(arm.idempotencyKey)
+  })
+
+  it("mints a FRESH key per manual run, because two presses are two runs", async () => {
     // A derived key would fold the second press onto the first, and there is
     // nothing in the payload that distinguishes them.
     let n = 0
     const mint = () => `uuid-${(n += 1)}`
-    const first = botWriteIdempotencyKey(
+    const first = await botWriteIdempotencyKey(
       BOT_WRITE_COMMANDS.runManual,
       { installationId: "a" },
       mint
     )
-    const second = botWriteIdempotencyKey(
+    const second = await botWriteIdempotencyKey(
       BOT_WRITE_COMMANDS.runManual,
       { installationId: "a" },
       mint
     )
     expect(first).not.toBe(second)
   })
+})
+
+it("preserves valid UUIDs and malformed legacy argument shapes", async () => {
+  const uuid = crypto.randomUUID()
+  const base = {
+    id: "r",
+    command: "bot_trigger_set_armed" as const,
+    payload: { installationId: "i", triggerId: "t", armed: true },
+    idempotencyKey: "bot-arm:i:t:1",
+  }
+  for (const payload of [
+    { installationId: "i" },
+    { installationId: "i", triggerId: "t" },
+    { installationId: "i", triggerId: "t", armed: "true" },
+  ]) {
+    expect(await normalizeLegacyBotWriteKey({ ...base, payload })).toBe(base.idempotencyKey)
+  }
+  expect(await normalizeLegacyBotWriteKey({ ...base, idempotencyKey: uuid })).toBe(uuid)
+  expect(
+    await normalizeLegacyBotWriteKey({
+      ...base,
+      payload: { ...base.payload, armed: false },
+      idempotencyKey: "bot-arm:i:t:0",
+    })
+  ).toMatch(/^[0-9a-f-]{36}$/)
+  expect(await botWriteIdempotencyKey(BOT_WRITE_COMMANDS.mutateInstallation, {}, () => uuid)).toBe(
+    uuid
+  )
+})
+
+it("carries optional labels, input and trigger on the same durable receipts", async () => {
+  await runBotManuallyRemotely(
+    {
+      installationId: "i",
+      triggerId: "t",
+      input: { number: 25 },
+      idempotencyKey: crypto.randomUUID(),
+    },
+    { label: "Manual" }
+  )
+  expect(enqueue).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      label: "Manual",
+      payload: expect.objectContaining({ triggerId: "t", input: { number: 25 } }),
+    })
+  )
+  await replayBotDeliveryRemotely("d", { label: "Retry" })
+  expect(enqueue).toHaveBeenLastCalledWith(expect.objectContaining({ label: "Retry" }))
+  await setBotTriggerArmedRemotely(
+    { installationId: "absent", triggerId: "t", armed: false },
+    { label: "Disable" }
+  )
+  expect(enqueue).toHaveBeenLastCalledWith(expect.objectContaining({ label: "Disable" }))
 })
 
 describe("setBotTriggerArmedRemotely", () => {
@@ -79,7 +167,7 @@ describe("setBotTriggerArmedRemotely", () => {
     enqueue.mockClear()
   })
 
-  it("enqueues the absolute value under a derived key", async () => {
+  it("enqueues the absolute value under a UUID", async () => {
     await setBotTriggerArmedRemotely({
       installationId: "boti_1",
       triggerId: "nightly",
@@ -88,7 +176,7 @@ describe("setBotTriggerArmedRemotely", () => {
     expect(enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         command: BOT_WRITE_COMMANDS.setTriggerArmed,
-        idempotencyKey: "bot-arm:boti_1:nightly:1",
+        idempotencyKey: expect.stringMatching(/^[0-9a-f-]{36}$/),
         payload: { installationId: "boti_1", triggerId: "nightly", armed: true },
       })
     )
@@ -176,12 +264,12 @@ describe("runBotManuallyRemotely", () => {
 describe("replayBotDeliveryRemotely", () => {
   beforeEach(() => enqueue.mockClear())
 
-  it("keys on the delivery, so a duplicate request finds nothing to do", async () => {
+  it("queues a UUID per explicit retry while the Host deduplicates the delivery", async () => {
     await replayBotDeliveryRemotely("bdl_9")
     expect(enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         command: BOT_WRITE_COMMANDS.replayDelivery,
-        idempotencyKey: "bot-replay:bdl_9",
+        idempotencyKey: expect.stringMatching(/^[0-9a-f-]{36}$/),
         payload: { deliveryId: "bdl_9" },
       })
     )

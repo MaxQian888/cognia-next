@@ -2,6 +2,7 @@
 import { getDb } from "@/lib/db/schema"
 import { getBotRunStep } from "@/lib/db/bot-run-steps"
 import { requireOwnedBotRun } from "@/lib/bot/runtime/owned-run"
+import { assertBotPublicationAuthority } from "@/lib/bot/policy/run-authority"
 import { getBot } from "@/lib/plugin/registries/bot-registry"
 import { getRegisteredIntegration } from "@/lib/integrations/registry"
 import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
@@ -119,6 +120,7 @@ export async function assertBotIntegrationAction(
     }
     const detail = (approval as typeof approval & { approvalDetail?: Record<string, unknown> })
       .approvalDetail
+    await assertBotPublicationAuthority(pluginId, ref.runId, approval)
     const approved = Array.isArray(detail?.approvedActions)
       ? detail.approvedActions
       : [detail?.approvedAction]

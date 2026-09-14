@@ -136,6 +136,15 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
       interrupt.status === "pending" &&
       interrupt.id === run?.latestSnapshot?.pendingInterrupt?.id
   )
+  const botEvidence = botDetailRecord(botResult?.output) ?? pendingBotApproval?.approvalDetail
+  const botSnapshot = botSnapshotFrom(botEvidence)
+  const botTests = botTestsFrom(botEvidence)
+  const botPaths = new Set(botSnapshot?.files?.map((file) => file.path))
+  const journalChanges = detail.changes.filter((change) => !botPaths.has(change.path))
+  const changeCount = journalChanges.length + (botSnapshot?.files?.length ?? 0)
+  const hasRawBotDiff = typeof botSnapshot?.diff === "string" && Boolean(botSnapshot.diff.trim())
+  const snapshotError =
+    typeof botEvidence?.snapshotError === "string" ? botEvidence.snapshotError : undefined
 
   return (
     <div className="flex flex-col gap-3">
@@ -172,7 +181,14 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
       )}
 
       {pendingBotApproval && (
-        <section className="space-y-3 rounded-md border p-3" aria-label={t("botApproval.title")}>
+        <section
+          className="space-y-3 rounded-md border p-3"
+          aria-label={t(
+            pendingBotApproval.approvalDetail?.externalAgent
+              ? "botApproval.commandTitle"
+              : "botApproval.title"
+          )}
+        >
           <h3 className="text-sm font-medium">{pendingBotApproval.title}</h3>
           {pendingBotApproval.approvalDetail ? (
             <>
@@ -229,6 +245,11 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
         >
           {t(`outcome.${outcome.reason}`)}
           {outcome.degradedReason ? ` (${t(`degraded.${outcome.degradedReason}`)})` : ""}
+          {outcome.consentCode && (
+            <span className="block">
+              {t("outcome.consentCode")} <code>{outcome.consentCode}</code>
+            </span>
+          )}
         </p>
       )}
       {outcome?.accepted && outcome.retryRunId && (
@@ -246,11 +267,11 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
           </TabsTrigger>
           <TabsTrigger value="changes">
             {t("tabs.changes")}
-            <SectionCount value={detail.changes.length} />
+            <SectionCount value={changeCount} />
           </TabsTrigger>
           <TabsTrigger value="tests">
             {t("tabs.tests")}
-            <SectionCount value={detail.verifications.length} />
+            <SectionCount value={detail.verifications.length + botTests.length} />
           </TabsTrigger>
           <TabsTrigger value="artifacts">
             {t("tabs.artifacts")}
@@ -362,76 +383,114 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
         </TabsContent>
 
         <TabsContent value="changes" className="pt-2">
-          <Unavailable when={!journalAvailable} label={t("detail.journalUnavailable")}>
+          <Unavailable
+            when={!journalAvailable && !botSnapshot && !snapshotError}
+            label={t("detail.journalUnavailable")}
+          >
             {!changesAreComplete(detail.changeSummary) && (
               <p className="mb-2 flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-700 dark:text-amber-400">
                 <AlertTriangleIcon className="size-3.5 shrink-0" />
                 {t("detail.changesIncomplete")}
               </p>
             )}
-            <EmptyOr empty={detail.changes.length === 0} label={t("detail.noChanges")}>
-              <ul className="space-y-1">
-                {detail.changes.map((change) => (
-                  <li
-                    key={change.path}
-                    className="flex items-center gap-2 rounded border px-2 py-1 text-xs"
-                  >
-                    <FileIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 flex-1 truncate font-mono">{change.path}</span>
-                    {change.sensitive && (
-                      <Badge variant="outline" className="shrink-0 text-[10px]">
-                        {t("detail.sensitive")}
-                      </Badge>
-                    )}
-                    {changeKindLabelKey(change.changeKind) && (
-                      <span className="shrink-0 text-muted-foreground">
-                        {t(`changeKind.${changeKindLabelKey(change.changeKind)}`)}
-                      </span>
-                    )}
-                  </li>
-                ))}
-              </ul>
+            {snapshotError && (
+              <p role="status" className="mb-2 text-xs text-amber-700 dark:text-amber-400">
+                {t("detail.changesIncomplete")} {snapshotError}
+              </p>
+            )}
+            <EmptyOr
+              empty={changeCount === 0 && !hasRawBotDiff && !snapshotError}
+              label={t("detail.noChanges")}
+            >
+              <>
+                <ul className="space-y-1">
+                  {journalChanges.map((change) => (
+                    <li
+                      key={change.path}
+                      className="flex items-center gap-2 rounded border px-2 py-1 text-xs"
+                    >
+                      <FileIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 flex-1 truncate font-mono">{change.path}</span>
+                      {change.sensitive && (
+                        <Badge variant="outline" className="shrink-0 text-[10px]">
+                          {t("detail.sensitive")}
+                        </Badge>
+                      )}
+                      {changeKindLabelKey(change.changeKind) && (
+                        <span className="shrink-0 text-muted-foreground">
+                          {t(`changeKind.${changeKindLabelKey(change.changeKind)}`)}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                {botSnapshot && <BotSnapshotDetail snapshot={botSnapshot} />}
+              </>
             </EmptyOr>
           </Unavailable>
         </TabsContent>
 
         <TabsContent value="tests" className="pt-2">
-          <EmptyOr empty={detail.verifications.length === 0} label={t("detail.noTests")}>
-            <ul className="space-y-1">
-              {detail.verifications.map((artifact) => {
-                const summary = artifact.verification
-                const Icon = CONCLUSION_ICON[summary.conclusion]
-                return (
-                  <li
-                    key={artifact.id}
-                    className="flex items-center gap-2 rounded border px-2 py-1 text-xs"
-                  >
-                    <Icon
-                      className={cn("size-3.5 shrink-0", CONCLUSION_CLASS[summary.conclusion])}
-                    />
-                    <span
-                      className={cn("shrink-0 font-medium", CONCLUSION_CLASS[summary.conclusion])}
+          <EmptyOr
+            empty={detail.verifications.length === 0 && botTests.length === 0}
+            label={t("detail.noTests")}
+          >
+            <>
+              <ul className="space-y-1">
+                {detail.verifications.map((artifact) => {
+                  const summary = artifact.verification
+                  const Icon = CONCLUSION_ICON[summary.conclusion]
+                  return (
+                    <li
+                      key={artifact.id}
+                      className="flex items-center gap-2 rounded border px-2 py-1 text-xs"
                     >
-                      {t(`tests.${summary.conclusion}`)}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                      {summary.conclusion === "inconclusive"
-                        ? t("tests.inconclusiveHint")
-                        : t("tests.counts", {
-                            passed: summary.passed,
-                            failed: summary.failed,
-                            skipped: summary.skipped,
-                          })}
-                    </span>
-                    {summary.durationMs !== undefined && (
-                      <span className="shrink-0 tabular-nums text-muted-foreground">
-                        {formatDuration(summary.durationMs)}
+                      <Icon
+                        className={cn("size-3.5 shrink-0", CONCLUSION_CLASS[summary.conclusion])}
+                      />
+                      <span
+                        className={cn("shrink-0 font-medium", CONCLUSION_CLASS[summary.conclusion])}
+                      >
+                        {t(`tests.${summary.conclusion}`)}
                       </span>
-                    )}
-                  </li>
-                )
-              })}
-            </ul>
+                      <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                        {summary.conclusion === "inconclusive"
+                          ? t("tests.inconclusiveHint")
+                          : t("tests.counts", {
+                              passed: summary.passed,
+                              failed: summary.failed,
+                              skipped: summary.skipped,
+                            })}
+                      </span>
+                      {summary.durationMs !== undefined && (
+                        <span className="shrink-0 tabular-nums text-muted-foreground">
+                          {formatDuration(summary.durationMs)}
+                        </span>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+              {botTests.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs text-amber-700 dark:text-amber-400">
+                    {t("botApproval.agentReported")}
+                  </p>
+                  {botTests.map((test, index) => (
+                    <div
+                      key={`${index}:${test.command}`}
+                      className="space-y-1 rounded border p-2 text-xs"
+                    >
+                      <p className="break-words font-mono">{test.command}</p>
+                      <InspectRow label={t("tests.exitCode")} value={String(test.exitCode)} />
+                      <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-2">
+                        {test.output}
+                      </pre>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           </EmptyOr>
         </TabsContent>
 
@@ -496,17 +555,17 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
   )
 }
 
-function BotApprovalDetail({
-  detail,
-  context = "approval",
-}: {
-  detail: Record<string, unknown>
-  context?: "approval" | "result"
-}) {
-  const t = useTranslations("agentRuns")
-  const candidate = detail.snapshot as Partial<BotWorkspaceSnapshot> | undefined
-  const snapshot =
-    candidate &&
+function botDetailRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined
+}
+
+function botSnapshotFrom(
+  detail: Record<string, unknown> | undefined
+): Partial<BotWorkspaceSnapshot> | undefined {
+  const candidate = detail?.snapshot as Partial<BotWorkspaceSnapshot> | undefined
+  return candidate &&
     typeof candidate.id === "string" &&
     Array.isArray(candidate.files) &&
     candidate.files.every(
@@ -516,8 +575,82 @@ function BotApprovalDetail({
         (file.oldContent === null || typeof file.oldContent === "string") &&
         (file.newContent === null || typeof file.newContent === "string")
     )
-      ? candidate
-      : undefined
+    ? candidate
+    : undefined
+}
+
+interface BotReportedTest {
+  command: string
+  exitCode: number
+  output: string
+}
+
+function botTestsFrom(detail: Record<string, unknown> | undefined): BotReportedTest[] {
+  const report = botDetailRecord(detail?.report)
+  const tests = report?.tests
+  return Array.isArray(tests) &&
+    tests.every(
+      (test) =>
+        test &&
+        typeof test.command === "string" &&
+        test.command.trim() &&
+        Number.isInteger(test.exitCode) &&
+        typeof test.output === "string"
+    )
+    ? (tests as BotReportedTest[])
+    : []
+}
+
+function BotSnapshotDetail({ snapshot }: { snapshot: Partial<BotWorkspaceSnapshot> }) {
+  const t = useTranslations("agentRuns")
+  return (
+    <div className="space-y-3 py-2">
+      <>
+        <InspectRow label={t("botApproval.baseSha")} value={snapshot.baseSha} />
+        <InspectRow label={t("botApproval.headSha")} value={snapshot.headSha} />
+        {snapshot.files!.map((file) => (
+          <div key={file.path} className="space-y-1">
+            <p className="break-all font-mono text-xs">{file.path}</p>
+            {typeof file.mode === "string" && (
+              <InspectRow label={t("botApproval.fileMode")} value={file.mode} />
+            )}
+            <div className="h-80 overflow-hidden rounded border">
+              <DiffViewer
+                staged={false}
+                readOnly
+                diff={{
+                  path: file.path,
+                  oldContent: file.oldContent ?? "",
+                  newContent: file.newContent ?? "",
+                  hunks: [],
+                  isBinary: false,
+                }}
+              />
+            </div>
+          </div>
+        ))}
+      </>
+
+      {snapshot.files?.length === 0 &&
+        typeof snapshot.diff === "string" &&
+        snapshot.diff.trim() && (
+          <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-2 text-xs">
+            {snapshot.diff}
+          </pre>
+        )}
+    </div>
+  )
+}
+
+function BotApprovalDetail({
+  detail,
+  context = "approval",
+}: {
+  detail: Record<string, unknown>
+  context?: "approval" | "result"
+}) {
+  const t = useTranslations("agentRuns")
+  const snapshot = botSnapshotFrom(detail)
   return (
     <div className="space-y-3 py-2">
       {typeof detail.model === "string" && (
@@ -526,33 +659,7 @@ function BotApprovalDetail({
       {typeof detail.sessionId === "string" && (
         <InspectRow label={t("botApproval.session")} value={detail.sessionId} />
       )}
-      {snapshot && (
-        <>
-          <InspectRow label={t("botApproval.baseSha")} value={snapshot.baseSha} />
-          <InspectRow label={t("botApproval.headSha")} value={snapshot.headSha} />
-          {snapshot.files!.map((file) => (
-            <div key={file.path} className="space-y-1">
-              <p className="break-all font-mono text-xs">{file.path}</p>
-              {typeof file.mode === "string" && (
-                <InspectRow label={t("botApproval.fileMode")} value={file.mode} />
-              )}
-              <div className="h-80 overflow-hidden rounded border">
-                <DiffViewer
-                  staged={false}
-                  readOnly
-                  diff={{
-                    path: file.path,
-                    oldContent: file.oldContent ?? "",
-                    newContent: file.newContent ?? "",
-                    hunks: [],
-                    isBinary: false,
-                  }}
-                />
-              </div>
-            </div>
-          ))}
-        </>
-      )}
+      {snapshot && <BotSnapshotDetail snapshot={snapshot} />}
       {detail.testEvidence === "agent-reported" && (
         <p className="text-xs text-amber-700 dark:text-amber-400">
           {t("botApproval.agentReported")}
@@ -568,7 +675,13 @@ function BotApprovalDetail({
       )}
       <div>
         <h4 className="text-xs font-medium">
-          {t(context === "result" ? "botApproval.result" : "botApproval.publication")}
+          {t(
+            context === "result"
+              ? "botApproval.result"
+              : detail.externalAgent
+                ? "botApproval.command"
+                : "botApproval.publication"
+          )}
         </h4>
         <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-2 text-xs">
           {JSON.stringify(

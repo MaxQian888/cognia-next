@@ -1,12 +1,13 @@
 /** @jest-environment jsdom */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 
 import type { BotWriteReadiness } from "@/hooks/bots/use-bot-control-writes"
 import type { BotConsoleRow } from "@/lib/bot/console/bot-rows"
 import type { BotEventDeliveryRow } from "@/lib/db/bot-types"
 
 const replayDelivery = jest.fn(async (_deliveryId: string) => undefined)
+let pending = new Set<string>()
 let deliveries: { rows: BotEventDeliveryRow[]; loading: boolean } = { rows: [], loading: false }
 let readiness: BotWriteReadiness = {
   route: "local",
@@ -21,7 +22,7 @@ jest.mock("@/hooks/bots/use-bot-deliveries", () => ({
 jest.mock("@/hooks/bots/use-bot-control-writes", () => ({
   useBotWriteReadiness: () => readiness,
   useBotControlActions: () => ({
-    pending: new Set<string>(),
+    pending,
     replayDelivery: (id: string) => replayDelivery(id),
     setTriggerArmed: jest.fn(),
     runNow: jest.fn(),
@@ -73,6 +74,7 @@ function delivery(over: Partial<BotEventDeliveryRow> = {}): BotEventDeliveryRow 
 
 beforeEach(() => {
   replayDelivery.mockClear()
+  pending = new Set<string>()
   deliveries = { rows: [], loading: false }
   readiness = {
     route: "local",
@@ -112,6 +114,67 @@ describe("BotDeliveriesSection", () => {
     render(<BotDeliveriesSection row={row()} />)
     fireEvent.click(screen.getByTestId("bot-delivery-replay-bdl_1"))
     await waitFor(() => expect(replayDelivery).toHaveBeenCalledWith("bdl_1"))
+  })
+
+  it.each(["dismissed", "failed"] as const)(
+    "retries a terminal %s result via the same paired facade",
+    async (status) => {
+      readiness = {
+        route: "remote",
+        availability: { state: "available", reason: "local-host" },
+        can: true,
+      }
+      deliveries = {
+        rows: [delivery({ status, runId: "failed-run", lastError: "invalid_result_report" })],
+        loading: false,
+      }
+      render(<BotDeliveriesSection row={row()} />)
+      expect(screen.getByRole("link", { name: "View run" })).toHaveAttribute(
+        "href",
+        "/agent-runs?run=failed-run"
+      )
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+      await waitFor(() => expect(replayDelivery).toHaveBeenCalledWith("bdl_1"))
+    }
+  )
+
+  it("links the successor and previous execution without offering a duplicate retry", () => {
+    const original = delivery({ status: "dismissed", runId: "old/run" })
+    const successor = delivery({
+      id: "bdl_retry",
+      eventId: "bev_integration_retry:bdl_1",
+      status: "pending",
+      envelope: {
+        provenance: { causationEventIds: [original.eventId] },
+      } as BotEventDeliveryRow["envelope"],
+    })
+    deliveries = { rows: [successor, original], loading: false }
+    const { rerender } = render(<BotDeliveriesSection row={row()} />)
+    expect(
+      within(screen.getByTestId("bot-delivery-bdl_1")).queryByRole("button", { name: "Retry" })
+    ).toBeNull()
+    expect(screen.getByText("Retry queued")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Previous run" })).toHaveAttribute(
+      "href",
+      "/agent-runs?run=old%2Frun"
+    )
+    successor.runId = "new/run"
+    rerender(<BotDeliveriesSection row={row()} />)
+    expect(screen.getByRole("link", { name: "Retry run" })).toHaveAttribute(
+      "href",
+      "/agent-runs?run=new%2Frun"
+    )
+  })
+
+  it("does not replay skipped deliveries or pending requests", () => {
+    deliveries = {
+      rows: [delivery({ id: "skipped", status: "dismissed" }), delivery({ status: "deadletter" })],
+      loading: false,
+    }
+    pending.add("delivery:bdl_1")
+    render(<BotDeliveriesSection row={row()} />)
+    expect(within(screen.getByTestId("bot-delivery-skipped")).queryByRole("button")).toBeNull()
+    expect(screen.getByRole("button", { name: "Retry" })).toBeDisabled()
   })
 
   it("says why replay is unavailable, but only when there is one to replay", () => {

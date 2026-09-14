@@ -114,6 +114,9 @@
     "unavailable": "This device does not carry this Squad run's record."
   },
   "outcome": {
+    "host_consent_required": "Authorize this device on the Host, then try the action again.",
+    "control_failed": "The Host could not apply this action. Check the connection and try again.",
+    "consentCode": "Host authorization code:",
     "action_unavailable": "That action is no longer available — the run has moved on.",
     "already_retried": "This run has already been retried.",
     "forbidden": "You are not authorized to control this run.",
@@ -242,7 +245,8 @@
     "failed": "Failed",
     "inconclusive": "Inconclusive",
     "inconclusiveHint": "The output could not be parsed — this is not a pass.",
-    "passed": "Passed"
+    "passed": "Passed",
+    "exitCode": "Exit code"
   },
   "title": "Agent Runs",
   "waitingReasons": {
@@ -250,13 +254,15 @@
     "recovery_required": "Recovery required"
   },
   "botApproval": {
+    "commandTitle": "Review Bot command",
+    "command": "Exact command request",
     "title": "Review Bot publication",
     "detailUnavailable": "Approval details are unavailable. Refresh this run before approving.",
     "model": "Model",
     "session": "Agent session",
     "baseSha": "Approved target SHA",
     "headSha": "Workspace HEAD",
-    "agentReported": "Test results below are reported by the agent. Inspect the command evidence before approving.",
+    "agentReported": "These command results are reported by the agent and have not been independently verified.",
     "report": "Test and review report",
     "publication": "Exact publication contents",
     "result": "Recorded result",

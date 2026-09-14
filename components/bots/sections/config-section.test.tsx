@@ -5,14 +5,16 @@ import userEvent from "@testing-library/user-event"
 
 import type { BotConsoleRow } from "@/lib/bot/console/bot-rows"
 
-const saveConfig = jest.fn(async (_id: string, _config: Record<string, unknown>) => true)
+const saveConfig = jest.fn(
+  async (_id: string, _config: Record<string, unknown>, _grant?: unknown) => true
+)
 let readiness = { availability: { state: "available", reason: "local-host" }, can: true }
 
 jest.mock("@/hooks/bots/use-bot-lifecycle-actions", () => ({
   useBotLifecycleReadiness: () => readiness,
   useBotLifecycleActions: () => ({
     pending: new Set<string>(),
-    saveConfig: (id: string, config: Record<string, unknown>) => saveConfig(id, config),
+    saveConfig,
   }),
 }))
 
@@ -76,12 +78,73 @@ describe("BotConfigSection", () => {
     expect(saveConfig).toHaveBeenCalledWith("boti_1", { channel: "", verbose: false })
   })
 
-  it("says the Bot has no settings rather than rendering an empty form", () => {
+  it("grants unattended execution and publication only after explicitly selecting and saving them", async () => {
+    const user = userEvent.setup()
+    render(<BotConfigSection row={row()} />)
+    await user.click(screen.getByRole("switch", { name: "Allow commands without asking" }))
+    await user.click(
+      screen.getByRole("switch", { name: "Allow automatic publication of PRs and reviews" })
+    )
+    expect(saveConfig).not.toHaveBeenCalled()
+    await user.click(screen.getByRole("button", { name: "Save settings" }))
+    expect(saveConfig).toHaveBeenCalledWith("boti_1", expect.any(Object), {
+      maxAuthority: "bypassPermissions",
+      maxAutonomy: "autopilot",
+      requireApprovalForWrites: false,
+    })
+  })
+
+  it("lets the user revoke automatic authority and keeps a failed selection retryable", async () => {
+    const user = userEvent.setup()
+    saveConfig.mockResolvedValue(false)
+    render(
+      <BotConfigSection
+        row={row({
+          policyGrant: {
+            maxAuthority: "bypassPermissions",
+            maxAutonomy: "autopilot",
+            requireApprovalForWrites: false,
+          },
+        })}
+      />
+    )
+    await user.click(screen.getByRole("switch", { name: "Allow commands without asking" }))
+    await user.click(
+      screen.getByRole("switch", { name: "Allow automatic publication of PRs and reviews" })
+    )
+    await user.click(screen.getByRole("button", { name: "Save settings" }))
+    expect(saveConfig).toHaveBeenLastCalledWith("boti_1", expect.any(Object), {
+      maxAuthority: "acceptEdits",
+      maxAutonomy: "confirm",
+      requireApprovalForWrites: true,
+    })
+    expect(screen.getByRole("switch", { name: "Allow commands without asking" })).not.toBeChecked()
+  })
+
+  it("does not carry an unsaved authority selection to another installation", async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(<BotConfigSection row={row()} />)
+    await user.click(screen.getByRole("switch", { name: "Allow commands without asking" }))
+    rerender(<BotConfigSection row={row({ id: "boti_2" })} />)
+    expect(screen.getByRole("switch", { name: "Allow commands without asking" })).not.toBeChecked()
+  })
+
+  it("allows independent host authority changes even when the Bot has no config schema", async () => {
     const withoutSchema = row()
     delete (withoutSchema as { configSchema?: unknown }).configSchema
     render(<BotConfigSection row={withoutSchema} />)
-    expect(screen.getByText("Nothing to configure")).toBeInTheDocument()
-    expect(screen.queryByTestId("bot-config")).not.toBeInTheDocument()
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("switch", { name: "Allow commands without asking" }))
+    await user.click(screen.getByRole("button", { name: "Save settings" }))
+    expect(saveConfig).toHaveBeenCalledWith(
+      "boti_1",
+      {},
+      {
+        maxAuthority: "bypassPermissions",
+        maxAutonomy: "autopilot",
+        requireApprovalForWrites: true,
+      }
+    )
   })
 
   it("tells an orphan apart from a Bot that simply has no settings", () => {

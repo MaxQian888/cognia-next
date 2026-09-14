@@ -114,6 +114,9 @@
     "unavailable": "本设备没有这次小队运行的记录。"
   },
   "outcome": {
+    "host_consent_required": "请先在宿主上授权此设备，然后重试操作。",
+    "control_failed": "宿主未能执行此操作，请检查连接后重试。",
+    "consentCode": "宿主授权码：",
     "action_unavailable": "该操作已失效——运行状态已经变化。",
     "already_retried": "该运行已经重试过了。",
     "forbidden": "你没有控制该运行的权限。",
@@ -242,7 +245,8 @@
     "failed": "失败",
     "inconclusive": "无法判定",
     "inconclusiveHint": "输出无法解析——这不等于通过。",
-    "passed": "通过"
+    "passed": "通过",
+    "exitCode": "退出码"
   },
   "title": "运行中心",
   "waitingReasons": {
@@ -250,13 +254,15 @@
     "recovery_required": "需要恢复"
   },
   "botApproval": {
+    "commandTitle": "审批 Bot 命令",
+    "command": "具体命令请求",
     "title": "审核 Bot 发布内容",
     "detailUnavailable": "审批详情不可用，请刷新此运行后再审批。",
     "model": "模型",
     "session": "Agent 会话",
     "baseSha": "审批目标 SHA",
     "headSha": "工作区 HEAD",
-    "agentReported": "以下测试结果由 Agent 报告，请审批前检查实际命令证据。",
+    "agentReported": "以下命令结果由 Agent 报告，尚未经独立验证。",
     "report": "测试与审查报告",
     "publication": "完整发布内容",
     "result": "已保存的结果",

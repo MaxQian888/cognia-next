@@ -24,6 +24,7 @@ import {
   bindBotCredentialLocally,
   setBotInstallationEnabledLocally,
   uninstallBotInstallationLocally,
+  botPolicyGrantSchema,
 } from "./lifecycle"
 
 const id = z.string().min(1).max(256)
@@ -51,7 +52,15 @@ export const botLifecycleMutationSchema = z.discriminatedUnion("operation", [
       credentialBindings: z.record(z.string(), binding).optional(),
     })
     .strict(),
-  z.object({ ...common, operation: z.literal("config"), installationId: id, config }).strict(),
+  z
+    .object({
+      ...common,
+      operation: z.literal("config"),
+      installationId: id,
+      config,
+      policyGrant: botPolicyGrantSchema.optional(),
+    })
+    .strict(),
   z
     .object({
       ...common,
@@ -179,7 +188,9 @@ export async function mutateBotInstallationOnHost(raw: unknown) {
   if (!resolved) throw new Error("Bot installation definition is missing")
   if (input.operation === "config") {
     const config = validateConfig(resolved.definition.configSchema, input.config)
-    return projectBotInstallationRow(await updateBotConfigLocally(input.installationId, config))
+    return projectBotInstallationRow(
+      await updateBotConfigLocally(input.installationId, config, input.policyGrant)
+    )
   }
   if (input.operation === "bind") {
     await validateBinding(

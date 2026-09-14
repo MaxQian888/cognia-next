@@ -204,6 +204,7 @@ describe("buildBotRow credentials and policy", () => {
       resolved: resolved(inst, { policy: { maxRunDurationMs: 60_000 } }),
     })
     expect(row.policy?.policy).toMatchObject({ maxRunDurationMs: 60_000, maxConcurrentRuns: 1 })
+    expect(row.policyGrant).toEqual({ maxConcurrentRuns: 1 })
     expect(row.policy?.provenance).toMatchObject({
       maxRunDurationMs: "definition",
       maxConcurrentRuns: "installation",

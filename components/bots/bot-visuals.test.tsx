@@ -110,6 +110,25 @@ describe("useBotProblemText", () => {
 })
 
 describe("useBotRelativeTime", () => {
+  it("provides a refreshable clock when the locale provider has no global now", () => {
+    const intl = jest.requireMock<typeof import("next-intl")>("next-intl")
+    const now = new Date("2026-09-12T12:00:00Z")
+    const relativeTime = jest.fn(() => "one minute ago")
+    const clock = jest.spyOn(intl, "useNow").mockReturnValue(now)
+    const formatter = jest.spyOn(intl, "useFormatter").mockReturnValue({
+      relativeTime,
+    } as unknown as ReturnType<typeof intl.useFormatter>)
+    try {
+      const { result } = renderHook(() => useBotRelativeTime())
+      expect(result.current(now.getTime() - 60_000)).toBe("one minute ago")
+      expect(clock).toHaveBeenCalledWith({ updateInterval: 60_000 })
+      expect(relativeTime).toHaveBeenCalledWith(new Date(now.getTime() - 60_000), now)
+    } finally {
+      formatter.mockRestore()
+      clock.mockRestore()
+    }
+  })
+
   it("says never rather than printing the epoch", () => {
     const { result } = renderHook(() => useBotRelativeTime())
     expect(result.current(undefined)).toBe("Never")

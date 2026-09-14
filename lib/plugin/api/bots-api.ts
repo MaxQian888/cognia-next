@@ -1,4 +1,4 @@
-import type { PluginBotsAPI } from "@/types/bot/api"
+import type { BotPublicationReference, PluginBotsAPI } from "@/types/bot/api"
 import { requireOwnedBotRun } from "@/lib/bot/runtime/owned-run"
 import { dispatchManualBotRun } from "@/lib/bot/events/dispatch"
 import { botEventId, buildBotEventEnvelope } from "@/lib/bot/events/envelope"
@@ -7,6 +7,79 @@ import { getIntegrationIngressEndpoint } from "@/lib/db/integrations"
 import { getDb } from "@/lib/db/schema"
 import { dismissBotDelivery, isTerminalBotDelivery } from "@/lib/db/bot-event-deliveries"
 import { cancelBotRun } from "@/lib/bot/runtime/run"
+
+/** Only the current installation's locally owned host artifacts may restore tracking. */
+async function publicationReferences(
+  installationId: string,
+  repository: unknown
+): Promise<BotPublicationReference[]> {
+  const db = getDb()
+  const references: BotPublicationReference[] = []
+  // Walk only primary keys in bounded pages. Poll history still adds cheap index
+  // traversal, but never loads poll payloads, results, runs, or deliveries.
+  const pageSize = 512
+  let after: string | undefined
+  while (true) {
+    const keys = await (
+      after === undefined ? db.botRunSteps.orderBy(":id") : db.botRunSteps.where(":id").above(after)
+    )
+      .limit(pageSize)
+      .primaryKeys()
+    if (keys.length === 0) break
+    after = keys[keys.length - 1] as string
+    const publicationKeys = keys.filter((key) =>
+      String(key).includes("::__host:publication:")
+    ) as string[]
+    const checkpoints = await db.botRunSteps.bulkGet(publicationKeys)
+    for (const checkpoint of checkpoints) {
+      if (!checkpoint) continue
+      const artifact = checkpoint.output as Record<string, unknown> | null | undefined
+      if (
+        checkpoint.status !== "completed" ||
+        !artifact ||
+        typeof artifact.repository !== "string" ||
+        typeof artifact.branch !== "string" ||
+        !artifact.branch ||
+        typeof artifact.headSha !== "string" ||
+        !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(artifact.headSha) ||
+        typeof artifact.snapshotId !== "string" ||
+        checkpoint.name !== `__host:publication:${artifact.snapshotId}`
+      )
+        continue
+      if (
+        typeof repository === "string" &&
+        artifact.repository.toLowerCase() !== repository.toLowerCase()
+      )
+        continue
+      const run = await db.executionRuns.get(checkpoint.runId)
+      if (!run || run.kind !== "bot" || run.sourceId !== installationId) continue
+      const delivery = await db.botEventDeliveries
+        .where("runId")
+        .equals(run.id)
+        .filter((row) => row.installationId === installationId && !row.syncedFromHost)
+        .first()
+      if (!delivery) continue
+      const snapshot = await db.botRunSteps.get(`${run.id}::__host:snapshot:${artifact.snapshotId}`)
+      const snapshotValue = snapshot?.output as { id?: unknown; runId?: unknown } | undefined
+      if (
+        snapshot?.status !== "completed" ||
+        snapshotValue?.id !== artifact.snapshotId ||
+        snapshotValue.runId !== run.id
+      )
+        continue
+      references.push({
+        sourceRunId: run.id,
+        repository: artifact.repository,
+        branch: artifact.branch,
+        headSha: artifact.headSha,
+        snapshotId: artifact.snapshotId,
+        sourcePayload: delivery.envelope.payload,
+      })
+      if (references.length === 256) return references
+    }
+  }
+  return references
+}
 
 export function createBotsAPI(
   pluginId: string,
@@ -32,16 +105,18 @@ export function createBotsAPI(
           getIntegrationIngressEndpoint(subscription.pluginId, subscription.accountId)
         )
       )
+      const config = {
+        ...defaultsFromConfigSchema(resolved.definition.configSchema),
+        ...installation.config,
+      }
       return {
         id: installation.id,
         createdAt: installation.createdAt,
         activatedAt: installation.activatedAt,
-        config: {
-          ...defaultsFromConfigSchema(resolved.definition.configSchema),
-          ...installation.config,
-        },
+        config,
         triggerState: installation.triggerState ?? {},
         monitor: installation.monitor,
+        publications: await publicationReferences(installation.id, config.repository),
         webhookEnabled: subscriptions.some(
           (subscription) =>
             accounts.includes(subscription.accountId) &&

@@ -84,6 +84,8 @@ const DEGRADED_REASONS = [
 const _degraded: Covers<SteerDegradedReason, typeof DEGRADED_REASONS> = true
 
 const OUTCOME_REASONS = [
+  "host_consent_required",
+  "control_failed",
   "run_not_found",
   "forbidden",
   "revision_conflict",

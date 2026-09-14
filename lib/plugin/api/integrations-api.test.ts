@@ -11,6 +11,28 @@ import * as botBinding from "./bot-integration-binding"
 import { setIntegrationAuthenticatedRequestExecutorForTesting } from "@/lib/integrations/action-runner"
 import { createIntegrationsAPI } from "./integrations-api"
 
+// Mutable namespace seams retain the real implementations unless a boundary test spies on one.
+jest.mock("@/lib/db/integrations", () => ({
+  __esModule: true,
+  ...jest.requireActual("@/lib/db/integrations"),
+}))
+jest.mock("@/lib/integrations/action-runner", () => ({
+  __esModule: true,
+  ...jest.requireActual("@/lib/integrations/action-runner"),
+}))
+jest.mock("@/lib/integrations/ingress-client", () => ({
+  __esModule: true,
+  ...jest.requireActual("@/lib/integrations/ingress-client"),
+}))
+jest.mock("@/lib/integrations/events", () => ({
+  __esModule: true,
+  ...jest.requireActual("@/lib/integrations/events"),
+}))
+jest.mock("@/lib/integrations/migration", () => ({
+  __esModule: true,
+  ...jest.requireActual("@/lib/integrations/migration"),
+}))
+
 jest.mock("./bot-integration-binding", () => ({
   ...jest.requireActual("./bot-integration-binding"),
   resolveBotIntegrationBinding: jest.fn(),
@@ -252,4 +274,143 @@ describe("ctx.integrations", () => {
     )
     await expect(bot.checkAccountHealth(ref)).resolves.toMatchObject({ health: "healthy" })
   })
+})
+
+it("exposes only the bound GitHub actor identity and rejects broader identity routes", async () => {
+  const account = { id: "account", pluginId: "github-delivery" }
+  jest
+    .spyOn(botBinding, "resolveBotIntegrationBinding")
+    .mockResolvedValue({ account, repository: "owner/repo" } as never)
+  const request = jest.fn().mockResolvedValue({
+    status: 200,
+    headers: {},
+    data: { login: "actor", id: 3, email: "private", plan: { name: "private" } },
+  })
+  setIntegrationAuthenticatedRequestExecutorForTesting(request)
+  const api = createIntegrationsAPI("bot", () => true)
+  const ref = { runId: "run", slotId: "github" }
+  expect((await api.authenticatedRequest(ref, "https://api.github.com/user")).data).toEqual({
+    login: "actor",
+    id: 3,
+  })
+  for (const url of [
+    "https://api.github.com/user?extra=true",
+    "https://api.github.com/user/repos",
+    "https://evil.test/user",
+  ])
+    await expect(api.authenticatedRequest(ref, url)).rejects.toThrow("scope")
+  request.mockResolvedValue({ status: 403, headers: {}, data: null })
+  expect((await api.authenticatedRequest(ref, "https://api.github.com/user")).data).toEqual({})
+})
+
+it("requires the declared permission before invoking every integration operation", async () => {
+  const api = createIntegrationsAPI("denied", () => false)
+  for (const method of Object.values(api)) {
+    await expect(
+      Promise.resolve().then(() => (method as (...args: unknown[]) => unknown)(undefined))
+    ).rejects.toThrow("requires the")
+  }
+})
+
+it("delegates account, publication and recovery operations with the calling plugin's identity", async () => {
+  const database = await import("@/lib/db/integrations")
+  const actions = await import("@/lib/integrations/action-runner")
+  const ingress = await import("@/lib/integrations/ingress-client")
+  const events = await import("@/lib/integrations/events")
+  const migrations = await import("@/lib/integrations/migration")
+  const api = createIntegrationsAPI("owner", () => true)
+  try {
+    const list = jest.spyOn(database, "listIntegrationAccounts").mockResolvedValue([])
+    await api.listAccounts("github")
+    expect(list).toHaveBeenCalledWith("owner", "github")
+    const update = jest
+      .spyOn(database, "updateIntegrationAccount")
+      .mockResolvedValue({ id: "account" } as never)
+    await api.updateAccount("account", { enabled: false })
+    expect(update).toHaveBeenCalledWith("owner", "account", { enabled: false })
+    const remove = jest.spyOn(ingress, "deleteIntegrationAccount").mockResolvedValue(undefined)
+    await api.removeAccount("account")
+    expect(remove).toHaveBeenCalledWith("owner", "account")
+    const unsubscribe = jest
+      .spyOn(ingress, "deleteIntegrationSubscription")
+      .mockResolvedValue(undefined)
+    await api.removeSubscription("subscription")
+    expect(unsubscribe).toHaveBeenCalledWith("owner", "subscription")
+    const publish = jest
+      .spyOn(events, "publishIntegrationEvent")
+      .mockResolvedValue({ inserted: false } as never)
+    const event = { id: "event" } as never
+    expect(await api.publishEvent(event)).toEqual({ inserted: false })
+    expect(publish).toHaveBeenCalledWith("owner", event)
+    const execute = jest
+      .spyOn(actions, "executeIntegrationAction")
+      .mockResolvedValue({ id: "job" } as never)
+    const action = { actionId: "write", accountId: "account", integrationId: "github", input: {} }
+    await api.executeAction(action)
+    expect(execute).toHaveBeenCalledWith("owner", action)
+    const job = jest
+      .spyOn(database, "getIntegrationActionJob")
+      .mockResolvedValue({ pluginId: "other" } as never)
+    expect(await api.getActionJob("job")).toBeUndefined()
+    await expect(api.cancelAction("job")).rejects.toThrow("not found")
+    job.mockResolvedValue({ pluginId: "owner" } as never)
+    expect(await api.getActionJob("job")).toMatchObject({ pluginId: "owner" })
+    const cancel = jest.spyOn(actions, "cancelIntegrationActionJob").mockResolvedValue(undefined)
+    await api.cancelAction("job")
+    expect(cancel).toHaveBeenCalledWith("job")
+    job.mockResolvedValue({
+      pluginId: "provider",
+      accountId: "bound",
+      botBinding: { pluginId: "owner", runId: "run", slotId: "github" },
+    } as never)
+    jest
+      .mocked(botBinding.resolveBotIntegrationBinding)
+      .mockResolvedValue({ account: { id: "bound" } } as never)
+    expect(await api.getActionJob("job")).toMatchObject({ pluginId: "provider" })
+    await api.cancelAction("job")
+    expect(botBinding.resolveBotIntegrationBinding).toHaveBeenCalledWith(
+      "owner",
+      expect.objectContaining({ runId: "run" })
+    )
+    const subscriptions = jest.spyOn(database, "listIntegrationSubscriptions").mockResolvedValue([])
+    expect(await api.getIngressPublicUrl("subscription")).toBeUndefined()
+    subscriptions.mockResolvedValue([{ id: "subscription", accountId: "account" }] as never)
+    const endpoint = jest
+      .spyOn(database, "getIntegrationIngressEndpoint")
+      .mockResolvedValue(undefined)
+    expect(await api.getIngressPublicUrl("subscription")).toBeUndefined()
+    endpoint.mockResolvedValue({ routeId: "route" } as never)
+    const publicUrl = jest
+      .spyOn(ingress, "getIntegrationIngressPublicUrl")
+      .mockResolvedValue("https://host.test/route")
+    expect(await api.getIngressPublicUrl("subscription")).toBe("https://host.test/route")
+    expect(publicUrl).toHaveBeenCalledWith("route")
+    const deadletters = jest
+      .spyOn(ingress, "listIntegrationIngressDeadletters")
+      .mockResolvedValue([])
+    await api.listIngressDeadletters("account")
+    expect(deadletters).toHaveBeenCalledWith("owner", "account")
+    const deadletter = jest
+      .spyOn(ingress, "getIntegrationIngressDeadletter")
+      .mockResolvedValue(undefined)
+    await api.getIngressDeadletter("account", "route", "delivery")
+    expect(deadletter).toHaveBeenCalledWith("owner", "account", "route", "delivery")
+    const replay = jest
+      .spyOn(ingress, "requeueIntegrationIngressDeadletter")
+      .mockResolvedValue(undefined)
+    await api.requeueIngressDeadletter("account", "route", "delivery")
+    expect(replay).toHaveBeenCalledWith("owner", "account", "route", "delivery")
+    const migrate = jest
+      .spyOn(migrations, "migrateLegacyIntegration")
+      .mockResolvedValue({} as never)
+    await api.migrateLegacy({} as never)
+    expect(migrate).toHaveBeenCalledWith("owner", {})
+    const rollback = jest
+      .spyOn(migrations, "rollbackIntegrationMigration")
+      .mockResolvedValue(undefined)
+    await api.rollbackMigration("migration")
+    expect(rollback).toHaveBeenCalledWith("owner", "migration")
+  } finally {
+    jest.restoreAllMocks()
+  }
 })

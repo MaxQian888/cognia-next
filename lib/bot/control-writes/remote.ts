@@ -12,16 +12,11 @@
  * Each command's key is chosen for what a REPLAY after a reconnect must do,
  * which is the one thing nobody exercises by hand:
  *
- *  * `bot_trigger_set_armed` uses a DERIVED key naming the VALUE it sets, so
- *    arm, disarm and arm again enqueue three distinct rows, and replaying the
- *    first still leaves the Host armed. A `bot_trigger_toggle` command could
- *    not be made safe at any key, which is why the write is absolute.
- *  * `bot_run_manual` uses a FRESH key per press, because two presses are two
- *    runs and only a fresh key can tell that from a retry of one. The Host arm
- *    derives the envelope's event id from it, so a retry folds back onto the
- *    same delivery through `botDeliveryDedupKey`.
- *  * `bot_delivery_replay` uses a derived key AND the Host arm is guarded on
- *    the row still being dead-lettered, so a duplicate finds nothing to do.
+ *  * Arming uses a fresh UUID per explicit command. Queue retries preserve it,
+ *    while arm/disarm/arm cannot reuse a cached response from the first arm.
+ *  * Manual runs use a fresh UUID per press and carry it in their event payload.
+ *  * Retry presses also use fresh UUIDs so a completed transient failure is
+ *    not replayed forever. The Host deduplicates the successor by delivery.
  *
  * ## What is optimistic and what is not
  *
@@ -33,6 +28,7 @@
  */
 
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
+import { sha256Hex } from "@/lib/share/hash"
 import type { MobileOutboundJobRow } from "@/lib/db/mobile-outbound-types"
 import { getBotInstallation, updateBotInstallation } from "@/lib/db/bot-installations"
 
@@ -50,22 +46,50 @@ export interface RemoteBotWriteOptions {
  * Kept as a pure function taking its id source, so the replay semantics can be
  * tested without a queue and without a clock.
  */
-export function botWriteIdempotencyKey(
+export async function botWriteIdempotencyKey(
   command: BotWriteCommand,
-  payload: Record<string, unknown>,
+  _payload: Record<string, unknown>,
   freshId: () => string
-): string {
+): Promise<string> {
   switch (command) {
-    case BOT_WRITE_COMMANDS.setTriggerArmed:
-      return `bot-arm:${String(payload.installationId)}:${String(payload.triggerId)}:${payload.armed ? 1 : 0}`
     case BOT_WRITE_COMMANDS.replayDelivery:
-      return `bot-replay:${String(payload.deliveryId)}`
+    case BOT_WRITE_COMMANDS.setTriggerArmed:
     case BOT_WRITE_COMMANDS.mutateInstallation:
     case BOT_WRITE_COMMANDS.runManual:
       // Minted once, here, not derived. Two manual runs ARE two runs, and a
       // derived key would fold the second press onto the first.
       return freshId()
   }
+}
+
+/** UUID v8: a namespaced digest, with the complete delivery identity included. */
+async function botControlUuid(key: string): Promise<string> {
+  const hex = await sha256Hex(`cognia:bot-control:${key}`)
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-8${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`
+}
+
+/** Upgrade only the two exact legacy Bot key formats at dispatch, without rewriting audit rows. */
+export async function normalizeLegacyBotWriteKey(
+  row: Pick<MobileOutboundJobRow, "id" | "command" | "payload" | "idempotencyKey">
+): Promise<string> {
+  if (
+    row.command === BOT_WRITE_COMMANDS.replayDelivery &&
+    typeof row.payload.deliveryId === "string" &&
+    row.idempotencyKey === `bot-replay:${row.payload.deliveryId}`
+  ) {
+    return botControlUuid(`legacy-replay:${row.id}`)
+  }
+  if (
+    row.command === BOT_WRITE_COMMANDS.setTriggerArmed &&
+    typeof row.payload.installationId === "string" &&
+    typeof row.payload.triggerId === "string" &&
+    typeof row.payload.armed === "boolean" &&
+    row.idempotencyKey ===
+      `bot-arm:${row.payload.installationId}:${row.payload.triggerId}:${row.payload.armed ? 1 : 0}`
+  ) {
+    return botControlUuid(`legacy-arm:${row.id}`)
+  }
+  return row.idempotencyKey
 }
 
 export interface SetTriggerArmedRemotelyInput {
@@ -94,8 +118,10 @@ export async function setBotTriggerArmedRemotely(
     }
     const queueRow = await enqueue({
       command: BOT_WRITE_COMMANDS.setTriggerArmed,
-      idempotencyKey: botWriteIdempotencyKey(BOT_WRITE_COMMANDS.setTriggerArmed, payload, () =>
-        crypto.randomUUID()
+      idempotencyKey: await botWriteIdempotencyKey(
+        BOT_WRITE_COMMANDS.setTriggerArmed,
+        payload,
+        () => crypto.randomUUID()
       ),
       ...(options.label ? { label: options.label } : {}),
       payload,
@@ -158,7 +184,7 @@ export async function replayBotDeliveryRemotely(
   const payload = { deliveryId }
   return enqueue({
     command: BOT_WRITE_COMMANDS.replayDelivery,
-    idempotencyKey: botWriteIdempotencyKey(BOT_WRITE_COMMANDS.replayDelivery, payload, () =>
+    idempotencyKey: await botWriteIdempotencyKey(BOT_WRITE_COMMANDS.replayDelivery, payload, () =>
       crypto.randomUUID()
     ),
     ...(options.label ? { label: options.label } : {}),

@@ -124,6 +124,53 @@ describe("schedulerTriggerFor", () => {
 })
 
 describe("syncBotTriggerSchedules", () => {
+  it("keeps routine delivery ticks quiet and migrates existing noisy tasks", async () => {
+    const bot = resolved([{ id: "poll", kind: "poll", everyMs: 60_000 }])
+    await syncBotTriggerSchedules(bot)
+    expect(tasks.get("task_1")?.notification).toEqual({
+      onStart: false,
+      onComplete: false,
+      onError: true,
+      channels: ["toast"],
+    })
+    const existing = tasks.get("task_1")!
+    tasks.set("task_1", {
+      ...existing,
+      notification: { onStart: true, onComplete: true, onError: false, channels: ["none"] },
+    })
+    await syncBotTriggerSchedules(bot)
+    expect(tasks.get("task_1")?.notification).toEqual({
+      onStart: false,
+      onComplete: false,
+      onError: false,
+      channels: ["none"],
+    })
+    schedulerApi.updateTask.mockClear()
+    await syncBotTriggerSchedules(bot)
+    expect(schedulerApi.updateTask).not.toHaveBeenCalled()
+  })
+
+  it("repairs legacy notification defaults without changing unrelated tasks", async () => {
+    const bot = resolved([{ id: "poll", label: "Repository", kind: "poll", everyMs: 60_000 }])
+    await syncBotTriggerSchedules(bot)
+    const existing = tasks.get("task_1")!
+    tasks.set("task_1", { ...existing, notification: undefined } as unknown as ScheduledTask)
+    tasks.set("foreign", { ...existing, id: "foreign", type: "chat" })
+    tasks.set("untagged", { ...existing, id: "untagged", tags: undefined })
+    await syncBotTriggerSchedules(bot)
+    expect(tasks.get("task_1")?.notification).toEqual({ onStart: false, onComplete: false })
+    tasks.set("task_1", {
+      ...existing,
+      status: "paused",
+      notification: { ...existing.notification, onStart: false, onComplete: true },
+    })
+    await syncBotTriggerSchedules(bot)
+    expect(tasks.get("task_1")?.status).toBe("active")
+    expect(tasks.get("task_1")?.notification.onComplete).toBe(false)
+    await removeBotTriggerSchedules("boti_1")
+    expect([...tasks.keys()]).toEqual(["foreign", "untagged"])
+  })
+
   it("creates one task per armed timed trigger, in the executor's payload shape", async () => {
     await syncBotTriggerSchedules(
       resolved([

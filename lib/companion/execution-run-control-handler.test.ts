@@ -11,13 +11,14 @@ const base = {
   action: "pause",
   idempotencyKey: "phone:1",
   expectedRevision: 4,
+  callerDeviceId: "dev-9",
 }
 
 describe("parseExecutionRunControlPayload", () => {
   it("builds the cockpit's command shape from a remote payload", () => {
     const parsed = parseExecutionRunControlPayload({
       ...base,
-      deviceId: "dev-9",
+      deviceId: "spoofed-device",
       deviceName: "Pixel",
       interruptId: "int-1",
       steerMessage: "focus on tests",
@@ -69,17 +70,37 @@ describe("parseExecutionRunControlPayload", () => {
 })
 
 describe("handleExecutionRunControl", () => {
+  it("rejects an unstamped caller even when it supplies a device identity", async () => {
+    const execute = jest.fn()
+    expect(
+      await handleExecutionRunControl(
+        { ...base, callerDeviceId: undefined, deviceId: "dev-9" },
+        { execute }
+      )
+    ).toEqual({
+      ok: false,
+      reason: "invalid-payload",
+      field: "callerDeviceId",
+    })
+    expect(execute).not.toHaveBeenCalled()
+  })
+
   it("submits through the run control gate with the caller as an operator", async () => {
     const execute = jest.fn(
       async (): Promise<RunControlResult> => ({ accepted: true, revision: 5 }) as RunControlResult
     )
     const result = await handleExecutionRunControl(
-      { ...base, deviceId: "dev-9" },
+      { ...base, deviceId: "spoofed-device" },
       { execute, operatorIds: () => ["cognia:local-console"] }
     )
     expect(result).toEqual({ accepted: true, revision: 5 })
     expect(execute).toHaveBeenCalledWith(
-      expect.objectContaining({ runId: base.runId, action: "pause", expectedRevision: 4 }),
+      expect.objectContaining({
+        runId: base.runId,
+        action: "pause",
+        expectedRevision: 4,
+        actor: { remoteUserId: "dev-9" },
+      }),
       { operatorIds: ["cognia:local-console", "dev-9"] }
     )
   })

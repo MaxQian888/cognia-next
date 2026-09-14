@@ -9,7 +9,7 @@
  * validation, authorization) applies to a remote caller unchanged, and the
  * result is the same `RunControlResult` the cockpit renders.
  *
- * The actor is the authenticated caller. The Rust side stamps `deviceId` from
+ * The actor is the authenticated caller. The Rust side stamps `callerDeviceId` from
  * the session (this command is in `CALLER_DEVICE_ID_COMMANDS`), so a payload
  * cannot borrow another device's name. A paired device that reached this arm
  * passed the Remote Control capability gate, and is therefore an operator for
@@ -74,7 +74,8 @@ export function parseExecutionRunControlPayload(
   if (reviewDecision !== undefined && !isWellFormedSquadReviewDecision(reviewDecision)) {
     return { ok: false, reason: "invalid-payload", field: "reviewDecision" }
   }
-  const deviceId = readString(payload, "deviceId")
+  const deviceId = readString(payload, "callerDeviceId")
+  if (!deviceId) return { ok: false, reason: "invalid-payload", field: "callerDeviceId" }
   const displayName = readString(payload, "deviceName")
   return {
     ok: true,

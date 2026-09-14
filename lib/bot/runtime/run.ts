@@ -32,7 +32,8 @@ import {
   semanticRunEvent,
 } from "@/lib/db/execution-runs"
 import { getDb } from "@/lib/db/schema"
-import { completeBotRunStep } from "@/lib/db/bot-run-steps"
+import { completeBotRunStep, getBotRunStep } from "@/lib/db/bot-run-steps"
+import { BOT_RUN_POLICY_STEP } from "@/lib/bot/policy/run-authority"
 import { expireRunInterruptFromSource } from "@/lib/execution/run-control"
 import { writeBotTriggerState } from "@/lib/db/bot-installations"
 import { projectBotComposition } from "@/lib/bot/composition/project-bot-composition"
@@ -187,6 +188,11 @@ export async function runBotDelivery(input: RunBotDeliveryInput): Promise<BotRun
     return { status: "unavailable", runId, error }
   }
   if (!existing) {
+    // Preserve all original host ceilings across retries and future grant edits.
+    // Legacy runs are not upgraded into unattended authority on re-entry.
+    if (!(await getBotRunStep(runId, BOT_RUN_POLICY_STEP))) {
+      await completeBotRunStep(runId, BOT_RUN_POLICY_STEP, structuredClone(resolved.policy), ts)
+    }
     await createExecutionRun({
       id: runId,
       kind: "bot",
@@ -394,7 +400,13 @@ export async function runBotDelivery(input: RunBotDeliveryInput): Promise<BotRun
           semanticRunEvent(
             "run.waiting",
             { stepId: error.stepName },
-            { ts: endedAt, sourceEventId: `run.waiting:${error.stepName}` }
+            {
+              ts: endedAt,
+              // Each resumed attempt must project back to waiting. A key
+              // shared across attempts would deduplicate this transition
+              // while retaining the newer run.resumed event.
+              sourceEventId: `run.waiting:${error.stepName}:${existing?.currentRevision ?? 0}`,
+            }
           )
         )
         .catch(() => undefined)

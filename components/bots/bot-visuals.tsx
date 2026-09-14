@@ -30,7 +30,7 @@ import {
   ZapIcon,
   type LucideIcon,
 } from "lucide-react"
-import { useFormatter, useTranslations } from "next-intl"
+import { useFormatter, useNow, useTranslations } from "next-intl"
 
 import { Badge } from "@/components/ui/badge"
 import type { BotTriggerKind } from "@/lib/bot/console/bot-rows"
@@ -237,9 +237,10 @@ export function useBotIntervalText(): (everyMs: number) => string {
 /** Relative time, or "never" when nothing has happened yet. */
 export function useBotRelativeTime(): (value: number | undefined) => string {
   const format = useFormatter()
+  const now = useNow({ updateInterval: 60_000 })
   const t = useTranslations("bots")
   return (value) => {
     if (value === undefined || !Number.isFinite(value) || value <= 0) return t("never")
-    return format.relativeTime(new Date(value))
+    return format.relativeTime(new Date(value), now)
   }
 }

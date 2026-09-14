@@ -22,11 +22,13 @@
  * defaults here instead would give the form and the runtime two answers.
  */
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 
 import { AdapterForm, type JsonSchema } from "@/components/settings/connections/forms/adapter-form"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
+import { Switch } from "@/components/ui/switch"
+import { Label } from "@/components/ui/label"
 import {
   useBotLifecycleActions,
   useBotLifecycleReadiness,
@@ -38,6 +40,21 @@ export function BotConfigSection({ row }: { row: BotConsoleRow }) {
   const t = useTranslations("bots")
   const readiness = useBotLifecycleReadiness()
   const actions = useBotLifecycleActions()
+  const [authority, setAuthority] = useState<{
+    id: string
+    unattended: boolean
+    automatic: boolean
+  } | null>(null)
+  const storedUnattended = row.policyGrant?.maxAuthority === "bypassPermissions"
+  const storedAutomatic =
+    row.policyGrant?.maxAutonomy === "autopilot" &&
+    row.policyGrant?.requireApprovalForWrites === false
+  const selection =
+    authority?.id === row.id
+      ? authority
+      : { id: row.id, unattended: storedUnattended, automatic: storedAutomatic }
+  const authorityChanged =
+    selection.unattended !== storedUnattended || selection.automatic !== storedAutomatic
 
   const initialValues = useMemo(
     () =>
@@ -48,16 +65,12 @@ export function BotConfigSection({ row }: { row: BotConsoleRow }) {
     [row.config, row.configSchema]
   )
 
-  if (!row.configSchema) {
+  if (row.orphaned) {
     return (
       <Empty className="border-none py-4">
         <EmptyHeader>
-          <EmptyTitle className="text-sm">
-            {row.orphaned ? t("config.orphanTitle") : t("config.emptyTitle")}
-          </EmptyTitle>
-          <EmptyDescription className="text-xs">
-            {row.orphaned ? t("config.orphanBody") : t("config.emptyBody")}
-          </EmptyDescription>
+          <EmptyTitle className="text-sm">{t("config.orphanTitle")}</EmptyTitle>
+          <EmptyDescription className="text-xs">{t("config.orphanBody")}</EmptyDescription>
         </EmptyHeader>
       </Empty>
     )
@@ -67,11 +80,37 @@ export function BotConfigSection({ row }: { row: BotConsoleRow }) {
 
   return (
     <div className="flex flex-col gap-2" data-testid="bot-config">
+      <fieldset
+        className="mb-3 flex flex-col gap-3 rounded-md border p-3"
+        disabled={!readiness.can || busy}
+      >
+        <legend className="px-1 text-sm font-medium">{t("config.authorityTitle")}</legend>
+        <p className="text-xs text-muted-foreground">{t("config.authorityHint")}</p>
+        <div className="flex items-center justify-between gap-3">
+          <Label htmlFor={`bot-unattended-${row.id}`}>{t("config.allowUnattended")}</Label>
+          <Switch
+            id={`bot-unattended-${row.id}`}
+            checked={selection.unattended}
+            onCheckedChange={(unattended) => setAuthority({ ...selection, unattended })}
+            disabled={!readiness.can || busy}
+          />
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <Label htmlFor={`bot-automatic-${row.id}`}>{t("config.allowAutomaticPublication")}</Label>
+          <Switch
+            id={`bot-automatic-${row.id}`}
+            checked={selection.automatic}
+            onCheckedChange={(automatic) => setAuthority({ ...selection, automatic })}
+            disabled={!readiness.can || busy}
+          />
+        </div>
+      </fieldset>
       <AdapterForm
+        key={row.id}
         // The schema is `Record<string, unknown>` on the definition because the
         // manifest type does not depend on the form's subset. Narrowing here
         // rather than at the type keeps the manifest free of a UI dependency.
-        schema={row.configSchema as JsonSchema}
+        schema={(row.configSchema ?? { type: "object", properties: {} }) as JsonSchema}
         initialValues={initialValues}
         disabled={!readiness.can || busy}
         submitLabel={t("config.save")}
@@ -79,7 +118,15 @@ export function BotConfigSection({ row }: { row: BotConsoleRow }) {
         // landed. Awaited rather than dropped so the form's own submitting
         // state covers the write instead of ending a frame into it.
         onSubmit={async (values) => {
-          await actions.saveConfig(row.id, values)
+          const config = row.configSchema ? values : row.config
+          if (authorityChanged) {
+            const saved = await actions.saveConfig(row.id, config, {
+              maxAuthority: selection.unattended ? "bypassPermissions" : "acceptEdits",
+              maxAutonomy: selection.unattended || selection.automatic ? "autopilot" : "confirm",
+              requireApprovalForWrites: !selection.automatic,
+            })
+            if (saved) setAuthority(null)
+          } else await actions.saveConfig(row.id, config)
         }}
       />
       {!readiness.can ? (

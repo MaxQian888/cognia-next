@@ -110,8 +110,17 @@ export async function syncBotTriggerSchedules(resolved: InstalledBot): Promise<v
       continue
     }
     wanted.delete(tag)
-    if (!sameTrigger(task.trigger, want.trigger) || task.status !== "active") {
-      await api.updateTask(task.id, { trigger: want.trigger, status: "active" })
+    if (
+      !sameTrigger(task.trigger, want.trigger) ||
+      task.status !== "active" ||
+      task.notification?.onStart !== false ||
+      task.notification?.onComplete !== false
+    ) {
+      await api.updateTask(task.id, {
+        trigger: want.trigger,
+        status: "active",
+        notification: { ...task.notification, onStart: false, onComplete: false },
+      })
     }
   }
 
@@ -123,6 +132,8 @@ export async function syncBotTriggerSchedules(resolved: InstalledBot): Promise<v
       // Exactly the shape `executeBotTask` reads.
       payload: { installationId: installation.id, triggerId: want.def.id },
       tags: [BOT_TRIGGER_TAG, tag],
+      // Enqueueing a delivery is routine; the Bot run owns meaningful results.
+      notification: { onStart: false, onComplete: false, onError: true, channels: ["toast"] },
       // So the task lists in the workspace that owns the installation rather
       // than in every one of them.
       ...(installation.projectId ? { projectId: installation.projectId } : {}),

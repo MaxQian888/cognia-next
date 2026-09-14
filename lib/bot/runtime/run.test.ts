@@ -11,7 +11,7 @@ import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import type { InstalledBot } from "@/lib/bot/installed-bot"
 import type { BotEventEnvelopeV1 } from "@/types/bot/event"
 
-import { BotExecutorUnavailableError } from "./executors/types"
+import { BotExecutorUnavailableError, type BotExecutorContext } from "./executors/types"
 import { BotRunParkedError } from "./step"
 import {
   __resetLiveBotRunsForTesting,
@@ -83,6 +83,7 @@ beforeEach(async () => {
   await db.botRunSteps.clear()
   await db.executionRuns.clear()
   await db.executionRunEvents.clear()
+  await db.executionRunInterrupts.clear()
 }, 15_000)
 
 describe("botRunId", () => {
@@ -495,6 +496,86 @@ describe("runBotDelivery", () => {
  * resumption unable to write to it.
  */
 describe("runBotDelivery when a handler parks", () => {
+  it("does not journal a waiting transition after its delivery lease expires", async () => {
+    const { delivery, resolved } = await seed()
+    const outcome = await runBotDelivery({
+      delivery,
+      resolved,
+      now,
+      executors: {
+        handler: async (ctx) => {
+          await getDb().botEventDeliveries.update(delivery.id, { leaseExpiresAt: NOW })
+          throw new BotRunParkedError(ctx.runId, "publish", NOW + 20_000)
+        },
+      },
+    })
+
+    expect(outcome.status).toBe("cancelled")
+    expect((await runEventJournal.replay(outcome.runId)).map((event) => event.type)).not.toContain(
+      "run.waiting"
+    )
+    expect((await getExecutionRun(outcome.runId))?.latestSnapshot?.allowedActions).not.toContain(
+      "approve"
+    )
+  })
+
+  it("keeps the same publication approval actionable after repeated re-entry", async () => {
+    const { delivery, resolved } = await seed()
+    const detail = { snapshot: { id: "snapshot-1", diff: "approved contents" } }
+    const handler = jest.fn(async (ctx: BotExecutorContext) => {
+      await ctx.step.waitForApproval("publish", {
+        title: "Publish the prepared changes?",
+        timeoutMs: 7 * 24 * 60 * 60 * 1_000,
+        detail,
+      })
+    })
+    let interruptId: string | undefined
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      // A fixed clock also verifies that occurrence identity is independent
+      // of wall-clock precision. Re-entry must not re-create the approval.
+      const outcome = await runBotDelivery({
+        delivery,
+        resolved,
+        now,
+        stepDeps: { now },
+        executors: { handler },
+      })
+      expect(outcome.status).toBe("parked")
+      const run = await getExecutionRun(outcome.runId)
+      expect(run?.status).toBe("waiting")
+      expect(run?.latestSnapshot?.status).toBe("waiting")
+      expect(run?.latestSnapshot?.allowedActions).toEqual([
+        "approve",
+        "deny",
+        "stop",
+        "open_details",
+      ])
+      interruptId ??= run?.latestSnapshot?.pendingInterrupt?.id
+      expect(run?.latestSnapshot?.pendingInterrupt?.id).toBe(interruptId)
+      expect(await getDb().executionRunInterrupts.count()).toBe(1)
+      expect(await getDb().executionRunInterrupts.get(interruptId!)).toMatchObject({
+        status: "pending",
+        approvalDetail: detail,
+        expiresAt: NOW + 7 * 24 * 60 * 60 * 1_000,
+      })
+      expect((await getDb().botEventDeliveries.get(delivery.id))?.attempts).toBe(0)
+    }
+
+    const events = await runEventJournal.replay(botRunId(delivery.id))
+    expect(events.filter((event) => event.type === "run.waiting")).toHaveLength(3)
+    expect(events.filter((event) => event.type === "interrupt.requested")).toHaveLength(1)
+
+    // Stopping the recovered run must invalidate this same approval, rather
+    // than leave a newly actionable publication behind after cancellation.
+    expect(await cancelBotRun(botRunId(delivery.id))).toBe(true)
+    const cancelled = await getExecutionRun(botRunId(delivery.id))
+    expect(cancelled?.latestSnapshot?.status).toBe("cancelled")
+    expect(cancelled?.latestSnapshot?.pendingInterrupt).toBeUndefined()
+    expect(cancelled?.latestSnapshot?.allowedActions).not.toContain("approve")
+    expect((await getDb().executionRunInterrupts.get(interruptId!))?.status).toBe("expired")
+  })
+
   it("reports parked, leaves the run open, and sets the delivery aside", async () => {
     const { delivery, resolved } = await seed()
     const executor = jest.fn(() => {
@@ -544,5 +625,23 @@ describe("runBotDelivery when a handler parks", () => {
 
     const events = await runEventJournal.replay(botRunId(delivery.id))
     expect(events.map((event) => event.type)).toContain("run.waiting")
+  })
+})
+
+it("persists the original policy ceiling before dispatch and never widens it on resumed runs", async () => {
+  const { delivery, resolved } = await seed()
+  resolved.policy = { requireApprovalForWrites: true, maxAutonomy: "confirm" }
+  const handler = async () => {
+    throw new BotRunParkedError(botRunId(delivery.id), "wait", NOW + 100)
+  }
+  await runBotDelivery({ delivery, resolved, now, executors: { handler } })
+  expect((await getBotRunStep(botRunId(delivery.id), "__host:policy"))?.output).toEqual(
+    resolved.policy
+  )
+  resolved.policy = { requireApprovalForWrites: false, maxAutonomy: "autopilot" }
+  await runBotDelivery({ delivery, resolved, now, executors: { handler } })
+  expect((await getBotRunStep(botRunId(delivery.id), "__host:policy"))?.output).toEqual({
+    requireApprovalForWrites: true,
+    maxAutonomy: "confirm",
   })
 })

@@ -7,6 +7,23 @@ function layers(...entries: Array<[(typeof BOT_POLICY_LAYERS)[number], PluginBot
 }
 
 describe("resolveBotPolicy", () => {
+  it("retains an explicit false approval ceiling until another layer requires approval", () => {
+    expect(
+      resolveBotPolicy(layers(["installation", { requireApprovalForWrites: false }]))
+    ).toMatchObject({
+      policy: { requireApprovalForWrites: false },
+      provenance: { requireApprovalForWrites: "installation" },
+    })
+    expect(
+      resolveBotPolicy(
+        layers(
+          ["definition", { requireApprovalForWrites: false }],
+          ["installation", { requireApprovalForWrites: false }],
+          ["request", { requireApprovalForWrites: true }]
+        )
+      ).policy.requireApprovalForWrites
+    ).toBe(true)
+  })
   it("is empty when no layer has an opinion", () => {
     const resolved = resolveBotPolicy([{ name: "definition" }, { name: "installation" }])
     expect(resolved.policy).toEqual({})

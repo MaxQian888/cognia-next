@@ -528,6 +528,9 @@ export interface ExecutionRunInterrupt {
   /** Immutable Bot publication proposal; rendered as data, never executed. */
   approvalDetail?: Record<string, unknown>
   approvalMessage?: string
+  /** Host-owned decision provenance. Absent means a human decision. */
+  approvalDecisionMode?: "human" | "policy"
+  approvalPolicy?: { kind: "bot-installation"; installationId: string }
   expiresAt: number
   createdAt: number
   resolvedAt?: number

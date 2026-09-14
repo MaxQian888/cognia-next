@@ -92,6 +92,135 @@ beforeEach(() => {
 })
 
 describe("RunDetailPane", () => {
+  it.each(["completed", "approval"])(
+    "shows saved Bot Changes and Tests for %s runs",
+    async (phase) => {
+      const evidence = {
+        snapshot: {
+          id: "snapshot",
+          baseSha: "base",
+          headSha: "head",
+          files: [
+            {
+              path: "navigation.test.ts",
+              oldContent: "10 tests",
+              newContent: "40 tests",
+              mode: "100644",
+            },
+          ],
+        },
+        report: {
+          tests: [
+            { command: "pnpm test --runInBand", exitCode: 0, output: "40 passed" },
+            { command: "pnpm lint", exitCode: 1, output: "Lint failed" },
+          ],
+        },
+        testEvidence: "agent-reported",
+      }
+      if (phase === "completed")
+        detailState.botResult = { output: { status: "published", ...evidence } }
+      else {
+        detailState.run = { latestSnapshot: { pendingInterrupt: { id: "approval" } } }
+        detailState.interrupts = [
+          { id: "approval", type: "bot_approval", status: "pending", approvalDetail: evidence },
+        ]
+      }
+      render(<RunDetailPane row={row({ kind: "bot" })} actions={makeActions()} />)
+      const user = userEvent.setup()
+      expect(screen.getByRole("tab", { name: /tabs\.changes/ })).toHaveTextContent("1")
+      expect(screen.getByRole("tab", { name: /tabs\.tests/ })).toHaveTextContent("2")
+      await user.click(screen.getByRole("tab", { name: /tabs\.changes/ }))
+      const changes = screen.getByRole("tabpanel", { name: /tabs\.changes/ })
+      expect(within(changes).getByText("navigation.test.ts")).toBeVisible()
+      expect(within(changes).getByTestId("approval-diff")).toHaveTextContent("10 tests40 tests")
+      expect(within(changes).queryByText("detail.noChanges")).not.toBeInTheDocument()
+      await user.click(screen.getByRole("tab", { name: /tabs\.tests/ }))
+      const tests = screen.getByRole("tabpanel", { name: /tabs\.tests/ })
+      expect(within(tests).getByText("pnpm test --runInBand")).toBeVisible()
+      expect(within(tests).getByText("40 passed")).toBeVisible()
+      expect(within(tests).getByText("Lint failed")).toBeVisible()
+      expect(within(tests).getByText("botApproval.agentReported")).toBeVisible()
+      expect(within(tests).queryByText("detail.noTests")).not.toBeInTheDocument()
+      expect(within(tests).queryByText(/tests.counts/)).not.toBeInTheDocument()
+    }
+  )
+
+  it("uses authoritative final Bot evidence without duplicating generic changed paths", async () => {
+    detailState.journalAvailable = false
+    detailState.detail = emptyDetail({
+      changes: [
+        { path: "file.ts", sensitive: false },
+        { path: "other.ts", sensitive: false },
+      ],
+    })
+    detailState.botResult = {
+      output: {
+        snapshot: {
+          id: "final",
+          files: [{ path: "file.ts", oldContent: "before", newContent: "after" }],
+        },
+      },
+    }
+    render(<RunDetailPane row={row({ kind: "bot" })} actions={makeActions()} />)
+    expect(screen.getByRole("tab", { name: /tabs\.changes/ })).toHaveTextContent("2")
+    await userEvent.setup().click(screen.getByRole("tab", { name: /tabs\.changes/ }))
+    expect(screen.getAllByText("file.ts")).toHaveLength(1)
+    expect(screen.getByText("other.ts")).toBeVisible()
+    expect(screen.queryByText("detail.journalUnavailable")).not.toBeInTheDocument()
+  })
+
+  it("retains raw diff-only snapshots and distinguishes capture failure from no changes", async () => {
+    detailState.botResult = {
+      output: { snapshot: { id: "raw", files: [], diff: "+retained patch" } },
+    }
+    const view = render(<RunDetailPane row={row({ kind: "bot" })} actions={makeActions()} />)
+    await userEvent.setup().click(screen.getByRole("tab", { name: /tabs\.changes/ }))
+    expect(screen.getByText("+retained patch")).toBeVisible()
+    detailState.botResult = { output: { snapshotError: "Snapshot too large" } }
+    view.rerender(<RunDetailPane row={row({ kind: "bot" })} actions={makeActions()} />)
+    expect(screen.getByText(/Snapshot too large/)).toBeVisible()
+    expect(screen.queryByText("detail.noChanges")).not.toBeInTheDocument()
+  })
+
+  it("does not infer successful tests from malformed Bot report entries", async () => {
+    detailState.botResult = {
+      output: { report: { tests: [{ command: "test", exitCode: "0", output: "passed" }] } },
+    }
+    render(<RunDetailPane row={row({ kind: "bot" })} actions={makeActions()} />)
+    await userEvent.setup().click(screen.getByRole("tab", { name: /tabs\.tests/ }))
+    expect(screen.getByText("detail.noTests")).toBeVisible()
+    expect(screen.queryByText("tests.passed")).not.toBeInTheDocument()
+  })
+  it("shows a concrete Bot command request separately from publication approval", () => {
+    detailState.interrupts = [
+      {
+        id: "command-approval",
+        type: "bot_approval",
+        status: "pending",
+        title: "Run tests",
+        approvalDetail: {
+          model: "swe-2-medium",
+          externalAgent: { toolName: "exec", input: { command: "pnpm test --runInBand" } },
+          command: { command: "pnpm test --runInBand", cwd: "/owned/checkout" },
+        },
+      },
+    ]
+    detailState.run = {
+      id: "run-1",
+      currentRevision: 2,
+      latestSnapshot: {
+        pendingInterrupt: { id: "command-approval" },
+        allowedActions: ["approve", "deny"],
+      },
+    }
+    render(<RunDetailPane row={row({ kind: "bot" })} actions={makeActions()} />)
+    const region = screen.getByRole("region", { name: "botApproval.commandTitle" })
+    expect(within(region).getByText(/pnpm test --runInBand/)).toBeVisible()
+    expect(within(region).getByText("botApproval.command")).toBeVisible()
+    expect(within(region).queryByText("botApproval.publication")).not.toBeInTheDocument()
+    expect(within(region).getByRole("button", { name: "actions.approve" })).toBeEnabled()
+  })
+
   it("shows retained blocked Bot patches and command evidence without an approval", async () => {
     detailState = {
       ...detailState,
@@ -234,6 +363,21 @@ describe("RunDetailPane", () => {
     expect(screen.getByRole("button", { name: "actions.stop" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "actions.resume" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "actions.retry" })).not.toBeInTheDocument()
+  })
+
+  it("shows a host authorization challenge when a control click needs consent", async () => {
+    const actions = makeActions({
+      dispatch: jest.fn().mockResolvedValue({
+        accepted: false,
+        reason: "host_consent_required",
+        consentCode: "TEST-4821",
+      }),
+    })
+    render(<RunDetailPane row={row()} actions={actions} />)
+    fireEvent.click(screen.getByRole("button", { name: "actions.stop" }))
+    const status = await screen.findByRole("status")
+    expect(status).toHaveTextContent("outcome.host_consent_required")
+    expect(status).toHaveTextContent("TEST-4821")
   })
 
   it("dispatches the verb that was pressed", async () => {

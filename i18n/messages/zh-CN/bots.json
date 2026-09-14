@@ -10,7 +10,11 @@
     "orphanBody": "定义已不存在，无法渲染表单。该安装此前存下的内容仍留在记录里。",
     "orphanTitle": "没有可显示的设置",
     "save": "保存设置",
-    "title": "设置"
+    "title": "设置",
+    "authorityTitle": "宿主授权",
+    "authorityHint": "当 Bot 请求无人执行或自动发布时使用这些权限。保存后授权给当前安装实例；更严格的宿主策略仍然生效。自动发布不包含合并权限。",
+    "allowUnattended": "允许执行命令，无需逐次审批",
+    "allowAutomaticPublication": "允许自动发布 PR 和代码评审"
   },
   "credentials": {
     "bindAria": "绑定 {slot}",
@@ -41,7 +45,7 @@
     "description": "这个 Bot 背后的队列。一条从未跑起来的投递，在别处看不到任何运行记录。",
     "emptyBody": "还没有任何东西投递给这个 Bot。武装一个触发器，或者手动跑一次。",
     "emptyTitle": "没有投递",
-    "replay": "重放",
+    "replay": "重试",
     "status": {
       "deadletter": "已放弃",
       "dismissed": "已作废",
@@ -52,7 +56,11 @@
       "running": "运行中",
       "succeeded": "已完成"
     },
-    "title": "投递"
+    "title": "投递",
+    "viewRun": "查看运行",
+    "previousRun": "上次运行",
+    "retryRun": "重试运行",
+    "retryQueued": "重试已排队"
   },
   "description": "已安装的 Bot：各自被什么唤醒、由什么执行、被允许做什么。",
   "detail": {
@@ -265,7 +273,7 @@
   },
   "write": {
     "alreadyQueued": "这次运行已经在排队了。",
-    "alreadyReplayed": "这条投递已经不是死信了。",
+    "alreadyReplayed": "已有重试任务，或这条投递无法重试。",
     "armed": "触发器已武装",
     "disarmed": "触发器已关闭",
     "failed": "改动未能保存",
@@ -294,7 +302,10 @@
     },
     "replayed": "投递已重新排队",
     "started": "运行已启动",
-    "unavailable": "这项改动无法从这里进行"
+    "unavailable": "这项改动无法从这里进行",
+    "retrySubmitted": "重试请求已排队，等待 Host 处理。",
+    "retryUnavailable": "请先在所属 Host 上启用此 Bot，并恢复其定义和原运行记录，再重试。",
+    "submitted": "请求已排队，等待 Host 处理。"
   },
   "monitor": {
     "activated": "监控开始时间",

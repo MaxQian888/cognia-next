@@ -60,13 +60,36 @@ describe("bot-delivery-runner headless runtime", () => {
     startBotDeliveryRunner.mockReturnValue({ stop })
 
     const runtime = await loadRuntime()
+    const { isBotRunnerOwnedHere } = await import("@/lib/bot/runtime/runner-owner")
+    expect(isBotRunnerOwnedHere()).toBe(false)
     const dispose = await runtime.start(context())
+    expect(isBotRunnerOwnedHere()).toBe(true)
 
     // Two brains serving different accounts must never contend for one
     // another's leases.
     expect(startBotDeliveryRunner).toHaveBeenCalledWith({ owner: "brain:acct_1" })
     if (typeof dispose === "function") dispose()
     expect(stop).toHaveBeenCalled()
+    expect(isBotRunnerOwnedHere()).toBe(false)
+  })
+
+  it("does not claim ownership on failed startup and releases ownership even if stop fails", async () => {
+    const runtime = await loadRuntime()
+    const { isBotRunnerOwnedHere } = await import("@/lib/bot/runtime/runner-owner")
+    startBotDeliveryRunner.mockImplementationOnce(() => {
+      throw new Error("start failed")
+    })
+    expect(() => runtime.start(context())).toThrow("start failed")
+    expect(isBotRunnerOwnedHere()).toBe(false)
+    startBotDeliveryRunner.mockReturnValue({
+      stop: () => {
+        throw new Error("stop failed")
+      },
+    })
+    const dispose = await runtime.start(context())
+    expect(isBotRunnerOwnedHere()).toBe(true)
+    expect(() => (dispose as () => void)()).toThrow("stop failed")
+    expect(isBotRunnerOwnedHere()).toBe(false)
   })
 })
 

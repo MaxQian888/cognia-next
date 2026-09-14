@@ -6,7 +6,9 @@ import type { BotCatalogEntry } from "@/lib/bot/console/catalog"
 import type { BotCredentialCandidate } from "@/lib/bot/console/credential-candidates"
 
 const installBotFromCatalog = jest.fn(async (_input: unknown) => ({ id: "boti_new" }))
-const updateBotConfig = jest.fn(async (_id: string, _config: Record<string, unknown>) => ({}))
+const updateBotConfig = jest.fn(
+  async (_id: string, _config: Record<string, unknown>, _grant?: unknown) => ({})
+)
 const bindBotCredential = jest.fn(async (_id: string, _slot: string, _binding: unknown) => ({}))
 const setBotInstallationEnabled = jest.fn(async (_id: string, _enabled: boolean) => ({
   status: "enabled",
@@ -33,7 +35,8 @@ jest.mock("@/lib/bot/control-writes", () => {
     BotDefinitionMissingError,
     BotControlTargetMissingError,
     installBotFromCatalog: (input: unknown) => installBotFromCatalog(input),
-    updateBotConfig: (id: string, config: Record<string, unknown>) => updateBotConfig(id, config),
+    updateBotConfig: (id: string, config: Record<string, unknown>, grant?: unknown) =>
+      grant ? updateBotConfig(id, config, grant) : updateBotConfig(id, config),
     bindBotCredential: (id: string, slot: string, binding: unknown) =>
       bindBotCredential(id, slot, binding),
     setBotInstallationEnabled: (id: string, enabled: boolean) =>
@@ -177,6 +180,17 @@ describe("useBotLifecycleActions", () => {
     expect(error).toHaveBeenCalledWith("That change cannot be made from here", {
       description: "This browser cannot run Bots. Pair a Host or use the desktop app.",
     })
+  })
+
+  it("passes an explicit authority grant with the same configuration save", async () => {
+    const { result } = renderHook(() => useBotLifecycleActions())
+    const grant = {
+      maxAuthority: "bypassPermissions",
+      maxAutonomy: "autopilot",
+      requireApprovalForWrites: false,
+    } as const
+    await act(() => result.current.saveConfig("boti_1", { repository: "owner/repo" }, grant))
+    expect(updateBotConfig).toHaveBeenCalledWith("boti_1", { repository: "owner/repo" }, grant)
   })
 
   it("names a missing definition, which needs a different remedy from a missing row", async () => {

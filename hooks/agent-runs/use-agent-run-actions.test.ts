@@ -4,6 +4,12 @@ import { useRunControlActions } from "./use-agent-run-actions"
 import { LOCAL_CONSOLE_ACTOR_ID } from "@/lib/execution/local-operator"
 import type { UnifiedExecutionRow } from "@/lib/execution/monitor-model"
 import type { ExecutionRun, RunControlAction } from "@/types/execution/run"
+import { HostConsentRequiredError, issueHostAdminLease } from "@/lib/tauri/admin-lease"
+
+jest.mock("@/lib/tauri/admin-lease", () => ({
+  ...jest.requireActual("@/lib/tauri/admin-lease"),
+  issueHostAdminLease: jest.fn(),
+}))
 
 const getExecutionRun = jest.fn()
 jest.mock("@/lib/db/execution-runs", () => ({
@@ -109,6 +115,14 @@ describe("reviewed approval identity", () => {
 })
 
 beforeEach(() => {
+  jest
+    .mocked(issueHostAdminLease)
+    .mockReset()
+    .mockResolvedValue({
+      token: "one-operation-lease",
+      operations: ["execution_run_control"],
+      expiresAt: 123,
+    })
   getExecutionRun.mockReset()
   executeRunControlCommand.mockReset()
   executeRunControlCommand.mockResolvedValue({ accepted: true, currentRevision: 8 })
@@ -181,6 +195,56 @@ describe("useRunControlActions on a companion", () => {
     )
     const payload = transportCall.mock.calls[0]?.[1] as Record<string, unknown>
     expect(payload.actor).toBeUndefined()
+    expect(payload.adminLease).toBe("one-operation-lease")
+    expect(issueHostAdminLease).toHaveBeenCalledWith(["execution_run_control"], 120)
+  })
+
+  it.each(["ABC123", null])(
+    "surfaces host consent with code %s without sending the control",
+    async (consentCode) => {
+      getExecutionRun.mockResolvedValue(storedRun())
+      jest
+        .mocked(issueHostAdminLease)
+        .mockRejectedValue(new HostConsentRequiredError("REMOTE_CONSENT_REQUIRED", consentCode))
+      const { result } = renderHook(() => useRunControlActions())
+      let outcome
+      await act(async () => {
+        outcome = await result.current.dispatch(row(), "stop")
+      })
+      expect(outcome).toEqual({
+        accepted: false,
+        reason: "host_consent_required",
+        ...(consentCode ? { consentCode } : {}),
+      })
+      expect(transportCall).not.toHaveBeenCalled()
+      expect(executeRunControlCommand).not.toHaveBeenCalled()
+      expect(result.current.pendingRowId).toBeNull()
+    }
+  )
+
+  it("returns an actionable failure and clears busy state on a transport rejection", async () => {
+    getExecutionRun.mockResolvedValue(storedRun())
+    transportCall.mockRejectedValue(
+      new Error("HTTP 428: a current device-bound approval lease is required")
+    )
+    const { result } = renderHook(() => useRunControlActions())
+    let outcome
+    await act(async () => {
+      outcome = await result.current.dispatch(row(), "stop")
+    })
+    expect(outcome).toEqual({ accepted: false, reason: "control_failed" })
+    expect(result.current.pendingRowId).toBeNull()
+  })
+
+  it("mints no lease until a valid user action is dispatched", async () => {
+    getExecutionRun.mockResolvedValue(storedRun({}, ["open_details"]))
+    const { result } = renderHook(() => useRunControlActions())
+    expect(issueHostAdminLease).not.toHaveBeenCalled()
+    await act(async () => {
+      await result.current.dispatch(row(), "stop")
+    })
+    expect(issueHostAdminLease).not.toHaveBeenCalled()
+    expect(transportCall).not.toHaveBeenCalled()
   })
 
   it("reads a host refusal as the gate's own refusal", async () => {
@@ -200,6 +264,21 @@ describe("useRunControlActions on a companion", () => {
     })
     expect(outcome).toEqual({ accepted: false, reason: "revision_conflict" })
   })
+
+  it.each([null, { ok: false, reason: "invalid-payload" }])(
+    "does not report malformed host response %p as accepted",
+    async (response) => {
+      getExecutionRun.mockResolvedValue(storedRun())
+      transportCall.mockResolvedValue(response)
+      const { result } = renderHook(() => useRunControlActions())
+      let outcome
+      await act(async () => {
+        outcome = await result.current.dispatch(row(), "stop")
+      })
+      expect(outcome).toEqual({ accepted: false, reason: "invalid_command" })
+      expect(result.current.pendingRowId).toBeNull()
+    }
+  )
 })
 
 describe("useRunControlActions", () => {
@@ -227,6 +306,7 @@ describe("useRunControlActions", () => {
     const { result } = renderHook(() => useRunControlActions())
 
     await act(() => result.current.dispatch(row(), "stop"))
+    expect(issueHostAdminLease).not.toHaveBeenCalled()
 
     expect(executeRunControlCommand).toHaveBeenCalledWith(
       expect.objectContaining({

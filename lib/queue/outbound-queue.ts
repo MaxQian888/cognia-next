@@ -170,9 +170,12 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
 
   async function dispatchOne(row: MobileOutboundJobRow): Promise<void> {
     try {
-      const result = await dispatcher.call(row.command, row.payload, {
-        idempotencyKey: row.idempotencyKey,
-      })
+      let idempotencyKey = row.idempotencyKey
+      if (row.command === "bot_delivery_replay" || row.command === "bot_trigger_set_armed") {
+        const { normalizeLegacyBotWriteKey } = await import("@/lib/bot/control-writes/remote")
+        idempotencyKey = await normalizeLegacyBotWriteKey(row)
+      }
+      const result = await dispatcher.call(row.command, row.payload, { idempotencyKey })
       if (row.protocol === "host-state") {
         const receipt = hostStateReceipt(result, row.actionId)
         if (!receipt) throw new Error("host_state_malformed_response")

@@ -430,6 +430,60 @@ it("relays installation configuration to a supporting host with stable per-opera
   expect(options.idempotencyKey).toBe(payload.operationId)
   expect(payload).not.toHaveProperty("entry")
   expect(await listBotInstallations()).toEqual(before)
+  await installBotFromCatalog({
+    entry: entry(),
+    scope: { kind: "account" },
+    credentialBindings: {
+      github: { integrationAccountId: "account" },
+      chat: { adapterId: "adapter" },
+    },
+  })
+  expect(mockRelay).toHaveBeenLastCalledWith(
+    "bot_installation_mutate",
+    expect.objectContaining({
+      credentialBindings: {
+        github: { integrationAccountId: "account" },
+        chat: { adapterId: "adapter" },
+      },
+    }),
+    expect.any(Object)
+  )
+  await expect(
+    installBotFromCatalog({
+      entry: entry(),
+      scope: { kind: "account" },
+      credentialBindings: { invalid: { authSessionId: "session-only" } },
+    })
+  ).rejects.toThrow("one account or adapter")
+  await bindBotCredential("host-install", "github", { integrationAccountId: "account" })
+  await bindBotCredential("host-install", "chat", { adapterId: "adapter" })
+  await bindBotCredential("host-install", "chat", null)
+  await expect(
+    bindBotCredential("host-install", "github", {
+      integrationAccountId: "account",
+      adapterId: "adapter",
+    })
+  ).rejects.toThrow("one account or adapter")
+  await uninstallBotInstallation("host-install")
+  expect(mockRelay).toHaveBeenLastCalledWith(
+    "bot_installation_mutate",
+    expect.objectContaining({ operation: "uninstall" }),
+    expect.any(Object)
+  )
+  const grant = {
+    maxAuthority: "bypassPermissions",
+    maxAutonomy: "autopilot",
+    requireApprovalForWrites: false,
+  } as const
+  await updateBotConfig("host-install", { repository: "owner/repo" }, grant)
+  expect(mockRelay).toHaveBeenLastCalledWith(
+    "bot_installation_mutate",
+    expect.objectContaining({ operation: "config", policyGrant: grant }),
+    expect.any(Object)
+  )
+  await expect(
+    updateBotConfig("host-install", {}, { ...grant, maxConcurrentRuns: 99 } as never)
+  ).rejects.toThrow()
 })
 
 it("refuses local configuration mutations against a synced host mirror after disconnect", async () => {

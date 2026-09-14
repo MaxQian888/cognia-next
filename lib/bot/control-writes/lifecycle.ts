@@ -38,6 +38,7 @@ import type {
 } from "@/lib/db/bot-types"
 import type { OperationAvailability } from "@/lib/runtime/operation-availability"
 import type { PluginBotCredentialSlot } from "@/types/plugin/plugin-bot"
+import { z } from "zod"
 
 import type { BotCatalogEntry } from "@/lib/bot/console/catalog"
 import { BotControlTargetMissingError } from "./local"
@@ -48,6 +49,16 @@ import {
 } from "./route"
 import { transport } from "@/lib/tauri"
 import type { BotLifecycleMutation } from "./lifecycle-host"
+
+/** User-selected authority, separate from plugin-controlled configuration. */
+export const botPolicyGrantSchema = z
+  .object({
+    maxAuthority: z.enum(["acceptEdits", "bypassPermissions"]),
+    maxAutonomy: z.enum(["confirm", "autopilot"]),
+    requireApprovalForWrites: z.boolean(),
+  })
+  .strict()
+export type BotPolicyGrantInput = z.infer<typeof botPolicyGrantSchema>
 
 export class BotLifecycleUnavailableError extends Error {
   readonly code = "bot_lifecycle_unavailable"
@@ -160,7 +171,8 @@ export async function installBotFromCatalogLocally(
  */
 export async function updateBotConfigLocally(
   installationId: string,
-  config: Record<string, unknown>
+  config: Record<string, unknown>,
+  policyGrant?: BotPolicyGrantInput
 ): Promise<BotInstallationRow> {
   assertAvailable()
   const installation = await getBotInstallation(installationId)
@@ -168,8 +180,25 @@ export async function updateBotConfigLocally(
   if (installation.syncedFromHost)
     throw new BotLifecycleUnavailableError({ state: "unsupported", reason: "requires-companion" })
   const requiredCredentials = await requiredSlotsFor(installation)
-  const updated = await updateBotInstallation(installationId, { config, requiredCredentials })
+  const grant = policyGrant === undefined ? undefined : botPolicyGrantSchema.parse(policyGrant)
+  const updated = await updateBotInstallation(installationId, {
+    config,
+    requiredCredentials,
+    ...(grant ? { policyGrant: { ...installation.policyGrant, ...grant } } : {}),
+  })
   if (!updated) throw new BotControlTargetMissingError("installation", installationId)
+  if (
+    grant &&
+    ((installation.policyGrant?.maxAuthority === "bypassPermissions" &&
+      grant.maxAuthority !== "bypassPermissions") ||
+      (installation.policyGrant?.maxAutonomy === "autopilot" &&
+        grant.maxAutonomy !== "autopilot") ||
+      (installation.policyGrant?.requireApprovalForWrites === false &&
+        grant.requireApprovalForWrites))
+  ) {
+    const { cancelLiveBotInstallation } = await import("@/lib/bot/runtime/run")
+    cancelLiveBotInstallation(installationId)
+  }
   return updated
 }
 
@@ -294,15 +323,17 @@ export async function installBotFromCatalog(
 }
 export async function updateBotConfig(
   installationId: string,
-  config: Record<string, unknown>
+  config: Record<string, unknown>,
+  policyGrant?: BotPolicyGrantInput
 ): Promise<BotInstallationRow> {
   if (resolveBotWriteRoute(BOT_WRITE_COMMANDS.mutateInstallation) === "local")
-    return updateBotConfigLocally(installationId, config)
+    return updateBotConfigLocally(installationId, config, policyGrant)
   return relayLifecycle({
     operation: "config",
     operationId: crypto.randomUUID(),
     installationId,
     config,
+    ...(policyGrant ? { policyGrant: botPolicyGrantSchema.parse(policyGrant) } : {}),
   })
 }
 export async function bindBotCredential(

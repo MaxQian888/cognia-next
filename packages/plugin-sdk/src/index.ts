@@ -216,6 +216,7 @@ export type {
   PluginBotsAPI,
   BotEnqueueInput,
   BotInstallationSnapshot,
+  BotPublicationReference,
   BotMonitorState,
 } from "@/types/bot/api"
 export type {
@@ -532,6 +533,7 @@ export { combineAbortSignals } from "./runtime/abort"
 export { downloadBlob } from "./runtime/download"
 
 export type {
+  PluginBotExternalAgentPermissionMode,
   PluginExternalAgentOptions,
   PluginExternalAgentResult,
 } from "@/lib/plugin/api/external-agent-api"

@@ -11,8 +11,12 @@ import {
   getBotDelivery,
   listBotDeliveries,
 } from "@/lib/db/bot-event-deliveries"
+import { runBotDelivery } from "@/lib/bot/runtime/run"
+import { resolveInstalledBot } from "@/lib/bot/installed-bot"
 import { buildBotEventEnvelope } from "@/lib/bot/events/envelope"
-import { __resetDbForTesting } from "@/lib/db/schema"
+import { __resetDbForTesting, getDb } from "@/lib/db/schema"
+import { createExecutionRun, getExecutionRun } from "@/lib/db/execution-runs"
+import { completeBotRunStep, getBotRunStep } from "@/lib/db/bot-run-steps"
 import { __resetBotsForTesting, registerBot } from "@/lib/plugin/registries/bot-registry"
 
 import {
@@ -224,6 +228,218 @@ describe("replayBotDeliveryLocally", () => {
     await replayBotDeliveryLocally(id)
     expect(await replayBotDeliveryLocally(id)).toBe(false)
   })
+
+  it.each(["failed", "cancelled"] as const)(
+    "creates one fresh successor for a %s execution, preserving its artifacts and approvals",
+    async (status) => {
+      const installation = await install(
+        def({
+          triggers: [
+            {
+              id: "run",
+              kind: "manual",
+              concurrencyKey: "{{resource.scope}}",
+              holdConcurrencyWhileWaiting: false,
+            },
+          ],
+        })
+      )
+      const id = await deadLetter(installation.id)
+      const original = (await getBotDelivery(id))!
+      const runId = `recorded-${id}`
+      await getDb().botEventDeliveries.update(id, {
+        runId,
+        status: "dismissed",
+        envelope: {
+          ...original.envelope,
+          payload: { kind: "issue", mode: "implement", number: 25 },
+          resource: { kind: "issue", id: "25", scope: "owner/repo" },
+          binding: { integrationAccountId: "github" },
+          correlation: "old-wait",
+        },
+      })
+      await createExecutionRun({
+        id: runId,
+        kind: "bot",
+        sourceId: installation.id,
+        title: "Digest",
+        status,
+        currentRevision: 0,
+        startedAt: NOW,
+        updatedAt: NOW,
+        endedAt: NOW,
+      })
+      await completeBotRunStep(runId, "completed-agent", { sessionId: "old-session" }, NOW)
+      await completeBotRunStep(
+        runId,
+        "approval",
+        { approved: true, approvalId: "old-approval" },
+        NOW
+      )
+      const before = await getBotDelivery(id)
+      const result = await Promise.all([replayBotDeliveryLocally(id), replayBotDeliveryLocally(id)])
+      expect(result.sort()).toEqual([false, true])
+      const rows = await listBotDeliveries({ installationId: installation.id })
+      const successor = rows.find((candidate) => candidate.id !== id)!
+      expect(rows).toHaveLength(2)
+      expect(successor).toMatchObject({
+        status: "pending",
+        attempts: 0,
+        source: original.source,
+        type: original.type,
+        concurrencyKey: `${installation.id}::owner/repo`,
+        holdConcurrencyWhileWaiting: false,
+        envelope: {
+          payload: { kind: "issue", mode: "implement", number: 25 },
+          binding: { integrationAccountId: "github" },
+          actor: { kind: "human" },
+          provenance: { causationEventIds: [original.eventId], selfProduced: false, depth: 0 },
+        },
+      })
+      expect(successor.runId).toBeUndefined()
+      expect(successor.envelope.correlation).toBeUndefined()
+      expect(successor.envelope.eventId).not.toBe(original.eventId)
+      expect(await getBotDelivery(id)).toEqual(before)
+      expect((await getExecutionRun(runId))?.status).toBe(status)
+      expect((await getBotRunStep(runId, "approval"))?.output).toEqual({
+        approved: true,
+        approvalId: "old-approval",
+      })
+      expect(await getBotRunStep(`run_bot_${successor.id}`, "approval")).toBeUndefined()
+      expect(await replayBotDeliveryLocally(id)).toBe(false)
+      await getDb().botEventDeliveries.update(successor.id, { status: "deadletter" })
+      expect(await replayBotDeliveryLocally(successor.id)).toBe(true)
+      expect(await listBotDeliveries({ installationId: installation.id })).toHaveLength(2)
+    }
+  )
+
+  it.each([
+    "delivery",
+    "installation",
+    "run",
+    "disabled",
+    "missing-definition",
+    "missing-trigger",
+    "missing-run",
+  ])("refuses unsafe retry ownership or readiness: %s", async (failure) => {
+    const installation = await install()
+    const id = await deadLetter(installation.id)
+    if (failure === "delivery")
+      await getDb().botEventDeliveries.update(id, { syncedFromHost: true })
+    if (failure === "installation")
+      await getDb().botInstallations.update(installation.id, { syncedFromHost: true })
+    if (failure === "disabled")
+      await getDb().botInstallations.update(installation.id, { status: "disabled" })
+    if (failure === "missing-definition") __resetBotsForTesting()
+    if (failure === "missing-trigger")
+      await getDb().botEventDeliveries.update(id, { triggerId: "removed" })
+    if (failure === "run" || failure === "missing-run") {
+      await getDb().botEventDeliveries.update(id, { runId: "foreign-run" })
+      if (failure === "run")
+        await createExecutionRun({
+          id: "foreign-run",
+          kind: "bot",
+          sourceId: "other-installation",
+          title: "Other",
+          status: "failed",
+          currentRevision: 0,
+          startedAt: NOW,
+          updatedAt: NOW,
+        })
+    }
+    await expect(replayBotDeliveryLocally(id)).rejects.toThrow()
+    expect(await listBotDeliveries({ installationId: installation.id })).toHaveLength(1)
+    expect((await getBotDelivery(id))?.status).toBe("deadletter")
+  })
+
+  it("does not replay succeeded work or dismissals without an execution", async () => {
+    const installation = await install()
+    const id = await deadLetter(installation.id)
+    await getDb().botEventDeliveries.update(id, { status: "dismissed" })
+    expect(await replayBotDeliveryLocally(id)).toBe(false)
+    await getDb().botEventDeliveries.update(id, { status: "deadletter", runId: "complete" })
+    await createExecutionRun({
+      id: "complete",
+      kind: "bot",
+      sourceId: installation.id,
+      title: "Complete",
+      status: "completed",
+      currentRevision: 0,
+      startedAt: NOW,
+      updatedAt: NOW,
+    })
+    expect(await replayBotDeliveryLocally(id)).toBe(false)
+  })
+
+  it("executes a new run after a blocked result and lets a later failed successor retry independently", async () => {
+    const installation = await install()
+    const id = await deadLetter(installation.id)
+    const original = (await getBotDelivery(id))!
+    const resolved = (await resolveInstalledBot(installation))!
+    const blocked = await runBotDelivery({
+      delivery: original,
+      resolved,
+      executors: {
+        handler: async () => ({ summary: "invalid_result_report", output: { status: "blocked" } }),
+      },
+    })
+    expect(blocked.status).toBe("unavailable")
+    expect(await replayBotDeliveryLocally(id)).toBe(true)
+    const successor = (await listBotDeliveries({ installationId: installation.id })).find(
+      (row) => row.id !== id
+    )!
+    const handler = jest.fn(async () => ({
+      summary: "still blocked",
+      output: { status: "blocked" },
+    }))
+    const second = await runBotDelivery({ delivery: successor, resolved, executors: { handler } })
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect(second.runId).not.toBe(blocked.runId)
+    expect((await getExecutionRun(blocked.runId))?.status).toBe("failed")
+    expect((await getExecutionRun(second.runId))?.status).toBe("failed")
+    expect(await replayBotDeliveryLocally(id)).toBe(false)
+    expect(await replayBotDeliveryLocally(successor.id)).toBe(true)
+    const newest = (await listBotDeliveries({ installationId: installation.id })).find(
+      (row) => row.status === "pending"
+    )!
+    const success = await runBotDelivery({
+      delivery: newest,
+      resolved,
+      executors: { handler: async () => ({ summary: "recovered" }) },
+    })
+    expect(success.status).toBe("completed")
+    expect((await getBotRunStep(blocked.runId, "__host:result"))?.output).toMatchObject({
+      summary: "invalid_result_report",
+    })
+    expect(await listBotDeliveries({ installationId: installation.id })).toHaveLength(3)
+  })
+
+  it.each(["running", "waiting", "paused", "recovery_required"] as const)(
+    "requeues a %s execution without replacing its recorded run or completed steps",
+    async (status) => {
+      const installation = await install()
+      const id = await deadLetter(installation.id)
+      const runId = `recorded-${id}`
+      await getDb().botEventDeliveries.update(id, { runId })
+      const run = await createExecutionRun({
+        id: runId,
+        kind: "bot",
+        sourceId: installation.id,
+        title: "Digest",
+        status,
+        currentRevision: 0,
+        startedAt: NOW,
+        updatedAt: NOW,
+      })
+      await completeBotRunStep(runId, "completed-agent", { sessionId: "recorded-session" }, NOW)
+      expect(await replayBotDeliveryLocally(id)).toBe(true)
+      expect(await getBotDelivery(id)).toMatchObject({ status: "pending", attempts: 0, runId })
+      expect(await getExecutionRun(runId)).toEqual(run)
+      expect(await getBotRunStep(runId, "completed-agent")).toMatchObject({
+        output: { sessionId: "recorded-session" },
+      })
+    }
+  )
 
   it("refuses a delivery that does not exist", async () => {
     await expect(replayBotDeliveryLocally("bdl_missing")).rejects.toBeInstanceOf(

@@ -34,6 +34,8 @@ export type BotLogLevel = "debug" | "info" | "warn" | "error"
  */
 export interface BotApprovalRequestV1 {
   title: string
+  /** Default human; policy mode requires an explicit host installation grant. */
+  decisionMode?: "human" | "policy"
   message?: string
   /**
    * Structured detail rendered on the shared decision surface. Untrusted
@@ -50,6 +52,7 @@ export interface BotApprovalRequestV1 {
 }
 
 export interface BotApprovalDecisionV1 {
+  decisionMode?: "human" | "policy"
   /** The persisted decision authorizing this exact proposal. */
   approvalId?: string
   outcome: "approved" | "denied" | "expired" | "cancelled"

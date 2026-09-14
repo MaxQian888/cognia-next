@@ -15,6 +15,7 @@
 
 import { recoverStaleBotDeliveries } from "@/lib/db/bot-event-deliveries"
 import { startBotDeliveryRunner } from "@/lib/bot/runtime/delivery-runner"
+import { markBotRunnerOwned } from "@/lib/bot/runtime/runner-owner"
 import { reconcileAllBotSchedules } from "@/lib/bot/schedule/reconcile-timed-triggers"
 
 import { registerHeadlessRuntime } from "../registry"
@@ -32,6 +33,10 @@ registerHeadlessRuntime({
     // Armed timed triggers become scheduler rows here, and orphans go.
     void reconcileAllBotSchedules().catch(() => undefined)
     const runner = startBotDeliveryRunner({ owner })
-    return () => runner.stop()
+    const releaseOwnership = markBotRunnerOwned()
+    return () => {
+      releaseOwnership()
+      runner.stop()
+    }
   },
 })

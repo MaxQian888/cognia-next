@@ -9,6 +9,11 @@ import {
 import { __setBotWriteRouteDepsForTests } from "./route"
 import { mutateBotInstallationOnHost, readBotConsoleOnHost } from "./lifecycle-host"
 
+jest.mock("@/lib/bot/runtime/run", () => {
+  const actual = jest.requireActual("@/lib/bot/runtime/run")
+  return { ...actual, cancelLiveBotInstallation: jest.fn(actual.cancelLiveBotInstallation) }
+})
+
 let restore: () => void
 const operationId = "123e4567-e89b-42d3-a456-426614174000"
 const input = {
@@ -53,6 +58,63 @@ beforeEach(async () => {
   )
 })
 afterEach(() => restore())
+
+it("requires an explicit valid host grant and preserves unrelated installation ceilings", async () => {
+  const installed = await mutateBotInstallationOnHost(input)
+  await getDb().botInstallations.update(installed.id, {
+    status: "enabled",
+    credentialBindings: { github: { integrationAccountId: "fixture-account" } },
+    policyGrant: { maxConcurrentRuns: 1, maxRunDurationMs: 60_000 },
+  })
+  const runtime = await import("@/lib/bot/runtime/run")
+  const cancel = jest.mocked(runtime.cancelLiveBotInstallation)
+  cancel.mockClear()
+  const update = { operation: "config", operationId, installationId: installed.id, config: {} }
+  await mutateBotInstallationOnHost(update)
+  expect((await getDb().botInstallations.get(installed.id))?.policyGrant).toEqual({
+    maxConcurrentRuns: 1,
+    maxRunDurationMs: 60_000,
+  })
+  const grant = {
+    maxAuthority: "bypassPermissions",
+    maxAutonomy: "autopilot",
+    requireApprovalForWrites: false,
+  }
+  await mutateBotInstallationOnHost({ ...update, policyGrant: grant })
+  expect((await getDb().botInstallations.get(installed.id))?.status).toBe("enabled")
+  expect(cancel).not.toHaveBeenCalled()
+  expect((await getDb().botInstallations.get(installed.id))?.policyGrant).toEqual({
+    ...grant,
+    maxConcurrentRuns: 1,
+    maxRunDurationMs: 60_000,
+  })
+  await expect(
+    mutateBotInstallationOnHost({ ...update, policyGrant: { ...grant, maxConcurrentRuns: 99 } })
+  ).rejects.toThrow()
+  await expect(
+    mutateBotInstallationOnHost({ ...update, policyGrant: { ...grant, maxAuthority: "anything" } })
+  ).rejects.toThrow()
+  const consoleResult = await readBotConsoleOnHost({ view: "installations" })
+  expect(consoleResult).toMatchObject({ rows: [{ policyGrant: grant }] })
+  await mutateBotInstallationOnHost({
+    ...update,
+    policyGrant: {
+      maxAuthority: "acceptEdits",
+      maxAutonomy: "confirm",
+      requireApprovalForWrites: true,
+    },
+  })
+  expect(cancel).toHaveBeenCalledWith(installed.id)
+  for (const narrowed of [
+    { ...grant, maxAutonomy: "confirm" },
+    { ...grant, requireApprovalForWrites: true },
+  ]) {
+    await mutateBotInstallationOnHost({ ...update, policyGrant: grant })
+    cancel.mockClear()
+    await mutateBotInstallationOnHost({ ...update, policyGrant: narrowed })
+    expect(cancel).toHaveBeenCalledWith(installed.id)
+  }
+})
 
 it("installs the host catalog default once and remains needs_setup without credentials", async () => {
   const first = await mutateBotInstallationOnHost(input)

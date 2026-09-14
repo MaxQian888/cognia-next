@@ -190,11 +190,17 @@ export function createIntegrationsAPI(
           (await integrationApiBaseUrl(binding.account)) ?? "https://api.github.com"
         )
         const prefix = `${base.pathname.replace(/\/$/, "")}/repos/${binding.repository}`
+        const ownIdentity =
+          binding.account.pluginId === "github-delivery" &&
+          url.pathname === `${base.pathname.replace(/\/$/, "")}/user` &&
+          !url.search &&
+          !url.hash
         if (
           url.origin !== base.origin ||
           url.username ||
           url.password ||
           !(
+            ownIdentity ||
             url.pathname.toLowerCase() === prefix ||
             url.pathname.toLowerCase().startsWith(`${prefix}/`)
           ) ||
@@ -202,12 +208,21 @@ export function createIntegrationsAPI(
         ) {
           throw new Error("Bot binding request is outside its repository scope")
         }
-        return authenticatedIntegrationRequest<T>(
+        const response = await authenticatedIntegrationRequest<T>(
           binding.account.pluginId,
           binding.account.id,
           input,
           init
         )
+        if (!ownIdentity) return response
+        const identity = response.data as { login?: unknown; id?: unknown } | null
+        return {
+          ...response,
+          data: {
+            ...(typeof identity?.login === "string" ? { login: identity.login } : {}),
+            ...(typeof identity?.id === "number" ? { id: identity.id } : {}),
+          } as T,
+        }
       }
       const account = await getIntegrationAccount(pluginId, accountId)
       if (!account) throw new Error(`Integration account "${accountId}" was not found`)

@@ -32,7 +32,40 @@ it drives, ``ctx.bots``, arrives with the Bot runtime.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Literal, Mapping, Optional, TypedDict
+
+
+class BotPublicationReference(TypedDict):
+    """Owned publication identity returned by ctx.bots.getInstallation.
+
+    Callers must verify the remote branch, exact head, and task marker before
+    restoring monitoring. This reference never contains a diff or credentials.
+    """
+
+    sourceRunId: str
+    repository: str
+    branch: str
+    headSha: str
+    snapshotId: str
+    sourcePayload: Any
+
+
+class _BotApprovalRequired(TypedDict):
+    title: str
+
+
+class BotApprovalRequest(_BotApprovalRequired, total=False):
+    """Serialized host decision request. Omitted decisionMode retains human approval.
+
+    ``policy`` asks the host to evaluate the installation's explicit authority;
+    it never grants authority to a plugin by itself.
+    """
+
+    decisionMode: Literal["human", "policy"]
+    message: str
+    detail: Dict[str, Any]
+    risk: Literal["low", "medium", "high"]
+    timeoutMs: int
 
 #: Executor discriminants, mirroring ``PLUGIN_BOT_EXECUTORS``.
 BOT_EXECUTORS = ("workflow", "squad", "agent-turn", "handler")
@@ -212,5 +245,6 @@ __all__ = [
     "BOT_EXECUTORS",
     "BOT_TRIGGER_KINDS",
     "Bot",
+    "BotApprovalRequest",
     "define_bot",
 ]

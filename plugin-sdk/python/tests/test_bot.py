@@ -102,3 +102,18 @@ class TestDefineBot:
     def test_is_exported_from_the_package_root(self):
         assert cognia.define_bot is define_bot
         assert cognia.BOT_EXECUTORS == ("workflow", "squad", "agent-turn", "handler")
+
+
+def test_approval_request_serializes_policy_mode_without_granting_authority():
+    import json
+    from cognia.bot import BotApprovalRequest
+
+    proposal = BotApprovalRequest(
+        title="Publish exact result",
+        decisionMode="policy",
+        detail={"approvedActions": [{"actionId": "reviewPr", "input": {"body": "exact"}}]},
+        timeoutMs=60_000,
+    )
+    assert json.loads(json.dumps(proposal)) == proposal
+    assert proposal["decisionMode"] == "policy"
+    assert "decisionMode" not in BotApprovalRequest(title="Human review")

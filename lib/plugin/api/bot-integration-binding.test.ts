@@ -288,3 +288,20 @@ it("derives the PR head exclusively from the matching approved host publication"
   })
   await expect(assertBotIntegrationAction("bot", ref, open, "approval")).rejects.toThrow("snapshot")
 })
+
+it("revalidates policy-authorized writes against the current explicit installation grant", async () => {
+  const grant = { requireApprovalForWrites: false, maxAutonomy: "autopilot" as const }
+  await completeBotRunStep(ref.runId, "__host:policy", grant)
+  await getDb().botInstallations.update("install", { policyGrant: grant })
+  await getDb().executionRunInterrupts.update("approval", {
+    approvalDecisionMode: "policy",
+    approvalPolicy: { kind: "bot-installation", installationId: "install" },
+  })
+  await expect(assertBotIntegrationAction("bot", ref, action, "approval")).resolves.toBeDefined()
+  await getDb().botInstallations.update("install", {
+    policyGrant: { ...grant, requireApprovalForWrites: true },
+  })
+  await expect(assertBotIntegrationAction("bot", ref, action, "approval")).rejects.toThrow(
+    "no longer authorized"
+  )
+})

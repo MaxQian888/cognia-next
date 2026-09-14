@@ -7,6 +7,16 @@ export interface BotMonitorState {
   cursor?: string
 }
 
+/** Host-owned publication checkpoints, safe for rebuilding monitoring after a restart. */
+export interface BotPublicationReference {
+  sourceRunId: string
+  repository: string
+  branch: string
+  headSha: string
+  snapshotId: string
+  sourcePayload: unknown
+}
+
 export interface BotInstallationSnapshot {
   id: string
   createdAt: number
@@ -15,6 +25,7 @@ export interface BotInstallationSnapshot {
   triggerState: Record<string, { cursor?: string }>
   monitor?: BotMonitorState
   webhookEnabled: boolean
+  publications?: BotPublicationReference[]
 }
 
 export interface BotEnqueueInput {

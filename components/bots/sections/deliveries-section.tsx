@@ -8,13 +8,13 @@
  * a delivery that dead-lettered before its first attempt, or that is parked
  * waiting on a person, has no run to show and is invisible everywhere else.
  *
- * Replay is offered only on a dead letter, which is the one status where it
- * means something: `replayBotDelivery` writes absolute values and resets the
- * attempt budget, and doing that to a delivery that is merely backing off
- * would hand it a fresh set of attempts it has not earned.
+ * Retry stays in the delivery queue. Terminal failures get a fresh linked
+ * execution, while a dead letter with a resumable run retains its checkpoints.
  */
 
 import { useTranslations } from "next-intl"
+import Link from "next/link"
+import { botEventId } from "@/lib/bot/events/envelope"
 import { RotateCcwIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -54,15 +54,23 @@ function DeliveryRow({
   canReplay,
   busy,
   onReplay,
+  successor,
+  previousRunId,
 }: {
   delivery: BotEventDeliveryRow
   canReplay: boolean
   busy: boolean
   onReplay: () => void
+  successor?: BotEventDeliveryRow
+  previousRunId?: string
 }) {
   const t = useTranslations("bots")
   const relative = useBotRelativeTime()
-  const replayable = delivery.status === "deadletter"
+  const replayable =
+    !successor &&
+    (delivery.status === "deadletter" ||
+      ((delivery.status === "dismissed" || delivery.status === "failed") &&
+        Boolean(delivery.runId)))
 
   return (
     <li
@@ -91,6 +99,36 @@ function DeliveryRow({
               full rather than truncated: half a stack trace is not a clue. */}
           {delivery.lastError ? ` · ${delivery.lastError}` : ""}
         </p>
+        <div className="flex gap-2 text-[11px]">
+          {delivery.runId ? (
+            <Link
+              href={`/agent-runs?run=${encodeURIComponent(delivery.runId)}`}
+              className="underline"
+            >
+              {t("delivery.viewRun")}
+            </Link>
+          ) : null}
+          {previousRunId ? (
+            <Link
+              href={`/agent-runs?run=${encodeURIComponent(previousRunId)}`}
+              className="underline"
+            >
+              {t("delivery.previousRun")}
+            </Link>
+          ) : null}
+          {successor ? (
+            successor.runId ? (
+              <Link
+                href={`/agent-runs?run=${encodeURIComponent(successor.runId)}`}
+                className="underline"
+              >
+                {t("delivery.retryRun")}
+              </Link>
+            ) : (
+              <span>{t("delivery.retryQueued")}</span>
+            )
+          ) : null}
+        </div>
       </div>
       {replayable ? (
         <Button
@@ -135,7 +173,17 @@ export function BotDeliveriesSection({ row }: { row: BotConsoleRow }) {
     )
   }
 
-  const hasDeadLetter = rows.some((delivery) => delivery.status === "deadletter")
+  const successorFor = (delivery: BotEventDeliveryRow) =>
+    rows.find(
+      (candidate) => candidate.eventId === botEventId(delivery.source, `retry:${delivery.id}`)
+    )
+  const hasRetryable = rows.some(
+    (delivery) =>
+      !successorFor(delivery) &&
+      (delivery.status === "deadletter" ||
+        ((delivery.status === "dismissed" || delivery.status === "failed") &&
+          Boolean(delivery.runId)))
+  )
 
   return (
     <div className="flex flex-col gap-2">
@@ -147,10 +195,17 @@ export function BotDeliveriesSection({ row }: { row: BotConsoleRow }) {
             canReplay={readiness.can}
             busy={actions.pending.has(`delivery:${delivery.id}`)}
             onReplay={() => void actions.replayDelivery(delivery.id)}
+            successor={successorFor(delivery)}
+            previousRunId={
+              rows.find(
+                (previous) =>
+                  previous.eventId === delivery.envelope.provenance?.causationEventIds?.[0]
+              )?.runId
+            }
           />
         ))}
       </ul>
-      {hasDeadLetter && !readiness.can ? (
+      {hasRetryable && !readiness.can ? (
         <p
           className="text-[11px] leading-snug text-muted-foreground"
           data-testid="bot-replay-blocked"
