@@ -244,6 +244,16 @@ function registerBuiltinMentionPickHandlers(): void {
   registerMentionPickHandler({
     kind: "entity",
     onPick: async (item, ctx) => {
+      // Taken as text (⌥↵ on a row that carries words — a prompt the user sent
+      // before): the words replace the token and become part of THIS message.
+      // Nothing is staged and nothing is cited, because nothing is referenced;
+      // the text is read at search time, so there is no await for a later
+      // keystroke to race.
+      const { insertText } = item.candidate
+      if (item.mode === "text" && insertText) {
+        ctx.insertReplacement(insertText)
+        return
+      }
       // Same order and same reason as `doc`: drop the token first so a read
       // that comes back empty leaves a clean composer, not `@issue:foo`.
       ctx.removeTriggerToken()

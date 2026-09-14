@@ -58,7 +58,9 @@ import {
   TableIcon,
   TargetIcon,
   TerminalIcon,
+  TextCursorInputIcon,
   UserRoundIcon,
+  UserRoundPenIcon,
   WandSparklesIcon,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -93,6 +95,7 @@ import {
 } from "./composer-popover-groups"
 import { FileTypeIcon } from "@/components/shared/file-type-icon"
 import { cn } from "@/lib/utils"
+import { formatKeybinding } from "@/lib/shortcuts/utils"
 import { commandArgumentOptions, hasSlashCompletion } from "./composer/slash-completion"
 import {
   COMPOSER_MEMORY_TARGETS,
@@ -177,8 +180,12 @@ export type PopoverItem =
    * A first-party record reached through `@memory:` / `@issue:` / `@plan:` /
    * `@chat:` / `@artifact:`. Carries only the picker row — the body is read on
    * pick, not on every keystroke of the search.
+   *
+   * `mode: "text"` is the row taken the other way — ⌥↵ or its insert button —
+   * which puts `candidate.insertText` in the draft instead of staging a chip.
+   * Only a candidate that carries `insertText` is ever picked that way.
    */
-  | { kind: "entity"; candidate: EntityMentionCandidate }
+  | { kind: "entity"; candidate: EntityMentionCandidate; mode?: "text" }
   /**
    * A `!`-mode shell completion. Carries the whole candidate (including the
    * span it replaces) rather than a label, because acceptance rewrites a
@@ -187,11 +194,25 @@ export type PopoverItem =
    */
   | { kind: "shell"; completion: ShellCompletion }
 
+export interface ComposerPopoverConfirmOptions {
+  /**
+   * Take the row its second way when it has one (⌥↵): a record that carries
+   * `insertText` goes into the draft as text. A row with no second way is
+   * picked as usual, so the modifier never turns a working Enter into nothing.
+   */
+  alternate?: boolean
+}
+
 export interface ComposerPopoverHandle {
   /** Move the highlighted index by `delta` (-1 for up, +1 for down). */
   navigate: (delta: number) => void
   /** Confirm the highlighted item — returns true if a pick happened. */
-  confirm: () => boolean
+  confirm: (options?: ComposerPopoverConfirmOptions) => boolean
+}
+
+/** The row taken as text, or null when it has no text to give. */
+export function insertTextPick(item: PopoverItem): PopoverItem | null {
+  return item.kind === "entity" && item.candidate.insertText ? { ...item, mode: "text" } : null
 }
 
 interface Props {
@@ -790,12 +811,28 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     },
     [displayList.items.length]
   )
-  const confirm = useCallback(() => {
-    const item = displayList.items[highlight]
-    if (!item) return false
-    onPick(item)
-    return true
-  }, [displayList.items, highlight, onPick])
+  const confirm = useCallback(
+    (options?: ComposerPopoverConfirmOptions) => {
+      const item = displayList.items[highlight]
+      if (!item) return false
+      onPick((options?.alternate ? insertTextPick(item) : null) ?? item)
+      return true
+    },
+    [displayList.items, highlight, onPick]
+  )
+  // Stable, so the memoised rows do not re-render on every highlight move.
+  const pickAsText = useCallback(
+    (item: PopoverItem) => {
+      const pick = insertTextPick(item)
+      if (pick) onPick(pick)
+    },
+    [onPick]
+  )
+  // The footer names ⌥↵ only while a row can actually be taken that way.
+  const offersInsertText = useMemo(
+    () => displayList.items.some((item) => insertTextPick(item) !== null),
+    [displayList.items]
+  )
 
   useImperativeHandle(ref, () => ({ navigate, confirm }), [navigate, confirm])
 
@@ -964,6 +1001,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
                       item={item}
                       pinned={item.kind === "slash" ? pinnedSet.has(item.command.name) : false}
                       onTogglePin={onTogglePin}
+                      onPickAsText={pickAsText}
                     />
                   </li>
                 </Fragment>
@@ -972,6 +1010,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
           </ul>
         )}
         {trigger?.kind === "bash" ? <BashHint query={trigger.query} /> : null}
+        {trigger?.kind === "entity" && offersInsertText ? <EntityInsertHint /> : null}
         {trigger?.kind === "doc" && docSearch.hostSupported && docSearch.accounts?.length ? (
           <div className="flex items-center gap-2 border-t bg-muted/15 px-3 py-2 text-[11px] leading-4 text-muted-foreground">
             <span className="shrink-0">{tDocs("picker.accountLabel")}</span>
@@ -1034,6 +1073,9 @@ const ENTITY_ROW_ICONS: Record<EntitySelectionKind, typeof BrainIcon> = {
   // singular one has to read as a single turn or the two rows look alike in a
   // list that mixes them.
   message: MessageSquareTextIcon,
+  // The user's own words, not a turn of the transcript: the pen on a person
+  // separates "what I wrote" from the message row beside it.
+  prompt: UserRoundPenIcon,
   // A result is an OUTPUT, not a document: the glyph has to separate "what came
   // back" from the artifact row sitting next to it in the same list.
   result: SquareChevronRightIcon,
@@ -1220,10 +1262,13 @@ const ItemRow = memo(function ItemRow({
   item,
   pinned,
   onTogglePin,
+  onPickAsText,
 }: {
   item: PopoverItem
   pinned: boolean
   onTogglePin?: (name: string) => void
+  /** Take a record that carries `insertText` as text rather than as a chip. */
+  onPickAsText?: (item: PopoverItem) => void
 }) {
   const t = useTranslations("chat.composer.popover")
   const tMemory = useTranslations("chat.composer.memory")
@@ -1357,6 +1402,30 @@ const ItemRow = memo(function ItemRow({
             {candidate.subtitle}
           </span>
         ) : null}
+        {candidate.insertText && onPickAsText ? (
+          <button
+            type="button"
+            aria-label={t("entityInsertAction", { title: candidate.title })}
+            title={t("entityInsertAction", { title: candidate.title })}
+            data-slot="entity-insert-text"
+            className={cn(
+              "shrink-0 rounded p-0.5 text-muted-foreground transition-opacity hover:text-foreground",
+              !candidate.subtitle && "ml-auto",
+              // Same reveal as the pin: on row hover or keyboard highlight at
+              // pointer-fine, always on touch, where ⌥↵ does not exist and this
+              // is the only way to take the row as text.
+              "opacity-0 group-hover/row:opacity-100 group-data-[active=true]/row:opacity-100 [@media(hover:none)]:opacity-100"
+            )}
+            onMouseDown={(e) => {
+              // The row's own mousedown would stage the chip underneath.
+              e.preventDefault()
+              e.stopPropagation()
+              onPickAsText(item)
+            }}
+          >
+            <TextCursorInputIcon className="size-3.5" />
+          </button>
+        ) : null}
       </>
     )
   }
@@ -1484,6 +1553,30 @@ function BashHint({ query }: { query: string }) {
       <code className="block truncate rounded bg-muted px-2 py-1 font-mono text-xs">
         $ {query || t("bashEmpty")}
       </code>
+    </div>
+  )
+}
+
+/**
+ * The two ways to take a row that carries text. Hidden on touch, which has no
+ * keyboard: the row's insert button is always visible there instead.
+ */
+function EntityInsertHint() {
+  const t = useTranslations("chat.composer.popover")
+  return (
+    <div
+      className="flex items-center gap-3 border-t bg-muted/15 px-3 py-2 text-[11px] leading-4 text-muted-foreground [@media(hover:none)]:hidden"
+      data-testid="composer-entity-insert-hint"
+    >
+      <span className="flex items-center gap-1.5">
+        {/* i18n-exempt: keyboard key cap, locale-invariant */}
+        <Kbd>↵</Kbd>
+        {t("entityReferenceHint")}
+      </span>
+      <span className="flex items-center gap-1.5">
+        <Kbd>{formatKeybinding("Alt+Enter")}</Kbd>
+        {t("entityInsertHint")}
+      </span>
     </div>
   )
 }

@@ -648,6 +648,83 @@ describe("ComposerPopover — workflow node/edge picker", () => {
   })
 })
 
+describe("ComposerPopover — a record taken as text", () => {
+  const prompt = {
+    entityKind: "prompt" as const,
+    id: "s1#m1",
+    title: "tag the release then push",
+    subtitle: "Release prep · 2026-09-02",
+    searchText: "tag the release then push",
+    insertText: "tag the release\nthen push",
+  }
+  const issue = {
+    entityKind: "issue" as const,
+    id: "one",
+    title: "First issue",
+    searchText: "first issue",
+  }
+
+  function mountEntities(items: (typeof prompt | typeof issue)[]) {
+    jest.mocked(useEntityMentionSearch).mockReturnValue({
+      source: { entityKind: "prompt", prefix: "prompt:", snapshot: jest.fn() },
+      items,
+      loading: false,
+      error: null,
+    })
+    return setup({ kind: "entity", namespace: "prompt:", query: "", tokenStart: 0, tokenEnd: 8 })
+  }
+
+  it("stages the chip on a plain Enter", () => {
+    const { ref, onPick } = mountEntities([prompt])
+    act(() => {
+      ref.current!.confirm()
+    })
+    expect(onPick).toHaveBeenCalledWith({ kind: "entity", candidate: prompt })
+  })
+
+  it("takes the row as text on ⌥↵", () => {
+    const { ref, onPick } = mountEntities([prompt])
+    let picked = false
+    act(() => {
+      picked = ref.current!.confirm({ alternate: true })
+    })
+    expect(picked).toBe(true)
+    expect(onPick).toHaveBeenCalledWith({ kind: "entity", candidate: prompt, mode: "text" })
+  })
+
+  // The modifier must never turn a working Enter into nothing.
+  it("picks a row with no text the ordinary way on ⌥↵", () => {
+    const { ref, onPick } = mountEntities([issue])
+    act(() => {
+      ref.current!.confirm({ alternate: true })
+    })
+    expect(onPick).toHaveBeenCalledWith({ kind: "entity", candidate: issue })
+  })
+
+  it("offers an insert button that does not also stage the row beneath it", () => {
+    const { onPick } = mountEntities([prompt, issue])
+    const buttons = screen.getAllByRole("button", { name: /^entityInsertAction/ })
+    // Only the row that carries words gets one.
+    expect(buttons).toHaveLength(1)
+    expect(buttons[0]).toHaveAccessibleName(
+      `entityInsertAction:${JSON.stringify({ title: prompt.title })}`
+    )
+    fireEvent.mouseDown(buttons[0]!)
+    expect(onPick).toHaveBeenCalledTimes(1)
+    expect(onPick).toHaveBeenCalledWith({ kind: "entity", candidate: prompt, mode: "text" })
+  })
+
+  it("names both keys only while a row can be taken as text", () => {
+    const view = mountEntities([prompt])
+    const hint = screen.getByTestId("composer-entity-insert-hint")
+    expect(hint).toHaveTextContent("entityReferenceHint")
+    expect(hint).toHaveTextContent("entityInsertHint")
+    view.unmount()
+    mountEntities([issue])
+    expect(screen.queryByTestId("composer-entity-insert-hint")).toBeNull()
+  })
+})
+
 describe("ComposerPopover — keyboard navigation handle", () => {
   it("confirm() picks the highlighted (first) item", () => {
     const { ref, onPick } = setup(slashTrigger("co"))

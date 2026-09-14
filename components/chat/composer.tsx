@@ -2098,7 +2098,10 @@ function ComposerInner(props: InnerProps) {
             void submit()
             return
           }
-          if (popoverRef.current?.confirm()) {
+          // ⌥↵ takes a row its second way when it has one — a prompt the
+          // user sent before goes back into the draft as text instead of
+          // becoming a chip. Rows without one are picked as usual.
+          if (popoverRef.current?.confirm({ alternate: e.altKey })) {
             e.preventDefault()
             return
           }

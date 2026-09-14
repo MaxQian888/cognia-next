@@ -35,6 +35,25 @@ jest.mock("@/lib/shell/exec", () => ({
   formatShellResult: jest.fn(),
 }))
 jest.mock("@/lib/files/memory", () => ({ appendMemory: jest.fn() }))
+// `@prompt:` reads Dexie through this module, whose own suite covers that. Here
+// only the composer's half: which key does what with the row.
+jest.mock("@/lib/chat/mentions/prompt-reference", () => ({
+  searchOwnPrompts: jest.fn(async () => [
+    {
+      entityKind: "prompt",
+      id: "ses_old#m1",
+      title: "tag the release then push",
+      subtitle: "Release prep · 2026-09-02",
+      href: "/?session=ses_old&message=m1",
+      sourceSessionId: "ses_old",
+      searchText: "tag the release then push",
+      insertText: "tag the release\nthen push",
+    },
+  ]),
+  promptReferenceText: jest.fn(async () => "tag the release\nthen push"),
+  promptFingerprint: jest.fn(async () => "1:abc"),
+}))
+jest.mock("@/lib/chat/search/indexer", () => ({ drainSearchIndex: jest.fn(async () => ({})) }))
 jest.mock("./composer/voice-controls", () => ({ VoiceControls: () => null }))
 jest.mock("@/hooks/use-platform", () => ({ usePlatform: jest.fn(() => "web") }))
 
@@ -45,6 +64,7 @@ import { Composer } from "./composer"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
 import { useChatStore } from "@/stores/chat"
+import { selectComposerContextSelections } from "@/stores/chat/chat-store"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 function makeAdapter(overrides: Partial<DataAdapter> = {}): DataAdapter {
@@ -309,4 +329,38 @@ describe("Composer — slash popover (keyboard, end-to-end)", () => {
 
     expect(onSend).not.toHaveBeenCalled()
   }, 15_000)
+})
+
+describe("Composer — @prompt: (keyboard, end-to-end)", () => {
+  const staged = () => selectComposerContextSelections(useChatStore.getState(), "ses_slash")
+
+  async function openPrompts() {
+    const { ta, onSend } = renderComposer()
+    await typeValue(ta, "@prompt:")
+    await waitFor(() => expect(rowTexts().some((t) => t.includes("tag the release"))).toBe(true))
+    return { ta, onSend }
+  }
+
+  it("⌥↵ puts the words back in the draft and stages nothing", async () => {
+    const { ta, onSend } = await openPrompts()
+    fireEvent.keyDown(ta, { key: "Enter", altKey: true })
+    await waitFor(() => expect(ta.value).toBe("tag the release\nthen push "))
+    expect(staged()).toHaveLength(0)
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it("Enter references the prompt as a chip and leaves no token", async () => {
+    const { ta, onSend } = await openPrompts()
+    fireEvent.keyDown(ta, { key: "Enter" })
+    await waitFor(() => expect(staged()).toHaveLength(1))
+    expect(staged()[0]).toMatchObject({
+      kind: "entity",
+      entityKind: "prompt",
+      entityId: "ses_old#m1",
+      snapshot: "tag the release\nthen push",
+      fingerprint: "1:abc",
+    })
+    expect(ta.value).toBe("")
+    expect(onSend).not.toHaveBeenCalled()
+  })
 })

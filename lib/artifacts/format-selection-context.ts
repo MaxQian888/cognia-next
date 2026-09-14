@@ -83,6 +83,10 @@ const ENTITY_NOUNS: Record<EntitySelectionKind, string> = {
   plan: "Plan",
   session: "Another conversation",
   message: "A message from another conversation",
+  // "The user wrote", not "a message": the body is their words alone, and a
+  // model told so reads it as what they asked for before, not as a transcript
+  // to be quoted back at them.
+  prompt: "Something the user wrote in another conversation",
   result: "A result produced in another conversation",
   artifact: "Artifact",
   // Not "a teammate": the block is the ROLE, not something the member said.
@@ -101,8 +105,17 @@ const ENTITY_NOUNS: Record<EntitySelectionKind, string> = {
  */
 const SAME_CONVERSATION_NOUNS: Partial<Record<EntitySelectionKind, string>> = {
   message: "A message from earlier in this conversation",
+  prompt: "Something the user wrote earlier in this conversation",
   result: "A result produced earlier in this conversation",
 }
+
+/**
+ * The kinds whose heading carries the permalink instead of the title.
+ *
+ * Both name one turn, and the assistant can hand the link back: a prompt's
+ * title is only its own first words, which the body repeats in full.
+ */
+const PERMALINK_HEADING_KINDS: ReadonlySet<EntitySelectionKind> = new Set(["message", "prompt"])
 
 /** Plural headings for a combined reference, by where its members came from. */
 const MEMBER_NOUNS: Partial<Record<EntitySelectionKind, { same: string; other: string }>> = {
@@ -265,12 +278,13 @@ function headingFor(sel: ContextSelectionRef, ctx: SelectionFormatContext): stri
       }
       const noun =
         (same ? SAME_CONVERSATION_NOUNS[sel.entityKind] : undefined) ?? ENTITY_NOUNS[sel.entityKind]
-      // A message reference names WHERE it came from, because the assistant can
-      // hand that link back: `hooks/chat/use-message-permalink.ts` consumes
-      // `?session=&message=` and lands on the exact turn. Only this kind — the
-      // others open a record whose own surface is the better destination, and a
-      // heading full of routes is noise the model has to read past.
-      if (sel.entityKind === "message" && sel.href) {
+      // A message or prompt reference names WHERE it came from, because the
+      // assistant can hand that link back: `hooks/chat/use-message-permalink.ts`
+      // consumes `?session=&message=` and lands on the exact turn. Only these
+      // kinds — the others open a record whose own surface is the better
+      // destination, and a heading full of routes is noise the model has to
+      // read past.
+      if (PERMALINK_HEADING_KINDS.has(sel.entityKind) && sel.href) {
         const span = sel.span
         const turns =
           span && (span.before > 0 || span.after > 0)

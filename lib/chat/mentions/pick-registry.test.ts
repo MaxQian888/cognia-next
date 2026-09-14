@@ -236,6 +236,47 @@ describe("entity picks", () => {
   it("stays out of the parameter-eligible set", () => {
     expect(getMentionPickHandler("entity")!.toContextRef(entityItem as never)).toBeNull()
   })
+
+  describe("taken as text", () => {
+    const prompt = {
+      kind: "entity",
+      mode: "text",
+      candidate: {
+        entityKind: "prompt",
+        id: "s1#m1",
+        title: "tag the release then push",
+        searchText: "",
+        insertText: "tag the release\nthen push",
+      },
+    }
+
+    // The words become part of the new message; nothing about the old one is
+    // referenced, so nothing is staged or cited.
+    it("puts the words in place of the token and stages nothing", async () => {
+      const ctx = makeCtx()
+      await getMentionPickHandler("entity")!.onPick(prompt as never, ctx)
+      expect(ctx.insertReplacement).toHaveBeenCalledWith("tag the release\nthen push")
+      expect(ctx.stageEntity).not.toHaveBeenCalled()
+      expect(ctx.removeTriggerToken).not.toHaveBeenCalled()
+      expect(ctx.recordMention).not.toHaveBeenCalled()
+    })
+
+    it("stages as usual when the record has no words to give", async () => {
+      const ctx = makeCtx()
+      const item = { ...prompt, candidate: { ...prompt.candidate, insertText: undefined } }
+      await getMentionPickHandler("entity")!.onPick(item as never, ctx)
+      expect(ctx.insertReplacement).not.toHaveBeenCalled()
+      expect(ctx.stageEntity).toHaveBeenCalledWith(item)
+    })
+
+    it("stages a prompt picked the ordinary way", async () => {
+      const ctx = makeCtx()
+      const item = { kind: "entity", candidate: prompt.candidate }
+      await getMentionPickHandler("entity")!.onPick(item as never, ctx)
+      expect(ctx.stageEntity).toHaveBeenCalledWith(item)
+      expect(ctx.insertReplacement).not.toHaveBeenCalled()
+    })
+  })
 })
 
 describe("insertion-style picks record nothing", () => {

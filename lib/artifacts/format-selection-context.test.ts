@@ -331,6 +331,7 @@ describe("entity selections", () => {
       "plan",
       "session",
       "message",
+      "prompt",
       "result",
       "artifact",
       "teammate",
@@ -682,6 +683,35 @@ describe("where a referenced turn came from", () => {
       { sessionId: "s1" }
     )
     expect(out).toContain("3 messages from earlier in this conversation, in order:")
+  })
+})
+
+describe("a referenced prompt", () => {
+  const prompt = {
+    kind: "entity" as const,
+    entityKind: "prompt" as const,
+    entityId: "s1#m1",
+    title: "Rewrite the release notes for designers",
+    subtitle: "Release prep · 2026-09-01",
+    snapshot: "Rewrite the release notes for designers",
+    comment: "",
+    capturedAt: 1,
+    href: "/?session=s1&message=m1",
+    sourceSessionId: "s1",
+  }
+
+  it("says the user wrote it, and links the turn instead of repeating the words", () => {
+    const out = formatContextSelectionsForLLM([prompt], { sessionId: "s2" })
+    expect(out).toContain(
+      "Something the user wrote in another conversation (Release prep · 2026-09-01) — /?session=s1&message=m1:"
+    )
+    expect(out).not.toContain('"Rewrite the release notes for designers"')
+  })
+
+  it("says 'this conversation' when the prompt was sent in the one being written in", () => {
+    expect(formatContextSelectionsForLLM([prompt], { sessionId: "s1" })).toContain(
+      "Something the user wrote earlier in this conversation"
+    )
   })
 })
 

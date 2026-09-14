@@ -256,7 +256,7 @@ export interface EntitySelectionRef extends ContextSelectionBase {
   href?: string
   /**
    * The conversation the record belongs to, for the kinds that live inside one
-   * (`message`, `result`). Lets the prompt say "from this conversation" rather
+   * (`message`, `prompt`, `result`). Lets the prompt say "from this conversation" rather
    * than claiming every such reference came from somewhere else.
    */
   sourceSessionId?: string
@@ -313,7 +313,7 @@ export interface EntityReferenceMember {
 
 /**
  * The records `@memory:` / `@issue:` / `@plan:` / `@chat:` / `@msg:` /
- * `@result:` (also `^`) / `@artifact:` / `@teammate:` reach.
+ * `@prompt:` / `@result:` (also `^`) / `@artifact:` / `@teammate:` reach.
  */
 export type EntitySelectionKind =
   | "memory"
@@ -321,6 +321,13 @@ export type EntitySelectionKind =
   | "plan"
   | "session"
   | "message"
+  /**
+   * Something the user typed and sent, in this conversation or another. The
+   * id is a `message` id (`<sessionId>#<messageId>`), but the body is only the
+   * typed words — never the context envelope, attachments or anyone else's
+   * message stored under the `user` role (`lib/chat/mentions/prompt-reference.ts`).
+   */
+  | "prompt"
   | "result"
   | "artifact"
   /** One member of a Squad. Its role and prompt are readable text. */

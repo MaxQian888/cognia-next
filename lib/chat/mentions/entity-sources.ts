@@ -80,6 +80,16 @@ export interface EntityMentionCandidate {
   sourceSessionId?: string
   /** Pre-lowercased haystack for fuzzy matching (title + subtitle + id). */
   searchText: string
+  /**
+   * Words the user can put back in the draft instead of referencing the record.
+   *
+   * Set only by a source whose record IS text the user could send again — a
+   * prompt they typed. When present, the panel offers a second way to take the
+   * row (⌥↵, or the row's insert button) that replaces the `@…` token with this
+   * text and stages nothing: the words become part of the new message, not a
+   * citation of the old one.
+   */
+  insertText?: string
 }
 
 /** What a source needs to know about where the composer is. */
@@ -264,6 +274,11 @@ export function clampEntitySnapshot(text: string): string {
  * A plan and an artifact stay unwrapped: both are authored inside this app by
  * the user or the agent as work to be continued, and a plan prefixed with a
  * do-not-follow notice is worse than no plan.
+ *
+ * So does a `prompt`, and only because its source enforces the authorship line
+ * rather than trusting the `user` role: an inbound IM message or another
+ * participant's turn in a shared session is refused before it can become one
+ * (`prompt-reference.ts`).
  */
 const UNTRUSTED_ENTITY_KINDS: ReadonlySet<EntitySelectionKind> = new Set([
   "issue",
@@ -452,7 +467,9 @@ function messageCandidate(input: MessageCandidateInput): EntityMentionCandidate 
  * `@chat:`, reopened one layer down. The content search path already applies
  * the same two rules inside the engine (`lib/chat/search/engine.ts`).
  */
-async function listableSessionTitles(sessionIds: readonly string[]): Promise<Map<string, string>> {
+export async function listableSessionTitles(
+  sessionIds: readonly string[]
+): Promise<Map<string, string>> {
   const unique = [...new Set(sessionIds)]
   if (unique.length === 0) return new Map()
   const [{ getDb }, { isSessionExposed }] = await Promise.all([
@@ -731,6 +748,28 @@ function registerBuiltinEntityMentionSources(): void {
       // most — correcting a word.
       const { contentFingerprint } = await import("./content-fingerprint")
       return `${row.createdAt}:${contentFingerprint(JSON.stringify(row.parts))}`
+    },
+  })
+
+  registerEntityMentionSource({
+    entityKind: "prompt",
+    prefix: "prompt:",
+    // `@msg:`'s engine with the role filter on, plus the authorship check the
+    // `user` role cannot make by itself — see `prompt-reference.ts`. The floor
+    // and the flush are the same as `@msg:` for the same reasons.
+    async search(query, ctx) {
+      if (query.length > 0 && query.length < CONTENT_SEARCH_MIN_QUERY) return []
+      await flushSearchIndex()
+      const { searchOwnPrompts } = await import("./prompt-reference")
+      return searchOwnPrompts(query, ctx)
+    },
+    async snapshot(candidate) {
+      const { promptReferenceText } = await import("./prompt-reference")
+      return promptReferenceText(candidate.id)
+    },
+    async fingerprint(candidate) {
+      const { promptFingerprint } = await import("./prompt-reference")
+      return promptFingerprint(candidate.id)
     },
   })
 

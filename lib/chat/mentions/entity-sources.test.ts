@@ -56,6 +56,18 @@ jest.mock("@/lib/chat/search/indexer", () => ({
   drainSearchIndex: (...args: unknown[]) => drainMock(...args),
 }))
 
+// `@prompt:` owns its reads in `prompt-reference.ts`, whose suite runs them
+// against Dexie. Here only the source's own half: the floor, the flush, and
+// that it hands over to that module.
+const searchOwnPromptsMock = jest.fn()
+const promptReferenceTextMock = jest.fn()
+const promptFingerprintMock = jest.fn()
+jest.mock("./prompt-reference", () => ({
+  searchOwnPrompts: (...args: unknown[]) => searchOwnPromptsMock(...args),
+  promptReferenceText: (id: string) => promptReferenceTextMock(id),
+  promptFingerprint: (id: string) => promptFingerprintMock(id),
+}))
+
 const loadNewestResultsMock = jest.fn()
 const searchResultsMock = jest.fn()
 jest.mock("@/lib/db/chat-result-index", () => ({
@@ -69,6 +81,7 @@ const EXPECTED_PREFIXES: Record<EntitySelectionKind, string> = {
   plan: "plan:",
   session: "chat:",
   message: "msg:",
+  prompt: "prompt:",
   result: "result:",
   artifact: "artifact:",
   teammate: "teammate:",
@@ -187,6 +200,12 @@ describe("untrusted-content wrapping", () => {
     for (const kind of ["plan", "artifact"] as const) {
       expect(entitySnapshotBody(kind, "body")).toBe("body")
     }
+  })
+
+  // Unwrapped only because the source refuses anyone else's `user` row before
+  // it can become a prompt — `prompt-reference.test.ts` pins that half.
+  it("does not wrap the words the user typed", () => {
+    expect(entitySnapshotBody("prompt", "body")).toBe("body")
   })
 })
 
@@ -655,6 +674,55 @@ describe("@msg: candidates", () => {
     const rows = await searchEntityMentionCandidates(source(), "restack", {})
     expect(searchChatHistoryMock.mock.calls[0][0].limit).toBe(ENTITY_MENTION_RESULT_LIMIT)
     expect(rows).toHaveLength(30)
+  })
+})
+
+describe("@prompt: source", () => {
+  const source = () => getEntityMentionSourceByPrefix("prompt:")!
+  const ctx = { projectId: "p", sessionId: "s9" }
+
+  beforeEach(() => {
+    searchOwnPromptsMock.mockReset().mockResolvedValue([])
+    promptReferenceTextMock.mockReset()
+    promptFingerprintMock.mockReset()
+    drainMock.mockClear()
+  })
+
+  it("hands the query and the composer's place to the prompt module", async () => {
+    const row = candidate({ entityKind: "prompt", id: "s1#m1", insertText: "ship it" })
+    searchOwnPromptsMock.mockResolvedValue([row])
+    await expect(source().search!("deploy", ctx)).resolves.toEqual([row])
+    expect(searchOwnPromptsMock).toHaveBeenCalledWith("deploy", ctx)
+  })
+
+  it("flushes the index queue, without a backfill step, before reading", async () => {
+    await source().search!("", ctx)
+    expect(drainMock).toHaveBeenCalledWith(undefined, { backfill: false })
+    expect(searchOwnPromptsMock).toHaveBeenCalledWith("", ctx)
+  })
+
+  it("does not search on a one-character query", async () => {
+    await expect(source().search!("d", ctx)).resolves.toEqual([])
+    expect(searchOwnPromptsMock).not.toHaveBeenCalled()
+    expect(drainMock).not.toHaveBeenCalled()
+  })
+
+  it("reads the body and the version by reference id", async () => {
+    promptReferenceTextMock.mockResolvedValue("ship it")
+    promptFingerprintMock.mockResolvedValue("1:abc")
+    const row = candidate({ entityKind: "prompt", id: "s1#m1" })
+    await expect(source().snapshot(row)).resolves.toBe("ship it")
+    await expect(source().fingerprint!(row)).resolves.toBe("1:abc")
+    expect(promptReferenceTextMock).toHaveBeenCalledWith("s1#m1")
+    expect(promptFingerprintMock).toHaveBeenCalledWith("s1#m1")
+  })
+
+  it("never copies the insertable words onto a staged chip", () => {
+    const selection = entitySelectionFrom(
+      candidate({ entityKind: "prompt", id: "s1#m1", insertText: "ship it" }),
+      "ship it"
+    )
+    expect("insertText" in selection).toBe(false)
   })
 })
 
