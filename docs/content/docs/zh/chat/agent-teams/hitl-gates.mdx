@@ -34,7 +34,7 @@ description: 骑在 Action Review 契约上的小队审批（ADR-0169）。Execu
 | `capability_audit` | `squad_capability_audit` | `{ kind: "capability_audit" }` | 能力 id 过期时的运行前核查 |
 | `budget_extension` | `squad_budget` | `{ kind: "budget_extension", extraTokens }` | 预算守卫，每次触及临界值 |
 | `deadlock` | `squad_deadlock` | `{ kind: "deadlock", teammateIds?, resetAll? }` | 队员池，所有队员都不可用时 |
-| `teammate_repair` | `squad_teammate_repair` | `{ kind: "teammate_repair", action: "rejoin" | "skip" }` | 队员池，某个队员被取消资格时 |
+| `teammate_repair` | `squad_teammate_repair` | `{ kind: "teammate_repair", action: "rejoin" \| "skip" }` | 队员池，某个队员被取消资格时 |
 | `replan` | `squad_replan` | `{ kind: "replan", edited? }` | 队长在运行中提出重新规划时 |
 | `team_recovery` | `team_recovery` | `{ kind: "team_recovery", choice, hostRef? }` | 控制状态机，运行无法安全重放时 |
 

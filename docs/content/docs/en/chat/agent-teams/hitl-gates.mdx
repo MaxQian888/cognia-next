@@ -36,7 +36,7 @@ A Squad run is autonomous until something needs a person. Since ADR-0169 every s
 | `capability_audit` | `squad_capability_audit` | `{ kind: "capability_audit" }` | the pre-run audit when capability ids are stale |
 | `budget_extension` | `squad_budget` | `{ kind: "budget_extension", extraTokens }` | the budget guard at each critical crossing |
 | `deadlock` | `squad_deadlock` | `{ kind: "deadlock", teammateIds? , resetAll? }` | the pool when every teammate is unavailable |
-| `teammate_repair` | `squad_teammate_repair` | `{ kind: "teammate_repair", action: "rejoin" | "skip" }` | the pool when one teammate is disqualified |
+| `teammate_repair` | `squad_teammate_repair` | `{ kind: "teammate_repair", action: "rejoin" \| "skip" }` | the pool when one teammate is disqualified |
 | `replan` | `squad_replan` | `{ kind: "replan", edited? }` | the lead when it proposes a mid-run re-plan |
 | `team_recovery` | `team_recovery` | `{ kind: "team_recovery", choice, hostRef? }` | the control machine when a run cannot be replayed safely |
 

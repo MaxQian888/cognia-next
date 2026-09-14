@@ -37,7 +37,7 @@ description: 对 cognia-next Jest + Playwright + sidecar 测试体系做的一�
 | `useTranslations: () => (key) => key` 且测试断言原始 key 字符串                       | ~30%     | ❌ 必须保留 | 删除后全局 mock 会去 en.json 解析，把 `"errorTitle"` 还原成英文文案，断言失效。典型：`app/scheduler/error.test.tsx:40-41`。                                                     |
 | `useTranslations: () => (key) => key` 且测试只断言 fixture 文本/`data-testid`         | ~25%     | ✅ 可删     | 全局 mock 与 inline mock 行为一致即可。本次 PR 在 `lib/tray/sync.test.ts`、`components/chat/skill-picker.test.tsx`、`components/goal/goal-status-pill.test.tsx` 各删 1 处示范。 |
 | 自定义翻译字典（如 `{ rename: "Rename", duplicate: "Duplicate", ... }`）              | ~30%     | ❌ 必须保留 | 字典里塞的是测试断言依赖的具体英文，与 en.json 实际内容是否一致并不确定。删除前必须逐键比对。典型：`components/canvas/version-history-panel.test.tsx:80-109`。                  |
-| `useTranslations: (ns) => (key) => \`${ns}.${key}\`` 返回带命名空间的 key 字符串      | ~10%     | ❌ 必须保留 | 测试断言里包含 `ns.key` 格式（如 `"loading.fetchingApps"`），全局 mock 无法重现。典型：`components/desktop/title-bar.test.tsx:11-13`。                                          |
+| `` `useTranslations: (ns) => (key) => `${ns}.${key}` `` 返回带命名空间的 key 字符串      | ~10%     | ❌ 必须保留 | 测试断言里包含 `ns.key` 格式（如 `"loading.fetchingApps"`），全局 mock 无法重现。典型：`components/desktop/title-bar.test.tsx:11-13`。                                          |
 | inline mock 顺带提供 `NextIntlClientProvider`、`useLocale`、`useFormatter` 等扩展接口 | ~5%      | 视测试而定  | 全局 mock 已经提供这些，但 inline 版本可能传递了不同的 `locale` / `TimeZone`，需逐文件核对。                                                                                    |
 
 **结论**：原审计代理给出的 "268 处冗余" 数字不能直接作为清退目标。真冗余比例估算 **~25%**（约 67 个文件）。下一步工作量较小但需要按上表逐文件分类，**不能用单一 sed 脚本批量删除**。
@@ -95,7 +95,7 @@ description: 对 cognia-next Jest + Playwright + sidecar 测试体系做的一�
 
 | 包名                        | 是否已在 allowlist      | 本次 PR 处理        |
 | --------------------------- | ----------------------- | ------------------- | -------- |
-| `@huggingface/transformers` | ✅ 已被 `@huggingface\+ | @huggingface/` 覆盖 | 无需追加 |
+| `@huggingface/transformers` | ✅ 已被 `@huggingface\+ \| @huggingface/` 覆盖 | 无需追加 |
 | `@modelcontextprotocol/sdk` | ❌                      | ✅ 已追加           |
 | `@xyflow/react`             | ❌                      | ✅ 已追加           |
 | `chart.js`                  | ❌                      | ✅ 已追加           |

@@ -153,7 +153,7 @@ The `session/list|fork|resume` extensions are optional and unstable. This module
 | --- | --- | --- |
 | `ExternalAgentUnsupportedSessionExtensionError` | 32 | Typed error; `code = "extension_unsupported"`, carries the `method`. |
 | `createExternalAgentUnsupportedSessionExtensionError` | 46 | Factory. |
-| `getExternalAgentUnsupportedSessionExtensionMethod` | 66 | Extract the method (`session/list|fork|resume`) from a typed error or message text. |
+| `getExternalAgentUnsupportedSessionExtensionMethod` | 66 | Extract the method (`session/list\|fork\|resume`) from a typed error or message text. |
 | `isExternalAgentMethodNotFoundError` | 91 | Detect JSON-RPC `-32601` / "method not found". |
 | `isExternalAgentSessionExtensionUnsupportedForMethod` | 99 | Per-method unsupported check (typed → extracted → heuristic). |
 | `isExternalAgentSessionExtensionUnsupportedError` | 129 | General detector combining session-context + unsupported/method-not-found signals. |

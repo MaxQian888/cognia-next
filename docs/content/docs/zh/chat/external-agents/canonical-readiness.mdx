@@ -143,7 +143,7 @@ stdio 需 Tauri）、`isExternalAgentExecutable`（`:393`，阻断原因 === nul
 | --- | --- | --- |
 | `ExternalAgentUnsupportedSessionExtensionError` | 32 | 类型化错误；`code = "extension_unsupported"`，携带 `method`。 |
 | `createExternalAgentUnsupportedSessionExtensionError` | 46 | 工厂。 |
-| `getExternalAgentUnsupportedSessionExtensionMethod` | 66 | 从类型化错误或消息文本中提取方法（`session/list|fork|resume`）。 |
+| `getExternalAgentUnsupportedSessionExtensionMethod` | 66 | 从类型化错误或消息文本中提取方法（`session/list\|fork\|resume`）。 |
 | `isExternalAgentMethodNotFoundError` | 91 | 检测 JSON-RPC `-32601` / "method not found"。 |
 | `isExternalAgentSessionExtensionUnsupportedForMethod` | 99 | 逐方法的不支持检查（类型化 → 提取 → 启发式）。 |
 | `isExternalAgentSessionExtensionUnsupportedError` | 129 | 综合会话上下文 + 不支持/method-not-found 信号的通用检测器。 |
