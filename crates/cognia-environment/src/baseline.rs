@@ -45,10 +45,10 @@ use std::path::{Path, PathBuf};
 
 use crate::catalog::{
     CatalogEntry, CatalogEntrySource, CatalogError, CatalogImage, CatalogScope,
-    EnvironmentBaseline, RegistryRule, SandboxPoolSwitch, SizeClass,
+    EnvironmentBaseline, OfferedBundle, RegistryRule, SandboxPoolSwitch, SizeClass,
 };
 use crate::image::ImageReference;
-use crate::spec::{IsolationTier, SpecBundle};
+use crate::spec::IsolationTier;
 
 /// Path to the baseline JSON (ConfigMap mount or compose file).
 pub const BASELINE_FILE_ENV: &str = "COGNIA_ENVIRONMENT_BASELINE_FILE";
@@ -354,14 +354,16 @@ fn legacy_baseline(
                 None
             }
             Ok(ImageReference {
+                registry,
+                repository,
                 digest: Some(digest),
                 tag,
-                ..
             }) => Some(crate::catalog::BundlePolicy {
-                current: SpecBundle {
+                current: OfferedBundle {
+                    registry,
+                    repository,
                     digest,
                     release_tag: tag.unwrap_or_else(|| UNTAGGED_BUNDLE_RELEASE.into()),
-                    pinned: false,
                 },
                 retained: Vec::new(),
             }),
@@ -395,13 +397,12 @@ fn legacy_baseline(
                             ),
                         }),
                         Ok(ImageReference {
+                            registry,
+                            repository,
                             digest: Some(digest),
                             tag,
-                            ..
                         }) => {
-                            let listed = std::iter::once(&policy.current)
-                                .chain(policy.retained.iter())
-                                .any(|listed| listed.digest == digest);
+                            let listed = policy.offered().any(|listed| listed.digest == digest);
                             if listed {
                                 unusable(
                                     AGENT_BUNDLE_RETAINED_IMAGES_ENV,
@@ -410,11 +411,12 @@ fn legacy_baseline(
                                 )?;
                                 continue;
                             }
-                            policy.retained.push(SpecBundle {
+                            policy.retained.push(OfferedBundle {
+                                registry,
+                                repository,
                                 digest,
                                 release_tag: tag
                                     .unwrap_or_else(|| UNTAGGED_BUNDLE_RELEASE.into()),
-                                pinned: false,
                             });
                         }
                     }
@@ -618,7 +620,13 @@ mod tests {
         let bundle = baseline.bundle.as_ref().unwrap();
         assert_eq!(bundle.current.digest, BUNDLE_DIGEST);
         assert_eq!(bundle.current.release_tag, "v1.2.0");
-        assert!(!bundle.current.pinned);
+        // Where the driver pulls it from rides along; the spec records only
+        // the digest and release tag.
+        assert_eq!(
+            bundle.current.image().canonical(),
+            format!("ghcr.io/maxqian888/cognia-agent-bundle@{BUNDLE_DIGEST}")
+        );
+        baseline.validate().unwrap();
     }
 
     #[test]
@@ -739,6 +747,10 @@ mod tests {
                 (RETAINED_V0, UNTAGGED_BUNDLE_RELEASE)
             ]
         );
+        assert!(bundle
+            .retained
+            .iter()
+            .all(|retained| retained.repository == "maxqian888/cognia-agent-bundle"));
     }
 
     #[test]

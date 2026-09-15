@@ -777,6 +777,8 @@ pub(crate) mod tests {
         "sha256:1111111111111111111111111111111111111111111111111111111111111111";
     pub(crate) const BUNDLE_DIGEST: &str =
         "sha256:2222222222222222222222222222222222222222222222222222222222222222";
+    pub(crate) const RETAINED_BUNDLE_DIGEST: &str =
+        "sha256:4444444444444444444444444444444444444444444444444444444444444444";
 
     pub(crate) fn sample_spec() -> EnvironmentSpec {
         let mut spec = EnvironmentSpec {

@@ -21,11 +21,21 @@ use serde::Serialize;
 
 use crate::approval::{ApprovalRecord, EgressGrant};
 use crate::catalog::{CatalogEntry, CatalogScope, TenantPolicy};
+use crate::spec::EnvironmentSpec;
+
+/// A spec as this Host admitted it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AdmittedSpec {
+    pub spec: EnvironmentSpec,
+    pub first_admitted_at: i64,
+    pub last_admitted_at: i64,
+}
 
 /// Bump when a migration is appended to [`MIGRATIONS`].
-const SCHEMA_VERSION: i32 = 1;
+const SCHEMA_VERSION: i32 = 2;
 
-const MIGRATIONS: [&str; 1] = [r#"
+const MIGRATIONS: [&str; 2] = [
+    r#"
 CREATE TABLE tenant_catalog_entries (
     id TEXT PRIMARY KEY NOT NULL,
     body TEXT NOT NULL,
@@ -65,7 +75,20 @@ CREATE TABLE probe_cache (
     recorded_at INTEGER NOT NULL,
     PRIMARY KEY (user_image_digest, bundle_digest)
 );
-"#];
+"#,
+    // ADR-0182 "One resolved, immutable spec": the body a sandbox was admitted
+    // under, kept after the sandbox is gone as the record of what ran.
+    r#"
+CREATE TABLE admitted_specs (
+    spec_digest TEXT PRIMARY KEY NOT NULL,
+    project_id TEXT NOT NULL,
+    body TEXT NOT NULL,
+    first_admitted_at INTEGER NOT NULL,
+    last_admitted_at INTEGER NOT NULL
+);
+CREATE INDEX admitted_specs_by_project ON admitted_specs (project_id, last_admitted_at);
+"#,
+];
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -422,6 +445,49 @@ impl EnvironmentStore {
         Ok(grant)
     }
 
+    // ── admitted specs ────────────────────────────────────────────────────
+
+    /// Record a spec admission. The first body stored for a digest is kept:
+    /// a digest names content, so a later admission can differ only in the
+    /// `explain` trace the digest excludes, and only the time moves.
+    pub fn record_admitted_spec(&self, spec: &EnvironmentSpec, now: i64) -> Result<(), StoreError> {
+        spec.validate_with_digest()
+            .map_err(|error| StoreError::Invalid(error.to_string()))?;
+        self.conn.execute(
+            "INSERT INTO admitted_specs
+                 (spec_digest, project_id, body, first_admitted_at, last_admitted_at)
+             VALUES (?1, ?2, ?3, ?4, ?4)
+             ON CONFLICT(spec_digest) DO UPDATE SET last_admitted_at = excluded.last_admitted_at",
+            params![spec.spec_digest, spec.project_id, to_json(spec)?, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_admitted_spec(&self, spec_digest: &str) -> Result<Option<AdmittedSpec>, StoreError> {
+        self.conn
+            .query_row(
+                "SELECT body, first_admitted_at, last_admitted_at
+                 FROM admitted_specs WHERE spec_digest = ?1",
+                [spec_digest],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
+            )
+            .optional()?
+            .map(|(body, first, last)| {
+                Ok(AdmittedSpec {
+                    spec: from_json(&body)?,
+                    first_admitted_at: first,
+                    last_admitted_at: last,
+                })
+            })
+            .transpose()
+    }
+
     // ── probe cache ───────────────────────────────────────────────────────
 
     /// Cache a probe report for (user image, bundle). The report is opaque
@@ -665,5 +731,60 @@ mod tests {
             EnvironmentStore::open(&path),
             Err(StoreError::SchemaTooNew { .. })
         ));
+    }
+
+    #[test]
+    fn admitted_specs_keep_their_first_body_and_refuse_a_tampered_one() {
+        use crate::spec::tests::sample_spec;
+        let store = EnvironmentStore::open_in_memory().unwrap();
+        let spec = sample_spec();
+        store.record_admitted_spec(&spec, 10).unwrap();
+
+        let mut retraced = spec.clone();
+        retraced.explain = Some(serde_json::json!({ "steps": ["again"] }));
+        store.record_admitted_spec(&retraced, 20).unwrap();
+
+        let admitted = store.get_admitted_spec(&spec.spec_digest).unwrap().unwrap();
+        assert_eq!(admitted.spec, spec);
+        assert_eq!(
+            (admitted.first_admitted_at, admitted.last_admitted_at),
+            (10, 20)
+        );
+        assert!(store.get_admitted_spec(&"0".repeat(64)).unwrap().is_none());
+
+        let mut tampered = spec.clone();
+        tampered.size_class_id = "large".into();
+        assert!(matches!(
+            store.record_admitted_spec(&tampered, 30),
+            Err(StoreError::Invalid(message)) if message.contains("spec_digest_mismatch")
+        ));
+    }
+
+    #[test]
+    fn a_version_one_store_gains_the_admitted_specs_table_in_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("environment.sqlite");
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            let tx = conn.transaction().unwrap();
+            tx.execute_batch(MIGRATIONS[0]).unwrap();
+            tx.pragma_update(None, "user_version", 1).unwrap();
+            tx.commit().unwrap();
+            conn.execute(
+                "INSERT INTO tenant_policy (singleton, body, updated_at) VALUES (1, ?1, 5)",
+                [serde_json::to_string(&TenantPolicy::default()).unwrap()],
+            )
+            .unwrap();
+        }
+        let store = EnvironmentStore::open(&path).unwrap();
+        assert_eq!(store.tenant_policy().unwrap(), TenantPolicy::default());
+        store
+            .record_admitted_spec(&crate::spec::tests::sample_spec(), 1)
+            .unwrap();
+        let version: i32 = store
+            .conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
     }
 }

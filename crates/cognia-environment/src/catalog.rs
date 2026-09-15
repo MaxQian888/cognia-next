@@ -181,9 +181,55 @@ pub struct InternalException {
 #[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct BundlePolicy {
     /// The release's current agent bundle.
-    pub current: SpecBundle,
-    /// Older bundles a project may still pin.
-    pub retained: Vec<SpecBundle>,
+    pub current: OfferedBundle,
+    /// Older bundles a project may still pin, newest first.
+    pub retained: Vec<OfferedBundle>,
+}
+
+impl BundlePolicy {
+    /// Every offered bundle, current first.
+    pub fn offered(&self) -> impl Iterator<Item = &OfferedBundle> {
+        std::iter::once(&self.current).chain(self.retained.iter())
+    }
+
+    /// The offered bundle a spec names: the current one for a spec following
+    /// the release, any retained one for a pinned spec.
+    pub fn resolve(&self, bundle: &SpecBundle) -> Option<&OfferedBundle> {
+        if bundle.pinned {
+            self.offered().find(|offered| offered.matches(bundle))
+        } else {
+            Some(&self.current).filter(|current| current.matches(bundle))
+        }
+    }
+}
+
+/// An agent bundle a deployment offers (ADR-0183): where a driver pulls it
+/// from, and the digest and release tag a spec records. The spec itself does
+/// not carry the registry, so a bundle moving registries between releases does
+/// not change any spec digest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
+pub struct OfferedBundle {
+    pub registry: String,
+    pub repository: String,
+    /// `sha256:<64 lowercase hex>`.
+    pub digest: String,
+    pub release_tag: String,
+}
+
+impl OfferedBundle {
+    pub fn image(&self) -> PinnedImage {
+        PinnedImage {
+            registry: self.registry.clone(),
+            repository: self.repository.clone(),
+            digest: self.digest.clone(),
+        }
+    }
+
+    pub fn matches(&self, bundle: &SpecBundle) -> bool {
+        self.digest == bundle.digest && self.release_tag == bundle.release_tag
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -537,22 +583,22 @@ impl EnvironmentBaseline {
 
         if let Some(bundle) = &self.bundle {
             let mut digests = BTreeSet::new();
-            for (index, candidate) in std::iter::once(&bundle.current)
-                .chain(bundle.retained.iter())
-                .enumerate()
-            {
+            for (index, candidate) in bundle.offered().enumerate() {
                 let field = if index == 0 {
                     "bundle.current".to_string()
                 } else {
                     format!("bundle.retained[{}]", index - 1)
                 };
-                crate::image::validate_digest(&candidate.digest).map_err(|error| {
-                    CatalogError::new(
-                        "baseline_bundle_invalid",
-                        format!("{field}.digest"),
-                        error.to_string(),
-                    )
+                candidate.image().validate().map_err(|error| {
+                    CatalogError::new("baseline_bundle_invalid", field.clone(), error.to_string())
                 })?;
+                if candidate.release_tag.trim().is_empty() || candidate.release_tag.len() > 128 {
+                    return Err(CatalogError::new(
+                        "baseline_bundle_invalid",
+                        format!("{field}.releaseTag"),
+                        "release tag must be 1-128 characters",
+                    ));
+                }
                 if !digests.insert(candidate.digest.clone()) {
                     return Err(CatalogError::new(
                         "baseline_bundle_invalid",
@@ -867,13 +913,18 @@ pub(crate) mod tests {
             }],
             internal_exceptions: vec![],
             bundle: Some(BundlePolicy {
-                current: SpecBundle {
-                    digest: BUNDLE_DIGEST.into(),
-                    release_tag: "v1.0.0".into(),
-                    pinned: false,
-                },
+                current: offered_bundle(BUNDLE_DIGEST, "v1.0.0"),
                 retained: vec![],
             }),
+        }
+    }
+
+    pub(crate) fn offered_bundle(digest: &str, release_tag: &str) -> OfferedBundle {
+        OfferedBundle {
+            registry: "ghcr.io".into(),
+            repository: "maxqian888/cognia-agent-bundle".into(),
+            digest: digest.into(),
+            release_tag: release_tag.into(),
         }
     }
 
@@ -958,6 +1009,69 @@ pub(crate) mod tests {
             }),
             "baseline_registry_rule_conflict"
         );
+    }
+
+    #[test]
+    fn offered_bundles_must_be_pullable_pinned_and_distinct() {
+        use crate::spec::tests::RETAINED_BUNDLE_DIGEST;
+        let with_retained = |b: &mut EnvironmentBaseline| {
+            b.bundle.as_mut().unwrap().retained =
+                vec![offered_bundle(RETAINED_BUNDLE_DIGEST, "v0.9.0")];
+        };
+        let mut valid = baseline();
+        with_retained(&mut valid);
+        valid.validate().unwrap();
+
+        for broken in [
+            |b: &mut EnvironmentBaseline| b.bundle.as_mut().unwrap().current.registry = "".into(),
+            |b: &mut EnvironmentBaseline| {
+                b.bundle.as_mut().unwrap().current.repository = "UPPER/case".into()
+            },
+            |b: &mut EnvironmentBaseline| {
+                b.bundle.as_mut().unwrap().current.digest = "sha256:short".into()
+            },
+            |b: &mut EnvironmentBaseline| {
+                b.bundle.as_mut().unwrap().current.release_tag = " ".into()
+            },
+            |b: &mut EnvironmentBaseline| {
+                let current = b.bundle.as_ref().unwrap().current.clone();
+                b.bundle.as_mut().unwrap().retained = vec![current];
+            },
+        ] {
+            assert_eq!(baseline_refusal(broken), "baseline_bundle_invalid");
+        }
+    }
+
+    #[test]
+    fn a_spec_bundle_resolves_to_what_the_deployment_offers() {
+        use crate::spec::tests::RETAINED_BUNDLE_DIGEST;
+        let mut policy = baseline().bundle.unwrap();
+        policy.retained = vec![offered_bundle(RETAINED_BUNDLE_DIGEST, "v0.9.0")];
+        let spec_bundle = |digest: &str, tag: &str, pinned: bool| SpecBundle {
+            digest: digest.into(),
+            release_tag: tag.into(),
+            pinned,
+        };
+
+        let following = spec_bundle(BUNDLE_DIGEST, "v1.0.0", false);
+        assert_eq!(policy.resolve(&following), Some(&policy.current));
+        // A spec following the release cannot name a retained bundle.
+        assert_eq!(
+            policy.resolve(&spec_bundle(RETAINED_BUNDLE_DIGEST, "v0.9.0", false)),
+            None
+        );
+        let pinned_old = spec_bundle(RETAINED_BUNDLE_DIGEST, "v0.9.0", true);
+        assert_eq!(policy.resolve(&pinned_old), Some(&policy.retained[0]));
+        assert_eq!(
+            policy.resolve(&pinned_old).unwrap().image().canonical(),
+            format!("ghcr.io/maxqian888/cognia-agent-bundle@{RETAINED_BUNDLE_DIGEST}")
+        );
+        // The release tag is part of the match: a re-tagged digest is not the same bundle.
+        assert_eq!(
+            policy.resolve(&spec_bundle(BUNDLE_DIGEST, "v1.0.1", true)),
+            None
+        );
+        assert_eq!(policy.offered().count(), 2);
     }
 
     #[test]

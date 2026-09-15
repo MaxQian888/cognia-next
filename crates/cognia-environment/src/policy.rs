@@ -12,7 +12,7 @@
 use std::collections::BTreeSet;
 
 use crate::approval::{runtime_fields_digest, ApprovalRecord, EgressGrant};
-use crate::catalog::{EffectiveCatalog, EnvironmentBaseline, SizeClass};
+use crate::catalog::{EffectiveCatalog, EnvironmentBaseline, OfferedBundle, SizeClass};
 use crate::spec::{EgressTier, EnvironmentSource, EnvironmentSpec, IsolationTier};
 
 /// Why a spec is not admitted. `code` is stable and localized by the UI.
@@ -46,12 +46,14 @@ pub struct AdmissionContext<'a> {
     pub device_approvals: bool,
 }
 
-/// An admitted spec: the tier it will actually get and its size class.
+/// An admitted spec: the tier it will actually get, its size class, and the
+/// offered bundle — with the registry a driver pulls it from — it runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Admission {
     pub spec_digest: String,
     pub actual_tier: IsolationTier,
     pub size_class: SizeClass,
+    pub bundle: OfferedBundle,
 }
 
 pub fn admit(
@@ -202,19 +204,7 @@ pub fn admit(
             "this deployment has no agent bundle configured",
         ));
     };
-    let bundle_ok = if spec.bundle.pinned {
-        bundles
-            .retained
-            .iter()
-            .chain(std::iter::once(&bundles.current))
-            .any(|bundle| {
-                bundle.digest == spec.bundle.digest && bundle.release_tag == spec.bundle.release_tag
-            })
-    } else {
-        bundles.current.digest == spec.bundle.digest
-            && bundles.current.release_tag == spec.bundle.release_tag
-    };
-    if !bundle_ok {
+    let Some(bundle) = bundles.resolve(&spec.bundle).cloned() else {
         return Err(refuse(
             if spec.bundle.pinned {
                 "bundle_pin_retired"
@@ -223,7 +213,7 @@ pub fn admit(
             },
             "the agent bundle is not one this deployment offers",
         ));
-    }
+    };
 
     let presets: BTreeSet<&str> = ctx
         .baseline
@@ -295,6 +285,7 @@ pub fn admit(
         spec_digest: spec.spec_digest.clone(),
         actual_tier,
         size_class: size_class.clone(),
+        bundle,
     })
 }
 
@@ -392,6 +383,36 @@ mod tests {
         assert_eq!(admission.actual_tier, IsolationTier::Gvisor);
         assert_eq!(admission.size_class.id, "medium");
         assert_eq!(admission.spec_digest, spec.spec_digest);
+        assert_eq!(admission.bundle, base.bundle.as_ref().unwrap().current);
+    }
+
+    #[test]
+    fn a_pinned_spec_is_admitted_with_the_retained_bundle_it_names() {
+        use crate::catalog::tests::offered_bundle;
+        use crate::spec::tests::RETAINED_BUNDLE_DIGEST;
+        let (mut base, _) = ctx_parts();
+        base.bundle.as_mut().unwrap().retained =
+            vec![offered_bundle(RETAINED_BUNDLE_DIGEST, "v0.9.0")];
+        let catalog = EffectiveCatalog::merge(&base, &[], &TenantPolicy::default());
+        let domains = grant(EgressTier::Allowlist, &["files.pythonhosted.org"]);
+        let mut spec = sample_spec();
+        spec.bundle = SpecBundle {
+            digest: RETAINED_BUNDLE_DIGEST.into(),
+            release_tag: "v0.9.0".into(),
+            pinned: true,
+        };
+        reseal(&mut spec);
+        let admission =
+            admit_with(&spec, &base, &catalog, None, Some(&domains), &ALL_TIERS).unwrap();
+        assert_eq!(admission.bundle.digest, RETAINED_BUNDLE_DIGEST);
+
+        // The same retained bundle without the pin is not the release's bundle.
+        spec.bundle.pinned = false;
+        reseal(&mut spec);
+        assert_eq!(
+            admit_with(&spec, &base, &catalog, None, Some(&domains), &ALL_TIERS).unwrap_err(),
+            "bundle_not_current"
+        );
     }
 
     #[test]
