@@ -64,7 +64,11 @@ The existing persistent runtime supervisor cannot carry that job. `services/work
   | 67 | `probe_user_missing` |
   | 68 | `probe_workspace_not_writable` |
 
-- `init-agent -- <argv>` is a reaping PID 1. It sets user, env, `PATH` and CA variables, runs one child with inherited stdio, forwards signals and passes the exit code through. ACP over container attach therefore works exactly as before.
+- `init-agent -- <argv>` is a reaping PID 1. It sets user, env, `PATH` and CA variables, runs one child with inherited stdio, forwards signals and passes the exit code through (`128 + n` for a child killed by signal `n`). ACP over container attach therefore works exactly as before. It exits 125 when it cannot start the agent at all: an unknown user, a missing program, or a user switch without root.
+
+  Inside the container, the image's `ENV` and the driver's variables are indistinguishable, so the driver lists the names it set in `COGNIA_SANDBOXD_PROVIDED_ENV`. An ambient provider credential not on that list came from the image and is removed. `COGNIA_SANDBOXD_*` never reaches the agent. The image's `PATH` stays first, so project commands use the project's toolchain; the agent and its shims are addressed by absolute path under `/cognia`.
+
+`cognia-sandboxd` is also a library. The probe report and bundle manifest types are what drivers read back, so it must not link `cognia-net` or `cognia-environment`, both of which pull a network stack into a static binary.
 
 **Step ② mode:** `serve`, the persistent-sandbox supervisor (ADR-0184, planned). It multiplexes agents, PTYs, filesystem, exec, Task Workspace and lifecycle over one authenticated connection. Its per-agent streams carry sequence numbers and credit-based backpressure. When credit runs out, it stops reading the child's stdout instead of dropping frames.
 

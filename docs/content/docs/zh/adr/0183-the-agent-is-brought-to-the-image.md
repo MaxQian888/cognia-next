@@ -64,7 +64,11 @@ description: "agent CLI 不再预装在项目运行的镜像里。每个版本�
   | 67 | `probe_user_missing` |
   | 68 | `probe_workspace_not_writable` |
 
-- `init-agent -- <argv>`：会回收子进程的 PID 1。设置用户、环境变量、`PATH` 与 CA 变量，以继承的 stdio 运行一个子进程，转发信号并透传退出码。通过容器挂接跑 ACP 与以前完全一样。
+- `init-agent -- <argv>`：会回收子进程的 PID 1。设置用户、环境变量、`PATH` 与 CA 变量，以继承的 stdio 运行一个子进程，转发信号并透传退出码（子进程被信号 `n` 杀死时为 `128 + n`）。通过容器挂接跑 ACP 与以前完全一样。根本无法启动 agent 时（用户不存在、程序不存在、非 root 却要切换用户）退出码为 125。
+
+  在容器内部，镜像的 `ENV` 与驱动设置的变量无法区分，所以驱动把自己设置的变量名列在 `COGNIA_SANDBOXD_PROVIDED_ENV` 里。不在该列表中的环境内模型凭据来自镜像，会被移除；`COGNIA_SANDBOXD_*` 永远不会传给 agent。镜像自己的 `PATH` 排在前面，项目命令用的是项目自己的工具链；agent 本身及其 shim 通过 `/cognia` 下的绝对路径调用。
+
+`cognia-sandboxd` 同时是一个库。驱动读回的探测报告与 bundle 清单类型都在这里，所以它不能链接 `cognia-net` 或 `cognia-environment`：两者都会把网络栈带进静态二进制。
 
 **第 ② 步的模式：** `serve`，持久沙箱的监管进程（ADR-0184，规划中）。它在一条认证连接上复用 agent、PTY、文件系统、exec、任务工作区和生命周期。每个 agent 的输出流带序号和基于额度的背压；额度用完时停止读取子进程 stdout，而不是丢帧。
 

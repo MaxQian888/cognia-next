@@ -1,0 +1,48 @@
+# ADR-0183 — the in-sandbox supervisor.
+#
+# One static (musl) binary shipped inside the agent bundle image. Step ① modes:
+# `install` stages bundle trees into the injection volume, `probe` inspects the
+# user image the agent is about to run in, `init-agent` is the reaping PID 1
+# that runs one agent as the declared user. Step ② adds `serve`.
+#
+# A library too: the probe report and bundle manifest types are what the
+# container drivers read back (ADR-0183 "Injection"), and linking them must not
+# pull a network stack. Keep this crate free of cognia-net / cognia-environment
+# (both drag reqwest in); `cli` is the only feature with more than std, serde
+# and libc behind it.
+[package]
+name = "cognia-sandboxd"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+description = "In-sandbox supervisor: bundle staging, image probe and the agent init process."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "cognia_sandboxd"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cognia-sandboxd"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[features]
+default = ["cli"]
+cli = ["dep:clap"]
+
+[dependencies]
+clap = { version = "4", default-features = false, features = ["std", "derive", "help", "usage", "error-context"], optional = true }
+hex = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+thiserror = "2"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+signal-hook = "0.3"
+
+[dev-dependencies]
+tempfile = "3"

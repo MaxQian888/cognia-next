@@ -47,6 +47,10 @@ members = [
   # ADR-0182 — runtime environments: EnvironmentSpec, the two-level image
   # catalog, admission policy and the tenant environment store.
   "crates/cognia-environment",
+  # ADR-0183 — the in-sandbox supervisor: bundle staging, image probe, agent
+  # init. A static musl binary, so it must stay off cognia-net and anything
+  # else that links a network stack.
+  "crates/cognia-sandboxd",
   "crates/cognia-git",
   "crates/cognia-ocr",
   "crates/cognia-vector",

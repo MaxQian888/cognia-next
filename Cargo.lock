@@ -2662,6 +2662,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-sandboxd"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "hex",
+ "libc",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "signal-hook",
+ "tempfile",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "cognia-scheduling"
 version = "0.1.0"
 dependencies = [

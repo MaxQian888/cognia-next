@@ -8,9 +8,9 @@
 # grants and probe results.
 #
 # `store` (default) pulls rusqlite; `registry` (default) pulls reqwest + tokio
-# for the production registry transport. The in-sandbox supervisor
-# (`cognia-sandboxd`, ADR-0183) only needs the wire types and builds this crate
-# with `default-features = false`.
+# for the production registry transport. `cognia-net` is always linked (egress
+# hostname rules), which is why the static in-sandbox supervisor
+# (`cognia-sandboxd`, ADR-0183) does not depend on this crate.
 [package]
 name = "cognia-environment"
 version = "0.1.0"
