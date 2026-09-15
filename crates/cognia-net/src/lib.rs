@@ -21,7 +21,10 @@
 //!   `provider_diagnostics_*` command shells so this crate stays tauri-free.
 //! - [`outbound_pii`] — fail-closed PII detection for text crossing native
 //!   network boundaries.
+//! - [`egress`] — pure allowlist/destination checks and the never-exceptable
+//!   cloud metadata endpoints, shared by every egress filter.
 
+pub mod egress;
 pub mod http_download;
 pub mod inbound_policy;
 pub mod ndjson_stream;
