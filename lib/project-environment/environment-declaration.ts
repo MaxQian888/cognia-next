@@ -27,6 +27,8 @@ import { sha256String } from "@/lib/ocr/hash"
 import { canonicalizeJson } from "@/lib/plugin/character-pack/canonical-json"
 import {
   ENVIRONMENT_SPEC_LIMITS,
+  LIFECYCLE_COMMAND_NAMES,
+  SANDBOX_WORKSPACE_FOLDER,
   type CommandSpec,
   type DeclarationFile,
   type DeclaredUser,
@@ -36,7 +38,12 @@ import {
   type SingleCommandSpec,
 } from "@/types/sandbox/environment-spec"
 
-import { canonicalImageReference, type ImageReference } from "./image-reference"
+import {
+  canonicalImageReference,
+  ImageReferenceError,
+  parseImageReference,
+  type ImageReference,
+} from "./image-reference"
 
 export interface EnvironmentDeclaration {
   file: DeclarationFile
@@ -71,6 +78,8 @@ export type DeclarationProblemCode =
   | "declaration_egress_domain_invalid"
   | "declaration_variable_unsupported"
   | "declaration_field_unknown"
+  | "declaration_source_conflict"
+  | "declaration_path_invalid"
   | "devcontainer_field_refused"
   | "devcontainer_build_requires_build_service"
   | "devcontainer_gpu_not_supported"
@@ -355,6 +364,208 @@ export function normalizeEgressDomains(
     return []
   }
   return [...domains].sort()
+}
+
+const VARIABLE = /\$\{([^}]*)\}/g
+const CONTAINER_ENV_VARIABLE = /^containerEnv:[A-Za-z_][A-Za-z0-9_]*(?::[^}]*)?$/
+
+/**
+ * Substitutes the variables a declaration may use. `${containerWorkspaceFolder}`
+ * and `${containerWorkspaceFolderBasename}` resolve here; `${containerEnv:NAME}`
+ * survives only where `allowContainerEnv` (env values) for the supervisor to
+ * expand. Anything else — notably `${localEnv:…}` and `${localWorkspaceFolder}`,
+ * which would copy the reading machine into something other people approve —
+ * is a problem, and `undefined` is returned.
+ */
+export function substituteDeclarationVariables(
+  value: string,
+  field: string,
+  problems: DeclarationProblem[],
+  allowContainerEnv: boolean
+): string | undefined {
+  let unsupported: string | undefined
+  const result = value.replace(VARIABLE, (match, name: string) => {
+    if (name === "containerWorkspaceFolder") return SANDBOX_WORKSPACE_FOLDER
+    if (name === "containerWorkspaceFolderBasename") {
+      return SANDBOX_WORKSPACE_FOLDER.split("/").pop() ?? ""
+    }
+    if (allowContainerEnv && CONTAINER_ENV_VARIABLE.test(name)) return match
+    unsupported ??= name
+    return match
+  })
+  if (unsupported !== undefined) {
+    problems.push({
+      code: "declaration_variable_unsupported",
+      field,
+      detail: { variable: unsupported },
+    })
+    return undefined
+  }
+  return result
+}
+
+/** Parses an image field, recording why it is not a reference. */
+export function normalizeImage(
+  value: unknown,
+  field: string,
+  problems: DeclarationProblem[]
+): ImageReference | undefined {
+  if (typeof value !== "string") {
+    problems.push({ code: "declaration_image_invalid", field })
+    return undefined
+  }
+  const text = substituteDeclarationVariables(value, field, problems, false)
+  if (text === undefined) return undefined
+  try {
+    return parseImageReference(text)
+  } catch (cause) {
+    problems.push({
+      code: "declaration_image_invalid",
+      field,
+      detail: { reason: cause instanceof ImageReferenceError ? cause.kind : "invalid" },
+    })
+    return undefined
+  }
+}
+
+export const WORKSPACE_CONFIG_DECLARATION_PATH = ".cognia/workspace.json"
+
+/**
+ * The `environment` block of `.cognia/workspace.json`. Either it points at a
+ * devcontainer (and may add egress domains, which devcontainer.json cannot
+ * express), or it declares the environment inline in the devcontainer shapes.
+ */
+export type WorkspaceEnvironmentBlock =
+  | { kind: "devcontainer"; path: string; egressDomains: string[] }
+  | { kind: "inline"; declaration: EnvironmentDeclaration }
+
+const INLINE_BLOCK_KEYS = new Set([
+  "image",
+  "containerEnv",
+  "lifecycleCommands",
+  "forwardPorts",
+  "user",
+  "egressDomains",
+])
+
+export function parseWorkspaceEnvironmentBlock(
+  value: unknown
+): { ok: true; block: WorkspaceEnvironmentBlock } | { ok: false; problems: DeclarationProblem[] } {
+  const problems: DeclarationProblem[] = []
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    problems.push({ code: "declaration_not_object", field: "environment" })
+    return { ok: false, problems }
+  }
+  const row = value as Record<string, unknown>
+  for (const key of Object.keys(row)) {
+    if (key !== "devcontainer" && !INLINE_BLOCK_KEYS.has(key)) {
+      problems.push({ code: "declaration_field_unknown", field: `environment.${key}` })
+    }
+  }
+  const egressDomains = normalizeEgressDomains(
+    row.egressDomains,
+    "environment.egressDomains",
+    problems
+  )
+
+  if (row.devcontainer !== undefined) {
+    const inlineKeys = Object.keys(row).filter(
+      (key) => key !== "devcontainer" && key !== "egressDomains"
+    )
+    for (const key of inlineKeys.filter((key) => INLINE_BLOCK_KEYS.has(key))) {
+      problems.push({ code: "declaration_source_conflict", field: `environment.${key}` })
+    }
+    const path =
+      typeof row.devcontainer === "string" ? row.devcontainer.trim().replaceAll("\\", "/") : ""
+    const fileName = path.split("/").pop()
+    if (
+      !path ||
+      path.startsWith("/") ||
+      /^[A-Za-z]:\//.test(path) ||
+      path.split("/").some((segment) => segment === ".." || segment === "") ||
+      (fileName !== "devcontainer.json" && fileName !== ".devcontainer.json")
+    ) {
+      problems.push({ code: "declaration_path_invalid", field: "environment.devcontainer" })
+    }
+    return problems.length > 0
+      ? { ok: false, problems }
+      : { ok: true, block: { kind: "devcontainer", path, egressDomains } }
+  }
+
+  let image: ImageReference | undefined
+  if (row.image === undefined) {
+    problems.push({ code: "declaration_image_missing", field: "environment.image" })
+  } else {
+    image = normalizeImage(row.image, "environment.image", problems)
+  }
+
+  const envEntries: Array<readonly [string, unknown, string]> = []
+  if (row.containerEnv !== undefined) {
+    if (
+      !row.containerEnv ||
+      typeof row.containerEnv !== "object" ||
+      Array.isArray(row.containerEnv)
+    ) {
+      problems.push({
+        code: "declaration_env_invalid",
+        field: "environment.containerEnv",
+        detail: { reason: "type" },
+      })
+    } else {
+      for (const [name, raw] of Object.entries(row.containerEnv as Record<string, unknown>)) {
+        const field = `environment.containerEnv.${name}`
+        if (typeof raw !== "string") {
+          problems.push({ code: "declaration_env_invalid", field, detail: { reason: "type" } })
+          continue
+        }
+        const substituted = substituteDeclarationVariables(raw, field, problems, true)
+        if (substituted !== undefined) envEntries.push([name, substituted, field])
+      }
+    }
+  }
+  const containerEnv = normalizeEnv(envEntries, problems)
+
+  const lifecycleCommands: LifecycleCommands = {}
+  if (row.lifecycleCommands !== undefined) {
+    const commands = row.lifecycleCommands
+    if (!commands || typeof commands !== "object" || Array.isArray(commands)) {
+      problems.push({ code: "declaration_command_invalid", field: "environment.lifecycleCommands" })
+    } else {
+      const names = new Set<string>(LIFECYCLE_COMMAND_NAMES)
+      for (const [name, raw] of Object.entries(commands as Record<string, unknown>)) {
+        const field = `environment.lifecycleCommands.${name}`
+        if (!names.has(name)) {
+          problems.push({ code: "declaration_field_unknown", field })
+          continue
+        }
+        const command = normalizeCommand(raw, field, problems, (text, textField) =>
+          substituteDeclarationVariables(text, textField, problems, false)
+        )
+        if (command) lifecycleCommands[name as keyof LifecycleCommands] = command
+      }
+    }
+  }
+
+  const forwardPorts = normalizePorts(row.forwardPorts, "environment.forwardPorts", problems)
+  const user = normalizeUser(row.user, "remoteUser", "environment.user", problems)
+
+  if (problems.length > 0 || !image) return { ok: false, problems }
+  return {
+    ok: true,
+    block: {
+      kind: "inline",
+      declaration: {
+        file: "workspace-json",
+        path: WORKSPACE_CONFIG_DECLARATION_PATH,
+        image,
+        containerEnv,
+        lifecycleCommands,
+        forwardPorts,
+        ...(user ? { user } : {}),
+        egressDomains,
+      },
+    },
+  }
 }
 
 /** SHA-256 (lowercase hex) over the RFC 8785 form of the digest-relevant fields. See the header. */

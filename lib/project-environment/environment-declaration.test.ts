@@ -7,6 +7,7 @@ import {
   normalizeEnv,
   normalizePorts,
   normalizeUser,
+  parseWorkspaceEnvironmentBlock,
   type DeclarationProblem,
   type EnvironmentDeclaration,
 } from "./environment-declaration"
@@ -176,5 +177,103 @@ describe("declaration validators", () => {
     expect(normalizeUser("4294967295", "remoteUser", "u", problems)).toBeUndefined()
     expect(normalizeUser("Root", "remoteUser", "u", problems)).toBeUndefined()
     expect(problems).toHaveLength(3)
+  })
+})
+
+describe("parseWorkspaceEnvironmentBlock", () => {
+  function codes(value: unknown) {
+    const result = parseWorkspaceEnvironmentBlock(value)
+    return result.ok ? [] : result.problems.map(({ code, field }) => ({ code, field }))
+  }
+
+  it("declares an environment inline in the devcontainer shapes", () => {
+    const result = parseWorkspaceEnvironmentBlock({
+      image: "ghcr.io/acme/dev:1",
+      containerEnv: {
+        PATH: "${containerEnv:PATH}:/opt/bin",
+        CACHE: "${containerWorkspaceFolder}/.cache",
+      },
+      lifecycleCommands: { postCreate: ["pnpm", "install"], postStart: { api: "pnpm dev" } },
+      forwardPorts: [3000],
+      user: "node",
+      egressDomains: ["Registry.Acme.dev", "*.npmmirror.com"],
+    })
+    expect(result).toEqual({
+      ok: true,
+      block: {
+        kind: "inline",
+        declaration: {
+          file: "workspace-json",
+          path: ".cognia/workspace.json",
+          image: { registry: "ghcr.io", repository: "acme/dev", tag: "1" },
+          containerEnv: { CACHE: "/workspace/.cache", PATH: "${containerEnv:PATH}:/opt/bin" },
+          lifecycleCommands: {
+            postCreate: { kind: "argv", argv: ["pnpm", "install"] },
+            postStart: {
+              kind: "parallel",
+              commands: { api: { kind: "shell", command: "pnpm dev" } },
+            },
+          },
+          forwardPorts: [{ port: 3000 }],
+          user: { name: "node", from: "remoteUser" },
+          egressDomains: ["*.npmmirror.com", "registry.acme.dev"],
+        },
+      },
+    })
+  })
+
+  it("points at a devcontainer and may add egress domains to it", () => {
+    expect(
+      parseWorkspaceEnvironmentBlock({
+        devcontainer: ".devcontainer/python/devcontainer.json",
+        egressDomains: ["pypi.org"],
+      })
+    ).toEqual({
+      ok: true,
+      block: {
+        kind: "devcontainer",
+        path: ".devcontainer/python/devcontainer.json",
+        egressDomains: ["pypi.org"],
+      },
+    })
+  })
+
+  it("refuses mixing a devcontainer pointer with inline fields", () => {
+    expect(codes({ devcontainer: ".devcontainer.json", image: "node:22" })).toEqual([
+      { code: "declaration_source_conflict", field: "environment.image" },
+    ])
+  })
+
+  it("refuses devcontainer paths that escape or name another file", () => {
+    for (const path of [
+      "../x/devcontainer.json",
+      "/etc/devcontainer.json",
+      "config.json",
+      "a//devcontainer.json",
+      "",
+    ]) {
+      expect(codes({ devcontainer: path })).toEqual([
+        { code: "declaration_path_invalid", field: "environment.devcontainer" },
+      ])
+    }
+  })
+
+  it("refuses unknown keys, unknown lifecycle names and local variables", () => {
+    expect(
+      codes({
+        image: "node:22",
+        mounts: [],
+        lifecycleCommands: { preCreate: "x", postCreate: "echo ${localEnv:HOME}" },
+      })
+    ).toEqual([
+      { code: "declaration_field_unknown", field: "environment.mounts" },
+      { code: "declaration_field_unknown", field: "environment.lifecycleCommands.preCreate" },
+      {
+        code: "declaration_variable_unsupported",
+        field: "environment.lifecycleCommands.postCreate",
+      },
+    ])
+    expect(codes({})).toEqual([{ code: "declaration_image_missing", field: "environment.image" }])
+    expect(codes("node:22")).toEqual([{ code: "declaration_not_object", field: "environment" }])
   })
 })

@@ -137,6 +137,29 @@ describe("evaluateWorkspaceConfig", () => {
       })
     )
     expect(verdict).toMatchObject({ kind: "invalid", field: "roots[0].path" })
+    expect(verdict).not.toHaveProperty("problems")
+  })
+
+  it("carries every environment-block problem on the invalid verdict", async () => {
+    const verdict = await evaluateWorkspaceConfig(
+      base,
+      deps({
+        readFile: jest.fn(async () =>
+          JSON.stringify({
+            version: 1,
+            environment: { image: "node:22", privileged: true, user: "a:b" },
+          })
+        ),
+      })
+    )
+    expect(verdict).toMatchObject({
+      kind: "invalid",
+      field: "environment.privileged",
+      problems: [
+        { code: "declaration_field_unknown", field: "environment.privileged" },
+        { code: "declaration_user_invalid", field: "environment.user" },
+      ],
+    })
   })
 
   it("is absent without a root to read from", async () => {

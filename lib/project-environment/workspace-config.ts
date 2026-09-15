@@ -10,6 +10,12 @@ import type {
   ProjectEnvironmentScript,
 } from "@/types/project-environment"
 
+import {
+  parseWorkspaceEnvironmentBlock,
+  type DeclarationProblem,
+  type WorkspaceEnvironmentBlock,
+} from "./environment-declaration"
+
 export const WORKSPACE_CONFIG_PATH = ".cognia/workspace.json"
 export const WORKSPACE_CONFIG_MAX_BYTES = 256 * 1024
 
@@ -54,6 +60,14 @@ export interface WorkspaceRepositoryConfigV1 {
   include: string[]
   requiredSecrets: string[]
   capabilities: WorkspaceConfigCapabilities
+  /**
+   * The runtime environment the repository declares (ADR-0182). Present only
+   * when the file has an `environment` block — an absent key keeps the
+   * ADR-0147 digest of every existing configuration unchanged. Approving the
+   * configuration does not approve the environment: that has its own
+   * declaration digest and approval.
+   */
+  environment?: WorkspaceEnvironmentBlock
 }
 
 export interface ResolvedProjectEnvironment {
@@ -71,7 +85,9 @@ export interface ResolvedProjectEnvironment {
 export class WorkspaceConfigError extends Error {
   constructor(
     message: string,
-    readonly field = "workspace.json"
+    readonly field = "workspace.json",
+    /** Every problem found in the `environment` block, when that is what failed. */
+    readonly problems: DeclarationProblem[] = []
   ) {
     super(message)
     this.name = "WorkspaceConfigError"
@@ -266,6 +282,20 @@ export function parseWorkspaceConfig(source: string): WorkspaceRepositoryConfigV
     }
   })
 
+  let environment: WorkspaceEnvironmentBlock | undefined
+  if (row.environment !== undefined) {
+    const parsed = parseWorkspaceEnvironmentBlock(row.environment)
+    if (!parsed.ok) {
+      const [first] = parsed.problems
+      throw new WorkspaceConfigError(
+        `environment is invalid: ${parsed.problems.map((problem) => `${problem.code} at ${problem.field}`).join(", ")}`,
+        first?.field ?? "environment",
+        parsed.problems
+      )
+    }
+    environment = parsed.block
+  }
+
   return {
     version: 1,
     roots: normalizedRoots,
@@ -278,6 +308,7 @@ export function parseWorkspaceConfig(source: string): WorkspaceRepositoryConfigV
     include: stringArray(row.include, "include", true),
     requiredSecrets: stringArray(row.requiredSecrets, "requiredSecrets"),
     capabilities: capabilities(row.capabilities),
+    ...(environment ? { environment } : {}),
   }
 }
 

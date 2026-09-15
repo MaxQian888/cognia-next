@@ -5,6 +5,7 @@ import {
   readWorkspaceConfig,
   WorkspaceConfigError,
 } from "./workspace-config"
+import { workspaceConfigDigest } from "./workspace-config-trust"
 
 const local: ProjectEnvironment = {
   id: "env-1",
@@ -114,6 +115,62 @@ describe("workspace repository config", () => {
         JSON.stringify({ version: 1, capabilities: { skill: {} } })
       )
       expect(config.capabilities).toEqual({})
+    })
+  })
+
+  describe("environment", () => {
+    it("is absent from the parsed config when the file has no block, keeping ADR-0147 digests", async () => {
+      const config = parseWorkspaceConfig(JSON.stringify({ version: 1, setup: { default: "x" } }))
+      expect("environment" in config).toBe(false)
+      // Pinned: this digest predates the environment block. It must never move
+      // for a file without one, or every approved configuration re-prompts.
+      await expect(workspaceConfigDigest(config)).resolves.toBe(
+        "b88f2fd25f8801cf8922f8d039d65ce091b23184eb8cb9d6f1d3d91cc213a970"
+      )
+    })
+
+    it("parses a devcontainer pointer and an inline declaration", () => {
+      expect(
+        parseWorkspaceConfig(
+          JSON.stringify({
+            version: 1,
+            environment: { devcontainer: ".devcontainer/devcontainer.json" },
+          })
+        ).environment
+      ).toEqual({
+        kind: "devcontainer",
+        path: ".devcontainer/devcontainer.json",
+        egressDomains: [],
+      })
+      expect(
+        parseWorkspaceConfig(JSON.stringify({ version: 1, environment: { image: "node:22" } }))
+          .environment
+      ).toMatchObject({
+        kind: "inline",
+        declaration: { file: "workspace-json", image: { repository: "library/node" } },
+      })
+    })
+
+    it("fails the whole file with every environment problem attached", () => {
+      let thrown: unknown
+      try {
+        parseWorkspaceConfig(
+          JSON.stringify({
+            version: 1,
+            environment: { image: "Bad!", forwardPorts: ["db:5432"], mounts: [] },
+          })
+        )
+      } catch (error) {
+        thrown = error
+      }
+      expect(thrown).toBeInstanceOf(WorkspaceConfigError)
+      const error = thrown as WorkspaceConfigError
+      expect(error.field).toBe("environment.mounts")
+      expect(error.problems.map((problem) => problem.code)).toEqual([
+        "declaration_field_unknown",
+        "declaration_image_invalid",
+        "declaration_port_invalid",
+      ])
     })
   })
 

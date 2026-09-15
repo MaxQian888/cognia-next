@@ -49,6 +49,7 @@
 import { sha256String } from "@/lib/ocr/hash"
 import type { Project } from "@/types"
 
+import type { DeclarationProblem } from "./environment-declaration"
 import {
   WorkspaceConfigError,
   readWorkspaceConfig,
@@ -60,8 +61,11 @@ export type WorkspaceConfigVerdict =
   | { kind: "absent" }
   /** Present, but the workspace is not trusted — deliberately not read. */
   | { kind: "restricted" }
-  /** Present and unreadable. Reported, never silently skipped. */
-  | { kind: "invalid"; message: string; field: string }
+  /**
+   * Present and unreadable. Reported, never silently skipped. `problems` lists
+   * every issue when the `environment` block (ADR-0182) is what failed.
+   */
+  | { kind: "invalid"; message: string; field: string; problems?: DeclarationProblem[] }
   /**
    * Present, valid, and awaiting the user. `approvedDigest` is absent on first
    * sight and set when a previously approved configuration has changed — the
@@ -199,7 +203,12 @@ export async function evaluateWorkspaceConfig(
     config = await readWorkspaceConfig(root, resolved.readFile)
   } catch (cause) {
     if (cause instanceof WorkspaceConfigError) {
-      return { kind: "invalid", message: cause.message, field: cause.field }
+      return {
+        kind: "invalid",
+        message: cause.message,
+        field: cause.field,
+        ...(cause.problems.length > 0 ? { problems: cause.problems } : {}),
+      }
     }
     return {
       kind: "invalid",

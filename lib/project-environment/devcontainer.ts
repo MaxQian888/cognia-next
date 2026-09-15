@@ -45,18 +45,20 @@ import {
   type ParseError,
 } from "jsonc-parser"
 
-import { SANDBOX_WORKSPACE_FOLDER, type LifecycleCommands } from "@/types/sandbox/environment-spec"
+import type { LifecycleCommands } from "@/types/sandbox/environment-spec"
 
 import {
   normalizeCommand,
   normalizeEnv,
+  normalizeImage,
   normalizePorts,
   normalizeUser,
+  substituteDeclarationVariables,
   type DeclarationNotice,
   type DeclarationParseResult,
   type DeclarationProblem,
 } from "./environment-declaration"
-import { ImageReferenceError, parseImageReference, type ImageReference } from "./image-reference"
+import type { ImageReference } from "./image-reference"
 
 export const DEVCONTAINER_MAX_BYTES = 256 * 1024
 
@@ -133,9 +135,6 @@ const IGNORED = new Set<string>(DEVCONTAINER_IGNORED_FIELDS)
 const REFUSED = new Set<string>(DEVCONTAINER_REFUSED_FIELDS)
 const DORMANT = new Set<string>(DEVCONTAINER_DORMANT_FIELDS)
 
-const VARIABLE = /\$\{([^}]*)\}/g
-const CONTAINER_ENV_VARIABLE = /^containerEnv:[A-Za-z_][A-Za-z0-9_]*(?::[^}]*)?$/
-
 /**
  * Parses devcontainer text. `path` is the repository-relative location, which
  * becomes part of the declaration (and its digest).
@@ -193,48 +192,16 @@ export function parseDevcontainer(text: string, path: string): DeclarationParseR
     }
   }
 
-  const substitute = (allowContainerEnv: boolean) => (value: string, field: string) => {
-    let unsupported: string | undefined
-    const result = value.replace(VARIABLE, (match, name: string) => {
-      if (name === "containerWorkspaceFolder") return SANDBOX_WORKSPACE_FOLDER
-      if (name === "containerWorkspaceFolderBasename") {
-        return SANDBOX_WORKSPACE_FOLDER.split("/").pop() ?? ""
-      }
-      if (allowContainerEnv && CONTAINER_ENV_VARIABLE.test(name)) return match
-      unsupported ??= name
-      return match
-    })
-    if (unsupported !== undefined) {
-      problems.push({
-        code: "declaration_variable_unsupported",
-        field,
-        detail: { variable: unsupported },
-      })
-      return undefined
-    }
-    return result
-  }
+  const substitute = (allowContainerEnv: boolean) => (value: string, field: string) =>
+    substituteDeclarationVariables(value, field, problems, allowContainerEnv)
 
   let image: ImageReference | undefined
   const hasDormantBuild = Object.keys(row).some((key) => DORMANT.has(key))
   if (row.image === undefined) {
     // A build-only devcontainer is already refused as dormant; do not pile on.
     if (!hasDormantBuild) problems.push({ code: "declaration_image_missing", field: "image" })
-  } else if (typeof row.image !== "string") {
-    problems.push({ code: "declaration_image_invalid", field: "image" })
   } else {
-    const text = substitute(false)(row.image, "image")
-    if (text !== undefined) {
-      try {
-        image = parseImageReference(text)
-      } catch (cause) {
-        problems.push({
-          code: "declaration_image_invalid",
-          field: "image",
-          detail: { reason: cause instanceof ImageReferenceError ? cause.kind : "invalid" },
-        })
-      }
-    }
+    image = normalizeImage(row.image, "image", problems)
   }
 
   const envEntries: Array<readonly [string, unknown, string]> = []

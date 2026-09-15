@@ -160,6 +160,49 @@ describe("project environments persistence", () => {
     expect((await getProjectEnvironmentVersion(second.id))?.setupScript.default).toBe("pnpm ci")
   })
 
+  it("snapshots, compares and rolls back the runtime selection only when one is set", async () => {
+    const runtime = {
+      source: { kind: "catalog" as const, catalogEntryId: "python-3.12" },
+      sizeClassId: "small",
+      updatedAt: 5,
+    }
+    const plain = await createProjectEnvironmentVersion(
+      environment(),
+      { requiredRuntimeCapabilities: ["filesystem"] },
+      10
+    )
+    expect(plain).not.toHaveProperty("runtime")
+
+    const selected = await createProjectEnvironmentVersion(
+      environment({ runtime }),
+      { requiredRuntimeCapabilities: ["filesystem"] },
+      20
+    )
+    expect(selected.runtime).toEqual(runtime)
+    expect(compareProjectEnvironmentVersions(plain, selected)).toEqual([
+      { field: "runtime", before: undefined, after: runtime },
+    ])
+
+    const restored = await rollbackProjectEnvironmentVersion(selected.id, 30)
+    expect(restored.runtime).toEqual(runtime)
+    const cleared = await rollbackProjectEnvironmentVersion(plain.id, 40)
+    expect(cleared).not.toHaveProperty("runtime")
+  })
+
+  it("refuses to store a malformed runtime selection", async () => {
+    await expect(
+      putProjectEnvironment(
+        environment({
+          runtime: { source: { kind: "catalog", catalogEntryId: "Not Valid" }, updatedAt: 1 },
+        })
+      )
+    ).rejects.toThrow(/runtime\.source\.catalogEntryId/)
+    await putProjectEnvironment(
+      environment({ runtime: { source: { kind: "auto" }, lifecycle: "ephemeral", updatedAt: 1 } })
+    )
+    expect((await getProjectEnvironment("env-1"))?.runtime?.lifecycle).toBe("ephemeral")
+  })
+
   it("hydrates them on read so a reader cannot throw on an absent array", async () => {
     // The type itself notes that legacy desktop definitions omit fields, and
     // rows come back from Dexie unvalidated. `Object.keys(undefined)` and

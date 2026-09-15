@@ -1,3 +1,4 @@
+import { assertRuntimeSelection } from "@/lib/project-environment/runtime-selection"
 import type {
   ProjectEnvironment,
   ProjectEnvironmentPolicy,
@@ -49,6 +50,8 @@ function assertEnvironmentBoundary(environment: ProjectEnvironment): void {
     }
     keyringVariables.add(reference.variable)
   }
+
+  if (environment.runtime !== undefined) assertRuntimeSelection(environment.runtime)
 }
 
 export async function putProjectEnvironment(environment: ProjectEnvironment): Promise<void> {
@@ -128,6 +131,8 @@ export async function createProjectEnvironmentVersion(
       variables: structuredClone(environment.variables),
       keyringReferences: structuredClone(environment.keyringReferences),
       policy: structuredClone(policy),
+      // Spread only when set: a project that never opted in snapshots exactly as before.
+      ...(environment.runtime ? { runtime: structuredClone(environment.runtime) } : {}),
       createdAt,
     }
     await db.projectEnvironmentVersions.add(row)
@@ -165,6 +170,7 @@ export function compareProjectEnvironmentVersions(
     "variables",
     "keyringReferences",
     "policy",
+    "runtime",
   ] as const
   return fields.flatMap((field) =>
     JSON.stringify(left[field]) === JSON.stringify(right[field])
@@ -190,6 +196,7 @@ export async function rollbackProjectEnvironmentVersion(
       actions: structuredClone(target.actions),
       variables: structuredClone(target.variables),
       keyringReferences: structuredClone(target.keyringReferences),
+      ...(target.runtime ? { runtime: structuredClone(target.runtime) } : {}),
       createdAt: target.createdAt,
       updatedAt: createdAt,
     },

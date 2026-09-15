@@ -6,7 +6,33 @@
 // Pattern mirrors VS Code's workspace trust: a single dialog on first sight,
 // remembered per absolute path, revocable from settings.
 
+import { isValidImageDigest } from "@/lib/project-environment/image-reference"
+import type { DeclarationFile, PinnedImage } from "@/types/sandbox/environment-spec"
+
 import { getDb } from "./schema"
+
+/**
+ * A runtime-environment declaration the user approved on this device (ADR-0182).
+ *
+ * Approving the image a repository asks for is a third decision, separate from
+ * folder trust and from `approvedConfigDigest`: setup scripts and an image are
+ * different grants, and a repository can change either without the other.
+ */
+export interface ApprovedEnvironmentDeclaration {
+  /** `environmentDeclarationDigest` of the declaration as approved. */
+  declarationDigest: string
+  file: DeclarationFile
+  /** Repository-relative path of the declaring file. */
+  path: string
+  /**
+   * The image the declaration named, resolved to a digest when the user
+   * approved it. A run uses this digest, never the tag: a tag moved by the
+   * registry after approval must not change what executes.
+   */
+  resolvedImage: PinnedImage
+  /** Wall-clock millis of the approval. */
+  approvedAt: number
+}
 
 export interface TrustedWorkspace {
   /** Absolute path to the workspace root. Stored as-is from the OS. */
@@ -44,6 +70,12 @@ export interface TrustedWorkspace {
    * exactly the failure a shared config file invites.
    */
   seededDeclarations?: string[]
+  /**
+   * The runtime-environment declaration approved for this root, absent when
+   * none ever was. Non-indexed and optional, so no schema version bump; a
+   * device that never enables runtime environments never writes it.
+   */
+  approvedEnvironment?: ApprovedEnvironmentDeclaration
 }
 
 /** The full trust row for a path, or undefined when it was never trusted. */
@@ -67,6 +99,53 @@ export async function approveWorkspaceConfig(path: string, digest: string): Prom
     approvedConfigDigest: digest,
     approvedConfigAt: Date.now(),
   })
+  return true
+}
+
+/**
+ * Record the user's approval of a runtime-environment declaration at this root.
+ *
+ * No-op for an untrusted root, for the same reason as `approveWorkspaceConfig`,
+ * and for an approval that does not pin its image to a digest: storing a tag
+ * would approve whatever the registry serves under it later.
+ */
+export async function approveEnvironmentDeclaration(
+  path: string,
+  approval: Omit<ApprovedEnvironmentDeclaration, "approvedAt">
+): Promise<boolean> {
+  if (!path || !/^[0-9a-f]{64}$/.test(approval.declarationDigest)) return false
+  if (!approval.path || !isValidImageDigest(approval.resolvedImage.digest)) return false
+  const key = normalize(path)
+  const row = await getDb().trustedWorkspaces.get(key)
+  if (!row) return false
+  await getDb().trustedWorkspaces.put({
+    ...row,
+    approvedEnvironment: {
+      declarationDigest: approval.declarationDigest,
+      file: approval.file,
+      path: approval.path,
+      resolvedImage: {
+        registry: approval.resolvedImage.registry,
+        repository: approval.resolvedImage.repository,
+        digest: approval.resolvedImage.digest,
+      },
+      approvedAt: Date.now(),
+    },
+  })
+  return true
+}
+
+/**
+ * Withdraw the runtime-environment approval at this root, keeping folder trust
+ * and the workspace.json approval. Returns whether an approval was removed.
+ */
+export async function revokeEnvironmentApproval(path: string): Promise<boolean> {
+  if (!path) return false
+  const key = normalize(path)
+  const row = await getDb().trustedWorkspaces.get(key)
+  if (!row?.approvedEnvironment) return false
+  const { approvedEnvironment: _removed, ...rest } = row
+  await getDb().trustedWorkspaces.put(rest)
   return true
 }
 
