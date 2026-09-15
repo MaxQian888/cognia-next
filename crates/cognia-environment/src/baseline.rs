@@ -380,6 +380,7 @@ fn legacy_baseline(
         baseline.registry_allowlist = vec![RegistryRule {
             registry: image.registry.clone(),
             repository_prefix: image.repository.clone(),
+            insecure: false,
         }];
         baseline.entries = vec![CatalogEntry {
             id: LEGACY_ENTRY_ID.into(),
@@ -545,6 +546,7 @@ mod tests {
             vec![RegistryRule {
                 registry: "ghcr.io".into(),
                 repository_prefix: "maxqian888/cognia-runner".into(),
+                insecure: false,
             }]
         );
         let bundle = baseline.bundle.as_ref().unwrap();

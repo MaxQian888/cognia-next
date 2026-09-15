@@ -132,10 +132,15 @@ pub struct GpuRequest {
 /// (empty prefix: any repository on that registry).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[schemars(transform = cognia_problem::wire_schema::closed_object)]
+#[schemars(transform = cognia_problem::wire_schema::closed_sparse_object)]
 pub struct RegistryRule {
     pub registry: String,
     pub repository_prefix: String,
+    /// The registry speaks plain HTTP (an in-cluster registry without TLS).
+    /// Metadata reads then use `http://`; pulls still verify every digest.
+    /// Every rule naming one registry must agree on this.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub insecure: bool,
 }
 
 impl RegistryRule {
@@ -414,6 +419,20 @@ impl EnvironmentBaseline {
                     "registry must be an explicit host[:port]",
                 ));
             }
+            let disagrees = self.registry_allowlist[..index].iter().any(|earlier| {
+                earlier.registry.eq_ignore_ascii_case(&rule.registry)
+                    && earlier.insecure != rule.insecure
+            });
+            if disagrees {
+                return Err(CatalogError::new(
+                    "baseline_registry_rule_conflict",
+                    format!("registryAllowlist[{index}].insecure"),
+                    format!(
+                        "rules for {} disagree on whether it is insecure",
+                        rule.registry
+                    ),
+                ));
+            }
         }
 
         let mut size_ids = BTreeSet::new();
@@ -550,6 +569,16 @@ impl EnvironmentBaseline {
         self.registry_allowlist
             .iter()
             .any(|rule| rule.matches(&image.registry, &image.repository))
+    }
+
+    /// Whether metadata for an allowlisted image is read over plain HTTP.
+    /// `None` when the allowlist does not permit the image — the caller must
+    /// not contact a registry the baseline does not name.
+    pub fn registry_is_insecure(&self, image: &CatalogImage) -> Option<bool> {
+        self.registry_allowlist
+            .iter()
+            .find(|rule| rule.matches(&image.registry, &image.repository))
+            .map(|rule| rule.insecure)
     }
 
     pub fn size_class(&self, id: &str) -> Option<&SizeClass> {
@@ -812,6 +841,7 @@ pub(crate) mod tests {
             registry_allowlist: vec![RegistryRule {
                 registry: "ghcr.io".into(),
                 repository_prefix: "acme".into(),
+                insecure: false,
             }],
             isolation_floor: IsolationTier::Container,
             entries: vec![entry(
@@ -858,6 +888,7 @@ pub(crate) mod tests {
         let rule = RegistryRule {
             registry: "ghcr.io".into(),
             repository_prefix: "acme".into(),
+            insecure: false,
         };
         assert!(rule.matches("ghcr.io", "acme"));
         assert!(rule.matches("GHCR.io", "acme/python"));
@@ -869,6 +900,7 @@ pub(crate) mod tests {
         let any = RegistryRule {
             registry: "registry.cn-beijing.cr.volces.com".into(),
             repository_prefix: String::new(),
+            insecure: false,
         };
         assert!(any.matches("registry.cn-beijing.cr.volces.com", "team/app"));
     }
@@ -917,6 +949,32 @@ pub(crate) mod tests {
             baseline_refusal(|b| b.entries[0].scope = CatalogScope::Tenant),
             "baseline_entry_scope"
         );
+        assert_eq!(
+            baseline_refusal(|b| {
+                let mut other = b.registry_allowlist[0].clone();
+                other.repository_prefix = "acme-internal".into();
+                other.insecure = true;
+                b.registry_allowlist.push(other);
+            }),
+            "baseline_registry_rule_conflict"
+        );
+    }
+
+    #[test]
+    fn insecure_is_read_from_the_matching_rule_and_omitted_when_false() {
+        let mut value = baseline();
+        let image = value.entries[0].image.clone();
+        assert_eq!(value.registry_is_insecure(&image), Some(false));
+        let wire = serde_json::to_value(&value.registry_allowlist[0]).unwrap();
+        assert!(wire.get("insecure").is_none(), "{wire}");
+
+        value.registry_allowlist[0].insecure = true;
+        value.validate().unwrap();
+        assert_eq!(value.registry_is_insecure(&image), Some(true));
+
+        let mut elsewhere = image;
+        elsewhere.registry = "docker.io".into();
+        assert_eq!(value.registry_is_insecure(&elsewhere), None);
     }
 
     #[test]

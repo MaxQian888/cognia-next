@@ -7,7 +7,8 @@
 # tenant store (`environment.sqlite`) for catalog additions, approvals, egress
 # grants and probe results.
 #
-# `store` (default) pulls rusqlite. The in-sandbox supervisor
+# `store` (default) pulls rusqlite; `registry` (default) pulls reqwest + tokio
+# for the production registry transport. The in-sandbox supervisor
 # (`cognia-sandboxd`, ADR-0183) only needs the wire types and builds this crate
 # with `default-features = false`.
 [package]
@@ -24,20 +25,26 @@ name = "cognia_environment"
 path = "src/lib.rs"
 
 [features]
-default = ["store"]
+default = ["store", "registry"]
 store = ["dep:rusqlite"]
+registry = ["dep:reqwest", "dep:tokio"]
 
 [dependencies]
 cognia-canonical-json = { path = "../cognia-canonical-json" }
 cognia-net = { path = "../cognia-net" }
 cognia-problem = { path = "../cognia-problem" }
+base64 = "0.23"
 hex = "0.4"
+reqwest = { version = "0.13", default-features = false, features = ["rustls"], optional = true }
 rusqlite = { version = "0.37", features = ["bundled"], optional = true }
 schemars = "1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.11"
 thiserror = "2"
+tokio = { version = "1", features = ["net"], optional = true }
+url = "2"
 
 [dev-dependencies]
 tempfile = "3"
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "rt-multi-thread"] }
