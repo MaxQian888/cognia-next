@@ -168,6 +168,11 @@ export interface EnvironmentSpec {
   sizeClassId: string
   lifecycle: SandboxLifecycleKind
   user: SpecUser
+  /**
+   * Values may contain `${containerEnv:NAME}` / `${containerEnv:NAME:default}`,
+   * which `cognia-sandboxd` expands against the image's environment when a
+   * process starts. No other `${…}` form survives resolution.
+   */
   containerEnv: Record<string, string>
   lifecycleCommands: LifecycleCommands
   forwardPorts: ForwardPort[]
