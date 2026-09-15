@@ -40,12 +40,13 @@ export async function sealEnvironmentSpec(body: EnvironmentSpecBody): Promise<En
 /**
  * The runtime fields a repository declaration contributes, digested — what a
  * server-side approval freezes. Mirrors `approval::runtime_fields_digest`.
+ *
+ * Egress domains are not in it: a spec's `approvedDomains` also carries the
+ * project's own allowlist, and admission authorizes every domain against the
+ * project's egress grant instead.
  */
 export async function environmentRuntimeFieldsDigest(
-  spec: Pick<
-    EnvironmentSpec,
-    "containerEnv" | "lifecycleCommands" | "forwardPorts" | "user" | "egress"
-  >
+  spec: Pick<EnvironmentSpec, "containerEnv" | "lifecycleCommands" | "forwardPorts" | "user">
 ): Promise<string> {
   return sha256String(
     canonicalizeJson({
@@ -53,7 +54,6 @@ export async function environmentRuntimeFieldsDigest(
       lifecycleCommands: spec.lifecycleCommands,
       forwardPorts: spec.forwardPorts,
       user: spec.user,
-      egressDomains: spec.egress.approvedDomains,
     })
   )
 }

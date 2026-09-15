@@ -6,9 +6,17 @@
 //! against the spec, so this crate never needs to parse a `devcontainer.json`.
 //!
 //! The runtime-fields digest covers what a declaration contributes at run
-//! time — env, lifecycle commands, ports, the declared user, the requested
-//! egress domains. Changing any of those in the repository changes the digest
-//! and the old approval no longer admits the spec.
+//! time — env, lifecycle commands, ports, the declared user. Changing any of
+//! those in the repository changes the digest and the old approval no longer
+//! admits the spec.
+//!
+//! Egress domains are deliberately outside it. A spec's `approvedDomains` is
+//! the union of the declaration's domains and the project's own allowlist, so
+//! binding it here would void every approval whenever a project admin edited
+//! that allowlist. The declaration's domains are still frozen by
+//! `declarationDigest`, and admission checks every domain against the
+//! project's [`EgressGrant`] — the grant, not the approval, is the authority
+//! for where a sandbox may connect.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -84,15 +92,15 @@ impl EgressGrant {
 }
 
 /// SHA-256 (lowercase hex) over the RFC 8785 form of the runtime fields a
-/// declaration contributes. Mirrored by `runtimeFieldsDigest` in
-/// `lib/project-environment/resolve-environment-spec.ts`.
+/// declaration contributes (egress domains excluded, see the module doc).
+/// Mirrored by `environmentRuntimeFieldsDigest` in
+/// `lib/project-environment/environment-spec-digest.ts`.
 pub fn runtime_fields_digest(spec: &EnvironmentSpec) -> Result<String, SpecError> {
     let value = json!({
         "containerEnv": spec.container_env,
         "lifecycleCommands": spec.lifecycle_commands,
         "forwardPorts": spec.forward_ports,
         "user": spec.user,
-        "egressDomains": spec.egress.approved_domains,
     });
     let canonical = cognia_canonical_json::canonicalize(&value).map_err(|error| SpecError {
         code: "spec_digest_failed",
@@ -124,12 +132,17 @@ mod tests {
         });
         assert_ne!(base, runtime_fields_digest(&more_ports).unwrap());
 
+        let mut other_env = spec.clone();
+        other_env.container_env.insert("EXTRA".into(), "1".into());
+        assert_ne!(base, runtime_fields_digest(&other_env).unwrap());
+
+        // The egress grant, not the approval, authorizes domains.
         let mut more_domains = spec;
         more_domains
             .egress
             .approved_domains
             .push("example.org".into());
-        assert_ne!(base, runtime_fields_digest(&more_domains).unwrap());
+        assert_eq!(base, runtime_fields_digest(&more_domains).unwrap());
     }
 
     #[test]
