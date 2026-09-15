@@ -256,6 +256,21 @@ pub fn probe(options: &ProbeOptions<'_>) -> ProbeReport {
                 message: "the glibc version could not be read from libc.so.6".into(),
             }),
         }
+        // The glibc tree runs the image's own C++ runtime: the official Node
+        // build links libstdc++ dynamically, and a newer copy of ours would
+        // demand a newer glibc than the image may have. (The musl tree ships
+        // its own loader and C++ runtime, so it needs neither check.)
+        let has_libstdcxx = options
+            .arch
+            .glibc_dirs()
+            .iter()
+            .any(|dir| rootfs::exists(root, &format!("/{dir}/libstdc++.so.6")));
+        if !has_libstdcxx {
+            problems.push(ProbeProblem {
+                code: ProbeCode::LibcUnsupported,
+                message: "the image has no libstdc++.so.6, which the bundled Node needs".into(),
+            });
+        }
     }
 
     if shell.is_none() {
@@ -299,7 +314,7 @@ pub fn probe(options: &ProbeOptions<'_>) -> ProbeReport {
     let ca_bundle = find_ca_bundle(root);
 
     let runtimes = match (options.manifest, libc) {
-        (Some(manifest), Some(libc)) => manifest.runtimes_for(libc),
+        (Some(manifest), Some(libc)) => manifest.runtimes_for(libc, glibc_version),
         _ => Vec::new(),
     };
 
@@ -590,6 +605,11 @@ mod tests {
             let mut libc = b"\x7fELF...GLIBC_2.2.5\0GLIBC_2.17\0GLIBC_PRIVATE\0".to_vec();
             libc.extend(glibc_banner.as_bytes());
             image.write("lib/x86_64-linux-gnu/libc.so.6", &libc);
+            image.write("usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30", b"c++");
+            image.link(
+                "libstdc++.so.6.0.30",
+                "usr/lib/x86_64-linux-gnu/libstdc++.so.6",
+            );
             image.write(
                 "etc/ssl/certs/ca-certificates.crt",
                 b"-----BEGIN CERTIFICATE-----",
@@ -718,6 +738,18 @@ mod tests {
         assert_eq!(codes(&report), [ProbeCode::GlibcTooOld]);
         assert_eq!(report.exit_code(), 65);
         assert_eq!(report.glibc_version, Some("2.17".parse().unwrap()));
+    }
+
+    #[test]
+    fn refuses_a_glibc_image_without_the_cpp_runtime_but_not_a_musl_one() {
+        let image = Image::debian("stable release version 2.36.");
+        fs::remove_file(image.root().join("usr/lib/x86_64-linux-gnu/libstdc++.so.6")).unwrap();
+        let report = image.probe(Some(&me()), None);
+        assert_eq!(codes(&report), [ProbeCode::LibcUnsupported]);
+        assert!(report.problems[0].message.contains("libstdc++"));
+
+        // Alpine base images ship no libstdc++; the musl tree brings its own.
+        assert_eq!(codes(&Image::alpine().probe(Some(&me()), None)), []);
     }
 
     #[test]

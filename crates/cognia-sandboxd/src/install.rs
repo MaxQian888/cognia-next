@@ -46,7 +46,7 @@ impl Stage {
             Stage::Core => vec![
                 (MANIFEST_FILE, true),
                 (BIN_DIR, true),
-                (COMMON_DIR, false),
+                (COMMON_DIR, true),
                 (CERTS_DIR, true),
             ],
             Stage::Libc(libc) => vec![(libc.as_str(), true)],
@@ -87,7 +87,12 @@ pub fn install(from: &Path, to: &Path, stage: Stage) -> Result<InstallOutcome, I
     let digest = hex::encode(Sha256::digest(&manifest_bytes));
 
     if let Stage::Libc(libc) = stage {
-        if !manifest.runtimes.is_empty() && manifest.runtimes_for(libc).is_empty() {
+        if !manifest.runtimes.is_empty()
+            && !manifest
+                .runtimes
+                .iter()
+                .any(|runtime| runtime.libc.contains(&libc))
+        {
             return Err(InstallError::Refused {
                 path: libc.to_string(),
                 reason: "the bundle builds no runtime for this libc".into(),
@@ -267,6 +272,8 @@ mod tests {
         for sub in [
             "bin",
             "certs",
+            "common/git/bin",
+            "common/bin",
             "glibc/bin",
             "glibc/lib/node_modules/@anthropic-ai/claude-code",
             "musl/bin",
@@ -280,6 +287,8 @@ mod tests {
         )
         .unwrap();
         fs::write(root.join("certs/ca-bundle.pem"), b"pem").unwrap();
+        fs::write(root.join("common/git/bin/git"), b"git").unwrap();
+        symlink("../git/bin/git", root.join("common/bin/git")).unwrap();
         fs::write(root.join("glibc/bin/node"), tag.as_bytes()).unwrap();
         fs::set_permissions(
             root.join("glibc/bin/node"),
@@ -313,7 +322,7 @@ mod tests {
         );
         assert!(to.path().join(MANIFEST_FILE).is_file());
         assert!(to.path().join("certs/ca-bundle.pem").is_file());
-        assert!(!to.path().join("common").exists());
+        assert_eq!(fs::read(to.path().join("common/bin/git")).unwrap(), b"git");
         assert!(!to.path().join("glibc").exists());
         let mode = fs::metadata(to.path().join("bin/cognia-sandboxd"))
             .unwrap()
@@ -397,6 +406,12 @@ mod tests {
         assert!(matches!(
             install(from.path(), to.path(), Stage::Core),
             Err(InstallError::MissingEntry(entry)) if entry == "certs"
+        ));
+        let no_tools = bundle("v1");
+        fs::remove_dir_all(no_tools.path().join("common")).unwrap();
+        assert!(matches!(
+            install(no_tools.path(), to.path(), Stage::Core),
+            Err(InstallError::MissingEntry(entry)) if entry == "common"
         ));
 
         let no_musl_runtime = bundle("v1");

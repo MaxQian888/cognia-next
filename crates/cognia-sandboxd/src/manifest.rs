@@ -44,6 +44,11 @@ pub struct BundleRuntime {
     /// Which libc trees carry a build of it. A runtime missing one is refused
     /// on images of that libc rather than attempted.
     pub libc: Vec<Libc>,
+    /// A glibc floor above the bundle's own, for a vendor binary built against
+    /// a newer glibc. Written per architecture: each platform of the bundle
+    /// image carries its own manifest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_glibc: Option<GlibcVersion>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -117,15 +122,35 @@ impl BundleManifest {
                     runtime.id
                 )));
             }
+            if let Some(floor) = runtime.min_glibc {
+                if !runtime.libc.contains(&Libc::Glibc) {
+                    return Err(ManifestError::Invalid(format!(
+                        "runtime {} sets minGlibc without a glibc build",
+                        runtime.id
+                    )));
+                }
+                if floor <= self.min_glibc {
+                    return Err(ManifestError::Invalid(format!(
+                        "runtime {} sets minGlibc {floor}, not above the bundle's {}",
+                        runtime.id, self.min_glibc
+                    )));
+                }
+            }
         }
         Ok(())
     }
 
-    /// Runtime ids this bundle can run on `libc`, in manifest order.
-    pub fn runtimes_for(&self, libc: Libc) -> Vec<String> {
+    /// Runtime ids this bundle can run on an image with `libc`, in manifest
+    /// order. `glibc` is the probed glibc release; a runtime with its own
+    /// floor is left out when the release is older or unknown.
+    pub fn runtimes_for(&self, libc: Libc, glibc: Option<GlibcVersion>) -> Vec<String> {
         self.runtimes
             .iter()
             .filter(|runtime| runtime.libc.contains(&libc))
+            .filter(|runtime| match (libc, runtime.min_glibc) {
+                (Libc::Glibc, Some(floor)) => glibc.is_some_and(|found| found >= floor),
+                _ => true,
+            })
             .map(|runtime| runtime.id.clone())
             .collect()
     }
@@ -207,22 +232,51 @@ mod tests {
             "runtimes": [
                 { "id": "claude-code", "version": "2.1.3", "libc": ["glibc", "musl"] },
                 { "id": "gemini-cli", "version": "0.9.0", "libc": ["glibc"] },
-                { "id": "codex", "version": "0.52.0", "libc": ["musl", "glibc"] }
+                { "id": "codex", "version": "0.52.0", "libc": ["musl", "glibc"] },
+                { "id": "kiro-cli", "version": "2.21.4", "libc": ["glibc", "musl"], "minGlibc": "2.34" }
             ]
         })
     }
 
     #[test]
-    fn parses_and_filters_runtimes_by_libc() {
+    fn parses_and_filters_runtimes_by_libc_and_glibc_floor() {
         let manifest = BundleManifest::parse(sample().to_string().as_bytes()).unwrap();
+        let glibc = |text: &str| Some(text.parse::<GlibcVersion>().unwrap());
         assert_eq!(manifest.min_glibc, DEFAULT_MIN_GLIBC);
         assert_eq!(
-            manifest.runtimes_for(Libc::Glibc),
+            manifest.runtimes_for(Libc::Glibc, glibc("2.36")),
+            ["claude-code", "gemini-cli", "codex", "kiro-cli"]
+        );
+        assert_eq!(
+            manifest.runtimes_for(Libc::Glibc, glibc("2.31")),
             ["claude-code", "gemini-cli", "codex"]
         );
-        assert_eq!(manifest.runtimes_for(Libc::Musl), ["claude-code", "codex"]);
+        assert_eq!(
+            manifest.runtimes_for(Libc::Glibc, None),
+            ["claude-code", "gemini-cli", "codex"]
+        );
+        // The floor is a glibc floor; the musl build does not carry it.
+        assert_eq!(
+            manifest.runtimes_for(Libc::Musl, None),
+            ["claude-code", "codex", "kiro-cli"]
+        );
         let round_trip = serde_json::to_value(&manifest).unwrap();
         assert_eq!(round_trip, sample());
+    }
+
+    #[test]
+    fn refuses_a_runtime_glibc_floor_that_means_nothing() {
+        for runtime in [
+            serde_json::json!({ "id": "a", "version": "1", "libc": ["musl"], "minGlibc": "2.34" }),
+            serde_json::json!({ "id": "a", "version": "1", "libc": ["glibc"], "minGlibc": "2.28" }),
+        ] {
+            let mut manifest = sample();
+            manifest["runtimes"] = serde_json::json!([runtime]);
+            assert!(matches!(
+                BundleManifest::parse(manifest.to_string().as_bytes()),
+                Err(ManifestError::Invalid(_))
+            ));
+        }
     }
 
     #[test]

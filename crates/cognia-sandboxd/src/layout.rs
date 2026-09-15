@@ -20,9 +20,10 @@ pub const WORKSPACE_ROOT: &str = "/workspace";
 
 pub const MANIFEST_FILE: &str = "bundle-manifest.json";
 pub const PROBE_FILE: &str = "probe.json";
-/// Static tools every image gets: `cognia-sandboxd`, `git`, `rg`.
+/// The supervisor itself.
 pub const BIN_DIR: &str = "bin";
-/// Static vendor binaries that run on either libc.
+/// Static tools that run on either libc — `git` (with its `libexec`, built
+/// relocatable) and `rg` — reached through `common/bin`.
 pub const COMMON_DIR: &str = "common";
 /// `ca-bundle.pem`, for images that ship no CA store.
 pub const CERTS_DIR: &str = "certs";

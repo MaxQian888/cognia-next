@@ -40,10 +40,11 @@ fn static_elf() -> Vec<u8> {
 
 fn bundle(dir: &Path) {
     fs::write(dir.join("bundle-manifest.json"), MANIFEST).unwrap();
-    for sub in ["bin", "certs", "glibc/bin", "musl/bin"] {
+    for sub in ["bin", "certs", "common/bin", "glibc/bin", "musl/bin"] {
         fs::create_dir_all(dir.join(sub)).unwrap();
     }
-    fs::write(dir.join("bin/git"), b"git").unwrap();
+    fs::write(dir.join("bin/cognia-sandboxd"), b"sandboxd").unwrap();
+    fs::write(dir.join("common/bin/rg"), b"rg").unwrap();
     fs::write(dir.join("certs/ca-bundle.pem"), b"pem").unwrap();
     fs::write(dir.join("glibc/bin/node"), b"glibc-node").unwrap();
     fs::write(dir.join("musl/bin/node"), b"musl-node").unwrap();
