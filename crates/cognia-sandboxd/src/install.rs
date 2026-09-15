@@ -12,6 +12,13 @@
 //! init container, a reused Docker volume) finds the marker and does nothing;
 //! a different bundle replaces the tree.
 //!
+//! Installs into one root must not overlap. The staging name carries the pid,
+//! and every staging container runs this as PID 1, so two concurrent installs
+//! would share it. A leftover from an interrupted run is removed before the
+//! copy, which is what makes a sequential rerun safe. Kubernetes init
+//! containers are sequential by construction; the Docker driver holds a lock
+//! per bundle volume.
+//!
 //! What gets copied is checked, not trusted to the bundle build: symlinks must
 //! be relative and stay inside their tree (an absolute link would point into
 //! the user image once relocated to `/cognia`), set-id bits are dropped, and
@@ -260,8 +267,8 @@ mod tests {
     fn manifest(tag: &str) -> String {
         format!(
             r#"{{"version":1,"releaseTag":"{tag}","minGlibc":"2.28","runtimes":[
-                {{"id":"claude-code","version":"2","libc":["glibc","musl"]}},
-                {{"id":"gemini-cli","version":"1","libc":["glibc"]}}]}}"#
+                {{"id":"claude-code","version":"2","libc":["glibc","musl"],"commands":[{{"name":"claude"}}]}},
+                {{"id":"gemini-cli","version":"1","libc":["glibc"],"commands":[{{"name":"gemini"}}]}}]}}"#
         )
     }
 
@@ -417,7 +424,7 @@ mod tests {
         let no_musl_runtime = bundle("v1");
         fs::write(
             no_musl_runtime.path().join(MANIFEST_FILE),
-            r#"{"version":1,"releaseTag":"v1","minGlibc":"2.28","runtimes":[{"id":"gemini-cli","version":"1","libc":["glibc"]}]}"#,
+            r#"{"version":1,"releaseTag":"v1","minGlibc":"2.28","runtimes":[{"id":"gemini-cli","version":"1","libc":["glibc"],"commands":[{"name":"gemini"}]}]}"#,
         )
         .unwrap();
         assert!(matches!(

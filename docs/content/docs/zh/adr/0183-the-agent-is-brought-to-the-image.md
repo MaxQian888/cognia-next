@@ -28,7 +28,7 @@ description: "agent CLI 不再预装在项目运行的镜像里。每个版本�
 `deploy/bundle/Dockerfile` 发布 amd64 与 arm64 的 `cognia-agent-bundle`。libc 不是 OCI 平台维度，所以用一个镜像装两套目录，而不是两个镜像、两个 digest：
 
 ```
-/opt/cognia/bundle-manifest.json   版本标签、固定的 CLI 版本、按 libc 的可用性
+/opt/cognia/bundle-manifest.json   版本标签、固定的 CLI 版本、按 libc 的可用性、命令
 /opt/cognia/bin/cognia-sandboxd    静态编译（musl）
 /opt/cognia/common/{git,bin}       静态、可重定位的 git 与 rg，两种 libc 通用
 /opt/cognia/certs/ca-bundle.pem    给没有 CA 证书库的镜像用
@@ -42,6 +42,7 @@ description: "agent CLI 不再预装在项目运行的镜像里。每个版本�
   - `scripts/build/bundle-agent-versions.mjs check` 让锁文件与运行时目录保持一致：目录里每个运行时要么被打包，要么标为 `unavailable` 并写明原因（例如厂商不公布校验和）。
   - 锁文件不是认证：它从不修改 `certifiedVersions`，因为在桌面端，certified 版本可以免同意直接运行。
   - 没有 musl 构建的运行时标为仅 glibc，在 musl 镜像上会带着原因被拒绝；需要比 bundle 下限更新的 glibc 的厂商二进制，在清单里带各架构自己的 `minGlibc`。
+  - 清单里每个运行时列出它装进 `<libc>/bin/` 的命令，npm 命令还带包名。spawn 写的裸命令或 `npx -y <package>` 会映射到固定版本的那份；其他写法一律拒绝，绝不在启动时下载。
 - **两棵 libc 树，自给程度不同**：glibc 上 Node 用官方构建，依赖镜像自己的 glibc 和 `libstdc++`，因为自带更新的 C++ 运行时反而会要求比许多镜像更新的 glibc。musl 上 Node 被改为加载 bundle 自带的 musl 加载器和 C++ 运行时，所以在没有 `libstdc++` 的 Alpine 基础镜像上也能跑，与镜像的 musl 版本无关。
 - **发布契约**：bundle digest 是发布契约里的第四个镜像，与 server、runner、workspace runtime 并列：`ImageConfig.agentBundle` 与 `AgentRelease.agent_bundle_image`。
   - 它是可选的，因为沙箱池默认关闭。没有它的目标或发布，序列化、签名和渲染结果都与原来的三镜像版本完全一致。
@@ -65,10 +66,11 @@ description: "agent CLI 不再预装在项目运行的镜像里。每个版本�
   - glibc 还要读 `libc.so.6` 里记录的版本（只读不执行），并检查 `libstdc++.so.6` 是否存在；
   - `/bin/sh`；
   - `/etc/passwd` 里的目标用户；
-  - `HOME` 与工作区是否可写；
-  - 是否有 CA 证书包。
+  - 工作区的属主，以及 `HOME` 与工作区是否可写；
+  - 是否有 CA 证书包；
+  - 探测出的 libc 能运行哪些运行时和命令。
 
-  退出时带类型化退出码。驱动把 126（exec 格式错误）映射为 `bundle_arch_mismatch`。
+  `--out -` 只打印报告、不写文件，给卷全部只读挂载的驱动用。退出时带类型化退出码。驱动把 126（exec 格式错误）映射为 `bundle_arch_mismatch`。
 
   | 退出码 | 原因 |
   | --- | --- |
@@ -100,7 +102,11 @@ description: "agent CLI 不再预装在项目运行的镜像里。每个版本�
 
 - **有声明时**：`remoteUser` 优先，其次 `containerUser`，再其次镜像的 `USER`（添加目录条目时从 registry 读取）。
 - **未声明时**：gVisor 与虚拟机级档位用 root，由隔离边界兜底，因为 agent 经常在任务中途装依赖；普通容器档位用 UID/GID 10001 并启用 `runAsNonRoot`。
-- **记录并展示**：实际 UID 来自探测结果，记录在沙箱上，并在 UI 显示。
+- **声明的用户名 UID 与工作区属主不同时**：agent 以属主的 UID 运行，保留声明的用户名、home 和附加组。这正是 devcontainer CLI 的 `updateRemoteUserUID` 对 `vscode`（UID 1000）这类 `remoteUser` 的处理：它要编辑的文件属于别人（compose 里 server 以 10001 写入）。
+  - `probe --match-workspace-owner` 按这个身份给出探测结论，`init-agent --match-owner-of /workspace` 按它执行。
+  - agent 启动前，`init-agent` 把 home 交给新 UID（`lchown`，不跟随符号链接、不跨挂载点）。改动只落在容器可写层，镜像和工作区卷都不受影响。
+  - 绝不重映射到 root：工作区属于 root 时保留声明的 UID，由探测以 `probe_workspace_not_writable` 拒绝。声明的是数字 UID 时按原样使用，不重映射。
+- **记录并展示**：实际 UID 来自探测结果，记录在沙箱上并在 UI 显示；发生重映射时同时显示声明的 UID。
 
 ### 环境卫生
 

@@ -385,8 +385,22 @@ export function buildManifest(pins, { arch, releaseTag }) {
         version: runtime.version,
         libc: [...runtime.libc],
         ...(runtime.minGlibc?.[arch] ? { minGlibc: runtime.minGlibc[arch] } : {}),
+        commands: manifestCommands(runtime),
       })),
   }
+}
+
+/**
+ * The `<libc>/bin/` entries one runtime installs, as `BundleCommand`s: npm
+ * commands carry their package so a sandboxed `npx -y <package>` maps onto the
+ * pinned copy; a vendor archive or binary is a bare name.
+ */
+export function manifestCommands(runtime) {
+  const source = runtime.archive ?? runtime.binary
+  return [
+    ...(runtime.commands ?? []).map((command) => ({ name: command.name, package: command.package })),
+    ...(source ? [{ name: source.command }] : []),
+  ]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

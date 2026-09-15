@@ -149,6 +149,28 @@ describe("manifest and plans", () => {
     assert.ok(ids.includes("claude-agent-acp"))
     assert.ok(!ids.includes("cursor-agent"), "unavailable runtimes are not in the manifest")
     assert.deepEqual(manifest.runtimes.find((runtime) => runtime.id === "droid").libc, ["glibc"])
+    // Commands: npm ones name their package, vendor binaries are bare, and
+    // every runtime in the manifest installs at least one.
+    assert.deepEqual(manifest.runtimes.find((runtime) => runtime.id === "codex-acp").commands, [
+      { name: "codex-acp", package: "@agentclientprotocol/codex-acp" },
+    ])
+    assert.deepEqual(manifest.runtimes.find((runtime) => runtime.id === "droid").commands, [{ name: "droid" }])
+    assert.deepEqual(manifest.runtimes.find((runtime) => runtime.id === "kiro-cli").commands, [
+      { name: "kiro-cli" },
+    ])
+    for (const runtime of manifest.runtimes) {
+      assert.ok(runtime.commands.length > 0, `${runtime.id} installs a command`)
+      for (const command of runtime.commands) {
+        assert.match(command.name, /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/, `${runtime.id} ${command.name}`)
+      }
+    }
+    // A command two runtimes share must name one package (sandboxd refuses
+    // a manifest where it does not).
+    const packages = new Map()
+    for (const command of manifest.runtimes.flatMap((runtime) => runtime.commands)) {
+      if (packages.has(command.name)) assert.equal(packages.get(command.name), command.package, command.name)
+      packages.set(command.name, command.package)
+    }
 
     const withFloor = clone(pins)
     withFloor.runtimes.find((runtime) => runtime.id === "droid").minGlibc = { arm64: "2.39" }

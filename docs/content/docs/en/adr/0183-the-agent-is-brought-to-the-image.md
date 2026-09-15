@@ -28,7 +28,7 @@ The existing persistent runtime supervisor cannot carry that job. `services/work
 `deploy/bundle/Dockerfile` publishes `cognia-agent-bundle` for amd64 and arm64. libc is not an OCI platform dimension, so one image carries both trees rather than two images with two digests:
 
 ```
-/opt/cognia/bundle-manifest.json   release tag, pinned CLI versions, per-libc availability
+/opt/cognia/bundle-manifest.json   release tag, pinned CLI versions, per-libc availability, commands
 /opt/cognia/bin/cognia-sandboxd    static (musl)
 /opt/cognia/common/{git,bin}       static relocatable git and rg, for either libc
 /opt/cognia/certs/ca-bundle.pem    for images without a CA store
@@ -42,6 +42,7 @@ The existing persistent runtime supervisor cannot carry that job. `services/work
   - `scripts/build/bundle-agent-versions.mjs check` holds the lock to the runtime catalog. Every catalog runtime is either bundled or marked `unavailable` with its reason, for example a vendor that publishes no checksum.
   - The lock is not certification: it never changes `certifiedVersions`, because on a desktop a certified version runs without consent.
   - A runtime with no musl build is listed as glibc-only and is refused on musl images with its reason. A vendor binary that needs a newer glibc than the bundle's floor carries its own per-architecture `minGlibc` in the manifest.
+  - Each manifest runtime lists the commands it installs under `<libc>/bin/`, with the npm package for npm commands. A spawn that names a bare command or `npx -y <package>` maps onto the pinned copy; anything else is refused, never downloaded at start.
 - **Two libc trees, differently self-contained.** On glibc, Node is the official build and uses the image's glibc and `libstdc++`. A newer bundled C++ runtime would demand a newer glibc than many images have. On musl, Node is patched to load a bundled musl loader and C++ runtime, so it runs on Alpine base images without `libstdc++`, whatever their musl release.
 - **Release contract.** The bundle digest is the fourth image in the release contract, alongside server, runner and workspace runtime: `ImageConfig.agentBundle` and `AgentRelease.agent_bundle_image`.
   - It is optional, because the sandbox pool is off by default. A target or release without it serializes, signs and renders exactly as a three-image one did.
@@ -65,10 +66,11 @@ The existing persistent runtime supervisor cannot carry that job. `services/work
   - for glibc, the release recorded in `libc.so.6` (read, not executed), and whether `libstdc++.so.6` exists;
   - `/bin/sh`;
   - the target user, from `/etc/passwd`;
-  - whether `HOME` and the workspace are writable;
-  - whether a CA bundle exists.
+  - who owns the workspace, and whether `HOME` and the workspace are writable;
+  - whether a CA bundle exists;
+  - the runtimes and commands the probed libc can run.
 
-  It exits with a typed code. The driver maps exit 126 (exec format error) to `bundle_arch_mismatch`.
+  `--out -` prints the report without writing it, for a driver whose volumes are all read-only. It exits with a typed code. The driver maps exit 126 (exec format error) to `bundle_arch_mismatch`.
 
   | Code | Reason |
   | --- | --- |
@@ -100,7 +102,11 @@ The existing persistent runtime supervisor cannot carry that job. `services/work
 
 - **Declared user.** `remoteUser` wins, then `containerUser`, then the image's `USER`. The image's `USER` is read from the registry when a catalog entry is added.
 - **No declaration.** On gVisor and VM-level tiers the agent runs as root, and the isolation boundary contains it; agents routinely install packages mid-task. On the plain-container tier it runs as UID/GID 10001 with `runAsNonRoot`.
-- **Recorded and shown.** The actual UID comes from the probe, is recorded on the sandbox and is shown in the UI.
+- **A declared name whose UID is not the workspace owner's.** The agent runs as the owner, keeping the declared name, home and supplementary groups. This is what the devcontainer CLI's `updateRemoteUserUID` does for a `remoteUser` such as `vscode` (UID 1000) editing files owned by someone else (the compose server writes as 10001).
+  - `probe --match-workspace-owner` answers for that identity, and `init-agent --match-owner-of /workspace` applies it.
+  - Before the agent starts, `init-agent` hands the home over (`lchown`, never following links or crossing a mount). The change stays in the container's writable layer; the image and the workspace volume are untouched.
+  - It never remaps onto root: a root-owned workspace keeps the declared UID, and the probe refuses with `probe_workspace_not_writable`. A declared numeric UID is taken as meant and not remapped.
+- **Recorded and shown.** The actual UID comes from the probe, is recorded on the sandbox and is shown in the UI, with the declared UID when it was remapped.
 
 ### Environment hygiene
 

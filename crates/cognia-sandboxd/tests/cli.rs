@@ -15,8 +15,10 @@ use cognia_sandboxd::probe::{ProbeCode, ProbeReport};
 const BIN: &str = env!("CARGO_BIN_EXE_cognia-sandboxd");
 
 const MANIFEST: &str = r#"{"version":1,"releaseTag":"v9","minGlibc":"2.28","runtimes":[
-    {"id":"claude-code","version":"2","libc":["glibc","musl"]},
-    {"id":"gemini-cli","version":"1","libc":["glibc"]}]}"#;
+    {"id":"claude-code","version":"2","libc":["glibc","musl"],
+     "commands":[{"name":"claude-agent-acp","package":"@agentclientprotocol/claude-agent-acp"}]},
+    {"id":"gemini-cli","version":"1","libc":["glibc"],
+     "commands":[{"name":"gemini","package":"@google/gemini-cli"}]}]}"#;
 
 fn sandboxd() -> Command {
     let mut command = Command::new(BIN);
@@ -328,4 +330,104 @@ fn init_agent_refuses_what_it_cannot_do_with_125() {
         assert_eq!(switch.status.code(), Some(125));
         assert!(String::from_utf8_lossy(&switch.stderr).contains("needs root"));
     }
+}
+
+/// The probe a Docker driver runs: every volume read-only, the report read
+/// from stdout, commands listed for the spawn mapping.
+#[test]
+fn probe_to_stdout_writes_no_file_and_lists_commands() {
+    let injection = tempfile::tempdir().unwrap();
+    fs::write(injection.path().join("bundle-manifest.json"), MANIFEST).unwrap();
+    let image = tempfile::tempdir().unwrap();
+    musl_image(image.path());
+
+    let output = sandboxd()
+        .arg("probe")
+        .arg("--root")
+        .arg(image.path())
+        .arg("--bundle")
+        .arg(injection.path())
+        .args(["--out", "-", "--user"])
+        .arg(uid().to_string())
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!injection.path().join("probe.json").exists());
+    assert!(!Path::new("-").exists());
+    let report: ProbeReport = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report
+            .commands
+            .iter()
+            .map(|command| command.name.as_str())
+            .collect::<Vec<_>>(),
+        ["claude-agent-acp"]
+    );
+}
+
+/// A named user whose uid is not the workspace owner's runs as the owner,
+/// keeping its name and home — the devcontainer `updateRemoteUserUID` rule.
+#[test]
+fn a_named_user_is_matched_to_the_workspace_owner_by_probe_and_init() {
+    let injection = tempfile::tempdir().unwrap();
+    fs::write(injection.path().join("bundle-manifest.json"), MANIFEST).unwrap();
+    let image = tempfile::tempdir().unwrap();
+    musl_image(image.path());
+    fs::write(
+        image.path().join("etc/passwd"),
+        "root:x:0:0:root:/root:/bin/sh\nnode:x:1000:1000::/home/node:/bin/sh\n",
+    )
+    .unwrap();
+    fs::create_dir_all(image.path().join("home/node")).unwrap();
+    let me = uid();
+
+    let probe = sandboxd()
+        .arg("probe")
+        .arg("--root")
+        .arg(image.path())
+        .arg("--bundle")
+        .arg(injection.path())
+        .args(["--out", "-", "--user", "node", "--match-workspace-owner"])
+        .output()
+        .unwrap();
+    let report: ProbeReport = serde_json::from_slice(&probe.stdout).unwrap();
+    let expected_uid = if me == 0 { 1000 } else { me };
+    assert_eq!(
+        report.user.as_ref().map(|user| user.uid),
+        Some(expected_uid)
+    );
+    assert_eq!(report.user_remapped_from.is_some(), me != 0 && me != 1000);
+
+    let init = sandboxd()
+        .arg("init-agent")
+        .arg("--root")
+        .arg(image.path())
+        .arg("--bundle")
+        .arg(injection.path())
+        .args([
+            "--user",
+            "node",
+            "--match-owner-of",
+            "/workspace",
+            "--",
+            "/bin/sh",
+            "-c",
+            "printf '%s|%s' \"$(id -u)\" \"$HOME\"",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        init.status.success(),
+        "{}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(init.stdout).unwrap(),
+        format!("{expected_uid}|/home/node")
+    );
 }

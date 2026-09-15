@@ -66,7 +66,13 @@ enum Mode {
         /// The user the agent will run as; defaults to the probing user.
         #[arg(long)]
         user: Option<UserSpec>,
-        /// Defaults to `<bundle>/probe.json`.
+        /// Answer for a named `--user` remapped onto the workspace owner, as
+        /// `init-agent --match-owner-of <workspace>` will run it.
+        #[arg(long)]
+        match_workspace_owner: bool,
+        /// Defaults to `<bundle>/probe.json`; `-` prints the report only,
+        /// for a driver reading it from a container whose volumes are all
+        /// read-only.
         #[arg(long)]
         out: Option<PathBuf>,
     },
@@ -74,6 +80,10 @@ enum Mode {
     InitAgent {
         #[arg(long)]
         user: Option<UserSpec>,
+        /// Run a named `--user` as the owner of this in-image directory when
+        /// the two differ, handing its home over first (ADR-0183).
+        #[arg(long)]
+        match_owner_of: Option<String>,
         #[arg(long, default_value = "/")]
         root: PathBuf,
         #[arg(long, default_value = INJECTION_ROOT)]
@@ -99,15 +109,31 @@ fn main() -> ExitCode {
             bundle,
             workspace,
             user,
+            match_workspace_owner,
             out,
-        } => run_probe(&root, &bundle, &workspace, user.as_ref(), out),
+        } => run_probe(
+            &root,
+            &bundle,
+            &workspace,
+            user.as_ref(),
+            match_workspace_owner,
+            out,
+        ),
         Mode::InitAgent {
             user,
+            match_owner_of,
             root,
             bundle,
             cwd,
             argv,
-        } => run_init(user.as_ref(), &root, &bundle, cwd, argv),
+        } => run_init(
+            user.as_ref(),
+            match_owner_of.as_deref(),
+            &root,
+            &bundle,
+            cwd,
+            argv,
+        ),
     }
 }
 
@@ -147,6 +173,7 @@ fn run_probe(
     bundle: &Path,
     workspace: &str,
     user: Option<&UserSpec>,
+    match_workspace_owner: bool,
     out: Option<PathBuf>,
 ) -> ExitCode {
     let Some(arch) = Arch::current() else {
@@ -165,14 +192,17 @@ fn run_probe(
         arch,
         workspace,
         user,
+        match_workspace_owner,
         manifest: Some(&manifest),
         probing_uid: effective_uid(),
     });
 
-    let out = out.unwrap_or_else(|| layout.probe());
     let json = serde_json::to_vec_pretty(&report).expect("probe reports serialize");
-    if let Err(error) = write_atomically(&out, &json) {
-        return fail(format!("cannot write {}: {error}", out.display()), 1);
+    let out = out.unwrap_or_else(|| layout.probe());
+    if out != Path::new("-") {
+        if let Err(error) = write_atomically(&out, &json) {
+            return fail(format!("cannot write {}: {error}", out.display()), 1);
+        }
     }
     let _ = std::io::stdout().write_all(&json);
     println!();
@@ -185,19 +215,35 @@ fn run_probe(
 
 fn run_init(
     user: Option<&UserSpec>,
+    match_owner_of: Option<&str>,
     root: &Path,
     bundle: &Path,
     cwd: Option<PathBuf>,
     argv: Vec<OsString>,
 ) -> ExitCode {
     let layout = InjectedLayout::at(bundle);
-    let resolved = match user {
+    let mut resolved = match user {
         Some(spec) => match cognia_sandboxd::passwd::resolve_user(root, spec) {
             Ok(user) => Some(user),
             Err(error) => return fail(error, EXIT_INIT_FAILED),
         },
         None => None,
     };
+    if let (Some(dir), Some(UserSpec::Name(_)), Some(declared)) =
+        (match_owner_of, user, resolved.as_ref())
+    {
+        match probe::ownership_of(root, dir) {
+            Some(owner) => {
+                if let Some(remapped) =
+                    cognia_sandboxd::passwd::remap_to_owner(declared, owner.uid, owner.gid)
+                {
+                    hand_over_home(root, declared, &remapped);
+                    resolved = Some(remapped);
+                }
+            }
+            None => return fail(format!("cannot read the owner of {dir}"), EXIT_INIT_FAILED),
+        }
+    }
 
     // The probe's findings when the driver staged them; otherwise look again.
     let (libc, image_ca) = match read_probe(&layout.probe()) {
@@ -246,6 +292,58 @@ fn run_agent(
     _cwd: Option<PathBuf>,
 ) -> ExitCode {
     fail("init-agent only runs on Linux", EXIT_INIT_FAILED)
+}
+
+/// Gives a remapped user's home to the uid it now runs as. Failures are
+/// reported and the agent still starts: a home it cannot write is a problem
+/// the agent can name, a missing agent is not.
+#[cfg(unix)]
+fn hand_over_home(
+    root: &Path,
+    declared: &cognia_sandboxd::passwd::ResolvedUser,
+    remapped: &cognia_sandboxd::passwd::ResolvedUser,
+) {
+    use cognia_sandboxd::init::{apply_handover, plan_home_handover, HANDOVER_ENTRY_LIMIT};
+    use cognia_sandboxd::probe::Ownership;
+
+    let Some(home) = declared.home.as_deref().filter(|home| *home != "/") else {
+        return;
+    };
+    let Ok(host) = cognia_sandboxd::rootfs::resolve(root, home) else {
+        return;
+    };
+    let from = Ownership {
+        uid: declared.uid,
+        gid: declared.gid,
+    };
+    let to = Ownership {
+        uid: remapped.uid,
+        gid: remapped.gid,
+    };
+    match plan_home_handover(&host, from, to, HANDOVER_ENTRY_LIMIT) {
+        Ok(plan) => {
+            if plan.truncated {
+                eprintln!(
+                    "cognia-sandboxd: {home} has more than {HANDOVER_ENTRY_LIMIT} entries; only the first were handed over"
+                );
+            }
+            for (path, error) in apply_handover(&plan) {
+                eprintln!(
+                    "cognia-sandboxd: cannot hand over {}: {error}",
+                    path.display()
+                );
+            }
+        }
+        Err(error) => eprintln!("cognia-sandboxd: cannot walk {home}: {error}"),
+    }
+}
+
+#[cfg(not(unix))]
+fn hand_over_home(
+    _root: &Path,
+    _declared: &cognia_sandboxd::passwd::ResolvedUser,
+    _remapped: &cognia_sandboxd::passwd::ResolvedUser,
+) {
 }
 
 fn read_probe(path: &Path) -> Result<ProbeReport, String> {

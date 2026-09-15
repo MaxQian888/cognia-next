@@ -1,13 +1,14 @@
 //! `bundle-manifest.json`: what one agent bundle contains (ADR-0183).
 //!
-//! Written by the bundle build from `protocol/external-agent-runtimes.json`
-//! `certifiedVersions` (`scripts/build/bundle-agent-versions.mjs`), read by
-//! `probe` to say which runtimes the probed image can host and by the drivers
-//! to refuse the rest with a reason. The bundle and this binary ship in the
-//! same image, so the format is closed: an unknown field is a build bug.
+//! Written by the bundle build from `deploy/bundle/agent-versions.json`
+//! (`scripts/build/bundle-agent-versions.mjs manifest`), read by `probe` to say
+//! which runtimes and commands the probed image can host. Drivers read that
+//! answer back to refuse the rest with a reason and to turn a spawn's command
+//! into the bundled file it runs. The bundle and this binary ship in the same
+//! image, so the format is closed: an unknown field is a build bug.
 
 use std::cmp::Ordering;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::Path;
 use std::str::FromStr;
@@ -49,6 +50,55 @@ pub struct BundleRuntime {
     /// image carries its own manifest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_glibc: Option<GlibcVersion>,
+    /// The commands this runtime puts under `<libc>/bin/`.
+    pub commands: Vec<BundleCommand>,
+}
+
+/// One executable in a libc tree's `bin/`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BundleCommand {
+    /// The file name under `<libc>/bin/`, which is also the bare command a
+    /// spawn names.
+    pub name: String,
+    /// The npm package that provides it, so a spawn written as
+    /// `npx -y <package>` runs the pinned copy instead of downloading one.
+    /// Absent for vendor binaries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package: Option<String>,
+}
+
+/// A bare executable name: what `<libc>/bin/` may contain.
+pub fn is_valid_command_name(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= 64
+        && bytes[0].is_ascii_alphanumeric()
+        && bytes
+            .iter()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
+/// An npm package name, scoped or not.
+fn is_valid_package_name(name: &str) -> bool {
+    let segment = |part: &str| {
+        !part.is_empty()
+            && !part.starts_with('.')
+            && part.bytes().all(|b| {
+                b.is_ascii_lowercase()
+                    || b.is_ascii_digit()
+                    || matches!(b, b'.' | b'_' | b'-' | b'~')
+            })
+    };
+    if name.is_empty() || name.len() > 214 {
+        return false;
+    }
+    match name.strip_prefix('@') {
+        Some(scoped) => scoped
+            .split_once('/')
+            .is_some_and(|(scope, package)| segment(scope) && segment(package)),
+        None => segment(name),
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -92,6 +142,9 @@ impl BundleManifest {
             ));
         }
         let mut ids = BTreeSet::new();
+        // A command two runtimes share (opencode's two surfaces) is one file
+        // in the tree, so both must mean the same package.
+        let mut packages: BTreeMap<&str, Option<&str>> = BTreeMap::new();
         for runtime in &self.runtimes {
             if runtime.id.is_empty()
                 || !runtime
@@ -136,8 +189,63 @@ impl BundleManifest {
                     )));
                 }
             }
+            if runtime.commands.is_empty() {
+                return Err(ManifestError::Invalid(format!(
+                    "runtime {} installs no command",
+                    runtime.id
+                )));
+            }
+            let mut names = BTreeSet::new();
+            for command in &runtime.commands {
+                if !is_valid_command_name(&command.name) {
+                    return Err(ManifestError::Invalid(format!(
+                        "runtime {} command {:?} is not a bare executable name",
+                        runtime.id, command.name
+                    )));
+                }
+                if !names.insert(command.name.as_str()) {
+                    return Err(ManifestError::Invalid(format!(
+                        "runtime {} lists command {} twice",
+                        runtime.id, command.name
+                    )));
+                }
+                if let Some(package) = &command.package {
+                    if !is_valid_package_name(package) {
+                        return Err(ManifestError::Invalid(format!(
+                            "runtime {} command {} names the invalid package {package:?}",
+                            runtime.id, command.name
+                        )));
+                    }
+                }
+                let package = command.package.as_deref();
+                match packages.get(command.name.as_str()) {
+                    Some(listed) if *listed != package => {
+                        return Err(ManifestError::Invalid(format!(
+                            "command {} is provided by different packages",
+                            command.name
+                        )));
+                    }
+                    _ => {
+                        packages.insert(&command.name, package);
+                    }
+                }
+            }
         }
         Ok(())
+    }
+
+    /// Commands this bundle can run on an image with `libc`: those of
+    /// [`Self::runtimes_for`], each name once, in manifest order.
+    pub fn commands_for(&self, libc: Libc, glibc: Option<GlibcVersion>) -> Vec<BundleCommand> {
+        let runnable = self.runtimes_for(libc, glibc);
+        let mut seen = BTreeSet::new();
+        self.runtimes
+            .iter()
+            .filter(|runtime| runnable.contains(&runtime.id))
+            .flat_map(|runtime| runtime.commands.iter())
+            .filter(|command| seen.insert(command.name.clone()))
+            .cloned()
+            .collect()
     }
 
     /// Runtime ids this bundle can run on an image with `libc`, in manifest
@@ -230,12 +338,111 @@ mod tests {
             "releaseTag": "v1.2.0",
             "minGlibc": "2.28",
             "runtimes": [
-                { "id": "claude-code", "version": "2.1.3", "libc": ["glibc", "musl"] },
-                { "id": "gemini-cli", "version": "0.9.0", "libc": ["glibc"] },
-                { "id": "codex", "version": "0.52.0", "libc": ["musl", "glibc"] },
-                { "id": "kiro-cli", "version": "2.21.4", "libc": ["glibc", "musl"], "minGlibc": "2.34" }
+                {
+                    "id": "claude-code", "version": "2.1.3", "libc": ["glibc", "musl"],
+                    "commands": [
+                        { "name": "claude-agent-acp", "package": "@agentclientprotocol/claude-agent-acp" },
+                        { "name": "claude", "package": "@anthropic-ai/claude-code" }
+                    ]
+                },
+                {
+                    "id": "gemini-cli", "version": "0.9.0", "libc": ["glibc"],
+                    "commands": [{ "name": "gemini", "package": "@google/gemini-cli" }]
+                },
+                {
+                    "id": "codex", "version": "0.52.0", "libc": ["musl", "glibc"],
+                    "commands": [{ "name": "codex-acp", "package": "@agentclientprotocol/codex-acp" }]
+                },
+                {
+                    "id": "kiro-cli", "version": "2.21.4", "libc": ["glibc", "musl"], "minGlibc": "2.34",
+                    "commands": [{ "name": "kiro-cli" }]
+                }
             ]
         })
+    }
+
+    fn runtime(id: &str, commands: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({ "id": id, "version": "1", "libc": ["glibc"], "commands": commands })
+    }
+
+    #[test]
+    fn lists_the_commands_an_image_can_run() {
+        let manifest = BundleManifest::parse(sample().to_string().as_bytes()).unwrap();
+        let names = |commands: Vec<BundleCommand>| {
+            commands
+                .into_iter()
+                .map(|command| command.name)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            names(manifest.commands_for(Libc::Musl, None)),
+            ["claude-agent-acp", "claude", "codex-acp", "kiro-cli"]
+        );
+        // The glibc floor that drops a runtime drops its commands with it.
+        assert_eq!(
+            names(manifest.commands_for(Libc::Glibc, Some("2.31".parse().unwrap()))),
+            ["claude-agent-acp", "claude", "gemini", "codex-acp"]
+        );
+        assert_eq!(
+            manifest.commands_for(Libc::Musl, None)[2]
+                .package
+                .as_deref(),
+            Some("@agentclientprotocol/codex-acp")
+        );
+    }
+
+    #[test]
+    fn a_command_shared_by_two_runtimes_is_listed_once_and_must_agree() {
+        let mut shared = sample();
+        shared["runtimes"] = serde_json::json!([
+            runtime(
+                "opencode",
+                serde_json::json!([{ "name": "opencode", "package": "opencode-ai" }])
+            ),
+            runtime(
+                "opencode-acp",
+                serde_json::json!([{ "name": "opencode", "package": "opencode-ai" }])
+            ),
+        ]);
+        let manifest = BundleManifest::parse(shared.to_string().as_bytes()).unwrap();
+        assert_eq!(manifest.commands_for(Libc::Glibc, None).len(), 1);
+
+        shared["runtimes"][1]["commands"][0]["package"] = "opencode-fork".into();
+        assert!(matches!(
+            BundleManifest::parse(shared.to_string().as_bytes()),
+            Err(ManifestError::Invalid(message)) if message.contains("different packages")
+        ));
+    }
+
+    #[test]
+    fn refuses_commands_that_are_not_bare_names_or_real_packages() {
+        for commands in [
+            serde_json::json!([]),
+            serde_json::json!([{ "name": "../bin/sh" }]),
+            serde_json::json!([{ "name": "-flag" }]),
+            serde_json::json!([{ "name": "claude" }, { "name": "claude" }]),
+            serde_json::json!([{ "name": "claude", "package": "Not A Package" }]),
+            serde_json::json!([{ "name": "claude", "package": "@scope" }]),
+        ] {
+            let mut manifest = sample();
+            manifest["runtimes"] = serde_json::json!([runtime("a", commands.clone())]);
+            assert!(
+                matches!(
+                    BundleManifest::parse(manifest.to_string().as_bytes()),
+                    Err(ManifestError::Invalid(_))
+                ),
+                "{commands} should be refused"
+            );
+        }
+        let mut missing = sample();
+        missing["runtimes"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("commands");
+        assert!(matches!(
+            BundleManifest::parse(missing.to_string().as_bytes()),
+            Err(ManifestError::Json(_))
+        ));
     }
 
     #[test]
@@ -266,9 +473,10 @@ mod tests {
 
     #[test]
     fn refuses_a_runtime_glibc_floor_that_means_nothing() {
+        let commands = serde_json::json!([{ "name": "a" }]);
         for runtime in [
-            serde_json::json!({ "id": "a", "version": "1", "libc": ["musl"], "minGlibc": "2.34" }),
-            serde_json::json!({ "id": "a", "version": "1", "libc": ["glibc"], "minGlibc": "2.28" }),
+            serde_json::json!({ "id": "a", "version": "1", "libc": ["musl"], "minGlibc": "2.34", "commands": commands }),
+            serde_json::json!({ "id": "a", "version": "1", "libc": ["glibc"], "minGlibc": "2.28", "commands": commands }),
         ] {
             let mut manifest = sample();
             manifest["runtimes"] = serde_json::json!([runtime]);
@@ -293,18 +501,18 @@ mod tests {
             ("releaseTag", serde_json::json!(" ")),
             (
                 "runtimes",
-                serde_json::json!([{ "id": "Claude", "version": "1", "libc": ["glibc"] }]),
+                serde_json::json!([{ "id": "Claude", "version": "1", "libc": ["glibc"], "commands": [{ "name": "a" }] }]),
             ),
             (
                 "runtimes",
                 serde_json::json!([
-                    { "id": "a", "version": "1", "libc": ["glibc"] },
-                    { "id": "a", "version": "2", "libc": ["musl"] }
+                    { "id": "a", "version": "1", "libc": ["glibc"], "commands": [{ "name": "a" }] },
+                    { "id": "a", "version": "2", "libc": ["musl"], "commands": [{ "name": "a" }] }
                 ]),
             ),
             (
                 "runtimes",
-                serde_json::json!([{ "id": "a", "version": "1", "libc": [] }]),
+                serde_json::json!([{ "id": "a", "version": "1", "libc": [], "commands": [{ "name": "a" }] }]),
             ),
         ];
         for (field, value) in cases {

@@ -196,6 +196,35 @@ pub fn resolve_user(root: &Path, spec: &UserSpec) -> Result<ResolvedUser, UserEr
     })
 }
 
+/// `user` running as the owner of the workspace, the way the devcontainer CLI's
+/// `updateRemoteUserUID` rewrites a remote user whose uid differs from the
+/// person whose files it will edit (ADR-0183 "Which user the agent runs as").
+///
+/// The name, home and supplementary groups are kept; the uid becomes the
+/// owner's and the primary gid is swapped for the owner's gid. `None` when
+/// nothing changes, and when the owner is root: remapping a declared user to
+/// uid 0 would hand the agent more than the declaration asked for, so the
+/// caller keeps the declared uid and the workspace check refuses instead.
+pub fn remap_to_owner(user: &ResolvedUser, owner_uid: u32, owner_gid: u32) -> Option<ResolvedUser> {
+    if owner_uid == 0 || (user.uid == owner_uid && user.gid == owner_gid) {
+        return None;
+    }
+    let mut groups: BTreeSet<u32> = user
+        .groups
+        .iter()
+        .copied()
+        .filter(|gid| *gid != user.gid)
+        .collect();
+    groups.insert(owner_gid);
+    Some(ResolvedUser {
+        name: user.name.clone(),
+        uid: owner_uid,
+        gid: owner_gid,
+        groups: groups.into_iter().collect(),
+        home: user.home.clone(),
+    })
+}
+
 fn read_image_file(root: &Path, path: &str) -> Option<String> {
     let host = rootfs::resolve(root, path).ok()?;
     std::fs::read_to_string(host).ok()
@@ -299,5 +328,26 @@ bad:x:notanumber:vscode
         let empty = tempfile::tempdir().unwrap();
         assert!(resolve_user(empty.path(), &UserSpec::Uid(0)).is_ok());
         assert!(resolve_user(empty.path(), &UserSpec::Name("root".into())).is_err());
+    }
+
+    #[test]
+    fn remaps_a_user_onto_the_workspace_owner_but_never_onto_root() {
+        let dir = image();
+        let vscode = resolve_user(dir.path(), &UserSpec::Name("vscode".into())).unwrap();
+
+        let remapped = remap_to_owner(&vscode, 10001, 10001).unwrap();
+        assert_eq!(remapped.name.as_deref(), Some("vscode"));
+        assert_eq!(remapped.home.as_deref(), Some("/home/vscode"));
+        assert_eq!((remapped.uid, remapped.gid), (10001, 10001));
+        // The old primary group is gone; docker and wheel memberships stay.
+        assert_eq!(remapped.groups, vec![10, 998, 10001]);
+
+        assert_eq!(remap_to_owner(&vscode, 1001, 1001), None);
+        assert_eq!(remap_to_owner(&vscode, 0, 0), None);
+        // Same uid, different primary group: still a remap, of the gid alone.
+        assert_eq!(
+            remap_to_owner(&vscode, 1001, 50).unwrap().groups,
+            vec![10, 50, 998]
+        );
     }
 }

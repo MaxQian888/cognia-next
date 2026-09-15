@@ -5,7 +5,7 @@ The agent CLIs and `cognia-sandboxd`, packaged to be injected into whatever imag
 ## Layout
 
 ```
-/opt/cognia/bundle-manifest.json   release tag, runtimes, libc per runtime (per architecture)
+/opt/cognia/bundle-manifest.json   release tag, runtimes, libc and commands per runtime (per architecture)
 /opt/cognia/bin/cognia-sandboxd    static musl; also the image entrypoint
 /opt/cognia/common/git/            static, relocatable git (RUNTIME_PREFIX), https via a static libcurl
 /opt/cognia/common/bin/{git,rg}    reached on PATH from any image

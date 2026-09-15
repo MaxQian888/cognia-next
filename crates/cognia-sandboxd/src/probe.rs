@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::elf::{self, ElfError};
 use crate::layout::{Arch, Libc};
-use crate::manifest::{BundleManifest, GlibcVersion, DEFAULT_MIN_GLIBC};
+use crate::manifest::{BundleCommand, BundleManifest, GlibcVersion, DEFAULT_MIN_GLIBC};
 use crate::passwd::{self, ResolvedUser, UserError, UserSpec};
 use crate::rootfs;
 
@@ -103,9 +103,17 @@ pub struct ProbeReport {
     /// What `/bin/sh` resolves to inside the image.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shell: Option<String>,
-    /// The user the agent will run as; absent when that user does not exist.
+    /// The user the agent will run as, after any remap onto the workspace
+    /// owner; absent when that user does not exist.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user: Option<ResolvedUser>,
+    /// The declared user's own uid and gid, present only when `user` was
+    /// remapped onto the workspace owner ([`passwd::remap_to_owner`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_remapped_from: Option<Ownership>,
+    /// Who owns the workspace directory, when it exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_owner: Option<Ownership>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home_writable: Option<bool>,
     pub workspace_writable: bool,
@@ -114,7 +122,38 @@ pub struct ProbeReport {
     pub ca_bundle: Option<String>,
     /// Runtime ids from the bundle manifest this image's libc can run.
     pub runtimes: Vec<String>,
+    /// The commands those runtimes install, each once. A driver maps a spawn
+    /// onto one of these or refuses it.
+    #[serde(default)]
+    pub commands: Vec<BundleCommand>,
     pub problems: Vec<ProbeProblem>,
+}
+
+/// A numeric owner, as `stat` reports it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Ownership {
+    pub uid: u32,
+    pub gid: u32,
+}
+
+/// The owner of an in-image path, following symlinks inside the image.
+pub fn ownership_of(root: &Path, path: &str) -> Option<Ownership> {
+    let host = rootfs::resolve(root, path).ok()?;
+    let metadata = fs::metadata(host).ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some(Ownership {
+            uid: metadata.uid(),
+            gid: metadata.gid(),
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = metadata;
+        None
+    }
 }
 
 impl ProbeReport {
@@ -135,6 +174,11 @@ pub struct ProbeOptions<'a> {
     pub workspace: &'a str,
     /// Absent: the user the probe itself runs as (uid 0 in an init container).
     pub user: Option<&'a UserSpec>,
+    /// Run a user named in [`Self::user`] as the owner of the workspace when
+    /// the two differ ([`passwd::remap_to_owner`]). `init-agent
+    /// --match-owner-of` applies the same rule, so the probe answers for the
+    /// identity the agent will really have.
+    pub match_workspace_owner: bool,
     pub manifest: Option<&'a BundleManifest>,
     /// Who is probing, for deciding whether a real write test is meaningful.
     pub probing_uid: u32,
@@ -284,7 +328,7 @@ pub fn probe(options: &ProbeOptions<'_>) -> ProbeReport {
         .user
         .cloned()
         .unwrap_or(UserSpec::Uid(options.probing_uid));
-    let user = match passwd::resolve_user(root, &requested) {
+    let declared = match passwd::resolve_user(root, &requested) {
         Ok(user) => Some(user),
         Err(UserError::Missing(name)) => {
             problems.push(ProbeProblem {
@@ -294,6 +338,26 @@ pub fn probe(options: &ProbeOptions<'_>) -> ProbeReport {
             None
         }
     };
+
+    let workspace_owner = ownership_of(root, options.workspace);
+    // Only a named user is remapped: a bare uid is already a deliberate
+    // identity, and the devcontainer rule this mirrors is about names too.
+    let remapped = match (&declared, workspace_owner) {
+        (Some(user), Some(owner))
+            if options.match_workspace_owner && matches!(requested, UserSpec::Name(_)) =>
+        {
+            passwd::remap_to_owner(user, owner.uid, owner.gid)
+        }
+        _ => None,
+    };
+    let user_remapped_from = remapped
+        .as_ref()
+        .and(declared.as_ref())
+        .map(|user| Ownership {
+            uid: user.uid,
+            gid: user.gid,
+        });
+    let user = remapped.or_else(|| declared.clone());
 
     let (workspace_writable, workspace_reason) = match &user {
         Some(user) => writable_by(root, options.workspace, user, options.probing_uid),
@@ -305,17 +369,24 @@ pub fn probe(options: &ProbeOptions<'_>) -> ProbeReport {
             message: format!("{} is not writable: {workspace_reason}", options.workspace),
         });
     }
-    let home_writable = user.as_ref().and_then(|user| {
-        user.home
+    // A remapped user's home still belongs to the declared uid in the image;
+    // `init-agent` hands it over before the agent starts, so it is as writable
+    // as it was for the declared user.
+    let home_writable = declared.as_ref().and_then(|declared| {
+        declared
+            .home
             .as_deref()
-            .map(|home| writable_by(root, home, user, options.probing_uid).0)
+            .map(|home| writable_by(root, home, declared, options.probing_uid).0)
     });
 
     let ca_bundle = find_ca_bundle(root);
 
-    let runtimes = match (options.manifest, libc) {
-        (Some(manifest), Some(libc)) => manifest.runtimes_for(libc, glibc_version),
-        _ => Vec::new(),
+    let (runtimes, commands) = match (options.manifest, libc) {
+        (Some(manifest), Some(libc)) => (
+            manifest.runtimes_for(libc, glibc_version),
+            manifest.commands_for(libc, glibc_version),
+        ),
+        _ => (Vec::new(), Vec::new()),
     };
 
     // Exit-code order is the table's: architecture, libc, glibc, shell, user,
@@ -333,10 +404,13 @@ pub fn probe(options: &ProbeOptions<'_>) -> ProbeReport {
         interpreter,
         shell,
         user,
+        user_remapped_from,
+        workspace_owner,
         home_writable,
         workspace_writable,
         ca_bundle,
         runtimes,
+        commands,
         problems,
     }
 }
@@ -630,11 +704,21 @@ mod tests {
         }
 
         fn probe(&self, user: Option<&UserSpec>, manifest: Option<&BundleManifest>) -> ProbeReport {
+            self.probe_matching(user, manifest, false)
+        }
+
+        fn probe_matching(
+            &self,
+            user: Option<&UserSpec>,
+            manifest: Option<&BundleManifest>,
+            match_workspace_owner: bool,
+        ) -> ProbeReport {
             probe(&ProbeOptions {
                 root: self.root(),
                 arch: Arch::Amd64,
                 workspace: "/workspace",
                 user,
+                match_workspace_owner,
                 manifest,
                 probing_uid: current_uid(),
             })
@@ -649,8 +733,10 @@ mod tests {
     fn manifest() -> BundleManifest {
         BundleManifest::parse(
             br#"{"version":1,"releaseTag":"v1","minGlibc":"2.28","runtimes":[
-                {"id":"claude-code","version":"2","libc":["glibc","musl"]},
-                {"id":"gemini-cli","version":"1","libc":["glibc"]}]}"#,
+                {"id":"claude-code","version":"2","libc":["glibc","musl"],
+                 "commands":[{"name":"claude-agent-acp","package":"@agentclientprotocol/claude-agent-acp"}]},
+                {"id":"gemini-cli","version":"1","libc":["glibc"],
+                 "commands":[{"name":"gemini","package":"@google/gemini-cli"}]}]}"#,
         )
         .unwrap()
     }
@@ -686,6 +772,11 @@ mod tests {
             Some("/etc/ssl/certs/ca-certificates.crt")
         );
         assert_eq!(report.runtimes, ["claude-code", "gemini-cli"]);
+        assert_eq!(report.commands.len(), 2);
+        assert_eq!(
+            report.commands[1].package.as_deref(),
+            Some("@google/gemini-cli")
+        );
     }
 
     #[test]
@@ -698,6 +789,55 @@ mod tests {
         assert_eq!(report.glibc_version, None);
         assert_eq!(report.ca_bundle, None);
         assert_eq!(report.runtimes, ["claude-code"]);
+        assert_eq!(
+            report
+                .commands
+                .iter()
+                .map(|command| command.name.as_str())
+                .collect::<Vec<_>>(),
+            ["claude-agent-acp"]
+        );
+    }
+
+    #[test]
+    fn a_named_user_runs_as_the_workspace_owner_when_asked() {
+        let image = Image::alpine();
+        let node = UserSpec::Name("node".into());
+        let me = current_uid();
+        let owner = ownership_of(image.root(), "/workspace").unwrap();
+        assert_eq!(owner.uid, me);
+
+        let report = image.probe_matching(Some(&node), None, true);
+        assert_eq!(report.workspace_owner, Some(owner));
+        if me == 0 {
+            // Never remapped onto root: node keeps uid 1000 and the 0755
+            // root-owned workspace refuses it.
+            assert_eq!(report.user_remapped_from, None);
+            assert_eq!(codes(&report), [ProbeCode::WorkspaceNotWritable]);
+        } else if me != 1000 {
+            assert_eq!(codes(&report), []);
+            let user = report.user.as_ref().unwrap();
+            assert_eq!((user.name.as_deref(), user.uid), (Some("node"), me));
+            assert_eq!(user.home.as_deref(), Some("/home/node"));
+            assert_eq!(
+                report.user_remapped_from,
+                Some(Ownership {
+                    uid: 1000,
+                    gid: 1000
+                })
+            );
+
+            // Without the flag the declared uid is what runs, and it cannot write.
+            let strict = image.probe(Some(&node), None);
+            assert_eq!(codes(&strict), [ProbeCode::WorkspaceNotWritable]);
+            assert_eq!(strict.user_remapped_from, None);
+        }
+
+        // A bare uid is taken as meant, flag or not.
+        let other = UserSpec::Uid(me.wrapping_add(4242));
+        let bare = image.probe_matching(Some(&other), None, true);
+        assert_eq!(bare.user_remapped_from, None);
+        assert_eq!(bare.user.unwrap().uid, me.wrapping_add(4242));
     }
 
     #[test]
