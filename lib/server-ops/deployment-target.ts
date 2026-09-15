@@ -93,6 +93,12 @@ const imagesSchema = z
     server: z.string().min(1).max(512),
     runner: z.string().min(1).max(512),
     workspaceRuntime: z.string().min(1).max(512),
+    /**
+     * The agent bundle injected into project runtime environments (ADR-0183).
+     * Optional: the sandbox pool is off by default, and a target without it is
+     * exactly the three-image target it was before.
+     */
+    agentBundle: z.string().min(1).max(512).optional(),
   })
   .strict()
 
@@ -196,7 +202,8 @@ const DIGEST_IMAGE = /@sha256:[a-fA-F0-9]{64}$/
 export function productionCertificationIssues(target: DeploymentTarget): string[] {
   const issues: string[] = []
   for (const [name, image] of Object.entries(target.spec.images)) {
-    if (!DIGEST_IMAGE.test(image)) {
+    // An absent bundle is not an issue; a present one is pinned like the rest.
+    if (image !== undefined && !DIGEST_IMAGE.test(image)) {
       issues.push(`images.${name} must use an immutable sha256 digest`)
     }
   }

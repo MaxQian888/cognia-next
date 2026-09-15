@@ -30,6 +30,7 @@ import {
   type EnrollmentToken,
   type Operation,
   type ProviderCapabilities,
+  type ReleaseImages,
   type ServerDetail,
   type ServerSummary,
 } from "@/lib/server-ops/client"
@@ -90,14 +91,7 @@ export interface ServerOpsValue {
   restore: (id: string, recoveryPointId: string) => Promise<void>
   rollback: (id: string) => Promise<void>
   rotateKey: (id: string, keyVersion: string) => Promise<void>
-  upgrade: (
-    id: string,
-    release: {
-      serverImage: string
-      runnerImage: string
-      workspaceRuntimeImage: string
-    }
-  ) => Promise<void>
+  upgrade: (id: string, release: ReleaseImages) => Promise<void>
   cancelOperation: (operationId: string) => Promise<void>
   registerAndDeploy: (target: DeploymentTarget) => Promise<void>
   createEnrollmentToken: (targetId: string) => Promise<EnrollmentToken | null>
@@ -523,6 +517,9 @@ export function ServerOpsProvider({ children }: { children: React.ReactNode }) {
               serverImage: target.spec.images.server,
               runnerImage: target.spec.images.runner,
               workspaceRuntimeImage: target.spec.images.workspaceRuntime,
+              ...(target.spec.images.agentBundle
+                ? { agentBundleImage: target.spec.images.agentBundle }
+                : {}),
               configRevision: String(registered.targetRevision),
             },
           },

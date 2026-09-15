@@ -120,6 +120,35 @@ it("submits a validated target and previews what will be deployed", async () => 
   })
 })
 
+it("keeps the agent bundle optional and submits it only when entered", async () => {
+  const user = userEvent.setup()
+  const { onSubmit } = renderWizard()
+
+  await completeForm(user)
+  expect(
+    screen.getByText(
+      "Optional. Injected into project runtime environments once the sandbox pool is on. Leave empty if this server will not run them."
+    )
+  ).toBeInTheDocument()
+
+  await user.click(screen.getByTestId("wizard-step-review"))
+  await user.click(screen.getByRole("button", { name: "Register and deploy" }))
+  await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1))
+  expect(onSubmit.mock.calls[0][0].spec.images).not.toHaveProperty("agentBundle")
+})
+
+it("carries an entered agent bundle into the submitted target", async () => {
+  const user = userEvent.setup()
+  const { onSubmit } = renderWizard()
+
+  await completeForm(user)
+  await user.type(screen.getByLabelText("Agent bundle image digest"), digest("cognia-agent-bundle"))
+  await user.click(screen.getByTestId("wizard-step-review"))
+  await user.click(screen.getByRole("button", { name: "Register and deploy" }))
+  await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1))
+  expect(onSubmit.mock.calls[0][0].spec.images.agentBundle).toBe(digest("cognia-agent-bundle"))
+})
+
 it("warns about certification without blocking a valid deploy", async () => {
   const user = userEvent.setup()
   const { onSubmit } = renderWizard()

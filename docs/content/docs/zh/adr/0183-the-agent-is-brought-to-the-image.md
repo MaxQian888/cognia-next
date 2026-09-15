@@ -43,8 +43,15 @@ description: "agent CLI 不再预装在项目运行的镜像里。每个版本�
   - 锁文件不是认证：它从不修改 `certifiedVersions`，因为在桌面端，certified 版本可以免同意直接运行。
   - 没有 musl 构建的运行时标为仅 glibc，在 musl 镜像上会带着原因被拒绝；需要比 bundle 下限更新的 glibc 的厂商二进制，在清单里带各架构自己的 `minGlibc`。
 - **两棵 libc 树，自给程度不同**：glibc 上 Node 用官方构建，依赖镜像自己的 glibc 和 `libstdc++`，因为自带更新的 C++ 运行时反而会要求比许多镜像更新的 glibc。musl 上 Node 被改为加载 bundle 自带的 musl 加载器和 C++ 运行时，所以在没有 `libstdc++` 的 Alpine 基础镜像上也能跑，与镜像的 musl 版本无关。
-- **发布契约**：bundle digest 是发布契约里的第四个镜像，与 server、runner、workspace runtime 并列：`ImageConfig.agentBundle` 与 `AgentRelease.agent_bundle_image`。生产认证要求它按 digest 固定。
+- **发布契约**：bundle digest 是发布契约里的第四个镜像，与 server、runner、workspace runtime 并列：`ImageConfig.agentBundle` 与 `AgentRelease.agent_bundle_image`。
+  - 它是可选的，因为沙箱池默认关闭。没有它的目标或发布，序列化、签名和渲染结果都与原来的三镜像版本完全一致。
+  - 设置了它时，生产认证要求按 digest 固定，deploy agent 也会拒绝可变 tag。
+  - deploy agent 以 `COGNIA_AGENT_BUNDLE_IMAGE` 交给服务器：Compose 环境变量，或 ConfigMap 的 `agentBundleImage` 键。不带 bundle 的发布会清掉这个变量，不会沿用上一次发布的值。
 - **项目锁定**：部署仍保留某个旧 bundle 时，项目可以锁定在它上面；锁定的 bundle 已被移除时，以 `bundle_pin_retired` 拒绝。
+  - Ops Controller 在 `release_bundles` 里记录每个目标运行过的 bundle（每次成功的 deploy、upgrade、rollback 都会刷新，并裁剪到仍可能被保留的范围）。
+  - 签发发布时，它把最近生效过的另外两个 bundle（按 digest 比较）写进 `AgentRelease.retained_agent_bundle_images`；客户端自带这个列表会被拒绝。
+  - 服务器从 `COGNIA_AGENT_BUNDLE_RETAINED_IMAGES` 读到它们，最新的在前。回滚会恢复该发布当时携带的列表。
+  - 独立部署可以手动设置这两个变量。
 
 ### `cognia-sandboxd`
 

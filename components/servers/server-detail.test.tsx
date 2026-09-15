@@ -138,6 +138,31 @@ it("requires all three image digests before an upgrade can be queued", async () 
   })
 })
 
+it("sends the agent bundle only when one is entered", async () => {
+  const user = userEvent.setup()
+  const { actions } = renderDetail()
+
+  await user.click(screen.getByRole("tab", { name: "Deployments" }))
+  await user.click(screen.getByRole("button", { name: "Upgrade release" }))
+  expect(
+    screen.getByText(
+      "Optional. Needed only when projects on this server use runtime environments. Leaving it empty ships this release without a bundle."
+    )
+  ).toBeInTheDocument()
+
+  await user.type(screen.getByLabelText("Server image"), "server@sha256:aa")
+  await user.type(screen.getByLabelText("Runner image"), "runner@sha256:bb")
+  await user.type(screen.getByLabelText("Workspace runtime image"), "runtime@sha256:cc")
+  await user.type(screen.getByLabelText("Agent bundle image"), " bundle@sha256:dd ")
+  await user.click(screen.getByRole("button", { name: "Queue upgrade" }))
+  expect(actions.onUpgrade).toHaveBeenCalledWith({
+    serverImage: "server@sha256:aa",
+    runnerImage: "runner@sha256:bb",
+    workspaceRuntimeImage: "runtime@sha256:cc",
+    agentBundleImage: "bundle@sha256:dd",
+  })
+})
+
 it("gates key rotation on a key version being supplied", async () => {
   const user = userEvent.setup()
   const { actions } = renderDetail()

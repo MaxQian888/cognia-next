@@ -30,7 +30,12 @@ import { HealthLabel } from "@/components/servers/server-visuals"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { PageLoading } from "@/components/ui/loading-states"
-import type { Operation, RecoveryPoint, ServerLogEntry } from "@/lib/server-ops/client"
+import type {
+  Operation,
+  RecoveryPoint,
+  ReleaseImages,
+  ServerLogEntry,
+} from "@/lib/server-ops/client"
 
 /** Stable empty arrays so an unloaded target does not remount the tabs. */
 const EMPTY_BACKUPS: readonly RecoveryPoint[] = []
@@ -141,11 +146,7 @@ function ServerDetailRoute() {
     onRestore: (recoveryPointId: string) => void ops.restore(server.id, recoveryPointId),
     onRollback: () => void ops.rollback(server.id),
     onRotateKey: (keyVersion: string) => void ops.rotateKey(server.id, keyVersion),
-    onUpgrade: (release: {
-      serverImage: string
-      runnerImage: string
-      workspaceRuntimeImage: string
-    }) => void ops.upgrade(server.id, release),
+    onUpgrade: (release: ReleaseImages) => void ops.upgrade(server.id, release),
   }
 
   /**

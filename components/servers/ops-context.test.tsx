@@ -4,6 +4,7 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import type { Operation, ServerDetail, ServerSummary } from "@/lib/server-ops/client"
+import type { DeploymentTarget } from "@/lib/server-ops/deployment-target"
 
 // Every mock below is created INSIDE its factory: `jest.mock` is hoisted above
 // the `const` declarations, so referencing an outer binding from a factory hits
@@ -121,6 +122,21 @@ const operation: Operation = {
   updatedAt: "2026-08-19T10:00:00.000Z",
 }
 
+/** Only the images are read by `registerAndDeploy`; the client mocks take the rest. */
+function deploymentTarget(agentBundle?: string): DeploymentTarget {
+  return {
+    metadata: { id: "staging", label: "Staging" },
+    spec: {
+      images: {
+        server: "s",
+        runner: "r",
+        workspaceRuntime: "w",
+        ...(agentBundle ? { agentBundle } : {}),
+      },
+    },
+  } as unknown as DeploymentTarget
+}
+
 /** Renders the pieces of the context under test as plain, queryable DOM. */
 function Probe() {
   const ops = useServerOps()
@@ -146,6 +162,16 @@ function Probe() {
         }
       >
         upgrade
+      </button>
+      <button onClick={() => void ops.registerAndDeploy(deploymentTarget())}>deploy</button>
+      <button
+        onClick={() =>
+          void ops.registerAndDeploy(
+            deploymentTarget("ghcr.io/owner/cognia-agent-bundle@sha256:dd")
+          )
+        }
+      >
+        deploy with bundle
       </button>
       <button onClick={() => void ops.refresh()}>refresh</button>
       <button onClick={() => void ops.disconnect()}>disconnect</button>
@@ -182,6 +208,9 @@ beforeEach(() => {
   client.createAdminLease.mockResolvedValue({ token: "lease", expiresAt: "" })
   client.rollback.mockResolvedValue({ ...operation, id: "op-rollback" })
   client.upgrade.mockResolvedValue({ ...operation, id: "op-upgrade" })
+  client.validateTarget.mockResolvedValue(undefined)
+  client.registerTarget.mockResolvedValue({ ...detail, targetRevision: 4 })
+  client.deploy.mockResolvedValue({ ...operation, id: "op-deploy", kind: "deploy" })
   followOperationStreamMock.mockResolvedValue(undefined)
   pollOperationUpdatesMock.mockResolvedValue(undefined)
 })
@@ -391,6 +420,38 @@ it("upgrades at the revision the controller reported, not one the form guessed",
       expect.any(String)
     )
   )
+})
+
+it("deploys the registered revision and carries the agent bundle only when the target has one", async () => {
+  const user = userEvent.setup()
+  await renderConnected()
+
+  await user.click(screen.getByRole("button", { name: "deploy" }))
+  await waitFor(() => expect(client.deploy).toHaveBeenCalledTimes(1))
+  expect(client.deploy).toHaveBeenLastCalledWith(
+    "staging",
+    {
+      targetRevision: 4,
+      release: {
+        serverImage: "s",
+        runnerImage: "r",
+        workspaceRuntimeImage: "w",
+        configRevision: "4",
+      },
+    },
+    expect.any(String)
+  )
+  expect(client.deploy.mock.calls[0][1].release).not.toHaveProperty("agentBundleImage")
+
+  await user.click(screen.getByRole("button", { name: "deploy with bundle" }))
+  await waitFor(() => expect(client.deploy).toHaveBeenCalledTimes(2))
+  expect(client.deploy.mock.calls[1][1].release).toEqual({
+    serverImage: "s",
+    runnerImage: "r",
+    workspaceRuntimeImage: "w",
+    agentBundleImage: "ghcr.io/owner/cognia-agent-bundle@sha256:dd",
+    configRevision: "4",
+  })
 })
 
 it("clears the keyring entry and every cached view on disconnect", async () => {

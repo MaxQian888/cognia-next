@@ -214,6 +214,9 @@ impl AgentExecutor {
                 "production operations require sha256 image digests",
             );
         }
+        if let Some(problem) = release.agent_bundle_problem() {
+            return ExecutionOutcome::failed("invalid_release_bundles", problem);
+        }
         if target.metadata.id != self.target_id {
             return ExecutionOutcome::failed(
                 "deployment_target_mismatch",
@@ -312,6 +315,9 @@ impl AgentExecutor {
                 "mutable_release_image",
                 "the persisted rollback release is not digest-pinned",
             );
+        }
+        if let Some(problem) = target.agent_bundle_problem() {
+            return ExecutionOutcome::failed("invalid_release_bundles", problem);
         }
         let current = state.current_release.clone();
         let current_target = state.current_target.clone();

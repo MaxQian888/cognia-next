@@ -228,6 +228,21 @@ spec:
                   name: cognia-config
                   key: workspaceRuntimeImage
                   optional: true
+            # ── agent bundle (ADR-0183), the fourth release image — read only
+            # when the sandbox pool is on. The deploy agent sets both keys from
+            # the release, and removes them for a release without a bundle.
+            - name: COGNIA_AGENT_BUNDLE_IMAGE
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: agentBundleImage
+                  optional: true
+            - name: COGNIA_AGENT_BUNDLE_RETAINED_IMAGES
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: agentBundleRetainedImages
+                  optional: true
             - name: COGNIA_CONFIG_REVISION
               valueFrom:
                 configMapKeyRef:

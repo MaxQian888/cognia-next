@@ -250,6 +250,12 @@ pub struct ImageConfig {
     pub server: String,
     pub runner: String,
     pub workspace_runtime: String,
+    /// The agent bundle injected into project images (ADR-0183), the fourth
+    /// release image. Optional because the sandbox pool is off by default: a
+    /// deployment that never runs project runtime environments has no bundle,
+    /// and its target serializes exactly as it did before the field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_bundle: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -261,14 +267,20 @@ pub enum ProductionCertificationIssue {
 impl DeploymentTarget {
     pub fn production_certification_issues(&self) -> Vec<ProductionCertificationIssue> {
         let mut issues = Vec::new();
+        // An absent bundle is not an issue (the pool is opt-in); a present one
+        // must be pinned like every other release image.
         for (name, image) in [
-            ("server", self.spec.images.server.as_str()),
-            ("runner", self.spec.images.runner.as_str()),
+            ("server", Some(self.spec.images.server.as_str())),
+            ("runner", Some(self.spec.images.runner.as_str())),
             (
                 "workspaceRuntime",
-                self.spec.images.workspace_runtime.as_str(),
+                Some(self.spec.images.workspace_runtime.as_str()),
             ),
-        ] {
+            ("agentBundle", self.spec.images.agent_bundle.as_deref()),
+        ]
+        .into_iter()
+        .filter_map(|(name, image)| image.map(|image| (name, image)))
+        {
             if !is_digest_image(image) {
                 issues.push(ProductionCertificationIssue::MutableImage { image: name });
             }
@@ -295,10 +307,17 @@ impl DeploymentTarget {
 }
 
 fn is_digest_image(image: &str) -> bool {
-    let Some((_, digest)) = image.rsplit_once("@sha256:") else {
-        return false;
-    };
-    digest.len() == IMMUTABLE_DIGEST_LEN && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+    image_digest(image).is_some()
+}
+
+/// The `sha256:<hex>` digest an image reference is pinned to, lowercased, or
+/// `None` for a tag-only or malformed reference. Two references to the same
+/// bundle can differ in tag (`repo:v1@sha256:…` and `repo@sha256:…`), so bundle
+/// identity compares this rather than the whole string.
+pub fn image_digest(image: &str) -> Option<String> {
+    let (_, digest) = image.rsplit_once("@sha256:")?;
+    (digest.len() == IMMUTABLE_DIGEST_LEN && digest.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .then(|| format!("sha256:{}", digest.to_ascii_lowercase()))
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

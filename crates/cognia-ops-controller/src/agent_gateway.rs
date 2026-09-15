@@ -1,4 +1,4 @@
-use crate::{AppState, Operation, OpsErrorBody};
+use crate::{AppState, Operation, OpsErrorBody, ReleaseBundle};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
@@ -10,6 +10,7 @@ use cognia_deployment::agent_protocol::{
     CertificateRotationRequest, CollectLogsParameters, CollectStatusParameters,
     ControllerToAgentMessage, PreflightParameters, ReleaseParameters, RestoreParameters,
     RollbackParameters, RotateKeyParameters, SignedOperation, AGENT_PROTOCOL_VERSION,
+    RETAINED_AGENT_BUNDLE_LIMIT,
 };
 use cognia_deployment::{OperationKind, OperationState};
 use ed25519_dalek::{Signer, SigningKey};
@@ -304,7 +305,15 @@ async fn prepare_operation(
             .await?
             .ok_or_else(|| anyhow::anyhow!("server target is missing"))?
             .target_revision;
-        Some((target, revision))
+        let bundles = state
+            .store
+            .list_release_bundles(&operation.tenant_id, &operation.target_id)
+            .await?;
+        Some(ReleaseContext {
+            target,
+            revision,
+            bundles,
+        })
     } else {
         None
     };
@@ -339,9 +348,49 @@ async fn prepare_operation(
     )
 }
 
+/// What a deploy or upgrade is signed against, read from the store.
+struct ReleaseContext {
+    target: cognia_deployment::DeploymentTarget,
+    revision: i64,
+    /// The target's bundle history, newest first.
+    bundles: Vec<ReleaseBundle>,
+}
+
+/// The release a client asks for. Unlike [`AgentRelease`] it has no retained
+/// bundles: the controller chooses those, and `deny_unknown_fields` refuses a
+/// client that tries to supply them.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RequestedRelease {
+    server_image: String,
+    runner_image: String,
+    workspace_runtime_image: String,
+    #[serde(default)]
+    agent_bundle_image: Option<String>,
+    config_revision: String,
+}
+
+/// The bundles a release keeps pinnable: the most recently active ones other
+/// than its own, by digest, up to the limit. A release without a bundle
+/// retains none; the pool cannot run without a current bundle.
+fn retained_agent_bundles(current: Option<&str>, history: &[ReleaseBundle]) -> Vec<String> {
+    let Some(current) = current.and_then(cognia_deployment::image_digest) else {
+        return Vec::new();
+    };
+    let mut seen = std::collections::BTreeSet::from([current]);
+    history
+        .iter()
+        .filter(|bundle| {
+            cognia_deployment::image_digest(&bundle.image).is_some_and(|digest| seen.insert(digest))
+        })
+        .take(RETAINED_AGENT_BUNDLE_LIMIT)
+        .map(|bundle| bundle.image.clone())
+        .collect()
+}
+
 fn operation_payload(
     operation: &Operation,
-    release_context: Option<(cognia_deployment::DeploymentTarget, i64)>,
+    release_context: Option<ReleaseContext>,
 ) -> anyhow::Result<AgentOperation> {
     Ok(match operation.kind {
         OperationKind::Preflight => AgentOperation::Preflight(serde_json::from_value::<
@@ -352,21 +401,34 @@ fn operation_payload(
             #[serde(rename_all = "camelCase", deny_unknown_fields)]
             struct ReleaseRequest {
                 target_revision: i64,
-                release: AgentRelease,
+                release: RequestedRelease,
             }
             let request: ReleaseRequest = serde_json::from_value(operation.request.clone())?;
-            let (target, current_revision) =
-                release_context.ok_or_else(|| anyhow::anyhow!("deployment target is missing"))?;
+            let ReleaseContext {
+                target,
+                revision: current_revision,
+                bundles,
+            } = release_context.ok_or_else(|| anyhow::anyhow!("deployment target is missing"))?;
             anyhow::ensure!(
                 request.target_revision == current_revision,
                 "deployment target revision changed: requested {}, current {}",
                 request.target_revision,
                 current_revision
             );
+            let requested = request.release;
+            let retained_agent_bundle_images =
+                retained_agent_bundles(requested.agent_bundle_image.as_deref(), &bundles);
             let parameters = ReleaseParameters {
                 target_revision: request.target_revision,
                 target,
-                release: request.release,
+                release: AgentRelease {
+                    server_image: requested.server_image,
+                    runner_image: requested.runner_image,
+                    workspace_runtime_image: requested.workspace_runtime_image,
+                    agent_bundle_image: requested.agent_bundle_image,
+                    retained_agent_bundle_images,
+                    config_revision: requested.config_revision,
+                },
             };
             if operation.kind == OperationKind::Deploy {
                 AgentOperation::Deploy(parameters)
@@ -500,6 +562,8 @@ mod tests {
             server_image: String::new(),
             runner_image: String::new(),
             workspace_runtime_image: String::new(),
+            agent_bundle_image: None,
+            retained_agent_bundle_images: Vec::new(),
             config_revision: String::new(),
         };
     }
@@ -527,7 +591,133 @@ mod tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
-        let target: cognia_deployment::DeploymentTarget = serde_json::from_value(json!({
+        let target: cognia_deployment::DeploymentTarget =
+            serde_json::from_value(target_json()).expect("target");
+
+        let error = operation_payload(&operation, Some(context(target.clone(), 4, Vec::new())))
+            .unwrap_err();
+        assert!(error.to_string().contains("revision changed"));
+        let AgentOperation::Upgrade(parameters) =
+            operation_payload(&operation, Some(context(target, 3, Vec::new()))).unwrap()
+        else {
+            panic!("upgrade payload")
+        };
+        assert_eq!(parameters.release.agent_bundle_image, None);
+        assert!(parameters.release.retained_agent_bundle_images.is_empty());
+        let wire = serde_json::to_string(&parameters.release).unwrap();
+        assert!(
+            !wire.contains("agentBundle"),
+            "a bundle-less release signs as before: {wire}"
+        );
+    }
+
+    fn context(
+        target: cognia_deployment::DeploymentTarget,
+        revision: i64,
+        bundles: Vec<ReleaseBundle>,
+    ) -> ReleaseContext {
+        ReleaseContext {
+            target,
+            revision,
+            bundles,
+        }
+    }
+
+    fn bundle(byte: char, tag: &str) -> String {
+        format!(
+            "ghcr.io/cognia/cognia-agent-bundle{tag}@sha256:{}",
+            byte.to_string().repeat(64)
+        )
+    }
+
+    fn history(images: &[String]) -> Vec<ReleaseBundle> {
+        images
+            .iter()
+            .map(|image| ReleaseBundle {
+                image: image.clone(),
+                first_active_at: chrono::Utc::now(),
+                last_active_at: chrono::Utc::now(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn retained_bundles_are_the_most_recent_others_by_digest() {
+        let recent = history(&[
+            bundle('3', ":v3"),
+            "ghcr.io/cognia/cognia-agent-bundle:v2".into(),
+            bundle('2', ":v2"),
+            bundle('2', ""),
+            bundle('1', ":v1"),
+        ]);
+        assert_eq!(
+            retained_agent_bundles(Some(&bundle('4', ":v4")), &recent),
+            vec![bundle('3', ":v3"), bundle('2', ":v2")],
+            "unpinned and same-digest rows are skipped, the limit applies"
+        );
+        assert_eq!(
+            retained_agent_bundles(Some(&bundle('3', "")), &recent),
+            vec![bundle('2', ":v2"), bundle('1', ":v1")],
+            "re-releasing a bundle does not retain it beside itself"
+        );
+        assert!(retained_agent_bundles(None, &recent).is_empty());
+        assert!(retained_agent_bundles(Some("bundle:latest"), &recent).is_empty());
+        assert!(retained_agent_bundles(Some(&bundle('4', "")), &[]).is_empty());
+    }
+
+    #[test]
+    fn release_payload_signs_controller_chosen_retained_bundles_only() {
+        let target: cognia_deployment::DeploymentTarget =
+            serde_json::from_value(target_json()).expect("target");
+        let mut operation = Operation {
+            id: Uuid::new_v4(),
+            tenant_id: "tenant".into(),
+            target_id: "staging".into(),
+            kind: OperationKind::Upgrade,
+            state: OperationState::Queued,
+            request: json!({
+                "targetRevision": 3,
+                "release": {
+                    "serverImage": format!("server@sha256:{}", "a".repeat(64)),
+                    "runnerImage": format!("runner@sha256:{}", "b".repeat(64)),
+                    "workspaceRuntimeImage": format!("runtime@sha256:{}", "c".repeat(64)),
+                    "agentBundleImage": bundle('4', ":v4"),
+                    "configRevision": "release-3"
+                }
+            }),
+            result: None,
+            error: None,
+            created_by: "user".into(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let recent = history(&[bundle('3', ":v3"), bundle('2', ":v2"), bundle('1', ":v1")]);
+        let AgentOperation::Upgrade(parameters) =
+            operation_payload(&operation, Some(context(target.clone(), 3, recent.clone())))
+                .unwrap()
+        else {
+            panic!("upgrade payload")
+        };
+        assert_eq!(
+            parameters.release.agent_bundle_image.as_deref(),
+            Some(bundle('4', ":v4").as_str())
+        );
+        assert_eq!(
+            parameters.release.retained_agent_bundle_images,
+            vec![bundle('3', ":v3"), bundle('2', ":v2")]
+        );
+        assert_eq!(parameters.release.agent_bundle_problem(), None);
+
+        operation.request["release"]["retainedAgentBundleImages"] = json!([bundle('9', "")]);
+        let error = operation_payload(&operation, Some(context(target, 3, recent))).unwrap_err();
+        assert!(
+            error.to_string().contains("retainedAgentBundleImages"),
+            "{error}"
+        );
+    }
+
+    fn target_json() -> serde_json::Value {
+        json!({
             "apiVersion": "deploy.cognia.dev/v1alpha1",
             "kind": "DeploymentTarget",
             "metadata": { "id": "staging", "label": "Staging" },
@@ -555,15 +745,7 @@ mod tests {
                     "workspaceRuntime": format!("runtime@sha256:{}", "c".repeat(64))
                 }
             }
-        }))
-        .expect("target");
-
-        let error = operation_payload(&operation, Some((target.clone(), 4))).unwrap_err();
-        assert!(error.to_string().contains("revision changed"));
-        assert!(matches!(
-            operation_payload(&operation, Some((target, 3))).unwrap(),
-            AgentOperation::Upgrade(_)
-        ));
+        })
     }
 
     #[test]

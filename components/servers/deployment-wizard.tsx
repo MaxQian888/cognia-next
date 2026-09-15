@@ -61,12 +61,14 @@ import { parseDeploymentTarget, type DeploymentTarget } from "@/lib/server-ops/d
 import { cn } from "@/lib/utils"
 import { DeploymentPreview } from "./deployment-preview"
 
-type TextFieldSpec = readonly [DeploymentFormTextKey, string, string?]
+/** `[field, label key, placeholder key?, hint key?]` */
+type TextFieldSpec = readonly [DeploymentFormTextKey, string, string?, string?]
 
 function TextField({
   fieldKey,
   labelKey,
   placeholderKey,
+  hintKey,
   state,
   issue,
   onChange,
@@ -75,6 +77,7 @@ function TextField({
   fieldKey: DeploymentFormTextKey
   labelKey: string
   placeholderKey?: string
+  hintKey?: string
   state: DeploymentFormState
   issue?: string
   onChange: (key: DeploymentFormTextKey, value: string) => void
@@ -95,7 +98,11 @@ function TextField({
         placeholder={placeholderKey ? t(placeholderKey as "wizard.placeholders.label") : undefined}
         onChange={(event) => onChange(fieldKey, event.target.value)}
       />
-      {issue && <FieldDescription className="text-destructive">{issue}</FieldDescription>}
+      {issue ? (
+        <FieldDescription className="text-destructive">{issue}</FieldDescription>
+      ) : (
+        hintKey && <FieldDescription>{t(hintKey as "wizard.agentBundleHint")}</FieldDescription>
+      )}
     </Field>
   )
 }
@@ -283,6 +290,7 @@ export function DeploymentWizard({
     serverImage: "spec.images.server",
     runnerImage: "spec.images.runner",
     workspaceRuntimeImage: "spec.images.workspaceRuntime",
+    agentBundleImage: "spec.images.agentBundle",
     namespace: "spec.kubernetes.namespace",
     ingressClassName: "spec.kubernetes.ingressClassName",
     storageClassName: "spec.kubernetes.storageClassName",
@@ -292,12 +300,13 @@ export function DeploymentWizard({
   }
 
   const renderFields = (fields: readonly TextFieldSpec[], mono = false) =>
-    fields.map(([key, labelKey, placeholderKey]) => (
+    fields.map(([key, labelKey, placeholderKey, hintKey]) => (
       <TextField
         key={key}
         fieldKey={key}
         labelKey={labelKey}
         placeholderKey={placeholderKey}
+        hintKey={hintKey}
         state={state}
         issue={issueFor(issuePathFor[key])}
         onChange={update}
@@ -472,6 +481,12 @@ export function DeploymentWizard({
                             "workspaceRuntimeImage",
                             "wizard.workspaceRuntimeImage",
                             "wizard.placeholders.workspaceRuntimeImage",
+                          ],
+                          [
+                            "agentBundleImage",
+                            "wizard.agentBundleImage",
+                            "wizard.placeholders.agentBundleImage",
+                            "wizard.agentBundleHint",
                           ],
                         ],
                         true

@@ -99,6 +99,31 @@ describe("validateDeploymentForm", () => {
     expect(validateDeploymentForm({ ...complete, runtimeClassName: "" }).issues).toEqual([])
   })
 
+  it("leaves the agent bundle out unless one is entered, and pins it when it is", () => {
+    for (const blank of ["", "   "]) {
+      const built = buildDeploymentTarget({ ...complete, agentBundleImage: blank }) as {
+        spec: { images: Record<string, unknown> }
+      }
+      expect("agentBundle" in built.spec.images).toBe(false)
+      expect(validateDeploymentForm({ ...complete, agentBundleImage: blank }).issues).toEqual([])
+    }
+
+    const bundle = digest("cognia-agent-bundle")
+    const withBundle = validateDeploymentForm({ ...complete, agentBundleImage: ` ${bundle} ` })
+    expect(withBundle.target?.spec.images.agentBundle).toBe(bundle)
+    expect(withBundle.certificationIssues).toEqual([])
+
+    const mutable = validateDeploymentForm({
+      ...complete,
+      agentBundleImage: "ghcr.io/owner/cognia-agent-bundle:latest",
+    })
+    expect(mutable.issues).toEqual([])
+    expect(mutable.certificationIssues).toEqual([
+      "images.agentBundle must use an immutable sha256 digest",
+    ])
+    expect(stepForIssuePath("spec.images.agentBundle")).toBe("images")
+  })
+
   it("shapes each snapshot and TLS provider's discriminated payload", () => {
     for (const [provider, expected] of [
       ["kubernetes-csi", { provider: "kubernetes-csi", className: "cognia-snapshots" }],
@@ -131,6 +156,11 @@ describe("deploymentFormFromTarget", () => {
   it("round-trips a validated target without losing a field", () => {
     const target = parseDeploymentTarget(buildDeploymentTarget(complete))
     expect(deploymentFormFromTarget(target)).toEqual(complete)
+
+    const withBundle = { ...complete, agentBundleImage: digest("cognia-agent-bundle") }
+    expect(
+      deploymentFormFromTarget(parseDeploymentTarget(buildDeploymentTarget(withBundle)))
+    ).toEqual(withBundle)
   })
 
   it("keeps the absent topology's defaults so switching back is not a blank form", () => {

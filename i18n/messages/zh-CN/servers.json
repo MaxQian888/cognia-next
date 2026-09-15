@@ -256,6 +256,8 @@
     "kubernetes": "Kubernetes"
   },
   "upgrade": {
+    "agentBundleHint": "可选。只有该服务器上的项目使用运行环境时才需要。留空则本次发布不带 bundle。",
+    "agentBundleImage": "Agent bundle 镜像",
     "description": "在该目标当前的配置修订版本上部署新镜像，目标本身不变。",
     "digestNotice": "请使用不可变的 sha256 摘要。可变 tag 也能部署，但无法通过生产认证。",
     "runnerImage": "Runner 镜像",
@@ -265,6 +267,8 @@
     "workspaceRuntimeImage": "工作区运行时镜像"
   },
   "wizard": {
+    "agentBundleHint": "可选。开启沙箱池后会注入项目运行环境。该服务器不运行项目运行环境时可以留空。",
+    "agentBundleImage": "Agent bundle 镜像摘要",
     "back": "上一步",
     "cancel": "取消",
     "certificationHelp": "该目标配置有效、可以部署，但按当前配置无法通过生产认证：",
@@ -292,6 +296,7 @@
     "oidcAudience": "OIDC audience",
     "oidcIssuer": "OIDC issuer",
     "placeholders": {
+      "agentBundleImage": "ghcr.io/owner/cognia-agent-bundle@sha256:…",
       "controllerCredentialRef": "ops-controller/staging",
       "controllerUrl": "https://ops.example.com",
       "keyVersion": "key-2026-08",

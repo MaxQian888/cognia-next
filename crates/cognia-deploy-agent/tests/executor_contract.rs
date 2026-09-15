@@ -84,8 +84,14 @@ fn release(revision: &str, byte: char) -> AgentRelease {
         server_image: format!("server@sha256:{}", byte.to_string().repeat(64)),
         runner_image: format!("runner@sha256:{}", byte.to_string().repeat(64)),
         workspace_runtime_image: format!("runtime@sha256:{}", byte.to_string().repeat(64)),
+        agent_bundle_image: None,
+        retained_agent_bundle_images: Vec::new(),
         config_revision: revision.into(),
     }
+}
+
+fn bundle(byte: char) -> String {
+    format!("bundle@sha256:{}", byte.to_string().repeat(64))
 }
 
 fn target() -> DeploymentTarget {
@@ -221,6 +227,109 @@ async fn smoke_failure_rolls_back_from_persisted_previous_release() {
             "activate:revision-1",
             "smoke:revision-1"
         ]
+    );
+}
+
+#[tokio::test]
+async fn contradictory_bundle_lists_never_reach_the_platform_driver() {
+    let temp = tempfile::tempdir().unwrap();
+    let signing_key = SigningKey::from_bytes(&[9_u8; 32]);
+    let driver = Arc::new(FakeDriver::default());
+    let executor = AgentExecutor::new(
+        "staging".into(),
+        signing_key.verifying_key(),
+        StateStore::new(temp.path().join("state.json")),
+        driver.clone(),
+    );
+    let cases = [
+        (
+            "retained-without-current",
+            AgentRelease {
+                retained_agent_bundle_images: vec![bundle('e')],
+                ..release("revision-2", 'b')
+            },
+            "invalid_release_bundles",
+        ),
+        (
+            "current-retained-twice",
+            AgentRelease {
+                agent_bundle_image: Some(bundle('d')),
+                retained_agent_bundle_images: vec![bundle('d')],
+                ..release("revision-2", 'b')
+            },
+            "invalid_release_bundles",
+        ),
+        (
+            "tag-only-bundle",
+            AgentRelease {
+                agent_bundle_image: Some("bundle:latest".into()),
+                ..release("revision-2", 'b')
+            },
+            "mutable_release_image",
+        ),
+    ];
+    for (operation_id, release, code) in cases {
+        let outcome = executor
+            .execute(
+                signed_upgrade(&signing_key, release, operation_id, 1_700_000_000),
+                1_700_000_000,
+            )
+            .await;
+        assert_eq!(outcome.state, cognia_deployment::OperationState::Failed);
+        assert_eq!(outcome.error_code.as_deref(), Some(code), "{operation_id}");
+    }
+    assert!(driver.calls.lock().is_empty());
+}
+
+#[tokio::test]
+async fn persisted_state_without_bundles_keeps_its_shape() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("state.json");
+    let store = StateStore::new(path.clone());
+    store
+        .save(&ExecutionState {
+            current_release: Some(release("revision-1", 'a')),
+            previous_release: None,
+            current_target: Some(target()),
+            previous_target: None,
+            completed_operations: Vec::new(),
+        })
+        .await
+        .unwrap();
+    let written = std::fs::read_to_string(&path).unwrap();
+    assert!(!written.contains("agentBundle"), "{written}");
+    assert!(!written.contains("retainedAgentBundleImages"), "{written}");
+
+    let with_bundles = AgentRelease {
+        agent_bundle_image: Some(bundle('d')),
+        retained_agent_bundle_images: vec![bundle('e')],
+        ..release("revision-2", 'b')
+    };
+    let signing_key = SigningKey::from_bytes(&[9_u8; 32]);
+    let executor = AgentExecutor::new(
+        "staging".into(),
+        signing_key.verifying_key(),
+        store,
+        Arc::new(FakeDriver::default()),
+    );
+    let outcome = executor
+        .execute(
+            signed_upgrade(
+                &signing_key,
+                with_bundles.clone(),
+                "upgrade-1",
+                1_700_000_000,
+            ),
+            1_700_000_000,
+        )
+        .await;
+    assert_eq!(outcome.state, cognia_deployment::OperationState::Succeeded);
+    let state = executor.state().await;
+    assert_eq!(state.current_release, Some(with_bundles));
+    assert_eq!(
+        state.previous_release.unwrap().agent_bundle_image,
+        None,
+        "the bundle-less release is kept for rollback as it was"
     );
 }
 

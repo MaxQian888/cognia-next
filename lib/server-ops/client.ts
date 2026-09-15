@@ -70,6 +70,24 @@ export interface Operation {
 }
 
 /**
+ * The images a deploy or upgrade runs. `agentBundleImage` is optional
+ * (ADR-0183): leave it out when the server runs no project runtime
+ * environments. The older bundles a release keeps pinnable are chosen by the
+ * controller from its release history; it refuses a request that names them.
+ */
+export interface ReleaseImages {
+  serverImage: string
+  runnerImage: string
+  workspaceRuntimeImage: string
+  agentBundleImage?: string
+}
+
+export interface ReleaseRequest {
+  targetRevision: number
+  release: ReleaseImages & { configRevision: string }
+}
+
+/**
  * A single-use agent enrollment grant, as returned by the controller. The
  * target it is bound to is not echoed back — the caller named it in the
  * request, and the controller stores the binding server-side.
@@ -193,33 +211,13 @@ export class OpsClient {
     return this.mutation(`/v1/servers/${encodeURIComponent(id)}/backups`, idempotencyKey, {})
   }
 
-  async deploy(
-    id: string,
-    parameters: {
-      targetRevision: number
-      release: {
-        serverImage: string
-        runnerImage: string
-        workspaceRuntimeImage: string
-        configRevision: string
-      }
-    },
-    idempotencyKey: string
-  ): Promise<Operation> {
+  async deploy(id: string, parameters: ReleaseRequest, idempotencyKey: string): Promise<Operation> {
     return this.mutation(`/v1/servers/${encodeURIComponent(id)}/deploy`, idempotencyKey, parameters)
   }
 
   async upgrade(
     id: string,
-    parameters: {
-      targetRevision: number
-      release: {
-        serverImage: string
-        runnerImage: string
-        workspaceRuntimeImage: string
-        configRevision: string
-      }
-    },
+    parameters: ReleaseRequest,
     idempotencyKey: string
   ): Promise<Operation> {
     return this.mutation(

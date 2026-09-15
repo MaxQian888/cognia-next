@@ -256,6 +256,8 @@
     "kubernetes": "Kubernetes"
   },
   "upgrade": {
+    "agentBundleHint": "Optional. Needed only when projects on this server use runtime environments. Leaving it empty ships this release without a bundle.",
+    "agentBundleImage": "Agent bundle image",
     "description": "Deploy new images at this target's current configuration revision. The target itself is unchanged.",
     "digestNotice": "Use immutable sha256 digests. A mutable tag deploys but fails production certification.",
     "runnerImage": "Runner image",
@@ -265,6 +267,8 @@
     "workspaceRuntimeImage": "Workspace runtime image"
   },
   "wizard": {
+    "agentBundleHint": "Optional. Injected into project runtime environments once the sandbox pool is on. Leave empty if this server will not run them.",
+    "agentBundleImage": "Agent bundle image digest",
     "back": "Back",
     "cancel": "Cancel",
     "certificationHelp": "This target is valid and will deploy. It would not pass production certification as configured:",
@@ -292,6 +296,7 @@
     "oidcAudience": "OIDC audience",
     "oidcIssuer": "OIDC issuer",
     "placeholders": {
+      "agentBundleImage": "ghcr.io/owner/cognia-agent-bundle@sha256:…",
       "controllerCredentialRef": "ops-controller/staging",
       "controllerUrl": "https://ops.example.com",
       "keyVersion": "key-2026-08",

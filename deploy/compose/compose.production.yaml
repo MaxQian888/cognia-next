@@ -57,6 +57,11 @@ services:
       COGNIA_REQUIRE_OBJECT_BACKUP: "true"
       COGNIA_RUNNER_IMAGE: ${COGNIA_RUNNER_IMAGE:?set a digest-pinned COGNIA_RUNNER_IMAGE}
       COGNIA_WORKSPACE_RUNTIME_IMAGE: ${COGNIA_WORKSPACE_RUNTIME_IMAGE:?set a digest-pinned COGNIA_WORKSPACE_RUNTIME_IMAGE}
+      # The agent bundle (ADR-0183) is optional: blank means none, and the
+      # server reads it only while the sandbox pool is on. The deploy agent
+      # sets both from the release.
+      COGNIA_AGENT_BUNDLE_IMAGE: ${COGNIA_AGENT_BUNDLE_IMAGE:-}
+      COGNIA_AGENT_BUNDLE_RETAINED_IMAGES: ${COGNIA_AGENT_BUNDLE_RETAINED_IMAGES:-}
       COGNIA_CONFIG_REVISION: ${COGNIA_CONFIG_REVISION:?set COGNIA_CONFIG_REVISION}
       COGNIA_METRICS_OPERATOR_TOKEN_FILE: /run/cognia-secrets/metrics-operator-token
     volumes:

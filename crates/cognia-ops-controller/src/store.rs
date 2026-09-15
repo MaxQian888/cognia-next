@@ -1,6 +1,7 @@
 use crate::model::*;
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
+use cognia_deployment::agent_protocol::RETAINED_AGENT_BUNDLE_LIMIT;
 use cognia_deployment::{DeploymentTarget, DeploymentTopology, OperationKind, OperationState};
 use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod};
 use parking_lot::Mutex;
@@ -58,6 +59,14 @@ pub trait Store: Send + Sync {
         tenant_id: &str,
         target_id: &str,
     ) -> Result<Vec<RecoveryPoint>, StoreError>;
+    /// The agent bundles the target has run, newest first (ADR-0183): at most
+    /// the current one and the retention limit before it. A succeeded deploy,
+    /// upgrade or rollback records its release's bundle.
+    async fn list_release_bundles(
+        &self,
+        tenant_id: &str,
+        target_id: &str,
+    ) -> Result<Vec<ReleaseBundle>, StoreError>;
     async fn create_operation(&self, input: NewOperation) -> Result<Operation, StoreError>;
     async fn operation_by_idempotency(
         &self,
@@ -187,6 +196,8 @@ struct MemoryData {
     agents: HashMap<String, AgentIdentity>,
     target_registrations: HashMap<(String, String), (Value, ServerDetail)>,
     recovery_points: Vec<(String, RecoveryPoint)>,
+    /// Newest first by insertion, so equal timestamps cannot reorder them.
+    release_bundles: HashMap<(String, String), Vec<ReleaseBundle>>,
     logs: Vec<(String, LogEntry)>,
     next_log_id: i64,
 }
@@ -309,6 +320,20 @@ impl Store for InMemoryStore {
             .filter(|(tenant, point)| tenant == tenant_id && point.server_id == target_id)
             .map(|(_, point)| point.clone())
             .collect())
+    }
+
+    async fn list_release_bundles(
+        &self,
+        tenant_id: &str,
+        target_id: &str,
+    ) -> Result<Vec<ReleaseBundle>, StoreError> {
+        Ok(self
+            .inner
+            .lock()
+            .release_bundles
+            .get(&(tenant_id.to_owned(), target_id.to_owned()))
+            .cloned()
+            .unwrap_or_default())
     }
 
     async fn create_operation(&self, input: NewOperation) -> Result<Operation, StoreError> {
@@ -776,6 +801,10 @@ impl PgStore {
         client
             .batch_execute(include_str!("../migrations/0002_tenant_isolation.sql"))
             .await?;
+        // After 0002: its policy calls `ops_tenant_visible`.
+        client
+            .batch_execute(include_str!("../migrations/0003_release_bundles.sql"))
+            .await?;
         Ok(())
     }
 
@@ -915,6 +944,11 @@ impl PgStore {
         } else {
             None
         };
+        let agent_bundle = if next == OperationState::Succeeded {
+            agent_bundle_from_result(&current, result.as_ref())
+        } else {
+            None
+        };
         let log_lines = if next == OperationState::Succeeded {
             log_lines_from_result(&current, result.as_ref())?
         } else {
@@ -961,6 +995,35 @@ impl PgStore {
                 )
                 .await
                 .map_err(database_error)?;
+            if let Some(image) = &agent_bundle {
+                transaction
+                    .execute(
+                        "INSERT INTO release_bundles (tenant_id, target_id, image)
+                         VALUES ($1,$2,$3)
+                         ON CONFLICT (tenant_id, target_id, image)
+                         DO UPDATE SET last_active_at=now()",
+                        &[&current.tenant_id, &current.target_id, image],
+                    )
+                    .await
+                    .map_err(database_error)?;
+                transaction
+                    .execute(
+                        "DELETE FROM release_bundles
+                         WHERE tenant_id=$1 AND target_id=$2 AND image NOT IN (
+                           SELECT image FROM release_bundles
+                           WHERE tenant_id=$1 AND target_id=$2
+                           ORDER BY last_active_at DESC, image
+                           LIMIT $3
+                         )",
+                        &[
+                            &current.tenant_id,
+                            &current.target_id,
+                            &KEPT_RELEASE_BUNDLES,
+                        ],
+                    )
+                    .await
+                    .map_err(database_error)?;
+            }
             for point in recovery_points {
                 let kind = serde_json::to_value(point.kind)
                     .map_err(|error| StoreError::Database(error.to_string()))?
@@ -1236,6 +1299,33 @@ impl Store for PgStore {
             .map_err(database_error)?;
         transaction.commit().await.map_err(database_error)?;
         rows.iter().map(recovery_point_from_row).collect()
+    }
+
+    async fn list_release_bundles(
+        &self,
+        tenant_id: &str,
+        target_id: &str,
+    ) -> Result<Vec<ReleaseBundle>, StoreError> {
+        let mut client = self.client().await?;
+        let transaction = tenant_scope(&mut client, tenant_id).await?;
+        let rows = transaction
+            .query(
+                "SELECT image, first_active_at, last_active_at
+                 FROM release_bundles WHERE tenant_id=$1 AND target_id=$2
+                 ORDER BY last_active_at DESC, image",
+                &[&tenant_id, &target_id],
+            )
+            .await
+            .map_err(database_error)?;
+        transaction.commit().await.map_err(database_error)?;
+        Ok(rows
+            .iter()
+            .map(|row| ReleaseBundle {
+                image: row.get("image"),
+                first_active_at: row.get("first_active_at"),
+                last_active_at: row.get("last_active_at"),
+            })
+            .collect())
     }
 
     async fn create_operation(&self, input: NewOperation) -> Result<Operation, StoreError> {
@@ -1712,7 +1802,49 @@ fn materialize_memory_result(
             server.summary.release_digest = Some(release);
         }
     }
+    if let Some(image) = agent_bundle_from_result(operation, operation.result.as_ref()) {
+        let bundles = data
+            .release_bundles
+            .entry((operation.tenant_id.clone(), operation.target_id.clone()))
+            .or_default();
+        let now = Utc::now();
+        let first_active_at = match bundles.iter().position(|bundle| bundle.image == image) {
+            Some(index) => bundles.remove(index).first_active_at,
+            None => now,
+        };
+        bundles.insert(
+            0,
+            ReleaseBundle {
+                image,
+                first_active_at,
+                last_active_at: now,
+            },
+        );
+        bundles.truncate(KEPT_RELEASE_BUNDLES as usize);
+    }
     Ok(())
+}
+
+/// The current bundle plus the ones a release may retain.
+const KEPT_RELEASE_BUNDLES: i64 = RETAINED_AGENT_BUNDLE_LIMIT as i64 + 1;
+
+/// The digest-pinned agent bundle of the release a succeeded deploy, upgrade
+/// or rollback made current, read from the agent's result like
+/// [`release_digest_from_result`].
+fn agent_bundle_from_result(operation: &Operation, result: Option<&Value>) -> Option<String> {
+    if !matches!(
+        operation.kind,
+        OperationKind::Deploy | OperationKind::Upgrade | OperationKind::Rollback
+    ) {
+        return None;
+    }
+    result
+        .and_then(|value| value.get("release"))
+        .or_else(|| result.and_then(|value| value.get("restoredRelease")))
+        .and_then(|release| release.get("agentBundleImage"))
+        .and_then(Value::as_str)
+        .filter(|image| cognia_deployment::image_digest(image).is_some())
+        .map(str::to_owned)
 }
 
 fn log_lines_from_result(
@@ -1937,6 +2069,8 @@ mod tests {
 
     const INIT_SQL: &str = include_str!("../migrations/0001_init.sql");
     const RLS_SQL: &str = include_str!("../migrations/0002_tenant_isolation.sql");
+    /// Later migrations create a table and its policy together.
+    const LATER_SQL: [&str; 1] = [include_str!("../migrations/0003_release_bundles.sql")];
 
     /// The production half of this file.
     ///
@@ -1951,8 +2085,9 @@ mod tests {
     /// The migration with its `--` comments removed, for the same reason:
     /// the comments name the mistakes the assertions look for.
     fn rls_statements() -> String {
-        RLS_SQL
-            .lines()
+        std::iter::once(RLS_SQL)
+            .chain(LATER_SQL)
+            .flat_map(str::lines)
             .filter(|line| !line.trim_start().starts_with("--"))
             .collect::<Vec<_>>()
             .join("\n")
@@ -1962,10 +2097,13 @@ mod tests {
         value.split_whitespace().collect::<Vec<_>>().join(" ")
     }
 
-    /// Table names declared in `0001_init.sql` that carry a `tenant_id`.
+    /// Table names declared in any migration that carry a `tenant_id`.
     fn tenant_tables() -> Vec<String> {
         let mut tables = Vec::new();
-        for block in INIT_SQL.split("CREATE TABLE IF NOT EXISTS ").skip(1) {
+        for block in std::iter::once(INIT_SQL)
+            .chain(LATER_SQL)
+            .flat_map(|sql| sql.split("CREATE TABLE IF NOT EXISTS ").skip(1))
+        {
             let (name, rest) = block.split_once(" (").expect("table header");
             let body = rest.split("\n);").next().expect("table body");
             if body.contains("tenant_id") {
@@ -1982,7 +2120,8 @@ mod tests {
     fn every_tenant_table_is_protected_by_row_level_security() {
         let tables = tenant_tables();
         // A sweep that found no tables would pass every assertion below.
-        assert!(tables.len() >= 12, "only found {tables:?}");
+        assert!(tables.len() >= 13, "only found {tables:?}");
+        assert!(tables.iter().any(|table| table == "release_bundles"));
         let statements = squeeze(&rls_statements());
 
         for table in &tables {
@@ -2151,6 +2290,100 @@ mod tests {
             updated_at: Utc::now(),
         };
         assert!(recovery_points_from_result(&operation, Some(&json!({ "stdout": "ok" }))).is_err());
+    }
+
+    fn release_operation(kind: OperationKind, tenant: &str, result: Value) -> Operation {
+        Operation {
+            id: Uuid::new_v4(),
+            tenant_id: tenant.into(),
+            target_id: "staging".into(),
+            kind,
+            state: OperationState::Succeeded,
+            request: json!({}),
+            result: Some(result),
+            error: None,
+            created_by: "operator".into(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    fn bundle(byte: char) -> String {
+        format!(
+            "ghcr.io/cognia/cognia-agent-bundle@sha256:{}",
+            byte.to_string().repeat(64)
+        )
+    }
+
+    fn bundle_images(data: &MemoryData, tenant: &str) -> Vec<String> {
+        data.release_bundles
+            .get(&(tenant.to_owned(), "staging".to_owned()))
+            .map(|bundles| bundles.iter().map(|bundle| bundle.image.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn release_bundles_are_recorded_newest_first_and_pruned_to_what_can_be_retained() {
+        let mut data = MemoryData::default();
+        for byte in ['1', '2', '3', '4'] {
+            let operation = release_operation(
+                OperationKind::Upgrade,
+                "tenant-a",
+                json!({ "release": { "serverImage": "s", "agentBundleImage": bundle(byte) } }),
+            );
+            materialize_memory_result(&mut data, &operation).unwrap();
+        }
+        assert_eq!(
+            bundle_images(&data, "tenant-a"),
+            vec![bundle('4'), bundle('3'), bundle('2')],
+            "the current bundle and RETAINED_AGENT_BUNDLE_LIMIT before it"
+        );
+        let first_seen =
+            data.release_bundles[&("tenant-a".into(), "staging".into())][1].first_active_at;
+
+        // A rollback to the release carrying bundle 3 makes it current again
+        // and keeps when it was first seen.
+        let rollback = release_operation(
+            OperationKind::Rollback,
+            "tenant-a",
+            json!({ "release": { "agentBundleImage": bundle('3') } }),
+        );
+        materialize_memory_result(&mut data, &rollback).unwrap();
+        assert_eq!(
+            bundle_images(&data, "tenant-a"),
+            vec![bundle('3'), bundle('4'), bundle('2')]
+        );
+        assert_eq!(
+            data.release_bundles[&("tenant-a".into(), "staging".into())][0].first_active_at,
+            first_seen
+        );
+
+        // Releases without a pinned bundle, and operations that are not
+        // releases, leave the history alone.
+        for operation in [
+            release_operation(
+                OperationKind::Upgrade,
+                "tenant-a",
+                json!({ "release": { "serverImage": "s" } }),
+            ),
+            release_operation(
+                OperationKind::Upgrade,
+                "tenant-a",
+                json!({ "release": { "agentBundleImage": "ghcr.io/cognia/cognia-agent-bundle:latest" } }),
+            ),
+            release_operation(
+                OperationKind::CollectStatus,
+                "tenant-a",
+                json!({ "release": { "agentBundleImage": bundle('5') } }),
+            ),
+        ] {
+            materialize_memory_result(&mut data, &operation).unwrap();
+        }
+        assert_eq!(
+            bundle_images(&data, "tenant-a"),
+            vec![bundle('3'), bundle('4'), bundle('2')]
+        );
+        assert!(bundle_images(&data, "tenant-b").is_empty());
     }
 
     #[test]

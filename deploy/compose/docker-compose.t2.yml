@@ -39,6 +39,11 @@ services:
     environment:
       COGNIA_EXEC_BACKEND: container
       COGNIA_RUNNER_IMAGE: ${COGNIA_RUNNER_IMAGE:-ghcr.io/maxqian888/cognia-runner:latest}
+      # Agent bundle for project runtime environments (ADR-0183). Blank means
+      # none; read only while the sandbox pool is on, and only a digest-pinned
+      # bundle admits sandboxes.
+      COGNIA_AGENT_BUNDLE_IMAGE: ${COGNIA_AGENT_BUNDLE_IMAGE:-}
+      COGNIA_AGENT_BUNDLE_RETAINED_IMAGES: ${COGNIA_AGENT_BUNDLE_RETAINED_IMAGES:-}
       DOCKER_HOST: tcp://docker-socket-proxy:2375
       # Workspaces live on a named volume shared with the runners. BOTH vars
       # matter: COGNIA_WORKSPACES_DIR is where cognia-server sees the tree;

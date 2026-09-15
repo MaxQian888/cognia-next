@@ -43,8 +43,15 @@ The existing persistent runtime supervisor cannot carry that job. `services/work
   - The lock is not certification: it never changes `certifiedVersions`, because on a desktop a certified version runs without consent.
   - A runtime with no musl build is listed as glibc-only and is refused on musl images with its reason. A vendor binary that needs a newer glibc than the bundle's floor carries its own per-architecture `minGlibc` in the manifest.
 - **Two libc trees, differently self-contained.** On glibc, Node is the official build and uses the image's glibc and `libstdc++`. A newer bundled C++ runtime would demand a newer glibc than many images have. On musl, Node is patched to load a bundled musl loader and C++ runtime, so it runs on Alpine base images without `libstdc++`, whatever their musl release.
-- **Release contract.** The bundle digest is the fourth image in the release contract, alongside server, runner and workspace runtime: `ImageConfig.agentBundle` and `AgentRelease.agent_bundle_image`. Production certification requires it to be digest-pinned.
+- **Release contract.** The bundle digest is the fourth image in the release contract, alongside server, runner and workspace runtime: `ImageConfig.agentBundle` and `AgentRelease.agent_bundle_image`.
+  - It is optional, because the sandbox pool is off by default. A target or release without it serializes, signs and renders exactly as a three-image one did.
+  - When it is set, production certification requires it to be digest-pinned, and the deploy agent refuses a mutable one.
+  - The deploy agent hands it to the server as `COGNIA_AGENT_BUNDLE_IMAGE`: the Compose environment or the `agentBundleImage` ConfigMap key. A release without a bundle clears the variable, so it never inherits the previous release's.
 - **Project pins.** A project may pin an older bundle while the deployment still retains it. A retired pin is refused with `bundle_pin_retired`.
+  - The Ops Controller records every bundle a target has run in `release_bundles` (bumped by each succeeded deploy, upgrade or rollback, pruned to what can still be retained).
+  - When it signs a release, it adds the two most recently active other bundles (compared by digest) as `AgentRelease.retained_agent_bundle_images`. A client that supplies that list is refused.
+  - The server receives them as `COGNIA_AGENT_BUNDLE_RETAINED_IMAGES`, newest first. A rollback restores the list its release carried.
+  - A standalone deployment can set both variables by hand.
 
 ### `cognia-sandboxd`
 

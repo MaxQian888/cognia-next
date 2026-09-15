@@ -93,6 +93,41 @@ fn production_certification_requires_digest_and_snapshot_provider() {
 }
 
 #[test]
+fn the_agent_bundle_is_optional_but_must_be_pinned_when_present() {
+    let without: DeploymentTarget = serde_yaml::from_str(&valid_yaml()).unwrap();
+    assert!(without.spec.images.agent_bundle.is_none());
+    assert!(without.production_certification_issues().is_empty());
+    let serialized = serde_json::to_value(&without).unwrap();
+    assert!(
+        serialized["spec"]["images"].get("agentBundle").is_none(),
+        "a target without a bundle serializes as before"
+    );
+
+    let pinned = valid_yaml().replace(
+        "    workspaceRuntime:",
+        &format!(
+            "    agentBundle: ghcr.io/owner/cognia-agent-bundle:v1.2.0@sha256:{}\n    workspaceRuntime:",
+            "d".repeat(64)
+        ),
+    );
+    let target: DeploymentTarget = serde_yaml::from_str(&pinned).unwrap();
+    assert!(target.spec.images.agent_bundle.is_some());
+    assert!(target.production_certification_issues().is_empty());
+
+    let mutable = valid_yaml().replace(
+        "    workspaceRuntime:",
+        "    agentBundle: ghcr.io/owner/cognia-agent-bundle:latest\n    workspaceRuntime:",
+    );
+    let target: DeploymentTarget = serde_yaml::from_str(&mutable).unwrap();
+    assert_eq!(
+        target.production_certification_issues(),
+        vec![ProductionCertificationIssue::MutableImage {
+            image: "agentBundle"
+        }]
+    );
+}
+
+#[test]
 fn operation_state_machine_rejects_skipped_and_terminal_transitions() {
     assert!(OperationState::Queued.can_transition_to(OperationState::Validating));
     assert!(!OperationState::Queued.can_transition_to(OperationState::Executing));

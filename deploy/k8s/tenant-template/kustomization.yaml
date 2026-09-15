@@ -12,6 +12,8 @@
 #      entry, and the execBackend/runnerImage/workspacesPvc literals — runner
 #      Pods spawn via the k8s exec backend (COGNIA_EXEC_BACKEND=kubernetes)
 #   6. (production) uncomment the gvisor patch entry
+#   7. (project runtime environments, ADR-0183) uncomment agentBundleImage with
+#      a digest-pinned bundle; it is read only while the sandbox pool is on
 #
 # NOTE: both optional patches live in the SINGLE `patches:` block below —
 # YAML rejects (or silently drops) a duplicated `patches:` key.
@@ -33,6 +35,7 @@ configMapGenerator:
       # - execBackend=kubernetes
       # - runnerImage=ghcr.io/maxqian888/cognia-runner:latest
       # - workspacesPvc=cognia-workspaces
+      # - agentBundleImage=ghcr.io/maxqian888/cognia-agent-bundle:vX.Y.Z@sha256:<digest>
 generatorOptions:
   disableNameSuffixHash: true
 # patches:

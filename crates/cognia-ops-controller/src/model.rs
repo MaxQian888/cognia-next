@@ -106,6 +106,20 @@ pub enum RecoveryPointKind {
     ObjectStore,
 }
 
+/// An agent bundle a target has run (ADR-0183). The controller keeps the
+/// current one and the [`RETAINED_AGENT_BUNDLE_LIMIT`] before it, newest
+/// `last_active_at` first, and signs the older ones into the next release so
+/// projects pinned to them keep working.
+///
+/// [`RETAINED_AGENT_BUNDLE_LIMIT`]: cognia_deployment::agent_protocol::RETAINED_AGENT_BUNDLE_LIMIT
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseBundle {
+    pub image: String,
+    pub first_active_at: DateTime<Utc>,
+    pub last_active_at: DateTime<Utc>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogEntry {

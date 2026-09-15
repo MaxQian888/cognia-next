@@ -125,12 +125,29 @@ pub struct ReleaseParameters {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RollbackParameters {}
 
+/// How many earlier agent bundles a release keeps pinnable besides its current
+/// one (ADR-0183 "project pins"). A project pinned to anything older is refused
+/// `bundle_pin_retired`.
+pub const RETAINED_AGENT_BUNDLE_LIMIT: usize = 2;
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentRelease {
     pub server_image: String,
     pub runner_image: String,
     pub workspace_runtime_image: String,
+    /// The release's agent bundle (ADR-0183). Absent on a deployment that does
+    /// not run project runtime environments; both bundle fields are then left
+    /// out of the signed payload and the agent's persisted state, so those stay
+    /// byte-identical to a release from before the fields existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_bundle_image: Option<String>,
+    /// Earlier bundles projects may still pin, newest first, at most
+    /// [`RETAINED_AGENT_BUNDLE_LIMIT`]. The controller fills this from its
+    /// release history when it signs the operation; it refuses a list supplied
+    /// by the client. A rollback restores the list its release carried.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub retained_agent_bundle_images: Vec<String>,
     pub config_revision: String,
 }
 
@@ -141,8 +158,35 @@ impl AgentRelease {
             self.runner_image.as_str(),
             self.workspace_runtime_image.as_str(),
         ]
-        .iter()
-        .all(|image| is_digest_image(image))
+        .into_iter()
+        .chain(self.agent_bundle_image.as_deref())
+        .chain(self.retained_agent_bundle_images.iter().map(String::as_str))
+        .all(is_digest_image)
+    }
+
+    /// Why the bundle fields contradict each other, if they do. Pinning is
+    /// [`Self::has_immutable_images`]'s job; this checks only the shape.
+    pub fn agent_bundle_problem(&self) -> Option<&'static str> {
+        if self.retained_agent_bundle_images.is_empty() {
+            return None;
+        }
+        let Some(current) = self.agent_bundle_image.as_deref() else {
+            return Some("retained agent bundles require a current agent bundle");
+        };
+        if self.retained_agent_bundle_images.len() > RETAINED_AGENT_BUNDLE_LIMIT {
+            return Some("the release retains more agent bundles than the limit");
+        }
+        let mut digests = std::collections::BTreeSet::new();
+        for image in std::iter::once(current)
+            .chain(self.retained_agent_bundle_images.iter().map(String::as_str))
+        {
+            if let Some(digest) = crate::image_digest(image) {
+                if !digests.insert(digest) {
+                    return Some("an agent bundle is listed twice");
+                }
+            }
+        }
+        None
     }
 }
 
@@ -249,8 +293,5 @@ pub enum ProtocolError {
 }
 
 fn is_digest_image(image: &str) -> bool {
-    let Some((_, digest)) = image.rsplit_once("@sha256:") else {
-        return false;
-    };
-    digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+    crate::image_digest(image).is_some()
 }

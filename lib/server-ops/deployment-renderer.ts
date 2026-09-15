@@ -62,6 +62,11 @@ function renderApplicationEnvironment(
     COGNIA_S3_REGION: target.spec.objectStore.region,
     COGNIA_S3_BUCKET: target.spec.objectStore.bucket,
     COGNIA_S3_PATH_STYLE: String(target.spec.objectStore.pathStyle),
+    // Only with a bundle: a target without one renders exactly as before. The
+    // retained bundles are chosen by the controller per release, not rendered.
+    ...(target.spec.images.agentBundle
+      ? { COGNIA_AGENT_BUNDLE_IMAGE: target.spec.images.agentBundle }
+      : {}),
   }
 }
 
@@ -109,6 +114,9 @@ function renderKubernetesFiles(
   ]
   if (target.spec.snapshots.provider === "kubernetes-csi") {
     configLiterals.push(`snapshotClassName=${target.spec.snapshots.className}`)
+  }
+  if (literals.COGNIA_AGENT_BUNDLE_IMAGE) {
+    configLiterals.push(`agentBundleImage=${literals.COGNIA_AGENT_BUNDLE_IMAGE}`)
   }
 
   const kustomization = {

@@ -295,6 +295,10 @@ impl ComposeDriver {
                     &release.workspace_runtime_image,
                 )
                 .env("COGNIA_CONFIG_REVISION", &release.config_revision)
+                .envs(
+                    agent_bundle_variables(release)
+                        .map(|(name, value)| (name, value.unwrap_or_default())),
+                )
                 .env("COGNIA_PUBLIC_URL", target.spec.public_url.as_str())
                 .env("COGNIA_DOMAIN", public_host)
                 .env("COGNIA_LOGTO_ISSUER", target.spec.identity.issuer.as_str())
@@ -755,30 +759,7 @@ impl KubernetesDriver {
                 ))
             }
         };
-        let scopes = [
-            target.spec.identity.scopes.read.as_str(),
-            target.spec.identity.scopes.operate.as_str(),
-            target.spec.identity.scopes.admin.as_str(),
-        ]
-        .join(" ");
-        let config_patch = json!({
-            "data": {
-                "publicUrl": target.spec.public_url.as_str(),
-                "logtoIssuer": target.spec.identity.issuer.as_str(),
-                "logtoAudience": target.spec.identity.audience,
-                "logtoRequiredScopes": scopes,
-                "runnerImage": release.runner_image,
-                "workspaceRuntimeImage": release.workspace_runtime_image,
-                "configRevision": release.config_revision,
-                "objectStoreEndpoint": target.spec.object_store.endpoint.as_str(),
-                "objectStoreRegion": target.spec.object_store.region,
-                "objectStoreBucket": target.spec.object_store.bucket,
-                "objectStorePathStyle": target.spec.object_store.path_style.to_string(),
-                "backupKeyVersion": release.config_revision,
-                "backupPrefix": target.metadata.id
-            }
-        });
-        let config_patch = serde_json::to_string(&config_patch)
+        let config_patch = serde_json::to_string(&kubernetes_config_patch(target, release))
             .map_err(|error| DriverError::Configuration(error.to_string()))?;
         self.kubectl(&[
             "patch",
@@ -1554,7 +1535,79 @@ fn append_snapshot_recovery_point(
     Ok(())
 }
 
+/// Same names as `cognia_environment::baseline::{AGENT_BUNDLE_IMAGE_ENV,
+/// AGENT_BUNDLE_RETAINED_IMAGES_ENV}`, which reads them; the agent stays free of
+/// that crate and its network stack. A test holds the two in step.
+const AGENT_BUNDLE_IMAGE_ENV: &str = "COGNIA_AGENT_BUNDLE_IMAGE";
+const AGENT_BUNDLE_RETAINED_IMAGES_ENV: &str = "COGNIA_AGENT_BUNDLE_RETAINED_IMAGES";
+
+/// The server variables for a release's agent bundles (ADR-0183). `None` means
+/// the release has none: Compose then sets the variable blank, which also
+/// overrides a value left in the deployment's `.env`, and Kubernetes removes it.
+/// Either way a release without a bundle never inherits the previous one's.
+fn agent_bundle_variables(release: &AgentRelease) -> [(&'static str, Option<String>); 2] {
+    [
+        (AGENT_BUNDLE_IMAGE_ENV, release.agent_bundle_image.clone()),
+        (
+            AGENT_BUNDLE_RETAINED_IMAGES_ENV,
+            (!release.retained_agent_bundle_images.is_empty())
+                .then(|| release.retained_agent_bundle_images.join(",")),
+        ),
+    ]
+}
+
+/// The merge patch for `configmap/cognia-config`.
+fn kubernetes_config_patch(target: &DeploymentTarget, release: &AgentRelease) -> Value {
+    let scopes = [
+        target.spec.identity.scopes.read.as_str(),
+        target.spec.identity.scopes.operate.as_str(),
+        target.spec.identity.scopes.admin.as_str(),
+    ]
+    .join(" ");
+    let [(_, agent_bundle_image), (_, retained_agent_bundle_images)] =
+        agent_bundle_variables(release);
+    json!({
+        "data": {
+            "publicUrl": target.spec.public_url.as_str(),
+            "logtoIssuer": target.spec.identity.issuer.as_str(),
+            "logtoAudience": target.spec.identity.audience,
+            "logtoRequiredScopes": scopes,
+            "runnerImage": release.runner_image,
+            "workspaceRuntimeImage": release.workspace_runtime_image,
+            // `null` deletes the key under a merge patch, so a release without
+            // a bundle does not keep the previous release's.
+            "agentBundleImage": agent_bundle_image,
+            "agentBundleRetainedImages": retained_agent_bundle_images,
+            "configRevision": release.config_revision,
+            "objectStoreEndpoint": target.spec.object_store.endpoint.as_str(),
+            "objectStoreRegion": target.spec.object_store.region,
+            "objectStoreBucket": target.spec.object_store.bucket,
+            "objectStorePathStyle": target.spec.object_store.path_style.to_string(),
+            "backupKeyVersion": release.config_revision,
+            "backupPrefix": target.metadata.id
+        }
+    })
+}
+
 fn kubernetes_release_commands(release: &AgentRelease) -> [Vec<String>; 2] {
+    let mut environment = vec![
+        "set".into(),
+        "env".into(),
+        "statefulset/cognia-server".into(),
+        format!("COGNIA_RUNNER_IMAGE={}", release.runner_image),
+        format!(
+            "COGNIA_WORKSPACE_RUNTIME_IMAGE={}",
+            release.workspace_runtime_image
+        ),
+        format!("COGNIA_CONFIG_REVISION={}", release.config_revision),
+    ];
+    environment.extend(
+        agent_bundle_variables(release).map(|(name, value)| match value {
+            Some(value) => format!("{name}={value}"),
+            // `kubectl set env NAME-` removes the variable.
+            None => format!("{name}-"),
+        }),
+    );
     [
         vec![
             "set".into(),
@@ -1562,42 +1615,146 @@ fn kubernetes_release_commands(release: &AgentRelease) -> [Vec<String>; 2] {
             "statefulset/cognia-server".into(),
             format!("cognia-server={}", release.server_image),
         ],
-        vec![
-            "set".into(),
-            "env".into(),
-            "statefulset/cognia-server".into(),
-            format!("COGNIA_RUNNER_IMAGE={}", release.runner_image),
-            format!(
-                "COGNIA_WORKSPACE_RUNTIME_IMAGE={}",
-                release.workspace_runtime_image
-            ),
-            format!("COGNIA_CONFIG_REVISION={}", release.config_revision),
-        ],
+        environment,
     ]
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        append_snapshot_recovery_point, compose_runtime_override, initialize_runtime_override,
-        kubernetes_release_commands, maintenance_job_manifest, parse_stdout_json,
-        restore_pvc_manifest, restore_runtime_override, safe_resource_name, validate_dns_name,
-        validate_storage_size, volume_snapshot_manifest, write_runtime_override,
-        ExternalSnapshotCreateResult, ExternalSnapshotRestoreResult, KubernetesDriver,
+        agent_bundle_variables, append_snapshot_recovery_point, compose_runtime_override,
+        initialize_runtime_override, kubernetes_config_patch, kubernetes_release_commands,
+        maintenance_job_manifest, parse_stdout_json, restore_pvc_manifest,
+        restore_runtime_override, safe_resource_name, validate_dns_name, validate_storage_size,
+        volume_snapshot_manifest, write_runtime_override, ExternalSnapshotCreateResult,
+        ExternalSnapshotRestoreResult, KubernetesDriver, AGENT_BUNDLE_IMAGE_ENV,
+        AGENT_BUNDLE_RETAINED_IMAGES_ENV,
     };
     use crate::KubernetesConfig;
     use cognia_deployment::agent_protocol::AgentRelease;
+    use cognia_deployment::DeploymentTarget;
     use std::path::PathBuf;
     use url::Url;
 
-    #[test]
-    fn kubernetes_release_updates_server_and_dynamic_runtime_configuration() {
-        let release = AgentRelease {
+    fn release_without_bundle() -> AgentRelease {
+        AgentRelease {
             server_image: format!("registry/server@sha256:{}", "a".repeat(64)),
             runner_image: format!("registry/runner@sha256:{}", "b".repeat(64)),
             workspace_runtime_image: format!("registry/runtime@sha256:{}", "c".repeat(64)),
+            agent_bundle_image: None,
+            retained_agent_bundle_images: Vec::new(),
             config_revision: "revision-7".into(),
-        };
+        }
+    }
+
+    fn release_with_bundles() -> AgentRelease {
+        AgentRelease {
+            agent_bundle_image: Some(format!("registry/bundle:v3@sha256:{}", "d".repeat(64))),
+            retained_agent_bundle_images: vec![
+                format!("registry/bundle:v2@sha256:{}", "e".repeat(64)),
+                format!("registry/bundle:v1@sha256:{}", "f".repeat(64)),
+            ],
+            ..release_without_bundle()
+        }
+    }
+
+    fn kubernetes_target() -> DeploymentTarget {
+        serde_json::from_value(serde_json::json!({
+            "apiVersion": "deploy.cognia.dev/v1alpha1",
+            "kind": "DeploymentTarget",
+            "metadata": { "id": "staging", "label": "Staging" },
+            "spec": {
+                "topology": "kubernetes",
+                "publicUrl": "https://server.example.com",
+                "kubernetes": {
+                    "namespace": "cognia-staging",
+                    "ingressClassName": "nginx",
+                    "storageClassName": "standard"
+                },
+                "controller": { "url": "https://ops.example.com", "credentialRef": "ops/staging" },
+                "identity": {
+                    "provider": "oidc", "issuer": "https://auth.example.com/oidc",
+                    "audience": "https://server.example.com/api", "tenantClaim": "organization_id",
+                    "scopes": { "read": "servers:read", "operate": "servers:operate", "admin": "servers:admin" }
+                },
+                "objectStore": {
+                    "provider": "s3-compatible", "endpoint": "https://s3.example.com",
+                    "region": "auto", "bucket": "backups", "pathStyle": false,
+                    "credentialRef": "backups/staging"
+                },
+                "snapshots": { "provider": "kubernetes-csi", "className": "cognia-snapshots" },
+                "tls": { "provider": "ingress", "secretRef": "cognia-tls" },
+                "secrets": { "provider": "kubernetes", "rootRef": "cognia/staging" },
+                "images": {
+                    "server": format!("server@sha256:{}", "a".repeat(64)),
+                    "runner": format!("runner@sha256:{}", "b".repeat(64)),
+                    "workspaceRuntime": format!("runtime@sha256:{}", "c".repeat(64))
+                }
+            }
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_release_without_a_bundle_removes_the_previous_releases_bundle() {
+        let release = release_without_bundle();
+        assert_eq!(
+            agent_bundle_variables(&release),
+            [
+                (AGENT_BUNDLE_IMAGE_ENV, None),
+                (AGENT_BUNDLE_RETAINED_IMAGES_ENV, None)
+            ]
+        );
+        let environment = &kubernetes_release_commands(&release)[1];
+        assert!(environment.contains(&"COGNIA_AGENT_BUNDLE_IMAGE-".to_string()));
+        assert!(environment.contains(&"COGNIA_AGENT_BUNDLE_RETAINED_IMAGES-".to_string()));
+
+        let patch = kubernetes_config_patch(&kubernetes_target(), &release);
+        assert!(patch["data"]["agentBundleImage"].is_null());
+        assert!(patch["data"]["agentBundleRetainedImages"].is_null());
+        assert_eq!(patch["data"]["runnerImage"], release.runner_image);
+    }
+
+    #[test]
+    fn a_release_with_bundles_sets_current_and_retained_images() {
+        let release = release_with_bundles();
+        let retained = release.retained_agent_bundle_images.join(",");
+        assert_eq!(
+            agent_bundle_variables(&release),
+            [
+                (AGENT_BUNDLE_IMAGE_ENV, release.agent_bundle_image.clone()),
+                (AGENT_BUNDLE_RETAINED_IMAGES_ENV, Some(retained.clone()))
+            ]
+        );
+        let environment = &kubernetes_release_commands(&release)[1];
+        assert!(environment.contains(&format!(
+            "COGNIA_AGENT_BUNDLE_IMAGE={}",
+            release.agent_bundle_image.as_deref().unwrap()
+        )));
+        assert!(environment.contains(&format!("COGNIA_AGENT_BUNDLE_RETAINED_IMAGES={retained}")));
+
+        let patch = kubernetes_config_patch(&kubernetes_target(), &release);
+        assert_eq!(
+            patch["data"]["agentBundleImage"],
+            release.agent_bundle_image.unwrap()
+        );
+        assert_eq!(patch["data"]["agentBundleRetainedImages"], retained);
+    }
+
+    #[test]
+    fn bundle_variable_names_match_the_environment_baseline() {
+        let baseline = include_str!("../../cognia-environment/src/baseline.rs");
+        for name in [AGENT_BUNDLE_IMAGE_ENV, AGENT_BUNDLE_RETAINED_IMAGES_ENV] {
+            assert!(
+                baseline.contains(&format!("= \"{name}\";")),
+                "{name} is not a constant in cognia-environment's baseline loader"
+            );
+        }
+    }
+
+    #[test]
+    fn kubernetes_release_updates_server_and_dynamic_runtime_configuration() {
+        let release = release_without_bundle();
 
         let commands = kubernetes_release_commands(&release);
 

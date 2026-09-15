@@ -50,6 +50,8 @@ export interface DeploymentFormState {
   serverImage: string
   runnerImage: string
   workspaceRuntimeImage: string
+  /** Optional; empty leaves `images.agentBundle` out of the target. */
+  agentBundleImage: string
   namespace: string
   ingressClassName: string
   storageClassName: string
@@ -90,6 +92,7 @@ export const INITIAL_DEPLOYMENT_FORM: DeploymentFormState = {
   serverImage: "",
   runnerImage: "",
   workspaceRuntimeImage: "",
+  agentBundleImage: "",
   namespace: "cognia-staging",
   ingressClassName: "nginx",
   storageClassName: "standard",
@@ -183,6 +186,7 @@ function tlsFor(state: DeploymentFormState) {
  * from the validator to whichever consumer read a field that is not there.
  */
 export function buildDeploymentTarget(state: DeploymentFormState): unknown {
+  const agentBundle = state.agentBundleImage.trim()
   return {
     apiVersion: DEPLOYMENT_TARGET_API_VERSION,
     kind: "DeploymentTarget",
@@ -225,6 +229,9 @@ export function buildDeploymentTarget(state: DeploymentFormState): unknown {
         server: state.serverImage,
         runner: state.runnerImage,
         workspaceRuntime: state.workspaceRuntimeImage,
+        // Optional, like `runtimeClassName`: a blank field means no bundle,
+        // not an empty image the schema would reject.
+        ...(agentBundle ? { agentBundle } : {}),
       },
     },
   }
@@ -294,6 +301,7 @@ export function deploymentFormFromTarget(target: DeploymentTarget): DeploymentFo
     serverImage: target.spec.images.server,
     runnerImage: target.spec.images.runner,
     workspaceRuntimeImage: target.spec.images.workspaceRuntime,
+    agentBundleImage: target.spec.images.agentBundle ?? "",
     // The absent topology's fields keep their defaults rather than emptying:
     // switching topology in the wizard should not hand the user a blank form.
     namespace: target.spec.kubernetes?.namespace ?? INITIAL_DEPLOYMENT_FORM.namespace,

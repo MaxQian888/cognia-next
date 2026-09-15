@@ -55,7 +55,12 @@ import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import type { RecoveryPoint, ServerDetail, ServerLogEntry } from "@/lib/server-ops/client"
+import type {
+  RecoveryPoint,
+  ReleaseImages,
+  ServerDetail,
+  ServerLogEntry,
+} from "@/lib/server-ops/client"
 import { cn } from "@/lib/utils"
 import { formatBytes, HealthLabel, useAbsoluteTime, useRelativeTime } from "./server-visuals"
 
@@ -72,11 +77,7 @@ export interface ServerDetailActions {
   onRestore: (recoveryPointId: string) => void
   onRollback: () => void
   onRotateKey: (keyVersion: string) => void
-  onUpgrade: (release: {
-    serverImage: string
-    runnerImage: string
-    workspaceRuntimeImage: string
-  }) => void
+  onUpgrade: (release: ReleaseImages) => void
   onConnectAgent: () => void
 }
 
@@ -151,6 +152,8 @@ function UpgradeDialog({
   const [serverImage, setServerImage] = useState("")
   const [runnerImage, setRunnerImage] = useState("")
   const [workspaceRuntimeImage, setWorkspaceRuntimeImage] = useState("")
+  // Optional: the three required images decide whether the form is complete.
+  const [agentBundleImage, setAgentBundleImage] = useState("")
   const complete = Boolean(serverImage.trim() && runnerImage.trim() && workspaceRuntimeImage.trim())
 
   const fields = [
@@ -161,6 +164,12 @@ function UpgradeDialog({
       workspaceRuntimeImage,
       setWorkspaceRuntimeImage,
       "wizard.placeholders.workspaceRuntimeImage",
+    ],
+    [
+      "upgrade.agentBundleImage",
+      agentBundleImage,
+      setAgentBundleImage,
+      "wizard.placeholders.agentBundleImage",
     ],
   ] as const
 
@@ -186,6 +195,9 @@ function UpgradeDialog({
                 placeholder={t(placeholderKey as "wizard.placeholders.serverImage")}
                 onChange={(event) => setValue(event.target.value)}
               />
+              {labelKey === "upgrade.agentBundleImage" && (
+                <FieldDescription>{t("upgrade.agentBundleHint")}</FieldDescription>
+              )}
             </Field>
           ))}
           <FieldDescription>{t("upgrade.digestNotice")}</FieldDescription>
@@ -202,6 +214,7 @@ function UpgradeDialog({
                 serverImage: serverImage.trim(),
                 runnerImage: runnerImage.trim(),
                 workspaceRuntimeImage: workspaceRuntimeImage.trim(),
+                ...(agentBundleImage.trim() ? { agentBundleImage: agentBundleImage.trim() } : {}),
               })
               onOpenChange(false)
             }}

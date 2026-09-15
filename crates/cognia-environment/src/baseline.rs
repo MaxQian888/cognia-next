@@ -10,8 +10,10 @@
 //!    `COGNIA_SANDBOX_POOL_ENABLED` is ignored (with a note) when it exists.
 //! 2. **The legacy mapping** from `COGNIA_RUNNER_IMAGE`: one `legacy-env`
 //!    entry, a size class from `COGNIA_RUNNER_CPUS` / `COGNIA_RUNNER_MEMORY_MB`,
-//!    the agent bundle from `COGNIA_AGENT_BUNDLE_IMAGE`, and the pool switch
-//!    from `COGNIA_SANDBOX_POOL_ENABLED`.
+//!    the agent bundle from `COGNIA_AGENT_BUNDLE_IMAGE` with the older bundles
+//!    projects may still pin from `COGNIA_AGENT_BUNDLE_RETAINED_IMAGES`, and the
+//!    pool switch from `COGNIA_SANDBOX_POOL_ENABLED`. A controller-managed
+//!    deployment gets both bundle variables from its release (ADR-0183).
 //! 3. **Nothing**: [`EnvironmentBaseline::disabled`].
 //!
 //! # What refuses boot and what does not
@@ -54,6 +56,9 @@ pub const BASELINE_FILE_ENV: &str = "COGNIA_ENVIRONMENT_BASELINE_FILE";
 pub const SANDBOX_POOL_ENABLED_ENV: &str = "COGNIA_SANDBOX_POOL_ENABLED";
 /// The release's agent bundle image (ADR-0183), digest-pinned by the release.
 pub const AGENT_BUNDLE_IMAGE_ENV: &str = "COGNIA_AGENT_BUNDLE_IMAGE";
+/// Comma-separated, digest-pinned bundle images a project may still pin,
+/// newest first. The Ops Controller fills it from its release history.
+pub const AGENT_BUNDLE_RETAINED_IMAGES_ENV: &str = "COGNIA_AGENT_BUNDLE_RETAINED_IMAGES";
 /// Same names as `cognia_external_agent::container_backend::{RUNNER_IMAGE_ENV,
 /// RUNNER_CPUS_ENV, RUNNER_MEMORY_MB_ENV}`; this crate stays free of that
 /// dependency, and the legacy backend's defaults are repeated below.
@@ -86,6 +91,7 @@ pub struct BaselineInputs {
     pub runner_cpus: Option<String>,
     pub runner_memory_mb: Option<String>,
     pub agent_bundle_image: Option<String>,
+    pub agent_bundle_retained_images: Option<String>,
 }
 
 impl BaselineInputs {
@@ -100,6 +106,7 @@ impl BaselineInputs {
             runner_cpus: read(RUNNER_CPUS_ENV),
             runner_memory_mb: read(RUNNER_MEMORY_MB_ENV),
             agent_bundle_image: read(AGENT_BUNDLE_IMAGE_ENV),
+            agent_bundle_retained_images: read(AGENT_BUNDLE_RETAINED_IMAGES_ENV),
         }
     }
 
@@ -327,7 +334,7 @@ fn legacy_baseline(
         }
     };
 
-    let bundle = match &inputs.agent_bundle_image {
+    let mut bundle = match &inputs.agent_bundle_image {
         None => None,
         Some(raw) => match ImageReference::parse(raw) {
             Err(error) => {
@@ -360,6 +367,61 @@ fn legacy_baseline(
             }),
         },
     };
+
+    if let Some(raw) = &inputs.agent_bundle_retained_images {
+        match bundle.as_mut() {
+            // Nothing to retain beside; the current bundle's own note or
+            // error already says why.
+            None => notes.push(BaselineNote {
+                code: "baseline_bundle_retained_ignored",
+                variable: AGENT_BUNDLE_RETAINED_IMAGES_ENV,
+                message: format!(
+                    "{AGENT_BUNDLE_RETAINED_IMAGES_ENV} is ignored without a pinned {AGENT_BUNDLE_IMAGE_ENV}"
+                ),
+            }),
+            Some(policy) => {
+                for item in raw.split(',').map(str::trim).filter(|item| !item.is_empty()) {
+                    match ImageReference::parse(item) {
+                        Err(error) => unusable(
+                            AGENT_BUNDLE_RETAINED_IMAGES_ENV,
+                            format!("{item:?}: {error}"),
+                            &mut notes,
+                        )?,
+                        Ok(ImageReference { digest: None, .. }) => notes.push(BaselineNote {
+                            code: "baseline_bundle_unpinned",
+                            variable: AGENT_BUNDLE_RETAINED_IMAGES_ENV,
+                            message: format!(
+                                "{item:?} has no digest; projects cannot pin it until it is pinned"
+                            ),
+                        }),
+                        Ok(ImageReference {
+                            digest: Some(digest),
+                            tag,
+                            ..
+                        }) => {
+                            let listed = std::iter::once(&policy.current)
+                                .chain(policy.retained.iter())
+                                .any(|listed| listed.digest == digest);
+                            if listed {
+                                unusable(
+                                    AGENT_BUNDLE_RETAINED_IMAGES_ENV,
+                                    format!("{item:?} is already listed"),
+                                    &mut notes,
+                                )?;
+                                continue;
+                            }
+                            policy.retained.push(SpecBundle {
+                                digest,
+                                release_tag: tag
+                                    .unwrap_or_else(|| UNTAGGED_BUNDLE_RELEASE.into()),
+                                pinned: false,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     let mut baseline = EnvironmentBaseline::disabled();
     baseline.sandbox_pool = SandboxPoolSwitch {
@@ -497,6 +559,10 @@ mod tests {
             Some("value-of-COGNIA_AGENT_BUNDLE_IMAGE")
         );
         assert_eq!(
+            captured.agent_bundle_retained_images.as_deref(),
+            Some("value-of-COGNIA_AGENT_BUNDLE_RETAINED_IMAGES")
+        );
+        assert_eq!(
             captured.runner_cpus.as_deref(),
             Some("value-of-COGNIA_RUNNER_CPUS")
         );
@@ -630,6 +696,108 @@ mod tests {
             loaded.baseline.bundle.unwrap().current.release_tag,
             UNTAGGED_BUNDLE_RELEASE
         );
+    }
+
+    const RETAINED_V1: &str =
+        "sha256:3333333333333333333333333333333333333333333333333333333333333333";
+    const RETAINED_V0: &str =
+        "sha256:4444444444444444444444444444444444444444444444444444444444444444";
+
+    fn bundle_ref(tag: &str, digest: &str) -> String {
+        format!("ghcr.io/maxqian888/cognia-agent-bundle{tag}@{digest}")
+    }
+
+    fn with_retained(retained: &str, pool: &str) -> BaselineInputs {
+        BaselineInputs {
+            runner_image: Some(pinned_runner()),
+            agent_bundle_image: Some(bundle_ref(":v1.2.0", BUNDLE_DIGEST)),
+            agent_bundle_retained_images: Some(retained.into()),
+            sandbox_pool_enabled: Some(pool.into()),
+            ..inputs()
+        }
+    }
+
+    #[test]
+    fn retained_bundles_stay_pinnable_in_release_order() {
+        let retained = format!(
+            "{}, {},",
+            bundle_ref(":v1.1.0", RETAINED_V1),
+            bundle_ref("", RETAINED_V0)
+        );
+        let loaded = load_baseline_from(&with_retained(&retained, "on")).unwrap();
+        assert!(loaded.notes.is_empty(), "{:?}", loaded.notes);
+        let bundle = loaded.baseline.bundle.unwrap();
+        assert_eq!(bundle.current.digest, BUNDLE_DIGEST);
+        assert_eq!(
+            bundle
+                .retained
+                .iter()
+                .map(|retained| (retained.digest.as_str(), retained.release_tag.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (RETAINED_V1, "v1.1.0"),
+                (RETAINED_V0, UNTAGGED_BUNDLE_RELEASE)
+            ]
+        );
+    }
+
+    #[test]
+    fn retained_bundles_without_a_current_bundle_are_ignored_with_a_note() {
+        for current in [None, Some("ghcr.io/maxqian888/cognia-agent-bundle:latest")] {
+            let loaded = load_baseline_from(&BaselineInputs {
+                agent_bundle_image: current.map(str::to_owned),
+                ..with_retained(&bundle_ref(":v1.1.0", RETAINED_V1), "on")
+            })
+            .unwrap();
+            assert!(loaded.baseline.bundle.is_none());
+            assert!(
+                loaded
+                    .notes
+                    .iter()
+                    .any(|note| note.code == "baseline_bundle_retained_ignored"),
+                "{current:?}: {:?}",
+                loaded.notes
+            );
+        }
+    }
+
+    #[test]
+    fn a_tag_only_retained_bundle_is_a_note_in_both_modes() {
+        for pool in ["off", "on"] {
+            let loaded = load_baseline_from(&with_retained(
+                "ghcr.io/maxqian888/cognia-agent-bundle:v1.1.0",
+                pool,
+            ))
+            .unwrap();
+            assert!(loaded.baseline.bundle.unwrap().retained.is_empty());
+            assert_eq!(loaded.notes[0].code, "baseline_bundle_unpinned");
+            assert_eq!(loaded.notes[0].variable, AGENT_BUNDLE_RETAINED_IMAGES_ENV);
+        }
+    }
+
+    #[test]
+    fn a_malformed_or_repeated_retained_bundle_is_a_note_off_and_an_error_on() {
+        for retained in [
+            "@@@".to_string(),
+            bundle_ref(":v1.2.0-again", BUNDLE_DIGEST),
+            format!(
+                "{},{}",
+                bundle_ref(":v1.1.0", RETAINED_V1),
+                bundle_ref("", RETAINED_V1)
+            ),
+        ] {
+            let loaded = load_baseline_from(&with_retained(&retained, "off")).unwrap();
+            assert_eq!(loaded.notes.len(), 1, "{retained}: {:?}", loaded.notes);
+            assert_eq!(loaded.notes[0].code, "baseline_env_unusable");
+            loaded.baseline.validate().unwrap();
+
+            match load_baseline_from(&with_retained(&retained, "on")) {
+                Err(BaselineError::EnvInvalid { variable, .. }) => {
+                    assert_eq!(variable, AGENT_BUNDLE_RETAINED_IMAGES_ENV)
+                }
+                other => panic!("{retained}: expected EnvInvalid, got {other:?}"),
+            }
+        }
     }
 
     #[test]

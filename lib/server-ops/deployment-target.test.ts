@@ -91,6 +91,44 @@ describe("DeploymentTarget contract", () => {
     ])
   })
 
+  it("treats the agent bundle as optional but pins it like every image when present", () => {
+    const parsed = parseDeploymentTarget(validTarget)
+    expect(parsed.spec.images).not.toHaveProperty("agentBundle")
+
+    const pinned = parseDeploymentTarget({
+      ...validTarget,
+      spec: {
+        ...validTarget.spec,
+        images: {
+          ...validTarget.spec.images,
+          agentBundle: `ghcr.io/owner/cognia-agent-bundle:v1.2.0@sha256:${"d".repeat(64)}`,
+        },
+      },
+    })
+    expect(productionCertificationIssues(pinned)).toEqual([])
+
+    const mutable = parseDeploymentTarget({
+      ...validTarget,
+      spec: {
+        ...validTarget.spec,
+        images: {
+          ...validTarget.spec.images,
+          agentBundle: "ghcr.io/owner/cognia-agent-bundle:latest",
+        },
+      },
+    })
+    expect(productionCertificationIssues(mutable)).toEqual([
+      "images.agentBundle must use an immutable sha256 digest",
+    ])
+
+    expect(() =>
+      parseDeploymentTarget({
+        ...validTarget,
+        spec: { ...validTarget.spec, images: { ...validTarget.spec.images, agentBundle: "" } },
+      })
+    ).toThrow(/agentBundle/)
+  })
+
   it("requires topology-specific infrastructure without accepting a mixed target", () => {
     expect(() =>
       parseDeploymentTarget({
