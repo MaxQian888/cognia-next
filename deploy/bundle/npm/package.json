@@ -1,0 +1,19 @@
+{
+  "name": "cognia-agent-bundle",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Agent CLIs pinned into the cognia-agent-bundle image (ADR-0183). Versions are exact; see deploy/bundle/agent-versions.json.",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "0.77.0",
+    "@agentclientprotocol/codex-acp": "1.11.0",
+    "@anthropic-ai/claude-code": "2.1.272",
+    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@github/copilot": "1.0.83",
+    "@google/gemini-cli": "0.59.0",
+    "@openai/codex": "0.153.4",
+    "@qwen-code/qwen-code": "0.23.4",
+    "opencode-ai": "1.18.31",
+    "pi-acp": "0.0.33"
+  }
+}

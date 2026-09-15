@@ -1,0 +1,244 @@
+{
+  "$comment": "What the cognia-agent-bundle image contains (ADR-0183). Exact versions only: npm packages are also pinned in npm/package.json + npm/package-lock.json (integrity per package), every downloaded artifact carries the vendor-published sha256. This is a bundle lock, not a certification: it does not change protocol/external-agent-runtimes.json certifiedVersions. `node scripts/build/bundle-agent-versions.mjs check` keeps this file, the npm lock, the runtime catalog and the Dockerfile ARGs in agreement.",
+  "version": 1,
+  "node": {
+    "version": "26.8.2",
+    "alpine": "3.24",
+    "minGlibc": "2.28"
+  },
+  "tools": {
+    "git": {
+      "version": "2.55.0",
+      "url": "https://mirrors.edge.kernel.org/pub/software/scm/git/git-2.55.0.tar.xz",
+      "sha256": "457fdb04dc8728e007d4688695e6912e6f680727920f2a40bf11eacc17505357"
+    },
+    "curl": {
+      "$comment": "Built static for git's https transport. curl.se publishes PGP signatures, not checksums: the build verifies the signature and requires this primary key fingerprint (Daniel Stenberg's release key).",
+      "version": "8.22.0",
+      "url": "https://curl.se/download/curl-8.22.0.tar.xz",
+      "signatureUrl": "https://curl.se/download/curl-8.22.0.tar.xz.asc",
+      "keyUrl": "https://daniel.haxx.se/mykey.asc",
+      "signingKey": "27EDEAF22F3ABCEB50DB9A125CC908FDB71E12C2"
+    },
+    "ripgrep": {
+      "version": "15.2.0",
+      "assets": {
+        "amd64": {
+          "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-unknown-linux-musl.tar.gz",
+          "sha256": "33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c"
+        },
+        "arm64": {
+          "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-aarch64-unknown-linux-musl.tar.gz",
+          "sha256": "800b1e7206afe799dfb5a6901f23147cfaabe0e52210538100f61e86e1740915"
+        }
+      }
+    }
+  },
+  "installScripts": {
+    "@anthropic-ai/claude-code": "Its postinstall links the platform's native claude binary (glibc or musl, chosen at install time) into bin/claude.exe.",
+    "opencode-ai": "Its postinstall links the platform's native opencode binary into bin/opencode.exe."
+  },
+  "runtimes": [
+    {
+      "id": "claude-agent-acp",
+      "version": "0.77.0",
+      "libc": ["glibc", "musl"],
+      "commands": [
+        {
+          "name": "claude-agent-acp",
+          "package": "@agentclientprotocol/claude-agent-acp",
+          "bin": "claude-agent-acp",
+          "smoke": "syntax"
+        },
+        {
+          "name": "claude",
+          "package": "@anthropic-ai/claude-code",
+          "bin": "claude",
+          "smoke": "version"
+        }
+      ]
+    },
+    {
+      "id": "codex-acp",
+      "version": "1.11.0",
+      "libc": ["glibc", "musl"],
+      "commands": [
+        {
+          "name": "codex-acp",
+          "package": "@agentclientprotocol/codex-acp",
+          "bin": "codex-acp",
+          "smoke": "syntax"
+        }
+      ]
+    },
+    {
+      "id": "codex-app-server",
+      "version": "0.153.4",
+      "libc": ["glibc", "musl"],
+      "commands": [
+        {
+          "name": "codex",
+          "package": "@openai/codex",
+          "bin": "codex",
+          "smoke": "version"
+        }
+      ]
+    },
+    {
+      "id": "gemini-cli",
+      "version": "0.59.0",
+      "libc": ["glibc", "musl"],
+      "commands": [
+        {
+          "name": "gemini",
+          "package": "@google/gemini-cli",
+          "bin": "gemini",
+          "smoke": "version"
+        }
+      ]
+    },
+    {
+      "id": "copilot-cli",
+      "version": "1.0.83",
+      "libc": ["glibc", "musl"],
+      "commands": [
+        {
+          "name": "copilot",
+          "package": "@github/copilot",
+          "bin": "copilot",
+          "smoke": "version"
+        }
+      ]
+    },
+    {
+      "id": "qwen-code",
+      "version": "0.23.4",
+      "libc": ["glibc", "musl"],
+      "commands": [
+        {
+          "name": "qwen",
+          "package": "@qwen-code/qwen-code",
+          "bin": "qwen",
+          "smoke": "version"
+        }
+      ]
+    },
+    {
+      "id": "pi",
+      "version": "0.85.1",
+      "libc": ["glibc", "musl"],
+      "commands": [
+        {
+          "name": "pi",
+          "package": "@earendil-works/pi-coding-agent",
+          "bin": "pi",
+          "smoke": "version"
+        },
+        {
+          "name": "pi-acp",
+          "package": "pi-acp",
+          "bin": "pi-acp",
+          "smoke": "syntax"
+        }
+      ]
+    },
+    {
+      "id": "opencode",
+      "version": "1.18.31",
+      "libc": ["glibc", "musl"],
+      "commands": [
+        {
+          "name": "opencode",
+          "package": "opencode-ai",
+          "bin": "opencode",
+          "smoke": "version"
+        }
+      ]
+    },
+    {
+      "id": "opencode-acp",
+      "version": "1.18.31",
+      "libc": ["glibc", "musl"],
+      "commands": [
+        {
+          "name": "opencode",
+          "package": "opencode-ai",
+          "bin": "opencode",
+          "smoke": "version"
+        }
+      ]
+    },
+    {
+      "id": "kiro-cli",
+      "version": "2.21.4",
+      "libc": ["glibc", "musl"],
+      "archive": {
+        "$comment": "Kiro's own installer falls back to the musl archive on glibc hosts, so the static musl build serves both trees and no glibc floor applies.",
+        "command": "kiro-cli",
+        "smoke": "version",
+        "assets": {
+          "glibc-amd64": {
+            "url": "https://prod.download.cli.kiro.dev/stable/2.21.4/kirocli-x86_64-linux-musl.tar.gz",
+            "sha256": "3a367d0efdcbff67551cfece3938c9237bd3a0099ddc5ac697a38e20af3eeac3"
+          },
+          "glibc-arm64": {
+            "url": "https://prod.download.cli.kiro.dev/stable/2.21.4/kirocli-aarch64-linux-musl.tar.gz",
+            "sha256": "6eeefad6f3a2ed978d4147396344c9a7bbcde3c8ee173894ba5c97e7ba470eb8"
+          },
+          "musl-amd64": {
+            "url": "https://prod.download.cli.kiro.dev/stable/2.21.4/kirocli-x86_64-linux-musl.tar.gz",
+            "sha256": "3a367d0efdcbff67551cfece3938c9237bd3a0099ddc5ac697a38e20af3eeac3"
+          },
+          "musl-arm64": {
+            "url": "https://prod.download.cli.kiro.dev/stable/2.21.4/kirocli-aarch64-linux-musl.tar.gz",
+            "sha256": "6eeefad6f3a2ed978d4147396344c9a7bbcde3c8ee173894ba5c97e7ba470eb8"
+          }
+        }
+      }
+    },
+    {
+      "id": "droid",
+      "version": "0.219.0",
+      "libc": ["glibc"],
+      "binary": {
+        "$comment": "x64-baseline, not the AVX2 build: a sandbox node's CPU flags are not known when the bundle is built.",
+        "command": "droid",
+        "smoke": "version",
+        "assets": {
+          "glibc-amd64": {
+            "url": "https://downloads.factory.ai/factory-cli/releases/0.219.0/linux/x64-baseline/droid",
+            "sha256": "1f8a3c7b72bf5e7c37e2ac0cc7a7243a9e785536438d0a4ba3473b0186ce2134"
+          },
+          "glibc-arm64": {
+            "url": "https://downloads.factory.ai/factory-cli/releases/0.219.0/linux/arm64/droid",
+            "sha256": "f10338679251b7cee2918f73f631626aba4a7ffd0ea9bbac83af0dbbacdf3a3d"
+          }
+        }
+      }
+    },
+    {
+      "id": "cursor-agent",
+      "unavailable": "Cursor publishes no checksum for its agent CLI tarball, so a pinned copy cannot be verified."
+    },
+    {
+      "id": "devin",
+      "unavailable": "No pinned Linux distribution is published; the runner image does not ship it either."
+    },
+    {
+      "id": "opencode-remote",
+      "unavailable": "A remote runtime: nothing of it runs inside the sandbox."
+    },
+    {
+      "id": "opencode-v2-service",
+      "unavailable": "A remote runtime: nothing of it runs inside the sandbox."
+    },
+    {
+      "id": "deepseek-harness",
+      "unavailable": "Managed by the Cognia host, not a CLI launched inside the sandbox."
+    },
+    {
+      "id": "cline",
+      "unavailable": "The runner image installs it, but no Cognia runtime launches it: it was removed from the launch allowlist."
+    }
+  ]
+}

@@ -5,6 +5,7 @@ name: Images
 #   ghcr.io/<owner>/cognia-signaling      services/signaling-server
 #   ghcr.io/<owner>/cognia-share          services/share-server
 #   ghcr.io/<owner>/cognia-runner        deploy/runner (external agent CLIs)
+#   ghcr.io/<owner>/cognia-agent-bundle  deploy/bundle (ADR-0183: CLIs injected into user images)
 #   ghcr.io/<owner>/cognia-workspace-runtime services/workspace-runtime
 #   ghcr.io/<owner>/cognia-diagnostics    services/diagnostic-server
 #   ghcr.io/<owner>/cognia-collab         Dockerfile.collab-server
@@ -44,6 +45,12 @@ on:
       - "Dockerfile.collab-server"
       - ".dockerignore"
       - "deploy/runner/**"
+      # The agent bundle: its Dockerfile, pins, npm lock and smoke script, the
+      # script that stages it, and the runtime catalog its pins are checked
+      # against. cognia-sandboxd itself is under crates/** below.
+      - "deploy/bundle/**"
+      - "scripts/build/bundle-agent-versions.mjs"
+      - "protocol/external-agent-runtimes.json"
       - "services/signaling-server/Dockerfile"
       - "services/share-server/Dockerfile"
       - "services/workspace-runtime/**"
@@ -185,6 +192,73 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: ${{ github.event_name != 'pull_request' && format('type=gha,scope={0},mode=max', matrix.name) || '' }}
+
+  # ADR-0183: the agent bundle. Built for amd64 and arm64 (QEMU), and walked
+  # through real user images (deploy/bundle/smoke.sh) before anything is
+  # pushed. Its layers run to several GB per architecture, so it caches in the
+  # registry like cognia-server, never in the shared GHA budget; PRs only read.
+  agent-bundle:
+    name: cognia-agent-bundle
+    needs: vars
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+
+      - name: Check bundle pins
+        run: node scripts/build/bundle-agent-versions.mjs check
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        if: needs.vars.outputs.should_push == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ needs.vars.outputs.owner }}/cognia-agent-bundle
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: Build amd64 for the smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/bundle/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: cognia-agent-bundle:smoke
+          build-args: BUNDLE_RELEASE_TAG=${{ github.ref_name }}
+          cache-from: type=registry,ref=ghcr.io/${{ needs.vars.outputs.owner }}/cognia-agent-bundle:buildcache
+
+      - name: Smoke against user images
+        run: sh deploy/bundle/smoke.sh cognia-agent-bundle:smoke
+
+      - name: Build amd64 + arm64
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/bundle/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ needs.vars.outputs.should_push == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: BUNDLE_RELEASE_TAG=${{ github.ref_name }}
+          cache-from: type=registry,ref=ghcr.io/${{ needs.vars.outputs.owner }}/cognia-agent-bundle:buildcache
+          cache-to: ${{ needs.vars.outputs.should_push == 'true' && format('type=registry,ref=ghcr.io/{0}/cognia-agent-bundle:buildcache,mode=max', needs.vars.outputs.owner) || '' }}
 
   cognia-server-check:
     name: cognia-server (cargo check in Docker)

@@ -55,6 +55,8 @@ export const ROOT_CONTEXT_RUST_DOCKERFILES = [
   "Dockerfile.collab-server",
   "Dockerfile.deploy-agent",
   "Dockerfile.ops-controller",
+  // ADR-0183: builds the static cognia-sandboxd from the workspace.
+  "deploy/bundle/Dockerfile",
 ]
 
 /** Dockerfiles that run `pnpm install` against the root workspace. */

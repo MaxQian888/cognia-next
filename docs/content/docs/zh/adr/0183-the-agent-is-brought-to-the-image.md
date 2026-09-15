@@ -30,13 +30,19 @@ description: "agent CLI 不再预装在项目运行的镜像里。每个版本�
 ```
 /opt/cognia/bundle-manifest.json   版本标签、固定的 CLI 版本、按 libc 的可用性
 /opt/cognia/bin/cognia-sandboxd    静态编译（musl）
-/opt/cognia/bin/{git,rg}           静态编译；certs/ca-bundle.pem
-/opt/cognia/common/                静态的厂商二进制（如 codex）
-/opt/cognia/glibc/                 node、npm 安装的 CLI、仅 glibc 的厂商 CLI
-/opt/cognia/musl/                  node、npm 安装的 CLI、musl 版厂商构建
+/opt/cognia/common/{git,bin}       静态、可重定位的 git 与 rg，两种 libc 通用
+/opt/cognia/certs/ca-bundle.pem    给没有 CA 证书库的镜像用
+/opt/cognia/glibc/                 node、npm 安装的 CLI、glibc 版厂商 CLI
+/opt/cognia/musl/                  自带加载器的 node、npm 安装的 CLI、musl 版厂商构建
 ```
 
-- **固定版本**：CLI 版本由 `scripts/build/bundle-agent-versions.mjs` 从 `protocol/external-agent-runtimes.json` 的 `certifiedVersions` 生成，取代 `latest`。没有 musl 构建的运行时标为仅 glibc，在 musl 镜像上会带着原因被拒绝。
+- **固定版本**：版本来自 bundle 锁文件 `deploy/bundle/agent-versions.json`，取代 `latest`。
+  - npm CLI 另外在 `deploy/bundle/npm/package-lock.json` 里固定，每个包都带 sha512 integrity。
+  - 厂商下载物带厂商公布的 sha256；curl 不公布校验和，改用固定密钥指纹校验 PGP 签名。
+  - `scripts/build/bundle-agent-versions.mjs check` 让锁文件与运行时目录保持一致：目录里每个运行时要么被打包，要么标为 `unavailable` 并写明原因（例如厂商不公布校验和）。
+  - 锁文件不是认证：它从不修改 `certifiedVersions`，因为在桌面端，certified 版本可以免同意直接运行。
+  - 没有 musl 构建的运行时标为仅 glibc，在 musl 镜像上会带着原因被拒绝；需要比 bundle 下限更新的 glibc 的厂商二进制，在清单里带各架构自己的 `minGlibc`。
+- **两棵 libc 树，自给程度不同**：glibc 上 Node 用官方构建，依赖镜像自己的 glibc 和 `libstdc++`，因为自带更新的 C++ 运行时反而会要求比许多镜像更新的 glibc。musl 上 Node 被改为加载 bundle 自带的 musl 加载器和 C++ 运行时，所以在没有 `libstdc++` 的 Alpine 基础镜像上也能跑，与镜像的 musl 版本无关。
 - **发布契约**：bundle digest 是发布契约里的第四个镜像，与 server、runner、workspace runtime 并列：`ImageConfig.agentBundle` 与 `AgentRelease.agent_bundle_image`。生产认证要求它按 digest 固定。
 - **项目锁定**：部署仍保留某个旧 bundle 时，项目可以锁定在它上面；锁定的 bundle 已被移除时，以 `bundle_pin_retired` 拒绝。
 
@@ -48,7 +54,8 @@ description: "agent CLI 不再预装在项目运行的镜像里。每个版本�
 
 - `install --stage core|libc`：把 bundle 目录拷进注入卷。
 - `probe`：在用户镜像里运行并写出 `probe.json`。它检测：
-  - libc：看存在哪个动态加载器（`ld-musl-*` / `ld-linux-*`），glibc 再读 `libc.so.6` 报告的版本；
+  - libc：看 `/bin/sh` 链接的加载器（`PT_INTERP`），只有 shell 是静态编译时才退回看加载器文件。单看文件是否存在，会误判装了 `musl` 包的 Debian 和装了 `gcompat` 的 Alpine；
+  - glibc 还要读 `libc.so.6` 里记录的版本（只读不执行），并检查 `libstdc++.so.6` 是否存在；
   - `/bin/sh`；
   - `/etc/passwd` 里的目标用户；
   - `HOME` 与工作区是否可写；

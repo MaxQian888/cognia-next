@@ -30,13 +30,19 @@ The existing persistent runtime supervisor cannot carry that job. `services/work
 ```
 /opt/cognia/bundle-manifest.json   release tag, pinned CLI versions, per-libc availability
 /opt/cognia/bin/cognia-sandboxd    static (musl)
-/opt/cognia/bin/{git,rg}           static; certs/ca-bundle.pem
-/opt/cognia/common/                static vendor binaries (e.g. codex)
-/opt/cognia/glibc/                 node, npm-installed CLIs, glibc-only vendor CLIs
-/opt/cognia/musl/                  node, npm-installed CLIs, musl vendor builds
+/opt/cognia/common/{git,bin}       static relocatable git and rg, for either libc
+/opt/cognia/certs/ca-bundle.pem    for images without a CA store
+/opt/cognia/glibc/                 node, npm-installed CLIs, glibc vendor CLIs
+/opt/cognia/musl/                  node on its own loader, npm-installed CLIs, musl vendor builds
 ```
 
-- **Pinned versions.** CLI versions come from `protocol/external-agent-runtimes.json` `certifiedVersions` through `scripts/build/bundle-agent-versions.mjs`, and replace `latest`. A runtime with no musl build is listed as glibc-only and is refused on musl images with its reason.
+- **Pinned versions.** Versions come from `deploy/bundle/agent-versions.json`, a bundle lock, and replace `latest`.
+  - npm CLIs are also pinned in `deploy/bundle/npm/package-lock.json` with sha512 integrity for every package.
+  - Vendor downloads carry the vendor-published sha256; curl, which publishes none, is verified by PGP signature from a pinned key.
+  - `scripts/build/bundle-agent-versions.mjs check` holds the lock to the runtime catalog. Every catalog runtime is either bundled or marked `unavailable` with its reason, for example a vendor that publishes no checksum.
+  - The lock is not certification: it never changes `certifiedVersions`, because on a desktop a certified version runs without consent.
+  - A runtime with no musl build is listed as glibc-only and is refused on musl images with its reason. A vendor binary that needs a newer glibc than the bundle's floor carries its own per-architecture `minGlibc` in the manifest.
+- **Two libc trees, differently self-contained.** On glibc, Node is the official build and uses the image's glibc and `libstdc++`. A newer bundled C++ runtime would demand a newer glibc than many images have. On musl, Node is patched to load a bundled musl loader and C++ runtime, so it runs on Alpine base images without `libstdc++`, whatever their musl release.
 - **Release contract.** The bundle digest is the fourth image in the release contract, alongside server, runner and workspace runtime: `ImageConfig.agentBundle` and `AgentRelease.agent_bundle_image`. Production certification requires it to be digest-pinned.
 - **Project pins.** A project may pin an older bundle while the deployment still retains it. A retired pin is refused with `bundle_pin_retired`.
 
@@ -48,7 +54,8 @@ The existing persistent runtime supervisor cannot carry that job. `services/work
 
 - `install --stage core|libc` copies bundle trees into the injection volume.
 - `probe` runs inside the user image and writes `probe.json`. It detects:
-  - libc, from the dynamic loader present (`ld-musl-*` / `ld-linux-*`) and, for glibc, the version reported by `libc.so.6`;
+  - libc, from the loader `/bin/sh` is linked against (`PT_INTERP`), falling back to the loader files only for a static shell. File presence alone misreads Debian with the `musl` package and Alpine with `gcompat`;
+  - for glibc, the release recorded in `libc.so.6` (read, not executed), and whether `libstdc++.so.6` exists;
   - `/bin/sh`;
   - the target user, from `/etc/passwd`;
   - whether `HOME` and the workspace are writable;
