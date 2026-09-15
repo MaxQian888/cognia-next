@@ -82,6 +82,7 @@ pub fn runtime_home(data_root: &Path) -> PathBuf {
 /// `COGNIA_DATA_DIR` first so desktop and headless agree when the user has
 /// relocated it; otherwise the app data dir, matching every other Cognia store
 /// on desktop (`app_data_dir()/cognia`).
+#[cfg(feature = "tauri-host")]
 pub fn host_data_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     if let Ok(raw) = std::env::var("COGNIA_DATA_DIR") {
         if !raw.trim().is_empty() {
@@ -120,6 +121,7 @@ pub fn host_node_version() -> String {
 /// dir holds no such folder, so fall back to the repo checkout via the
 /// compile-time manifest dir — the same resource-dir-then-manifest-parent
 /// pattern `hooks::builtin::builtin_base_dir` uses.
+#[cfg(feature = "tauri-host")]
 pub fn host_source_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     use tauri::Manager;
     if let Ok(resource_dir) = app.path().resource_dir() {

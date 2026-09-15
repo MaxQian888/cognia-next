@@ -17,6 +17,12 @@ name = "cognia_external_agent"
 path = "src/lib.rs"
 
 [features]
+# The #[tauri::command] surface and the AppHandle-bound DSH path helpers. On by
+# default so the desktop/headless app is unchanged; `--no-default-features`
+# builds the exec backends Tauri-free for the in-sandbox supervisor
+# (`cognia-sandboxd`, ADR-0183). Precedent: cognia-gateway `tauri-host`.
+default = ["tauri-host"]
+tauri-host = ["dep:tauri"]
 # Docker flavor of the exec backend (headless server image).
 container-exec = ["dep:bollard"]
 # Kubernetes flavor (runner Pods); enabled alongside container-exec in the
@@ -25,7 +31,8 @@ k8s-exec = ["dep:kube", "dep:k8s-openapi"]
 workspace-runtime-exec = ["dep:reqwest", "dep:cognia-net"]
 
 [dependencies]
-tauri = { version = "=2.11.5" }
+tauri = { version = "=2.11.5", optional = true }
+url = "2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
@@ -37,7 +44,9 @@ async-trait = "0.1"
 parking_lot = "0.12"
 log = "0.4"
 futures-util = { version = "0.3", default-features = false }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "sync", "time", "io-util"] }
+# `fs` is used by workspace_runtime_backend; it used to arrive only through
+# tauri's feature unification, which `--no-default-features` removes.
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "sync", "time", "io-util", "fs"] }
 bollard = { version = "0.21", optional = true }
 kube = { version = "4", default-features = false, features = ["client", "ws", "runtime", "rustls-tls"], optional = true }
 k8s-openapi = { version = "0.28", features = ["v1_32"], optional = true }

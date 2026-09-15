@@ -5,6 +5,7 @@
 //! external agents via stdio transport.
 
 pub mod command_resolver;
+#[cfg(feature = "tauri-host")]
 pub mod commands;
 pub mod container_backend;
 pub mod dsh_runtime;

@@ -183,7 +183,7 @@ fn injected(raw: &str) -> Result<Map<String, Value>, String> {
                     return Err(INVALID.into());
                 }
                 let url = entry.get("url").and_then(Value::as_str).ok_or(INVALID)?;
-                let parsed_url = tauri::Url::parse(url).map_err(|_| INVALID)?;
+                let parsed_url = url::Url::parse(url).map_err(|_| INVALID)?;
                 if !["http", "https"].contains(&parsed_url.scheme())
                     || parsed_url.host_str().is_none()
                 {
