@@ -144,3 +144,25 @@ trust is.
 
 **Correction to ADR-0144.** Its "deliberately not done" list named
 `.cognia/workspace.json` as marked dormant and not read. That no longer holds.
+
+## Amendment — 2026-09-15: the environment block and shared-Host approval
+
+[ADR-0182](./0182-a-project-names-the-image-it-runs-in) adds an optional
+`environment` block to `.cognia/workspace.json` (catalog entry, image or a
+`devcontainer.json` path, plus lifecycle and egress hints) and reads
+`devcontainer.json` as a second declaration source. Both stay behind the two
+gates above. The file remains `version: 1`; a file without the block keeps the
+digest it had, so no existing approval re-prompts.
+
+Two things this ADR said are now scoped more narrowly:
+
+- **"Approval is per device, because trust is"** holds on the desktop. On a
+  shared cloud Host a per-device answer means nothing, so ADR-0182 records the
+  approval server-side, grants it only to a workspace Maintainer, an Org
+  Owner/Admin or the Host owner, and audits it.
+- **The trust row** gains two more optional, non-indexed fields for the
+  devcontainer declaration (`approvedDevcontainerDigest`,
+  `approvedDevcontainerAt`). Still no Dexie version bump.
+
+`canonicalize` moves to `lib/project-environment/canonical-json.ts` and is
+re-exported, so every digest this ADR produced is unchanged.

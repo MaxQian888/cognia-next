@@ -109,3 +109,19 @@ companion 面上）。
 
 **对 ADR-0144 的更正。** 它的「有意未做」清单里把 `.cognia/workspace.json` 列为
 已标记休眠、不被读取。这一条不再成立。
+
+## 修订 — 2026-09-15：environment 块与共享 Host 审批
+
+[ADR-0182](./0182-a-project-names-the-image-it-runs-in) 给 `.cognia/workspace.json`
+增加了可选的 `environment` 块（目录条目、镜像或 `devcontainer.json` 路径，以及生命周期与出网提示），
+并把 `devcontainer.json` 作为第二个声明来源读取。两者都仍在上文两道门之后。文件仍是 `version: 1`；
+不含该块的文件 digest 不变，已有的审批不会重新弹出。
+
+本文有两处说法的适用范围收窄了：
+
+- **「批准是按设备的，因为信任就是按设备的」** 在桌面端仍然成立。共享云 Host 上按设备的回答没有意义，
+  因此 ADR-0182 在服务端记录审批，只允许工作区 Maintainer、组织 Owner/Admin 或 Host 所有者批准，并写审计。
+- **信任行** 为 devcontainer 声明再增加两个可选、非索引字段（`approvedDevcontainerDigest`、
+  `approvedDevcontainerAt`），仍不升级 Dexie 版本。
+
+`canonicalize` 移到 `lib/project-environment/canonical-json.ts` 并重新导出，本文产生过的所有 digest 均不变。
