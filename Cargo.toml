@@ -44,6 +44,9 @@ members = [
   # cognia-cli signs Character Packs with it and cognia-environment digests
   # EnvironmentSpecs with it (ADR-0182).
   "crates/cognia-canonical-json",
+  # ADR-0182 — runtime environments: EnvironmentSpec, the two-level image
+  # catalog, admission policy and the tenant environment store.
+  "crates/cognia-environment",
   "crates/cognia-git",
   "crates/cognia-ocr",
   "crates/cognia-vector",

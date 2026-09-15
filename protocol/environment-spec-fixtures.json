@@ -1,0 +1,209 @@
+{
+  "cases": [
+    {
+      "name": "projectSettingMinimal",
+      "spec": {
+        "version": 1,
+        "specDigest": "431911d3f1f7140403ab4a8f5e78a20b6f617a2e0a1d8678cdb113fdb8dfbf82",
+        "projectId": "proj_minimal",
+        "source": {
+          "kind": "project-setting",
+          "catalogEntryId": "python-3.12"
+        },
+        "image": {
+          "registry": "docker.io",
+          "repository": "library/python",
+          "digest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+          "catalogEntryId": "python-3.12"
+        },
+        "bundle": {
+          "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+          "releaseTag": "v1.2.0",
+          "pinned": false
+        },
+        "isolation": {
+          "minimum": "container"
+        },
+        "sizeClassId": "small",
+        "lifecycle": "ephemeral",
+        "user": {},
+        "containerEnv": {},
+        "lifecycleCommands": {},
+        "forwardPorts": [],
+        "egress": {
+          "tier": "off",
+          "presetIds": [],
+          "approvedDomains": []
+        },
+        "browserSidecar": false
+      },
+      "canonical": "{\"browserSidecar\":false,\"bundle\":{\"digest\":\"sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2\",\"pinned\":false,\"releaseTag\":\"v1.2.0\"},\"containerEnv\":{},\"egress\":{\"approvedDomains\":[],\"presetIds\":[],\"tier\":\"off\"},\"forwardPorts\":[],\"image\":{\"catalogEntryId\":\"python-3.12\",\"digest\":\"sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1\",\"registry\":\"docker.io\",\"repository\":\"library/python\"},\"isolation\":{\"minimum\":\"container\"},\"lifecycle\":\"ephemeral\",\"lifecycleCommands\":{},\"projectId\":\"proj_minimal\",\"sizeClassId\":\"small\",\"source\":{\"catalogEntryId\":\"python-3.12\",\"kind\":\"project-setting\"},\"user\":{},\"version\":1}",
+      "specDigest": "431911d3f1f7140403ab4a8f5e78a20b6f617a2e0a1d8678cdb113fdb8dfbf82",
+      "runtimeFieldsDigest": "173ae250429fd8cbe23303bef54e8f4de557680f4f3adee087b1af6cd7bb5f73"
+    },
+    {
+      "name": "repoDeclarationDevcontainer",
+      "spec": {
+        "version": 1,
+        "specDigest": "065ed345b2c78e477ebf602f0a14c8292e2fa0a01d1d3683621670545c84ae39",
+        "projectId": "01J8Z3V9K2M4N6P8Q0R2S4T6V8",
+        "source": {
+          "kind": "repo-declaration",
+          "file": "devcontainer",
+          "path": ".devcontainer/devcontainer.json",
+          "remote": "https://github.com/acme/app",
+          "commitSha": "0123456789abcdef0123456789abcdef01234567",
+          "declarationDigest": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+          "approvalRef": "device:acme-app/.devcontainer/devcontainer.json"
+        },
+        "image": {
+          "registry": "mcr.microsoft.com",
+          "repository": "devcontainers/typescript-node",
+          "digest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"
+        },
+        "bundle": {
+          "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+          "releaseTag": "v1.1.3",
+          "pinned": true
+        },
+        "isolation": {
+          "minimum": "vm"
+        },
+        "sizeClassId": "medium-4c8g",
+        "lifecycle": "persistent",
+        "user": {
+          "declared": {
+            "name": "node",
+            "from": "remoteUser"
+          }
+        },
+        "containerEnv": {
+          "lower_case": "héllo 世界 🚀",
+          "PATH_EXTRA": "/usr/local/share/npm-global/bin",
+          "_LEADING": ""
+        },
+        "lifecycleCommands": {
+          "onCreate": {
+            "kind": "shell",
+            "command": "npm ci && npm run build"
+          },
+          "postCreate": {
+            "kind": "argv",
+            "argv": ["git", "config", "--global", "core.autocrlf", "input"]
+          },
+          "postStart": {
+            "kind": "parallel",
+            "commands": {
+              "9": {
+                "kind": "argv",
+                "argv": ["echo", "nine"]
+              },
+              "10": {
+                "kind": "shell",
+                "command": "echo ten"
+              },
+              "a": {
+                "kind": "shell",
+                "command": "echo a"
+              },
+              "B": {
+                "kind": "shell",
+                "command": "echo B"
+              }
+            }
+          }
+        },
+        "forwardPorts": [
+          {
+            "port": 3000,
+            "label": "Web"
+          },
+          {
+            "port": 5432
+          }
+        ],
+        "egress": {
+          "tier": "allowlist",
+          "presetIds": ["npm-mirror", "github"],
+          "approvedDomains": ["*.example.com", "api.acme.dev"]
+        },
+        "browserSidecar": true,
+        "workspaceConfigDigest": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+        "explain": {
+          "steps": [
+            "project setting absent",
+            "declaration approved",
+            {
+              "1": "integer-like keys",
+              "10": true
+            }
+          ]
+        }
+      },
+      "canonical": "{\"browserSidecar\":true,\"bundle\":{\"digest\":\"sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2\",\"pinned\":true,\"releaseTag\":\"v1.1.3\"},\"containerEnv\":{\"PATH_EXTRA\":\"/usr/local/share/npm-global/bin\",\"_LEADING\":\"\",\"lower_case\":\"héllo 世界 🚀\"},\"egress\":{\"approvedDomains\":[\"*.example.com\",\"api.acme.dev\"],\"presetIds\":[\"npm-mirror\",\"github\"],\"tier\":\"allowlist\"},\"forwardPorts\":[{\"label\":\"Web\",\"port\":3000},{\"port\":5432}],\"image\":{\"digest\":\"sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1\",\"registry\":\"mcr.microsoft.com\",\"repository\":\"devcontainers/typescript-node\"},\"isolation\":{\"minimum\":\"vm\"},\"lifecycle\":\"persistent\",\"lifecycleCommands\":{\"onCreate\":{\"command\":\"npm ci && npm run build\",\"kind\":\"shell\"},\"postCreate\":{\"argv\":[\"git\",\"config\",\"--global\",\"core.autocrlf\",\"input\"],\"kind\":\"argv\"},\"postStart\":{\"commands\":{\"10\":{\"command\":\"echo ten\",\"kind\":\"shell\"},\"9\":{\"argv\":[\"echo\",\"nine\"],\"kind\":\"argv\"},\"B\":{\"command\":\"echo B\",\"kind\":\"shell\"},\"a\":{\"command\":\"echo a\",\"kind\":\"shell\"}},\"kind\":\"parallel\"}},\"projectId\":\"01J8Z3V9K2M4N6P8Q0R2S4T6V8\",\"sizeClassId\":\"medium-4c8g\",\"source\":{\"approvalRef\":\"device:acme-app/.devcontainer/devcontainer.json\",\"commitSha\":\"0123456789abcdef0123456789abcdef01234567\",\"declarationDigest\":\"c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3\",\"file\":\"devcontainer\",\"kind\":\"repo-declaration\",\"path\":\".devcontainer/devcontainer.json\",\"remote\":\"https://github.com/acme/app\"},\"user\":{\"declared\":{\"from\":\"remoteUser\",\"name\":\"node\"}},\"version\":1,\"workspaceConfigDigest\":\"d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4\"}",
+      "specDigest": "065ed345b2c78e477ebf602f0a14c8292e2fa0a01d1d3683621670545c84ae39",
+      "runtimeFieldsDigest": "c78c6eef92ee391c5e2529557a7a81a7777caec33335d36bfaa4af3541aad1d0"
+    },
+    {
+      "name": "deploymentDefaultEscapes",
+      "spec": {
+        "version": 1,
+        "specDigest": "9e8665f4ca0621a9e52c930c9e1d3df50171fe8cbd8976add652e03bd3d9bebb",
+        "projectId": "proj-escapes",
+        "source": {
+          "kind": "deployment-default",
+          "catalogEntryId": "legacy-env"
+        },
+        "image": {
+          "registry": "registry.cn-hangzhou.aliyuncs.com",
+          "repository": "acme/envs/built",
+          "digest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+          "buildKey": "e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5"
+        },
+        "bundle": {
+          "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+          "releaseTag": "untagged",
+          "pinned": false
+        },
+        "isolation": {
+          "minimum": "gvisor"
+        },
+        "sizeClassId": "legacy",
+        "lifecycle": "ephemeral",
+        "user": {
+          "declared": {
+            "uid": 1000,
+            "from": "image"
+          }
+        },
+        "containerEnv": {
+          "QUOTES": "say \"hi\" \\ back",
+          "CONTROL": "tab\tnewline\nbell\u0007",
+          "SEPARATORS": "line para end",
+          "ASTRAL": "😀􏿿"
+        },
+        "lifecycleCommands": {
+          "postAttach": {
+            "kind": "argv",
+            "argv": ["/bin/true"]
+          }
+        },
+        "forwardPorts": [
+          {
+            "port": 65535,
+            "label": "最大端口"
+          }
+        ],
+        "egress": {
+          "tier": "on",
+          "presetIds": [],
+          "approvedDomains": []
+        },
+        "browserSidecar": false
+      },
+      "canonical": "{\"browserSidecar\":false,\"bundle\":{\"digest\":\"sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2\",\"pinned\":false,\"releaseTag\":\"untagged\"},\"containerEnv\":{\"ASTRAL\":\"😀􏿿\",\"CONTROL\":\"tab\\tnewline\\nbell\\u0007\",\"QUOTES\":\"say \\\"hi\\\" \\\\ back\",\"SEPARATORS\":\"line para end\"},\"egress\":{\"approvedDomains\":[],\"presetIds\":[],\"tier\":\"on\"},\"forwardPorts\":[{\"label\":\"最大端口\",\"port\":65535}],\"image\":{\"buildKey\":\"e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5\",\"digest\":\"sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1\",\"registry\":\"registry.cn-hangzhou.aliyuncs.com\",\"repository\":\"acme/envs/built\"},\"isolation\":{\"minimum\":\"gvisor\"},\"lifecycle\":\"ephemeral\",\"lifecycleCommands\":{\"postAttach\":{\"argv\":[\"/bin/true\"],\"kind\":\"argv\"}},\"projectId\":\"proj-escapes\",\"sizeClassId\":\"legacy\",\"source\":{\"catalogEntryId\":\"legacy-env\",\"kind\":\"deployment-default\"},\"user\":{\"declared\":{\"from\":\"image\",\"uid\":1000}},\"version\":1}",
+      "specDigest": "9e8665f4ca0621a9e52c930c9e1d3df50171fe8cbd8976add652e03bd3d9bebb",
+      "runtimeFieldsDigest": "f234a8964b8b271f617103ec8a44935eda07d839529ac4f0c4c383d0acc58435"
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+# ADR-0182 — runtime environments.
+#
+# The Rust authority for what image a project runs in: the EnvironmentSpec wire
+# type (mirrored by `types/sandbox/environment-spec.ts`, digests byte-identical
+# through RFC 8785), the two-level image catalog and its merge rules, the
+# admission policy that re-validates every spec the brain resolves, and the
+# tenant store (`environment.sqlite`) for catalog additions, approvals, egress
+# grants and probe results.
+#
+# `store` (default) pulls rusqlite. The in-sandbox supervisor
+# (`cognia-sandboxd`, ADR-0183) only needs the wire types and builds this crate
+# with `default-features = false`.
+[package]
+name = "cognia-environment"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+description = "Runtime environment specs, image catalog, admission policy and tenant store."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "cognia_environment"
+path = "src/lib.rs"
+
+[features]
+default = ["store"]
+store = ["dep:rusqlite"]
+
+[dependencies]
+cognia-canonical-json = { path = "../cognia-canonical-json" }
+cognia-net = { path = "../cognia-net" }
+cognia-problem = { path = "../cognia-problem" }
+hex = "0.4"
+rusqlite = { version = "0.37", features = ["bundled"], optional = true }
+schemars = "1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.11"
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
