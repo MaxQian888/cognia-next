@@ -1,0 +1,196 @@
+{
+  "cases": [
+    {
+      "input": "python:3.12-slim",
+      "ok": {
+        "registry": "docker.io",
+        "repository": "library/python",
+        "tag": "3.12-slim",
+        "canonical": "docker.io/library/python:3.12-slim"
+      }
+    },
+    {
+      "input": "  node  ",
+      "ok": {
+        "registry": "docker.io",
+        "repository": "library/node",
+        "canonical": "docker.io/library/node:latest"
+      }
+    },
+    {
+      "input": "someuser/app",
+      "ok": {
+        "registry": "docker.io",
+        "repository": "someuser/app",
+        "canonical": "docker.io/someuser/app:latest"
+      }
+    },
+    {
+      "input": "ghcr.io/maxqian888/cognia-runner:latest",
+      "ok": {
+        "registry": "ghcr.io",
+        "repository": "maxqian888/cognia-runner",
+        "tag": "latest",
+        "canonical": "ghcr.io/maxqian888/cognia-runner:latest"
+      }
+    },
+    {
+      "input": "GHCR.IO/acme/app",
+      "ok": {
+        "registry": "ghcr.io",
+        "repository": "acme/app",
+        "canonical": "ghcr.io/acme/app:latest"
+      }
+    },
+    {
+      "input": "localhost:5000/team/app",
+      "ok": {
+        "registry": "localhost:5000",
+        "repository": "team/app",
+        "canonical": "localhost:5000/team/app:latest"
+      }
+    },
+    {
+      "input": "localhost/app:dev",
+      "ok": {
+        "registry": "localhost",
+        "repository": "app",
+        "tag": "dev",
+        "canonical": "localhost/app:dev"
+      }
+    },
+    {
+      "input": "10.0.0.5:5000/ns/img:v1",
+      "ok": {
+        "registry": "10.0.0.5:5000",
+        "repository": "ns/img",
+        "tag": "v1",
+        "canonical": "10.0.0.5:5000/ns/img:v1"
+      }
+    },
+    {
+      "input": "registry.cn-hangzhou.aliyuncs.com/ns/img:v1@sha256:0123456789ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef",
+      "ok": {
+        "registry": "registry.cn-hangzhou.aliyuncs.com",
+        "repository": "ns/img",
+        "tag": "v1",
+        "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "canonical": "registry.cn-hangzhou.aliyuncs.com/ns/img@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      }
+    },
+    {
+      "input": "mcr.microsoft.com/devcontainers/typescript-node@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "ok": {
+        "registry": "mcr.microsoft.com",
+        "repository": "devcontainers/typescript-node",
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "canonical": "mcr.microsoft.com/devcontainers/typescript-node@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "input": "cr.volces.com/a__b/c---d/e.f_g:_tag.1-x",
+      "ok": {
+        "registry": "cr.volces.com",
+        "repository": "a__b/c---d/e.f_g",
+        "tag": "_tag.1-x",
+        "canonical": "cr.volces.com/a__b/c---d/e.f_g:_tag.1-x"
+      }
+    },
+    {
+      "input": "reg.io:+80/app",
+      "ok": {
+        "registry": "reg.io:+80",
+        "repository": "app",
+        "canonical": "reg.io:+80/app:latest"
+      }
+    },
+    {
+      "input": "::ffff:1.2.3.4:5000/app",
+      "ok": {
+        "registry": "::ffff:1.2.3.4:5000",
+        "repository": "app",
+        "canonical": "::ffff:1.2.3.4:5000/app:latest"
+      }
+    },
+    {
+      "input": "[::1]:5000/app",
+      "error": "invalid-registry"
+    },
+    {
+      "input": " ",
+      "error": "empty"
+    },
+    {
+      "input": "",
+      "error": "empty"
+    },
+    {
+      "input": "Upper/Case",
+      "error": "invalid-repository"
+    },
+    {
+      "input": "app@sha256:short",
+      "error": "invalid-digest"
+    },
+    {
+      "input": "app@md5:0123",
+      "error": "invalid-digest"
+    },
+    {
+      "input": "app:-bad",
+      "error": "invalid-tag"
+    },
+    {
+      "input": "app:",
+      "error": "invalid-tag"
+    },
+    {
+      "input": "reg.io:notaport/app",
+      "error": "invalid-registry"
+    },
+    {
+      "input": "reg.io:70000/app",
+      "error": "invalid-registry"
+    },
+    {
+      "input": "bad_host.io/app",
+      "error": "invalid-registry"
+    },
+    {
+      "input": "reg.io/a//b",
+      "error": "invalid-repository"
+    },
+    {
+      "input": "reg.io/a-/b",
+      "error": "invalid-repository"
+    },
+    {
+      "input": "reg.io/a___b",
+      "error": "invalid-repository"
+    },
+    {
+      "input": "reg.io/a..b",
+      "error": "invalid-repository"
+    },
+    {
+      "input": "reg.io/",
+      "error": "invalid-repository"
+    },
+    {
+      "input": "héllo",
+      "error": "invalid-repository"
+    },
+    {
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "error": "too-long"
+    },
+    {
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "error": "invalid-repository"
+    },
+    {
+      "input": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+      "error": "too-long"
+    }
+  ]
+}

@@ -352,6 +352,43 @@ mod tests {
         }
     }
 
+    /// `protocol/image-reference-fixtures.json` is also asserted by
+    /// `lib/project-environment/image-reference.test.ts`: both parsers must
+    /// agree on every case, or a declaration approved on one side would name a
+    /// different image on the other.
+    #[test]
+    fn protocol_fixtures_parse_identically_to_the_typescript_parser() {
+        let fixtures: serde_json::Value =
+            serde_json::from_str(include_str!("../../../protocol/image-reference-fixtures.json"))
+                .unwrap();
+        let cases = fixtures["cases"].as_array().unwrap();
+        assert!(cases.len() >= 20, "fixture file lost its cases");
+        for case in cases {
+            let input = case["input"].as_str().unwrap();
+            match (ImageReference::parse(input), case.get("ok")) {
+                (Ok(reference), Some(expected)) => {
+                    assert_eq!(reference.registry, expected["registry"], "{input}");
+                    assert_eq!(reference.repository, expected["repository"], "{input}");
+                    assert_eq!(reference.tag.as_deref(), expected["tag"].as_str(), "{input}");
+                    assert_eq!(reference.digest.as_deref(), expected["digest"].as_str(), "{input}");
+                    assert_eq!(reference.canonical(), expected["canonical"], "{input}");
+                }
+                (Err(error), None) => {
+                    let kind = match error {
+                        ImageReferenceError::Empty => "empty",
+                        ImageReferenceError::TooLong => "too-long",
+                        ImageReferenceError::InvalidRegistry(_) => "invalid-registry",
+                        ImageReferenceError::InvalidRepository(_) => "invalid-repository",
+                        ImageReferenceError::InvalidTag(_) => "invalid-tag",
+                        ImageReferenceError::InvalidDigest(_) => "invalid-digest",
+                    };
+                    assert_eq!(kind, case["error"], "{input:?}");
+                }
+                (outcome, _) => panic!("{input:?}: unexpected {outcome:?}"),
+            }
+        }
+    }
+
     #[test]
     fn a_pinned_image_rejects_an_uppercase_digest() {
         let image = PinnedImage {
