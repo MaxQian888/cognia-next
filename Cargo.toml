@@ -40,6 +40,10 @@ members = [
   # cognia-instrument: cognia-git, cognia-task-workspace and src-tauri all
   # carry it, and it carries none of them.
   "crates/cognia-git-mirror",
+  # RFC 8785 canonical JSON, byte-identical to the TypeScript side. A leaf:
+  # cognia-cli signs Character Packs with it and cognia-environment digests
+  # EnvironmentSpecs with it (ADR-0182).
+  "crates/cognia-canonical-json",
   "crates/cognia-git",
   "crates/cognia-ocr",
   "crates/cognia-vector",

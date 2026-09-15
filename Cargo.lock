@@ -1909,6 +1909,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-canonical-json"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "cognia-ccswitch"
 version = "0.1.0"
 dependencies = [
@@ -1936,6 +1945,7 @@ dependencies = [
  "base64 0.23.1",
  "chrono",
  "clap",
+ "cognia-canonical-json",
  "cognia-headless-contract",
  "cognia-observability",
  "color-eyre",

@@ -1,0 +1,27 @@
+# RFC 8785 (JSON Canonicalization Scheme), the Rust twin of
+# `lib/plugin/character-pack/canonical-json.ts`.
+#
+# Extracted from `cognia-cli` (where it signed Character Packs) so every Rust
+# component that digests JSON the brain also digests agrees with it byte for
+# byte: the CLI's pack signatures and `cognia-environment`'s EnvironmentSpec
+# digests (ADR-0182). A leaf with no Cognia dependencies, like
+# cognia-instrument.
+[package]
+name = "cognia-canonical-json"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+description = "RFC 8785 JSON canonicalization shared with the TypeScript implementation."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "cognia_canonical_json"
+path = "src/lib.rs"
+
+[dependencies]
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
