@@ -43,6 +43,7 @@ import { steerBlocksOf, steerTextOf, type SteerMessageMeta } from "@/lib/claude/
 import {
   appendSteerMessage,
   isSessionOpen,
+  markPendingSteersFailed,
   mergeSteerWebSearchIntoLastSend,
   sessionExternalLane,
   sessionStatusOf,
@@ -65,6 +66,7 @@ import {
   attachRunMetadataToLastAssistant,
   attachUsageToLastAssistant,
   buildCompletedRunMetadata,
+  buildRoutingRunMetadata,
 } from "@/lib/chat/message-run-metadata"
 import {
   maybeDrainBackgroundResults,
@@ -212,6 +214,10 @@ import { isCapacitor } from "@/lib/platform/detect"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { chatTurnPerformance } from "@/lib/perf/chat-turn-performance"
 import { enforceCostBudget, isCostBudgetConfigured } from "@/lib/usage/cost-budget-gate"
+import { cancelRouterFusionTurn } from "@/lib/router-fusion/gate/chat-events"
+import { abortRouterFusionSend, prepareRouterFusionSend } from "@/lib/router-fusion/gate/chat-send"
+import { routerFusionRefusalDiagnostic } from "@/lib/router-fusion/gate/refusal-diagnostic"
+import { RouterFusionRefusalError } from "@/lib/router-fusion/gate/faults"
 import type { UIMessage } from "ai"
 import { registerInteractiveWorkSubmissionEvents } from "@/lib/work-submission/terminal-events"
 import {
@@ -222,7 +228,14 @@ import {
 import { applyInstantTitle, clearPendingLoopContinuation } from "./claude-chat-turn-tasks"
 import type { SendFn } from "./claude-chat-turn-tasks"
 import { buildSendOptions } from "./claude-chat-send-options"
+import { routingPlanTraceAttributes } from "@/lib/routing/plan-trace-attributes"
 import { drainSteerVia, handleEvent, tryAutoModeDecision } from "./claude-chat-events"
+import {
+  fusionChatTurnActive,
+  routerFusionSendDiagnostic,
+  runFusionChatTurn,
+  stopFusionChatTurn,
+} from "./router-fusion-chat-turn"
 
 export function resolveChatTurnAttemptIdentity(input: {
   sessionId: string
@@ -861,7 +874,16 @@ export function useClaudeChat() {
           }
 
           const externalAgentId = sessionExternalLane(sessionId)
-          if (!externalAgentId && text && blocks.length === 0 && !isStandaloneChatMode()) {
+          // A cascade or panel run takes no steer (ADR-0188 D19): the
+          // follow-up waits in the queue and becomes the next turn.
+          const fusionTurn = fusionChatTurnActive(sessionId)
+          if (
+            !fusionTurn &&
+            !externalAgentId &&
+            text &&
+            blocks.length === 0 &&
+            !isStandaloneChatMode()
+          ) {
             try {
               const queued = await enqueueHostStateIntentIfAvailable({
                 sessionId,
@@ -902,7 +924,9 @@ export function useClaudeChat() {
           // The lane comes from what THIS session dispatched
           // (`sessionExternalLane`), not the composer's global runtime pick,
           // which in split view describes whichever pane happens to be focused.
-          if (externalAgentId) {
+          if (fusionTurn) {
+            // Queued below.
+          } else if (externalAgentId) {
             // Adapter steering carries text only (`turn/steer` takes a string),
             // so an attachment-only follow-up has to queue on this lane.
             if (text) {
@@ -1012,6 +1036,23 @@ export function useClaudeChat() {
           ? content
           : (content.find((b) => b.type === "text") as { text?: string } | undefined)?.text
       const userMessageText = firstText === undefined ? undefined : stripPromptPreamble(firstText)
+      // Attachment kinds for the routing classifier: an image block implies a
+      // vision requirement; a document block discriminates audio/video by its
+      // declared media type. Text blocks never contribute a kind.
+      const routingAttachmentKinds = Array.isArray(content)
+        ? content
+            .map((block) => {
+              if (block.type === "image") return "image" as const
+              if (block.type === "document") {
+                const mediaType = block.source?.media_type ?? ""
+                if (mediaType.startsWith("audio/")) return "audio" as const
+                if (mediaType.startsWith("video/")) return "video" as const
+                return "document" as const
+              }
+              return undefined
+            })
+            .filter((kind): kind is "image" | "audio" | "video" | "document" => kind !== undefined)
+        : undefined
       let sendOptions: SendOptions
       try {
         sendOptions =
@@ -1033,7 +1074,12 @@ export function useClaudeChat() {
               runId: executionRunId,
               turnId: frozenTurnId,
               attemptId: frozenAttemptId,
-            }
+            },
+            routingAttachmentKinds?.length
+              ? { attachmentKinds: routingAttachmentKinds }
+              : undefined,
+            // This controller creates the Router + Fusion run before dispatch.
+            { routerFusionSurface: "chat" }
           ))
       } catch (err) {
         // RoutingNoCandidatesError (alias matched, every deployment down)
@@ -1044,7 +1090,8 @@ export function useClaudeChat() {
           .getState()
           .setSessionDiagnostic(
             sessionId,
-            toDiagnostic(error, { source: "chat", meta: { sessionId } })
+            (await routerFusionSendDiagnostic(err, sessionId)) ??
+              toDiagnostic(error, { source: "chat", meta: { sessionId } })
           )
         throw error
       }
@@ -1383,6 +1430,7 @@ export function useClaudeChat() {
                 { text?: string } | undefined
             )?.text ?? "")
       const hostStateEligible =
+        !sendOptions.routerFusionRun &&
         !skipAppend &&
         typeof effectiveContent === "string" &&
         callOptions?.resourceContext === undefined &&
@@ -1622,6 +1670,44 @@ export function useClaudeChat() {
         return
       }
 
+      // ── Router + Fusion cascade / panel (ADR-0188 B3) ──
+      // The send pipeline stamped this turn as a verified run: the run, not a
+      // sidecar stream, answers it. Like a Squad turn it branches above the
+      // direct-chat bookkeeping, which describes a single model turn; the run
+      // has its own ledger, budget and projection. Only a stamped send gets
+      // here, and only while Router + Fusion chat is on.
+      const fusionRun = sendOptions.routerFusionRun
+      if (fusionRun) {
+        void runFusionChatTurn({
+          sessionId,
+          stamp: fusionRun,
+          messages: providerPayload.messages,
+          userMessage: skipAppend ? null : userMsg,
+          workspaceRoot: turnCwd,
+          settings: useSettingsStore.getState().settings,
+          onSettled: (result) => {
+            const durationMs = finishBehaviorTurn(sessionId)
+            if (durationMs !== undefined && result !== "cancelled") {
+              void trackEvent(result === "completed" ? "chat.turn.completed" : "chat.turn.failed", {
+                sessionId,
+                provider: sendOptions.provider ?? "router-fusion",
+                surface: "chat",
+                durationMs,
+                ...(result === "failed" ? { errorType: "router_fusion_run_failed" } : {}),
+              })
+            }
+            // The same rule as a streamed turn's settle: a clean end drains the
+            // queue, an armed interrupt drains it, a failure keeps it.
+            if (result === "completed" || steerArmed.has(sessionId)) {
+              drainSteerVia(sessionId, sendRef)
+            } else if (result === "failed") {
+              markPendingSteersFailed(sessionId)
+            }
+          },
+        })
+        return
+      }
+
       // ── Independent reviewer (ADR-0117 `verified-fresh-agent`) ──
       // Armed here, after the Squad branch and before any direct-path await,
       // so the watcher sees this turn's `streaming` state and settles on its
@@ -1738,12 +1824,18 @@ export function useClaudeChat() {
       // The synchronous pre-check keeps the default install (no ceiling
       // configured) on exactly the code path it had before: no extra await, no
       // Dexie read, nothing to pay for a feature that is switched off.
-      const budgetDecision = isCostBudgetConfigured()
-        ? await enforceCostBudget({
-            ...(sendOptions.provider ? { providerId: sendOptions.provider } : {}),
-            runId: executionRunId,
-          })
-        : null
+      //
+      // A Router + Fusion turn skips it here (ADR-0188 D35): its run holds the
+      // same budget remainder, and going over asks for a one-run grant instead.
+      // Should the run then fault and the turn fall back to the original path,
+      // the ceiling is checked just before dispatch.
+      const budgetDecision =
+        isCostBudgetConfigured() && !sendOptions.routerFusion
+          ? await enforceCostBudget({
+              ...(sendOptions.provider ? { providerId: sendOptions.provider } : {}),
+              runId: executionRunId,
+            })
+          : null
       if (budgetDecision && !budgetDecision.allowed) {
         store.getState().setSessionStatus(sessionId, "idle")
         store.getState().setSessionDiagnostic(
@@ -1949,6 +2041,7 @@ export function useClaudeChat() {
               const handle = getExecutionHandle(sessionId)
               if (handle) await handle.interrupt()
               else await interruptSession(sessionId)
+              await cancelRouterFusionTurn(sessionId)
             })().catch(() => undefined)
           })
         }
@@ -2944,6 +3037,7 @@ export function useClaudeChat() {
               startedAt: externalStartedAt,
               completedAt,
               reportedDurationMs: result.duration,
+              routing: buildRoutingRunMetadata(sendOptions),
             })
           )
           // The agent's own token accounting — including the context occupancy
@@ -3023,6 +3117,11 @@ export function useClaudeChat() {
       // lane — clear any left by a previous turn before a follow-up reads it.
       setSessionExternalLane(sessionId, null)
 
+      // Router + Fusion (ADR-0188): a run created for this turn is released when
+      // the dispatch itself fails. A failure this turn already explained (a
+      // refusal, the cost ceiling) carries its own diagnostic into the catch.
+      let routerFusionAwaitingDispatch = false
+      let explainedSendFailure: { code: string; diagnostic: CogniaDiagnostic } | null = null
       try {
         await persistMessages(sessionId, next)
         await touchSession(sessionId)
@@ -3077,22 +3176,10 @@ export function useClaudeChat() {
           recordEvent(sendOptions.spanId, {
             name: "routing.plan",
             at: Date.now(),
-            attributes: {
-              decisionId: plan.decisionId,
-              surface: plan.surface,
-              strategy: plan.strategy,
-              providerId: plan.selected.providerId,
-              modelId: plan.selected.modelId,
-              candidateCount: plan.orderedCandidates.length,
-              reasonCodes: plan.reasonCodes,
-              ...(plan.classification
-                ? {
-                    category: plan.classification.category,
-                    complexity: plan.classification.complexity,
-                    difficultyScore: plan.classification.difficultyScore,
-                  }
-                : {}),
-            },
+            // One shared projection (lib/routing/plan-trace-attributes) — the
+            // calibration pipeline reads this shape and a hand-written copy
+            // here had already drifted once.
+            attributes: routingPlanTraceAttributes(plan),
           })
           recordEvent(sendOptions.spanId, {
             name: "routing.attempt",
@@ -3125,6 +3212,56 @@ export function useClaudeChat() {
         // bundle wins, which is what stops a replay from silently re-resolving
         // the project root against whatever the host looks like later.
         if (durableLeaseLost) return
+        // Router + Fusion (ADR-0188): create the run of a routed turn right
+        // before dispatch, after every early return above. A send without the
+        // stamp — every send while the switch is off — skips this block.
+        if (sendOptions.routerFusion) {
+          const fusionSend = await prepareRouterFusionSend({
+            sessionId,
+            options: sendOptions,
+            reused: Boolean(opts),
+            workspaceId: session?.projectId ?? null,
+            settings: useSettingsStore.getState().settings,
+          })
+          if (fusionSend.kind === "refused") {
+            explainedSendFailure = {
+              code: "router_fusion_refused",
+              diagnostic: await routerFusionRefusalDiagnostic({
+                code: fusionSend.code,
+                reasons: fusionSend.reasons ?? [],
+                sessionId,
+                ...(sendOptions.spanId ? { spanId: sendOptions.spanId } : {}),
+              }),
+            }
+            throw new RouterFusionRefusalError(
+              fusionSend.code,
+              "Router + Fusion refused this turn."
+            )
+          }
+          sendOptions = fusionSend.options
+          routerFusionAwaitingDispatch = Boolean(sendOptions.routerFusion)
+          // The run faulted and the turn takes the original path — including
+          // the cost ceiling it skipped above.
+          if (!sendOptions.routerFusion && isCostBudgetConfigured()) {
+            const lateBudget = await enforceCostBudget({
+              ...(sendOptions.provider ? { providerId: sendOptions.provider } : {}),
+              runId: executionRunId,
+            })
+            if (!lateBudget.allowed) {
+              explainedSendFailure = {
+                code: "cost_budget_exceeded",
+                diagnostic: toDiagnostic(new Error("cost_budget_exceeded"), {
+                  source: "chat",
+                  meta: {
+                    sessionId,
+                    extra: { blockedBy: lateBudget.blockedBy.map((v) => v.scopeKey).join(",") },
+                  },
+                }),
+              }
+              throw new Error("cost_budget_exceeded")
+            }
+          }
+        }
         await bindChatTurnContext({
           runId: executionRunId,
           context: {
@@ -3198,6 +3335,8 @@ export function useClaudeChat() {
             await sendPrompt(sessionId, effectiveContent, sendOptions)
           }
         }
+        // The host owns the turn now; its `session_ended` seals the run.
+        routerFusionAwaitingDispatch = false
         if (durableLeaseLost) return
         // The live handoff won this turn. Recording it keeps the periodic
         // pending-work sweep from dispatching the same accepted input again.
@@ -3232,12 +3371,17 @@ export function useClaudeChat() {
         }
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err))
+        const sendFailureCode = explainedSendFailure?.code ?? "send_failed"
+        if (routerFusionAwaitingDispatch) {
+          await abortRouterFusionSend(sessionId, sendOptions, error.message)
+        }
         store.getState().setSessionDiagnostic(
           sessionId,
-          toDiagnostic(error, {
-            source: "chat",
-            meta: { sessionId, ...(sendOptions.spanId ? { spanId: sendOptions.spanId } : {}) },
-          })
+          explainedSendFailure?.diagnostic ??
+            toDiagnostic(error, {
+              source: "chat",
+              meta: { sessionId, ...(sendOptions.spanId ? { spanId: sendOptions.spanId } : {}) },
+            })
         )
         // Notify plugins; fire-and-forget — host already surfaced the error.
         dispatchPluginChatError(sessionId, error)
@@ -3245,7 +3389,7 @@ export function useClaudeChat() {
         // opened so it doesn't dangle (no result event will ever land).
         if (sendOptions.spanId) {
           endSpan(sendOptions.spanId, {
-            errorType: "send_failed",
+            errorType: sendFailureCode,
             errorMessage: error.message,
           })
         }
@@ -3253,7 +3397,7 @@ export function useClaudeChat() {
         await finishDirectChatExecutionRun(sessionId, "failed", Date.now(), error.message)
         await settleChatTurnForSession(sessionId, {
           outcome: "failed",
-          errorCode: "send_failed",
+          errorCode: sendFailureCode,
         })
         stopAssemblyHeartbeat()
         const durationMs = finishBehaviorTurn(sessionId)
@@ -3547,6 +3691,13 @@ export function useClaudeChat() {
       const finishRun = Promise.all([
         finishDirectChatExecutionRun(sessionId, "cancelled"),
         settleChatTurnForSession(sessionId, { outcome: "cancelled" }),
+        // A ledgered turn stops granting model calls at once (ADR-0188); the
+        // turn's `session_ended` seals the run. A no-op for any other turn.
+        cancelRouterFusionTurn(sessionId),
+        // A cascade or panel run is cancelled and its calls aborted (B3).
+        stopFusionChatTurn(sessionId, useSettingsStore.getState().settings, {
+          settled: true,
+        }).catch((error) => console.warn("router-fusion chat run stop failed", error)),
       ])
 
       try {
@@ -3594,9 +3745,18 @@ export function useClaudeChat() {
           gatewayController.abort()
           return
         }
+        if (fusionChatTurnActive(sessionId)) {
+          // A verified run has no live input: stop it, and its settle replays
+          // the queue.
+          await stopFusionChatTurn(sessionId, useSettingsStore.getState().settings, {
+            settled: false,
+          })
+          return
+        }
         const handle = getExecutionHandle(sessionId)
         if (handle) await handle.interrupt()
         else await interruptSession(sessionId)
+        await cancelRouterFusionTurn(sessionId)
       } catch (err) {
         console.error("interrupt(steer) failed", err)
         steerArmed.delete(sessionId)

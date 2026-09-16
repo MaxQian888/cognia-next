@@ -81,6 +81,12 @@ export type UsageCostSource =
   | "static"
   /** Priced locally against a user-supplied custom/discovered rate. */
   | "custom"
+  /**
+   * Booked by the Router + Fusion ledger (ADR-0188) from the call's usage and
+   * the run's pinned rate card — or its conservative reservation when no bill
+   * was reported. Only ever written while Router + Fusion is switched on.
+   */
+  | "ledger"
   /** Written before v172; provenance cannot be recovered retroactively. */
   | "backfilled"
   /** No pricing layer knew the model — `costUsd` is 0 but means "unknown". */
@@ -290,12 +296,20 @@ export async function recordResultUsage(args: {
   speed?: "fast" | "normal"
   inferenceGeo?: "us" | "global"
   batch?: boolean
+  /**
+   * Router + Fusion (ADR-0188): the ledger's booking for this turn. The ledger
+   * is the one writer of a ledgered turn's money, so its figure replaces the
+   * SDK's. Absent for every other turn.
+   */
+  ledger?: { runId: string; costUsd: number }
 }): Promise<SessionUsageRow | null> {
-  const { sessionId, messageId, characterId, model, providerId, result } = args
+  const { sessionId, messageId, characterId, model, providerId, result, ledger } = args
   if (!sessionId || !messageId) return null
-  const usage = extractUsage(result)
+  // A ledgered turn keeps its booked spend even when the result carried no
+  // usage (it ended on a refusal before the model answered).
+  const usage = extractUsage(result) ?? (ledger ? {} : null)
   if (!usage) return null
-  const costUsd = usage.totalCostUsd ?? 0
+  const costUsd = ledger ? Math.max(0, ledger.costUsd) : (usage.totalCostUsd ?? 0)
   const row: SessionUsageRow = {
     messageId,
     sessionId,
@@ -321,15 +335,16 @@ export async function recordResultUsage(args: {
     // Frozen at write time. A positive figure came from the provider and is
     // authoritative; a zero one means this path reported no cost, and the
     // reader must price it rather than treating 0 as "free". Nothing here is
-    // ever recomputed against a later price table.
-    costSource: costUsd > 0 ? "sdk" : "unknown",
-    costKnown: costUsd > 0,
+    // ever recomputed against a later price table. A ledger figure is known by
+    // construction, including a booked zero (a subscription or free call).
+    costSource: ledger ? "ledger" : costUsd > 0 ? "sdk" : "unknown",
+    costKnown: ledger ? true : costUsd > 0,
     ...carryFrozenFields({
       cacheCreation5mTokens: usage.cacheCreation5mInputTokens,
       cacheCreation1hTokens: usage.cacheCreation1hInputTokens,
       unitBreakdown: usage.serverToolUse ? { requests: usage.serverToolUse } : undefined,
       projectId: args.projectId,
-      runId: args.runId,
+      runId: args.runId ?? ledger?.runId,
       turnId: args.turnId,
       attemptId: args.attemptId,
       speed: args.speed,

@@ -5,6 +5,7 @@ import { activateAccountContentCipher } from "@/lib/accounts/content-cipher"
 import { classifyWsHost } from "@/lib/connectivity/lan-classify"
 import { activateAccountDatabase } from "@/lib/db/schema"
 import { getExecutionBroker } from "@/lib/execution/broker"
+import { withFusionDatabase } from "@/lib/router-fusion/gate/database-name"
 import { getActiveBrowserVault } from "./browser-vault"
 import { getRuntimeSnapshot } from "./runtime-snapshot-store"
 import {
@@ -193,7 +194,9 @@ export async function removeAccountRuntimeTargets(
     const databaseExists = dependencies.databaseExists ?? ((name: string) => Dexie.exists(name))
     for (const databaseName of [
       runtimeTargetDatabaseName(accountId, target.id),
-      encryptedRuntimeTargetDatabaseName(accountId, target.id),
+      // The encrypted target database is the one a window runs against, so it
+      // is the one with a Router + Fusion ledger beside it.
+      ...withFusionDatabase(encryptedRuntimeTargetDatabaseName(accountId, target.id)),
     ]) {
       await dependencies.deleteDatabase(databaseName)
       if (await databaseExists(databaseName)) {

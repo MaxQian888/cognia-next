@@ -39,6 +39,13 @@ describe("RoutingConfigPanel", () => {
     expect(screen.getByText("Routing Workbench")).toBeInTheDocument()
   })
 
+  it("mounts the opt-in Router + Fusion section, collapsed", () => {
+    render(<RoutingConfigPanel />)
+    expect(screen.getByText("Router + Fusion")).toBeInTheDocument()
+    expect(screen.getByText("Opt-in")).toBeInTheDocument()
+    expect(screen.queryByTestId("router-fusion-section")).toBeNull()
+  })
+
   it("mounts the difficulty-routing section so the picker's difficulty strategy is configurable", () => {
     render(<RoutingConfigPanel />)
     // The strategy picker lists "difficulty"; its model pair used to have no UI.

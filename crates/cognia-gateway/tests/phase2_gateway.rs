@@ -216,6 +216,7 @@ async fn start_gateway_with_snapshot(snapshot_value: Value) -> Gateway {
         name: "test".into(),
         secret: secret.clone(),
         model_allowlist: vec![],
+        scopes: Vec::new(),
         expires_at_ms: None,
         enabled: true,
         rate_limit_per_min: None,

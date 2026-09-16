@@ -8,6 +8,7 @@ import { buildJsonInstruction, parseStructured } from "./structured"
 import { runStructuredTurn } from "./structured-turn"
 import { validateAgainstJsonSchema } from "./schema-validate"
 import { coerceToType, nonRetryable, resolveNodeApiKey } from "../shared/executor-support"
+import { ledgerUtilityCalls } from "@/lib/router-fusion/gate/utility-ledger"
 
 // ── ai.prompt ─────────────────────────────────────────────────────────────
 // Real LLM call via `createLlmClient` when provider + apiKey are present in
@@ -111,7 +112,7 @@ registerNodeExecutor({
       })
     }
     const { createLlmClient } = await import("@/lib/twin/distill/llm")
-    const client = createLlmClient({
+    const built = createLlmClient({
       provider: params.provider as Parameters<typeof createLlmClient>[0]["provider"],
       model: params.model,
       apiKey,
@@ -119,6 +120,24 @@ registerNodeExecutor({
       apiFlavor: params.apiFlavor,
       headers: params.headers,
       defaultTemperature: params.temperature,
+    })
+    // Router + Fusion reserves and settles this call when the `agentsWorkflows`
+    // switch is on (ADR-0188 D27). Off — the default — `ledgerUtilityCalls`
+    // returns the client it was given and nothing else is loaded.
+    // The workflow runtime also runs on the headless brain, which never loads
+    // the settings store; this read works on both hosts.
+    const { currentRouterFusionGateSettings } =
+      await import("@/lib/router-fusion/gate/current-settings")
+    const client = ledgerUtilityCalls(built, {
+      binding: {
+        surface: "agentsWorkflows",
+        origin: "workflow",
+        featureId: `workflow:${ctx.stepId}`,
+        providerId: params.provider,
+        modelId: params.model,
+        workspaceId: ctx.projectId ?? null,
+      },
+      settings: await currentRouterFusionGateSettings(),
     })
     // Emit a `chat` span for the LLM call so eval (and observability) can
     // assemble the workflow run. The eval workflow target threads `ctx.traceId`;

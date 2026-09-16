@@ -112,6 +112,7 @@ commands.allow = [
   "ccswitch_watch_stop",
   "check_command_exists",
   "claude_approve",
+  "claude_call_reserve_decision",
   "claude_close_session",
   "claude_compact",
   "claude_env_for_account",

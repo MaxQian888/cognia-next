@@ -882,6 +882,29 @@ export async function toolResultDecision(
   })
 }
 
+/**
+ * Answer a Router + Fusion `call_reserve_request` (ADR-0188). `granted` lets the
+ * sidecar send the call (the attempt is already durably dispatched in the fusion
+ * ledger); `refused` stops the turn with the refusal code; `bypass` tells the
+ * sidecar the ledger is unavailable and the turn continues unledgered.
+ * Desktop-only: the ledger lives in this renderer's fusion database.
+ */
+export async function callReserveDecision(
+  sessionId: string,
+  requestId: string,
+  decision:
+    // An envelope check grants continuation, not a call: no attempt.
+    | { decision: "granted"; attemptId?: string; attemptNo?: number }
+    | { decision: "refused"; code: string; message?: string }
+    | { decision: "bypass"; code: string }
+): Promise<void> {
+  await transport.call("claude_call_reserve_decision", {
+    sessionId,
+    requestId,
+    ...decision,
+  })
+}
+
 export async function closeSession(
   sessionId: string,
   options?: { commandId?: string }

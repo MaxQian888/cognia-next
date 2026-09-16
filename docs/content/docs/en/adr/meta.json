@@ -182,6 +182,8 @@
     "0180-a-video-reaches-the-model-as-what-it-can-read",
     "0181-what-the-user-staged-is-what-the-model-reads",
     "0182-a-project-names-the-image-it-runs-in",
-    "0183-the-agent-is-brought-to-the-image"
+    "0183-the-agent-is-brought-to-the-image",
+    "0188-a-routed-turn-spends-only-what-its-ledger-reserved",
+    "0189-a-plugin-says-which-of-four-things-it-is-doing"
   ]
 }

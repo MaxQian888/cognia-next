@@ -120,6 +120,7 @@ const settingsState = {
     ],
     routingConfig: { strategy: "least-busy", maxFallbackAttempts: 2 },
     autoRouting: { dataPolicy: "local-only" },
+    routerFusion: undefined as { enabled: boolean; surfaces: Record<string, boolean> } | undefined,
   },
 }
 jest.mock("@/stores/settings", () => ({
@@ -394,6 +395,39 @@ describe("GatewayProvider", () => {
       }),
       { ownerAccountId: "local-a", accountGeneration: 1 }
     )
+  })
+
+  it("re-publishes at once when a Router + Fusion gateway switch changes", async () => {
+    // Otherwise a lane the user just turned on would stay off at the gateway
+    // until the next periodic push.
+    const view = render(<GatewayProvider />)
+    await act(async () => {
+      jest.advanceTimersByTime(1500)
+      for (let i = 0; i < 12; i += 1) await Promise.resolve()
+    })
+    mockPushSnapshot.mockClear()
+
+    const original = settingsState.settings
+    settingsState.settings = {
+      ...original,
+      routerFusion: { enabled: true, surfaces: { gatewayRuns: true } },
+    }
+    try {
+      view.rerender(<GatewayProvider />)
+      await act(async () => {
+        jest.advanceTimersByTime(1500)
+        for (let i = 0; i < 12; i += 1) await Promise.resolve()
+      })
+
+      expect(mockPushSnapshot).toHaveBeenCalledWith(
+        expect.objectContaining({
+          routerFusion: { runsEnabled: true, passthroughLedgerEnabled: false },
+        }),
+        { ownerAccountId: "local-a", accountGeneration: 1 }
+      )
+    } finally {
+      settingsState.settings = original
+    }
   })
 
   it("forwards request-outcome events into telemetry", async () => {

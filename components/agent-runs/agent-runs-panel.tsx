@@ -46,6 +46,7 @@ import {
   type ExecutionFilterKind,
   type UnifiedExecutionRow,
 } from "@/lib/execution/monitor-model"
+import type { ExecutionRunOrigin } from "@/types/execution/run"
 import { ResponsiveDetailSheet } from "@/components/shared/responsive-detail-sheet"
 import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import { ExecutionStatusPill } from "./agent-run-status-pill"
@@ -61,6 +62,14 @@ export interface AgentRunsPanelProps {
   onStatusGroup?: (group: CockpitStatusGroup | "all") => void
   filterKind?: ExecutionFilterKind | "all"
   onFilterKind?: (kind: ExecutionFilterKind | "all") => void
+  /**
+   * Which entry point asked for the run (ADR-0188 D24). Surfaces itself only
+   * once a run arrived from somewhere other than this device — with Router +
+   * Fusion's Run API off, every run is local and a control with one option is
+   * noise, so the header keeps the shape it had before the feature existed.
+   */
+  origin?: ExecutionRunOrigin | "all"
+  onOrigin?: (origin: ExecutionRunOrigin | "all") => void
   /**
    * Only this Squad's runs (ADR-0169). The `/squads` Runs tab is this panel
    * with the Squad pinned, not a second history implementation.
@@ -78,6 +87,15 @@ export interface AgentRunsPanelProps {
    * keeps the filter controls and the list/detail split.
    */
   embedded?: boolean
+  /**
+   * Overrides the viewport-derived compact layout.
+   *
+   * An embedded host sizes this panel by its own container, not the window:
+   * the `/bots` Runs card can be ~600px wide on a 1400px monitor, where a
+   * viewport answer would seat a fixed 384px list beside a detail it starves.
+   * Pass a container measurement; omit to keep the viewport behaviour.
+   */
+  compact?: boolean
 }
 
 export function AgentRunsPanel({
@@ -87,9 +105,12 @@ export function AgentRunsPanel({
   onStatusGroup,
   filterKind = "all",
   onFilterKind,
+  origin = "all",
+  onOrigin,
   teamId,
   botInstallationId,
   embedded = false,
+  compact: compactOverride,
 }: AgentRunsPanelProps) {
   const t = useTranslations("agentRuns")
   const {
@@ -106,12 +127,14 @@ export function AgentRunsPanel({
   } = useExecutionCockpit({
     ...(statusGroup !== "all" ? { statusGroup } : {}),
     ...(filterKind !== "all" ? { kind: filterKind } : {}),
+    ...(origin !== "all" ? { origin } : {}),
     ...(teamId ? { teamId } : {}),
     ...(botInstallationId ? { botInstallationId } : {}),
     ...(selectedId ? { selectedId } : {}),
   })
   const actions = useRunControlActions()
-  const compact = useCompactLayout()
+  const viewportCompact = useCompactLayout()
+  const compact = compactOverride ?? viewportCompact
 
   /**
    * Deep links carry the RUN id; the row's own key is source-prefixed. Match on
@@ -138,7 +161,14 @@ export function AgentRunsPanel({
    */
   const canWiden =
     (onStatusGroup !== undefined && statusGroup !== "all") ||
-    (onFilterKind !== undefined && filterKind !== "all")
+    (onFilterKind !== undefined && filterKind !== "all") ||
+    (onOrigin !== undefined && origin !== "all")
+
+  // Rows carry no origin until something outside this device creates a run, so
+  // an always-visible origin control would be a filter with a single answer.
+  const showOrigin =
+    onOrigin !== undefined &&
+    (origin !== "all" || allRows.some((row) => (row.origin ?? "local") !== "local"))
 
   const controls = (
     <div className="flex flex-wrap items-center gap-1.5">
@@ -192,6 +222,26 @@ export function AgentRunsPanel({
                 </SelectItem>
               )
             })}
+          </SelectContent>
+        </Select>
+      ) : null}
+      {showOrigin ? (
+        <Select
+          value={origin}
+          onValueChange={(value) => onOrigin?.(value as ExecutionRunOrigin | "all")}
+        >
+          <SelectTrigger
+            size="sm"
+            aria-label={t("filters.originLabel")}
+            className="w-auto"
+            data-testid="agent-runs-origin-filter"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t("filters.allOrigins")}</SelectItem>
+            <SelectItem value="local">{t("filters.originLocal")}</SelectItem>
+            <SelectItem value="gateway-api">{t("filters.originGatewayApi")}</SelectItem>
           </SelectContent>
         </Select>
       ) : null}
@@ -338,6 +388,16 @@ function RunListRow({
         <span className="uppercase">{t(`kind.${runKindLabelKey(row)}`)}</span>
         <span>·</span>
         <span>{formatRelativeTime(new Date(row.startedAt))}</span>
+        {row.origin === "gateway-api" && (
+          <>
+            <span>·</span>
+            <span className="truncate">
+              {row.originActorName
+                ? t("originActor", { name: row.originActorName })
+                : t("filters.originGatewayApi")}
+            </span>
+          </>
+        )}
         {LIVE_STATUSES.has(row.status) && (
           <span className="ml-auto inline-flex items-center gap-1 text-blue-500">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" />

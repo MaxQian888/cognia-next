@@ -16,6 +16,16 @@ import { randomUUID } from "node:crypto"
 import { createEventAdapter } from "./event-adapter.mjs"
 import { makeInputStream } from "./input-stream.mjs"
 import { extractHttpErrorMeta } from "./http-error-meta.mjs"
+import {
+  classifyCallError,
+  createCallLedgerGate,
+  drainSideCallStream,
+  estimatePromptTokens,
+  isRetryableBeforeOutput,
+  rawUsageFromAiSdk,
+  refusalSessionEnded,
+  runLedgeredSideCall,
+} from "./call-ledger-gate.mjs"
 import { makeLazyLspResolver } from "./lsp-resolver-factory.mjs"
 import { makeLazyCodeGraphResolver } from "./codegraph-resolver-factory.mjs"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
@@ -516,6 +526,14 @@ export function dispatchAiSdk({
   // stopped consuming the stream AFTER the call completed — it kept billing).
   /** @type {AbortController | null} */
   let activeAbortController = null
+  // Router + Fusion (ADR-0188): the ledger stamp for the NEXT turn. The session
+  // outlives a single send, so each send hands its own stamp in (`setNextTurnLedger`
+  // from `handleSend`); a turn without one is never gated.
+  let nextTurnLedger = sendOptions.ledger ?? null
+  /** @type {ReturnType<typeof createCallLedgerGate> | null} */
+  let turnLedgerGate = null
+  // Distinct logical step ids for reserved calls outside the leg loop.
+  let ledgerSideCalls = 0
   // Creds/params from the most recent turn — let a manual compaction (between
   // turns) reuse them for its one-shot summary call. A deferred manual request
   // (turn in flight) is parked here and honoured at the next turn's head.
@@ -874,33 +892,49 @@ export function dispatchAiSdk({
           if (alt) summaryAdapter = alt
         }
         const summaryParams = { ...modelParams, maxOutputTokens: summaryCap }
-        const run = await summaryAdapter.start({
-          sessionId,
-          model: summaryModel,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: transcript },
-          ],
-          modelParams: summaryParams,
-          tools: undefined,
-          maxSteps: 1,
-          credentials: summaryCreds,
-          // Must track whichever credentials won above: a distinct summary
-          // provider carries its own id, otherwise these ARE the turn's creds
-          // and so is its provider. Omitting it dropped codex-on-a-relay back
-          // to `.chat()` for compaction only — the turn itself still worked.
-          providerId: sum.credentials ? sum.providerId : provider,
-          // Interruptible: a hung summary provider must not stall the turn
-          // head forever. Absent for a between-turns manual compaction (no
-          // active controller) — that call has no turn to stall.
-          ...(activeAbortController ? { abortSignal: activeAbortController.signal } : {}),
-          streamTextFn: streamTextOverride,
-        })
-        let out = ""
-        for await (const evt of run.fullStream) {
-          if (evt?.type === "text-delta") out += evt.text ?? evt.textDelta ?? evt.delta ?? ""
+        const summaryProviderId = sum.credentials ? sum.providerId : provider
+        // Router + Fusion: inside a ledgered turn the summary is a reserved call
+        // like any other; a refusal skips the AI summary.
+        const outcome = await runLedgeredSideCall(
+          turnLedgerGate,
+          {
+            logicalStepId: `compact:${++ledgerSideCalls}`,
+            deploymentId: `${summaryProviderId}::${summaryModel}`,
+            estimatedInputTokens: estimatePromptTokens([systemPrompt, transcript]),
+            maxOutputTokens: summaryCap,
+          },
+          async () => {
+            const run = await summaryAdapter.start({
+              sessionId,
+              model: summaryModel,
+              messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: transcript },
+              ],
+              modelParams: summaryParams,
+              tools: undefined,
+              maxSteps: 1,
+              credentials: summaryCreds,
+              // Must track whichever credentials won above: a distinct summary
+              // provider carries its own id, otherwise these ARE the turn's creds
+              // and so is its provider. Omitting it dropped codex-on-a-relay back
+              // to `.chat()` for compaction only — the turn itself still worked.
+              providerId: summaryProviderId,
+              // Interruptible: a hung summary provider must not stall the turn
+              // head forever. Absent for a between-turns manual compaction (no
+              // active controller) — that call has no turn to stall.
+              ...(activeAbortController ? { abortSignal: activeAbortController.signal } : {}),
+              streamTextFn: streamTextOverride,
+            })
+            return drainSideCallStream(run, { withBilling: turnLedgerGate?.active === true })
+          },
+          { isCancelled: () => cancelled }
+        )
+        if (!outcome.sent) {
+          log("warn", `compaction summary refused by Router + Fusion: ${outcome.refusal.code}`)
+          return null
         }
-        return out.trim() || null
+        return outcome.value.trim() || null
       } catch (err) {
         log("warn", `compaction summary failed, skipping: ${err?.message ?? err}`)
         return null
@@ -938,34 +972,51 @@ export function dispatchAiSdk({
           })
           if (alt) visionAdapter = alt
         }
-        const run = await visionAdapter.start({
-          model: sum.model || model,
-          messages: [
-            {
-              role: "user",
-              content: [
-                { type: "image", image: dataUrl, mediaType: "image/png" },
+        const visionModel = sum.model || model
+        const visionProviderId = sum.credentials ? sum.providerId : provider
+        const outcome = await runLedgeredSideCall(
+          turnLedgerGate,
+          {
+            logicalStepId: `optical:${++ledgerSideCalls}`,
+            deploymentId: `${visionProviderId}::${visionModel}`,
+            // An image part is billed as input tokens the text estimate cannot see.
+            estimatedInputTokens: estimatePromptTokens([dataUrl]),
+            maxOutputTokens: 1024,
+          },
+          async () => {
+            const run = await visionAdapter.start({
+              model: visionModel,
+              messages: [
                 {
-                  type: "text",
-                  text: "Transcribe ALL text visible in this image verbatim, preserving reading order. Output only the transcription, no commentary.",
+                  role: "user",
+                  content: [
+                    { type: "image", image: dataUrl, mediaType: "image/png" },
+                    {
+                      type: "text",
+                      text: "Transcribe ALL text visible in this image verbatim, preserving reading order. Output only the transcription, no commentary.",
+                    },
+                  ],
                 },
               ],
-            },
-          ],
-          modelParams: { ...modelParams, maxOutputTokens: 1024 },
-          tools: undefined,
-          maxSteps: 1,
-          credentials: sum.credentials || creds,
-          // Same pairing as the summary call above.
-          providerId: sum.credentials ? sum.providerId : provider,
-          ...(activeAbortController ? { abortSignal: activeAbortController.signal } : {}),
-          streamTextFn: streamTextOverride,
-        })
-        let out = ""
-        for await (const evt of run.fullStream) {
-          if (evt?.type === "text-delta") out += evt.text ?? evt.textDelta ?? evt.delta ?? ""
+              modelParams: { ...modelParams, maxOutputTokens: 1024 },
+              tools: undefined,
+              maxSteps: 1,
+              credentials: sum.credentials || creds,
+              // Same pairing as the summary call above.
+              providerId: visionProviderId,
+              ...(activeAbortController ? { abortSignal: activeAbortController.signal } : {}),
+              streamTextFn: streamTextOverride,
+            })
+            return drainSideCallStream(run, { withBilling: turnLedgerGate?.active === true })
+          },
+          { isCancelled: () => cancelled }
+        )
+        if (!outcome.sent) {
+          throw new Error(
+            `optical transcription refused by Router + Fusion: ${outcome.refusal.code}`
+          )
         }
-        return out.trim()
+        return outcome.value.trim()
       }
       const optical = await buildOpticalCompaction({
         middle: plan.middle,
@@ -1058,6 +1109,18 @@ export function dispatchAiSdk({
     // Clear any leftover interrupt from a previous turn so this turn streams.
     cancelled = false
     active = true
+    // Router + Fusion call gate for THIS turn. Inactive (and invisible) unless
+    // the send carried a ledger stamp.
+    const ledgerGate = createCallLedgerGate({ ledger: nextTurnLedger, sessionId, emit, log })
+    nextTurnLedger = null
+    turnLedgerGate = ledgerGate
+    /** @type {{ attemptId: string, attemptNo: number, logicalStepId: string } | null} */
+    let openLedgerAttempt = null
+    const reportOpenAttempt = (result) => {
+      if (!openLedgerAttempt) return
+      ledgerGate.report({ ...openLedgerAttempt, ...result })
+      openLedgerAttempt = null
+    }
     // Usage normally arrives on the closing `result.usage` promise. If the user
     // interrupts, that promise commonly rejects and used to erase every token
     // already billed by completed steps. Keep a per-step fallback while the
@@ -1273,6 +1336,10 @@ export function dispatchAiSdk({
       let stepsUsed = 0
       let turnError = null
       let cappedWhileBusy = false
+      // Router + Fusion: the logical call index (a transport retry keeps it) and
+      // a refusal that ended the turn.
+      let ledgerLegIndex = 0
+      let ledgerRefusal = null
       // eslint-disable-next-line no-constant-condition
       while (true) {
         currentLegStepInputTokens = 0
@@ -1326,7 +1393,38 @@ export function dispatchAiSdk({
         }
 
         // Never exceed the remaining turn budget; always allow at least 1 step.
-        const perLegCap = Math.max(1, Math.min(STEP_CHUNK, maxStepsBudget - stepsUsed))
+        // A ledgered turn runs exactly ONE model call per leg, so every call is
+        // reserved before it is sent.
+        const perLegCap = ledgerGate.active
+          ? 1
+          : Math.max(1, Math.min(STEP_CHUNK, maxStepsBudget - stepsUsed))
+
+        if (ledgerGate.active) {
+          const logicalStepId = `leg:${ledgerLegIndex}`
+          const reservation = await ledgerGate.reserve({
+            kind: "call",
+            logicalStepId,
+            estimatedInputTokens: Math.max(
+              lastInputTokens,
+              estimatePromptTokens(messagesForSend) + Object.keys(toolsCache ?? {}).length * 200
+            ),
+            maxOutputTokens:
+              typeof modelParams.maxOutputTokens === "number" ? modelParams.maxOutputTokens : null,
+          })
+          if (reservation.decision === "refused") {
+            // An interrupt drains pending reservations as refused; that is the
+            // user stopping the turn, not a budget refusal.
+            if (!cancelled) ledgerRefusal = reservation
+            break
+          }
+          if (reservation.decision === "granted" && reservation.attemptId) {
+            openLedgerAttempt = {
+              attemptId: reservation.attemptId,
+              attemptNo: reservation.attemptNo ?? 1,
+              logicalStepId,
+            }
+          }
+        }
 
         const result = await protocolAdapter.start({
           sessionId,
@@ -1379,9 +1477,13 @@ export function dispatchAiSdk({
             : {}),
           abortSignal: abortController.signal,
           streamTextFn: streamTextOverride,
+          // A reserved call is exactly one provider request: the SDK's own
+          // transport retries would send more than the ledger admitted.
+          ...(openLedgerAttempt ? { maxRetries: 0 } : {}),
         })
 
         let legText = ""
+        let legProducedOutput = false
         // Capture a streamed error part. AI SDK v6 surfaces provider/auth/network
         // failures as a `{ type:"error", error }` part in `fullStream` (and only
         // console.errors them via the default onError) rather than throwing.
@@ -1404,6 +1506,14 @@ export function dispatchAiSdk({
           if (evt?.type === "text-delta") {
             legText += evt.text ?? evt.textDelta ?? evt.delta ?? ""
           }
+          if (
+            evt?.type === "text-delta" ||
+            evt?.type === "reasoning-delta" ||
+            evt?.type === "tool-call" ||
+            evt?.type === "tool-input-start"
+          ) {
+            legProducedOutput = true
+          }
         }
         // Seal this leg's streamed text/reasoning deltas into the canonical full
         // `assistant` snapshot (the deltas above are `stream_event` previews). The
@@ -1412,6 +1522,28 @@ export function dispatchAiSdk({
         flushAdapter(adapter.sealAssistant())
         assistantText += legText
 
+        // Router + Fusion: a call the provider refused before producing anything
+        // is booked as a failed attempt; an explicit, retryable refusal may use
+        // the next transport attempt as a NEW reserved call. A call that was sent
+        // and simply never answered is UNKNOWN and is never retried.
+        if (openLedgerAttempt && streamError && !legProducedOutput && !cancelled) {
+          const errorClass = classifyCallError(streamError)
+          const retryable = isRetryableBeforeOutput(errorClass)
+          const attemptNo = openLedgerAttempt.attemptNo
+          reportOpenAttempt({
+            status: errorClass === "timeout_after_send" ? "unknown" : "failed",
+            errorClass,
+            reason: errorToMessage(streamError),
+          })
+          if (retryable && attemptNo < ledgerGate.transportAttempts) {
+            const { retryAfterMs } = extractHttpErrorMeta(streamError)
+            await new Promise((resolve) =>
+              setTimeout(resolve, Math.min(Math.max(retryAfterMs ?? 1000, 0), 30_000))
+            )
+            if (!cancelled) continue
+          }
+        }
+
         // A streamed error before ANY text in the whole turn is a failed turn —
         // report the real provider message instead of a silent empty
         // `session_ended` (which the loop maps to "no assistant text"). Returning
@@ -1419,6 +1551,13 @@ export function dispatchAiSdk({
         // getters reject on a hard error.
         if (streamError && !assistantText && !cancelled) {
           const msg = errorToMessage(streamError)
+          // Output was produced (tool calls) but no bill arrived: sent, outcome
+          // unknown. Never booked as free.
+          reportOpenAttempt({
+            status: "unknown",
+            errorClass: classifyCallError(streamError),
+            reason: msg,
+          })
           emit({
             type: "session_ended",
             sessionId,
@@ -1507,6 +1646,41 @@ export function dispatchAiSdk({
           currentLegStepUsage = null
         }
 
+        if (openLedgerAttempt) {
+          const rawUsage = rawUsageFromAiSdk(usage)
+          const clean = !cancelled && !streamError
+          let providerRequestId = null
+          if (clean) {
+            try {
+              providerRequestId = (await result.response)?.id ?? null
+            } catch {
+              providerRequestId = null
+            }
+          }
+          reportOpenAttempt({
+            // Interrupted or broken mid-stream: booked from its bill when the
+            // provider sent one, otherwise UNKNOWN (sent, bill never seen).
+            status: clean ? "succeeded" : rawUsage ? "failed" : "unknown",
+            usage: rawUsage,
+            providerRequestId,
+            ...(finishReason
+              ? {
+                  finishReason:
+                    finishReason === "tool-calls"
+                      ? "tool_calls"
+                      : finishReason === "length"
+                        ? "length"
+                        : "stop",
+                }
+              : {}),
+            ...(streamError
+              ? { errorClass: classifyCallError(streamError), reason: errorToMessage(streamError) }
+              : {}),
+            ...(cancelled && !rawUsage ? { reason: "cancelled_mid_stream" } : {}),
+          })
+          ledgerLegIndex += 1
+        }
+
         if (cancelled || turnError) break
 
         // How many steps this leg actually ran. A leg cut short by `stopWhenExtra`
@@ -1559,7 +1733,14 @@ export function dispatchAiSdk({
       const finishUsage = finishUsageSnapshot()
       const finishEvents = adapter.finish({ usage: finishUsage })
       flushAdapter(finishEvents)
-      if (turnError && !cancelled) {
+      if (ledgerRefusal) {
+        // Router + Fusion refused the next call (budget, limit, deadline). What
+        // was produced so far is kept; the turn ends explicitly, never silently.
+        emit({
+          ...refusalSessionEnded(sessionId, ledgerRefusal),
+          conversationSnapshot: conversation,
+        })
+      } else if (turnError && !cancelled) {
         // A provider error AFTER partial text already streamed (e.g. a 429 /
         // overloaded / connection-reset mid-reply). `finish` above closed the
         // content blocks so the partial is preserved, but we must still report
@@ -1579,6 +1760,20 @@ export function dispatchAiSdk({
         emit({ type: "session_ended", sessionId, conversationSnapshot: conversation })
       }
     } catch (err) {
+      // A reserved call that threw instead of streaming: a configuration error
+      // that never left the process is failed; anything else was possibly sent
+      // and is UNKNOWN until reconciled.
+      if (openLedgerAttempt) {
+        const errorClass = classifyCallError(err, { aborted: cancelled })
+        reportOpenAttempt({
+          status:
+            errorClass === "not_sent" || errorClass === "invalid_request" || errorClass === "auth"
+              ? "failed"
+              : "unknown",
+          errorClass,
+          reason: err?.message ?? String(err),
+        })
+      }
       // An aborted turn (user interrupt) is a clean stop, not a failure —
       // streamText rejects with an AbortError once the signal fires.
       if (cancelled || err?.name === "AbortError" || err?.name === "TimeoutError") {
@@ -1598,6 +1793,8 @@ export function dispatchAiSdk({
         })
       }
     } finally {
+      ledgerGate.drain("turn_ended")
+      turnLedgerGate = null
       active = false
       activeAbortController = null
     }
@@ -1663,6 +1860,7 @@ export function dispatchAiSdk({
           pendingToolResultReviews.delete(id)
           p.resolve(undefined) // pass through unchanged
         }
+        turnLedgerGate?.drain("interrupted")
         // Protocol-adapters have a `.fail` method on their pending channel, not
         // a bare resolve — mirror `handleProtocolAdapterError`'s teardown.
         if (pendingProtocolExecs) {
@@ -1703,6 +1901,16 @@ export function dispatchAiSdk({
       },
     },
     pushUserMessage: (content) => inputStream.push(content),
+    /**
+     * Router + Fusion: the ledger stamp of the send that is about to push its
+     * prompt into this live session (`handleSend`). `undefined` / null means
+     * the next turn is not gated.
+     */
+    setNextTurnLedger: (ledger) => {
+      nextTurnLedger = ledger ?? null
+    },
+    /** Resolve a pending reservation (`call_reserve_decision` from the renderer). */
+    resolveCallReserve: (message) => turnLedgerGate?.resolveDecision(message) ?? false,
     // Manual compaction (renderer `/compact` or "Compact now"). When idle, run
     // the summary now reusing the last turn's creds; when a turn is in flight,
     // defer to the next turn's head so two summary calls never overlap.
@@ -1737,6 +1945,7 @@ export function dispatchAiSdk({
       closing = true
       cancelled = true
       activeAbortController?.abort()
+      turnLedgerGate?.drain("session_closed")
       if (pendingProtocolExecs) {
         for (const [id, ch] of pendingProtocolExecs) {
           pendingProtocolExecs.delete(id)

@@ -26,6 +26,15 @@ jest.mock("@/lib/twin/distill/llm", () => {
   }
 })
 
+// The Router + Fusion seam is a pass-through unless the `agentsWorkflows`
+// switch is on; the tests below check both what it is handed and that the
+// executor keeps using whatever comes back.
+const ledgerUtilityCallsMock = jest.fn((client: unknown, _input: unknown) => client)
+jest.mock("@/lib/router-fusion/gate/utility-ledger", () => ({
+  ledgerUtilityCalls: (...args: unknown[]) =>
+    ledgerUtilityCallsMock(...(args as [unknown, unknown])),
+}))
+
 import "@/lib/workflow/nodes/built-ins"
 import { getExecutor } from "@/lib/workflow/nodes/registry"
 import type { StepExecutionContext } from "@/types/workflow/visual"
@@ -58,6 +67,8 @@ beforeEach(() => {
   generateEmbeddingMock.mockClear()
   completeMock.mockClear()
   createLlmClientMock.mockClear()
+  ledgerUtilityCallsMock.mockClear()
+  ledgerUtilityCallsMock.mockImplementation((client: unknown) => client)
   createLlmClientMock.mockImplementation(() => ({
     complete: (...args: unknown[]) => completeMock(...args),
     getUsageSnapshot: () => ({ inputTokens: 1, outputTokens: 1, totalTokens: 2 }),
@@ -112,6 +123,39 @@ describe("B1 — ai.prompt structured output", () => {
         headers,
       })
     )
+  })
+
+  it("offers each real call to the ledger as an agents/workflows run", async () => {
+    completeMock.mockResolvedValueOnce("ok")
+    await run("ai.prompt", { provider: "openai", model: "gpt", apiKey: "k", userPrompt: "x" })
+    expect(ledgerUtilityCallsMock).toHaveBeenCalledTimes(1)
+    expect(ledgerUtilityCallsMock.mock.calls[0][1]).toMatchObject({
+      binding: {
+        surface: "agentsWorkflows",
+        origin: "workflow",
+        featureId: "workflow:s",
+        providerId: "openai",
+        modelId: "gpt",
+      },
+    })
+  })
+
+  it("never offers a stub run to the ledger: nothing reaches a provider", async () => {
+    await run("ai.prompt", { userPrompt: "hi" })
+    expect(ledgerUtilityCallsMock).not.toHaveBeenCalled()
+  })
+
+  it("calls whatever the ledger hands back, not the client it built", async () => {
+    const ledgered = { complete: jest.fn(async () => "from the ledgered client") }
+    ledgerUtilityCallsMock.mockReturnValueOnce(ledgered)
+    const out = await run("ai.prompt", {
+      provider: "openai",
+      model: "gpt",
+      apiKey: "k",
+      userPrompt: "x",
+    })
+    expect(out.completion).toBe("from the ledgered client")
+    expect(completeMock).not.toHaveBeenCalled()
   })
 
   it("json mode surfaces parseError when the model returns no JSON", async () => {

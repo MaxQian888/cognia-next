@@ -2308,10 +2308,14 @@
     "filters": {
       "all": "全部",
       "allKinds": "全部类型",
+      "allOrigins": "全部来源",
       "failed": "失败",
       "finished": "已结束",
       "kindLabel": "按类型筛选",
       "kindOption": "{label}（{count}）",
+      "originGatewayApi": "网关 API",
+      "originLabel": "按来源筛选",
+      "originLocal": "本机",
       "running": "进行中",
       "statusLabel": "按状态筛选",
       "waiting": "等待中"
@@ -2322,6 +2326,7 @@
       "chat": "对话",
       "connector": "连接器",
       "delegation": "委派",
+      "fusion": "路由运行",
       "goal": "目标",
       "job": "后台任务",
       "other": "其他",
@@ -2338,6 +2343,7 @@
     "operations": {
       "unavailable": "本设备没有这次小队运行的记录。"
     },
+    "originActor": "密钥 {name}",
     "outcome": {
       "action_unavailable": "该操作已失效——运行状态已经变化。",
       "already_retried": "该运行已经重试过了。",
@@ -4775,7 +4781,9 @@
     "description": "已安装的 Bot：各自被什么唤醒、由什么执行、被允许做什么。",
     "detail": {
       "noSelectionBody": "从左侧选一个 Bot，查看它的触发器、凭据与策略。",
-      "noSelectionTitle": "未选择 Bot"
+      "noSelectionTitle": "未选择 Bot",
+      "notFoundBody": "链接指向的安装在这台设备上不存在。它可能已被卸载，或位于另一台主机上。",
+      "notFoundTitle": "找不到这个 Bot"
     },
     "executor": {
       "agent-turn": "单次 Agent 回合",
@@ -4835,6 +4843,7 @@
       "filterAria": "按状态筛选 Bot",
       "label": "Bot 列表",
       "searchAria": "搜索 Bot",
+      "searchClearAria": "清除 Bot 搜索",
       "searchPlaceholder": "搜索 Bot"
     },
     "monitor": {
@@ -4964,6 +4973,12 @@
     "trigger": {
       "armAria": "武装「{name}」",
       "armBlockedOrphan": "定义缺失时无法武装触发器。",
+      "configFallback": {
+        "below-floor": "使用默认值：低于 15 秒下限",
+        "invalid-cron": "使用默认值：cron 表达式无效",
+        "invalid-timezone": "使用默认值：时区无效",
+        "missing": "使用默认值：配置项缺失"
+      },
       "everyHours": "每 {value} 小时",
       "everyMinutes": "每 {value} 分钟",
       "everySeconds": "每 {value} 秒",
@@ -7698,6 +7713,18 @@
         "timestamp": "时间",
         "usage": "Token"
       },
+      "routing": {
+        "alias": "别名 · {alias}",
+        "auto": "自动 · {target}",
+        "candidates": "候选数：{count}",
+        "costCapExceeded": "已超出单次请求成本上限并继续执行",
+        "judgeUsed": "判定：{value}",
+        "no": "否",
+        "score": "评分：{score}",
+        "strategy": "策略：{strategy}",
+        "tier": "档位：{tier}",
+        "yes": "是"
+      },
       "status": {
         "complete": "已完成",
         "error": "失败",
@@ -8623,7 +8650,7 @@
     "agentsHint": "派发与查看",
     "agentsLabel": "子代理",
     "aliases": "别名：",
-    "arguments": "参数",
+    "argsTitle": "参数",
     "argumentsLabels": {
       "mcp": {
         "add": {
@@ -8698,6 +8725,7 @@
       "handoff": "将此会话发送到桌面应用",
       "help": "查看命令列表，或通过 /help [command] 查看命令详情",
       "hooks": "浏览、配置和重新加载生命周期钩子",
+      "images": "管理已粘贴的图片附件",
       "init": "创建或改进此项目的 AGENTS.md",
       "inspect": "浏览并展开工具或文件输出",
       "keybind": "查看和自定义快捷键",
@@ -8776,6 +8804,10 @@
     "helpHint": "所有命令与快捷键",
     "helpLabel": "帮助",
     "helpTitle": "帮助：/{command}",
+    "imagesEmpty": "暂无图片附件 — 剪贴板有图片时用快捷键粘贴",
+    "imagesFooter": "↑/↓ 选择 · d 移除 · c 清空 · Enter 打开 · Esc 关闭",
+    "imagesMissing": "文件不存在",
+    "imagesTitle": "图片附件",
     "inspectEmpty": "暂无可查看的工具输出。",
     "inspectLine": "1 行",
     "inspectLines": "{count} 行",
@@ -9058,6 +9090,7 @@
     },
     "cacheReused": "已复用 {count}",
     "cancel": "Esc 取消",
+    "clipboardImageReady": "剪贴板中有图片 · {key} 粘贴",
     "codexLimits": {
       "creditUnit": "额度",
       "credits": "额度余额",
@@ -9081,10 +9114,14 @@
     "crashHint": "错误已记录。按 r 重置会话，按 q 或 Esc 退出。",
     "crashTitle": "发生错误",
     "defaultModel": "默认",
+    "devinLimits": {
+      "noCredential": "未找到 Devin 凭证——请运行 `devin auth login`，或设置 DEVIN_API_KEY。"
+    },
     "diffFailed": "无法读取变更：{error}",
     "editingDiscard": "编辑消息 #{position}/{total} · 发送后将移除后续 {later} 轮对话 · Esc 取消",
     "editingMessage": "编辑消息 #{position}/{total} — ↑/↓ 选择 · Enter 编辑 · Esc 取消",
     "filterCommands": "输入以筛选命令",
+    "imagesAttached": "已附加 {count} 张图片 · /images 管理",
     "language": "界面语言",
     "languageHint": "启动、审批、错误、帮助和变更审阅面板的显示语言。",
     "mcp": {
@@ -9297,6 +9334,7 @@
     "allPaths": "全部",
     "allVisible": "全部",
     "binary": "二进制变更",
+    "binaryData": "{count} 行二进制数据",
     "branch": "分支对比 {ref}",
     "changed": "{count} 个文件有变更",
     "changedOne": "1 个文件有变更",
@@ -9309,9 +9347,14 @@
     "failed": "未能读取变更，按 r 重试。",
     "file": "1 个文件",
     "files": "{count} 个文件",
+    "hideViewed": "X 隐藏已看",
+    "hunkNav": "[/] 变更块",
+    "hunkPosition": "块 {current}/{total}",
     "hunks": "{count} 个变更块",
     "loading": "正在读取变更…",
+    "markViewed": "x 标记已看",
     "matches": "{current}/{total} 处匹配",
+    "modeChange": "模式 {from} → {to}",
     "navigation": "↑/↓ 文件 · PgUp/PgDn 翻页 · / 筛选 · Enter 打开 · Tab 焦点 · Ctrl+←/→ 范围 · Esc 返回",
     "noMatches": "没有匹配的文件",
     "pages": "第 {page}/{pages} 页 · {shown}/{total} 个文件",
@@ -9319,11 +9362,22 @@
     "pathSearch": "搜索路径：{query}▌ · Enter 确认",
     "refresh": "r 刷新",
     "searchDraft": "/{query}{cursor} · enter 搜索 · esc 取消",
+    "sectionStaged": "已暂存",
+    "sectionUnstaged": "未暂存",
+    "sectionUntracked": "新文件",
     "selectedFile": "当前文件：",
+    "showViewed": "X 显示已看",
+    "splitView": "s 分屏视图",
     "staged": "已暂存变更",
+    "statusDeleted": "已删除",
+    "statusNew": "新文件",
+    "statusRenamed": "重命名",
+    "statusRenamedFrom": "重命名自 {from}",
     "title": "Git 变更",
+    "unifiedView": "s 统一视图",
     "unstaged": "未暂存变更",
     "untracked": "新文件",
+    "viewedCount": "已看 {count}",
     "viewerNavigation": "↑/↓ 滚动 · PgUp/PgDn 翻页 · g/G 首尾 · / 搜索 · n/N 下/上一个",
     "workingTitle": "工作区变更"
   },
@@ -9376,6 +9430,7 @@
     "keyDescription": "当前快捷键；可通过下方“重新绑定快捷键…”修改。",
     "keys": {
       "agentsPanel": "打开运行中智能体面板",
+      "attachmentsPanel": "管理图片附件",
       "clearScreen": "清屏",
       "collapseAll": "展开或折叠全部",
       "copyCodeBlock": "复制最后一个代码块",
@@ -12277,6 +12332,14 @@
         "hint": "此主机已达到智能体进程数上限——请结束或关闭一个后重试。",
         "label": "智能体会话过多"
       },
+      "routerFusionRefused": {
+        "hint": "没有满足本轮预算、限制或数据规则的路由——请在「设置 → AI 连接 → 路由」中提高运行上限或更换模型。",
+        "label": "Router + Fusion 拒绝了本轮"
+      },
+      "routerFusionRunFailed": {
+        "hint": "级联或评审团运行在回答通过验证前停止。可在“运行中心”查看该运行；请重新发送消息，或将对话切换为直接模式。",
+        "label": "Router + Fusion 运行失败"
+      },
       "routingNoCandidates": {
         "hint": "路由链中没有服务商可以处理该请求——请检查服务商与模型映射配置。",
         "label": "没有可用服务商"
@@ -13769,6 +13832,7 @@
       "chat": "对话",
       "connector": "连接器",
       "delegation": "委派",
+      "fusion": "路由运行",
       "goal": "目标",
       "job": "后台任务",
       "plan": "计划",
@@ -27686,15 +27750,46 @@
       "applyModeOverwrite": "覆盖",
       "applyModeOverwriteDesc": "用预设完全替换现有别名列表。",
       "auto": {
+        "cacheEnabled": "缓存路由决策",
+        "cacheTtl": "缓存有效期（秒）",
+        "categoryAliasesHint": "配置的别名优先于难度档位，但不会越过能力或数据策略约束。",
+        "categoryAliasesTitle": "任务类别别名",
+        "categoryFollowLadder": "跟随难度档位",
         "defaultSelection": "未固定模型的对话默认使用自动路由",
         "defaultSelectionHint": "会话中明确选择的具体模型始终是硬覆盖。",
         "desc": "仅对明确选择「自动」的请求按能力、可靠性、任务匹配、成本和延迟进行本地路由。",
+        "dormant": {
+          "allowOverride": "会话中明确选择的具体模型始终是硬覆盖。",
+          "customTierModels": "档位模型由候选别名和模型映射中的别名承担。",
+          "routingMode": "已由上方判定设置取代——本地评分始终运行。"
+        },
+        "dormantInactive": "已停用",
+        "dormantTitle": "旧版字段（已保存，未使用）",
         "enabled": "启用自动路由",
+        "excludedProviders": "排除的供应商",
+        "fallbackHint": "仅在自动路由找不到可用候选时使用。",
+        "fallbackNone": "无",
+        "fallbackProvider": "兜底供应商",
+        "fallbackTier": "兜底档位别名",
+        "fallbackTitle": "兜底",
         "hint": "自动路由在本地分类，并优先使用这些实时档位别名：{tiers}。",
+        "judgeEnabled": "难度判定（二次确认）",
+        "judgeHint": "仅在档位边界附近触发；脱敏不通过时不会发送提示词，判定失败时沿用本地结果。",
+        "judgeTimeoutMs": "判定超时（毫秒）",
+        "judgeUncertaintyBand": "不确定区间（0–0.5）",
         "localOnly": "仅本地服务商",
         "localOnlyHint": "自动请求会硬性排除所有云端候选。",
+        "maxCostPerRequest": "单次请求成本上限（美分）",
+        "maxCostPerRequestHint": "软上限——若没有符合的候选仍会继续路由，并在消息上显示警告。",
+        "preferredProviders": "首选供应商",
+        "preferredProvidersHint": "按顺序生效——靠前的供应商优先尝试。",
+        "providerPolicyTitle": "供应商策略",
+        "routerModel": "判定模型",
+        "routerModelClear": "使用默认辅助模型",
+        "routerModelHint": "二次判定使用的模型，默认沿用辅助模型。",
         "shadowMode": "影子对比",
         "shadowModeHint": "只比较路由决策，不会重复发送模型请求。",
+        "showIndicator": "在消息上显示路由标记",
         "thresholdBalanced": "均衡档阈值（0–1）",
         "thresholdPowerful": "强力档阈值（0–1）",
         "title": "自动路由"
@@ -27778,6 +27873,7 @@
       "reasonCode": {
         "affinity-pin": "会话亲和",
         "alias-match": "已匹配别名策略",
+        "auto-category-fit": "任务类别别名匹配",
         "auto-task-fit": "自动任务适配",
         "budget-exceeded": "超出预算限制",
         "capability-required": "缺少必需能力",
@@ -27785,15 +27881,20 @@
         "cold-start": "冷启动稳定顺序",
         "committed-no-replay": "响应已提交，不能自动重放",
         "context-window": "上下文窗口不足",
+        "cost-cap-exceeded": "超出单次请求成本上限",
         "data-policy": "数据策略拒绝",
         "fallback-content-policy": "内容策略故障转移",
         "fallback-context": "上下文故障转移",
         "fallback-transient": "临时错误故障转移",
         "filter": "过滤器决策（{code}）",
+        "judge-agreed": "难度判定一致",
+        "judge-overrode": "难度判定覆盖了启发式结果",
+        "judge-unavailable": "难度判定不可用",
         "manual-override": "手动覆盖",
         "plugin": "插件决策（{code}）",
         "plugin-error": "插件错误",
         "plugin-timeout": "插件超时",
+        "provider-preference": "首选供应商",
         "provider-unavailable": "服务商不可用",
         "rate-limited": "已触发限流",
         "reliability-first": "可靠性优先排序",
@@ -28369,6 +28470,382 @@
       "secure": "设备安全存储",
       "unavailable": "Vault 不可用",
       "unlocked": "Vault 已解锁"
+    }
+  },
+  "routerFusion": {
+    "breakerToast": {
+      "body": "连续失败（{reason}）。在「设置 → AI 连接 → 路由」中重新启用前，所有轮次都走原路径且不计入账本。",
+      "title": "Router + Fusion 已暂停：{surface}"
+    },
+    "grant": {
+      "body": "本轮最多预留 {cap}，但你的费用预算只剩 {available}。批准一次性授权 {shortfall}，仅用于本次运行。",
+      "title": "批准这次 Router + Fusion 运行？"
+    },
+    "modePicker": {
+      "aria": "Router + Fusion 运行模式：{mode}",
+      "auto": "自动",
+      "autoDesc": "默认直接运行；若轮次匹配你批准的级联或评审团规则，则改用对应模式。",
+      "buffered": "级联和评审团的回答通过验证后才会显示。",
+      "cascade": "级联",
+      "cascadeDesc": "低成本模型先起草并接受检查，未通过则由强模型接手。仅文本，不使用智能体工具。",
+      "direct": "直接",
+      "directDesc": "由一个模型作答并流式输出，可使用智能体工具。",
+      "panel": "评审团",
+      "panelDesc": "多个模型独立作答，由裁判对照证据比较，再写出一个回答。仅文本，不使用智能体工具。",
+      "paused": "Router + Fusion 因连续失败已暂停聊天。在「设置 → AI 连接 → 路由」中重新启用前，级联和评审团轮次会被拒绝。",
+      "title": "本对话的轮次如何运行"
+    },
+    "progress": {
+      "buffered": "回答通过验证后才会显示。",
+      "calls": "{count, plural, other {# 次模型调用}}",
+      "details": "运行进度",
+      "runningCascade": "级联运行中",
+      "runningPanel": "评审团运行中",
+      "spent": "{spent} / {cap}",
+      "starting": "正在启动"
+    },
+    "refusal": {
+      "ATTEMPTS_EXHAUSTED": "该调用已用完允许的传输重试次数。",
+      "BUDGET_FROZEN": "本次运行花费超出上限，已被停止。",
+      "CALL_OUTCOME_UNKNOWN": "有一次模型调用的结果未知，为避免重复付费，运行已停止。",
+      "CANCELLED": "运行已取消。",
+      "CONTEXT_BUDGET_EXHAUSTED": "对话过长，在本次运行的上限内无法压缩。",
+      "CONTEXT_PRECHECK_FAILED": "对话超出了本次运行所需模型的上下文窗口。",
+      "DATA_CLASS_NOT_ALLOWED": "该模型不允许接收此工作区的数据级别。",
+      "DEADLINE_EXCEEDED": "本次运行已到截止时间。",
+      "DECLINED_GRANT": "一次性预算授权被拒绝，本轮未运行。",
+      "DEPLOYMENT_NOT_IN_SNAPSHOT": "严格预算不允许调用本次路由之外的模型。",
+      "DISPATCH_FAILED": "该轮次未能发送给模型。",
+      "FORMAT_INVALID": "模型的回答不符合要求的格式。",
+      "FUSION_INSUFFICIENT_CANDIDATES": "留存下来的评审团回答太少，无法比较。",
+      "FUSION_TEXT_ONLY": "级联和评审团运行只读取文本。请移除图片，或将本对话切换为直接模式。",
+      "INTERNAL": "Router + Fusion 发生内部错误。",
+      "JUDGE_OUTPUT_INVALID": "无法读取裁判的报告。",
+      "MAX_MODEL_CALLS": "本次运行已达到模型调用次数上限。",
+      "PII_BLOCKED": "本对话包含个人数据或密钥（邮箱地址、证件号码或密钥），因此没有发送给级联或评审团模型。",
+      "PRICE_UNKNOWN": "严格预算不允许使用没有审计价格的模型。",
+      "PROVIDER_UNAVAILABLE": "本轮进行中服务商被关闭或凭据失效。",
+      "RESERVATION_NOT_ACTIVE": "该调用的预留已经结算或释放。",
+      "RESTRICTED_NOT_GRANTED": "受限数据不得发送给该服务商。",
+      "REVOKED": "本轮进行中对该模型的访问被撤销。",
+      "ROUTER_FUSION_DISABLED": "本轮进行中 Router + Fusion（聊天）被关闭。",
+      "ROUTER_FUSION_UNAVAILABLE": "Router + Fusion 当前不可用，这次级联或评审团轮次没有运行。",
+      "ROUTE_EXPIRED": "为这条消息选定的路由在发送前已过期，请重新发送。",
+      "ROUTE_NO_SOLUTION": "没有模型能满足本轮的预算、限制和数据规则。",
+      "RUN_BUDGET_EXHAUSTED": "下一次调用将超出本次运行的上限。",
+      "RUN_BUSY": "另一个窗口正在处理这次运行。",
+      "RUN_EXISTS": "已存在相同 ID 的运行。",
+      "RUN_INPUT_MISSING": "找不到这次运行的输入。",
+      "RUN_LOST": "运行该轮次的窗口在完成前已关闭。",
+      "RUN_NOT_FOUND": "找不到这次运行。",
+      "RUN_NOT_RUNNING": "请求模型调用时本次运行已经结束。",
+      "RUN_SETUP_FAILED": "运行未能启动。",
+      "RUN_TERMINAL": "本次运行已经结束，无法再预留调用。",
+      "SESSION_BUSY": "此对话中仍有一个 Router + Fusion 轮次在运行。",
+      "SESSION_CLOSED": "调用获批前对话已关闭。",
+      "SESSION_VERSION_CONFLICT": "运行启动期间对话发生了变化。",
+      "STAGE_NOT_HELD": "为该阶段预留的预算已经用完或释放。",
+      "STEP_ALREADY_COMMITTED": "该步骤已经完成，因此没有再次发送给模型。",
+      "STEP_OUTCOME_UNKNOWN": "中断后有一个步骤的结果未知，因此没有再次执行。",
+      "TENANT_BUDGET_EXHAUSTED": "你的费用预算不足以覆盖本次运行的上限。",
+      "TOOL_CALL_LIMIT": "本次运行已达到证据查询次数上限。",
+      "TOOL_ROUND_EXCEEDED": "有评审团成员请求证据的次数超过了允许的轮数。",
+      "VERIFICATION_FAILED": "回答未通过验证。",
+      "VERIFICATION_INCONCLUSIVE": "无法验证该回答。",
+      "unknown": "已拒绝，代码 {code}。"
+    },
+    "runCard": {
+      "acceptance": "验收方式",
+      "acceptanceSchemaOnly": "{profile}（仅校验格式——未验证回答内容）",
+      "action": "动作",
+      "budget": "预算",
+      "budgetStrict": "严格",
+      "budgetTracked": "跟踪",
+      "bypassed": "Router + Fusion 暂不可用（{code}），本轮已走原路径，未计入账本。",
+      "bypassedTripped": "Router + Fusion 暂不可用（{code}），聊天入口现已暂停。在设置中重新启用前，所有轮次都走原路径。",
+      "calls": "模型调用",
+      "cap": "运行上限",
+      "cost": "费用",
+      "costStatus": {
+        "actual": "实际",
+        "estimated": "估算",
+        "pending": "待定——仍有调用未返回"
+      },
+      "costStatusParenthesized": "（{status}）",
+      "details": "运行详情",
+      "estimatedCap": "估算上限：该模型没有审计价格，本次运行可能超出上限。",
+      "frozen": "已在上限处停止",
+      "fusion": {
+        "candidates": "候选回答",
+        "candidatesValue": "{members} 个回答，{rejected} 个被拒，{evidence} 个证据无效",
+        "chipCascade": "级联",
+        "chipPanel": "评审团",
+        "compactions": "上下文压缩次数",
+        "contradictions": "{count} 处矛盾，{unresolved} 处未解决",
+        "costOfCap": "{spent} / {cap}",
+        "degraded": "已降级",
+        "escalated": "已升级",
+        "judge": "裁判",
+        "judgeValue": "支持 {supported} 条论断，否决 {rejected} 条，{unverified} 条缺少证据",
+        "level": {
+          "human_review": "人工复核",
+          "mixed": "混合",
+          "model_review": "模型复核",
+          "schema_only": "仅格式",
+          "tool_verified": "工具核验"
+        },
+        "modeCascade": "级联：先由低成本模型起草，未通过验证则升级",
+        "modePanel": "评审团：多个独立回答，由裁判比较",
+        "phase": {
+          "cascade": "级联",
+          "context": "上下文",
+          "execution": "作答",
+          "intake": "接收",
+          "judge": "裁判评估",
+          "panel": "评审团",
+          "prepare": "已准备",
+          "synthesis": "撰写回答",
+          "verification": "验证中"
+        },
+        "quality": "回答质量",
+        "qualityValue": {
+          "accepted": "已接受",
+          "degraded": "已降级：检查少于该动作的要求",
+          "unknown": "未验证"
+        },
+        "reason": {
+          "FORMAT_INVALID": "草稿不符合要求的格式",
+          "FUSION_INSUFFICIENT_CANDIDATES": "只有一个评审团回答留存",
+          "VERIFICATION_FAILED": "草稿未通过验证",
+          "VERIFICATION_INCONCLUSIVE": "草稿无法验证"
+        },
+        "role": {
+          "cheap": "低成本草稿",
+          "judge": "裁判",
+          "lead": "主导模型",
+          "panel_a": "评审团成员 A",
+          "panel_b": "评审团成员 B",
+          "panel_c": "评审团成员 C",
+          "reviewer": "复核模型",
+          "solver": "求解模型",
+          "strong": "强模型草稿",
+          "synthesizer": "汇总模型",
+          "worker": "执行模型"
+        },
+        "step": {
+          "candidates": "收集评审团回答",
+          "cheap": "低成本模型起草",
+          "compacted": "上下文已压缩",
+          "escalate": "已升级到强模型",
+          "format_repair": "修复格式",
+          "invoke": "调用模型",
+          "member_tools": "评审团成员查询了证据",
+          "reported": "裁判已给出报告",
+          "strong": "强模型起草",
+          "verification_requests_left_open": "裁判留有未完成的检查"
+        },
+        "timeline": "时间线",
+        "unknownCalls": "{count} 次结果未知",
+        "verification": "验证",
+        "verificationStatus": {
+          "failed": "未通过",
+          "inconclusive": "无法判定",
+          "not_applicable": "不适用",
+          "passed": "通过"
+        },
+        "verificationValue": "{status}（{level}）"
+      },
+      "label": "Router + Fusion",
+      "lane": "运行时",
+      "laneAgentSdk": "Claude Agent SDK",
+      "laneAiSdk": "AI SDK",
+      "mode": "模式",
+      "modeDirect": "直接",
+      "model": "模型",
+      "notLedgered": "未计入账本",
+      "overspend": "超出上限 {amount}",
+      "refused": "已拒绝",
+      "rule": "规则",
+      "ruleBaseline": "基线（未命中规则）",
+      "runId": "运行",
+      "status": "状态",
+      "statusValue": {
+        "cancelled": "已取消",
+        "cancelling": "正在取消",
+        "expired": "已过期",
+        "failed": "失败",
+        "queued": "排队中",
+        "reconciling": "对账中",
+        "running": "运行中",
+        "succeeded": "成功",
+        "unknown": "{status}"
+      }
+    },
+    "settings": {
+      "actions": {
+        "add": {
+          "added": "已添加动作 {id}。",
+          "id": "动作 ID",
+          "idDesc": "3–48 个小写字母、数字或下划线，以字母开头。新动作以同模式的内置动作为起点。",
+          "mode": "模式",
+          "submit": "添加",
+          "title": "添加动作"
+        },
+        "builtin": "内置",
+        "custom": "自定义",
+        "delegateDormant": "委派运行需要沙箱和验收检查，将在后续版本提供。此动作不会被选中。",
+        "delete": "删除",
+        "desc": "每种模式运行的内容：各角色使用的模型别名、回答的检查方式以及运行上限。每次修改都会为动作生成新的配置哈希；运行会保留其执行时的哈希。",
+        "edit": "编辑 {id}",
+        "edited": "已修改",
+        "enabled": "启用 {id}",
+        "hash": "配置哈希 {hash}",
+        "issue": {
+          "ALIAS_EMPTY": "{role} 角色需要一个模型别名。",
+          "CAP_INVALID": "请输入最多六位小数的美元金额。",
+          "ID_INVALID": "请使用 3–48 个小写字母、数字或下划线，并以字母开头。",
+          "ID_TAKEN": "已存在相同 ID 的动作。",
+          "LIMIT_INVALID": "评审团只能有两名或三名成员。",
+          "MODE_NOT_EDITABLE": "此模式暂不可用。",
+          "PANEL_C_REQUIRED": "三人评审团需要设置评审团成员 C 角色。",
+          "PROFILE_NOT_ALLOWED": "此模式不支持该检查方式。",
+          "ROLE_MISSING": "{role} 角色需要一个模型别名。",
+          "ROLE_UNKNOWN": "{role} 不是此模式的角色。"
+        },
+        "mode": {
+          "delegate": "委派"
+        },
+        "notChosen": "暂不会被选中",
+        "panelSize": "评审团人数",
+        "panelSizeDesc": "三名成员需要设置评审团成员 C 角色。",
+        "profile": "验证方式",
+        "profileDesc": {
+          "evidence_review": "每条论断都必须有裁判可核查的证据支持。",
+          "schema_fixture": "回答必须符合请求的 JSON 结构。",
+          "text_basic": "只检查回答的格式，不验证内容。",
+          "text_review": "由复核模型对照请求检查回答。"
+        },
+        "profileDormant": "需要运行时验证器，将在后续版本提供；在此之前路由不会选择此动作。",
+        "profileValue": {
+          "code_fixture": "代码测试",
+          "evidence_review": "证据审查",
+          "schema_fixture": "结构校验",
+          "text_basic": "格式检查",
+          "text_review": "模型复核"
+        },
+        "reset": "恢复内置设置",
+        "resetCustom": "清除修改",
+        "roleUnused": "不使用",
+        "roles": "角色",
+        "rolesDesc": "每个角色使用 「路由 → 模型映射」 中的一个模型别名。评审团成员需要使用不同的模型版本。",
+        "runCap": "运行上限（美元）",
+        "runCapDesc": "留空则使用{mode}模式的上限 ${cap}。",
+        "saveRefused": "此修改未保存。{reason}",
+        "title": "动作",
+        "webTools": "网络证据",
+        "webToolsDesc": "评审团成员可以搜索和阅读网页以获取证据。"
+      },
+      "badge": "需手动开启",
+      "breaker": {
+        "rearm": "重新启用",
+        "rearmed": "Router + Fusion（{surface}）已重新启用。",
+        "threshold": "暂停前允许的失败次数",
+        "thresholdDesc": "基础设施连续失败达到此次数后，该入口会回到原路径，直到你重新启用。",
+        "tripped": "因连续失败（{reason}）自 {when} 起已暂停。所有轮次都走原路径，未计入账本。"
+      },
+      "budget": {
+        "cascadeCap": "每次级联的运行上限（美元）",
+        "cascadeCapDesc": "级联运行宁可拒绝也不会超过此上限。",
+        "directCap": "每轮聊天的运行上限（美元）",
+        "directCapDesc": "宁可拒绝本轮，也不会超出此上限。",
+        "invalidAmount": "请输入美元金额，最多六位小数。",
+        "mode": "预算模式",
+        "panelCap": "每次评审团的运行上限（美元）",
+        "panelCapDesc": "评审团运行宁可拒绝也不会超过此上限。",
+        "strict": "严格",
+        "strictDesc": "只允许有审计价格且可逐次计费的模型运行，其他模型一律拒绝。",
+        "tracked": "跟踪",
+        "trackedDesc": "每次调用都会预留并结算。没有审计价格的模型按保守估算预留，可能超出估算。",
+        "unknownReserve": "无价格模型每次调用的预留（美元）",
+        "unknownReserveDesc": "跟踪模式下，每次调用没有审计价格的模型都会预留这么多。"
+      },
+      "dataClass": {
+        "desc": "除非工作区或对话提高级别，否则按此级别处理，且不会被自动降低。",
+        "grants": "允许接收受限数据的服务商",
+        "grantsDesc": "本地模型始终可以接收受限数据；无法证明去向的聚合服务商永远不能接收。",
+        "internal": "内部",
+        "label": "默认数据级别",
+        "noProviders": "尚未配置任何服务商。",
+        "public": "公开",
+        "restricted": "受限"
+      },
+      "desc": "带预算上限、计入账本的路由。默认关闭：关闭时，路由行为与之前完全一致。",
+      "laterRelease": "后续版本",
+      "laterReleaseDesc": "当前版本不可用，此开关不起作用。",
+      "master": "启用 Router + Fusion",
+      "masterDesc": "总开关。只有同时打开下方某个入口，路由才会发生变化。",
+      "migration": {
+        "dismiss": "知道了",
+        "notice": "你的自动路由设置已迁移：经济规则已批准，原来的单次请求费用上限已成为聊天运行上限。",
+        "restore": "恢复旧版自动路由",
+        "restoreDesc": "关闭 Router + Fusion，并把自动路由恢复到启用前的原样。",
+        "restored": "已恢复旧版自动路由，并关闭 Router + Fusion。"
+      },
+      "rules": {
+        "desc": "在没有评测数据时，自动路由使用基线动作。批准某条规则后，命中该规则的轮次可由自动路由选择其他动作。",
+        "provenanceMigrated": "从旧版 Auto 迁移",
+        "provenanceUser": "用户批准，未经评测验证",
+        "row": {
+          "cascade_verifiable": {
+            "desc": "必须符合 JSON 结构的请求（通过 Run API 或 cognia/auto 模型）先用低成本模型，校验未通过再升级。聊天轮次只有在你选择“级联”时才会以级联方式运行。",
+            "label": "可验证输出使用级联"
+          },
+          "delegate_multifile": {
+            "desc": "多文件实现在沙箱中运行并执行验收检查。",
+            "label": "多文件代码修改使用委派"
+          },
+          "economy_simple": {
+            "desc": "歧义较低或中等的转换、提取任务使用经济动作。",
+            "label": "简单文本任务使用经济模型"
+          },
+          "panel_research": {
+            "desc": "研究综合类任务运行多个独立回答，并由裁判对照证据审查。仅文本：该轮次不使用智能体工具。",
+            "label": "研究综合使用评审团"
+          }
+        },
+        "title": "自动路由规则"
+      },
+      "saveFailed": "无法保存 Router + Fusion 设置。",
+      "surface": {
+        "agentsWorkflows": {
+          "desc": "智能体、小队与工作流发起的模型调用。",
+          "label": "智能体与工作流"
+        },
+        "chat": {
+          "desc": "桌面应用中的聊天轮次以直接运行方式执行：有上限、计入账本，只做可见的改道，宁可拒绝也不静默降级。",
+          "label": "聊天"
+        },
+        "companion": {
+          "desc": "从已配对的 Web 和移动设备发起的运行。",
+          "label": "Web 与移动端"
+        },
+        "gatewayPassthroughLedger": {
+          "desc": "为本地网关代理的每次模型调用记账。",
+          "label": "网关直通账本"
+        },
+        "gatewayRuns": {
+          "desc": "/v1/runs API 与 cognia/* 虚拟模型。",
+          "label": "网关运行"
+        },
+        "utilityLedger": {
+          "desc": "标题、记忆、裁判等后台模型调用。",
+          "label": "后台生成"
+        }
+      },
+      "surfaceNeedsMaster": "请先打开总开关。",
+      "surfacesDesc": "每个入口单独开启；某个入口出问题时可以单独关闭。",
+      "surfacesTitle": "入口",
+      "title": "Router + Fusion"
     }
   },
   "routingFallback": {
@@ -37507,6 +37984,9 @@
       "keyRateLimit": "限流 / 分钟",
       "keyRateLimitHelp": "单个密钥的请求预算。留空 = 仅受全局限流约束。",
       "keyRateLimitNone": "—",
+      "keyScopes": "Run API 权限",
+      "keyScopesHelp": "该密钥在 Router + Fusion Run API 上可以做什么。没有任何权限的密钥在聊天端点上照常工作，只是 /v1/runs 会拒绝它。",
+      "keyScopesNone": "无（仅转发）",
       "keysEmpty": "暂无密钥。创建一把以认证外部工具。",
       "keysHeading": "API 密钥",
       "keysHelp": "为每个外部工具签发一把作用域密钥。每把可限制可用模型、设定有效期与独立限流，并可单独停用或删除。",
@@ -43951,10 +44431,16 @@
       "error": "限额查询失败：{message}",
       "fetchedAt": "更新于 {time}",
       "meter": {
+        "acu": "ACU 用量",
         "credit": "余额",
+        "daily": "每日配额",
+        "flexCredits": "Flex 点数",
+        "flowCredits": "Flow 点数",
         "monthly": "本月",
         "overage": "按量付费超额",
+        "promptCredits": "Prompt 点数",
         "session": "当前会话",
+        "topUp": "自动充值",
         "weekly": "本周（所有模型）",
         "weekly_opus": "本周（仅 Opus）",
         "weekly_sonnet": "本周（仅 Sonnet）"

@@ -62,7 +62,20 @@ export async function buildSendOptions(
   session: ChatSession | null | undefined,
   userMessage?: string,
   onResolvedExecutionSpec?: (spec: ResolvedAgentExecutionSpec) => void,
-  turnIdentity?: ChatTurnSkillIdentity
+  turnIdentity?: ChatTurnSkillIdentity,
+  /**
+   * Non-text signals the caller already knows about the outgoing turn — the
+   * routing classifier reads them as task hints. Currently attachment kinds
+   * only; message count is derived here from the session's transcript.
+   */
+  routingHints?: { attachmentKinds?: Array<"image" | "audio" | "video" | "document"> },
+  /**
+   * The caller creates the Router + Fusion run before dispatch (ADR-0188). Only
+   * the live chat controller does; a caller that hands the options straight to
+   * `sendPrompt` must leave this unset, or its turn would ask the ledger about a
+   * run nobody created.
+   */
+  dispatch?: { routerFusionSurface?: "chat" }
 ): Promise<SendOptions> {
   const appSettings = useSettingsStore.getState().settings
   const runtimeRef = runtimeRefForSession(session?.id)
@@ -325,9 +338,26 @@ export async function buildSendOptions(
     projectKnowledgeUserMessage: twinHandshake ? userMessage : undefined,
     precomputedQueryEmbedding: turnEmbedding,
     // Routing context-window pre-check input (B4): always pass the raw user
-    // message (unlike twin/memory it needs no handshake gate).
-    routingContextHint: userMessage ? { promptText: userMessage } : undefined,
+    // message (unlike twin/memory it needs no handshake gate). Attachment
+    // kinds and transcript depth ride along as task hints for the local
+    // classifier — `messageCount` counts what is already on the transcript,
+    // not the outgoing turn.
+    routingContextHint: userMessage
+      ? {
+          promptText: userMessage,
+          ...(routingHints?.attachmentKinds?.length
+            ? { attachmentKinds: routingHints.attachmentKinds }
+            : {}),
+          messageCount: sessionMessages.length,
+        }
+      : undefined,
     routingSurface: "chat",
+    // Router + Fusion chat runs are ledgered in this desktop window's fusion
+    // database and answered over the desktop IPC; other shells never ask
+    // (ADR-0188; the companion surface is separate). Inert while the switch is off.
+    ...(isTauri() && dispatch?.routerFusionSurface === "chat"
+      ? { routerFusionSurface: "chat" as const }
+      : {}),
     ephemeralSkillIds,
     skillIntents,
     requestScopedSkillIds:

@@ -35,6 +35,13 @@ export interface LlmClientCallOptions {
   stopSequences?: string[]
   /** Abort the in-flight call (forwarded to the AI SDK). */
   abortSignal?: AbortSignal
+  /**
+   * Transport retries the AI SDK may make on its own. Left unset, the SDK's
+   * own default (2) applies exactly as before — a ledgered call sets 0, so its
+   * retries become attempts the ledger reserves and books instead of hidden
+   * ones (ADR-0188 D27).
+   */
+  maxRetries?: number
 }
 
 /**
@@ -300,6 +307,7 @@ export function createLlmClient(config: LlmConfig): LlmClient {
         temperature: options?.temperature ?? config.defaultTemperature ?? 0,
         stopSequences: options?.stopSequences,
         abortSignal: options?.abortSignal,
+        maxRetries: options?.maxRetries,
       })
       addUsage(
         result.usage as Record<string, unknown> | undefined,
@@ -317,6 +325,7 @@ export function createLlmClient(config: LlmConfig): LlmClient {
         temperature: options?.temperature ?? config.defaultTemperature ?? 0,
         stopSequences: options?.stopSequences,
         abortSignal: options?.abortSignal,
+        maxRetries: options?.maxRetries,
       })
       for await (const delta of result.textStream) {
         yield delta

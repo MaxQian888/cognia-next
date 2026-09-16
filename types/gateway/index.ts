@@ -150,6 +150,8 @@ export interface GatewayApiKey {
   name: string
   secret: string
   modelAllowlist: string[]
+  /** Run API scopes (ADR-0188 D8). A newly issued key carries none. */
+  scopes: GatewayRunApiScope[]
   expiresAtMs: number | null
   enabled: boolean
   rateLimitPerMin: number | null
@@ -161,11 +163,28 @@ export interface GatewayApiKey {
   lastUsedAtMs: number | null
 }
 
+/** What a gateway key may do on the Run API. Mirrors `RUN_API_SCOPES`. */
+export const GATEWAY_RUN_API_SCOPES = [
+  "runs:create",
+  "runs:read",
+  "runs:cancel",
+  "runs:approve",
+  "artifacts:read",
+  "feedback:write",
+] as const
+export type GatewayRunApiScope = (typeof GATEWAY_RUN_API_SCOPES)[number]
+
 /** A key with its secret redacted to a fingerprint — the list shape. */
 export interface GatewayApiKeyRedacted {
   id: string
   name: string
   modelAllowlist: string[]
+  /**
+   * Run API scopes this key carries (ADR-0188 D8). Empty — which is what every
+   * key issued before scopes existed has — means passthrough only: the chat
+   * endpoints work exactly as before and `/v1/runs` refuses the key.
+   */
+  scopes: GatewayRunApiScope[]
   expiresAtMs: number | null
   enabled: boolean
   rateLimitPerMin: number | null
@@ -182,6 +201,8 @@ export interface GatewayApiKeyRedacted {
 export interface GatewayApiKeyPatch {
   name?: string
   modelAllowlist?: string[]
+  /** The whole scope set, replaced. An empty array takes every scope away. */
+  scopes?: GatewayRunApiScope[]
   expiresAtMs?: number | null
   enabled?: boolean
   rateLimitPerMin?: number | null
@@ -339,6 +360,20 @@ export interface GatewayRoutingSnapshot {
   profileVersion?: number
   /** Publisher identity; required alongside profileVersion. */
   authority?: "renderer" | "profile-store"
+  /**
+   * The Router + Fusion surfaces this host has switched on (ADR-0188 D36).
+   * Absent means both off, which is the default and leaves every gateway
+   * endpoint exactly as it was.
+   */
+  routerFusion?: GatewayRouterFusionSwitches
+}
+
+/** Mirrors `RouterFusionGatewaySwitches` in `crates/cognia-gateway/src/runs.rs`. */
+export interface GatewayRouterFusionSwitches {
+  /** `/v1/runs` and the `cognia/*` virtual models. */
+  runsEnabled: boolean
+  /** Ledger every model call the gateway proxies. */
+  passthroughLedgerEnabled: boolean
 }
 
 /** Result of a snapshot push — a rejected push (stale/conflicting version)

@@ -1,4 +1,9 @@
 import type { UIMessage } from "ai"
+import type {
+  RouterFusionRunSummary,
+  RouterFusionTurnStamp,
+  SendOptions,
+} from "@cognia/agent-config-types"
 
 export interface MessageRunMetadata {
   providerId?: string
@@ -7,6 +12,64 @@ export interface MessageRunMetadata {
   completedAt?: number
   durationMs?: number
   finishReason?: string
+  /**
+   * Routing explainability for the turn that produced this message — the
+   * plan's own record, not a re-derivation: what was asked for, what the
+   * strategy chose, and why. Absent when the turn never went through
+   * `planRoute` (e.g. an external runtime that resolves its own model).
+   */
+  routing?: {
+    mode: "auto" | "alias" | "manual"
+    alias?: string
+    tier?: string
+    score?: number
+    strategy: string
+    reasonCodes: string[]
+    judgeUsed?: boolean
+    candidateCount: number
+  }
+  /**
+   * Router + Fusion (ADR-0188) for a turn that went through it: how the run was
+   * routed, what the ledger booked when the turn ended, and whether a fault sent
+   * the turn down the original path unledgered. Absent while the switch is off.
+   */
+  routerFusion?: RouterFusionRunMetadata
+}
+
+/** Plain-data copy of a Router + Fusion turn for the transcript and the run card. */
+export interface RouterFusionRunMetadata {
+  /** How the turn was routed; absent when a fault bypassed routing before it stamped. */
+  route?: RouterFusionTurnStamp
+  /** The sealed run; absent when the turn never got a run (bypass) or the seal failed. */
+  outcome?: {
+    status: string
+    spentMicrousd: number
+    overspendMicrousd: number
+    modelCalls: number
+    /** `actual` | `estimated` | `pending` — a pending cost has an unanswered call. */
+    costStatus: string
+    frozen: boolean
+    refusalCode: string | null
+  }
+  /** The turn ran on the original path, not ledgered, because Router + Fusion faulted. */
+  bypass?: { code: string; justTripped: boolean }
+  /**
+   * A verified cascade or panel run (B3): its roles, phase timeline, candidate
+   * and judge counts and what it cost. Written with the run's answer message.
+   */
+  fusion?: RouterFusionRunSummary
+}
+
+/** The subset of the sealed run summary the transcript keeps. */
+export interface RouterFusionRunOutcomeInput {
+  status: string
+  spentMicrousd: number
+  overspendMicrousd: number
+  modelCalls: number
+  costStatus: string
+  frozen: boolean
+  refusalCode: string | null
+  bypass: { code: string; justTripped: boolean } | null
 }
 
 export interface CompletedRunMetadataInput {
@@ -16,6 +79,74 @@ export interface CompletedRunMetadataInput {
   completedAt: number
   reportedDurationMs?: number
   finishReason?: string
+  routing?: MessageRunMetadata["routing"]
+  routerFusion?: RouterFusionRunMetadata
+}
+
+/**
+ * Project a turn's Router + Fusion stamp and sealed run into message metadata.
+ * `undefined` for a turn that never touched Router + Fusion, so the off path
+ * writes exactly the metadata it always did.
+ */
+export function buildRouterFusionRunMetadata(
+  options: Pick<SendOptions, "routerFusion" | "routerFusionBypass"> | undefined,
+  outcome: RouterFusionRunOutcomeInput | null
+): RouterFusionRunMetadata | undefined {
+  const route = options?.routerFusion
+  const bypass = outcome?.bypass ?? options?.routerFusionBypass
+  if (!route && !outcome && !bypass) return undefined
+  return {
+    ...(route ? { route: { ...route } } : {}),
+    ...(outcome
+      ? {
+          outcome: {
+            status: outcome.status,
+            spentMicrousd: outcome.spentMicrousd,
+            overspendMicrousd: outcome.overspendMicrousd,
+            modelCalls: outcome.modelCalls,
+            costStatus: outcome.costStatus,
+            frozen: outcome.frozen,
+            refusalCode: outcome.refusalCode,
+          },
+        }
+      : {}),
+    ...(bypass ? { bypass: { code: bypass.code, justTripped: bypass.justTripped } } : {}),
+  }
+}
+
+/**
+ * Project the SendOptions routing record into the message-metadata shape.
+ *
+ * Reads the PLAN, never re-derives: `mode` is what the caller requested,
+ * `strategy`/`reasonCodes`/`candidateCount` come straight off the plan, and
+ * `tier`/`score` prefer the plan's difficulty outcome (post-judge) over the
+ * send option's earlier stamp. `undefined` when no plan exists — a manual
+ * provider:model send carries no routing story to tell.
+ */
+export function buildRoutingRunMetadata(
+  options: Pick<SendOptions, "routingPlan" | "autoRouting" | "aliasResolution">
+): MessageRunMetadata["routing"] | undefined {
+  const plan = options.routingPlan
+  // A plan without `requested` is malformed, not absent — but this helper runs
+  // inside the turn-seal path, where a metadata bug must never take the event
+  // handler down with it.
+  if (!plan?.requested) return undefined
+  const mode = plan.requested.kind
+  const difficulty = plan.difficulty
+  const tier = difficulty?.tier ?? options.autoRouting?.tier
+  const score = difficulty?.score ?? options.autoRouting?.score
+  return {
+    mode,
+    strategy: String(plan.strategy),
+    reasonCodes: [...plan.reasonCodes],
+    candidateCount: plan.orderedCandidates.length,
+    ...(difficulty?.judgeUsed !== undefined ? { judgeUsed: difficulty.judgeUsed } : {}),
+    ...(tier !== undefined ? { tier } : {}),
+    ...(score !== undefined ? { score } : {}),
+    ...(mode !== "manual" && options.aliasResolution?.alias
+      ? { alias: options.aliasResolution.alias }
+      : {}),
+  }
 }
 
 /** Build an honest completion snapshot without consulting mutable session routing state. */
@@ -26,6 +157,8 @@ export function buildCompletedRunMetadata({
   completedAt,
   reportedDurationMs,
   finishReason,
+  routing,
+  routerFusion,
 }: CompletedRunMetadataInput): MessageRunMetadata {
   return {
     providerId,
@@ -39,6 +172,8 @@ export function buildCompletedRunMetadata({
           ? undefined
           : Math.max(0, completedAt - startedAt),
     finishReason,
+    ...(routing ? { routing } : {}),
+    ...(routerFusion ? { routerFusion } : {}),
   }
 }
 

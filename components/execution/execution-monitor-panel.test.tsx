@@ -110,6 +110,27 @@ describe("ExecutionMonitorPanel", () => {
     expect(screen.getByText("1 running")).toBeInTheDocument()
   })
 
+  it("names a Run API run in words rather than its internal kind", () => {
+    monitorState = {
+      rows: [
+        row({
+          rowId: "journal:api-1",
+          source: "journal",
+          kind: "fusion",
+          label: "Summarise the release notes",
+          legId: undefined,
+          cancellable: false,
+        }),
+      ],
+      runningCount: 1,
+      isLoading: false,
+    }
+    render(<ExecutionMonitorPanel />)
+    const item = screen.getByRole("listitem")
+    expect(item).toHaveTextContent("Routed run")
+    expect(item).not.toHaveTextContent(/\bfusion\b/)
+  })
+
   it("promotes a conversational leg (one with a sessionId) to a watchable pane", async () => {
     const user = userEvent.setup()
     monitorState = {

@@ -531,6 +531,20 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     actions: [{ kind: "open-settings", section: "agent-runtime" }],
     icon: "gauge",
   },
+  routerFusionRefused: {
+    severity: "warning",
+    retryable: false,
+    persistent: false,
+    actions: [{ kind: "open-settings", section: "ai-connections" }],
+    icon: "gauge",
+  },
+  routerFusionRunFailed: {
+    severity: "error",
+    retryable: false,
+    persistent: false,
+    actions: [{ kind: "open-settings", section: "ai-connections" }],
+    icon: "alert",
+  },
   dispatchRejectedCycle: {
     severity: "error",
     retryable: false,

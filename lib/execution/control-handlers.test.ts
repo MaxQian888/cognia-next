@@ -265,6 +265,101 @@ describe("execution source control handlers", () => {
 // A companion mirrors plan rows read-only, so approving from the phone has to
 // travel back as a control command; a local write would be overwritten by the
 // next sync pull.
+describe("routed run control", () => {
+  beforeEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+    jest.clearAllMocks()
+  })
+
+  it("stops a projected Router + Fusion run through the gate", async () => {
+    const cancelRouterFusionRun = jest.fn(async () => true)
+    const installed = installExecutionRunControlHandlers({ cancelRouterFusionRun })
+
+    await installed.fusion({
+      runId: "fusion-run-1",
+      action: "stop",
+      idempotencyKey: "stop-fusion-1",
+      expectedRevision: 0,
+      actor: {},
+    })
+
+    expect(cancelRouterFusionRun).toHaveBeenCalledWith("fusion-run-1", "gatewayRuns")
+    installed.dispose()
+  })
+
+  it("stops a chat cascade or panel under the chat surface", async () => {
+    await createExecutionRun({
+      id: "fusion-chat-1",
+      kind: "fusion",
+      sourceId: "fusion-chat-1",
+      sessionId: "session-1",
+      title: "panel_review",
+      status: "running",
+      currentRevision: 0,
+      startedAt: 1,
+      updatedAt: 1,
+      origin: "local",
+    })
+    const cancelRouterFusionRun = jest.fn(async () => true)
+    const installed = installExecutionRunControlHandlers({ cancelRouterFusionRun })
+
+    await installed.fusion({
+      runId: "fusion-chat-1",
+      action: "stop",
+      idempotencyKey: "stop-fusion-chat",
+      expectedRevision: 0,
+      actor: {},
+    })
+
+    expect(cancelRouterFusionRun).toHaveBeenCalledWith("fusion-chat-1", "chat")
+    installed.dispose()
+  })
+
+  it("says so when the engine no longer has the run", async () => {
+    const cancelRouterFusionRun = jest.fn(async () => false)
+    const installed = installExecutionRunControlHandlers({ cancelRouterFusionRun })
+
+    await expect(
+      installed.fusion({
+        runId: "fusion-gone",
+        action: "stop",
+        idempotencyKey: "stop-fusion-2",
+        expectedRevision: 0,
+        actor: {},
+      })
+    ).rejects.toThrow(/no longer on this device/)
+    installed.dispose()
+  })
+
+  it("has no steer, pause or resume to offer, and loads nothing to say so", async () => {
+    const cancelRouterFusionRun = jest.fn()
+    const installed = installExecutionRunControlHandlers({ cancelRouterFusionRun })
+
+    for (const action of ["steer", "pause", "resume", "retry"] as const) {
+      await expect(
+        installed.fusion({
+          runId: "fusion-run-1",
+          action,
+          idempotencyKey: `fusion-${action}`,
+          expectedRevision: 0,
+          actor: {},
+        })
+      ).rejects.toMatchObject({ name: "UnsupportedForKindError", kind: "fusion" })
+    }
+    // `open_details` is the one verb every kind answers, and it touches nothing.
+    await installed.fusion({
+      runId: "fusion-run-1",
+      action: "open_details",
+      idempotencyKey: "fusion-open",
+      expectedRevision: 0,
+      actor: {},
+    })
+    expect(cancelRouterFusionRun).not.toHaveBeenCalled()
+    installed.dispose()
+  })
+})
+
 describe("plan approval over run control", () => {
   // Own the reset: this block sits outside the suite-level beforeEach, so each
   // case seeds its own run id rather than colliding on a shared one.

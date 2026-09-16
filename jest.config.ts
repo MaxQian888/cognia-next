@@ -173,6 +173,7 @@ const projectCommon: Config = {
     // only produced to prove each package compiles standalone). These MUST come
     // before the broad `^@/` rule below; Jest tries entries in order.
     "^@cognia/eval-core(.*)$": "<rootDir>/packages/eval-core/src$1",
+    "^@cognia/router-fusion(.*)$": "<rootDir>/packages/router-fusion/src$1",
     "^@cognia/provider-types(.*)$": "<rootDir>/packages/provider-types/src$1",
     "^@cognia/provider-core(.*)$": "<rootDir>/packages/provider-core/src$1",
     "^@cognia/provider-embedding(.*)$": "<rootDir>/packages/provider-embedding/src$1",
@@ -501,6 +502,15 @@ const globalConfig: Config = {
     "!packages/eval-core/src/**/*.test.{ts,tsx}",
     "!packages/eval-core/src/types.ts",
     "!packages/eval-core/src/index.ts",
+    // Router + Fusion (ADR-0188) is new pure code: contracts, ledger math,
+    // routing and workflow graphs, held to the same floor as eval-core
+    // (`coverage-thresholds.json`). `workflows/ports.ts` is interface-only, which
+    // v8 maps back to source and scores 0%, on the same grounds as eval-core's
+    // `types.ts`.
+    "packages/router-fusion/src/**/*.{ts,tsx}",
+    "!packages/router-fusion/src/**/*.test.{ts,tsx}",
+    "!packages/router-fusion/src/index.ts",
+    "!packages/router-fusion/src/workflows/ports.ts",
     // rag was lifted out of lib/ai/rag (coverage-collected), so keep it collected.
     "packages/rag/src/**/*.{ts,tsx}",
     // error-parsers was lifted out of lib/error-parsers (coverage-collected).
@@ -613,6 +623,7 @@ const globalConfig: Config = {
     "!lib/db/crm-types.ts",
     "!lib/db/inbox-telemetry-types.ts",
     "!lib/headless/types.ts",
+    "!lib/router-fusion/db/types.ts",
     "!lib/scheduler/sources/types.ts",
     "!lib/session-import/types.ts",
     "!lib/share/types.ts",

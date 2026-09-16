@@ -46,15 +46,18 @@ jest.mock("@/hooks/ui/use-compact-layout", () => ({
 jest.mock("@/components/shared/responsive-detail-sheet", () => ({
   ResponsiveDetailSheet: ({
     open,
+    onOpenChange,
     title,
     children,
   }: {
     open: boolean
+    onOpenChange: (open: boolean) => void
     title: string
     children: React.ReactNode
   }) =>
     open ? (
       <div data-testid="detail-drawer" data-title={title}>
+        <button data-testid="detail-drawer-close" onClick={() => onOpenChange(false)} />
         {children}
       </div>
     ) : null,
@@ -340,12 +343,38 @@ describe("AgentRunsPanel", () => {
     expect(screen.getAllByTestId("detail")).toHaveLength(1)
   })
 
+  it("honours a container-provided compact answer over the viewport's", () => {
+    // The `/bots` Runs card can be ~600px wide on a 1400px monitor: the
+    // window says "roomy", the card says otherwise, and the card is right.
+    cockpit = state({ selectedRow: row() })
+    render(<AgentRunsPanel selectedId="run-1" onSelect={jest.fn()} compact />)
+    const drawer = screen.getByTestId("detail-drawer")
+    expect(within(drawer).getByTestId("detail")).toBeInTheDocument()
+  })
+
+  it("lets a wide container keep the split on a narrow viewport", () => {
+    compact = true
+    cockpit = state({ selectedRow: row() })
+    render(<AgentRunsPanel selectedId="run-1" onSelect={jest.fn()} compact={false} />)
+    expect(screen.getByTestId("detail")).toBeInTheDocument()
+    expect(screen.queryByTestId("detail-drawer")).not.toBeInTheDocument()
+  })
+
   it("clears the selection when the narrow drawer closes", () => {
     compact = true
     cockpit = state()
     render(<AgentRunsPanel onSelect={jest.fn()} />)
     // Nothing selected: no drawer, and the list still fills the column.
     expect(screen.queryByTestId("detail-drawer")).not.toBeInTheDocument()
+  })
+
+  it("hands a drawer close back as a null selection", () => {
+    compact = true
+    cockpit = state({ selectedRow: row() })
+    const onSelect = jest.fn()
+    render(<AgentRunsPanel selectedId="run-1" onSelect={onSelect} />)
+    fireEvent.click(screen.getByTestId("detail-drawer-close"))
+    expect(onSelect).toHaveBeenCalledWith(null)
   })
 
   it("shows a live marker for queued and waiting work, not only running", () => {
@@ -377,5 +406,48 @@ describe("pinning the panel to one source", () => {
     render(<AgentRunsPanel onSelect={jest.fn()} />)
     expect(lastOptions).not.toHaveProperty("botInstallationId")
     expect(lastOptions).not.toHaveProperty("teamId")
+    expect(lastOptions).not.toHaveProperty("origin")
+  })
+})
+
+describe("the origin filter", () => {
+  const remote = row({
+    rowId: "journal:api-1",
+    nativeId: "api-1",
+    runId: "api-1",
+    kind: "fusion",
+    label: "Summarise the release notes",
+    origin: "gateway-api",
+    originActorName: "CI robot",
+  })
+
+  it("stays out of the header while every run came from this device", () => {
+    cockpit = state()
+    render(<AgentRunsPanel onSelect={jest.fn()} onOrigin={jest.fn()} />)
+    expect(screen.queryByTestId("agent-runs-origin-filter")).not.toBeInTheDocument()
+  })
+
+  it("appears once a run arrived from somewhere else, and pins the query", () => {
+    cockpit = state({ rows: [remote], allRows: [remote] })
+    const onOrigin = jest.fn()
+    const { rerender } = render(<AgentRunsPanel onSelect={jest.fn()} onOrigin={onOrigin} />)
+    expect(screen.getByTestId("agent-runs-origin-filter")).toBeInTheDocument()
+    rerender(<AgentRunsPanel onSelect={jest.fn()} origin="gateway-api" onOrigin={onOrigin} />)
+    expect(lastOptions).toMatchObject({ origin: "gateway-api" })
+  })
+
+  it("stays visible while it is pinned, even if the filtered list is empty", () => {
+    // Otherwise selecting "Gateway API" on a list with no matches would remove
+    // the control that is the only way back.
+    cockpit = state({ rows: [], allRows: [] })
+    render(<AgentRunsPanel onSelect={jest.fn()} origin="gateway-api" onOrigin={jest.fn()} />)
+    expect(screen.getByTestId("agent-runs-origin-filter")).toBeInTheDocument()
+  })
+
+  it("names the key that asked, on the row itself", () => {
+    cockpit = state({ rows: [remote], allRows: [remote] })
+    render(<AgentRunsPanel onSelect={jest.fn()} />)
+    const list = screen.getByRole("list", { name: "title" })
+    expect(within(list).getByText(/originActor/)).toBeInTheDocument()
   })
 })

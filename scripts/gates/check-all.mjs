@@ -227,6 +227,9 @@ const REGISTRY = [
   { script: "audit:loading-states", group: "audit" },
   { script: "audit:unreachable-components", group: "audit" },
   { script: "audit:workspace-attribution", group: "audit" },
+  // ADR-0188: Router + Fusion is opt-in, so shared modules may reach it only
+  // through its gate; a static import would put it on every user's send path.
+  { script: "audit:router-fusion-gate", group: "audit" },
   // ADR-0149: "account" means four different things and none of them is a
   // person. The counts may only shrink.
   { script: "audit:identity-vocabulary", group: "audit" },
@@ -278,6 +281,7 @@ const REGISTRY = [
   { script: "agent:sdk:test", group: "gate-tests" },
   { script: "pet:compat:test", group: "gate-tests" },
   { script: "audit:workspace-attribution:test", group: "gate-tests" },
+  { script: "audit:router-fusion-gate:test", group: "gate-tests" },
   // `node --test` over mobile/scripts/ — the iOS project/plist configurators
   // `mobile:sync:ios` runs. Jest ignores `scripts/**/*.test.mjs`, so these had
   // no runner at all and their assertions never executed.

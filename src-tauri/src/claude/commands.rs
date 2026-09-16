@@ -1164,6 +1164,65 @@ pub async fn claude_tool_result_decision_impl(
     state.write_command(&payload).await
 }
 
+/// Build the `call_reserve_decision` JSON line written to the sidecar stdin.
+/// Pure so it is unit-testable without a running sidecar. `decision` is
+/// validated: anything but `granted` / `refused` / `bypass` is rejected so the
+/// command cannot be used to inject another frame type.
+fn build_call_reserve_decision_payload(
+    session_id: String,
+    request_id: String,
+    decision: String,
+    attempt_id: Option<String>,
+    attempt_no: Option<u32>,
+    code: Option<String>,
+    message: Option<String>,
+) -> Result<Value, String> {
+    if !matches!(decision.as_str(), "granted" | "refused" | "bypass") {
+        return Err(format!("unexpected call reserve decision: {decision}"));
+    }
+    let mut object = serde_json::Map::new();
+    object.insert("type".into(), Value::String("call_reserve_decision".into()));
+    object.insert("sessionId".into(), Value::String(session_id));
+    object.insert("requestId".into(), Value::String(request_id));
+    object.insert("decision".into(), Value::String(decision));
+    if let Some(attempt_id) = attempt_id {
+        object.insert("attemptId".into(), Value::String(attempt_id));
+    }
+    if let Some(attempt_no) = attempt_no {
+        object.insert("attemptNo".into(), Value::from(attempt_no));
+    }
+    if let Some(code) = code {
+        object.insert("code".into(), Value::String(code));
+    }
+    if let Some(message) = message {
+        object.insert("message".into(), Value::String(message));
+    }
+    Ok(Value::Object(object))
+}
+
+/// Renderer → sidecar: answer a Router + Fusion `call_reserve_request`
+/// (ADR-0188) so the sidecar's pending reservation settles. The renderer is the
+/// ledger's only writer; the sidecar sends a model call only after `granted`.
+/// Mirrors `claude_tool_result_decision`. Renderer-only — the ledger lives in
+/// the desktop renderer's fusion database, never on a paired phone.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn claude_call_reserve_decision(
+    state: State<'_, SidecarState>,
+    session_id: String,
+    request_id: String,
+    decision: String,
+    attempt_id: Option<String>,
+    attempt_no: Option<u32>,
+    code: Option<String>,
+    message: Option<String>,
+) -> Result<(), String> {
+    let payload = build_call_reserve_decision_payload(
+        session_id, request_id, decision, attempt_id, attempt_no, code, message,
+    )?;
+    state.write_command(&payload).await
+}
+
 /// Forward a `protocol_adapter_{chunk,done,error}` line to the sidecar stdin
 /// (P2-E code-adapter round-trip). The renderer builds the full message; we
 /// only validate the type prefix so this can't be used as a generic
@@ -1859,6 +1918,72 @@ mod tests {
         let p = build_tool_result_decision_payload("s1".into(), "rev1".into(), None);
         assert_eq!(p["type"], "tool_result_decision");
         assert!(p["updatedToolOutput"].is_null());
+    }
+
+    #[test]
+    fn builds_call_reserve_decision_payloads_and_omits_absent_fields() {
+        let granted = build_call_reserve_decision_payload(
+            "s1".into(),
+            "req-1".into(),
+            "granted".into(),
+            Some("att-1".into()),
+            Some(2),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(granted["type"], "call_reserve_decision");
+        assert_eq!(granted["sessionId"], "s1");
+        assert_eq!(granted["requestId"], "req-1");
+        assert_eq!(granted["decision"], "granted");
+        assert_eq!(granted["attemptId"], "att-1");
+        assert_eq!(granted["attemptNo"], 2);
+        assert!(granted.get("code").is_none());
+
+        let refused = build_call_reserve_decision_payload(
+            "s1".into(),
+            "req-2".into(),
+            "refused".into(),
+            None,
+            None,
+            Some("RUN_BUDGET_EXHAUSTED".into()),
+            Some("cap".into()),
+        )
+        .unwrap();
+        assert_eq!(refused["code"], "RUN_BUDGET_EXHAUSTED");
+        assert_eq!(refused["message"], "cap");
+        assert!(refused.get("attemptId").is_none());
+
+        // The sidecar reads `code` as the reason it continues unledgered.
+        let bypass = build_call_reserve_decision_payload(
+            "s1".into(),
+            "req-3".into(),
+            "bypass".into(),
+            None,
+            None,
+            Some("db_unavailable".into()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(bypass["decision"], "bypass");
+        assert_eq!(bypass["code"], "db_unavailable");
+        assert!(bypass.get("message").is_none());
+        assert!(bypass.get("attemptNo").is_none());
+    }
+
+    #[test]
+    fn call_reserve_decision_rejects_an_unknown_decision() {
+        let err = build_call_reserve_decision_payload(
+            "s1".into(),
+            "req".into(),
+            "interrupt".into(),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("unexpected call reserve decision"));
     }
 
     #[test]

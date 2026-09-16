@@ -478,6 +478,10 @@ export function makeAiSdkAdapter(protocol) {
       // run to completion and keep billing).
       if (req.abortSignal) streamArgs.abortSignal = req.abortSignal
       if (req.prepareStep) streamArgs.prepareStep = req.prepareStep
+      // Router + Fusion ledgered call (ADR-0188): one reservation, one request.
+      // Only set by the dispatcher for a reserved call, so it overrides a
+      // provider-configured `modelParams.maxRetries` exactly then and never else.
+      if (typeof req.maxRetries === "number") streamArgs.maxRetries = req.maxRetries
       if (req.tools && Object.keys(req.tools).length > 0) {
         streamArgs.tools = req.tools
         // Multi-step agentic loop: AI SDK runs each tool's `execute` and feeds

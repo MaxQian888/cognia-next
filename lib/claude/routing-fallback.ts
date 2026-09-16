@@ -26,6 +26,11 @@ import {
 import { resolveAccountId, subscriptionAccountProviderFor } from "./env-resolver"
 import { switchChatLeaseProvider } from "@/lib/execution/chat-lease"
 import {
+  abortRouterFusionSend,
+  MAX_LEDGERED_REROUTES,
+  rerouteRouterFusionSend,
+} from "@/lib/router-fusion/gate/chat-send"
+import {
   classifyProviderErrorInfo,
   isTransientErrorClass,
   type ProviderErrorMeta,
@@ -167,18 +172,48 @@ async function issueRetry(
     )
   )
 
+  // Router + Fusion (ADR-0188 D5): a ledgered turn's retry is a visible reroute
+  // — the next candidate is routed through the hard filters and gets a run of
+  // its own before anything is sent, or the retry does not happen.
+  let dispatchOptions = retryOptions
+  let routerFusionRunStarted = false
+  if (cached.options.routerFusion) {
+    try {
+      const { getSession } = await import("@/lib/db/sessions")
+      const session = await getSession(sessionId)
+      const rerouted = await rerouteRouterFusionSend({
+        sessionId,
+        options: retryOptions,
+        workspaceId: session?.projectId ?? null,
+        settings,
+      })
+      if (rerouted.kind === "refused") {
+        console.warn("routing-fallback reroute refused by Router + Fusion", rerouted.code)
+        return false
+      }
+      dispatchOptions = rerouted.options
+      routerFusionRunStarted = Boolean(dispatchOptions.routerFusion)
+    } catch (error) {
+      console.warn("routing-fallback reroute failed", error)
+      return false
+    }
+  }
+
   // Bump the cache *before* the IPC so a second consecutive failure
   // increments cleanly and a concurrent read sees the post-bump state.
   useChatStore.getState().setLastSend(sessionId, {
     content: cached.content,
-    options: retryOptions,
+    options: dispatchOptions,
     attemptIndex: cacheUpdate.attemptIndex,
     ...(cacheUpdate.specialAttempts ? { specialAttempts: cacheUpdate.specialAttempts } : {}),
+    ...(cached.options.routerFusion
+      ? { routerFusionReroutes: (cached.routerFusionReroutes ?? 0) + 1 }
+      : {}),
   })
 
   try {
     await switchChatLeaseProvider(sessionId, nextEntry.providerId, attemptOptions.concurrentLimit)
-    await sendPrompt(sessionId, cached.content, retryOptions)
+    await sendPrompt(sessionId, cached.content, dispatchOptions)
     // Least-busy signal: the retry is now in flight against the next
     // provider (the failed attempt was settled by `session_ended`).
     const { useInFlightStore } = await import("@/stores/settings/in-flight-store")
@@ -201,18 +236,18 @@ async function issueRetry(
         },
       })
     )
-    if (retryOptions.spanId) {
+    if (dispatchOptions.spanId) {
       const attributes = {
         attemptIndex: cacheUpdate.attemptIndex,
         providerId: nextEntry.providerId,
         modelId: nextEntry.modelId,
       }
-      recordEvent(retryOptions.spanId, {
+      recordEvent(dispatchOptions.spanId, {
         name: "routing.fallback",
         at: Date.now(),
         attributes,
       })
-      recordEvent(retryOptions.spanId, {
+      recordEvent(dispatchOptions.spanId, {
         name: "routing.attempt",
         at: Date.now(),
         attributes,
@@ -224,6 +259,13 @@ async function issueRetry(
     // again. Treat the IPC throw as "no retry scheduled" so the caller
     // surfaces the original error if no further retry happens.
     console.warn("routing-fallback retry sendPrompt failed", err)
+    if (routerFusionRunStarted) {
+      await abortRouterFusionSend(
+        sessionId,
+        dispatchOptions,
+        err instanceof Error ? err.message : String(err)
+      )
+    }
     return false
   }
 }
@@ -250,6 +292,9 @@ export async function attemptRoutingFallback(
   if (!cached) return false
   // Never replay after the first visible assistant frame or tool dispatch.
   if (cached.routingCommitted) return false
+  // A ledgered turn reroutes at most MAX_LEDGERED_REROUTES times (ADR-0188 D5).
+  const ledgered = Boolean(cached.options.routerFusion)
+  if (ledgered && (cached.routerFusionReroutes ?? 0) >= MAX_LEDGERED_REROUTES) return false
 
   // Use the structured meta (real HTTP status) when the sidecar captured it so
   // an unclassifiable message ("upstream connect error" with a 429) still
@@ -269,6 +314,12 @@ export async function attemptRoutingFallback(
         ? ("contentPolicy" as const)
         : undefined
   if (specialKey) {
+    // A refusal is never answered by asking another model (D5): a ledgered
+    // turn surfaces a content-policy failure as it is.
+    if (ledgered && specialKey === "contentPolicy") {
+      useChatStore.getState().clearLastSend(sessionId)
+      return false
+    }
     const chain = cached.options.aliasResolution?.specialFallbacks?.[specialKey] ?? []
     const cursor = cached.specialAttempts?.[specialKey] ?? 0
     if (chain.length === 0 || cursor >= chain.length) {

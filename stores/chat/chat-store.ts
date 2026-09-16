@@ -67,6 +67,11 @@ export interface LastSendCacheEntry {
   specialAttempts?: Partial<Record<"contextWindowExceeded" | "contentPolicy", number>>
   /** First visible assistant output or tool dispatch has made replay unsafe. */
   routingCommitted?: boolean
+  /**
+   * Router + Fusion (ADR-0188): reroutes this ledgered turn has taken, capped
+   * at `MAX_LEDGERED_REROUTES`. Absent on every other turn.
+   */
+  routerFusionReroutes?: number
 }
 
 /**

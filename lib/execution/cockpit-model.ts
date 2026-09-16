@@ -49,7 +49,7 @@ import {
   type AgentRunStatus,
 } from "@/types/agent-runs/agent-run"
 import type { ExecutionLegSnapshot } from "./types"
-import type { ExecutionRun, ExecutionRunKind } from "@/types/execution/run"
+import type { ExecutionRun, ExecutionRunKind, ExecutionRunOrigin } from "@/types/execution/run"
 import type { WorkflowRunRow } from "@/types/workflow/visual"
 import type { TaskExecution } from "@/types/scheduler"
 import type { Goal } from "@/types/goal"
@@ -228,6 +228,7 @@ const KIND_LABEL_KEYS: Record<string, string> = {
   goal: "goal",
   job: "job",
   plan: "plan",
+  fusion: "fusion",
   scheduled: "scheduled",
   "security-scan": "securityScan",
   subagent: "subagent",
@@ -280,6 +281,11 @@ export interface CockpitFilter {
    * a Bot's history.
    */
   botInstallationId?: string
+  /**
+   * Keep only the runs asked for from one place (ADR-0188 D24). A row with no
+   * origin is `"local"`: it predates the Run API, so it came from this device.
+   */
+  origin?: ExecutionRunOrigin
 }
 
 export function filterCockpitRows(
@@ -297,6 +303,7 @@ export function filterCockpitRows(
     ) {
       return false
     }
+    if (filter.origin && (row.origin ?? "local") !== filter.origin) return false
     if (query && !row.label.toLowerCase().includes(query)) return false
     return true
   })

@@ -198,6 +198,24 @@ describe("useExecutionCockpit", () => {
     expect(byQuery.result.current.rows.map((r) => r.nativeId)).toEqual(["ship-it"])
   })
 
+  it("filters by where the run was asked for", () => {
+    persisted = sources({
+      executionRuns: [
+        run("api-run", "fusion", "running", {
+          origin: "gateway-api",
+          originActor: { keyId: "key-a", keyName: "CI robot" },
+        }),
+        run("here", "agent-turn", "running"),
+      ],
+    })
+    const remote = renderHook(() => useExecutionCockpit({ origin: "gateway-api" }))
+    expect(remote.result.current.rows.map((r) => r.nativeId)).toEqual(["api-run"])
+
+    // A run with no origin came from this device, which is what it means.
+    const local = renderHook(() => useExecutionCockpit({ origin: "local" }))
+    expect(local.result.current.rows.map((r) => r.nativeId)).toEqual(["here"])
+  })
+
   it("suppresses a legacy goal once its canonical run exists", () => {
     const legacyGoal = {
       id: "g1",

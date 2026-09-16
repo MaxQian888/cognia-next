@@ -20,6 +20,9 @@ import type { ResolvedMessageDisplayOptions } from "@/lib/chat/message-display"
 import type { MessageDisplayMetadataOptions } from "@/types/appearance"
 import { assistantBubbleClass, messageCardClass } from "@/lib/chat/message-bubble"
 import { runMetadataOf } from "@/lib/chat/message-run-metadata"
+import { RouterFusionRunCard } from "@/components/router-fusion/router-fusion-run-card"
+import { RoutingIndicator } from "@/components/chat/routing-indicator"
+import { useSettingsStore } from "@/stores/settings"
 import { cn } from "@/lib/utils"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import type { AvatarSubject } from "@/lib/ui/avatar"
@@ -98,6 +101,15 @@ export function MessageShell({
    */
   const inRoom = Boolean(speakerName)
   const showIdentity = inRoom || display.metadata.identity === "header"
+  // Auto-routing explainability chip (ADR-0043 Phase 12). Opt-out: the flag
+  // defaults to on and only an explicit `false` hides it.
+  const showRoutingIndicator =
+    useSettingsStore((s) => s.settings?.autoRouting?.showRoutingIndicator) !== false
+  const routingChip =
+    isAssistant &&
+    run?.routing !== undefined &&
+    run.routing.mode !== "manual" &&
+    showRoutingIndicator
   // One formatted value per metadata field, read by BOTH placements. `header`
   // and `details` used to be assembled independently, and the header list
   // simply omitted `usage` and `cost` — so choosing "header" for either
@@ -165,7 +177,10 @@ export function MessageShell({
           isAssistant && assistantBubbleClass(display.layout)
         )}
       >
-        {(showIdentity || display.metadata.timestamp === "header" || headerItems.length > 0) && (
+        {(showIdentity ||
+          display.metadata.timestamp === "header" ||
+          headerItems.length > 0 ||
+          routingChip) && (
           <header
             className={cn(
               "mb-1.5 flex min-h-6 flex-wrap items-center gap-1.5 text-xs text-muted-foreground",
@@ -207,6 +222,7 @@ export function MessageShell({
                 {item}
               </Badge>
             ))}
+            {routingChip && run?.routing ? <RoutingIndicator routing={run.routing} /> : null}
             {display.metadata.timestamp === "header" && createdAt !== undefined && (
               <time dateTime={new Date(createdAt).toISOString()} className="tabular-nums">
                 {formatTimestamp(createdAt)}
@@ -232,6 +248,14 @@ export function MessageShell({
         )}
 
         <div data-testid="message-shell-body">{children}</div>
+
+        {/* Router + Fusion run card (ADR-0188): only a turn that went through it
+            carries `run.routerFusion`, so every other message renders as before. */}
+        {isAssistant && run?.routerFusion ? (
+          <div className="mt-1.5 flex">
+            <RouterFusionRunCard routerFusion={run.routerFusion} />
+          </div>
+        ) : null}
 
         {detailRows.length > 0 && (
           <Collapsible open={detailsOpen} onOpenChange={setDetailsOpen} className="mt-2">

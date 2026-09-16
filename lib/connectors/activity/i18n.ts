@@ -116,6 +116,9 @@ const EN: ActivityI18n = {
       job: "Background task",
       "security-scan": "Security scan",
       bot: "Bot",
+      // A run the external Run API asked for (ADR-0188). Named for what the
+      // reader sees, not the subsystem.
+      fusion: "Routed run",
     })[kind],
   activityLabel: (activity) =>
     ({
@@ -196,6 +199,7 @@ const ZH: ActivityI18n = {
       job: "后台任务",
       "security-scan": "安全扫描",
       bot: "Bot",
+      fusion: "路由运行",
     })[kind],
   activityLabel: (activity) =>
     ({

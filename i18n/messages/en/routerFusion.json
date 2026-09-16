@@ -1,0 +1,376 @@
+{
+  "grant": {
+    "title": "Approve this Router + Fusion run?",
+    "body": "This turn reserves up to {cap}, but your cost budget only has {available} left. Approve a one-time grant of {shortfall} for this run only."
+  },
+  "breakerToast": {
+    "title": "Router + Fusion paused for {surface}",
+    "body": "Repeated failures ({reason}). Turns use the original path and are not ledgered until you re-arm it in Settings → AI connections → Routing."
+  },
+  "refusal": {
+    "ATTEMPTS_EXHAUSTED": "This call already used every transport attempt it was allowed.",
+    "BUDGET_FROZEN": "The run spent past its cap and was stopped.",
+    "CALL_OUTCOME_UNKNOWN": "A model call's outcome is unknown, so the run stopped rather than pay for it twice.",
+    "CANCELLED": "The run was cancelled.",
+    "CONTEXT_BUDGET_EXHAUSTED": "The conversation is too long to compact within this run's cap.",
+    "CONTEXT_PRECHECK_FAILED": "The conversation does not fit in the context window of the models this run needs.",
+    "DATA_CLASS_NOT_ALLOWED": "The model is not allowed to receive this workspace's data class.",
+    "DEADLINE_EXCEEDED": "The run reached its deadline.",
+    "DECLINED_GRANT": "The one-time budget grant was declined, so the turn did not run.",
+    "DEPLOYMENT_NOT_IN_SNAPSHOT": "The strict budget does not allow a model outside this run's route.",
+    "DISPATCH_FAILED": "The turn could not be sent to the model.",
+    "FORMAT_INVALID": "The model's answer was not in the required format.",
+    "FUSION_INSUFFICIENT_CANDIDATES": "Too few panel answers survived to compare.",
+    "FUSION_TEXT_ONLY": "Cascade and panel runs read text only. Remove the images or switch this conversation to Direct.",
+    "INTERNAL": "Router + Fusion hit an internal error.",
+    "JUDGE_OUTPUT_INVALID": "The judge's report could not be read.",
+    "MAX_MODEL_CALLS": "The run reached its model-call limit.",
+    "PII_BLOCKED": "This conversation contains personal data or a secret (an email address, an ID number or a key), so it was not sent to the cascade or panel models.",
+    "PRICE_UNKNOWN": "The strict budget does not allow a model without an audited price.",
+    "PROVIDER_UNAVAILABLE": "The provider was switched off or lost its credentials during the turn.",
+    "RESERVATION_NOT_ACTIVE": "The reservation for this call was already settled or released.",
+    "RESTRICTED_NOT_GRANTED": "Restricted data may not be sent to this provider.",
+    "REVOKED": "Access to this model was revoked during the turn.",
+    "ROUTER_FUSION_DISABLED": "Router + Fusion for chat was switched off during the turn.",
+    "ROUTER_FUSION_UNAVAILABLE": "Router + Fusion is unavailable right now, so this cascade or panel turn did not run.",
+    "ROUTE_EXPIRED": "The route chosen for this message expired before it was sent. Send it again.",
+    "ROUTE_NO_SOLUTION": "No model fits this turn's budget, limits and data rules.",
+    "RUN_BUDGET_EXHAUSTED": "The next call would exceed this run's cap.",
+    "RUN_BUSY": "Another window is already working on this run.",
+    "RUN_EXISTS": "A run with this id already exists.",
+    "RUN_INPUT_MISSING": "The run's input could not be found.",
+    "RUN_LOST": "The window running this turn closed before it finished.",
+    "RUN_NOT_FOUND": "The run could not be found.",
+    "RUN_NOT_RUNNING": "The run had already ended when the model call was requested.",
+    "RUN_SETUP_FAILED": "The run could not be started.",
+    "RUN_TERMINAL": "The run had already ended, so no further calls can be reserved.",
+    "SESSION_BUSY": "Another Router + Fusion turn is still running in this conversation.",
+    "SESSION_CLOSED": "The conversation closed before the call could be approved.",
+    "SESSION_VERSION_CONFLICT": "The conversation changed while the run was starting.",
+    "STAGE_NOT_HELD": "The budget held for this stage was already used or released.",
+    "STEP_ALREADY_COMMITTED": "This step already completed, so it was not sent to the model again.",
+    "STEP_OUTCOME_UNKNOWN": "A step's outcome is unknown after an interruption, so it was not run again.",
+    "TENANT_BUDGET_EXHAUSTED": "Your cost budget cannot cover this run's cap.",
+    "TOOL_CALL_LIMIT": "The run reached its limit of evidence lookups.",
+    "TOOL_ROUND_EXCEEDED": "A panel member asked for evidence more times than it is allowed.",
+    "VERIFICATION_FAILED": "The answer failed verification.",
+    "VERIFICATION_INCONCLUSIVE": "The answer could not be verified.",
+    "unknown": "Refused with code {code}."
+  },
+  "runCard": {
+    "label": "Router + Fusion",
+    "notLedgered": "Not ledgered",
+    "bypassed": "Router + Fusion was unavailable ({code}), so this turn used the original path and was not ledgered.",
+    "bypassedTripped": "Router + Fusion was unavailable ({code}) and is now paused for chat. Turns use the original path until you re-arm it in Settings.",
+    "details": "Run details",
+    "action": "Action",
+    "mode": "Mode",
+    "modeDirect": "Direct",
+    "rule": "Rule",
+    "ruleBaseline": "Baseline (no rule matched)",
+    "model": "Model",
+    "lane": "Runtime",
+    "laneAiSdk": "AI SDK",
+    "laneAgentSdk": "Claude Agent SDK",
+    "budget": "Budget",
+    "budgetTracked": "Tracked",
+    "budgetStrict": "Strict",
+    "cap": "Run cap",
+    "cost": "Cost",
+    "costStatus": {
+      "actual": "actual",
+      "estimated": "estimated",
+      "pending": "pending — a call is still unanswered"
+    },
+    "costStatusParenthesized": "({status})",
+    "estimatedCap": "Estimated cap: this model has no audited price, so the run may overspend its cap.",
+    "calls": "Model calls",
+    "overspend": "Over cap by {amount}",
+    "frozen": "Stopped at the cap",
+    "status": "Status",
+    "statusValue": {
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "expired": "Expired",
+      "running": "Running",
+      "reconciling": "Reconciling",
+      "queued": "Queued",
+      "cancelling": "Cancelling",
+      "unknown": "{status}"
+    },
+    "refused": "Refused",
+    "acceptance": "Accepted by",
+    "acceptanceSchemaOnly": "{profile} (schema only — the answer's content was not verified)",
+    "runId": "Run",
+    "fusion": {
+      "chipCascade": "Cascade",
+      "chipPanel": "Panel",
+      "modeCascade": "Cascade: a cheap draft, escalated if it fails verification",
+      "modePanel": "Panel: independent answers compared by a judge",
+      "candidates": "Candidates",
+      "candidatesValue": "{members, plural, =1 {# answer} other {# answers}}, {rejected} rejected, {evidence} with invalid evidence",
+      "judge": "Judge",
+      "judgeValue": "{supported, plural, =1 {# claim} other {# claims}} supported, {rejected} rejected, {unverified} without evidence",
+      "contradictions": "{count, plural, =1 {# contradiction} other {# contradictions}}, {unresolved} unresolved",
+      "escalated": "Escalated",
+      "degraded": "Degraded",
+      "verification": "Verification",
+      "verificationValue": "{status} ({level})",
+      "quality": "Answer quality",
+      "qualityValue": {
+        "accepted": "Accepted",
+        "degraded": "Degraded: fewer checks than the action asks for",
+        "unknown": "Not verified"
+      },
+      "costOfCap": "{spent} of {cap}",
+      "unknownCalls": "{count} with an unknown outcome",
+      "compactions": "Context compactions",
+      "timeline": "Timeline",
+      "role": {
+        "solver": "Solver",
+        "cheap": "Cheap draft",
+        "strong": "Strong draft",
+        "panel_a": "Panel member A",
+        "panel_b": "Panel member B",
+        "judge": "Judge",
+        "synthesizer": "Synthesizer",
+        "lead": "Lead",
+        "worker": "Worker",
+        "panel_c": "Panel member C",
+        "reviewer": "Reviewer"
+      },
+      "phase": {
+        "intake": "Intake",
+        "prepare": "Prepared",
+        "cascade": "Cascade",
+        "panel": "Panel",
+        "judge": "Judging",
+        "synthesis": "Writing the answer",
+        "verification": "Verifying",
+        "context": "Context",
+        "execution": "Answering"
+      },
+      "step": {
+        "cheap": "Cheap draft",
+        "strong": "Strong draft",
+        "escalate": "Escalated to the strong model",
+        "format_repair": "Repairing the format",
+        "candidates": "Collecting panel answers",
+        "member_tools": "Panel member looked up evidence",
+        "reported": "Judge reported",
+        "verification_requests_left_open": "Judge left checks open",
+        "compacted": "Context compacted",
+        "invoke": "Calling the model"
+      },
+      "reason": {
+        "FORMAT_INVALID": "The draft was not in the required format",
+        "VERIFICATION_FAILED": "The draft failed verification",
+        "VERIFICATION_INCONCLUSIVE": "The draft could not be verified",
+        "FUSION_INSUFFICIENT_CANDIDATES": "Only one panel answer survived"
+      },
+      "verificationStatus": {
+        "passed": "Passed",
+        "failed": "Failed",
+        "inconclusive": "Inconclusive",
+        "not_applicable": "Not applicable"
+      },
+      "level": {
+        "schema_only": "schema only",
+        "model_review": "model review",
+        "tool_verified": "checked with tools",
+        "human_review": "human review",
+        "mixed": "mixed"
+      }
+    }
+  },
+  "settings": {
+    "title": "Router + Fusion",
+    "desc": "Budget-capped, ledgered routing. Off by default: while it is off, routing works exactly as it did before.",
+    "badge": "Opt-in",
+    "master": "Enable Router + Fusion",
+    "masterDesc": "The master switch. Nothing is routed differently until a surface below is also on.",
+    "surfacesTitle": "Surfaces",
+    "surfacesDesc": "Each surface is switched on on its own and can be switched off alone if it misbehaves.",
+    "surfaceNeedsMaster": "Turn on the master switch first.",
+    "laterRelease": "Later release",
+    "laterReleaseDesc": "Not available in this version. The switch has no effect.",
+    "surface": {
+      "chat": {
+        "label": "Chat",
+        "desc": "Chat turns in the desktop app run as direct runs: capped, ledgered, rerouted only visibly, and refused rather than silently downgraded."
+      },
+      "gatewayRuns": {
+        "label": "Gateway runs",
+        "desc": "The /v1/runs API and the cognia/* virtual models."
+      },
+      "gatewayPassthroughLedger": {
+        "label": "Gateway passthrough ledger",
+        "desc": "Ledger every model call proxied by the local gateway."
+      },
+      "agentsWorkflows": {
+        "label": "Agents and workflows",
+        "desc": "Model calls made by agents, Squads and workflows."
+      },
+      "utilityLedger": {
+        "label": "Background generations",
+        "desc": "Titles, memory, judges and other background model calls."
+      },
+      "companion": {
+        "label": "Web and mobile",
+        "desc": "Runs started from paired web and mobile devices."
+      }
+    },
+    "breaker": {
+      "tripped": "Paused after repeated failures ({reason}) since {when}. Turns use the original path and are not ledgered.",
+      "rearm": "Re-arm",
+      "rearmed": "Router + Fusion for {surface} re-armed.",
+      "threshold": "Failures before pausing",
+      "thresholdDesc": "Consecutive infrastructure failures after which a surface falls back to the original path until you re-arm it."
+    },
+    "budget": {
+      "mode": "Budget mode",
+      "tracked": "Tracked",
+      "trackedDesc": "Every call is reserved and settled. A model without an audited price is held at a conservative estimate and may overspend it.",
+      "strict": "Strict",
+      "strictDesc": "Only models with an audited price and per-call accounting may run; any other model is refused.",
+      "directCap": "Run cap per chat turn (USD)",
+      "directCapDesc": "A turn is refused rather than exceed this cap.",
+      "unknownReserve": "Hold per call without a price (USD)",
+      "unknownReserveDesc": "In tracked mode, each call to a model without an audited price reserves this much.",
+      "invalidAmount": "Enter a dollar amount with at most six decimal places.",
+      "cascadeCap": "Run cap per cascade (USD)",
+      "cascadeCapDesc": "A cascade is refused rather than exceed this cap.",
+      "panelCap": "Run cap per panel (USD)",
+      "panelCapDesc": "A panel is refused rather than exceed this cap."
+    },
+    "dataClass": {
+      "label": "Default data class",
+      "desc": "Work is treated as this class unless its workspace or conversation raises it. It is never lowered automatically.",
+      "public": "Public",
+      "internal": "Internal",
+      "restricted": "Restricted",
+      "grants": "Providers allowed restricted data",
+      "grantsDesc": "Local models may always receive restricted data; aggregators without a provable destination never may.",
+      "noProviders": "No providers are configured."
+    },
+    "rules": {
+      "title": "Auto rules",
+      "desc": "Without evaluation data, Auto uses the baseline action. Approve a rule to let Auto pick another action when the turn matches it.",
+      "provenanceUser": "User-approved, not eval-proven",
+      "provenanceMigrated": "Migrated from legacy Auto",
+      "row": {
+        "economy_simple": {
+          "label": "Economy model for simple text work",
+          "desc": "Transform and extract tasks with low or medium ambiguity use the economy action."
+        },
+        "cascade_verifiable": {
+          "label": "Cascade for verifiable output",
+          "desc": "Requests that must match a JSON schema — through the Run API or the cognia/auto model — start on a cheap model and escalate if the check fails. A chat turn runs as a cascade only when you pick Cascade."
+        },
+        "panel_research": {
+          "label": "Panel for research synthesis",
+          "desc": "Research synthesis runs independent answers and a judge that checks them against evidence. Text only: the turn runs without agent tools."
+        },
+        "delegate_multifile": {
+          "label": "Delegate for multi-file code changes",
+          "desc": "Multi-file implementation runs in a sandbox with acceptance checks."
+        }
+      }
+    },
+    "migration": {
+      "notice": "Your Auto routing was carried over: the economy rule is approved and your per-request cost limit became the chat run cap.",
+      "dismiss": "Got it",
+      "restore": "Restore legacy Auto",
+      "restoreDesc": "Switch Router + Fusion off and put Auto back exactly as it was before you enabled it.",
+      "restored": "Legacy Auto restored and Router + Fusion switched off."
+    },
+    "saveFailed": "Could not save the Router + Fusion settings.",
+    "actions": {
+      "title": "Actions",
+      "desc": "What each mode runs: the model alias behind every role, how the answer is checked, and the run cap. Every change gives the action a new configuration hash; a run keeps the hash it ran under.",
+      "builtin": "Built-in",
+      "custom": "Custom",
+      "edited": "Edited",
+      "enabled": "Enable {id}",
+      "edit": "Edit {id}",
+      "hash": "Config hash {hash}",
+      "mode": {
+        "delegate": "Delegate"
+      },
+      "delegateDormant": "Delegate runs need a sandbox and acceptance checks, which arrive in a later release. This action is never chosen.",
+      "roles": "Roles",
+      "rolesDesc": "Each role runs on a model alias from Routing → Model mappings. A panel needs different model revisions for its members.",
+      "roleUnused": "Not used",
+      "profile": "Verified by",
+      "profileValue": {
+        "text_basic": "Format check",
+        "text_review": "Model review",
+        "schema_fixture": "Schema check",
+        "evidence_review": "Evidence review",
+        "code_fixture": "Code tests"
+      },
+      "profileDesc": {
+        "text_basic": "The answer is checked for format only; its content is not verified.",
+        "text_review": "A reviewer model checks the answer against the request.",
+        "schema_fixture": "The answer must match the requested JSON schema.",
+        "evidence_review": "Every claim must be backed by evidence the judge can check."
+      },
+      "profileDormant": "Needs a runtime verifier, which arrives in a later release; the router does not choose this action until then.",
+      "runCap": "Run cap (USD)",
+      "runCapDesc": "Leave empty to use the {mode} cap of ${cap}.",
+      "panelSize": "Panel size",
+      "panelSizeDesc": "Three members need the Panel member C role.",
+      "webTools": "Web evidence",
+      "webToolsDesc": "Panel members may search and read the web for evidence.",
+      "reset": "Reset to built-in",
+      "resetCustom": "Clear edits",
+      "delete": "Delete",
+      "saveRefused": "This change was not saved. {reason}",
+      "issue": {
+        "ID_INVALID": "Use 3–48 lowercase letters, digits or underscores, starting with a letter.",
+        "ID_TAKEN": "An action with this id already exists.",
+        "MODE_NOT_EDITABLE": "This mode cannot be used yet.",
+        "ROLE_MISSING": "The {role} role needs a model alias.",
+        "ROLE_UNKNOWN": "{role} is not a role of this mode.",
+        "ALIAS_EMPTY": "The {role} role needs a model alias.",
+        "PROFILE_NOT_ALLOWED": "This check is not available for this mode.",
+        "CAP_INVALID": "Enter a dollar amount with at most six decimal places.",
+        "PANEL_C_REQUIRED": "A panel of three needs the Panel member C role.",
+        "LIMIT_INVALID": "A panel has two or three members."
+      },
+      "add": {
+        "title": "Add an action",
+        "id": "Action id",
+        "idDesc": "3–48 lowercase letters, digits or underscores, starting with a letter. The new action starts from the built-in action of its mode.",
+        "mode": "Mode",
+        "submit": "Add",
+        "added": "Action {id} added."
+      },
+      "notChosen": "Not chosen yet"
+    }
+  },
+  "progress": {
+    "runningCascade": "Cascade running",
+    "runningPanel": "Panel running",
+    "buffered": "The answer appears once it is verified.",
+    "starting": "Starting",
+    "spent": "{spent} of {cap}",
+    "calls": "{count, plural, =1 {# model call} other {# model calls}}",
+    "details": "Run progress"
+  },
+  "modePicker": {
+    "aria": "Router + Fusion run mode: {mode}",
+    "title": "How this conversation's turns run",
+    "auto": "Auto",
+    "autoDesc": "Direct, unless a cascade or panel rule you approved matches the turn.",
+    "direct": "Direct",
+    "directDesc": "One model answers and streams as it writes, with the agent's tools.",
+    "cascade": "Cascade",
+    "cascadeDesc": "A cheap model drafts, the draft is checked, and a strong model takes over if it fails. Text only, no agent tools.",
+    "panel": "Panel",
+    "panelDesc": "Independent models answer, a judge compares them against evidence, and one answer is written. Text only, no agent tools.",
+    "buffered": "Cascade and panel answers appear once they are verified.",
+    "paused": "Router + Fusion is paused for chat after repeated failures. Cascade and Panel turns are refused until you re-arm it in Settings → AI connections → Routing."
+  }
+}

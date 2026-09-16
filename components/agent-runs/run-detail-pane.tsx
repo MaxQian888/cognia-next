@@ -47,6 +47,7 @@ import { runKindLabelKey } from "@/lib/execution/cockpit-model"
 import type { RunControlActions, RunControlOutcome } from "@/hooks/agent-runs/use-agent-run-actions"
 import type { UnifiedExecutionRow } from "@/lib/execution/monitor-model"
 import type {
+  ExecutionRunInterrupt,
   RunControlAction,
   RunVerificationConclusion,
   SquadReviewDecision,
@@ -190,6 +191,14 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
           )}
         >
           <h3 className="text-sm font-medium">{pendingBotApproval.title}</h3>
+          {pendingBotApproval.approvalRisk && (
+            <Badge
+              variant={botApprovalRiskVariant(pendingBotApproval.approvalRisk)}
+              className="text-[10px]"
+            >
+              {t(`botApproval.risk.${pendingBotApproval.approvalRisk}`)}
+            </Badge>
+          )}
           {pendingBotApproval.approvalDetail ? (
             <>
               <BotApprovalDetail detail={pendingBotApproval.approvalDetail} />
@@ -553,6 +562,12 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
       </Tabs>
     </div>
   )
+}
+
+function botApprovalRiskVariant(
+  risk: NonNullable<ExecutionRunInterrupt["approvalRisk"]>
+): "secondary" | "outline" | "destructive" {
+  return risk === "high" ? "destructive" : risk === "medium" ? "outline" : "secondary"
 }
 
 function botDetailRecord(value: unknown): Record<string, unknown> | undefined {

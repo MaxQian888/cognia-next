@@ -85,6 +85,11 @@ jest.mock("@/lib/sync/session-history", () => ({
   hydrateSessionHistory: (...args: unknown[]) => hydrateSessionHistoryMock(...args),
   subscribeSessionHistoryMode: () => () => {},
 }))
+jest.mock("@/components/router-fusion/router-fusion-progress-card", () => ({
+  RouterFusionProgressCard: ({ sessionId }: { sessionId: string | null }) => (
+    <div data-testid="router-fusion-progress-card" data-session={sessionId ?? ""} />
+  ),
+}))
 jest.mock("./workspace-changes-card", () => ({
   WorkspaceChangesCard: ({ session }: { session: { id: string } }) => (
     <div data-testid="workspace-changes-card" data-session={session.id} />
@@ -672,6 +677,11 @@ describe("ChatPane", () => {
         "split-session"
       )
     )
+  })
+
+  it("mounts the Router + Fusion progress card above the run status for this pane's session", () => {
+    render(<ChatPane {...makeProps()} />)
+    expect(screen.getByTestId("router-fusion-progress-card")).toHaveAttribute("data-session", "s1")
   })
 
   it("mounts the workspace changes card for this pane's session", () => {

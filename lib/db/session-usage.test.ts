@@ -549,6 +549,51 @@ describe("recordResultUsage", () => {
     expect(await recordResultUsage({ sessionId: "s1", messageId: "m1", result: empty })).toBeNull()
   })
 
+  it("takes a ledgered turn's cost from the Router + Fusion ledger, never the SDK", async () => {
+    const written = await recordResultUsage({
+      sessionId: "s1",
+      messageId: "m-ledger",
+      model: "gpt-5",
+      providerId: "openai",
+      result: makeResult({ total_cost_usd: 0.9 }),
+      ledger: { runId: "rf-1", costUsd: 0.0042 },
+    })
+    expect(written).toMatchObject({
+      costUsd: 0.0042,
+      costSource: "ledger",
+      costKnown: true,
+      runId: "rf-1",
+      inputTokens: 50,
+      outputTokens: 25,
+    })
+    const [row] = await listUsageForSession("s1")
+    expect(row.costSource).toBe("ledger")
+    expect(row.costUsd).toBeCloseTo(0.0042)
+  })
+
+  it("keeps a ledgered turn's booked spend when its result carried no usage", async () => {
+    const refused = {
+      type: "result",
+      subtype: "success",
+      duration_ms: 10,
+      is_error: false,
+      uuid: "u-3",
+      session_id: "sdk-3",
+    } as unknown as SDKResultMessage
+    const written = await recordResultUsage({
+      sessionId: "s1",
+      messageId: "m-refused",
+      result: refused,
+      ledger: { runId: "rf-2", costUsd: 0.001 },
+    })
+    expect(written).toMatchObject({
+      costUsd: 0.001,
+      costSource: "ledger",
+      inputTokens: 0,
+      outputTokens: 0,
+    })
+  })
+
   it("is idempotent — re-recording the same messageId overwrites", async () => {
     await recordResultUsage({ sessionId: "s1", messageId: "m1", result: makeResult() })
     await recordResultUsage({

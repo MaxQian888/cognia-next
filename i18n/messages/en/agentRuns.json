@@ -83,10 +83,14 @@
   "filters": {
     "all": "All",
     "allKinds": "All kinds",
+    "allOrigins": "All origins",
     "failed": "Failed",
     "finished": "Finished",
     "kindLabel": "Filter by kind",
     "kindOption": "{label} ({count})",
+    "originGatewayApi": "Gateway API",
+    "originLabel": "Filter by origin",
+    "originLocal": "This device",
     "running": "Running",
     "statusLabel": "Filter by status",
     "waiting": "Waiting"
@@ -97,6 +101,7 @@
     "chat": "Chat",
     "connector": "Connector",
     "delegation": "Delegation",
+    "fusion": "Routed run",
     "goal": "Goal",
     "job": "Background task",
     "other": "Other",
@@ -267,5 +272,6 @@
     "publication": "Exact publication contents",
     "result": "Recorded result",
     "fileMode": "File mode"
-  }
+  },
+  "originActor": "key {name}"
 }

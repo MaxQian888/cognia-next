@@ -798,6 +798,10 @@ describe("resolveSendOptions — opt-in Auto routing", () => {
     // The alias engine then resolved the tier to its concrete model.
     expect(opts.model).toBe("claude-opus-4-8")
     expect(opts.aliasResolution?.alias).toBe("powerful")
+    // The autoRouting stamp names the tier alias the plan resolved through.
+    expect(opts.autoRouting?.alias).toBe("powerful")
+    expect(opts.routingPlan?.requested).toEqual({ kind: "auto" })
+    expect(opts.routingPlan?.difficulty?.tier).toBe("powerful")
   })
 
   it("routes an easy prompt to the fast tier", async () => {
@@ -906,6 +910,130 @@ describe("resolveSendOptions — opt-in Auto routing", () => {
     })
     expect(opts.model).toBe("claude-sonnet-4-6")
     expect(opts.autoRouting).toBeUndefined()
+  })
+
+  it("hands the classifier the task hints the send path already knows", async () => {
+    const spy = jest.spyOn(ProviderRoutingEngine.prototype, "planRoute")
+    try {
+      await resolveSendOptions({
+        character: makeChar({ id: "hinted", allowedTools: ["Read", "Write", "Bash"] }),
+        session: makeSession({ id: "s-hints", effort: "high" }),
+        appSettings: settings({
+          enabled: true,
+          defaultSelection: "auto",
+          thresholds: { balanced: 0.34, powerful: 0.67 },
+          candidateAliases: ["fast", "balanced", "powerful"],
+        }),
+        routingContextHint: {
+          promptText: "hi",
+          attachmentKinds: ["image", "document"],
+          messageCount: 7,
+        },
+      })
+      const request = spy.mock.calls.at(-1)?.[0]
+      expect(request?.taskHints).toEqual({
+        attachmentKinds: ["image", "document"],
+        messageCount: 7,
+        toolCount: 3,
+        requestedEffort: "high",
+        hasCode: false,
+      })
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it("retries once through the configured fallback tier alias when auto finds no candidate", async () => {
+    const spy = jest
+      .spyOn(ProviderRoutingEngine.prototype, "planRoute")
+      .mockRejectedValueOnce(new RoutingNoCandidatesError("auto"))
+    try {
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "s-auto", model: "auto" }),
+        appSettings: settings({
+          enabled: true,
+          thresholds: { balanced: 0.34, powerful: 0.67 },
+          candidateAliases: ["fast", "balanced", "powerful"],
+          fallbackTier: "balanced",
+        }),
+        routingContextHint: { promptText: HARD_PROMPT },
+      })
+      expect(spy).toHaveBeenCalledTimes(2)
+      expect(spy.mock.calls[1]?.[0]?.selection).toEqual({ kind: "alias", alias: "balanced" })
+      expect(opts.model).toBe("claude-sonnet-4-6")
+      expect(opts.autoRouting).toBeDefined()
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it("falls to the configured fallback provider when no fallback tier resolves", async () => {
+    const spy = jest
+      .spyOn(ProviderRoutingEngine.prototype, "planRoute")
+      .mockRejectedValue(new RoutingNoCandidatesError("auto"))
+    try {
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "s-auto", model: "auto" }),
+        appSettings: settings({
+          enabled: true,
+          candidateAliases: ["fast", "balanced", "powerful"],
+          // Not an enabled alias → the tier retry is skipped entirely.
+          fallbackTier: "reasoning",
+          fallbackProvider: "openai",
+        }),
+        routingContextHint: { promptText: "hi" },
+      })
+      expect(spy).toHaveBeenCalledTimes(1)
+      expect(opts.provider).toBe("openai")
+      expect(opts.autoRouting).toBeUndefined()
+      expect(opts.routingDecision?.reason).toBe("auto-no-candidates-fallback")
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it("falls to the app default provider:model when nothing else is configured", async () => {
+    const spy = jest
+      .spyOn(ProviderRoutingEngine.prototype, "planRoute")
+      .mockRejectedValue(new RoutingNoCandidatesError("auto"))
+    try {
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "s-auto", model: "auto" }),
+        appSettings: settings({
+          enabled: true,
+          candidateAliases: ["fast", "balanced", "powerful"],
+          fallbackTier: "reasoning",
+        }),
+        routingContextHint: { promptText: "hi" },
+      })
+      expect(opts.provider).toBe("anthropic")
+      expect(opts.model).toBe("claude-sonnet-4-6")
+      expect(opts.autoRouting).toBeUndefined()
+      expect(opts.routingDecision?.reason).toBe("auto-no-candidates-fallback")
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it("keeps a literal 'auto' model off the wire — the fallback chain always rewrites it", async () => {
+    const spy = jest
+      .spyOn(ProviderRoutingEngine.prototype, "planRoute")
+      .mockRejectedValue(new RoutingNoCandidatesError("auto"))
+    try {
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "s-auto", model: "auto" }),
+        appSettings: settings({
+          enabled: true,
+          candidateAliases: ["fast", "balanced", "powerful"],
+          fallbackTier: "reasoning",
+        }),
+        routingContextHint: { promptText: "hi" },
+      })
+      expect(opts.model).not.toBe("auto")
+      expect(opts.model).toBeDefined()
+    } finally {
+      spy.mockRestore()
+    }
   })
 })
 

@@ -60,6 +60,33 @@ export type ExecutionRunKind =
    * case.
    */
   | "bot"
+  /**
+   * A Router + Fusion run that no local engine started (ADR-0188 D9/D39): the
+   * external Run API asked for it, so there is no chat turn, workflow or team
+   * run behind it for the ledger to annotate.
+   *
+   * Every OTHER Router + Fusion run keeps the kind of the work that owns it —
+   * a routed chat turn is still an `agent-turn` — because the fusion run is HOW
+   * that turn was carried out, not a second thing that happened. This kind
+   * exists only where the alternative is a run the cockpit cannot show at all.
+   *
+   * Stoppable and inspectable, never steerable, pausable or retryable: the
+   * caller that owns it holds the API key, and a retry is a new `POST /v1/runs`
+   * with its own idempotency key rather than a second life for this one.
+   */
+  | "fusion"
+
+/**
+ * Where a run was asked for. Absent means `"local"` — every run written before
+ * the external Run API existed came from this device's own surfaces.
+ *
+ * Deliberately not derived from the kind. `fusion` is the only kind the Run API
+ * creates TODAY, but that is a fact about this build rather than a rule, and
+ * the cockpit needs the axis separately: "what ran" and "who asked for it" are
+ * different questions, and only the second one answers "is something outside
+ * this machine spending my budget".
+ */
+export type ExecutionRunOrigin = "local" | "gateway-api"
 
 export type ExecutionRunStatus =
   | "queued"
@@ -326,6 +353,13 @@ export interface ExecutionRun {
   startedAt: number
   updatedAt: number
   endedAt?: number
+  /**
+   * Where the run was asked for. Absent on every run written before the Run
+   * API, which readers must treat as `"local"` rather than as unknown.
+   */
+  origin?: ExecutionRunOrigin
+  /** The gateway API key that asked, when `origin` is `"gateway-api"`. */
+  originActor?: { keyId: string; keyName: string }
   /** Set once a `retry` control minted a replacement for this settled run. */
   retry?: ExecutionRunRetryStamp
 }
@@ -531,6 +565,12 @@ export interface ExecutionRunInterrupt {
   /** Host-owned decision provenance. Absent means a human decision. */
   approvalDecisionMode?: "human" | "policy"
   approvalPolicy?: { kind: "bot-installation"; installationId: string }
+  /**
+   * What the requester believes this approval costs, surfaced on the decision
+   * card as a badge. Declared by the Bot handler; the ceremony resolver may
+   * still demand more than this, never less.
+   */
+  approvalRisk?: "low" | "medium" | "high"
   expiresAt: number
   createdAt: number
   resolvedAt?: number

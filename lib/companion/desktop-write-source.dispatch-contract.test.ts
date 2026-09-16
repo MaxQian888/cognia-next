@@ -293,3 +293,39 @@ describe("dispatchCommand: history references", () => {
     expect(references.sessionReferenceSnapshot).toHaveBeenCalledWith(snapshot)
   })
 })
+
+describe("dispatchCommand: the two Router + Fusion gateway families", () => {
+  // The gateway serves the HTTP and round-trips every request here, where
+  // Dexie is authoritative. With the surfaces off — the default — neither
+  // family loads anything past its gate module.
+  it("refuses a Run API command while its surface is off", async () => {
+    const outcome = await dispatchCommand("router_fusion_run_create", {
+      actor: { keyId: "key-a", keyName: "CI robot", scopes: ["runs:create"] },
+      body: {},
+    })
+    expect(outcome).toMatchObject({
+      ok: false,
+      error: { status: 403, code: "ROUTER_FUSION_DISABLED" },
+    })
+  })
+
+  it("bypasses a passthrough command while its surface is off, rather than refusing", async () => {
+    // Opposite answer on purpose (D38): a proxy caller never asked for Router +
+    // Fusion, so a switched-off ledger must not cost them their request.
+    const outcome = await dispatchCommand("router_fusion_passthrough_reserve", {
+      requestId: "req-1",
+      attempt: 0,
+      providerId: "openai",
+      modelId: "gpt-5-mini",
+    })
+    // In the `{ ok, value }` envelope the gateway's brain bridge requires: a
+    // bare outcome would be rejected there as an unrecognised shape.
+    expect(outcome).toEqual({ ok: true, value: { status: "bypassed", code: "surface_off" } })
+  })
+
+  it("still refuses a command in neither family", async () => {
+    await expect(dispatchCommand("router_fusion_run_teleport", {})).rejects.toThrow(
+      /unknown desktop-write command/i
+    )
+  })
+})

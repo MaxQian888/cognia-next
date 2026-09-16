@@ -275,6 +275,10 @@ export type DiagnosticCode =
   | "aborted"
   | "interrupted"
   | "budgetExhausted"
+  /** Router + Fusion refused a chat turn: no route, or its run budget or limits were reached (ADR-0188). */
+  | "routerFusionRefused"
+  /** A Router + Fusion cascade or panel run stopped before its answer was verified (ADR-0188 B3). */
+  | "routerFusionRunFailed"
   | "dispatchRejectedCycle"
   | "dispatchRejectedDepth"
   | "dispatchRejectedPolicy"

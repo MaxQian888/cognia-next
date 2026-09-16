@@ -158,6 +158,13 @@ const IslandInitializer = dynamic(
   () => import("./island-initializer").then((m) => m.IslandInitializer),
   { ssr: false }
 )
+// Router + Fusion chat runs are ledgered in this desktop window (ADR-0188); the
+// initializer keeps breaker trips across restarts and seals runs a closed
+// window left behind. Inert — nothing loaded, no database opened — while off.
+const RouterFusionInitializer = dynamic(
+  () => import("./router-fusion-initializer").then((m) => m.RouterFusionInitializer),
+  { ssr: false }
+)
 const SessionImportWatchInitializer = dynamic(
   () => import("./session-import-watch-initializer").then((m) => m.SessionImportWatchInitializer),
   { ssr: false }
@@ -214,6 +221,7 @@ export function DesktopOnlyInitializers() {
       <IslandInitializer />
       <SessionImportWatchInitializer />
       <SitesInitializer />
+      <RouterFusionInitializer />
     </>
   )
 }

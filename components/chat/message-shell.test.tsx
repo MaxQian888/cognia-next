@@ -1,6 +1,8 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import type { UIMessage } from "ai"
 import { resolveMessageDisplayOptions } from "@/lib/chat/message-display"
+import { useSettingsStore } from "@/stores/settings"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { METADATA_FIELDS, MessageShell } from "./message-shell"
 
 const message: UIMessage = {
@@ -178,6 +180,127 @@ describe("MessageShell", () => {
   })
 })
 
+describe("routing indicator (ADR-0043 Phase 12)", () => {
+  const routedMessage: UIMessage = {
+    ...message,
+    metadata: {
+      ...(message.metadata as Record<string, unknown>),
+      run: {
+        providerId: "anthropic",
+        modelId: "claude-sonnet-4-6",
+        finishReason: "success",
+        routing: {
+          mode: "auto",
+          alias: "fast",
+          strategy: "quality",
+          reasonCodes: ["auto-task-fit"],
+          candidateCount: 2,
+        },
+      },
+    },
+  }
+
+  const hiddenMetadata = resolveMessageDisplayOptions(undefined, {
+    preset: "balanced",
+    overrides: {
+      metadata: {
+        identity: "hidden",
+        timestamp: "hidden",
+        model: "hidden",
+        provider: "hidden",
+        duration: "hidden",
+        usage: "hidden",
+        cost: "hidden",
+        finishState: "hidden",
+      },
+    },
+  })
+
+  it("renders the chip in the header even when every metadata field is hidden", () => {
+    render(
+      <TooltipProvider delayDuration={0}>
+        <MessageShell message={routedMessage} display={hiddenMetadata}>
+          <p>Hello</p>
+        </MessageShell>
+      </TooltipProvider>
+    )
+    // The header only exists because the chip is in it — no other header
+    // content survives the all-hidden metadata placement.
+    const header = screen.getByTestId("message-shell-header")
+    expect(header).toContainElement(screen.getByTestId("routing-indicator"))
+    expect(screen.getByTestId("routing-indicator")).toHaveTextContent("Auto · fast")
+  })
+
+  it("hides the chip when showRoutingIndicator is off and restores afterwards", () => {
+    const previous = useSettingsStore.getState().settings
+    try {
+      act(() => {
+        useSettingsStore.setState({
+          settings: {
+            ...(previous ?? {}),
+            autoRouting: {
+              ...(previous?.autoRouting ?? {}),
+              showRoutingIndicator: false,
+            },
+          } as typeof previous,
+        })
+      })
+      render(
+        <TooltipProvider delayDuration={0}>
+          <MessageShell message={routedMessage} display={hiddenMetadata}>
+            <p>Hello</p>
+          </MessageShell>
+        </TooltipProvider>
+      )
+      expect(screen.queryByTestId("routing-indicator")).toBeNull()
+    } finally {
+      act(() => {
+        useSettingsStore.setState({ settings: previous })
+      })
+    }
+  })
+
+  it("stays off user messages and manual selections", () => {
+    const { rerender } = render(
+      <TooltipProvider delayDuration={0}>
+        <MessageShell
+          message={{ ...routedMessage, role: "user" }}
+          display={resolveMessageDisplayOptions()}
+        >
+          <p>Hello</p>
+        </MessageShell>
+      </TooltipProvider>
+    )
+    expect(screen.queryByTestId("routing-indicator")).toBeNull()
+
+    rerender(
+      <TooltipProvider delayDuration={0}>
+        <MessageShell
+          message={{
+            ...routedMessage,
+            metadata: {
+              ...(routedMessage.metadata as Record<string, unknown>),
+              run: {
+                finishReason: "success",
+                routing: {
+                  mode: "manual",
+                  strategy: "quality",
+                  reasonCodes: ["manual-override"],
+                  candidateCount: 1,
+                },
+              },
+            },
+          }}
+          display={resolveMessageDisplayOptions()}
+        >
+          <p>Hello</p>
+        </MessageShell>
+      </TooltipProvider>
+    )
+    expect(screen.queryByTestId("routing-indicator")).toBeNull()
+  })
+})
+
 describe("per-member stop (ADR-0177 batch 3)", () => {
   it("offers the stop only while a named speaker is mid-reply, and names them", () => {
     const onStopSpeaker = jest.fn()
@@ -203,5 +326,53 @@ describe("per-member stop (ADR-0177 batch 3)", () => {
       </MessageShell>
     )
     expect(screen.queryByTestId("message-stop-speaker")).toBeNull()
+  })
+})
+
+describe("Router + Fusion run card (ADR-0188)", () => {
+  const withRouterFusion = (role: UIMessage["role"]): UIMessage => ({
+    ...message,
+    role,
+    metadata: {
+      ...(message.metadata as Record<string, unknown>),
+      run: {
+        finishReason: "success",
+        routerFusion: { bypass: { code: "db_unavailable", justTripped: false } },
+      },
+    },
+  })
+
+  it("shows the card on an assistant message that went through Router + Fusion", () => {
+    render(
+      <TooltipProvider delayDuration={0}>
+        <MessageShell
+          message={withRouterFusion("assistant")}
+          display={resolveMessageDisplayOptions()}
+        >
+          <p>Hello</p>
+        </MessageShell>
+      </TooltipProvider>
+    )
+    expect(screen.getByTestId("router-fusion-bypass")).toHaveTextContent("Not ledgered")
+  })
+
+  it("[ACC:OFF-02] renders no card for any other message", () => {
+    const { rerender } = render(
+      <TooltipProvider delayDuration={0}>
+        <MessageShell message={message} display={resolveMessageDisplayOptions()}>
+          <p>Hello</p>
+        </MessageShell>
+      </TooltipProvider>
+    )
+    expect(screen.queryByTestId("router-fusion-bypass")).toBeNull()
+    expect(screen.queryByTestId("router-fusion-run-card")).toBeNull()
+    rerender(
+      <TooltipProvider delayDuration={0}>
+        <MessageShell message={withRouterFusion("user")} display={resolveMessageDisplayOptions()}>
+          <p>Hello</p>
+        </MessageShell>
+      </TooltipProvider>
+    )
+    expect(screen.queryByTestId("router-fusion-bypass")).toBeNull()
   })
 })

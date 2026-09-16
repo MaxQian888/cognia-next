@@ -277,6 +277,14 @@
       "hint": "This host is already running the maximum number of agent processes — finish or close one, then try again.",
       "label": "Too many agent sessions"
     },
+    "routerFusionRefused": {
+      "hint": "No route fits this turn's budget, limits or data rules — raise the run cap or change the model in Settings → AI connections → Routing.",
+      "label": "Router + Fusion refused the turn"
+    },
+    "routerFusionRunFailed": {
+      "hint": "The cascade or panel run stopped before its answer was verified. Agent Runs shows the run; send the message again, or switch the conversation to Direct.",
+      "label": "Router + Fusion run failed"
+    },
     "routingNoCandidates": {
       "hint": "No provider in the routing chain can serve this request — check your providers and model mappings.",
       "label": "No provider available"

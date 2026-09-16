@@ -23,6 +23,7 @@
     "chat": "Chat",
     "connector": "Connector",
     "delegation": "Delegation",
+    "fusion": "Routed run",
     "goal": "Goal",
     "job": "Background task",
     "plan": "Plan",

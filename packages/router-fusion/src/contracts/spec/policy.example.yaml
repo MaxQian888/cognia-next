@@ -1,0 +1,70 @@
+schema_version: 1.0.0
+policy_version: mock-policy-1
+example_only: true
+production_auto_baseline_only: true
+classifier:
+  implementation: rules
+  version: rules-1
+  input_token_cap: 4096
+  timeout_ms: 1500
+  cache_ttl_seconds: 600
+limits:
+  max_model_calls: 24
+  transport_attempts_per_call: 2
+  max_format_repairs: 1
+  max_reroutes: 2
+  panel_size: 2
+  panel_min_candidates: 2
+  panel_evidence_rounds: 1
+  worker_model_turns: 8
+  worker_tool_operations: 12
+  worker_repair_rounds: 1
+  lead_takeovers: 1
+  run_lease_seconds: 45
+  heartbeat_seconds: 10
+  deadline_default_ms: 120000
+switch_margin: 0.15
+default_delivery: verified_buffered
+answer_cache_enabled: false
+actions:
+  - id: direct_economy
+    mode: direct
+    roles:
+      solver: economy
+    prompt_version: roles-1
+    verifier_profile: text_basic
+    enabled: true
+  - id: direct_baseline
+    mode: direct
+    roles:
+      solver: baseline
+      reviewer: baseline
+    prompt_version: roles-1
+    verifier_profile: text_review
+    enabled: true
+  - id: cascade_schema
+    mode: cascade
+    roles:
+      cheap: economy
+      strong: baseline
+    prompt_version: roles-1
+    verifier_profile: schema_fixture
+    enabled: true
+  - id: panel_review
+    mode: panel
+    roles:
+      panel_a: economy
+      panel_b: independent
+      judge: baseline
+      synthesizer: baseline
+    prompt_version: roles-1
+    verifier_profile: evidence_review
+    enabled: true
+  - id: delegate_code
+    mode: delegate
+    roles:
+      lead: baseline
+      worker: economy
+    prompt_version: roles-1
+    verifier_profile: code_fixture
+    enabled: true

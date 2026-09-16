@@ -456,6 +456,7 @@ interface SliceLike {
   pendingCommandOverrides?: unknown
   citedRefs?: unknown[]
   ephemeralSkillIds?: string[]
+  steerQueue?: unknown[]
 }
 const makeSlice = (): SliceLike => ({
   messages: [],
@@ -734,11 +735,62 @@ jest.mock("@cognia/vector/store", () => ({
   createVectorStore: (...args: unknown[]) => mockCreateVectorStore(...args),
 }))
 
+// Router + Fusion (ADR-0188) entry seams. The defaults are the off path: every
+// send passes through untouched, nothing is cancelled.
+const prepareRouterFusionSendMock = jest.fn(async (input: { options: SendOptions }) => ({
+  kind: "send" as const,
+  options: input.options,
+}))
+const abortRouterFusionSendMock = jest.fn(async (..._args: unknown[]) => undefined)
+jest.mock("@/lib/router-fusion/gate/chat-send", () => ({
+  prepareRouterFusionSend: (input: { options: SendOptions }) => prepareRouterFusionSendMock(input),
+  abortRouterFusionSend: (...args: unknown[]) => abortRouterFusionSendMock(...args),
+}))
+const cancelRouterFusionTurnMock = jest.fn(async (..._args: unknown[]) => undefined)
+jest.mock("@/lib/router-fusion/gate/chat-events", () => ({
+  ...jest.requireActual("@/lib/router-fusion/gate/chat-events"),
+  cancelRouterFusionTurn: (...args: unknown[]) => cancelRouterFusionTurnMock(...args),
+}))
+// A cascade or panel turn (ADR-0188 B3). The default is no fusion turn in flight.
+const fusionChatTurnActiveMock = jest.fn((_sessionId: string) => false)
+const runFusionChatTurnMock = jest.fn(async (..._args: unknown[]) => "completed" as const)
+const stopFusionChatTurnMock = jest.fn(async (..._args: unknown[]) => undefined)
+jest.mock("./router-fusion-chat-turn", () => ({
+  ...jest.requireActual("./router-fusion-chat-turn"),
+  fusionChatTurnActive: (sessionId: string) => fusionChatTurnActiveMock(sessionId),
+  runFusionChatTurn: (...args: unknown[]) => runFusionChatTurnMock(...args),
+  stopFusionChatTurn: (...args: unknown[]) => stopFusionChatTurnMock(...args),
+}))
+// A private session is the default: `beginSharedSessionRun` only reaches its
+// lease handlers for a collaboration-bound session.
+const beginSharedSessionRunMock = jest.fn(
+  async (..._args: unknown[]) => ({ kind: "private" }) as unknown
+)
+jest.mock("@/lib/collab/shared-run-coordinator", () => ({
+  ...jest.requireActual("@/lib/collab/shared-run-coordinator"),
+  beginSharedSessionRun: (...args: unknown[]) => beginSharedSessionRunMock(...args),
+}))
+const isCostBudgetConfiguredMock = jest.fn(() => false)
+const enforceCostBudgetMock = jest.fn(async (..._args: unknown[]) => ({
+  allowed: true,
+  blockedBy: [] as Array<{ scopeKey: string }>,
+}))
+jest.mock("@/lib/usage/cost-budget-gate", () => ({
+  ...jest.requireActual("@/lib/usage/cost-budget-gate"),
+  isCostBudgetConfigured: () => isCostBudgetConfiguredMock(),
+  enforceCostBudget: (...args: unknown[]) => enforceCostBudgetMock(...args),
+}))
+
 import {
   __resetRemoteAttachForTests,
   DEFAULT_APPROVAL_BACKSTOP_MS,
 } from "@/lib/companion/remote-attach-registry"
 import { registerCaptureResponder } from "@/lib/connectors/hitl/approval-registry"
+import {
+  RouterFusionInfrastructureError,
+  RouterFusionRefusalError,
+  RouterFusionUnavailableError,
+} from "@/lib/router-fusion/gate/faults"
 import { createElement, useState, type ReactNode } from "react"
 import { useClaudeChat } from "./use-claude-chat-controller"
 import { ClaudeChatRuntimeProvider, useClaudeChat as useSharedClaudeChat } from "./use-claude-chat"
@@ -767,6 +819,16 @@ beforeEach(() => {
   onClaudeMessageMock.mockClear()
   onClaudeUnsub.mockClear()
   sendPromptMock.mockReset().mockResolvedValue(undefined)
+  prepareRouterFusionSendMock
+    .mockReset()
+    .mockImplementation(async (input) => ({ kind: "send", options: input.options }))
+  abortRouterFusionSendMock.mockReset().mockResolvedValue(undefined)
+  cancelRouterFusionTurnMock.mockReset().mockResolvedValue(undefined)
+  fusionChatTurnActiveMock.mockReset().mockReturnValue(false)
+  runFusionChatTurnMock.mockReset().mockResolvedValue("completed")
+  stopFusionChatTurnMock.mockReset().mockResolvedValue(undefined)
+  isCostBudgetConfiguredMock.mockReset().mockReturnValue(false)
+  enforceCostBudgetMock.mockReset().mockResolvedValue({ allowed: true, blockedBy: [] })
   acceptChatTurnMock.mockReset().mockResolvedValue(null)
   bindChatTurnContextMock.mockReset().mockResolvedValue(false)
   claimChatTurnForDispatchMock.mockReset().mockResolvedValue("disabled")
@@ -778,6 +840,7 @@ beforeEach(() => {
   stopLeaseHeartbeatMock.mockClear()
   enqueueHostStateIntentMock.mockReset().mockResolvedValue(null)
   interruptSessionMock.mockReset().mockResolvedValue(undefined)
+  beginSharedSessionRunMock.mockReset().mockResolvedValue({ kind: "private" })
   standaloneFlag.value = false
   runStandaloneTurnMock.mockReset().mockResolvedValue(undefined)
   gateWorkbenchProviderPayloadMock.mockClear()
@@ -1335,6 +1398,36 @@ describe("useClaudeChat — actions", () => {
       await result.current.send("hello", undefined, { attachmentManifest: manifest })
     })
     expect(makeUserMessage).toHaveBeenCalledWith("hello", expect.any(String), manifest)
+  })
+
+  it("derives routing attachment kinds from the outgoing content blocks", async () => {
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send([
+        { type: "text", text: "transcribe this" },
+        {
+          type: "image",
+          source: { type: "base64", media_type: "image/png", data: "SU1H" },
+        },
+        {
+          type: "document",
+          source: { type: "base64", media_type: "audio/mpeg", data: "QVVESU8=" },
+        },
+        {
+          type: "document",
+          source: { type: "base64", media_type: "application/pdf", data: "UERG" },
+        },
+      ] as never)
+    })
+    expect(resolveSendOptionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routingContextHint: expect.objectContaining({
+          promptText: "transcribe this",
+          attachmentKinds: ["image", "audio", "document"],
+        }),
+      })
+    )
   })
 
   describe("native video route guard", () => {
@@ -4417,6 +4510,450 @@ function activeLoop(over: Record<string, unknown> = {}) {
     ...over,
   }
 }
+
+describe("useClaudeChat — Router + Fusion dispatch (ADR-0188)", () => {
+  const stamp = { runId: "rf-run-1", providerId: "openai", modelId: "gpt-5" } as NonNullable<
+    SendOptions["routerFusion"]
+  >
+  const stamped: SendOptions = {
+    provider: "openai",
+    model: "gpt-5",
+    routerFusion: stamp,
+    ledger: {
+      runId: "rf-run-1",
+      mode: "per_call",
+      transportAttempts: 2,
+      deploymentId: "openai::gpt-5",
+    },
+  }
+
+  it("[ACC:OFF-02] leaves an unstamped send on the original path, cost ceiling included", async () => {
+    isCostBudgetConfiguredMock.mockReturnValue(true)
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello")
+    })
+    expect(prepareRouterFusionSendMock).not.toHaveBeenCalled()
+    expect(enforceCostBudgetMock).toHaveBeenCalledTimes(1)
+    expect(sendPromptMock).toHaveBeenCalled()
+    expect(sendPromptMock.mock.calls.at(-1)?.[2]).not.toHaveProperty("routerFusion")
+    expect(resolveSendOptionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ routerFusionSurface: "chat" })
+    )
+  })
+
+  it("creates the run of a stamped turn after the early returns and before dispatch", async () => {
+    isCostBudgetConfiguredMock.mockReturnValue(true)
+    resolveSendOptionsMock.mockResolvedValue(stamped)
+    const started = { ...stamped, routerFusion: { ...stamp, runId: "rf-run-2" } } as SendOptions
+    prepareRouterFusionSendMock.mockResolvedValue({ kind: "send", options: started })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello")
+    })
+    // D35: the run holds the budget remainder, so the legacy ceiling is skipped.
+    expect(enforceCostBudgetMock).not.toHaveBeenCalled()
+    expect(prepareRouterFusionSendMock).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "sess-1", reused: false })
+    )
+    const sent = sendPromptMock.mock.calls.at(-1)?.[2] as SendOptions
+    expect(sent.routerFusion?.runId).toBe("rf-run-2")
+    expect(prepareRouterFusionSendMock.mock.invocationCallOrder[0]).toBeLessThan(
+      bindChatTurnContextMock.mock.invocationCallOrder.at(-1)!
+    )
+    expect(bindChatTurnContextMock.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      sendPromptMock.mock.invocationCallOrder.at(-1)!
+    )
+    expect(abortRouterFusionSendMock).not.toHaveBeenCalled()
+  })
+
+  it("routes cached options again as a new run", async () => {
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("retry", stamped)
+    })
+    expect(prepareRouterFusionSendMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reused: true,
+        options: expect.objectContaining({ routerFusion: stamp }),
+      })
+    )
+  })
+
+  it("[ACC:ISO-04] does not dispatch a refused turn and shows the refusal", async () => {
+    resolveSendOptionsMock.mockResolvedValue(stamped)
+    prepareRouterFusionSendMock.mockResolvedValue({
+      kind: "refused",
+      code: "TENANT_BUDGET_EXHAUSTED",
+      reasons: ["tenant"],
+    } as never)
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello")
+    })
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    expect(bindChatTurnContextMock).not.toHaveBeenCalled()
+    expect(abortRouterFusionSendMock).not.toHaveBeenCalled()
+    const diagnostic = chatState.setSessionDiagnostic.mock.calls.at(-1)?.[1] as {
+      code: string
+      detail?: string
+    }
+    expect(diagnostic.code).toBe("routerFusionRefused")
+    expect(diagnostic.detail).toBe("TENANT_BUDGET_EXHAUSTED\ntenant")
+    expect(settleChatTurnForSessionMock).toHaveBeenCalledWith("sess-1", {
+      outcome: "failed",
+      errorCode: "router_fusion_refused",
+    })
+  })
+
+  it("[ACC:ISO-01] applies the cost ceiling when a faulted run sends the turn on the original path", async () => {
+    isCostBudgetConfiguredMock.mockReturnValue(true)
+    enforceCostBudgetMock.mockResolvedValue({ allowed: false, blockedBy: [{ scopeKey: "global" }] })
+    resolveSendOptionsMock.mockResolvedValue(stamped)
+    prepareRouterFusionSendMock.mockResolvedValue({
+      kind: "send",
+      options: {
+        provider: "openai",
+        model: "gpt-5",
+        routerFusionBypass: { code: "db_unavailable", justTripped: false },
+      },
+    })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello")
+    })
+    expect(enforceCostBudgetMock).toHaveBeenCalledTimes(1)
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    expect(settleChatTurnForSessionMock).toHaveBeenCalledWith("sess-1", {
+      outcome: "failed",
+      errorCode: "cost_budget_exceeded",
+    })
+    expect(abortRouterFusionSendMock).not.toHaveBeenCalled()
+  })
+
+  it("sends a faulted turn unledgered when the ceiling allows it", async () => {
+    resolveSendOptionsMock.mockResolvedValue(stamped)
+    const bypassed: SendOptions = {
+      provider: "openai",
+      model: "gpt-5",
+      routerFusionBypass: { code: "db_unavailable", justTripped: true },
+    }
+    prepareRouterFusionSendMock.mockResolvedValue({ kind: "send", options: bypassed })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello")
+    })
+    const sent = sendPromptMock.mock.calls.at(-1)?.[2] as SendOptions
+    expect(sent.routerFusion).toBeUndefined()
+    expect(sent.ledger).toBeUndefined()
+    expect(sent.routerFusionBypass).toEqual({ code: "db_unavailable", justTripped: true })
+  })
+
+  it("releases the run when the dispatch itself fails", async () => {
+    resolveSendOptionsMock.mockResolvedValue(stamped)
+    sendPromptMock.mockRejectedValueOnce(new Error("ipc closed"))
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello")
+    })
+    expect(abortRouterFusionSendMock).toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({ routerFusion: stamp }),
+      "ipc closed"
+    )
+    expect(settleChatTurnForSessionMock).toHaveBeenCalledWith("sess-1", {
+      outcome: "failed",
+      errorCode: "send_failed",
+    })
+  })
+
+  it("stops granting model calls when the user stops the turn", async () => {
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.stop("sess-1")
+    })
+    expect(cancelRouterFusionTurnMock).toHaveBeenCalledWith("sess-1")
+  })
+
+  it("shows a build-time refusal as the refusal diagnostic, not a generic error", async () => {
+    resolveSendOptionsMock.mockRejectedValue(
+      new RouterFusionRefusalError("ROUTE_NO_SOLUTION", "no route satisfies the hard filters", {
+        reasons: ["NO_CANDIDATES:alias:powerful"],
+      })
+    )
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await expect(result.current.send("hello")).rejects.toThrow(
+        "no route satisfies the hard filters"
+      )
+    })
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    const diagnostic = chatState.setSessionDiagnostic.mock.calls.at(-1)?.[1] as {
+      code: string
+      detail?: string
+    }
+    expect(diagnostic.code).toBe("routerFusionRefused")
+    expect(diagnostic.detail).toBe("ROUTE_NO_SOLUTION\nNO_CANDIDATES:alias:powerful")
+  })
+
+  describe("a cascade or panel turn (B3)", () => {
+    const runStamp = {
+      runId: "rf-panel-1",
+      decisionId: "d1",
+      actionId: "panel_review",
+      mode: "panel",
+      ruleId: "R1_explicit_mode",
+      requested: "panel",
+      roles: { judge: "openai::gpt-5" },
+      budgetMode: "tracked",
+      capMicrousd: 2_000_000,
+      acceptanceProfile: "evidence_review",
+    } as NonNullable<SendOptions["routerFusionRun"]>
+    const fusionOptions: SendOptions = {
+      provider: "openai",
+      model: "gpt-5",
+      routerFusionRun: runStamp,
+    }
+
+    it("hands a stamped turn to the run instead of the sidecar", async () => {
+      isCostBudgetConfiguredMock.mockReturnValue(true)
+      resolveSendOptionsMock.mockResolvedValue(fusionOptions)
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send("compare the two designs")
+      })
+      expect(runFusionChatTurnMock).toHaveBeenCalledTimes(1)
+      const input = runFusionChatTurnMock.mock.calls[0]?.[0] as {
+        sessionId: string
+        stamp: unknown
+        messages: Array<{ role: string }>
+        userMessage: { role: string; parts: Array<{ text?: string }> } | null
+      }
+      expect(input.sessionId).toBe("sess-1")
+      expect(input.stamp).toBe(runStamp)
+      expect(input.userMessage?.parts[0]?.text).toBe("compare the two designs")
+      expect(input.messages.at(-1)).toBe(input.userMessage)
+      expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "streaming")
+      // None of the single-model-turn machinery runs for it.
+      expect(sendPromptMock).not.toHaveBeenCalled()
+      expect(prepareRouterFusionSendMock).not.toHaveBeenCalled()
+      expect(enforceCostBudgetMock).not.toHaveBeenCalled()
+      expect(acceptChatTurnMock).not.toHaveBeenCalled()
+      expect(enqueueHostStateIntentMock).not.toHaveBeenCalled()
+    })
+
+    it("does not save the message again on a regenerate", async () => {
+      resolveSendOptionsMock.mockResolvedValue(fusionOptions)
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send("again", undefined, { skipUserAppend: true })
+      })
+      expect(
+        (runFusionChatTurnMock.mock.calls[0]?.[0] as { userMessage: unknown }).userMessage
+      ).toBeNull()
+    })
+
+    it("drains the steer queue when the run completes and keeps it when the run fails", async () => {
+      resolveSendOptionsMock.mockResolvedValue(fusionOptions)
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send("compare")
+      })
+      const { onSettled } = runFusionChatTurnMock.mock.calls[0]?.[0] as {
+        onSettled: (result: string) => void
+      }
+      // The queue lives on the session's own slice; read it as a background one.
+      chatState.activeSessionId = "elsewhere"
+      try {
+        const queuedBubble = {
+          id: "steer-1",
+          role: "user",
+          parts: [{ type: "text", text: "next" }],
+          metadata: { steer: { entryId: "q1", state: "queued" } },
+        }
+        chatState.otherSlices["sess-1"] = {
+          ...makeSlice(),
+          messages: [queuedBubble],
+          steerQueue: [{ id: "q1", text: "next" }],
+        }
+        await act(async () => {
+          onSettled("failed")
+          await flush()
+        })
+        // A failed run keeps the queue and says the follow-up was not delivered.
+        expect(chatState.clearSteerQueue).not.toHaveBeenCalled()
+        const marked = chatState.otherSlices["sess-1"]?.messages as Array<{
+          metadata?: { steer?: { state: string } }
+        }>
+        expect(marked[0]?.metadata?.steer?.state).toBe("failed")
+        expect(mockTrackEvent).toHaveBeenCalledWith(
+          "chat.turn.failed",
+          expect.objectContaining({ sessionId: "sess-1", errorType: "router_fusion_run_failed" })
+        )
+        await act(async () => {
+          onSettled("cancelled")
+          await flush()
+        })
+        expect(chatState.clearSteerQueue).not.toHaveBeenCalled()
+        await act(async () => {
+          onSettled("completed")
+          await flush()
+        })
+        expect(chatState.clearSteerQueue).toHaveBeenCalledWith("sess-1")
+        // One turn, one outcome event: the first settle took the turn's start time.
+        expect(
+          mockTrackEvent.mock.calls.filter(([name]) => String(name).startsWith("chat.turn."))
+        ).toHaveLength(1)
+      } finally {
+        chatState.activeSessionId = "sess-1"
+      }
+    })
+
+    it("replays the queue when an interrupt-and-steer stop settles the run", async () => {
+      resolveSendOptionsMock.mockResolvedValue(fusionOptions)
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send("compare")
+      })
+      const { onSettled } = runFusionChatTurnMock.mock.calls[0]?.[0] as {
+        onSettled: (result: string) => void
+      }
+      chatState.activeSessionId = "elsewhere"
+      try {
+        chatState.otherSlices["sess-1"] = {
+          ...makeSlice(),
+          steerQueue: [{ id: "q1", text: "next" }],
+        }
+        fusionChatTurnActiveMock.mockReturnValue(true)
+        await act(async () => {
+          await result.current.interruptAndSteer("sess-1")
+        })
+        expect(stopFusionChatTurnMock).toHaveBeenCalledWith("sess-1", expect.anything(), {
+          settled: false,
+        })
+        // The stopped run settles as cancelled; the armed interrupt drains the queue.
+        await act(async () => {
+          onSettled("cancelled")
+          await flush()
+        })
+        expect(chatState.clearSteerQueue).toHaveBeenCalledWith("sess-1")
+        expect(mockTrackEvent).not.toHaveBeenCalledWith("chat.turn.failed", expect.anything())
+      } finally {
+        chatState.activeSessionId = "sess-1"
+      }
+    })
+
+    it("queues a follow-up typed while the run works instead of steering it", async () => {
+      chatState.status = "streaming"
+      fusionChatTurnActiveMock.mockReturnValue(true)
+      steerSessionMock.mockResolvedValue({ accepted: true })
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send("also check the costs")
+      })
+      expect(steerSessionMock).not.toHaveBeenCalled()
+      expect(enqueueHostStateIntentMock).not.toHaveBeenCalled()
+      expect(chatState.enqueueSteer).toHaveBeenCalledWith(
+        "sess-1",
+        expect.objectContaining({ text: "also check the costs" })
+      )
+      expect(runFusionChatTurnMock).not.toHaveBeenCalled()
+    })
+
+    it("stops the run on Stop, the session already settled", async () => {
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.stop("sess-1")
+      })
+      expect(stopFusionChatTurnMock).toHaveBeenCalledWith("sess-1", expect.anything(), {
+        settled: true,
+      })
+    })
+
+    it("stops the run for an interrupt-and-steer and lets its settle replay the queue", async () => {
+      chatState.otherSlices["steer-sess"] = { ...makeSlice(), steerQueue: [{ id: "q1" }] }
+      fusionChatTurnActiveMock.mockReturnValue(true)
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.interruptAndSteer("steer-sess")
+      })
+      expect(stopFusionChatTurnMock).toHaveBeenCalledWith("steer-sess", expect.anything(), {
+        settled: false,
+      })
+      expect(interruptSessionMock).not.toHaveBeenCalled()
+    })
+
+    it("[ACC:ISO-03] explains an unavailable Router + Fusion for an explicit cascade or panel", async () => {
+      resolveSendOptionsMock.mockRejectedValue(
+        new RouterFusionUnavailableError(
+          new RouterFusionInfrastructureError("breaker_tripped", "paused")
+        )
+      )
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await expect(result.current.send("hello")).rejects.toThrow()
+      })
+      const diagnostic = chatState.setSessionDiagnostic.mock.calls.at(-1)?.[1] as {
+        code: string
+        detail?: string
+      }
+      expect(diagnostic.code).toBe("routerFusionRunFailed")
+      expect(diagnostic.detail).toBe("ROUTER_FUSION_UNAVAILABLE\nbreaker_tripped")
+      expect(runFusionChatTurnMock).not.toHaveBeenCalled()
+      expect(sendPromptMock).not.toHaveBeenCalled()
+    })
+  })
+
+  it("stops granting model calls when a steer interrupts the running turn", async () => {
+    chatState.otherSlices["steer-sess"] = { ...makeSlice(), steerQueue: [{ id: "q1" }] }
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.interruptAndSteer("steer-sess")
+    })
+    expect(interruptSessionMock).toHaveBeenCalledWith("steer-sess")
+    expect(cancelRouterFusionTurnMock).toHaveBeenCalledWith("steer-sess")
+  })
+
+  it("stops granting model calls when the durable lease is lost", async () => {
+    let leaseLost: (() => void) | undefined
+    beginSharedSessionRunMock.mockResolvedValue({
+      kind: "acquired",
+      setApprovalDecisionHandler: jest.fn(),
+      setLeaseLostHandler: (handler: () => void) => {
+        leaseLost = handler
+      },
+    })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello")
+    })
+    expect(leaseLost).toBeDefined()
+    await act(async () => {
+      leaseLost?.()
+      await flush()
+    })
+    expect(cancelRouterFusionTurnMock).toHaveBeenCalledWith("sess-1")
+  })
+})
 
 describe("embedded runtime reachability", () => {
   it("projects existing subagents when a pane appears without a new runtime event", async () => {

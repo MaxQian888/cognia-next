@@ -18,7 +18,12 @@
 import type { ExecutionLegSnapshot } from "./types"
 import type { WorkflowRunRow, RunStatus } from "@/types/workflow/visual"
 import type { TaskExecution, TaskExecutionStatus } from "@/types/scheduler"
-import type { ExecutionRun, ExecutionRunStatus, RunControlAction } from "@/types/execution/run"
+import type {
+  ExecutionRun,
+  ExecutionRunOrigin,
+  ExecutionRunStatus,
+  RunControlAction,
+} from "@/types/execution/run"
 
 export type UnifiedExecutionStatus =
   "queued" | "running" | "waiting" | "done" | "error" | "cancelled"
@@ -92,6 +97,14 @@ export interface UnifiedExecutionRow {
   pendingInterruptId?: string
   /** The Squad behind a `team` journal row, when its opening event named one. */
   teamId?: string
+  /**
+   * Where the run was asked for (ADR-0188 D24). Journal rows only, and absent
+   * on every run written before the external Run API — a reader treats that as
+   * `"local"`, which is what it was.
+   */
+  origin?: ExecutionRunOrigin
+  /** The gateway API key behind a `"gateway-api"` row, for the list to name. */
+  originActorName?: string
 }
 
 export interface BuildMonitorModelInput {
@@ -309,6 +322,8 @@ export function journalRunRow(run: ExecutionRun): UnifiedExecutionRow {
     ...(ratio !== undefined ? { progressRatio: ratio } : {}),
     ...(snapshot?.pendingInterrupt ? { pendingInterruptId: snapshot.pendingInterrupt.id } : {}),
     ...(snapshot?.teamId ? { teamId: snapshot.teamId } : {}),
+    ...(run.origin ? { origin: run.origin } : {}),
+    ...(run.originActor ? { originActorName: run.originActor.keyName } : {}),
   }
 }
 
@@ -432,6 +447,9 @@ export const EXECUTION_FILTER_KINDS = [
   // it may spawn is the difference between reading the cockpit and scrolling
   // it.
   "bot",
+  // Reachable once the Router + Fusion Run API projects the runs it creates
+  // (ADR-0188). Appended for the same KIND_RANK reason as everything above it.
+  "fusion",
 ] as const
 
 export type ExecutionFilterKind = (typeof EXECUTION_FILTER_KINDS)[number]

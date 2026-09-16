@@ -219,6 +219,44 @@ describe("filterCockpitRows", () => {
   })
 })
 
+describe("filterCockpitRows by origin", () => {
+  function unified(over: Partial<UnifiedExecutionRow>): UnifiedExecutionRow {
+    return {
+      rowId: "r",
+      source: "journal",
+      nativeId: "n",
+      kind: "fusion",
+      label: "Run",
+      status: "running",
+      startedAt: 1_000,
+      cancellable: false,
+      ...over,
+    }
+  }
+
+  const rows: UnifiedExecutionRow[] = [
+    unified({ rowId: "remote", origin: "gateway-api", originActorName: "CI robot" }),
+    unified({ rowId: "here", kind: "agent-turn", origin: "local" }),
+    // Written before the Run API existed: it came from this device, which is
+    // what "no origin" means rather than "unknown".
+    unified({ rowId: "legacy", kind: "agent-turn" }),
+  ]
+
+  it("keeps only the runs asked for from one place", () => {
+    expect(filterCockpitRows(rows, { origin: "gateway-api" }).map((r) => r.rowId)).toEqual([
+      "remote",
+    ])
+    expect(filterCockpitRows(rows, { origin: "local" }).map((r) => r.rowId)).toEqual([
+      "here",
+      "legacy",
+    ])
+  })
+
+  it("leaves every row alone when no origin is pinned", () => {
+    expect(filterCockpitRows(rows, {})).toHaveLength(3)
+  })
+})
+
 describe("buildCockpitFacets", () => {
   // Six runs; two of them belong to a Squad. This is the `/squads` Runs tab's
   // shape, where the chips read "All 6 / Failed 1 / Finished 5" over a list

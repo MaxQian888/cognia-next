@@ -13,6 +13,11 @@ const mockSendPrompt = jest.fn(async (..._args: unknown[]) => undefined)
 jest.mock("@/lib/claude/ipc", () => ({
   sendPrompt: (...args: unknown[]) => mockSendPrompt(...args),
 }))
+const mockAbortRouterFusionSend = jest.fn(async (..._args: unknown[]) => undefined)
+jest.mock("@/lib/router-fusion/gate/chat-send", () => ({
+  ...jest.requireActual("@/lib/router-fusion/gate/chat-send"),
+  abortRouterFusionSend: (...args: unknown[]) => mockAbortRouterFusionSend(...args),
+}))
 
 beforeAll(() => {
   if (!globalThis.crypto?.subtle) {
@@ -24,7 +29,9 @@ const NOW = 1_755_000_000_000
 const KEY = new Uint8Array(32).fill(19)
 const loadKey = async () => KEY
 
-async function seedReplayableSubmission() {
+async function seedReplayableSubmission(
+  sendOptions: Record<string, unknown> = { cwd: "/original/workspace", model: "claude-sonnet-4-5" }
+) {
   await acceptWorkSubmission(
     {
       intent: {
@@ -54,7 +61,8 @@ async function seedReplayableSubmission() {
       contextBundleId: "context-1",
       context: {
         cwd: "/original/workspace",
-        sendOptions: { cwd: "/original/workspace", model: "claude-sonnet-4-5" },
+        projectId: "project-1",
+        sendOptions,
       },
       now: NOW,
     },
@@ -67,13 +75,19 @@ describe("stored chat dispatch", () => {
   beforeEach(async () => {
     await getDb().delete()
     __resetDbForTesting()
-    mockSendPrompt.mockClear()
+    mockSendPrompt.mockReset().mockResolvedValue(undefined)
+    mockAbortRouterFusionSend.mockClear()
   }, 30_000)
 
   it("replays the frozen prompt and send options through the canonical send path", async () => {
     const row = await seedReplayableSubmission()
+    const prepare = jest.fn()
 
-    const outcome = await createStoredChatDispatch({ loadKey })(row)
+    const outcome = await createStoredChatDispatch({ loadKey, prepareRouterFusionSend: prepare })(
+      row
+    )
+    // [ACC:OFF-02] an unstamped replay never enters Router + Fusion.
+    expect(prepare).not.toHaveBeenCalled()
 
     expect(outcome).toEqual({ status: "dispatched" })
     expect(mockSendPrompt).toHaveBeenCalledWith(
@@ -83,6 +97,69 @@ describe("stored chat dispatch", () => {
       { commandId: "submission-1" }
     )
   }, 30_000)
+
+  describe("a turn accepted under Router + Fusion (ADR-0188)", () => {
+    const stamped = {
+      cwd: "/original/workspace",
+      provider: "openai",
+      model: "gpt-5",
+      routerFusion: { runId: "rf-old", providerId: "openai", modelId: "gpt-5" },
+      ledger: {
+        runId: "rf-old",
+        mode: "per_call",
+        transportAttempts: 2,
+        deploymentId: "openai::gpt-5",
+      },
+    }
+
+    it("replays on the same deployment as a new run", async () => {
+      const row = await seedReplayableSubmission(stamped)
+      const replayed = { ...stamped, routerFusion: { ...stamped.routerFusion, runId: "rf-new" } }
+      const prepare = jest.fn().mockResolvedValue({ kind: "send", options: replayed })
+
+      await expect(
+        createStoredChatDispatch({ loadKey, prepareRouterFusionSend: prepare })(row)
+      ).resolves.toEqual({
+        status: "dispatched",
+      })
+      expect(prepare).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: "session-1",
+          reused: true,
+          workspaceId: "project-1",
+          options: expect.objectContaining({ routerFusion: stamped.routerFusion }),
+        })
+      )
+      expect(mockSendPrompt).toHaveBeenCalledWith("session-1", "frozen prompt", replayed, {
+        commandId: "submission-1",
+      })
+    }, 30_000)
+
+    it("[ACC:ISO-04] fails a replay Router + Fusion refuses instead of sending it", async () => {
+      const row = await seedReplayableSubmission(stamped)
+      const prepare = jest.fn().mockResolvedValue({ kind: "refused", code: "PROVIDER_UNAVAILABLE" })
+
+      await expect(
+        createStoredChatDispatch({ loadKey, prepareRouterFusionSend: prepare })(row)
+      ).resolves.toEqual({
+        status: "failed",
+        errorCode: "router_fusion_refused:PROVIDER_UNAVAILABLE",
+      })
+      expect(mockSendPrompt).not.toHaveBeenCalled()
+    }, 30_000)
+
+    it("releases the new run when the replay could not be handed to the host", async () => {
+      const row = await seedReplayableSubmission(stamped)
+      const replayed = { ...stamped, routerFusion: { ...stamped.routerFusion, runId: "rf-new" } }
+      const prepare = jest.fn().mockResolvedValue({ kind: "send", options: replayed })
+      mockSendPrompt.mockRejectedValueOnce(new Error("host away"))
+
+      await expect(
+        createStoredChatDispatch({ loadKey, prepareRouterFusionSend: prepare })(row)
+      ).rejects.toThrow("host away")
+      expect(mockAbortRouterFusionSend).toHaveBeenCalledWith("session-1", replayed, "host away")
+    }, 30_000)
+  })
 
   it("parks an accepted turn whose frozen dispatch context was never committed", async () => {
     const row = await seedReplayableSubmission()

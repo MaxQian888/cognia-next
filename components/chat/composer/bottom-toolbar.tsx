@@ -34,9 +34,11 @@
 //     own box. Without it the group shrank, its `shrink-0` children did not,
 //     and they overflowed the group's box to paint on top of the next control.
 //
-// Grouping is carried by ONE hairline: per-turn answers (model, thinking,
-// permission) on the left of it, session shape (mode, runtime, preset) on the
-// right, ambient status pinned to the far end.
+// Every zone boundary carries a hairline: per-turn answers (model, thinking,
+// permission) | session shape (mode, runtime, preset) | plugin actions |
+// ambient status pinned to the far end. A zone that renders nothing takes its
+// rule with it (the rule is a `::before`, which `:empty` does not count), so a
+// default install never shows a rule with nothing on one side of it.
 
 import { ANTHROPIC_DEFAULT_MODEL } from "@/lib/ai/provider-default-model"
 import { useRef, type ReactNode } from "react"
@@ -55,6 +57,7 @@ import type { ChatSession } from "@cognia/agent-config-types"
 import { PermissionModeIndicator } from "../permission-mode-indicator"
 import { ModelPicker } from "./model-picker"
 import { EffortChip } from "./effort-chip"
+import { FusionModeChip } from "./fusion-mode-chip"
 import { SandboxShield } from "./sandbox-shield"
 import { AgentRuntimeSelector } from "@/components/agent/mode/runtime-selector"
 import { CompositionChip } from "@/components/agent/composition/composition-chip"
@@ -297,8 +300,28 @@ function GenericBottomToolbar({
           teaches nothing, and the model id beside them is the only string on
           this side long enough to be worth ellipsizing. Below the compact
           threshold the whole row re-packs instead of shaving letters. */}
-          <EffortChip
+          {/* `chat.input.effort` REPLACES this chip rather than sitting beside
+          it: a plugin dial and the host chip write the same two session
+          fields, and two controls for one value on one row is a question the
+          user should never have to ask ("which of these wins?"). */}
+          <PluginExtensionSlotWithOverflow
+            point="chat.input.effort"
+            limit={1}
+            className="flex shrink-0 items-center"
+            overflowLabel={t("pluginExtensionOverflow")}
+            fallback={
+              <EffortChip
+                session={session}
+                disabled={isStreaming}
+                className={cn(TOOLBAR_CHIP, "max-w-[7.5rem] shrink-0")}
+              />
+            }
+          />
+          {/* How the turn runs under Router + Fusion (ADR-0188): Auto, Direct,
+          Cascade or Panel. Self-hides while Router + Fusion chat is off. */}
+          <FusionModeChip
             session={session}
+            builtinRuntime={onBuiltinRuntime}
             disabled={isStreaming}
             className={cn(TOOLBAR_CHIP, "max-w-[7.5rem] shrink-0")}
           />
@@ -440,7 +463,7 @@ function GenericBottomToolbar({
         <ToolbarDivider />
         {runtimeControl}
         <div
-          className="ml-auto flex shrink-0 items-center gap-0.5 pl-2"
+          className={cn("ml-auto flex shrink-0 items-center gap-0.5 pl-2", ZONE_RULE)}
           data-testid="composer-status-cluster"
         >
           {sessionStatus}
@@ -505,12 +528,19 @@ function GenericBottomToolbar({
       {runConfigGroup}
       <ToolbarDivider />
       {shapeGroup}
-      <div className="flex shrink-0 items-center gap-1 empty:hidden">{pluginSlots}</div>
-      {/* Read-only ambient state, held apart from the controls by the auto
-          margin rather than by another rule — the gap IS the grouping, and one
-          hairline per row is the whole divider budget. */}
       <div
-        className="ml-auto flex shrink-0 items-center gap-0.5 pl-3"
+        className={cn("flex shrink-0 items-center gap-1 empty:hidden", ZONE_RULE)}
+        // A data attribute, not a test id: the chrome budget counts an empty
+        // test-id'd element as a control stub, and this zone is empty by default.
+        data-toolbar-zone="plugins"
+      >
+        {pluginSlots}
+      </div>
+      {/* Read-only ambient state, pinned right by the auto margin and opened
+          by its own rule so it reads as a separate zone rather than as the
+          tail of whichever control happens to sit last on the left. */}
+      <div
+        className={cn("ml-auto flex shrink-0 items-center gap-0.5 pl-3 empty:hidden", ZONE_RULE)}
         data-testid="composer-status-cluster"
       >
         {sessionStatus}
@@ -572,10 +602,24 @@ const COMPACT_TOOLBAR_PX = 520
 export const TOOLBAR_CHIP =
   "h-7 min-w-0 shrink rounded-md border-transparent bg-transparent px-2 text-[11px] font-normal text-muted-foreground shadow-none hover:border-transparent hover:bg-muted/60 hover:text-foreground dark:border-transparent dark:bg-transparent dark:hover:bg-muted/60"
 
-/** Thin vertical rule between control groups on the wide row. */
+/**
+ * The hairline between zones. `bg-border` at full strength: at `/50` the rule
+ * was a 1px line at half the opacity of an already-quiet token, which on a
+ * light theme simply did not render as a line.
+ */
+const RULE = "h-3.5 w-px shrink-0 bg-border"
+
+/** Thin vertical rule between two zones that are always both present. */
 function ToolbarDivider() {
-  return <span aria-hidden className="mx-1 h-3.5 w-px shrink-0 bg-border/50" />
+  return <span aria-hidden data-testid="composer-toolbar-divider" className={cn("mx-1", RULE)} />
 }
+
+/**
+ * The same rule for a zone that may render nothing: drawn as the zone's own
+ * `::before`, so `empty:hidden` removes the rule together with the zone.
+ */
+const ZONE_RULE =
+  "before:me-1.5 before:h-3.5 before:w-px before:shrink-0 before:bg-border before:content-['']"
 
 /**
  * Compact "⋯ More" popover holding the toolbar controls that don't fit on a

@@ -267,5 +267,8 @@
     "ticketMeta": "Session {session} · {candidates} candidates · expires {expires}",
     "title": "Route tickets"
   },
-  "title": "Inbound Gateway"
+  "title": "Inbound Gateway",
+  "keyScopes": "Run API scopes",
+  "keyScopesNone": "none (passthrough only)",
+  "keyScopesHelp": "What this key may do on the Router + Fusion Run API. A key with no scopes keeps working on the chat endpoints exactly as before, and /v1/runs refuses it."
 }

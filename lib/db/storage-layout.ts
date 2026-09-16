@@ -21,6 +21,8 @@
 
 import Dexie from "dexie"
 
+import { withFusionDatabase } from "@/lib/router-fusion/gate/database-name"
+
 import { CURRENT_SCHEMA_VERSION } from "./schema"
 
 /**
@@ -145,14 +147,18 @@ export async function writeStorageLayoutMarker(database: {
  *
  * Only ever called from an explicit user action. Deletion is verified, because
  * a delete that silently did nothing would loop the user through the same
- * refusal on every launch with no way out.
+ * refusal on every launch with no way out. The Router + Fusion ledger beside
+ * the database describes sessions that are about to stop existing, so it goes
+ * too (a no-op when Router + Fusion was never switched on).
  */
 export async function resetLocalDatabase(
   databaseName: string,
   dependencies: StorageLayoutDependencies = defaultDependencies
 ): Promise<void> {
-  await dependencies.deleteDatabase(databaseName)
-  if (await dependencies.databaseExists(databaseName)) {
-    throw new Error(`Local database ${databaseName} could not be deleted.`)
+  for (const name of withFusionDatabase(databaseName)) {
+    await dependencies.deleteDatabase(name)
+    if (await dependencies.databaseExists(name)) {
+      throw new Error(`Local database ${name} could not be deleted.`)
+    }
   }
 }

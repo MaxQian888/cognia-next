@@ -47,6 +47,13 @@ pub struct GatewayApiKey {
     /// Model/alias ids this key may call. Empty = every exposed model.
     #[serde(default)]
     pub model_allowlist: Vec<String>,
+    /// Run API scopes this key carries (ADR-0188 D8): `runs:create`,
+    /// `runs:read`, `runs:cancel`, `runs:approve`, `artifacts:read`,
+    /// `feedback:write`. Empty — which every key written before this field
+    /// deserializes as — means passthrough only: the chat endpoints work as
+    /// they always have, and `/v1/runs` refuses the key.
+    #[serde(default)]
+    pub scopes: Vec<String>,
     /// Epoch-ms expiry; `None` = never expires.
     #[serde(default)]
     pub expires_at_ms: Option<i64>,
@@ -75,6 +82,7 @@ pub struct RedactedApiKey {
     pub id: String,
     pub name: String,
     pub model_allowlist: Vec<String>,
+    pub scopes: Vec<String>,
     pub expires_at_ms: Option<i64>,
     pub enabled: bool,
     pub rate_limit_per_min: Option<u32>,
@@ -94,6 +102,12 @@ impl GatewayApiKey {
     /// Enabled AND not expired — the gate the auth middleware applies.
     pub fn is_usable(&self, now_ms: i64) -> bool {
         self.enabled && !self.is_expired(now_ms)
+    }
+
+    /// Whether this key carries a Run API scope. A legacy key carries none, so
+    /// every Run API verb refuses it while the chat endpoints keep working.
+    pub fn has_scope(&self, scope: &str) -> bool {
+        self.scopes.iter().any(|held| held == scope)
     }
 
     /// Whether this key has drawn down its entire token quota. Keys with no
@@ -116,6 +130,7 @@ impl GatewayApiKey {
             id: self.id.clone(),
             name: self.name.clone(),
             model_allowlist: self.model_allowlist.clone(),
+            scopes: self.scopes.clone(),
             expires_at_ms: self.expires_at_ms,
             enabled: self.enabled,
             rate_limit_per_min: self.rate_limit_per_min,
@@ -170,6 +185,8 @@ pub fn load_keys() -> Result<Vec<GatewayApiKey>, String> {
             name: "Default".to_string(),
             secret: legacy,
             model_allowlist: Vec::new(),
+            // A migrated legacy token is passthrough only until the user grants it scopes.
+            scopes: Vec::new(),
             expires_at_ms: None,
             enabled: true,
             rate_limit_per_min: None,
@@ -228,6 +245,7 @@ pub fn create_owned_key(
         name,
         secret: generate_secret(),
         model_allowlist,
+        scopes: Vec::new(),
         expires_at_ms,
         enabled: true,
         rate_limit_per_min,
@@ -248,6 +266,9 @@ pub fn create_owned_key(
 pub struct ApiKeyPatch {
     pub name: Option<String>,
     pub model_allowlist: Option<Vec<String>>,
+    /// The whole scope set, replaced. Absent leaves it unchanged; an empty
+    /// array takes every Run API scope away.
+    pub scopes: Option<Vec<String>>,
     /// `Some(None)` clears the expiry; absent leaves it unchanged.
     #[serde(default, deserialize_with = "double_option")]
     pub expires_at_ms: Option<Option<i64>>,
@@ -280,6 +301,9 @@ pub fn apply_patch(keys: &mut [GatewayApiKey], id: &str, patch: ApiKeyPatch) -> 
     }
     if let Some(models) = patch.model_allowlist {
         key.model_allowlist = models;
+    }
+    if let Some(scopes) = patch.scopes {
+        key.scopes = scopes;
     }
     if let Some(exp) = patch.expires_at_ms {
         key.expires_at_ms = exp;
@@ -358,6 +382,7 @@ mod tests {
             name: id.to_string(),
             secret: secret.to_string(),
             model_allowlist: Vec::new(),
+            scopes: Vec::new(),
             expires_at_ms: None,
             enabled: true,
             rate_limit_per_min: None,

@@ -42,6 +42,7 @@
       "children": {
         "account_env": {},
         "api_key": {},
+        "call_reservation": {},
         "command_telemetry": {},
         "config": {},
         "feature": {},

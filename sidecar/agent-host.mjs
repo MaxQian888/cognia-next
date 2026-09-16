@@ -13,6 +13,9 @@
 //   { type: "plugin_tool_response", sessionId, toolUseId, result?, error? }
 //   { type: "plugin_hook_response", sessionId, execId, result?, error? }
 //   { type: "tool_result_decision", sessionId, reviewId, updatedToolOutput? }
+//   { type: "call_reserve_decision", sessionId, requestId, decision: "granted"|"refused"|"bypass", attemptId?, attemptNo?, code?, message? }
+//     — Router + Fusion (ADR-0188) answer to `call_reserve_request`; only ever sent for a
+//       send that carried `options.ledger`.
 //   { type: "close",               sessionId }
 //
 // Outbound (sidecar -> parent) on stdout, one JSON object per line. Every
@@ -24,6 +27,10 @@
 //       closed / teardown drain). The SDK already received a deny; the renderer
 //       marks the approval "interrupted" instead of silently dropping it.
 //   { type: "tool_result_review", sessionId, reviewId, toolUseId, toolName, result, isError }
+//   { type: "call_reserve_request", sessionId, runId, requestId, kind: "call"|"envelope_open"|"envelope_check", logicalStepId, deploymentId, estimatedInputTokens?, maxOutputTokens?, toolName? }
+//   { type: "call_attempt_result", sessionId, runId, attemptId, logicalStepId, status: "succeeded"|"failed"|"unknown", usage?, semantics?, providerRequestId, finishReason?, errorClass?, reason? }
+//   { type: "ledger_bypassed",    sessionId, runId, reason }
+//     — Router + Fusion (ADR-0188): emitted only for a send that carried `options.ledger`.
 //   { type: "plugin_tool_exec",   sessionId, toolUseId, name, args }
 //   { type: "plugin_hook_exec",   sessionId, execId, pluginId, hookId, payload }
 //   { type: "session_ended",      sessionId, result?: SDKResultMessage, error?: string }
@@ -377,6 +384,30 @@ export function providerVisibleSendPayloadIsSafe({ prompt, options }) {
   })
 }
 
+/**
+ * Hand a prompt to a session's LIVE loop, carrying this send's per-turn
+ * identity across.
+ *
+ * A running loop was configured by the send that started it and ignores later
+ * options wholesale, so anything that is per-TURN rather than per-session has
+ * to be handed over explicitly here: the turn id its events are stamped with,
+ * and the Router + Fusion ledger stamp (ADR-0188) — whose ABSENCE matters just
+ * as much, since a switched-off surface must leave the next turn unledgered.
+ * Exported for the same reason `routeSteer` and `routeClose` are: the read
+ * loop's session map is module-private.
+ *
+ * @param {{ turnRef?: { id?: string }, setNextTurnLedger?: (ledger: unknown) => void, pushUserMessage: (prompt: unknown) => void }} existing
+ * @param {{ turnId?: string, ledger?: unknown } | undefined} options
+ * @param {string | unknown[]} prompt
+ */
+export function routeSendIntoLiveLoop(existing, options, prompt) {
+  // Only reached for a session we're pushing into in place; a restarted one
+  // got a fresh ref, and the loop it replaced keeps its own.
+  if (existing.turnRef) existing.turnRef.id = options?.turnId
+  existing.setNextTurnLedger?.(options?.ledger)
+  existing.pushUserMessage(prompt)
+}
+
 function handleSend(msg) {
   const { sessionId, prompt, options } = msg
   if (!sessionId) {
@@ -410,11 +441,7 @@ function handleSend(msg) {
       startSession(sessionId, prompt, options)
       return
     }
-    // Advance the LIVE loop's turn id so its events are stamped for this turn.
-    // Only reached for a session we're pushing into in place; a restarted one
-    // got a fresh ref above, and the loop it replaced keeps its own.
-    if (existing.turnRef) existing.turnRef.id = options?.turnId
-    existing.pushUserMessage(prompt)
+    routeSendIntoLiveLoop(existing, options, prompt)
   } else {
     startSession(sessionId, prompt, options)
   }
@@ -924,6 +951,18 @@ function handleToolResultDecision(msg) {
   pending.resolve(updatedToolOutput)
 }
 
+/**
+ * Resolve a pending Router + Fusion reservation (ADR-0188). The renderer — the
+ * ledger's only writer — answered a `call_reserve_request`. Unknown sessions or
+ * request ids are ignored: the waiter already timed out into a bypass or the
+ * session closed.
+ */
+export function routeCallReserveDecision(sessionsMap, msg) {
+  const s = sessionsMap.get(msg?.sessionId)
+  if (!s || typeof s.resolveCallReserve !== "function") return false
+  return s.resolveCallReserve(msg) === true
+}
+
 function handleProtocolAdapterChunk(msg) {
   const { sessionId, execId, chunk } = msg
   const s = sessions.get(sessionId)
@@ -1280,6 +1319,9 @@ function startReadLoop() {
         // Answered by Rust directly (never by the renderer) — see host-rpc.mjs.
         host_rpc_result: (m) => hostRpc.resolveResult(m),
         tool_result_decision: handleToolResultDecision,
+        call_reserve_decision: (m) => {
+          routeCallReserveDecision(sessions, m)
+        },
         protocol_adapter_chunk: (m) => {
           if (!featureCalls.handleProtocolAdapterMessage(m)) handleProtocolAdapterChunk(m)
         },

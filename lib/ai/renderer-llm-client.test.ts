@@ -1,4 +1,4 @@
-const mockCreateLlmClient = jest.fn(() => ({ complete: jest.fn() }))
+const mockCreateLlmClient = jest.fn((..._args: unknown[]) => ({ complete: jest.fn() }))
 
 jest.mock("@/lib/twin/distill/llm", () => ({
   createLlmClient: (...args: unknown[]) => mockCreateLlmClient(...(args as [])),
@@ -30,6 +30,50 @@ function makeSession(over: Record<string, unknown> = {}): ChatSession {
 describe("buildRendererLlmClient", () => {
   beforeEach(() => {
     mockCreateLlmClient.mockClear()
+  })
+
+  it("[ACC:OFF-01] hands back the client it built while Router + Fusion is off", () => {
+    // The default for every user: the ledger seam is a pass-through, so a
+    // utility call is byte-for-byte the call it was before ADR-0188.
+    const built = { complete: jest.fn() }
+    mockCreateLlmClient.mockReturnValueOnce(built)
+    const client = buildRendererLlmClient({
+      session: makeSession(),
+      appSettings: makeSettings(),
+      featureId: "conversation-title",
+    })
+    expect(client).toBe(built)
+  })
+
+  it("wraps the client for the ledger once the utility switch is on", () => {
+    const built = { complete: jest.fn() }
+    mockCreateLlmClient.mockReturnValueOnce(built)
+    const client = buildRendererLlmClient({
+      session: makeSession(),
+      appSettings: makeSettings({
+        routerFusion: { enabled: true, surfaces: { utilityLedger: true } },
+      }),
+      featureId: "conversation-title",
+    })
+    expect(client).not.toBe(built)
+    expect(typeof client?.complete).toBe("function")
+  })
+
+  it("routes a workflow's own call to the agents/workflows surface, not the utility one", () => {
+    const built = { complete: jest.fn() }
+    mockCreateLlmClient.mockReturnValueOnce(built)
+    // `agentsWorkflows` is off here, so this one is untouched even though the
+    // utility switch is on: a surface is opted into on its own (D36).
+    expect(
+      buildRendererLlmClient({
+        session: makeSession(),
+        appSettings: makeSettings({
+          routerFusion: { enabled: true, surfaces: { utilityLedger: true } },
+        }),
+        featureId: "workflow-node",
+        ledgerSurface: "agentsWorkflows",
+      })
+    ).toBe(built)
   })
 
   it("returns null when appSettings is missing", () => {
@@ -203,5 +247,61 @@ describe("buildRendererLlmClient", () => {
       providerOverride: "ghost",
     })
     expect(client).toBeNull()
+  })
+
+  it('treats a session model of "auto" as unset — the placeholder is not a model id', () => {
+    // The send path resolves "auto" through the routing engine; a renderer-side
+    // utility call has no engine, so forwarding "auto" verbatim would hand a
+    // provider a model it does not have.
+    const client = buildRendererLlmClient({
+      session: makeSession({ model: "auto" }),
+      appSettings: makeSettings(),
+      featureId: "conversation-title",
+    })
+    expect(client).not.toBeNull()
+    const arg = mockCreateLlmClient.mock.calls[0][0] as unknown as { model?: string }
+    expect(arg.model).toBe("claude-sonnet-4-6")
+  })
+
+  it("treats an enabled mapping alias as a placeholder, a disabled one as a real id", () => {
+    const mappings = [
+      {
+        id: "m1",
+        alias: "fast",
+        providers: [{ providerId: "anthropic", modelId: "claude-haiku-4-5" }],
+        distribution: "priority",
+        enabled: true,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: "m2",
+        alias: "slow-alias",
+        providers: [{ providerId: "anthropic", modelId: "claude-x" }],
+        distribution: "priority",
+        enabled: false,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ]
+    const settings = makeSettings({ modelMappings: mappings })
+
+    buildRendererLlmClient({
+      session: makeSession({ model: "fast" }),
+      appSettings: settings,
+      featureId: "f",
+    })
+    let arg = mockCreateLlmClient.mock.calls.at(-1)?.[0] as unknown as { model?: string }
+    expect(arg.model).toBe("claude-sonnet-4-6")
+
+    // A DISABLED alias name is not a routing placeholder: if a session carries
+    // it, it is a concrete (if unusual) model id and stays verbatim.
+    buildRendererLlmClient({
+      session: makeSession({ model: "slow-alias" }),
+      appSettings: settings,
+      featureId: "f",
+    })
+    arg = mockCreateLlmClient.mock.calls.at(-1)?.[0] as unknown as { model?: string }
+    expect(arg.model).toBe("slow-alias")
   })
 })

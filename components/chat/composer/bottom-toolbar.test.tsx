@@ -2,9 +2,13 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { act, render, screen, fireEvent } from "@testing-library/react"
 import { useChatExecutor } from "@/components/agent/composition/use-chat-executor"
 import { BottomToolbar, TOOLBAR_CHIP } from "./bottom-toolbar"
+import {
+  clearAllMockExtensions,
+  registerMockExtension,
+} from "@/components/plugins/test-utils/register-mock-extension"
 import { CHROME_BUDGET, countControls } from "@/lib/ui/chrome-budget"
 import type { ChatSession } from "@cognia/agent-config-types"
 
@@ -125,6 +129,8 @@ jest.mock("@/stores/chat", () => ({
     <T,>(selector: (s: typeof chatStoreState) => T) => selector(chatStoreState),
     { getState: () => chatStoreState }
   ),
+  // `useSdkContextUsage` reads the per-session status through this selector.
+  useSessionStatus: () => chatStoreState.status,
 }))
 
 // The shipped default (`PROVIDERS.anthropic.defaultModel`), so the budget below
@@ -182,6 +188,17 @@ jest.mock("./credential-badge", () => ({
 }))
 jest.mock("@/components/chat/session-cost-badge-live", () => ({
   SessionCostBadgeLive: () => <div data-testid="session-cost-badge" />,
+}))
+
+// The Router + Fusion mode chip renders nothing while Router + Fusion is off,
+// which is the shipped default; its own suite covers when it shows.
+let fusionChipVisible = false
+const fusionChipProps: Array<{ builtinRuntime: boolean; disabled?: boolean }> = []
+jest.mock("./fusion-mode-chip", () => ({
+  FusionModeChip: (props: { builtinRuntime: boolean; disabled?: boolean }) => {
+    fusionChipProps.push(props)
+    return fusionChipVisible ? <div data-testid="fusion-mode-chip" /> : null
+  },
 }))
 
 jest.mock("./workflow-bottom-toolbar", () => ({
@@ -305,6 +322,46 @@ describe("BottomToolbar — session-kind branching", () => {
     expect(chip.compareDocumentPosition(permission) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
+  // A plugin dial on `chat.input.effort` writes the same two session fields the
+  // host chip does. Mounting both left two thinking controls on one row, which
+  // is the bug this slot exists to close: the plugin REPLACES the chip.
+  it("lets a chat.input.effort plugin replace the thinking-level chip in place", () => {
+    const Dial = () => <button data-testid="plugin-effort-dial">dial</button>
+    registerMockExtension("chat.input.effort", Dial)
+    try {
+      render(<BottomToolbar session={session} />)
+      const dial = screen.getByTestId("plugin-effort-dial")
+      expect(screen.queryByTestId("effort-chip")).toBeNull()
+      // Same seat: after the model, before the permission chip.
+      const permission = screen.getByTestId("permission-mode-indicator")
+      expect(
+        dial.compareDocumentPosition(permission) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+      expect(screen.getByTestId("composer-execution-controls")).toContainElement(dial)
+      // Unregistered, the host chip comes back on the mounted row: the slot
+      // subscribes to the registry, so the fallback is not a one-way swap.
+      act(() => clearAllMockExtensions())
+      expect(screen.queryByTestId("plugin-effort-dial")).toBeNull()
+      expect(screen.getByTestId("effort-chip")).toBeInTheDocument()
+    } finally {
+      clearAllMockExtensions()
+    }
+  })
+
+  // Every zone boundary carries a visible rule, and a zone with nothing in it
+  // takes its rule with it (the rule is a `::before`, which `:empty` ignores).
+  it("separates the zones with full-strength rules that leave with an empty zone", () => {
+    const { container } = render(<BottomToolbar session={session} />)
+    const divider = screen.getByTestId("composer-toolbar-divider")
+    expect(divider.className).toContain("bg-border")
+    expect(divider.className).not.toContain("bg-border/")
+    const plugins = container.querySelector<HTMLElement>('[data-toolbar-zone="plugins"]')!
+    expect(plugins.className).toContain("before:bg-border")
+    expect(plugins.className).toContain("empty:hidden")
+    expect(plugins).toBeEmptyDOMElement()
+    expect(screen.getByTestId("composer-status-cluster").className).toContain("before:bg-border")
+  })
+
   // The self-gate is what lets the chip live on a saturated band: a surface
   // with no depth ladder pays nothing for it, in pixels or in budget.
   it("hides the thinking-level chip on a model with no depth ladder", () => {
@@ -359,6 +416,36 @@ describe("BottomToolbar — session-kind branching", () => {
   it("stays within the composer-toolbar chrome control budget", () => {
     const { container } = render(<BottomToolbar session={session} />)
     expect(countControls(container)).toBeLessThanOrEqual(CHROME_BUDGET.composerToolbar)
+  })
+})
+
+describe("BottomToolbar — Router + Fusion mode chip", () => {
+  afterEach(() => {
+    fusionChipVisible = false
+    fusionChipProps.length = 0
+  })
+
+  it("sits with the per-turn answers and is told the runtime and the turn state", () => {
+    fusionChipVisible = true
+    chatStoreState.status = "streaming"
+    render(<BottomToolbar session={session} />)
+    expect(screen.getByTestId("composer-execution-controls")).toContainElement(
+      screen.getByTestId("fusion-mode-chip")
+    )
+    expect(fusionChipProps.at(-1)).toMatchObject({ builtinRuntime: true, disabled: true })
+  })
+
+  it("tells the chip when the conversation runs on an external agent", () => {
+    agentRuntimeState.runtimeRef = { kind: "external", agentId: "codex" } as never
+    render(<BottomToolbar session={session} />)
+    expect(fusionChipProps.at(-1)).toMatchObject({ builtinRuntime: false, disabled: false })
+  })
+
+  it("is not offered on a Squad-bound conversation, which runs on each member's own model", () => {
+    fusionChipVisible = true
+    ;(useChatExecutor as jest.Mock).mockReturnValue({ squadId: "sq1", squadName: "Team" })
+    render(<BottomToolbar session={session} />)
+    expect(screen.queryByTestId("fusion-mode-chip")).toBeNull()
   })
 })
 

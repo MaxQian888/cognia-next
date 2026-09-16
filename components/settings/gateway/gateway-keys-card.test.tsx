@@ -2,7 +2,11 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event"
 import { toast } from "sonner"
 import { GatewayKeysCard } from "./gateway-keys-card"
-import type { GatewayApiKey, GatewayApiKeyRedacted } from "@/types/gateway"
+import {
+  GATEWAY_RUN_API_SCOPES,
+  type GatewayApiKey,
+  type GatewayApiKeyRedacted,
+} from "@/types/gateway"
 
 jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
 
@@ -27,6 +31,7 @@ const redacted = (over: Partial<GatewayApiKeyRedacted> = {}): GatewayApiKeyRedac
   id: "k1",
   name: "CLI",
   modelAllowlist: [],
+  scopes: [],
   expiresAtMs: null,
   enabled: true,
   rateLimitPerMin: null,
@@ -43,6 +48,7 @@ const fullKey = (over: Partial<GatewayApiKey> = {}): GatewayApiKey => ({
   name: "New",
   secret: "sk-cognia-FULLSECRET0000",
   modelAllowlist: [],
+  scopes: [],
   expiresAtMs: null,
   enabled: true,
   rateLimitPerMin: null,
@@ -363,6 +369,7 @@ describe("GatewayKeysCard", () => {
         expect(mockUpdate).toHaveBeenCalledWith("k1", {
           name: "CLI",
           modelAllowlist: [],
+          scopes: [],
           expiresAtMs: null,
           rateLimitPerMin: null,
           quotaTokens: null,
@@ -557,5 +564,53 @@ describe("GatewayKeysCard", () => {
 
       await waitFor(() => expect(toast.error).toHaveBeenCalledWith("plain string failure"))
     })
+  })
+})
+
+describe("GatewayKeysCard — Run API scopes (ADR-0188 D8)", () => {
+  it("shows a key with no scopes as passthrough-only", async () => {
+    mockList.mockResolvedValue([redacted({ scopes: [] })])
+    render(<GatewayKeysCard />)
+    expect(await screen.findByText(/keyScopesNone/)).toBeInTheDocument()
+  })
+
+  it("lists the scopes a key does carry", async () => {
+    mockList.mockResolvedValue([redacted({ scopes: ["runs:create", "runs:read"] })])
+    render(<GatewayKeysCard />)
+    expect(await screen.findByText(/runs:create, runs:read/)).toBeInTheDocument()
+    expect(screen.queryByText(/keyScopesNone/)).not.toBeInTheDocument()
+  })
+
+  it("grants and revokes a scope, saving the whole set", async () => {
+    mockList.mockResolvedValue([redacted({ scopes: ["runs:read"] })])
+    render(<GatewayKeysCard />)
+    await screen.findByText("CLI")
+    fireEvent.click(screen.getByRole("button", { name: "editKey CLI" }))
+
+    const row = await screen.findByTestId("gateway-key-scopes-k1")
+    expect(within(row).getByLabelText("runs:read")).toBeChecked()
+    expect(within(row).getByLabelText("runs:create")).not.toBeChecked()
+
+    fireEvent.click(within(row).getByLabelText("runs:create"))
+    fireEvent.click(within(row).getByLabelText("runs:read"))
+    fireEvent.click(screen.getByRole("button", { name: "save" }))
+
+    await waitFor(() =>
+      expect(mockUpdate).toHaveBeenCalledWith(
+        "k1",
+        expect.objectContaining({ scopes: ["runs:create"] })
+      )
+    )
+  })
+
+  it("offers every scope the Run API defines, so none is unreachable from the UI", async () => {
+    mockList.mockResolvedValue([redacted()])
+    render(<GatewayKeysCard />)
+    await screen.findByText("CLI")
+    fireEvent.click(screen.getByRole("button", { name: "editKey CLI" }))
+    const row = await screen.findByTestId("gateway-key-scopes-k1")
+    for (const scope of GATEWAY_RUN_API_SCOPES) {
+      expect(within(row).getByLabelText(scope)).toBeInTheDocument()
+    }
   })
 })

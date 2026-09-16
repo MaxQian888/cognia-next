@@ -1,3 +1,5 @@
+import Dexie from "dexie"
+
 import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { setDraftDebounced, clearDraft } from "@/lib/db/chat-drafts"
@@ -228,5 +230,18 @@ describe("clearAll", () => {
     } finally {
       remove.mockRestore()
     }
+  })
+
+  it("deletes the Router + Fusion ledger beside the database", async () => {
+    const fusionName = `${getDb().name}-router-fusion-v1`
+    const fusion = new Dexie(fusionName)
+    fusion.version(1).stores({ fusionRuns: "&runId" })
+    await fusion.open()
+    await fusion.table("fusionRuns").put({ runId: "run-1" })
+    fusion.close()
+
+    await clearAll()
+
+    expect(await Dexie.exists(fusionName)).toBe(false)
   })
 })

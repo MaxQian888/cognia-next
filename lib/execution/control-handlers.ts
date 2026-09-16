@@ -72,6 +72,12 @@ export function registerSecurityScanRunController(
 
 export interface ExecutionRunControlHandlerDeps {
   resumeAgentRun?: (runId: string) => Promise<{ resumed: boolean; reason?: string }>
+  /**
+   * Stop a projected Router + Fusion run (ADR-0188). A seam rather than a
+   * direct call so a test can drive the handler without the fusion engine, and
+   * so this shared module keeps its ONE Router + Fusion import at the gate.
+   */
+  cancelRouterFusionRun?: (runId: string, surface: "gatewayRuns" | "chat") => Promise<boolean>
 }
 
 /**
@@ -86,6 +92,7 @@ const TERMINAL_RETRY_STATUSES = new Set(["failed", "cancelled"])
 
 export function installExecutionRunControlHandlers(deps: ExecutionRunControlHandlerDeps = {}): {
   agent: RunControlHandler
+  fusion: RunControlHandler
   job: RunControlHandler
   securityScan: RunControlHandler
   bot: RunControlHandler
@@ -608,7 +615,39 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
     controller.abort("execution_run_stopped")
   }
 
+  /**
+   * A Router + Fusion run no other engine owns (`kind: "fusion"`): a run the
+   * external Run API asked for (`origin: "gateway-api"`), or a chat cascade or
+   * panel (`origin: "local"`).
+   *
+   * Stop only, which is what `allowedActions` already offers for the kind:
+   * there is no live input lane to steer, no coordinator to pause, and a retry
+   * is a new `POST /v1/runs` with its own idempotency key rather than a second
+   * life for this one.
+   */
+  const fusion: RunControlHandler = async (command) => {
+    if (command.action === "open_details") return
+    if (command.action !== "stop") throw new UnsupportedForKindError(command.action, "fusion")
+    const surface =
+      (await getExecutionRun(command.runId))?.origin === "local" ? "chat" : "gatewayRuns"
+    const cancel =
+      deps.cancelRouterFusionRun ??
+      (async (runId: string, runSurface: "gatewayRuns" | "chat") => {
+        const [{ cancelRouterFusionRun }, { currentRouterFusionGateSettings }] = await Promise.all([
+          import("@/lib/router-fusion/gate/run-control"),
+          import("@/lib/router-fusion/gate/current-settings"),
+        ])
+        return cancelRouterFusionRun(runId, {
+          settings: await currentRouterFusionGateSettings(),
+          surface: runSurface,
+        })
+      })
+    if (!(await cancel(command.runId, surface)))
+      throw new Error("Routed run is no longer on this device")
+  }
+
   const unregisterAgent = registerRunControlHandler("agent-turn", agent)
+  const unregisterFusion = registerRunControlHandler("fusion", fusion)
   const unregisterJob = registerRunControlHandler("job", job)
   const unregisterSecurityScan = registerRunControlHandler("security-scan", securityScan)
   const unregisterBot = registerRunControlHandler("bot", bot)
@@ -641,6 +680,7 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
   const unregisterTeamRetry = registerRunRetryHandler("team", teamRetry)
   return {
     agent,
+    fusion,
     job,
     securityScan,
     bot,
@@ -654,6 +694,7 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
     teamRetry,
     dispose() {
       unregisterAgent()
+      unregisterFusion()
       unregisterJob()
       unregisterSecurityScan()
       unregisterBot()

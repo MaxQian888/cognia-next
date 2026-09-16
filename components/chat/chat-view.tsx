@@ -41,6 +41,7 @@ import type { SettingsSectionId } from "@/components/settings/settings-nav-confi
 import { MessageList } from "./message-list"
 import { CompanionTranscriptMessages } from "./companion-transcript-messages"
 import { RunStatusBar } from "./run-status-bar"
+import { RouterFusionProgressCard } from "@/components/router-fusion/router-fusion-progress-card"
 import { PlanApprovalDock } from "@/components/agent/plan/plan-approval-dock"
 import { PlanTrackerDock } from "@/components/agent/plan/plan-tracker-dock"
 import { PlanComposerDock } from "@/components/agent/plan/plan-composer-dock"
@@ -703,6 +704,7 @@ export function ChatPane({
   // pinned directly above the composer. Self-hides when idle with no queue.
   const runStatusEl = (
     <ChatColumn>
+      <RouterFusionProgressCard sessionId={boundId} />
       <RunStatusBar
         sessionId={boundId}
         onStop={() => void onStop()}

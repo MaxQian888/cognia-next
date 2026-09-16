@@ -1,0 +1,2045 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:router-fusion:contracts:1.0.0",
+  "title": "Router Fusion implementation contracts",
+  "$defs": {
+    "MoneyUSD": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,5})(\\.[0-9]{1,6})?$"
+    },
+    "Message": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": ["system", "user", "assistant"]
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500000
+        }
+      },
+      "required": ["role", "content"]
+    },
+    "InputMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": ["user"]
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500000
+        }
+      },
+      "required": ["role", "content"]
+    },
+    "Budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_cost_usd": {
+          "$ref": "#/$defs/MoneyUSD"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["strict", "tracked"]
+        }
+      },
+      "required": ["max_cost_usd", "mode"]
+    },
+    "RunRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "input_messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InputMessage"
+          },
+          "minItems": 1,
+          "maxItems": 20
+        },
+        "session_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "expected_session_version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["auto", "direct", "cascade", "panel", "delegate"]
+        },
+        "allowed_modes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["direct", "cascade", "panel", "delegate"]
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "profile": {
+          "type": "string",
+          "enum": ["economy", "balanced", "quality"]
+        },
+        "budget": {
+          "$ref": "#/$defs/Budget"
+        },
+        "deadline_ms": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 3600000
+        },
+        "workspace_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "acceptance_profile_id": {
+          "type": "string"
+        },
+        "allow_degraded": {
+          "type": "boolean"
+        },
+        "delivery": {
+          "type": "string",
+          "enum": ["verified_buffered"]
+        }
+      },
+      "required": [
+        "schema_version",
+        "input_messages",
+        "mode",
+        "allowed_modes",
+        "profile",
+        "budget",
+        "deadline_ms",
+        "allow_degraded",
+        "delivery"
+      ],
+      "dependentRequired": {
+        "session_id": ["expected_session_version"],
+        "expected_session_version": ["session_id"]
+      }
+    },
+    "RunAccepted": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "session_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "session_version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "running",
+            "waiting_for_input",
+            "waiting_for_approval",
+            "reconciling",
+            "cancelling",
+            "succeeded",
+            "failed",
+            "cancelled",
+            "expired"
+          ]
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "schema_version",
+        "run_id",
+        "session_id",
+        "session_version",
+        "status",
+        "version",
+        "created_at"
+      ]
+    },
+    "RoutingFeatures": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "goal": {
+          "type": "string"
+        },
+        "task": {
+          "type": "string",
+          "enum": [
+            "text.transform",
+            "data.extract",
+            "qa.knowledge",
+            "research.synthesis",
+            "reasoning.solve",
+            "code.implement",
+            "code.debug",
+            "code.review",
+            "agent.plan",
+            "agent.execute",
+            "unknown"
+          ]
+        },
+        "phase": {
+          "type": "string",
+          "enum": ["intake", "planning", "investigation", "execution", "verification", "review"]
+        },
+        "language": {
+          "type": "string"
+        },
+        "missing_information": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "ambiguity": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "unknown"]
+        },
+        "tool_need": {
+          "type": "string",
+          "enum": ["none", "read_only", "sandbox_write", "external_write", "unknown"]
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["single_item", "single_file", "multi_file", "cross_system", "unknown"]
+        },
+        "failed_attempts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "verification_kinds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "source_revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "feature_version": {
+          "type": "string"
+        },
+        "context_truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "schema_version",
+        "goal",
+        "task",
+        "phase",
+        "language",
+        "missing_information",
+        "ambiguity",
+        "tool_need",
+        "scope",
+        "failed_attempts",
+        "verification_kinds",
+        "source_revision",
+        "feature_version",
+        "context_truncated"
+      ]
+    },
+    "QualityEstimate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "type": "string"
+        },
+        "p_pass": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "group_pass_rate": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "type": "string",
+          "enum": ["rule", "eval", "model"]
+        },
+        "support_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "in_distribution": {
+          "type": "boolean"
+        },
+        "predictor_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "action_id",
+        "p_pass",
+        "group_pass_rate",
+        "source",
+        "support_count",
+        "in_distribution",
+        "predictor_version"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "enum": ["rule", "eval"]
+              }
+            },
+            "required": ["source"]
+          },
+          "then": {
+            "properties": {
+              "p_pass": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "const": "model"
+              }
+            },
+            "required": ["source"]
+          },
+          "then": {
+            "properties": {
+              "p_pass": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "predictor_version": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "CandidateAssessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "type": "string"
+        },
+        "eligible": {
+          "type": "boolean"
+        },
+        "exclusion_reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "quality": {
+          "$ref": "#/$defs/QualityEstimate"
+        },
+        "expected_cost_microusd": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "reserve_cost_microusd": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "estimated_p95_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "action_id",
+        "eligible",
+        "exclusion_reasons",
+        "quality",
+        "expected_cost_microusd",
+        "reserve_cost_microusd",
+        "estimated_p95_ms"
+      ]
+    },
+    "RouteDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "decision_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "selected_action_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mode_selected": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["direct", "cascade", "panel", "delegate"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CandidateAssessment"
+          }
+        },
+        "reason_codes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "policy_version": {
+          "type": "string"
+        },
+        "registry_version": {
+          "type": "string"
+        },
+        "prompt_version": {
+          "type": "string"
+        },
+        "classifier_version": {
+          "type": "string"
+        },
+        "degraded": {
+          "type": "boolean"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "schema_version",
+        "decision_id",
+        "run_id",
+        "selected_action_id",
+        "mode_selected",
+        "candidates",
+        "reason_codes",
+        "policy_version",
+        "registry_version",
+        "prompt_version",
+        "classifier_version",
+        "degraded",
+        "created_at"
+      ]
+    },
+    "EvidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "content_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "locator": {
+          "type": "string"
+        },
+        "retrieved_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["artifact_id", "content_sha256", "locator", "retrieved_at"]
+    },
+    "Claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "claim_id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          }
+        }
+      },
+      "required": ["claim_id", "text", "evidence_refs"]
+    },
+    "Candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "candidate_id": {
+          "type": "string"
+        },
+        "answer": {
+          "type": "string"
+        },
+        "claims": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Claim"
+          }
+        },
+        "assumptions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "open_questions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "schema_version",
+        "candidate_id",
+        "answer",
+        "claims",
+        "assumptions",
+        "open_questions"
+      ]
+    },
+    "Contradiction": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "topic": {
+          "type": "string"
+        },
+        "claim_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "resolution": {
+          "type": "string",
+          "enum": ["resolved", "unresolved"]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          }
+        }
+      },
+      "required": ["topic", "claim_ids", "resolution", "summary", "evidence_refs"]
+    },
+    "VerificationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["artifact_read", "source_check", "compute", "test"]
+        },
+        "question": {
+          "type": "string"
+        },
+        "artifact_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "required": ["request_id", "kind", "question", "artifact_ids"]
+    },
+    "JudgeReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "supported_claim_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rejected_claim_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "contradictions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Contradiction"
+          }
+        },
+        "missing_requirements": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "verification_requests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VerificationRequest"
+          }
+        },
+        "ready_to_synthesize": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "schema_version",
+        "supported_claim_ids",
+        "rejected_claim_ids",
+        "contradictions",
+        "missing_requirements",
+        "verification_requests",
+        "ready_to_synthesize"
+      ]
+    },
+    "Subtask": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "task_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "goal": {
+          "type": "string"
+        },
+        "base_revision": {
+          "type": "string"
+        },
+        "allowed_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "constraints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "acceptance": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "tool_policy_id": {
+          "type": "string"
+        },
+        "max_steps": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "artifact_namespace": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "task_id",
+        "goal",
+        "base_revision",
+        "allowed_paths",
+        "constraints",
+        "acceptance",
+        "tool_policy_id",
+        "max_steps",
+        "artifact_namespace"
+      ]
+    },
+    "WorkerResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "task_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "base_revision": {
+          "type": "string"
+        },
+        "result_revision": {
+          "type": "string"
+        },
+        "patch_artifact_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "claimed_check_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "open_questions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "schema_version",
+        "task_id",
+        "summary",
+        "base_revision",
+        "result_revision",
+        "patch_artifact_id",
+        "claimed_check_ids",
+        "open_questions"
+      ]
+    },
+    "VerificationCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "check_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["passed", "failed", "inconclusive", "not_applicable"]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "executed_by": {
+          "type": "string",
+          "enum": ["runtime", "model", "human"]
+        },
+        "artifact_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "required": ["check_id", "kind", "status", "summary", "executed_by", "artifact_refs"]
+    },
+    "VerificationReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "report_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["passed", "failed", "inconclusive", "not_applicable"]
+        },
+        "level": {
+          "type": "string",
+          "enum": ["schema_only", "model_review", "tool_verified", "human_review", "mixed"]
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VerificationCheck"
+          }
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "verifier_version": {
+          "type": "string"
+        },
+        "artifact_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "required": [
+        "schema_version",
+        "report_id",
+        "status",
+        "level",
+        "checks",
+        "revision",
+        "verifier_version",
+        "artifact_refs"
+      ]
+    },
+    "BillableItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "ordinary_input",
+            "cache_read",
+            "cache_write_5m",
+            "cache_write_1h",
+            "output",
+            "reasoning_separate",
+            "tool",
+            "request",
+            "other"
+          ]
+        },
+        "quantity": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unit": {
+          "type": "string"
+        },
+        "amount_microusd": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "rate_version": {
+          "type": "string"
+        }
+      },
+      "required": ["kind", "quantity", "unit", "amount_microusd", "rate_version"]
+    },
+    "Usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "input_uncached_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "input_cache_read_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "input_cache_write_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "output_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reasoning_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reasoning_included_in_output": {
+          "type": "boolean"
+        },
+        "billable_items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BillableItem"
+          }
+        },
+        "cost_status": {
+          "type": "string",
+          "enum": ["actual", "estimated", "pending"]
+        },
+        "raw_usage_artifact_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "input_uncached_tokens",
+        "input_cache_read_tokens",
+        "input_cache_write_tokens",
+        "output_tokens",
+        "reasoning_tokens",
+        "reasoning_included_in_output",
+        "billable_items",
+        "cost_status",
+        "raw_usage_artifact_id"
+      ]
+    },
+    "BillingSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "budget_cap_microusd": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "spent_microusd": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "active_step_reservations_microusd": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "tenant_hold_microusd": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "status": {
+          "type": "string",
+          "enum": ["actual", "estimated", "pending"]
+        },
+        "overspend_microusd": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "model_calls": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "budget_cap_microusd",
+        "spent_microusd",
+        "active_step_reservations_microusd",
+        "tenant_hold_microusd",
+        "status",
+        "overspend_microusd",
+        "model_calls"
+      ]
+    },
+    "RunResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "answer": {
+          "type": "string"
+        },
+        "answer_artifact_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "answer_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "mode_executed": {
+          "type": "string",
+          "enum": ["direct", "cascade", "panel", "delegate"]
+        },
+        "quality_status": {
+          "type": "string",
+          "enum": ["accepted", "degraded", "unknown"]
+        },
+        "verification": {
+          "$ref": "#/$defs/VerificationReport"
+        },
+        "delivery": {
+          "type": "string",
+          "enum": ["answer", "patch_only", "workspace_updated"]
+        },
+        "artifact_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "answer",
+        "answer_artifact_id",
+        "answer_sha256",
+        "mode_executed",
+        "quality_status",
+        "verification",
+        "delivery",
+        "artifact_ids",
+        "warnings"
+      ]
+    },
+    "APIError": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "details": {
+          "type": "object"
+        },
+        "trace_id": {
+          "type": "string"
+        }
+      },
+      "required": ["code", "message", "retryable", "details", "trace_id"]
+    },
+    "ErrorResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/APIError"
+        }
+      },
+      "required": ["error"]
+    },
+    "RunSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "session_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "session_version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "running",
+            "waiting_for_input",
+            "waiting_for_approval",
+            "reconciling",
+            "cancelling",
+            "succeeded",
+            "failed",
+            "cancelled",
+            "expired"
+          ]
+        },
+        "phase": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "deadline_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "decision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RouteDecision"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunResult"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "billing": {
+          "$ref": "#/$defs/BillingSummary"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/APIError"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pending_approval_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "trace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "run_id",
+        "session_id",
+        "session_version",
+        "status",
+        "phase",
+        "version",
+        "created_at",
+        "deadline_at",
+        "decision",
+        "result",
+        "billing",
+        "error",
+        "pending_approval_id",
+        "trace_id"
+      ]
+    },
+    "ResumeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["input", "approval"]
+        },
+        "expected_run_version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "input_messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InputMessage"
+          },
+          "minItems": 1
+        },
+        "approval_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "decision": {
+          "type": "string",
+          "enum": ["approve", "reject"]
+        }
+      },
+      "required": ["kind", "expected_run_version"],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "input"
+              }
+            }
+          },
+          "then": {
+            "required": ["input_messages"],
+            "not": {
+              "anyOf": [
+                {
+                  "required": ["approval_id"]
+                },
+                {
+                  "required": ["decision"]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "approval"
+              }
+            }
+          },
+          "then": {
+            "required": ["approval_id", "decision"],
+            "not": {
+              "required": ["input_messages"]
+            }
+          }
+        }
+      ]
+    },
+    "FeedbackRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rating": {
+          "type": "string",
+          "enum": ["positive", "negative"]
+        },
+        "comment": {
+          "type": "string",
+          "maxLength": 10000
+        }
+      },
+      "required": ["rating"]
+    },
+    "Acknowledgement": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        }
+      },
+      "required": ["accepted"]
+    },
+    "SessionSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "active_run_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Message"
+          }
+        }
+      },
+      "required": ["session_id", "version", "active_run_id", "messages"]
+    },
+    "ArtifactMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "content_sha256": {
+          "type": "string"
+        },
+        "media_type": {
+          "type": "string"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "read_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "content_sha256",
+        "media_type",
+        "size_bytes",
+        "read_url",
+        "expires_at"
+      ]
+    },
+    "ModelPublic": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "alias": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "string"
+        },
+        "input_modalities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["text", "image"]
+          }
+        },
+        "supports_tools": {
+          "type": "boolean"
+        },
+        "supports_json_schema": {
+          "type": "boolean"
+        },
+        "context_limit": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "alias",
+        "revision",
+        "input_modalities",
+        "supports_tools",
+        "supports_json_schema",
+        "context_limit",
+        "max_output_tokens"
+      ]
+    },
+    "ModelsResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ModelPublic"
+          }
+        }
+      },
+      "required": ["data"]
+    },
+    "ChatRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "type": "string",
+          "enum": ["router/auto", "router/direct", "router/cascade", "router/panel"]
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Message"
+          },
+          "minItems": 1,
+          "maxItems": 100
+        },
+        "stream": {
+          "type": "boolean"
+        },
+        "n": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1
+        },
+        "response_format": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["text", "json_schema"]
+            },
+            "json_schema": {
+              "type": "object"
+            }
+          },
+          "required": ["type"]
+        },
+        "routing": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "profile": {
+              "type": "string",
+              "enum": ["economy", "balanced", "quality"]
+            },
+            "budget": {
+              "$ref": "#/$defs/Budget"
+            },
+            "deadline_ms": {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 3600000
+            },
+            "allow_degraded": {
+              "type": "boolean"
+            }
+          },
+          "required": ["profile", "budget", "deadline_ms", "allow_degraded"]
+        }
+      },
+      "required": ["model", "messages", "routing"]
+    },
+    "ChatResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "object": {
+          "type": "string",
+          "enum": ["chat.completion"]
+        },
+        "created": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "model": {
+          "type": "string"
+        },
+        "choices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "message": {
+                "$ref": "#/$defs/Message"
+              },
+              "finish_reason": {
+                "type": "string",
+                "enum": ["stop", "length"]
+              }
+            },
+            "required": ["index", "message", "finish_reason"]
+          },
+          "minItems": 1,
+          "maxItems": 1
+        },
+        "usage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "prompt_tokens": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "completion_tokens": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "total_tokens": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": ["prompt_tokens", "completion_tokens", "total_tokens"]
+        },
+        "routing": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "run_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "mode_executed": {
+              "type": "string",
+              "enum": ["direct", "cascade", "panel", "delegate"]
+            },
+            "degraded": {
+              "type": "boolean"
+            },
+            "billing": {
+              "$ref": "#/$defs/BillingSummary"
+            }
+          },
+          "required": ["run_id", "mode_executed", "degraded", "billing"]
+        }
+      },
+      "required": ["id", "object", "created", "model", "choices", "usage", "routing"]
+    },
+    "RunEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "event_type": {
+          "type": "string",
+          "enum": [
+            "run.queued",
+            "route.selected",
+            "phase.changed",
+            "call.started",
+            "call.finished",
+            "verification.completed",
+            "approval.required",
+            "billing.updated",
+            "answer.delta",
+            "answer.completed",
+            "run.completed",
+            "run.failed",
+            "run.cancelled",
+            "run.expired"
+          ]
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "payload": {
+          "type": "object"
+        }
+      },
+      "required": ["schema_version", "run_id", "seq", "event_type", "timestamp", "payload"]
+    },
+    "Health": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["ok", "not_ready"]
+        },
+        "checks": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        }
+      },
+      "required": ["status", "checks"]
+    },
+    "ProviderDeployment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string",
+          "enum": ["fake", "openrouter", "anthropic"]
+        },
+        "model_revision": {
+          "type": "string"
+        },
+        "credential_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "region": {
+          "type": "string"
+        },
+        "data_classes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["public", "internal", "restricted"]
+          }
+        },
+        "context_limit": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "supports_tools": {
+          "type": "boolean"
+        },
+        "supports_json_schema": {
+          "type": "boolean"
+        },
+        "usage_lookup": {
+          "type": "boolean"
+        },
+        "provider_idempotency": {
+          "type": "boolean"
+        },
+        "cache_mode": {
+          "type": "string",
+          "enum": ["none", "automatic", "explicit"]
+        },
+        "rate_card_id": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "provider",
+        "model_revision",
+        "credential_ref",
+        "region",
+        "data_classes",
+        "context_limit",
+        "max_output_tokens",
+        "supports_tools",
+        "supports_json_schema",
+        "usage_lookup",
+        "provider_idempotency",
+        "cache_mode",
+        "rate_card_id",
+        "enabled"
+      ]
+    },
+    "ModelRegistry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "registry_version": {
+          "type": "string"
+        },
+        "example_only": {
+          "type": "boolean"
+        },
+        "deployments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProviderDeployment"
+          },
+          "minItems": 1
+        },
+        "aliases": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "rate_cards": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "example_only": {
+                "type": "boolean"
+              },
+              "currency": {
+                "type": "string",
+                "enum": ["USD"]
+              },
+              "ordinary_input_per_million": {
+                "type": "string"
+              },
+              "output_per_million": {
+                "type": "string"
+              },
+              "cache_read_per_million": {
+                "type": "string"
+              },
+              "cache_write_5m_per_million": {
+                "type": "string"
+              },
+              "cache_write_1h_per_million": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "example_only",
+              "currency",
+              "ordinary_input_per_million",
+              "output_per_million",
+              "cache_read_per_million",
+              "cache_write_5m_per_million",
+              "cache_write_1h_per_million"
+            ]
+          },
+          "minItems": 1
+        }
+      },
+      "required": [
+        "schema_version",
+        "registry_version",
+        "example_only",
+        "deployments",
+        "aliases",
+        "rate_cards"
+      ]
+    },
+    "ActionConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["direct", "cascade", "panel", "delegate"]
+        },
+        "roles": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "prompt_version": {
+          "type": "string"
+        },
+        "verifier_profile": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": ["id", "mode", "roles", "prompt_version", "verifier_profile", "enabled"]
+    },
+    "PolicyConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "policy_version": {
+          "type": "string"
+        },
+        "example_only": {
+          "type": "boolean"
+        },
+        "production_auto_baseline_only": {
+          "type": "boolean"
+        },
+        "classifier": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "implementation": {
+              "type": "string",
+              "enum": ["rules", "llm_schema", "encoder"]
+            },
+            "version": {
+              "type": "string"
+            },
+            "input_token_cap": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "timeout_ms": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "cache_ttl_seconds": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "implementation",
+            "version",
+            "input_token_cap",
+            "timeout_ms",
+            "cache_ttl_seconds"
+          ]
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_model_calls": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "transport_attempts_per_call": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "max_format_repairs": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "max_reroutes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "panel_size": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 3
+            },
+            "panel_min_candidates": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 3
+            },
+            "panel_evidence_rounds": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "worker_model_turns": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "worker_tool_operations": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "worker_repair_rounds": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "lead_takeovers": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "run_lease_seconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "heartbeat_seconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "deadline_default_ms": {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 3600000
+            }
+          },
+          "required": [
+            "max_model_calls",
+            "transport_attempts_per_call",
+            "max_format_repairs",
+            "max_reroutes",
+            "panel_size",
+            "panel_min_candidates",
+            "panel_evidence_rounds",
+            "worker_model_turns",
+            "worker_tool_operations",
+            "worker_repair_rounds",
+            "lead_takeovers",
+            "run_lease_seconds",
+            "heartbeat_seconds",
+            "deadline_default_ms"
+          ]
+        },
+        "switch_margin": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "default_delivery": {
+          "type": "string",
+          "enum": ["verified_buffered"]
+        },
+        "answer_cache_enabled": {
+          "type": "boolean"
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ActionConfig"
+          },
+          "minItems": 1
+        }
+      },
+      "required": [
+        "schema_version",
+        "policy_version",
+        "example_only",
+        "production_auto_baseline_only",
+        "classifier",
+        "limits",
+        "switch_margin",
+        "default_delivery",
+        "answer_cache_enabled",
+        "actions"
+      ]
+    }
+  }
+}

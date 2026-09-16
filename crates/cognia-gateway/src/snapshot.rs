@@ -232,6 +232,11 @@ pub struct RoutingSnapshot {
     /// Which publisher produced it. Required alongside `profile_version`.
     #[serde(default)]
     pub authority: Option<SnapshotAuthority>,
+    /// The Router + Fusion surfaces this host has switched on (ADR-0188 D36).
+    /// Absent — every snapshot written before B2 — means both off, which is the
+    /// default and leaves every endpoint exactly as it was.
+    #[serde(default)]
+    pub router_fusion: Option<crate::runs::RouterFusionGatewaySwitches>,
 }
 
 impl RoutingSnapshot {

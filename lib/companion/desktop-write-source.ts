@@ -15,16 +15,20 @@
  *   - headless brain   — `lib/headless/runtimes/desktop-message-source.ts`
  *
  * The command surface is not a fixed list. `dispatchCommand` owns the arms
- * enumerated in its own switch and delegates three families wholesale:
+ * enumerated in its own switch and delegates five families wholesale:
  * `perf_*` (`lib/perf/host-dispatch.ts`), `scheduled_task_*`
- * (`lib/scheduler/scheduled-task-rpc.ts`), and `workflow_api_*`
- * (`lib/workflow/api/workflow-api-service.ts`).
+ * (`lib/scheduler/scheduled-task-rpc.ts`), `workflow_api_*`
+ * (`lib/workflow/api/workflow-api-service.ts`), `router_fusion_run_*`
+ * (`lib/router-fusion/gate/run-api-bridge.ts`) and `router_fusion_passthrough_*`
+ * (`lib/router-fusion/gate/passthrough-bridge.ts`).
  *
  * The authoritative routing table lives on the Rust side — a command only
  * reaches here if one of these dispatches it to the writes bridge:
  *   - `src-tauri/src/companion_api/rpc/data_sync.rs` (the bulk of the surface)
  *   - `src-tauri/src/companion_api/rpc/service_plane.rs` (`app_settings_update`)
  *   - `src-tauri/src/companion_api/workflow_api.rs` (`workflow_api_*`)
+ *   - `src-tauri/src/gateway_brain_bridge.rs` (`router_fusion_run_*` and
+ *     `router_fusion_passthrough_*`, ADR-0188 B2)
  * An arm with no counterpart there is unreachable; a Rust route with no arm
  * here fails with `unknown desktop-write command`.
  *
@@ -37,6 +41,15 @@
  *   - `desktop-write-source.workflow-api.test.ts` — the `workflow_api_*` delegation
  */
 
+import {
+  dispatchRouterFusionBridgeCommand,
+  isRouterFusionBridgeCommand,
+} from "@/lib/router-fusion/gate/run-api-bridge"
+import {
+  dispatchRouterFusionPassthroughCommand,
+  isRouterFusionPassthroughCommand,
+} from "@/lib/router-fusion/gate/passthrough-bridge"
+import { currentRouterFusionGateSettings } from "@/lib/router-fusion/gate/current-settings"
 import { parseAdapterPolicyRelay } from "@/lib/connectors/adapter-policy-relay"
 import { updateAdapterConfigSection } from "@/lib/db/adapter-instances"
 import { createCharacter, deleteCharacter, updateCharacter } from "@/lib/db/characters"
@@ -260,6 +273,29 @@ export async function dispatchCommand(
     await import("@/lib/perf/host-dispatch")
   if (isPerformanceHostCommand(command)) {
     return dispatchPerformanceHostCommand(command, payload)
+  }
+  // Router + Fusion's Run API (ADR-0188 B2). The gateway serves `/v1/runs` and
+  // round-trips every request here, where Dexie is authoritative. The gate
+  // module is the only Router + Fusion module this dispatcher may reach: with
+  // the surface off it refuses without loading anything else.
+  if (isRouterFusionBridgeCommand(command)) {
+    return dispatchRouterFusionBridgeCommand(command, payload, {
+      settings: await currentRouterFusionGateSettings(),
+    })
+  }
+  // The gateway's OTHER Router + Fusion lane: reserve/settle around a plain
+  // proxy request (D13). Its own gate module because its failure answer is the
+  // opposite one — ordinary traffic is never refused over a ledger fault.
+  if (isRouterFusionPassthroughCommand(command)) {
+    const outcome = await dispatchRouterFusionPassthroughCommand(command, payload, {
+      settings: await currentRouterFusionGateSettings(),
+    })
+    // The gateway's brain bridge (`src-tauri/src/gateway_brain_bridge.rs`)
+    // accepts only the `{ ok, value }` envelope the Run API family answers
+    // with. Every passthrough outcome — refusals and bypasses included — is a
+    // value, so it always travels as `ok: true`; a bare outcome would be read
+    // as a broken contract and turn every request into "brain unavailable".
+    return { ok: true, value: outcome }
   }
   if (
     command === "workflow_api_run_create" ||

@@ -48,7 +48,10 @@ jest.mock("@/lib/goal/runtime", () => ({
 jest.mock("@/lib/loop/runtime", () => ({
   getLoopRuntime: () => ({ getActiveLoopForSession: async () => null }),
 }))
-jest.mock("@/lib/tauri", () => ({ isTauri: () => false }))
+// Read through a global: modules call `isTauri()` while this file is still importing.
+jest.mock("@/lib/tauri", () => ({
+  isTauri: () => (globalThis as { __mockIsTauri?: boolean }).__mockIsTauri === true,
+}))
 
 const PROJECT_A = {
   id: "proj-a",
@@ -173,6 +176,58 @@ describe("Claude chat send-option seam", () => {
         executionIdentity: expect.objectContaining({ runId: "r1", turnId: "t1", attemptId: "a2" }),
       })
     )
+  })
+
+  it("carries routing hints — attachment kinds and transcript depth — into the routing context", async () => {
+    await buildSendOptions({ id: "s1" } as never, "Describe this picture", undefined, undefined, {
+      attachmentKinds: ["image", "document"],
+    })
+    expect(jest.mocked(resolveSendOptions)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routingContextHint: {
+          promptText: "Describe this picture",
+          attachmentKinds: ["image", "document"],
+          messageCount: 0,
+        },
+        routingSurface: "chat",
+      })
+    )
+  })
+
+  it("names the Router + Fusion chat surface only for the run-creating caller in the desktop shell", async () => {
+    const optIn = { routerFusionSurface: "chat" as const }
+    await buildSendOptions({ id: "s1" } as never, "hello", undefined, undefined, undefined, optIn)
+    expect(jest.mocked(resolveSendOptions).mock.calls.at(-1)?.[0]).not.toHaveProperty(
+      "routerFusionSurface"
+    )
+    ;(globalThis as { __mockIsTauri?: boolean }).__mockIsTauri = true
+    try {
+      // A caller that dispatches straight to `sendPrompt` never opts in.
+      await buildSendOptions({ id: "s1" } as never, "hello")
+      expect(jest.mocked(resolveSendOptions).mock.calls.at(-1)?.[0]).not.toHaveProperty(
+        "routerFusionSurface"
+      )
+      await buildSendOptions({ id: "s1" } as never, "hello", undefined, undefined, undefined, optIn)
+    } finally {
+      delete (globalThis as { __mockIsTauri?: boolean }).__mockIsTauri
+    }
+    expect(jest.mocked(resolveSendOptions).mock.calls.at(-1)?.[0]?.routerFusionSurface).toBe("chat")
+  })
+
+  it("omits attachmentKinds when no hints are passed but still reports depth", async () => {
+    await buildSendOptions({ id: "s1" } as never, "hello")
+    const hint = jest.mocked(resolveSendOptions).mock.calls.at(-1)?.[0]?.routingContextHint
+    expect(hint).toEqual({ promptText: "hello", messageCount: 0 })
+    expect(hint).not.toHaveProperty("attachmentKinds")
+  })
+
+  it("keeps routingContextHint absent when there is no user message", async () => {
+    await buildSendOptions({ id: "s1" } as never, undefined, undefined, undefined, {
+      attachmentKinds: ["image"],
+    })
+    expect(
+      jest.mocked(resolveSendOptions).mock.calls.at(-1)?.[0]?.routingContextHint
+    ).toBeUndefined()
   })
 
   it("forwards the durable onboarding request as request-scoped authorization", async () => {

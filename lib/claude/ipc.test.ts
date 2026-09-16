@@ -44,6 +44,7 @@ import {
   restoreSession,
   scanClaudeSkills,
   sendPluginToolResponse,
+  callReserveDecision,
   sendPrompt,
   sessionControl,
   steerSession,
@@ -115,6 +116,49 @@ describe("subscribePluginToolExec", () => {
     expect(handler).toHaveBeenCalledWith(
       expect.objectContaining({ type: "plugin_tool_exec", toolUseId: "t" })
     )
+  })
+})
+
+describe("callReserveDecision", () => {
+  it("answers a Router + Fusion reservation with each decision shape", async () => {
+    callSpy.mockResolvedValue(undefined)
+    await callReserveDecision("s1", "req-1", {
+      decision: "granted",
+      attemptId: "att-1",
+      attemptNo: 1,
+    })
+    await callReserveDecision("s1", "req-2", {
+      decision: "refused",
+      code: "RUN_BUDGET_EXHAUSTED",
+      message: "cap",
+    })
+    await callReserveDecision("s1", "req-3", { decision: "bypass", code: "db_unavailable" })
+    expect(callSpy.mock.calls).toEqual([
+      [
+        "claude_call_reserve_decision",
+        {
+          sessionId: "s1",
+          requestId: "req-1",
+          decision: "granted",
+          attemptId: "att-1",
+          attemptNo: 1,
+        },
+      ],
+      [
+        "claude_call_reserve_decision",
+        {
+          sessionId: "s1",
+          requestId: "req-2",
+          decision: "refused",
+          code: "RUN_BUDGET_EXHAUSTED",
+          message: "cap",
+        },
+      ],
+      [
+        "claude_call_reserve_decision",
+        { sessionId: "s1", requestId: "req-3", decision: "bypass", code: "db_unavailable" },
+      ],
+    ])
   })
 })
 

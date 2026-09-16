@@ -1,9 +1,12 @@
 // Helpers used by the Clear-data section of the settings dialog. Each helper
 // is destructive — the UI requires the user to type "DELETE" to confirm.
 
+import Dexie from "dexie"
+
 import { getDb } from "@/lib/db/schema"
 import { clearDraft } from "@/lib/db/chat-drafts"
 import { collectUnreferencedMessageMedia } from "@/lib/db/message-media-refs"
+import { fusionDatabaseName } from "@/lib/router-fusion/gate/database-name"
 import { recordTombstones } from "@/lib/sync/tombstones"
 import { loggers } from "@cognia/logging"
 
@@ -95,9 +98,13 @@ export async function clearTables(names: ClearableTable[]): Promise<void> {
 
 /**
  * Drop the entire database. The page must reload afterwards so Dexie can
- * re-open and re-run the seed step.
+ * re-open and re-run the seed step. The Router + Fusion ledger beside it only
+ * describes the sessions just dropped, so it goes too; deleting a database that
+ * was never created (Router + Fusion never switched on) is a no-op.
  */
 export async function clearAll(): Promise<void> {
   const db = getDb()
+  const fusionName = fusionDatabaseName(db.name)
   await db.delete()
+  await Dexie.delete(fusionName)
 }

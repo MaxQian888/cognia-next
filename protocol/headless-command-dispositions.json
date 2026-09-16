@@ -143,6 +143,7 @@
       "disposition": "runtime-internal",
       "reason": "Renderer or runtime bridge acknowledgement/response plumbing; it is not an operator action and remains behind the internal runtime protocol.",
       "commands": [
+        "claude_call_reserve_decision",
         "claude_plugin_hook_response",
         "cli_bridge_host_state_publish",
         "companion_host_state_publish",
@@ -162,6 +163,7 @@
         "telemetry_otlp_cancel"
       ],
       "commandReasons": {
+        "claude_call_reserve_decision": "The renderer's answer to a Router + Fusion call_reserve_request the sidecar's AI SDK leg loop is blocked on (ADR-0188): the renderer's ledger reserved or refused the next model call. Like claude_plugin_hook_response it is one half of an in-flight call keyed by a request id only that sidecar issued, so a remote caller has no pending request to answer.",
         "claude_plugin_hook_response": "The renderer's answer to a hook the sidecar is blocked on. It is one half of an in-flight call, not an action: there is nothing for a remote caller to invoke because there is no pending request on its side to answer.",
         "cli_bridge_host_state_publish": "The CLI-bridge twin of companion_host_state_publish, publishing the same post-commit event onto CliBridgeServerState.host_state_events. Same receipt role, same already-exposed operator surface.",
         "companion_host_state_publish": "Broadcast receipt, not an operator action: it rejects every topic but host-state://action and republishes the event on the companion EventBus after the TypeScript authority has already committed its ledger transaction (lib/companion/desktop-write-source.ts:470). The operator surface is host_state_submit / host_state_snapshot / host_state_status, all already in KNOWN_COMMANDS.",

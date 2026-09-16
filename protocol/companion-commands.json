@@ -2569,6 +2569,23 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "claude_call_reserve_decision",
+      "resource": "agent.call_reservation",
+      "verb": "respond",
+      "arm": "claude_call_reserve_decision",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "pagination": "none",
+      "longRunning": false,
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "claude_close_session",
       "resource": "agent.session",
       "verb": "close",

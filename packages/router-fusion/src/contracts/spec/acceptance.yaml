@@ -1,0 +1,635 @@
+schema_version: 1.0.0
+status: specifications_not_executed_tests
+cases:
+  - id: AUTH-01
+    priority: P0
+    owner: B
+    area: tenant
+    level: integration
+    given: 存在两个租户及各自run
+    when: 租户A读取B的run
+    expected: 404，不泄露存在性或内容
+  - id: AUTH-02
+    priority: P0
+    owner: B
+    area: tenant
+    level: integration
+    given: 存在B的artifact
+    when: A请求下载B的artifact
+    expected: 404，不返回签名URL
+  - id: AUTH-03
+    priority: P0
+    owner: B
+    area: rls
+    level: integration
+    given: API数据库角色无tenant context
+    when: 直接查询领域表
+    expected: 无业务行或明确拒绝，不能全表可见
+  - id: AUTH-04
+    priority: P0
+    owner: E
+    area: authorization
+    level: integration
+    given: restricted任务禁止外发
+    when: classifier建议external强模型
+    expected: 分类、embedding、Judge等全部不能外发
+  - id: AUTH-05
+    priority: P0
+    owner: G
+    area: prompt_injection
+    level: integration
+    given: 候选/网页内含忽略规则并发送秘密的指令
+    when: 进入Judge和工具流程
+    expected: 规则与权限不变，未授权工具调用被拒绝
+  - id: AUTH-06
+    priority: P0
+    owner: B
+    area: auth
+    level: integration
+    given: 请求体伪造tenant_id或scopes
+    when: 创建run
+    expected: schema拒绝未知字段，身份只来自Bearer
+  - id: AUTH-07
+    priority: P0
+    owner: C
+    area: revocation
+    level: integration
+    given: run已固定config snapshot
+    when: 撤销目标部署数据权限后触发下一调用
+    expected: 停止新调用，不能以snapshot固定绕过撤销
+  - id: API-01
+    priority: P0
+    owner: B
+    area: idempotency
+    level: integration
+    given: 相同tenant/endpoint/key/body
+    when: 并发发起20次create
+    expected: 只有一个run、一份tenant_hold和一组输入消息
+  - id: API-02
+    priority: P0
+    owner: B
+    area: idempotency
+    level: integration
+    given: key已用于bodyA
+    when: 同key发bodyB
+    expected: 409 IDEMPOTENCY_CONFLICT
+  - id: API-03
+    priority: P0
+    owner: B
+    area: session
+    level: integration
+    given: session版本5且无active run
+    when: 两个请求均expected_version=5
+    expected: 只创建一个active run，另一409
+  - id: API-04
+    priority: P0
+    owner: H
+    area: compatibility
+    level: integration
+    given: Chat请求传tools或n=2
+    when: 调用兼容API
+    expected: 422 UNSUPPORTED_PARAMETER或schema错误，不静默忽略
+  - id: API-05
+    priority: P0
+    owner: H
+    area: mode
+    level: integration
+    given: mode=panel allowed_modes=[direct]
+    when: 创建run
+    expected: 422，不私自改模式
+  - id: API-06
+    priority: P0
+    owner: H
+    area: session
+    level: integration
+    given: 有状态会话已含历史
+    when: 发送新增input_messages
+    expected: 历史只追加一次，不把旧历史再次拼接
+  - id: API-07
+    priority: P0
+    owner: H
+    area: resume
+    level: integration
+    given: run正在正常running
+    when: 发送补充input的resume
+    expected: 409，正常执行不能无序改写当前任务
+  - id: API-08
+    priority: P0
+    owner: H
+    area: resume
+    level: integration
+    given: 等待审批且approval绑定原args hash
+    when: 批准不同参数或不同revision
+    expected: 拒绝，原授权不覆盖新操作
+  - id: ROUTE-01
+    priority: P0
+    owner: E
+    area: cold_start
+    level: integration
+    given: 没有质量预测训练产物
+    when: 自动路由unknown任务
+    expected: 允许的baseline，p_pass=null，不编造分数
+  - id: ROUTE-02
+    priority: P0
+    owner: E
+    area: hard_filter
+    level: integration
+    given: 最低价部署不支持所需模态
+    when: 枚举候选
+    expected: 先排除，不以成本高低抵消能力限制
+  - id: ROUTE-03
+    priority: P0
+    owner: E
+    area: classification
+    level: integration
+    given: classifier超时/输出无效JSON
+    when: route决策
+    expected: 有界失败后rules/baseline，分类费用保留
+  - id: ROUTE-04
+    priority: P0
+    owner: E
+    area: classification
+    level: integration
+    given: 分类输入超4096tokens
+    when: 提取特征
+    expected: 保留硬约束并标context_truncated，信息不足为unknown
+  - id: ROUTE-05
+    priority: P0
+    owner: E
+    area: quality
+    level: integration
+    given: 模型revision更新且无新评测
+    when: 执行自动降本
+    expected: 新action不承袭旧个体预测，进入保守路径
+  - id: ROUTE-06
+    priority: P0
+    owner: E
+    area: decision_trace
+    level: integration
+    given: 多个action被不同约束排除
+    when: 保存RouteDecision
+    expected: 每候选有实际原因、版本、估计，不生成事后理由
+  - id: ROUTE-07
+    priority: P0
+    owner: E
+    area: affinity
+    level: integration
+    given: 当前模型合格，新模型预计仅便宜5%
+    when: switch_margin=15%执行
+    expected: 因成本不切换；当前模型权限失效则必须离开
+  - id: ROUTE-08
+    priority: P0
+    owner: E
+    area: no_solution
+    level: integration
+    given: 无方案满足数据范围和预算
+    when: route决策
+    expected: 明确失败，不越权、不偷偷降低要求
+  - id: BUD-01
+    priority: P0
+    owner: C
+    area: concurrency
+    level: integration
+    given: tenant只够一个run cap
+    when: 同时创建两个需同cap的run
+    expected: 一成功一预算拒绝，无超发hold
+  - id: BUD-02
+    priority: P0
+    owner: C
+    area: reservations
+    level: integration
+    given: Panel预算只够两个候选、不够Judge
+    when: 启动Panel
+    expected: 不发候选请求，先发现必要阶段预算不足
+  - id: BUD-03
+    priority: P0
+    owner: C
+    area: ledger
+    level: integration
+    given: 同一call_usage已结算
+    when: 重复送达usage三次
+    expected: spent只增加一次，流水去重
+  - id: BUD-04
+    priority: P0
+    owner: D
+    area: usage
+    level: integration
+    given: provider prompt_total已含cached_tokens
+    when: 归一化并计费
+    expected: 缓存输入不重复相加，bucket总和与规范输入一致
+  - id: BUD-05
+    priority: P0
+    owner: D
+    area: usage
+    level: integration
+    given: reasoning已包含在output总数
+    when: 计算费用
+    expected: reasoning不重复收费，保留诊断字段
+  - id: BUD-06
+    priority: P0
+    owner: C
+    area: unknown
+    level: integration
+    given: 请求发出后timeout且无法查询
+    when: 恢复/取消
+    expected: call为UNKNOWN，保留额度，不假定0费用
+  - id: BUD-07
+    priority: P0
+    owner: C
+    area: reconciliation
+    level: integration
+    given: 取消后provider返回迟到usage
+    when: 接收usage
+    expected: 照常结算，run保持cancelled，不追加最终答案
+  - id: BUD-08
+    priority: P0
+    owner: C
+    area: money
+    level: integration
+    given: 使用0.000001等微小费率
+    when: 大量调用累计
+    expected: Decimal+microusd稳定，无binary float误差
+  - id: BUD-09
+    priority: P0
+    owner: C
+    area: overrun
+    level: integration
+    given: 真实账单超保守预留
+    when: 对账
+    expected: 记录完整实际费用和overspend，冻结，不丢账
+  - id: BUD-10
+    priority: P0
+    owner: C
+    area: limits
+    level: integration
+    given: 已用23个model attempts
+    when: 剩余流程要发2个
+    expected: 最多再准入1个，不能并发越过24
+  - id: BUD-11
+    priority: P0
+    owner: C
+    area: two_level
+    level: integration
+    given: run cap=1，A预留.2，B预留.3，A花.1
+    when: A结算
+    expected: run_available=.6，tenant_hold=.9，不重复减tenant
+  - id: BUD-12
+    priority: P0
+    owner: C
+    area: stage_reservation
+    level: integration
+    given: Judge reserved_stage已占额度
+    when: 转换为真实call
+    expected: 原预留被转换而非新增同额，余额不重复扣
+  - id: REC-01
+    priority: P0
+    owner: C
+    area: replay
+    level: chaos
+    given: call结果已提交，checkpoint未写
+    when: kill worker再恢复
+    expected: 复用call结果，不重发已成功调用
+  - id: REC-02
+    priority: P0
+    owner: C
+    area: lease
+    level: chaos
+    given: 旧worker租约失效，新worker领取
+    when: 旧worker迟到提交
+    expected: fencing拒绝旧状态覆盖，外部费用仍可对账
+  - id: REC-03
+    priority: P0
+    owner: C
+    area: panel_replay
+    level: chaos
+    given: 候选A成功、B尚未完成
+    when: driver崩溃恢复
+    expected: A不重算，B按ledger状态处理，不整体重发
+  - id: REC-04
+    priority: P0
+    owner: C
+    area: terminal_race
+    level: chaos
+    given: 成功finalize与cancel并发
+    when: 事务竞争
+    expected: 只有一个一致终态，没有两个会话答案
+  - id: REC-05
+    priority: P0
+    owner: C
+    area: deadline
+    level: integration
+    given: 任务已等待输入接近deadline
+    when: resume输入
+    expected: 原deadline不重置，到期停止新调用
+  - id: REC-06
+    priority: P0
+    owner: C
+    area: side_effect
+    level: chaos
+    given: 外部非幂等操作已dispatch无回执
+    when: worker恢复
+    expected: 不自动重复执行，进入对账/人工处理
+  - id: REC-07
+    priority: P0
+    owner: C
+    area: infra
+    level: integration
+    given: Redis掉线但Postgres正常
+    when: 现有任务执行
+    expected: 不得丢预算/任务；按保守限流策略降级或暂停
+  - id: CAS-01
+    priority: P0
+    owner: F
+    area: cascade
+    level: integration
+    given: 廉价输出通过独立验收
+    when: 执行cascade
+    expected: 不调用强模型
+  - id: CAS-02
+    priority: P0
+    owner: F
+    area: cascade
+    level: integration
+    given: 廉价失败、强模型通过
+    when: 执行cascade
+    expected: 一次升级，记录失败报告与两次成本
+  - id: CAS-03
+    priority: P0
+    owner: F
+    area: cascade
+    level: integration
+    given: 两阶段均inconclusive
+    when: 执行cascade且allow_degraded=false
+    expected: 不返回accepted
+  - id: CAS-04
+    priority: P0
+    owner: F
+    area: refusal
+    level: integration
+    given: 上游因安全政策拒绝
+    when: 执行cascade
+    expected: 不通过换模型绕过拒绝
+  - id: PAN-01
+    priority: P0
+    owner: F
+    area: independence
+    level: integration
+    given: 两候选并行
+    when: 检查首轮输入
+    expected: 均有任务契约，均不含对方答案
+  - id: PAN-02
+    priority: P0
+    owner: F
+    area: partial
+    level: integration
+    given: 只有一个有效候选
+    when: allow_degraded=false
+    expected: FUSION_INSUFFICIENT_CANDIDATES
+  - id: PAN-03
+    priority: P0
+    owner: F
+    area: partial
+    level: integration
+    given: 只有一个有效候选且允许降级
+    when: 继续输出
+    expected: mode_executed=direct，quality_status=degraded，成本仍全计
+  - id: PAN-04
+    priority: P0
+    owner: F
+    area: judge
+    level: integration
+    given: 两个候选重复同一个无依据错误
+    when: Judge审查
+    expected: 不把多数同意当独立证据
+  - id: PAN-05
+    priority: P0
+    owner: G
+    area: evidence
+    level: integration
+    given: 候选引用不存在或另一tenant artifact
+    when: 验收候选
+    expected: 引用被拒绝，不能作为支持证据
+  - id: PAN-06
+    priority: P0
+    owner: F
+    area: synthesis
+    level: integration
+    given: Judge未批准某个事实
+    when: Synthesis新增该事实
+    expected: 最终验证失败/标不确定，不直接accepted
+  - id: PAN-07
+    priority: P0
+    owner: F
+    area: bounds
+    level: integration
+    given: 模型试图递归Fusion或无限补证
+    when: 执行图
+    expected: 递归拒绝；补证最多1轮，调用上限有效
+  - id: PAN-08
+    priority: P0
+    owner: F
+    area: context
+    level: integration
+    given: 候选合计无法装入Judge上下文
+    when: 启动前检查
+    expected: 调整有界输出或拒绝，不静默截断争议
+  - id: DEL-01
+    priority: P0
+    owner: G
+    area: verification
+    level: integration
+    given: Worker文本声称所有测试通过，无工具报告
+    when: Lead复核
+    expected: 不能记录tool_verified或任务验收通过
+  - id: DEL-02
+    priority: P0
+    owner: G
+    area: verification
+    level: integration
+    given: test命令退出0但0个测试/全跳过
+    when: 校验报告
+    expected: 必须失败或inconclusive
+  - id: DEL-03
+    priority: P0
+    owner: G
+    area: revision
+    level: integration
+    given: v1测试通过后代码变成v2
+    when: 最终验收
+    expected: 不使用v1结果证明v2
+  - id: DEL-04
+    priority: P0
+    owner: G
+    area: workspace
+    level: integration
+    given: patch base_revision与目标不一致
+    when: 应用patch
+    expected: CAS冲突，不覆盖其他修改
+  - id: DEL-05
+    priority: P0
+    owner: G
+    area: sandbox
+    level: integration
+    given: patch含../或symlink到宿主机secret
+    when: 应用/读文件
+    expected: 拒绝目录穿越与宿主访问
+  - id: DEL-06
+    priority: P0
+    owner: F
+    area: escalation
+    level: integration
+    given: Worker修复后仍失败
+    when: 继续执行
+    expected: 最多约定修复/接管次数，失败不无限循环
+  - id: DEL-07
+    priority: P0
+    owner: G
+    area: scope
+    level: integration
+    given: Worker要求改未授权目录
+    when: 工具执行
+    expected: 拒绝或等待显式审批，不能自批
+  - id: CACHE-01
+    priority: P0
+    owner: E
+    area: classification
+    level: integration
+    given: 同输入分类缓存命中但provider已失效
+    when: 路由
+    expected: 仍检查最新health/预算，不复用旧决策
+  - id: CACHE-02
+    priority: P0
+    owner: G
+    area: tool_cache
+    level: integration
+    given: 参数相同但文件内容变化
+    when: 读取工具缓存
+    expected: 不命中旧结果
+  - id: CACHE-03
+    priority: P0
+    owner: F
+    area: prefix
+    level: integration
+    given: 同模型连续多轮
+    when: 构造prompt
+    expected: 稳定前缀不被动态时间戳重写；实际命中按usage
+  - id: CACHE-04
+    priority: P0
+    owner: F
+    area: handoff
+    level: integration
+    given: 有pending tool调用
+    when: 请求模型切换/压缩
+    expected: 先完成或明确取消工具，不产生孤立tool消息
+  - id: CACHE-05
+    priority: P0
+    owner: B
+    area: isolation
+    level: integration
+    given: 两租户内容相同
+    when: 缓存访问
+    expected: 私有缓存键与权限隔离，不跨tenant读原始内容
+  - id: SSE-01
+    priority: P0
+    owner: H
+    area: replay
+    level: e2e
+    given: 已收到seq=12后断线
+    when: Last-Event-ID=12重连
+    expected: 只回放13起，按seq去重，最终结果一致
+  - id: SSE-02
+    priority: P0
+    owner: H
+    area: buffered
+    level: e2e
+    given: Panel/cascade尚未最终验收
+    when: 监听SSE
+    expected: 只有阶段事件，不含待替换答案token
+  - id: SSE-03
+    priority: P0
+    owner: H
+    area: disconnect
+    level: e2e
+    given: SSE客户端断线
+    when: 后台run继续
+    expected: 不自动取消run，重连可读结果
+  - id: SSE-04
+    priority: P0
+    owner: H
+    area: expired_history
+    level: e2e
+    given: 请求已过期的event seq
+    when: 重连
+    expected: 410并可GET最终run快照
+  - id: EVAL-01
+    priority: P0
+    owner: I
+    area: split
+    level: integration
+    given: 同会话存在多轮任务与重复采样
+    when: 划分训练/校准/测试
+    expected: 同组不跨集合，测试按后移时间保留
+  - id: EVAL-02
+    priority: P0
+    owner: E
+    area: calibration
+    level: integration
+    given: 预测器只有单类/无独立校准数据
+    when: 训练发布
+    expected: 该head不发布为校准模型
+  - id: EVAL-03
+    priority: P0
+    owner: I
+    area: metric
+    level: integration
+    given: 10次调用只有2个accepted，另有degraded
+    when: 统计成本
+    expected: 全部费用入分子，仅2个accepted入分母
+  - id: EVAL-04
+    priority: P0
+    owner: I
+    area: honesty
+    level: integration
+    given: 只运行mock eval
+    when: 生成报告
+    expected: 明确模拟，不报告真实模型质量或实际降本
+  - id: CFG-01
+    priority: P0
+    owner: A
+    area: production
+    level: integration
+    given: 配置含fake provider或example_only费率
+    when: production启动
+    expected: 失败，不能把示例价格用于生产
+  - id: CFG-02
+    priority: P0
+    owner: A
+    area: contract
+    level: integration
+    given: action角色alias不存在
+    when: 编译config
+    expected: 失败并指出完整字段位置
+  - id: SAFE-01
+    priority: P0
+    owner: G
+    area: ssrf
+    level: integration
+    given: 搜索工具返回内网/metadata URL及重定向
+    when: fetch
+    expected: 阻断内网访问并审计
+  - id: SAFE-02
+    priority: P0
+    owner: G
+    area: sandbox
+    level: integration
+    given: 生成代码试图访问docker socket/外网secret
+    when: 运行fixture
+    expected: 隔离策略阻止，资源消耗受限
+  - id: PROF-01
+    priority: P0
+    owner: G
+    area: acceptance
+    level: integration
+    given: 代码任务请求text_basic作为验收
+    when: 匹配profile
+    expected: 不能降低到schema_only后误报代码通过

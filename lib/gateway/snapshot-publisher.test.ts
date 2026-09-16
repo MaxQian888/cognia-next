@@ -94,6 +94,58 @@ describe("buildGatewaySnapshot", () => {
     expect(buildGatewaySnapshot({}, 999).generatedAtMs).toBe(999)
   })
 
+  describe("Router + Fusion switches", () => {
+    it("[ACC:OFF-01] tells the gateway both lanes are off unless literally switched on", () => {
+      expect(buildGatewaySnapshot({}, 1).routerFusion).toEqual({
+        runsEnabled: false,
+        passthroughLedgerEnabled: false,
+      })
+      // A surface switch without the master is still off, and so is a truthy
+      // value that is not the boolean.
+      const surfaceOnly = {
+        routerFusion: { enabled: false, surfaces: { gatewayRuns: true } },
+      } as unknown as SnapshotSettingsSlice
+      expect(buildGatewaySnapshot(surfaceOnly, 1).routerFusion?.runsEnabled).toBe(false)
+      const truthy = {
+        routerFusion: { enabled: true, surfaces: { gatewayPassthroughLedger: 1 } },
+      } as unknown as SnapshotSettingsSlice
+      expect(buildGatewaySnapshot(truthy, 1).routerFusion?.passthroughLedgerEnabled).toBe(false)
+    })
+
+    it("carries each gateway lane's own switch", () => {
+      const runsOnly = {
+        routerFusion: { enabled: true, surfaces: { gatewayRuns: true } },
+      } as unknown as SnapshotSettingsSlice
+      expect(buildGatewaySnapshot(runsOnly, 1).routerFusion).toEqual({
+        runsEnabled: true,
+        passthroughLedgerEnabled: false,
+      })
+      const both = {
+        routerFusion: {
+          enabled: true,
+          surfaces: { gatewayRuns: true, gatewayPassthroughLedger: true },
+        },
+      } as unknown as SnapshotSettingsSlice
+      expect(buildGatewaySnapshot(both, 1).routerFusion).toEqual({
+        runsEnabled: true,
+        passthroughLedgerEnabled: true,
+      })
+    })
+
+    it("reports the switch, not the breaker: a tripped lane is still on for the gateway", () => {
+      // The brain answers a tripped lane itself (503 / bypassed:breaker_tripped);
+      // pushing "off" here would turn that into a misleading 403 / surface_off.
+      const tripped = {
+        routerFusion: {
+          enabled: true,
+          surfaces: { gatewayRuns: true },
+          trippedSurfaces: { gatewayRuns: { trippedAt: 1 } },
+        },
+      } as unknown as SnapshotSettingsSlice
+      expect(buildGatewaySnapshot(tripped, 1).routerFusion?.runsEnabled).toBe(true)
+    })
+  })
+
   it("omits version/authority for legacy pushes (no profile meta)", () => {
     const snap = buildGatewaySnapshot({}, 1)
     expect(snap.profileVersion).toBeUndefined()

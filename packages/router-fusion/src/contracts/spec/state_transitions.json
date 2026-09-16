@@ -1,0 +1,20 @@
+{
+  "queued": ["running", "cancelled", "expired", "failed"],
+  "running": [
+    "waiting_for_input",
+    "waiting_for_approval",
+    "reconciling",
+    "cancelling",
+    "succeeded",
+    "failed",
+    "expired"
+  ],
+  "waiting_for_input": ["queued", "cancelled", "expired"],
+  "waiting_for_approval": ["queued", "cancelled", "failed", "expired"],
+  "reconciling": ["queued", "cancelling", "failed", "expired"],
+  "cancelling": ["cancelled"],
+  "succeeded": [],
+  "failed": [],
+  "cancelled": [],
+  "expired": []
+}

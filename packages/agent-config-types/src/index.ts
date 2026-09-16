@@ -939,7 +939,35 @@ export interface SendOptions {
    * chosen `tier` alias, for the transparency badge. Sidecar-protocol metadata
    * only — the sidecar ignores it (mirrors `routingDecision`).
    */
-  autoRouting?: { score: number; tier: string }
+  autoRouting?: { score: number; tier: string; alias?: string }
+
+  /**
+   * Router + Fusion call ledger (ADR-0188). Present ONLY when the turn's surface
+   * is switched on and the turn was routed through Router + Fusion; absent means
+   * the sidecar behaves exactly as before. Its presence is what puts the sidecar
+   * into gated dispatch: one model call per agent-loop leg, SDK transport
+   * retries off, no `fallbackModel`, and a reservation round-trip
+   * (`call_reserve_request` → `claude_call_reserve_decision`) before each call.
+   */
+  ledger?: RouterFusionLedgerStamp
+
+  /**
+   * Renderer-only Router + Fusion routing summary for the run card and the
+   * turn's run bookkeeping. The sidecar ignores it (mirrors `routingDecision`).
+   */
+  routerFusion?: RouterFusionTurnStamp
+
+  /**
+   * Set instead of `routerFusion` when the turn is a cascade or panel run
+   * (ADR-0188 B3). Renderer-only; a send carrying it never reaches the sidecar.
+   */
+  routerFusionRun?: RouterFusionRunStamp
+
+  /**
+   * Set when the Router + Fusion step faulted and this turn fell back to the
+   * original path (ADR-0188 D38). Renderer-only: drives the "not ledgered" notice.
+   */
+  routerFusionBypass?: { code: string; justTripped: boolean }
 
   /**
    * Advisory capability-gate notice: the user requested a feature (e.g. a
@@ -1210,6 +1238,12 @@ export interface SessionEndedEvent {
    * falls back to extracting a hint from the `error` text.
    */
   retryAfterMs?: number
+  /**
+   * Router + Fusion (ADR-0188) refused the next model call of a ledgered turn
+   * (budget, model-call limit, deadline). The turn ended because of it — it did
+   * not fail at the provider, so routing fallback and breakers must not react.
+   */
+  routerFusionRefusal?: { code: string; message?: string }
 }
 
 /**
@@ -1316,6 +1350,63 @@ export function isProtocolAdapterCancelEvent(evt: ClaudeEvent): evt is ProtocolA
  * PostToolUse rewrite). ai-sdk channel only — native Anthropic tools execute
  * inside the SDK subprocess and are observe-only.
  */
+/**
+ * Router + Fusion (ADR-0188): the sidecar asks before a model call (`call`), or
+ * before a tool use inside an Agent SDK envelope (`envelope_check`). Answered
+ * with `claude_call_reserve_decision`. Only emitted for a send carrying
+ * `SendOptions.ledger`.
+ */
+export interface CallReserveRequestEvent {
+  type: "call_reserve_request"
+  sessionId: string
+  runId: string
+  requestId: string
+  kind: "call" | "envelope_check"
+  logicalStepId: string
+  /** The deployment the call goes to — the turn's, or a side call's own (a compaction summary model). */
+  deploymentId: string
+  estimatedInputTokens?: number
+  maxOutputTokens?: number
+  toolName?: string
+  turnId?: string
+}
+
+/** Router + Fusion: what happened to a reserved call, with the provider's own usage report. */
+export interface CallAttemptResultEvent {
+  type: "call_attempt_result"
+  sessionId: string
+  runId: string
+  attemptId: string
+  logicalStepId: string
+  status: "succeeded" | "failed" | "unknown"
+  usage?: {
+    inputTokens: number
+    outputTokens: number
+    cacheReadTokens?: number
+    cacheWriteTokens?: number
+    reasoningTokens?: number
+  }
+  semantics?: {
+    inputIncludesCacheRead: boolean
+    inputIncludesCacheWrite: boolean
+    outputIncludesReasoning: boolean
+  }
+  providerRequestId: string | null
+  finishReason?: "stop" | "length" | "tool_calls"
+  errorClass?: string
+  reason?: string
+  turnId?: string
+}
+
+/** Router + Fusion: the sidecar stopped asking (no answer, or the renderer said bypass). */
+export interface LedgerBypassedEvent {
+  type: "ledger_bypassed"
+  sessionId: string
+  runId?: string
+  reason: string
+  turnId?: string
+}
+
 export interface ToolResultReviewEvent {
   type: "tool_result_review"
   sessionId: string
@@ -1782,6 +1873,9 @@ export type ClaudeEvent =
   | PluginToolExecEvent
   | ProtocolAdapterCancelEvent
   | ToolResultReviewEvent
+  | CallReserveRequestEvent
+  | CallAttemptResultEvent
+  | LedgerBypassedEvent
   | ControlResponseEvent
   | CommandAckEvent
   | SessionApiResponseEvent
@@ -2149,8 +2243,23 @@ export type SessionSurfaceBinding =
    */
   | { kind: "session"; sessionId: string }
 
+/**
+ * Who opened this conversation, when it was not the person at the keyboard.
+ * Absent — the overwhelming majority — means the app's own UI.
+ */
+export type SessionOrigin =
+  /**
+   * A gateway API key created this session through the Run API (ADR-0188 D24).
+   * The key name is denormalised so the conversation rail can say which
+   * integration opened it without a second lookup, and only the key that
+   * created it may reach its runs through the API.
+   */
+  { kind: "gateway-api"; keyId: string; keyName: string }
+
 export interface ChatSession {
   id: string
+  /** Who opened this conversation, when it was not the app's own UI. */
+  origin?: SessionOrigin
   /**
    * Owning workspace (Project) id — Workspace isolation column (Dexie v86).
    * Stamped on create via `resolveScopeProjectId`; the v86 upgrade backfills
@@ -3258,6 +3367,101 @@ export const DEFAULT_LIVE_VOICE_SETTINGS: LiveVoiceSettings = {
 }
 
 export type SubscriptionAccountProvider = string
+
+/**
+ * Sidecar contract of a Router + Fusion ledgered turn (ADR-0188). Deliberately
+ * small: the sidecar learns only enough to ask before each call.
+ */
+export interface RouterFusionLedgerStamp {
+  runId: string
+  /**
+   * `per_call`: the AI SDK loop asks before every model call. `envelope`: the
+   * Claude Agent SDK loops internally, so the renderer settles each assistant
+   * message from the stream and the sidecar re-checks the run before each tool.
+   */
+  mode: "per_call" | "envelope"
+  /** Transport attempts one logical call may use, counting the first. */
+  transportAttempts: number
+  /** The deployment the run pinned for its solver role. */
+  deploymentId: string
+  /** Envelope mode: the USD ceiling handed to the Agent SDK as a backstop. */
+  envelopeMaxBudgetUsd?: number
+}
+
+/** Renderer-side summary of how Router + Fusion routed a turn. */
+export interface RouterFusionTurnStamp {
+  runId: string
+  decisionId: string
+  actionId: string
+  mode: "direct"
+  ruleId: string | null
+  deploymentId: string
+  providerId: string
+  modelId: string
+  budgetMode: "tracked" | "strict"
+  capMicrousd: number
+  /** Conservative hold for the first call; `priceKnown: false` means an estimate. */
+  reserveEstimateMicrousd: number
+  priceKnown: boolean
+  acceptanceProfile: string | null
+  /** The runtime lane the turn dispatches on, which decides the ledger mode. */
+  lane: "ai-sdk" | "claude-agent-sdk"
+}
+
+/**
+ * A chat turn routed to a cascade or panel run (ADR-0188 B3). Renderer-only:
+ * such a turn is never dispatched to the sidecar — the renderer's orchestrator
+ * executes it and the verified answer is written to the session afterwards.
+ */
+export interface RouterFusionRunStamp {
+  runId: string
+  decisionId: string
+  actionId: string
+  mode: "cascade" | "panel"
+  ruleId: string | null
+  /** What the composer asked for: a mode, or Auto (an approved rule row chose it). */
+  requested: "auto" | "cascade" | "panel"
+  /** Role → pinned deployment id (`providerId::modelId`). */
+  roles: Record<string, string>
+  budgetMode: "tracked" | "strict"
+  capMicrousd: number
+  acceptanceProfile: string
+}
+
+/** What a fusion run's journal says it went through, for the run card. Never model output. */
+export interface RouterFusionRunTimeline {
+  phases: Array<{ phase: string; step: string | null; at: number }>
+  calls: { started: number; finished: number; unknown: number }
+  candidates: { members: number | null; rejected: number; evidenceRejected: number }
+  judge: {
+    supported: number
+    rejected: number
+    unverified: number
+    contradictions: number
+    unresolved: number
+  } | null
+  escalated: { reason: string } | null
+  degraded: { reason: string } | null
+  verification: { status: string; level: string } | null
+  compactions: number
+}
+
+/** A finished (or running) chat fusion run, as the answer message carries it. */
+export interface RouterFusionRunSummary {
+  runId: string
+  mode: "cascade" | "panel"
+  actionId: string
+  ruleId: string | null
+  status: string
+  qualityStatus: string | null
+  roles: Record<string, string>
+  capMicrousd: number
+  spentMicrousd: number
+  modelCalls: number
+  costStatus: string
+  errorCode: string | null
+  timeline: RouterFusionRunTimeline
+}
 
 export interface AppSettings {
   id: "singleton"
@@ -5163,6 +5367,19 @@ export interface AppSettings {
    * `modelMappings`. See `lib/routing/auto-tier.ts`.
    */
   autoRouting?: import("@cognia/provider-types/auto-router").AutoRoutingSettings
+  /**
+   * Router + Fusion (ADR-0188) — opt-in by construction. A master switch plus
+   * one switch per surface (chat, gateway runs, gateway passthrough ledger,
+   * agents/workflows, utility ledger, companion), every one default OFF.
+   *
+   * Absent ⇒ off: `lib/db/settings.ts` deliberately seeds no default, so a user
+   * who never opens the section keeps a settings row byte-identical to before
+   * the feature existed. Read it only through
+   * `@cognia/router-fusion/settings/switches:effectiveSurface` (host gate) or
+   * `normalizeRouterFusionSettings` (once a surface is on) — never trust the raw
+   * persisted shape.
+   */
+  routerFusion?: import("@cognia/router-fusion/settings/settings").RouterFusionSettings
   /**
    * When true, on a `session_ended.error` for a turn that resolved via an
    * alias with non-empty `aliasResolution.fallbackEntries`, the renderer

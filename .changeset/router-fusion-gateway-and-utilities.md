@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Extend Router + Fusion to the gateway, background utilities and workflows. Each surface has its own switch and all of them are off by default. When the switch is on, conversation titles, memory and other background model calls, and workflow AI prompt nodes are budgeted and ledgered the same way chat turns are. The local gateway gains a `/v1/runs` API with scoped API keys (set the scopes on each key in Settings → Gateway), replayable event streams, cancel, resume and feedback. Runs started through that API appear in the task cockpit with a new origin filter that names the key behind them, and you can stop them from there. With the gateway passthrough ledger switched on, ordinary proxied requests are also reserved and settled. Every proxied response then carries `x-cognia-ledger`, `x-cognia-attempts` and `x-cognia-run-id` headers. A budget refusal returns 402, and if the ledger is unreachable the request still goes through, marked `bypassed`. Requests for `cognia/*` models get an explicit answer instead of "unknown model".

@@ -10,6 +10,10 @@
  * rejects a key that has spent its budget). A freshly created key's secret is
  * shown exactly once (create returns the full value; every list afterwards is
  * redacted to a fingerprint).
+ *
+ * A key also carries Run API scopes (ADR-0188 D8). A new key gets none, so it
+ * is passthrough-only — the chat endpoints exactly as before — until someone
+ * grants it what it needs here. Nothing about a scopeless key changes.
  */
 
 import { useEffect, useState } from "react"
@@ -49,7 +53,12 @@ import {
   gatewayRevealKey,
   gatewayUpdateKey,
 } from "@/lib/tauri/gateway"
-import type { GatewayApiKey, GatewayApiKeyRedacted } from "@/types/gateway"
+import {
+  GATEWAY_RUN_API_SCOPES,
+  type GatewayApiKey,
+  type GatewayApiKeyRedacted,
+  type GatewayRunApiScope,
+} from "@/types/gateway"
 
 import { GatewayPanelSection, GatewayPanelStack } from "./shared/panel-section"
 
@@ -91,6 +100,7 @@ interface EditDraft {
   expiry: string
   rate: string
   quota: string
+  scopes: GatewayRunApiScope[]
 }
 
 export function GatewayKeysCard({
@@ -177,6 +187,7 @@ export function GatewayKeysCard({
     setEditDraft({
       name: k.name,
       models: k.modelAllowlist.join(", "),
+      scopes: [...k.scopes],
       expiry: toDateInput(k.expiresAtMs),
       rate: k.rateLimitPerMin != null ? String(k.rateLimitPerMin) : "",
       quota: k.quotaTokens != null ? String(k.quotaTokens) : "",
@@ -193,6 +204,7 @@ export function GatewayKeysCard({
       await gatewayUpdateKey(id, {
         name: editDraft.name.trim(),
         modelAllowlist: parseCsv(editDraft.models),
+        scopes: editDraft.scopes,
         // `null` explicitly clears the optional value.
         expiresAtMs: parseExpiry(editDraft.expiry),
         rateLimitPerMin: parsePositiveInt(editDraft.rate),
@@ -345,6 +357,11 @@ export function GatewayKeysCard({
                                 total: k.quotaTokens.toLocaleString(),
                               })
                             : t("keyQuotaNone")}
+                        </span>
+                        <span>·</span>
+                        <span>
+                          {t("keyScopes")}:{" "}
+                          {k.scopes.length === 0 ? t("keyScopesNone") : k.scopes.join(", ")}
                         </span>
                         <span>·</span>
                         <span>
@@ -501,6 +518,37 @@ export function GatewayKeysCard({
                                 }
                               />
                               <FieldDescription>{t("keyQuotaHelp")}</FieldDescription>
+                            </Field>
+                            <Field className="@lg/gateway-pane:col-span-2">
+                              <FieldLabel>{t("keyScopes")}</FieldLabel>
+                              <div
+                                className="flex flex-wrap gap-x-4 gap-y-2"
+                                data-testid={`gateway-key-scopes-${k.id}`}
+                              >
+                                {GATEWAY_RUN_API_SCOPES.map((scope) => (
+                                  <label
+                                    key={scope}
+                                    className="flex items-center gap-2 text-xs"
+                                    htmlFor={`edit-scope-${k.id}-${scope}`}
+                                  >
+                                    <Switch
+                                      id={`edit-scope-${k.id}-${scope}`}
+                                      checked={editDraft.scopes.includes(scope)}
+                                      onCheckedChange={(on) =>
+                                        setEditDraft({
+                                          ...editDraft,
+                                          scopes: on
+                                            ? [...editDraft.scopes, scope]
+                                            : editDraft.scopes.filter((held) => held !== scope),
+                                        })
+                                      }
+                                      aria-label={scope}
+                                    />
+                                    <span className="font-mono">{scope}</span>
+                                  </label>
+                                ))}
+                              </div>
+                              <FieldDescription>{t("keyScopesHelp")}</FieldDescription>
                             </Field>
                             <div className="flex flex-wrap items-center gap-2 @lg/gateway-pane:col-span-2">
                               <Button size="sm" onClick={() => void onSaveEdit(k.id)}>

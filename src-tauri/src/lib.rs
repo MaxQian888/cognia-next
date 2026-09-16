@@ -80,6 +80,7 @@ pub use cognia_gateway as gateway;
 // ADR-0067 Phase 2 — extracted to `crates/cognia-git`; re-aliased so every
 // `crate::git::…` reference (incl. `generate_handler!` + `.manage()`) resolves.
 pub use cognia_git as git;
+mod gateway_brain_bridge;
 mod github;
 pub mod headless;
 mod hooks;
@@ -579,6 +580,18 @@ pub fn run() {
             files::seed_default_allowed_roots();
             task_workspace::start_workspace_maintenance();
 
+            // Give the gateway its link to the brain (ADR-0188 D9). Installing
+            // it does not switch anything on: `/v1/runs` stays refused until the
+            // renderer pushes a snapshot saying the `gatewayRuns` surface is on.
+            {
+                use tauri::Manager as _;
+                app.state::<gateway::GatewayState>()
+                    .runs
+                    .install_bridge(gateway_brain_bridge::DesktopBrainBridge::new(
+                        app.handle().clone(),
+                    ));
+            }
+
             // Hand the WASM plugin host its Tauri-backed surfaces (ADR-0013,
             // api-version 0.2). Clipboard and notifications are served
             // in-process; AI and workflow go through the renderer bridge this
@@ -697,6 +710,7 @@ pub fn run() {
             claude::commands::claude_plugin_tool_response,
             claude::commands::claude_plugin_hook_response,
             claude::commands::claude_tool_result_decision,
+            claude::commands::claude_call_reserve_decision,
             claude::commands::claude_protocol_adapter_message,
             claude::commands::claude_close_session,
             claude::commands::claude_session_control,

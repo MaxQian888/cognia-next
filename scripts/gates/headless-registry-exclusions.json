@@ -34,6 +34,10 @@
       "symbols": ["installRemoteNotificationListener"],
       "reason": "The CLIENT side of `notification://remote` \u2014 it ingests frames a headless server publishes into this device's Notification Center. The brain is the publisher (lib/notifications/runtime.ts -> remote_notification_publish) and must not subscribe to itself. Already recorded in the roster doc at lib/headless/runtimes/index.ts."
     },
+    "components/providers/initializers/router-fusion-initializer.tsx": {
+      "symbols": ["startBreakerPersistence"],
+      "reason": "Persists Router + Fusion breaker trips (ADR-0188) through lib/router-fusion/settings/save-router-fusion-settings.ts, which writes via the settings store's save path, and announces them through the window's notification center. The brain never loads that store, so running it there would write through an empty store. A trip the brain records still takes the surface out for the life of the brain process; it just does not survive a restart. Recovery and retention, the initializer's other two jobs, ARE registered for the brain in lib/headless/runtimes/router-fusion.ts, reading the account row directly, because since B2 the brain hosts Run API, passthrough and workflow runs of its own."
+    },
     "components/providers/initializers/selection-toolbar-initializer.tsx": {
       "symbols": ["subscribeQuickActions", "watchSelectionSpeech"],
       "reason": "Reads the OS-level text selection through the desktop selection-perception bus (ADR-0093/0095). Desktop selection awareness is one of ADR-0059 D7's recorded physical boundaries: there is no OS selection to observe in a container. subscribeQuickActions keeps the selection overlay's action list in step with the plugin quick-action registry. It exists to repaint a native always-on-top window over whatever application currently owns the OS text selection, which is the same recorded ADR-0059 D7 physical boundary as watchSelectionSpeech above. A brain has no window server to paint on and no selection to act on, so the subscription would fire into nothing."

@@ -46,6 +46,7 @@ import {
 } from "@/lib/accounts/quick-unlock/client"
 import { withLockoutCleared } from "@/lib/accounts/quick-unlock/types"
 import type { QuickUnlockMethod } from "@/lib/accounts/quick-unlock/types"
+import { withFusionDatabase } from "@/lib/router-fusion/gate/database-name"
 import { AccountUnlockError, asUnlockError } from "@/lib/accounts/account-unlock-error"
 import { publishUnlockStage } from "@/lib/accounts/unlock-progress"
 import { isCapacitor, isTauri } from "@/lib/platform/detect"
@@ -1340,10 +1341,11 @@ function assertPasswordProvided(password: string | undefined): asserts password 
   }
 }
 
-async function dropDexieAccountDatabase(accountId: string): Promise<void> {
+/** Delete an account's databases, the Router + Fusion ledger beside the encrypted one included. */
+export async function dropDexieAccountDatabase(accountId: string): Promise<void> {
   for (const databaseName of [
     accountDatabaseName(accountId),
-    encryptedAccountDatabaseName(accountId),
+    ...withFusionDatabase(encryptedAccountDatabaseName(accountId)),
   ]) {
     await Dexie.delete(databaseName)
     if (await Dexie.exists(databaseName)) {

@@ -13,6 +13,7 @@ import {
   GitMerge,
   Globe,
   Layers,
+  Route,
   Shield,
   Sparkles,
   Wand2,
@@ -33,9 +34,11 @@ import { ReliabilitySection } from "./reliability-section"
 import { SemanticRoutingSection } from "./semantic-routing-section"
 import { AutoRoutingSection } from "./auto-routing-section"
 import { DifficultyRoutingSection } from "./difficulty-routing-section"
+import { RouterFusionSection } from "./router-fusion-section"
 
 export function RoutingConfigPanel() {
   const t = useTranslations("providers.routingView")
+  const tRouterFusion = useTranslations("routerFusion.settings")
 
   return (
     <div className="space-y-5">
@@ -132,6 +135,19 @@ export function RoutingConfigPanel() {
         defaultOpen={false}
       >
         <AutoRoutingSection />
+      </SettingsCard>
+
+      <SettingsDivider />
+
+      <SettingsCard
+        icon={<Route className="h-4 w-4" />}
+        title={tRouterFusion("title")}
+        description={tRouterFusion("desc")}
+        badge={tRouterFusion("badge")}
+        collapsible
+        defaultOpen={false}
+      >
+        <RouterFusionSection />
       </SettingsCard>
 
       <SettingsDivider />

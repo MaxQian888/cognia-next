@@ -208,11 +208,14 @@ it("deletes every physical target database before removing registry metadata", a
     databaseExists: async () => false,
   })
 
+  // Each encrypted target database takes its Router + Fusion ledger with it.
   expect(events).toEqual([
     "cognia-account-acct_runtime-target-web-standalone",
     "cognia-account-acct_runtime-target-web-standalone-encrypted-v1",
+    "cognia-account-acct_runtime-target-web-standalone-encrypted-v1-router-fusion-v1",
     "cognia-account-acct_runtime-target-desktop-studio",
     "cognia-account-acct_runtime-target-desktop-studio-encrypted-v1",
+    "cognia-account-acct_runtime-target-desktop-studio-encrypted-v1-router-fusion-v1",
     "metadata",
   ])
   expect(result).toEqual({
@@ -221,8 +224,10 @@ it("deletes every physical target database before removing registry metadata", a
     deletedDatabases: [
       "cognia-account-acct_runtime-target-web-standalone",
       "cognia-account-acct_runtime-target-web-standalone-encrypted-v1",
+      "cognia-account-acct_runtime-target-web-standalone-encrypted-v1-router-fusion-v1",
       "cognia-account-acct_runtime-target-desktop-studio",
       "cognia-account-acct_runtime-target-desktop-studio-encrypted-v1",
+      "cognia-account-acct_runtime-target-desktop-studio-encrypted-v1-router-fusion-v1",
     ],
     registryRowsDeleted: 2,
   })
@@ -245,6 +250,28 @@ it("fails before metadata removal when physical deletion cannot be verified", as
       databaseExists: jest.fn(async () => true),
     })
   ).rejects.toThrow(/could not be verified/)
+  expect(registry.deleteAccountTargets).not.toHaveBeenCalled()
+})
+
+it("keeps the registry rows when a Router + Fusion ledger survives its delete", async () => {
+  const registry = {
+    getActiveTarget: jest.fn(),
+    ensureStandaloneTarget: jest.fn(),
+    activateTarget: jest.fn(),
+    listTargets: jest.fn(async () => [standalone]),
+    deleteTarget: jest.fn(),
+    deleteAccountTargets: jest.fn(),
+  }
+
+  await expect(
+    removeAccountRuntimeTargets("acct_runtime", {
+      registry,
+      deleteDatabase: jest.fn(async () => {}),
+      databaseExists: jest.fn(async (name: string) => name.endsWith("-router-fusion-v1")),
+    })
+  ).rejects.toThrow(
+    "Runtime target database deletion could not be verified: cognia-account-acct_runtime-target-web-standalone-encrypted-v1-router-fusion-v1"
+  )
   expect(registry.deleteAccountTargets).not.toHaveBeenCalled()
 })
 
@@ -712,7 +739,8 @@ describe("default runtime lifecycle boundaries", () => {
   it("verifies account registry removal after default physical database deletion", async () => {
     mockRegistry.listTargets.mockResolvedValueOnce([standalone]).mockResolvedValueOnce([])
     expect((await removeAccountRuntimeTargets("acct_runtime")).registryRowsDeleted).toBe(1)
-    expect(deleteDatabase).toHaveBeenCalledTimes(2)
+    // Plaintext, encrypted, and the encrypted database's Router + Fusion ledger.
+    expect(deleteDatabase).toHaveBeenCalledTimes(3)
     mockRegistry.listTargets.mockResolvedValue([standalone])
     await expect(removeAccountRuntimeTargets("acct_runtime")).rejects.toThrow(
       "registry deletion could not be verified"

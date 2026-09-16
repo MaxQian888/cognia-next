@@ -141,6 +141,20 @@ describe("resetLocalDatabase", () => {
       resetLocalDatabase("gone", deps({ databaseExists: jest.fn().mockResolvedValue(false) }))
     ).resolves.toBeUndefined()
   })
+
+  it("deletes the Router + Fusion ledger beside the refused database, verified", async () => {
+    const deleteDatabase = jest.fn().mockResolvedValue(undefined)
+    await expect(
+      resetLocalDatabase(
+        "refused",
+        deps({
+          deleteDatabase,
+          databaseExists: jest.fn(async (name: string) => name === "refused-router-fusion-v1"),
+        })
+      )
+    ).rejects.toThrow("Local database refused-router-fusion-v1 could not be deleted.")
+    expect(deleteDatabase.mock.calls).toEqual([["refused"], ["refused-router-fusion-v1"]])
+  })
 })
 
 describe("against a real IndexedDB", () => {
@@ -189,5 +203,19 @@ describe("against a real IndexedDB", () => {
     expect(row.layout).toBe(STORAGE_LAYOUT)
     expect(row.schemaVersion).toBe(CURRENT_SCHEMA_VERSION)
     db.close()
+  })
+
+  it("resets a real database together with its Router + Fusion ledger", async () => {
+    for (const name of [legacyName, `${legacyName}-router-fusion-v1`]) {
+      const db = new Dexie(name)
+      db.version(1).stores({ rows: "id" })
+      await db.open()
+      db.close()
+    }
+
+    await resetLocalDatabase(legacyName)
+
+    expect(await Dexie.exists(legacyName)).toBe(false)
+    expect(await Dexie.exists(`${legacyName}-router-fusion-v1`)).toBe(false)
   })
 })

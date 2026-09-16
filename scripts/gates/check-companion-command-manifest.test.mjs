@@ -107,7 +107,9 @@ test("the generated Rust table must carry the manifest's contract version and ro
       "\n"
     )
   assert.deepEqual(checkGeneratedTable(manifest, table(3, 2)), [])
-  assert(checkGeneratedTable(manifest, table(2, 2))[0].includes("CONTRACT_VERSION 2 lags manifest 3"))
+  assert(
+    checkGeneratedTable(manifest, table(2, 2))[0].includes("CONTRACT_VERSION 2 lags manifest 3")
+  )
   assert(checkGeneratedTable(manifest, table(3, 1))[0].includes("1 rows for 2 descriptors"))
   assert(checkGeneratedTable(manifest, "")[0].includes("missing CONTRACT_VERSION"))
 })

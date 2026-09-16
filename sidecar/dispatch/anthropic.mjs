@@ -51,6 +51,7 @@ import {
 } from "./tool-search-policy.mjs"
 import { buildLspHooks } from "./lsp-hooks.mjs"
 import { buildAgentHooks, mergeHookMaps } from "./agent-hooks.mjs"
+import { buildLedgerToolHooks, createCallLedgerGate } from "./call-ledger-gate.mjs"
 import { createNativeHookExecutor } from "./hook-native-executor.mjs"
 import { makeLazyLspResolver } from "./lsp-resolver-factory.mjs"
 import { makeLazyCodeGraphResolver } from "./codegraph-resolver-factory.mjs"
@@ -228,10 +229,12 @@ export function enforceAnthropicPermissionChannel(options, sendOptions = {}, ali
  *   denied" from "the waiter died with the turn" instead of a silent deny.
  */
 export function drainPendingRoundTrips(
-  { pendingApprovals, pendingPluginToolCalls } = {},
+  { pendingApprovals, pendingPluginToolCalls, ledgerGate } = {},
   reason = "interrupted",
   notifyInterrupted = undefined
 ) {
+  // A Router + Fusion envelope check waiting on a renderer that is gone.
+  ledgerGate?.drain(reason)
   if (pendingApprovals) {
     for (const [id, p] of pendingApprovals) {
       pendingApprovals.delete(id)
@@ -572,6 +575,25 @@ export function dispatchAnthropic(
   // Shared with the ai-sdk path's permission gate — see dispatch/doom-loop.mjs.
   const doomGuard = createDoomLoopGuard()
 
+  // Router + Fusion envelope mode (ADR-0188). Active only for a send carrying a
+  // ledger stamp; the SDK's own model fallback and hidden transport retries are
+  // off for such a turn, and every tool use re-checks the run with the renderer.
+  const ledgerGate = createCallLedgerGate({
+    ledger: sendOptions.ledger?.mode === "envelope" ? sendOptions.ledger : null,
+    sessionId,
+    emit,
+    log,
+  })
+  const sdkFallbackModel = ledgerGate.active
+    ? undefined
+    : (sendOptions.execution?.modelBindings?.fast ?? sendOptions.fallbackModel)
+  const sdkMaxBudgetUsd =
+    ledgerGate.active && typeof sendOptions.ledger?.envelopeMaxBudgetUsd === "number"
+      ? Math.min(sendOptions.maxBudgetUsd ?? Infinity, sendOptions.ledger.envelopeMaxBudgetUsd)
+      : sendOptions.maxBudgetUsd
+  /** Late-bound so a ledger refusal inside a hook can stop the query built below. */
+  let interruptForLedger = () => {}
+
   // --- Runtime tool-search (deferred loading) policy -----------------------
   // claude-agent-sdk `alwaysLoad` semantics: when tool search is enabled the
   // bundled CLI defers MCP-server tools behind tool search, keeping only the
@@ -786,6 +808,9 @@ export function dispatchAnthropic(
   // was inert without the attach; the renderer now warns at resolve time
   // instead of silently dropping (see `lib/claude/build-options.ts`).
   const baseEnv = buildSubprocessEnv(sendOptions)
+  // A ledgered envelope must not hide transport retries inside the CLI: each
+  // retry is another billed request the ledger never saw.
+  if (ledgerGate.active) baseEnv.CLAUDE_CODE_MAX_RETRIES = "0"
 
   // M5 Computer Use — merge `sendOptions.appendHeaders` into
   // ANTHROPIC_DEFAULT_HEADERS. The renderer's `resolveSendOptions` populates
@@ -816,10 +841,10 @@ export function dispatchAnthropic(
       sendOptions.execution.modelBindings.primary !== "inherit"
         ? sendOptions.execution.modelBindings.primary
         : sendOptions.model,
-    fallbackModel: sendOptions.execution?.modelBindings?.fast ?? sendOptions.fallbackModel,
+    fallbackModel: sdkFallbackModel,
     mcpServers: mergedMcpServers,
     allowedTools: modelAllowedTools,
-    maxBudgetUsd: sendOptions.maxBudgetUsd,
+    maxBudgetUsd: sdkMaxBudgetUsd,
   })
 
   // Allowlist construction — only fields listed below reach the SDK. This is
@@ -836,7 +861,7 @@ export function dispatchAnthropic(
       sendOptions.execution.modelBindings.primary !== "inherit"
         ? sendOptions.execution.modelBindings.primary
         : sendOptions.model,
-    fallbackModel: sendOptions.execution?.modelBindings?.fast ?? sendOptions.fallbackModel,
+    fallbackModel: sdkFallbackModel,
     // SDK 0.3.x dropped the top-level `appendSystemPrompt` from the public
     // `Options` type. Fold the stable base + dynamic appended sections into the
     // typed `systemPrompt: string | string[]` form (array = separate system
@@ -851,7 +876,7 @@ export function dispatchAnthropic(
     // Hard USD ceiling for this single invocation. The SDK halts and emits a
     // `result` with subtype `error_max_budget_usd` when crossed. Mapped from the
     // active goal's `maxBudgetUsd` by `resolveSendOptions`.
-    maxBudgetUsd: sendOptions.maxBudgetUsd,
+    maxBudgetUsd: sdkMaxBudgetUsd,
     // Deprecated `maxThinkingTokens` → typed `thinking` config (ThinkingEnabled).
     // The ai-sdk path still consumes `sendOptions.maxThinkingTokens` directly,
     // so the translation is localized here to the Anthropic dispatcher.
@@ -905,6 +930,10 @@ export function dispatchAnthropic(
         executeNativeHandler: executeNativeHook,
         pendingPluginHookCalls,
         newId: () => randomUUID(),
+      }),
+      buildLedgerToolHooks({
+        gate: ledgerGate,
+        onRefused: () => interruptForLedger(),
       })
     ),
 
@@ -1017,6 +1046,14 @@ export function dispatchAnthropic(
     { emit, sessionId, operationName: "invoke_agent", providerName: "anthropic" }
   )
 
+  // A ledger refusal inside the PreToolUse hook stops the query: the SDK must
+  // not make another model call on a run the ledger closed.
+  interruptForLedger = () => {
+    void Promise.resolve()
+      .then(() => q.interrupt())
+      .catch((err) => log("warn", `ledger interrupt failed: ${err?.message ?? err}`))
+  }
+
   // First-connection self-healing: the SDK's `system/init` event reports each
   // MCP server's connect status; a server that failed its FIRST connect (cold
   // npx install, waking remote endpoint) is auto-reconnected once instead of
@@ -1082,14 +1119,19 @@ export function dispatchAnthropic(
     // `q.interrupt()` doesn't settle `pendingPluginToolCalls`, so without this a
     // closed/crashed renderer would keep the turn alive until the per-call
     // timeout. See `drainPendingRoundTrips`.
+    /** Router + Fusion: resolve a pending envelope check (`call_reserve_decision`). */
+    resolveCallReserve: (message) => ledgerGate.resolveDecision(message),
     drainPending: (reason) =>
-      drainPendingRoundTrips({ pendingApprovals, pendingPluginToolCalls }, reason, (requestId) =>
-        emit({
-          type: "permission_interrupted",
-          sessionId,
-          requestId,
-          reason: typeof reason === "string" && reason !== "" ? reason : "interrupted",
-        })
+      drainPendingRoundTrips(
+        { pendingApprovals, pendingPluginToolCalls, ledgerGate },
+        reason,
+        (requestId) =>
+          emit({
+            type: "permission_interrupted",
+            sessionId,
+            requestId,
+            reason: typeof reason === "string" && reason !== "" ? reason : "interrupted",
+          })
       ),
     pendingApprovals,
     pendingPluginToolCalls,

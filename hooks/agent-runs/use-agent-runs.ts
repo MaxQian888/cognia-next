@@ -46,7 +46,7 @@ import {
   type UnifiedExecutionRow,
 } from "@/lib/execution/monitor-model"
 import type { ExecutionLegSnapshot } from "@/lib/execution/types"
-import type { ExecutionRun } from "@/types/execution/run"
+import type { ExecutionRun, ExecutionRunOrigin } from "@/types/execution/run"
 import type { WorkflowRunRow } from "@/types/workflow/visual"
 import type { TaskExecution } from "@/types/scheduler"
 import type { Goal } from "@/types/goal"
@@ -60,6 +60,8 @@ export interface UseExecutionCockpitOptions {
   teamId?: string
   /** Only this Bot installation's runs. See `CockpitFilter.botInstallationId`. */
   botInstallationId?: string
+  /** Only the runs asked for from one place. See `CockpitFilter.origin`. */
+  origin?: ExecutionRunOrigin
   projectId?: string
   /** Run id carried by a deep link; fetched independently of the page ceiling. */
   selectedId?: string
@@ -171,8 +173,16 @@ export function useExecutionCockpit(
       ...(options.query ? { query: options.query } : {}),
       ...(options.teamId ? { teamId: options.teamId } : {}),
       ...(options.botInstallationId ? { botInstallationId: options.botInstallationId } : {}),
+      ...(options.origin ? { origin: options.origin } : {}),
     }),
-    [options.statusGroup, options.kind, options.query, options.teamId, options.botInstallationId]
+    [
+      options.statusGroup,
+      options.kind,
+      options.query,
+      options.teamId,
+      options.botInstallationId,
+      options.origin,
+    ]
   )
 
   // One call owns the list AND every number above it, so a chip cannot report

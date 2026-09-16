@@ -83,10 +83,14 @@
   "filters": {
     "all": "全部",
     "allKinds": "全部类型",
+    "allOrigins": "全部来源",
     "failed": "失败",
     "finished": "已结束",
     "kindLabel": "按类型筛选",
     "kindOption": "{label}（{count}）",
+    "originGatewayApi": "网关 API",
+    "originLabel": "按来源筛选",
+    "originLocal": "本机",
     "running": "进行中",
     "statusLabel": "按状态筛选",
     "waiting": "等待中"
@@ -97,6 +101,7 @@
     "chat": "对话",
     "connector": "连接器",
     "delegation": "委派",
+    "fusion": "路由运行",
     "goal": "目标",
     "job": "后台任务",
     "other": "其他",
@@ -267,5 +272,6 @@
     "publication": "完整发布内容",
     "result": "已保存的结果",
     "fileMode": "文件权限模式"
-  }
+  },
+  "originActor": "密钥 {name}"
 }

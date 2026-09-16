@@ -25,6 +25,7 @@ import type {
   GatewayProviderSnapshot,
   GatewayModelMetadata,
   GatewayRotationStrategy,
+  GatewayRouterFusionSwitches,
   GatewayRoutingSnapshot,
 } from "@/types/gateway"
 import type { ModelMapping } from "@cognia/provider-types/model-mapping"
@@ -32,6 +33,7 @@ import type { RoutingStrategy } from "@cognia/provider-types/auto-router"
 import { getCatalogModelMetadata } from "@/lib/ai/providers/models-dev-sync"
 import { resolveModelPricingUsd } from "@/lib/usage/pricing"
 import { getProviderRoutingRuntimeAdapters } from "@cognia/provider-routing/runtime-adapters"
+import { effectiveSurface } from "@cognia/router-fusion/settings/switches"
 
 export interface SnapshotSettingsSlice {
   defaultProvider?: string
@@ -44,6 +46,8 @@ export interface SnapshotSettingsSlice {
     providerConstraints?: import("@cognia/provider-types/model-mapping").ProviderConstraint[]
     circuitBreaker?: import("@cognia/provider-types/model-mapping").RoutingCircuitBreakerSettings
   }
+  /** Read for the Router + Fusion surface switches the gateway serves (ADR-0188 D36). */
+  routerFusion?: AppSettings["routerFusion"]
 }
 
 /**
@@ -440,6 +444,31 @@ export function buildGatewaySnapshot(
     ...(profileMeta !== undefined
       ? { profileVersion: profileMeta.profileVersion, authority: "renderer" as const }
       : {}),
+    // The Router + Fusion switches ride the snapshot the gateway already gets,
+    // so there is no second channel to keep in step. Both off is the default
+    // and what every pre-B2 snapshot means.
+    routerFusion: routerFusionSwitchesOf(slice.routerFusion),
+  }
+}
+
+/**
+ * The two gateway surfaces, read by the same check every other call site uses:
+ * literally `true` for the master switch and for the surface, or off (ADR-0188
+ * D36/D37).
+ *
+ * Deliberately the switch, not the breaker. A tripped surface is still "on" as
+ * far as the gateway knows, and the brain answers for it: `/v1/runs` then gets
+ * `503` rather than the `403` a switched-off host gives, and a passthrough
+ * request is told `bypassed:breaker_tripped` rather than `surface_off`. Folding
+ * the breaker in here would make both answers lie about why.
+ */
+export function routerFusionSwitchesOf(
+  settings: AppSettings["routerFusion"] | undefined
+): GatewayRouterFusionSwitches {
+  const switches = settings as Parameters<typeof effectiveSurface>[0]
+  return {
+    runsEnabled: effectiveSurface(switches, "gatewayRuns"),
+    passthroughLedgerEnabled: effectiveSurface(switches, "gatewayPassthroughLedger"),
   }
 }
 
@@ -510,9 +539,7 @@ export async function loadSnapshotProfileMeta(): Promise<SnapshotProfileMeta | u
 }
 
 /** Resolves a subscription-vault credential for a provider id, or null. */
-export type VaultCredentialResolver = (
-  providerId: string
-) => Promise<{
+export type VaultCredentialResolver = (providerId: string) => Promise<{
   apiKey: string
   baseURL: string
   headers?: Record<string, string>

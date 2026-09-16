@@ -239,6 +239,10 @@ struct AppState {
     /// Upstream HTTP clients, one per live proxy route.
     http: Arc<UpstreamClients>,
     response_history: Arc<parking_lot::Mutex<ResponseHistory>>,
+    /// The Run API's brain link and surface switches (ADR-0188 B2). With the
+    /// surface off — the default — the merged routes refuse without ever
+    /// touching it.
+    runs: crate::runs::RunsState,
 }
 
 struct AccountBoundHost {
@@ -505,6 +509,9 @@ pub async fn spawn_server(
         on_request,
         tickets,
         leases,
+        // No host attached this one: `/v1/runs` answers 503 rather than reading
+        // a state it does not have.
+        crate::runs::RunsState::detached(),
     )
     .await
 }
@@ -525,6 +532,7 @@ pub async fn spawn_server_with_account(
     on_request: Arc<dyn RequestObserver>,
     tickets: Arc<RouteTicketRegistry>,
     leases: Arc<CredentialLeaseMap>,
+    runs: crate::runs::RunsState,
 ) -> Result<ServerHandle, GatewayError> {
     // Snapshot the bind-time config (these apply only on start).
     let (port, bind_interface, allowlist_raw, rate_limit_per_min, connect_timeout_secs) = {
@@ -591,6 +599,7 @@ pub async fn spawn_server_with_account(
         leases,
         http,
         response_history: Arc::new(parking_lot::Mutex::new(ResponseHistory::default())),
+        runs: runs.clone(),
     };
     // Cloned before the router consumes `state`; both share the same Arcs, so a
     // probe run through this sees the live cooldown / in-flight state.
@@ -604,6 +613,9 @@ pub async fn spawn_server_with_account(
         .route("/v1/messages/count_tokens", post(anthropic_count_tokens))
         .route("/v1/embeddings", post(openai_embeddings))
         .route("/v1/responses", post(openai_responses))
+        // `/v1/runs` shares this router's Host, origin, allowlist, key and
+        // rate-limit checks; what it adds is the scope check and the brain.
+        .merge(crate::runs::routes().with_state(runs.clone()))
         .layer(from_fn_with_state(state.clone(), middleware))
         .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES));
 
@@ -1111,6 +1123,11 @@ async fn middleware(
             .unwrap_or("")
             .to_string();
         let ticket_id = ticket.ticket_id.clone();
+        // A route-ticket caller is an agent borrowing credentials, not a Run API
+        // actor: no scopes, so every run verb refuses it by the ordinary rule.
+        request
+            .extensions_mut()
+            .insert(crate::runs::RunActor::default());
         request.extensions_mut().insert(ReqCtx {
             account_generation: account.generation,
             request_id: request_id.clone(),
@@ -1156,10 +1173,19 @@ async fn middleware(
                     k.model_allowlist.clone(),
                     k.rate_limit_per_min,
                     k.is_over_quota(),
+                    // The Run API's identity for this key (ADR-0188 D8). A key
+                    // written before scopes existed carries none, so it reaches
+                    // the chat endpoints exactly as before and no run verb.
+                    crate::runs::RunActor {
+                        key_id: Some(k.id.clone()),
+                        key_name: k.name.clone(),
+                        scopes: k.scopes.clone(),
+                    },
                 )
             })
     };
-    let Some((idx, key_id, key_model_allowlist, key_rate_limit, over_quota)) = matched else {
+    let Some((idx, key_id, key_model_allowlist, key_rate_limit, over_quota, run_actor)) = matched
+    else {
         return reject(StatusCode::UNAUTHORIZED, "invalid token", None);
     };
 
@@ -1203,6 +1229,7 @@ async fn middleware(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_string();
+    request.extensions_mut().insert(run_actor);
     request.extensions_mut().insert(ReqCtx {
         account_generation: account.generation,
         request_id,
@@ -1252,7 +1279,11 @@ async fn run_with_account_boundary(
     Response::from_parts(parts, Body::from_stream(stream))
 }
 
-async fn list_models(State(state): State<AppState>, Extension(ctx): Extension<ReqCtx>) -> Response {
+async fn list_models(
+    State(state): State<AppState>,
+    Extension(ctx): Extension<ReqCtx>,
+    actor: Option<Extension<crate::runs::RunActor>>,
+) -> Response {
     let state = state.for_request(&ctx);
     let snapshot = state.snapshot.read().clone();
     let Some(snapshot) = snapshot else {
@@ -1284,7 +1315,15 @@ async fn list_models(State(state): State<AppState>, Extension(ctx): Extension<Re
             })
             .collect()
     } else {
-        listable_models(&snapshot, cfg.hide_raw_provider_models, &visible)
+        let mut data = listable_models(&snapshot, cfg.hide_raw_provider_models, &visible);
+        // The `cognia/*` virtual models, for a key that may run them (ADR-0188 D13).
+        let actor = actor.map(|Extension(actor)| actor).unwrap_or_default();
+        data.extend(
+            crate::virtual_models::model_documents(state.runs.runs_enabled(), &actor)
+                .into_iter()
+                .filter(|doc| doc["id"].as_str().is_some_and(|id| ctx_allows(&ctx, id))),
+        );
+        data
     };
     Json(json!({ "object": "list", "data": data })).into_response()
 }
@@ -1292,9 +1331,10 @@ async fn list_models(State(state): State<AppState>, Extension(ctx): Extension<Re
 async fn get_model(
     State(state): State<AppState>,
     Extension(ctx): Extension<ReqCtx>,
+    actor: Option<Extension<crate::runs::RunActor>>,
     axum::extract::Path(model): axum::extract::Path<String>,
 ) -> Response {
-    let response = list_models(State(state), Extension(ctx)).await;
+    let response = list_models(State(state), Extension(ctx), actor).await;
     if !response.status().is_success() {
         return response;
     }
@@ -1524,8 +1564,68 @@ fn ctx_allows(ctx: &ReqCtx, model: &str) -> bool {
 async fn openai_chat(
     State(state): State<AppState>,
     Extension(ctx): Extension<ReqCtx>,
+    actor: Option<Extension<crate::runs::RunActor>>,
+    headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
+    // ADR-0188 D13: a `cognia/*` model on this endpoint is a run, served through
+    // the strict compat subset. Every other endpoint refuses one (`handle_chat`).
+    if let Some(model) = body["model"].as_str().map(str::to_string) {
+        if let crate::virtual_models::VirtualModelVerdict::Serve { .. } =
+            crate::virtual_models::classify(&model, state.runs.runs_enabled())
+        {
+            let state = state.for_request(&ctx);
+            // A key limited to named models reaches a virtual one only by name,
+            // as it would any other model.
+            if !ctx_allows(&ctx, &model) {
+                return crate::runs::error_response(
+                    StatusCode::FORBIDDEN,
+                    "MODEL_NOT_PERMITTED",
+                    &format!("this key is not permitted to use model \"{model}\""),
+                    None,
+                );
+            }
+            let actor = actor.map(|Extension(actor)| actor).unwrap_or_default();
+            let idempotency_key = headers
+                .get("idempotency-key")
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_string);
+            let stream = body["stream"].as_bool() == Some(true);
+            let started = Instant::now();
+            // The answer's tokens draw down the key's quota, as a passthrough
+            // request's do.
+            let keys = state.keys.clone();
+            let key_id = ctx.key_id.clone();
+            let on_usage: crate::virtual_models::UsageSink = Box::new(move |tokens| {
+                let consumed = i64::try_from(tokens).unwrap_or(i64::MAX);
+                if let (true, Some(key_id)) = (consumed > 0, key_id.as_deref()) {
+                    let _ = api_keys::add_quota_usage(&mut keys.write(), key_id, consumed);
+                }
+            });
+            let response = crate::virtual_models::serve_chat(
+                &state.runs,
+                &actor,
+                body,
+                idempotency_key,
+                on_usage,
+            )
+            .await;
+            emit_request_log_ctx(
+                state.host.as_ref(),
+                &ctx,
+                Some(&model),
+                None,
+                response.status().as_u16(),
+                started.elapsed().as_millis() as u64,
+                None,
+                None,
+                None,
+                stream,
+                None,
+            );
+            return response;
+        }
+    }
     handle_chat(state, ctx, InboundFormat::OpenAiChat, body).await
 }
 
@@ -2784,6 +2884,34 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
             None,
         );
     };
+    // `cognia/*` names a routing MODE, not a model (ADR-0188 D13). Catch it
+    // before model resolution: falling through would report "unknown model",
+    // which tells a caller nothing about the switch it has to turn on or the
+    // endpoint that serves what it asked for.
+    let verdict = match crate::virtual_models::classify(&model, state.runs.runs_enabled()) {
+        // Served only by `/v1/chat/completions`, which answers before this
+        // point; any other endpoint reaching here has no compat subset.
+        crate::virtual_models::VirtualModelVerdict::Serve { .. } => {
+            crate::virtual_models::chat_completions_only()
+        }
+        other => other,
+    };
+    if let crate::virtual_models::VirtualModelVerdict::Refuse {
+        status,
+        code,
+        message,
+    } = verdict
+    {
+        return logged_error(
+            &state,
+            &ctx,
+            format,
+            StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_REQUEST),
+            &code,
+            &message,
+            None,
+        );
+    }
     let ticket = ctx.ticket.clone();
     // Ticket requests skip the exposure guard: their model surface was frozen
     // and validated at mint, and live exposure edits must not alter it.
@@ -2935,6 +3063,29 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
     let mut failures: Vec<String> = Vec::new();
     let attempt_limit = route_attempt_limit(&cfg, &snapshot, candidates.len());
     let mut retry_wait_remaining_ms = cfg.max_retry_wait_ms;
+    // ADR-0188 D13: with `gatewayPassthroughLedger` on, every upstream attempt is
+    // reserved before it is sent and settled from the usage this handler already
+    // reads. With it off nothing below asks the brain anything, so the proxy path
+    // is byte-for-byte what it was (D37).
+    let ledger_enabled = state.runs.passthrough_ledger_enabled();
+    let ledger_bridge = state.runs.bridge();
+    // Resolved once, before any await: `state.keys` is a parking_lot guard, and
+    // the name is what the run's own history shows for "who asked" — a copy,
+    // because the key can be renamed or revoked while the run is still listed.
+    let ledger_key_name = ctx
+        .key_id
+        .as_ref()
+        .and_then(|id| {
+            let keys = state.keys.read();
+            keys.iter()
+                .find(|key| &key.id == id)
+                .map(|key| key.name.clone())
+        })
+        .unwrap_or_default();
+    let mut ledger_header =
+        crate::passthrough_ledger::LedgerHeader::Bypassed("surface_off".to_string());
+    let mut ledger_run_id: Option<String> = None;
+    let mut attempts_made: usize = 0;
     for (attempt_index, candidate) in candidates.iter().take(attempt_limit).enumerate() {
         let started = Instant::now();
 
@@ -3095,10 +3246,80 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
             }
         }
 
+        // Reserved here and nowhere earlier: every bail above this line sent
+        // nothing, so there is nothing to settle for them.
+        let has_more_candidates = attempt_index + 1 < attempt_limit;
+        let reservation = crate::passthrough_ledger::reserve(
+            ledger_bridge.clone(),
+            ledger_enabled,
+            crate::passthrough_ledger::ReserveRequest {
+                request_id: ctx.request_id.clone(),
+                attempt: attempt_index,
+                provider_id: candidate.provider.id.clone(),
+                model_id: candidate.model_id.clone(),
+                requested_model: model.clone(),
+                key_id: ctx.key_id.clone(),
+                key_name: ledger_key_name.clone(),
+                estimated_input_tokens: estimate_input_tokens(&upstream_body),
+                max_output_tokens: upstream_body["max_tokens"]
+                    .as_u64()
+                    .or_else(|| upstream_body["max_completion_tokens"].as_u64())
+                    .or_else(|| upstream_body["max_output_tokens"].as_u64()),
+            },
+        )
+        .await;
+        let ledgered = match reservation {
+            crate::passthrough_ledger::ReserveVerdict::Ledgered { run_id, attempt_id } => {
+                ledger_header = crate::passthrough_ledger::LedgerHeader::Ledgered;
+                ledger_run_id = Some(run_id.clone());
+                Some(crate::passthrough_ledger::LedgeredAttempt { run_id, attempt_id })
+            }
+            crate::passthrough_ledger::ReserveVerdict::Bypassed { reason } => {
+                // Ordinary traffic is never stopped by a ledger that cannot
+                // answer; the header says the bill was not recorded (D38).
+                ledger_header = crate::passthrough_ledger::LedgerHeader::Bypassed(reason);
+                None
+            }
+            crate::passthrough_ledger::ReserveVerdict::Refused { code, reasons } => {
+                // A budget or policy refusal is a real answer, not a fault:
+                // sending anyway would spend money the user said no to.
+                let mut message = format!("Router + Fusion refused this request: {code}");
+                if !reasons.is_empty() {
+                    message.push_str(&format!(" ({})", reasons.join(", ")));
+                }
+                let response = logged_error(
+                    &state,
+                    &ctx,
+                    format,
+                    StatusCode::PAYMENT_REQUIRED,
+                    &code,
+                    &message,
+                    Some(&model),
+                );
+                return with_ledger_headers(
+                    response,
+                    &crate::passthrough_ledger::LedgerHeader::Ledgered,
+                    attempts_made,
+                    ledger_run_id.as_deref(),
+                );
+            }
+        };
+        attempts_made += 1;
+
         let resp = match req.send().await {
             Ok(resp) => resp,
             Err(err) => {
                 let message = format!("connect error: {err}");
+                settle_attempt(
+                    &ledger_bridge,
+                    ledgered,
+                    crate::passthrough_ledger::AttemptOutcome::Failed(
+                        crate::passthrough_ledger::FailureClass::NotSent,
+                    ),
+                    Default::default(),
+                    Some(message.clone()),
+                    !has_more_candidates,
+                );
                 emit_outcome(
                     state.host.as_ref(),
                     candidate,
@@ -3147,6 +3368,25 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
                 message.push_str(&format!(" retry-after: {ra}"));
             }
             message.push_str(&format!(": {}", text.chars().take(500).collect::<String>()));
+            // An upstream error is a completed attempt with no bill: the
+            // reservation goes back rather than being held against an answer
+            // that will never arrive.
+            let will_retry = cfg.should_retry(status)
+                && (!(status == 401 || status == 403)
+                    || ctx
+                        .ticket
+                        .as_ref()
+                        .is_some_and(|ticket| ticket.allow_auth_failover));
+            settle_attempt(
+                &ledger_bridge,
+                ledgered,
+                crate::passthrough_ledger::AttemptOutcome::Failed(
+                    crate::passthrough_ledger::FailureClass::of_status(status),
+                ),
+                Default::default(),
+                Some(format!("HTTP {status}")),
+                !(will_retry && has_more_candidates),
+            );
             emit_outcome(
                 state.host.as_ref(),
                 candidate,
@@ -3201,11 +3441,17 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
                 for (name, value) in safe_upstream_response_headers(&headers) {
                     builder = builder.header(name, value);
                 }
-                return builder
+                let response = builder
                     .body(Body::from(text))
                     .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+                return with_ledger_headers(
+                    response,
+                    &ledger_header,
+                    attempts_made,
+                    ledger_run_id.as_deref(),
+                );
             }
-            return logged_error(
+            let response = logged_error(
                 &state,
                 &ctx,
                 format,
@@ -3213,6 +3459,12 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
                 "invalid_request_error",
                 &message,
                 Some(&model),
+            );
+            return with_ledger_headers(
+                response,
+                &ledger_header,
+                attempts_made,
+                ledger_run_id.as_deref(),
             );
         }
 
@@ -3262,6 +3514,8 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
                 gw_slot,
                 up_slot,
                 in_flight,
+                ledger_bridge.clone(),
+                ledgered,
             )
             .await;
             if format == InboundFormat::OpenAiResponses
@@ -3271,14 +3525,19 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
                     .headers_mut()
                     .insert("x-cognia-upstream-responses", HeaderValue::from_static("1"));
             }
-            return response;
+            return with_ledger_headers(
+                response,
+                &ledger_header,
+                attempts_made,
+                ledger_run_id.as_deref(),
+            );
         }
         // Buffered path: `gw_slot` / `up_slot` / `in_flight` carry Drop glue, so
         // they release only when this handler returns — i.e. after the awaited
         // response below completes — holding the concurrency slots and the
         // in-flight tally for the whole non-streaming request without being
         // passed down.
-        return buffered_response(
+        let response = buffered_response(
             state,
             ctx,
             format,
@@ -3288,11 +3547,82 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
             passthrough,
             &model,
             &session_id,
+            ledger_bridge.clone(),
+            ledgered,
         )
         .await;
+        return with_ledger_headers(
+            response,
+            &ledger_header,
+            attempts_made,
+            ledger_run_id.as_deref(),
+        );
     }
 
-    all_failed(&state, &ctx, format, &model, &failures)
+    with_ledger_headers(
+        all_failed(&state, &ctx, format, &model, &failures),
+        &ledger_header,
+        attempts_made,
+        ledger_run_id.as_deref(),
+    )
+}
+
+/// Settle one reserved attempt, or do nothing when it was never reserved.
+fn settle_attempt(
+    bridge: &std::sync::Arc<dyn crate::brain_bridge::BrainBridge>,
+    attempt: Option<crate::passthrough_ledger::LedgeredAttempt>,
+    outcome: crate::passthrough_ledger::AttemptOutcome,
+    usage: crate::passthrough_ledger::AttemptUsage,
+    reason: Option<String>,
+    final_attempt: bool,
+) {
+    if let Some(attempt) = attempt {
+        crate::passthrough_ledger::settle(
+            bridge.clone(),
+            attempt,
+            outcome,
+            usage,
+            reason,
+            final_attempt,
+        );
+    }
+}
+
+/// Say on the wire whether this request drew on the budget, how many upstream
+/// attempts it took, and which run holds its bill (ADR-0188 D13).
+///
+/// The headers are added to the response the caller already gets rather than
+/// changing it: a passthrough error body still reaches the client verbatim.
+fn with_ledger_headers(
+    mut response: Response,
+    ledger: &crate::passthrough_ledger::LedgerHeader,
+    attempts: usize,
+    run_id: Option<&str>,
+) -> Response {
+    // A request that made no upstream attempt has nothing to report: adding
+    // "bypassed" there would claim a ledger decision nobody took.
+    if attempts == 0 {
+        return response;
+    }
+    let headers = response.headers_mut();
+    if let Ok(value) = HeaderValue::try_from(ledger.value()) {
+        headers.insert("x-cognia-ledger", value);
+    }
+    if let Ok(value) = HeaderValue::try_from(attempts.to_string()) {
+        headers.insert("x-cognia-attempts", value);
+    }
+    // Only when it differs from 1: a request that failed over says so plainly.
+    if attempts > 1 {
+        if let Ok(value) = HeaderValue::try_from((attempts - 1).to_string()) {
+            headers.insert("x-cognia-fallback", value);
+        }
+    }
+    if let Some(run_id) = run_id {
+        if let Ok(value) = HeaderValue::try_from(run_id) {
+            headers.insert("x-cognia-run-id", value);
+        }
+    }
+    response
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3306,12 +3636,24 @@ async fn buffered_response(
     passthrough: bool,
     model: &str,
     session_id: &str,
+    ledger_bridge: std::sync::Arc<dyn crate::brain_bridge::BrainBridge>,
+    ledgered: Option<crate::passthrough_ledger::LedgeredAttempt>,
 ) -> Response {
     let upstream_headers_snapshot = resp.headers().clone();
     let upstream: Value = match resp.json().await {
         Ok(v) => v,
         Err(err) => {
             let message = format!("invalid upstream JSON: {err}");
+            // The bytes were sent and the provider will bill for them; what we
+            // cannot say is how much. The money stays held until it is known.
+            settle_attempt(
+                &ledger_bridge,
+                ledgered,
+                crate::passthrough_ledger::AttemptOutcome::Unknown,
+                Default::default(),
+                Some(message.clone()),
+                true,
+            );
             emit_outcome(
                 state.host.as_ref(),
                 candidate,
@@ -3345,6 +3687,14 @@ async fn buffered_response(
                 upstream["usage"]["output_tokens"].as_u64(),
             ),
         };
+        settle_attempt(
+            &ledger_bridge,
+            ledgered,
+            crate::passthrough_ledger::AttemptOutcome::Succeeded,
+            passthrough_usage_of(format, &upstream),
+            None,
+            true,
+        );
         emit_outcome(
             state.host.as_ref(),
             candidate,
@@ -3380,6 +3730,18 @@ async fn buffered_response(
 
     match response_to_ir(&candidate.provider.protocol, &upstream) {
         Ok(ir_resp) => {
+            settle_attempt(
+                &ledger_bridge,
+                ledgered,
+                crate::passthrough_ledger::AttemptOutcome::Succeeded,
+                crate::passthrough_ledger::AttemptUsage {
+                    input_tokens: Some(ir_resp.usage.input_tokens),
+                    output_tokens: Some(ir_resp.usage.output_tokens),
+                    ..Default::default()
+                },
+                None,
+                true,
+            );
             emit_outcome(
                 state.host.as_ref(),
                 candidate,
@@ -3407,6 +3769,16 @@ async fn buffered_response(
             Json(response_from_ir(format, &ir_resp, created)).into_response()
         }
         Err(err) => {
+            // The provider answered and will bill for it; this gateway just
+            // cannot read the answer. Held, not released.
+            settle_attempt(
+                &ledger_bridge,
+                ledgered,
+                crate::passthrough_ledger::AttemptOutcome::Unknown,
+                Default::default(),
+                Some(err.reason.clone()),
+                true,
+            );
             emit_outcome(
                 state.host.as_ref(),
                 candidate,
@@ -3430,6 +3802,32 @@ async fn buffered_response(
     }
 }
 
+/// The token counts a same-protocol answer reports, in the ledger's own shape.
+fn passthrough_usage_of(
+    format: InboundFormat,
+    upstream: &Value,
+) -> crate::passthrough_ledger::AttemptUsage {
+    let usage = &upstream["usage"];
+    match format {
+        InboundFormat::OpenAiChat => crate::passthrough_ledger::AttemptUsage {
+            input_tokens: usage["prompt_tokens"].as_u64(),
+            output_tokens: usage["completion_tokens"].as_u64(),
+            cache_read_tokens: usage["prompt_tokens_details"]["cached_tokens"].as_u64(),
+            cache_write_tokens: None,
+        },
+        InboundFormat::AnthropicMessages | InboundFormat::OpenAiResponses => {
+            crate::passthrough_ledger::AttemptUsage {
+                input_tokens: usage["input_tokens"].as_u64(),
+                output_tokens: usage["output_tokens"].as_u64(),
+                cache_read_tokens: usage["cache_read_input_tokens"]
+                    .as_u64()
+                    .or_else(|| usage["input_tokens_details"]["cached_tokens"].as_u64()),
+                cache_write_tokens: usage["cache_creation_input_tokens"].as_u64(),
+            }
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn stream_response(
     state: AppState,
@@ -3443,6 +3841,8 @@ async fn stream_response(
     gw_slot: Slot,
     up_slot: Slot,
     in_flight: InFlightGuard,
+    ledger_bridge: std::sync::Arc<dyn crate::brain_bridge::BrainBridge>,
+    ledgered: Option<crate::passthrough_ledger::LedgeredAttempt>,
 ) -> Response {
     // Resolved here, not inside the pump tasks: the guard is a parking_lot read
     // lock and must never be held across an `.await`.
@@ -3499,6 +3899,24 @@ async fn stream_response(
             // as success would both mis-train the breaker and leave a stuck
             // upstream looking healthy.
             let stall_error = stalled.then(|| stall_reason(idle_timeout));
+            // A stalled stream was SENT and has a bill nobody can read yet, so
+            // it settles as UNKNOWN and the money stays held (D27).
+            settle_attempt(
+                &ledger_bridge,
+                ledgered,
+                if stalled {
+                    crate::passthrough_ledger::AttemptOutcome::Unknown
+                } else {
+                    crate::passthrough_ledger::AttemptOutcome::Succeeded
+                },
+                crate::passthrough_ledger::AttemptUsage {
+                    input_tokens: input,
+                    output_tokens: output,
+                    ..Default::default()
+                },
+                stall_error.clone(),
+                true,
+            );
             emit_outcome(
                 task_state.host.as_ref(),
                 &candidate,
@@ -3591,6 +4009,22 @@ async fn stream_response(
         }
         let usage = transcoder.usage();
         let stall_error = stalled.then(|| stall_reason(idle_timeout));
+        settle_attempt(
+            &ledger_bridge,
+            ledgered,
+            if stalled {
+                crate::passthrough_ledger::AttemptOutcome::Unknown
+            } else {
+                crate::passthrough_ledger::AttemptOutcome::Succeeded
+            },
+            crate::passthrough_ledger::AttemptUsage {
+                input_tokens: Some(usage.input_tokens),
+                output_tokens: Some(usage.output_tokens),
+                ..Default::default()
+            },
+            stall_error.clone(),
+            true,
+        );
         emit_outcome(
             task_state.host.as_ref(),
             &candidate,

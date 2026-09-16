@@ -42,6 +42,17 @@ import {
 import { recordResolvedPermissionCeiling } from "@/lib/claude/agents/dispatch-context-registry"
 import { DISPATCH_AGENT_TOOL_NAME, TASK_TOOL_NAME } from "@/lib/claude/agents/dispatch-agent-tool"
 import { runtimeFromLegacy } from "@/lib/ai/agent/execution/legacy-mapping"
+// Router + Fusion (ADR-0188 D37): only the zero-cost gate is imported here;
+// everything behind it is loaded dynamically once the chat switch is on.
+import { recordFusionFault, recordFusionSuccess } from "@/lib/router-fusion/gate/breaker"
+import {
+  RouterFusionRefusalError,
+  RouterFusionUnavailableError,
+  toInfrastructureFault,
+} from "@/lib/router-fusion/gate/faults"
+import { trippedSurfaceError } from "@/lib/router-fusion/gate/guard"
+import { breakerThresholdOf, routerFusionGate } from "@/lib/router-fusion/gate/feature-gate"
+import { loadRouterFusionHost, type RouterFusionHost } from "@/lib/router-fusion/gate/load-engine"
 import { ASK_USER_TOOL_NAME } from "@/lib/claude/ask-user-tool"
 import { listCharactersByIds, resolveCharacterById } from "@/lib/db/characters"
 import {
@@ -141,6 +152,7 @@ import {
 } from "@/lib/ai/model-options"
 import { getModelContextWindow } from "@/lib/claude/usage"
 import { processPromptTemplateVariables } from "@/stores/agent/custom-mode-store/helpers"
+import { chatFusionModeOf } from "@/stores/chat/fusion-mode-store"
 import {
   ProviderRoutingEngine,
   RoutingNoCandidatesError,
@@ -533,13 +545,35 @@ export interface BuildOptionsContext {
    * and alias entries whose window can't fit the input are deprioritized.
    * Absent → the check is skipped (no-info passthrough).
    */
-  routingContextHint?: { promptText?: string }
+  routingContextHint?: {
+    promptText?: string
+    /**
+     * Attachment kinds on the outgoing turn — the classifier uses them as a
+     * capability signal (an image implies vision) without seeing the content.
+     */
+    attachmentKinds?: Array<"image" | "audio" | "video" | "document">
+    /** Prior message count — a depth signal for the difficulty score. */
+    messageCount?: number
+    /**
+     * Caller-declared task category (e.g. a team dispatch's `taskKind`). An
+     * authoritative hint — it beats the text-derived classification, so only
+     * pass it when the caller actually knows the work's shape.
+     */
+    category?: import("@cognia/provider-types/auto-router").TaskCategory
+  }
   /**
    * Routing surface for non-chat callers that reuse the canonical send-option
    * builder. Defaults to chat; Agent execution sets this to agent so plans,
    * affinity, and traces stay attributed to the immutable Agent ticket.
    */
   routingSurface?: import("@cognia/provider-types/auto-router").RoutingSurface
+  /**
+   * Router + Fusion surface this send belongs to (ADR-0188 D36). Only the chat
+   * composer passes `"chat"`; every other caller leaves it unset and is never
+   * routed through Router + Fusion, whatever the switches say. With the switch
+   * off (the default) the field changes nothing.
+   */
+  routerFusionSurface?: "chat"
   /** Semantic Agent model role. Normal chat/dispatch defaults to `execute`. */
   modelRole?: import("@cognia/agent-config-types").AgentModelRole
   /**
@@ -1337,7 +1371,58 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     !autoRequested && model && enabledAliases.has(model.toLowerCase()) ? model : undefined
   const manualRequested = Boolean(!autoRequested && !aliasRequested && model && providerId)
 
-  if (appSettings && (autoRequested || aliasRequested || manualRequested)) {
+  // --- Router + Fusion gate (ADR-0188 D36–D38) ----------------------------
+  // Only chat composer turns of a real session on the built-in runtimes can be
+  // Router + Fusion runs. Off (the default) or not applicable: this block and
+  // the seal below do nothing and the send is resolved exactly as before.
+  const fusionGate =
+    ctx.routerFusionSurface === "chat" && session?.id && !ctx.externalRuntimeId && appSettings
+      ? routerFusionGate(appSettings, "chat")
+      : "off"
+  let fusionHost: RouterFusionHost | null = null
+  let fusionRouteHost: import("@/lib/router-fusion/host").ChatRouteHost | null = null
+  let fusionSelection: Extract<
+    import("@/lib/router-fusion/host").ChatSelection,
+    { kind: "selected" }
+  > | null = null
+  let fusionRunStamp: import("@cognia/agent-config-types").RouterFusionRunStamp | null = null
+  const bypassRouterFusion = (error: unknown) => {
+    const fault = toInfrastructureFault(error)
+    if (!fault) throw error
+    const record = recordFusionFault(
+      "chat",
+      fault.code,
+      breakerThresholdOf(appSettings),
+      Date.now()
+    )
+    loggers.app.warn("Router + Fusion unavailable; chat turn uses the original path", {
+      code: fault.code,
+      message: fault.message,
+    })
+    fusionHost = null
+    fusionRouteHost = null
+    fusionSelection = null
+    delete opts.ledger
+    delete opts.routerFusion
+    opts.routerFusionBypass = { code: fault.code, justTripped: record.justTripped }
+  }
+  // The composer's Router + Fusion mode (ADR-0188 B3), read only while the gate
+  // is not off: an explicit cascade or panel is work the person asked for, so
+  // a paused surface refuses it rather than answering with an ordinary turn.
+  const requestedRunMode =
+    fusionGate === "off" || !session?.id ? "auto" : chatFusionModeOf(session.id)
+  const explicitRunMode = requestedRunMode === "cascade" || requestedRunMode === "panel"
+  if (fusionGate === "tripped") {
+    if (explicitRunMode) throw trippedSurfaceError("chat")
+    opts.routerFusionBypass = { code: "breaker_tripped", justTripped: false }
+  }
+
+  // An explicit cascade or panel routes by its roles' aliases, not by a model
+  // the conversation named: it enters the routing block even when no model is
+  // resolved yet, rather than becoming the direct turn the provider default
+  // would fill in below (D38).
+  const explicitFusionRoute = fusionGate === "on" && explicitRunMode
+  if (appSettings && (autoRequested || aliasRequested || manualRequested || explicitFusionRoute)) {
     const registry = createMappingRegistry(appSettings.modelMappings ?? [])
     const routingConfig = appSettings.routingConfig ?? DEFAULT_ROUTING_CONFIG
     // Persisted breaker settings (global enable + defaults) and per-provider
@@ -1355,42 +1440,206 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     const estimatedInputTokens =
       promptText && promptText.length > 0 ? estimateCJKTokenCount(promptText) : undefined
     const engine = new ProviderRoutingEngine(registry, routingConfig, deps)
+    // Task hints for the local classifier: what the send path already knows
+    // without re-reading prompt content. `toolCount`/`hasCode` are always
+    // meaningful (0 / false are signals); the rest are omitted when absent.
+    const taskHints: import("@cognia/provider-types/auto-router").RoutingTaskHints = {
+      ...(ctx.routingContextHint?.attachmentKinds
+        ? { attachmentKinds: ctx.routingContextHint.attachmentKinds }
+        : {}),
+      ...(ctx.routingContextHint?.messageCount !== undefined
+        ? { messageCount: ctx.routingContextHint.messageCount }
+        : {}),
+      toolCount:
+        (character?.allowedTools?.length ?? 0) +
+        (activePreset?.defaultToolSet?.length ?? 0) +
+        skills.reduce((sum, skill) => sum + (skill.allowedTools?.length ?? 0), 0),
+      ...(requestedEffort ? { requestedEffort } : {}),
+      hasCode: /```/.test(promptText ?? ""),
+      ...(ctx.routingContextHint?.category ? { category: ctx.routingContextHint.category } : {}),
+    }
+    const routingRequest: import("@cognia/provider-types/auto-router").RoutingRequest = {
+      surface: ctx.routingSurface ?? "chat",
+      selection: autoRequested
+        ? { kind: "auto" }
+        : aliasRequested
+          ? { kind: "alias", alias: aliasRequested }
+          : { kind: "manual", providerId, modelId: model! },
+      estimatedInputTokens,
+      promptText,
+      candidateAliases: appSettings.autoRouting?.candidateAliases,
+      thresholds: appSettings.autoRouting?.thresholds,
+      taskHints,
+      requirements: manualRequested
+        ? undefined
+        : {
+            tools: Boolean(
+              character?.allowedTools?.length ||
+              activePreset?.defaultToolSet?.length ||
+              skills.some((skill) => (skill.allowedTools?.length ?? 0) > 0)
+            ),
+            reasoning: Boolean(requestedEffort),
+            streaming: appSettings.streamPartialMessages !== false,
+          },
+      sessionId: session?.id,
+      strategy: routingConfig.strategy,
+      dataPolicy: appSettings.autoRouting?.dataPolicy,
+      shadowMode: appSettings.autoRouting?.shadowMode,
+    }
+    // Router + Fusion selection: the same engine, none of the silent fallbacks
+    // below. No route is an explicit refusal; an infrastructure fault falls
+    // through to the original planner.
+    if (fusionGate === "on") {
+      try {
+        const fusion = await loadRouterFusionHost()
+        const routeHost = fusion.createChatRouteHost({ appSettings, engine, engineDeps: deps })
+        const needsTools = (taskHints.toolCount ?? 0) > 0
+        const hasImages = taskHints.attachmentKinds?.includes("image") ?? false
+        if (
+          explicitRunMode ||
+          (requestedRunMode === "auto" &&
+            fusion.chatAutoConsidersFusion(routeHost.settings, needsTools))
+        ) {
+          const run = await fusion.selectChatFusionRun(routeHost, {
+            requested: explicitRunMode ? (requestedRunMode as "cascade" | "panel") : "auto",
+            sessionId: session!.id,
+            promptText: promptText ?? "",
+            hasImages,
+            workspaceId: capabilityScope.projectId,
+          })
+          if (run.kind === "refused") {
+            throw new RouterFusionRefusalError(
+              run.code,
+              "Router + Fusion could not run this turn as asked.",
+              { reasons: run.reasons, decision: run.decision }
+            )
+          }
+          if (run.kind === "fusion") {
+            // Executed by the renderer's orchestrator, never dispatched to the
+            // sidecar; the direct route below is not needed.
+            fusionRunStamp = run.stamp
+            opts.routerFusionRun = run.stamp
+            // The rest of the pipeline still resolves a provider and model; name
+            // the deployment that writes the run's answer rather than "auto".
+            const lead = run.stamp.roles.synthesizer ?? run.stamp.roles.strong
+            const separator = lead?.indexOf("::") ?? -1
+            if (lead && separator > 0) {
+              providerId = lead.slice(0, separator)
+              model = lead.slice(separator + 2)
+            }
+          }
+        }
+      } catch (error) {
+        // Explicit fusion work fails explicitly (D38); Auto falls back like any
+        // ordinary turn.
+        if (error instanceof RouterFusionRefusalError) throw error
+        const fault = explicitRunMode ? toInfrastructureFault(error) : null
+        if (fault) {
+          recordFusionFault("chat", fault.code, breakerThresholdOf(appSettings), Date.now())
+          throw new RouterFusionUnavailableError(fault)
+        }
+        if (explicitRunMode) throw error
+        bypassRouterFusion(error)
+      }
+    }
+    if (fusionGate === "on" && !fusionRunStamp && !opts.routerFusionBypass) {
+      try {
+        const fusion = await loadRouterFusionHost()
+        const routeHost = fusion.createChatRouteHost({ appSettings, engine, engineDeps: deps })
+        const selection = await fusion.selectChatDeployment(routeHost, {
+          selection: routingRequest.selection,
+          routingRequest,
+          promptText: promptText ?? "",
+          estimatedInputTokens: estimatedInputTokens ?? 1,
+          hints: {
+            hasCode: taskHints.hasCode,
+            toolCount: taskHints.toolCount,
+            workspaceBound: Boolean(capabilityScope.projectId),
+            ...(taskHints.attachmentKinds ? { attachmentKinds: taskHints.attachmentKinds } : {}),
+          },
+          workspaceId: capabilityScope.projectId,
+          hasImages: taskHints.attachmentKinds?.includes("image") ?? false,
+          needsTools: (taskHints.toolCount ?? 0) > 0,
+        })
+        if (selection.kind === "refused") {
+          throw new RouterFusionRefusalError(
+            selection.code,
+            "Router + Fusion found no route for this turn.",
+            { reasons: selection.reasons, decision: selection.decision }
+          )
+        }
+        fusionHost = fusion
+        fusionRouteHost = routeHost
+        fusionSelection = selection
+        model = selection.modelId
+        providerId = selection.providerId
+        opts.routingPlan = selection.plan
+        opts.routingDecision = {
+          strategy: selection.plan.strategy,
+          reason: selection.plan.reasonCodes.join(", "),
+        }
+        if (!manualRequested) {
+          opts.aliasResolution = {
+            alias: aliasRequested ?? "auto",
+            resolvedTo: { providerId: selection.providerId, modelId: selection.modelId },
+            // Reroutes are the reroute policy's decision (visible, ledgered,
+            // before commit); the plan's order is what it may choose from.
+            fallbackEntries: selection.plan.orderedCandidates.slice(1).map((candidate) => ({
+              providerId: candidate.providerId,
+              modelId: candidate.modelId,
+            })),
+            parameterDefaults: selection.plan.parameterDefaults as
+              Record<string, unknown> | undefined,
+          }
+        }
+      } catch (error) {
+        bypassRouterFusion(error)
+      }
+    }
     const manualFallbackModel = autoRequested && model !== "auto" ? model : undefined
     const manualFallbackProvider = providerId
     let plan: import("@cognia/provider-types/auto-router").RoutingPlan | undefined
     try {
-      plan = await engine.planRoute({
-        surface: ctx.routingSurface ?? "chat",
-        selection: autoRequested
-          ? { kind: "auto" }
-          : aliasRequested
-            ? { kind: "alias", alias: aliasRequested }
-            : { kind: "manual", providerId, modelId: model! },
-        estimatedInputTokens,
-        promptText,
-        candidateAliases: appSettings.autoRouting?.candidateAliases,
-        thresholds: appSettings.autoRouting?.thresholds,
-        requirements: manualRequested
-          ? undefined
-          : {
-              tools: Boolean(
-                character?.allowedTools?.length ||
-                activePreset?.defaultToolSet?.length ||
-                skills.some((skill) => (skill.allowedTools?.length ?? 0) > 0)
-              ),
-              reasoning: Boolean(requestedEffort),
-              streaming: appSettings.streamPartialMessages !== false,
-            },
-        sessionId: session?.id,
-        strategy: routingConfig.strategy,
-        dataPolicy: appSettings.autoRouting?.dataPolicy,
-        shadowMode: appSettings.autoRouting?.shadowMode,
-      })
+      if (!fusionSelection && !fusionRunStamp) plan = await engine.planRoute(routingRequest)
     } catch (err) {
       if (err instanceof RoutingNoCandidatesError && manualFallbackModel) {
         model = manualFallbackModel
         providerId = manualFallbackProvider
         delete opts.autoRouting
+      } else if (err instanceof RoutingNoCandidatesError && autoRequested && model === "auto") {
+        // Literal "auto" with no viable candidate: try the configured
+        // fallback tier alias once, then the configured fallback provider,
+        // then the app default. A second no-candidates on the tier alias
+        // falls through to the provider/default branch.
+        const fallbackTier = appSettings.autoRouting?.fallbackTier
+        let retried = false
+        if (fallbackTier && enabledAliases.has(fallbackTier.toLowerCase())) {
+          try {
+            plan = await engine.planRoute({
+              ...routingRequest,
+              selection: { kind: "alias", alias: fallbackTier },
+            })
+            retried = true
+          } catch (retryErr) {
+            if (!(retryErr instanceof RoutingNoCandidatesError)) throw retryErr
+          }
+        }
+        if (!retried) {
+          if (appSettings.autoRouting?.fallbackProvider) {
+            providerId = appSettings.autoRouting.fallbackProvider
+            // `resolveProviderAttemptOptions` fills the provider's default
+            // model below.
+            model = undefined
+          } else {
+            providerId = appDefault.provider ?? providerId
+            model = appDefault.model
+          }
+          delete opts.autoRouting
+          opts.routingDecision = {
+            strategy: routingConfig.strategy,
+            reason: "auto-no-candidates-fallback",
+          }
+        }
       } else {
         throw err
       }
@@ -1416,8 +1665,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       opts.routingPlan = plan
       if (autoRequested) {
         opts.autoRouting = {
-          score: scoreDifficulty(promptText ?? ""),
-          tier: selectedAlias ?? plan.classification?.complexity ?? "auto",
+          score: plan.difficulty?.score ?? scoreDifficulty(promptText ?? ""),
+          tier: plan.difficulty?.tier ?? "auto",
+          ...(selectedAlias ? { alias: selectedAlias } : {}),
         }
       }
       if (!manualRequested) {
@@ -4147,10 +4397,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   }
 
   // Plugin `onBuildOptions` transform pipeline (ADR-0026 §4 §B), the final,
-  // lowest-precedence option tweak. The dispatcher shallow-merges each enabled
-  // plugin's returned partial in priority order; when no plugin registers the
-  // hook it returns the input unchanged. Dormant until now — the merge logic
-  // existed in `PluginEventHooks.dispatchBuildOptions` but nothing invoked it.
+  // lowest-precedence option tweak. Dispatched as the `agent.context.prepare`
+  // interceptor point (ADR-0189): one SERIAL chain, so a second plugin sees the
+  // first one's output instead of both racing to overwrite the same input, and
+  // `sessionId` is invariant across it.
   if (session?.id) {
     const patched = await getPluginEventHooks().dispatchBuildOptions({
       sessionId: session.id,
@@ -4772,6 +5022,107 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
     for (const warning of validation.warnings) {
       loggers.app.warn("Claude Agent SDK option warning", { warning })
+    }
+  }
+
+  // --- Router + Fusion seal (ADR-0188) --------------------------------------
+  // Last, so the route is fixed for the provider, model and credentials the
+  // send really carries. The run itself is created right before dispatch.
+  if (
+    fusionGate === "on" &&
+    !opts.routerFusionBypass &&
+    !opts.routerFusionRun &&
+    session?.id &&
+    appSettings
+  ) {
+    const lane =
+      turnRuntime === "claude-agent-sdk"
+        ? "claude-agent-sdk"
+        : turnRuntime === "ai-sdk"
+          ? "ai-sdk"
+          : null
+    const sealProvider = opts.provider ?? providerId
+    if (lane && sealProvider && opts.model) {
+      try {
+        const fusion = fusionHost ?? (await loadRouterFusionHost())
+        let routeHost = fusionRouteHost
+        if (!routeHost) {
+          const routingConfig = appSettings.routingConfig ?? DEFAULT_ROUTING_CONFIG
+          const engineDeps = buildRoutingEngineDeps(appSettings)
+          routeHost = fusion.createChatRouteHost({
+            appSettings,
+            engine: new ProviderRoutingEngine(
+              createMappingRegistry(appSettings.modelMappings ?? []),
+              routingConfig,
+              engineDeps
+            ),
+            engineDeps,
+          })
+        }
+        let selection = fusionSelection
+        if (!selection) {
+          // No selection was routed above (the model came from the provider's
+          // default): the final model is the pick.
+          const picked = await fusion.selectChatDeployment(routeHost, {
+            selection: { kind: "manual", providerId: sealProvider, modelId: opts.model },
+            routingRequest: {
+              surface: "chat",
+              selection: { kind: "manual", providerId: sealProvider, modelId: opts.model },
+              sessionId: session.id,
+            },
+            promptText: promptText ?? "",
+            estimatedInputTokens: promptText ? estimateCJKTokenCount(promptText) : 1,
+            hints: { workspaceBound: Boolean(capabilityScope.projectId) },
+            workspaceId: capabilityScope.projectId,
+            hasImages: ctx.routingContextHint?.attachmentKinds?.includes("image") ?? false,
+            needsTools: false,
+          })
+          if (picked.kind === "refused") {
+            throw new RouterFusionRefusalError(
+              picked.code,
+              "Router + Fusion found no route for this turn.",
+              {
+                reasons: picked.reasons,
+                decision: picked.decision,
+              }
+            )
+          }
+          selection = picked
+        }
+        const seal = fusion.sealChatRoute(routeHost, {
+          selection,
+          providerId: sealProvider,
+          modelId: opts.model,
+          lane,
+          env: opts.env,
+          sessionId: session.id,
+          maxOutputTokens: opts.modelParams?.maxOutputTokens,
+          existingMaxBudgetUsd: opts.maxBudgetUsd,
+        })
+        if (seal.kind === "refused") {
+          throw new RouterFusionRefusalError(
+            seal.code,
+            "Router + Fusion found no route for this turn.",
+            {
+              reasons: seal.reasons,
+              decision: seal.decision,
+            }
+          )
+        }
+        opts.ledger = seal.ledger
+        opts.routerFusion = seal.stamp
+        // A per-call reservation holds the output bound, so the call must not
+        // be allowed more than was reserved.
+        if (lane === "ai-sdk" && opts.modelParams?.maxOutputTokens === undefined) {
+          opts.modelParams = { ...opts.modelParams, maxOutputTokens: seal.maxOutputTokens }
+        }
+        // No silent in-turn model switch on a ledgered turn (D5).
+        delete opts.fallbackModel
+        fusion.rememberChatRoute(seal.prepared)
+        recordFusionSuccess("chat")
+      } catch (error) {
+        bypassRouterFusion(error)
+      }
     }
   }
 

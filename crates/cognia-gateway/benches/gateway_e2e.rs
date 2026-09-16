@@ -355,6 +355,7 @@ async fn start_gateway(upstream: std::net::SocketAddr, scale: SnapshotScale) -> 
         name: "Benchmark".into(),
         secret: GATEWAY_SECRET.into(),
         model_allowlist: Vec::new(),
+        scopes: Vec::new(),
         expires_at_ms: None,
         enabled: true,
         rate_limit_per_min: None,

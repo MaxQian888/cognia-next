@@ -41,6 +41,14 @@ jest.mock("@/lib/subscription/codex/chat-bridge", () => ({
 jest.mock("@/lib/subscription/opencode/chat-bridge", () => ({
   resolveOpencodeVaultCredential: (...args: unknown[]) => opencodeCredentialMock(...args),
 }))
+// Router + Fusion (ADR-0188) reroute seam; untouched by every unledgered turn.
+const rerouteRouterFusionSendMock = jest.fn()
+const abortRouterFusionSendMock = jest.fn(async (..._args: unknown[]) => undefined)
+jest.mock("@/lib/router-fusion/gate/chat-send", () => ({
+  ...jest.requireActual("@/lib/router-fusion/gate/chat-send"),
+  rerouteRouterFusionSend: (...args: unknown[]) => rerouteRouterFusionSendMock(...args),
+  abortRouterFusionSend: (...args: unknown[]) => abortRouterFusionSendMock(...args),
+}))
 
 const baseOptions = (
   fallbackEntries: Array<{ providerId: string; modelId: string }>
@@ -349,6 +357,142 @@ describe("attemptRoutingFallback", () => {
     expect(result).toBe(false)
     // Cache is still bumped so a subsequent retry attempt sees the new index.
     expect(useChatStore.getState().lastSendBySession.s1?.attemptIndex).toBe(1)
+  })
+})
+
+describe("attemptRoutingFallback — Router + Fusion ledgered turns (ADR-0188 D5)", () => {
+  const stamp = { runId: "rf-1", providerId: "openai", modelId: "gpt-4o-mini" }
+  const ledgered = (): SendOptions =>
+    ({
+      provider: "openai",
+      model: "gpt-4o-mini",
+      routerFusion: stamp,
+      ledger: {
+        runId: "rf-1",
+        mode: "per_call",
+        transportAttempts: 2,
+        deploymentId: "openai::gpt-4o-mini",
+      },
+      aliasResolution: {
+        alias: "fast",
+        resolvedTo: { providerId: "openai", modelId: "gpt-4o-mini" },
+        fallbackEntries: [
+          { providerId: "openai", modelId: "gpt-4o-mini" },
+          { providerId: "anthropic", modelId: "claude-haiku-4-5" },
+          { providerId: "google", modelId: "gemini-flash" },
+          { providerId: "mistral", modelId: "mistral-small" },
+        ],
+        specialFallbacks: {
+          contentPolicy: [{ providerId: "local", modelId: "uncensored-model" }],
+        },
+      },
+    }) as unknown as SendOptions
+
+  const newRun = (options: SendOptions, runId: string): SendOptions =>
+    ({
+      ...options,
+      routerFusion: { ...stamp, runId, providerId: options.provider },
+    }) as unknown as SendOptions
+
+  beforeEach(() => {
+    sendPromptMock.mockReset().mockResolvedValue(undefined)
+    dispatchDiagnosticMock.mockClear()
+    getSessionMock.mockReset().mockResolvedValue({ id: "s1", projectId: "p1" })
+    rerouteRouterFusionSendMock
+      .mockReset()
+      .mockImplementation(async (input: { options: SendOptions }) => ({
+        kind: "send",
+        options: newRun(input.options, `rf-${input.options.provider}`),
+      }))
+    abortRouterFusionSendMock.mockClear()
+    useChatStore.getState().clear()
+    setRoutingEnabled(true)
+    useChatStore
+      .getState()
+      .setLastSend("s1", { content: "hello", options: ledgered(), attemptIndex: 0 })
+  })
+
+  it("routes the next candidate as a new ledgered run before sending it, visibly", async () => {
+    expect(await attemptRoutingFallback("s1", "rate limit exceeded")).toBe(true)
+    expect(rerouteRouterFusionSendMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "s1",
+        workspaceId: "p1",
+        options: expect.objectContaining({ provider: "anthropic", model: "claude-haiku-4-5" }),
+      })
+    )
+    const sent = sendPromptMock.mock.calls[0][2] as SendOptions
+    expect(sent.routerFusion?.runId).toBe("rf-anthropic")
+    expect(sent.fallbackModel).toBeUndefined()
+    expect(rerouteRouterFusionSendMock.mock.invocationCallOrder[0]).toBeLessThan(
+      sendPromptMock.mock.invocationCallOrder[0]
+    )
+    const cached = useChatStore.getState().lastSendBySession.s1
+    expect(cached?.options.routerFusion?.runId).toBe("rf-anthropic")
+    expect(cached?.routerFusionReroutes).toBe(1)
+    expect(dispatchDiagnosticMock.mock.calls[0][0]).toMatchObject({ code: "degradedFallback" })
+  })
+
+  it("stops after two reroutes", async () => {
+    expect(await attemptRoutingFallback("s1", "rate limit exceeded")).toBe(true)
+    expect(await attemptRoutingFallback("s1", "rate limit exceeded")).toBe(true)
+    expect(await attemptRoutingFallback("s1", "rate limit exceeded")).toBe(false)
+    expect(sendPromptMock).toHaveBeenCalledTimes(2)
+    expect(useChatStore.getState().lastSendBySession.s1?.routerFusionReroutes).toBe(2)
+  })
+
+  it("[ACC:CACHE-04] never reroutes a ledgered turn once a tool call or visible output went out", async () => {
+    useChatStore.getState().markLastSendCommitted("s1")
+    expect(await attemptRoutingFallback("s1", "rate limit exceeded")).toBe(false)
+    expect(rerouteRouterFusionSendMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("never answers a content-policy refusal with another model", async () => {
+    expect(await attemptRoutingFallback("s1", "blocked by content_policy")).toBe(false)
+    expect(rerouteRouterFusionSendMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("[ACC:ISO-04] does not send a retry Router + Fusion refused", async () => {
+    rerouteRouterFusionSendMock.mockResolvedValueOnce({
+      kind: "refused",
+      code: "ROUTE_NO_SOLUTION",
+    })
+    expect(await attemptRoutingFallback("s1", "rate limit exceeded")).toBe(false)
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    expect(useChatStore.getState().lastSendBySession.s1?.options.routerFusion?.runId).toBe("rf-1")
+  })
+
+  it("[ACC:ISO-02] does not send a retry the fusion infrastructure could not route", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    rerouteRouterFusionSendMock.mockRejectedValueOnce(new Error("fusion database unavailable"))
+    expect(await attemptRoutingFallback("s1", "rate limit exceeded")).toBe(false)
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    // The cache is untouched, so the turn keeps its original run.
+    expect(useChatStore.getState().lastSendBySession.s1?.options.routerFusion?.runId).toBe("rf-1")
+    expect(warn).toHaveBeenCalledWith("routing-fallback reroute failed", expect.any(Error))
+    warn.mockRestore()
+  })
+
+  it("releases the new run when the retry could not be sent", async () => {
+    sendPromptMock.mockRejectedValueOnce(new Error("ipc closed"))
+    expect(await attemptRoutingFallback("s1", "rate limit exceeded")).toBe(false)
+    expect(abortRouterFusionSendMock).toHaveBeenCalledWith(
+      "s1",
+      expect.objectContaining({ routerFusion: expect.objectContaining({ runId: "rf-anthropic" }) }),
+      "ipc closed"
+    )
+  })
+
+  it("[ACC:OFF-02] leaves an unledgered turn's fallback exactly as before", async () => {
+    seedCache("s2", [
+      { providerId: "openai", modelId: "gpt-4o-mini" },
+      { providerId: "anthropic", modelId: "claude-haiku-4-5" },
+    ])
+    expect(await attemptRoutingFallback("s2", "rate limit exceeded")).toBe(true)
+    expect(rerouteRouterFusionSendMock).not.toHaveBeenCalled()
+    expect(useChatStore.getState().lastSendBySession.s2).not.toHaveProperty("routerFusionReroutes")
   })
 })
 

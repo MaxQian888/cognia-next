@@ -5,6 +5,7 @@ import {
   elapsedPartsFrom,
   executionRowFilterKind,
   EXECUTION_FILTER_KINDS,
+  journalRunRow,
   mapRunStatus,
   mapExecStatus,
   supersededTeamRunIds,
@@ -373,6 +374,38 @@ describe("executionRowFilterKind", () => {
     expect(executionRowFilterKind(row({ source: "broker", kind: "workflow-step" }))).toBe(
       "workflow-step"
     )
+  })
+})
+
+describe("journalRunRow origin", () => {
+  const run = (o: Partial<ExecutionRun> = {}): ExecutionRun => ({
+    id: "run-1",
+    kind: "fusion",
+    sourceId: "run-1",
+    title: "Summarise the release notes",
+    status: "running",
+    currentRevision: 0,
+    startedAt: 1,
+    updatedAt: 1,
+    ...o,
+  })
+
+  it("carries who asked, so the cockpit can filter on it", () => {
+    const projected = journalRunRow(
+      run({ origin: "gateway-api", originActor: { keyId: "key-a", keyName: "CI robot" } })
+    )
+    expect(projected).toMatchObject({
+      kind: "fusion",
+      origin: "gateway-api",
+      originActorName: "CI robot",
+    })
+    expect(executionRowFilterKind(projected)).toBe("fusion")
+  })
+
+  it("leaves both off a run written before the Run API existed", () => {
+    const legacy = journalRunRow(run({ kind: "agent-turn" }))
+    expect(legacy.origin).toBeUndefined()
+    expect(legacy.originActorName).toBeUndefined()
   })
 })
 

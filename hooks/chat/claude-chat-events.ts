@@ -26,6 +26,16 @@ import { parseSuggestedDelay } from "@/lib/goal/prompts"
 import { getLoopRuntime } from "@/lib/loop/runtime"
 import { handleLoopTurnComplete } from "@/lib/loop/turn-driver"
 import { attemptRoutingFallback } from "@/lib/claude/routing-fallback"
+import {
+  finishAllRouterFusionTurns,
+  finishRouterFusionTurn,
+  handleRouterFusionSidecarFrame,
+  observeRouterFusionTurnMessage,
+  routerFusionOutcomeOfResult,
+  routerFusionOutcomeOfSessionEnd,
+  routerFusionTurnActive,
+} from "@/lib/router-fusion/gate/chat-events"
+import { routerFusionRefusalDiagnostic } from "@/lib/router-fusion/gate/refusal-diagnostic"
 import { applyPlanModeBridge } from "@/lib/agent/plan-mode-bridge"
 import {
   isSessionOpen,
@@ -71,6 +81,8 @@ import { bumpUnread } from "@/lib/db/session-state"
 import {
   attachRunMetadataToLastAssistant,
   buildCompletedRunMetadata,
+  buildRouterFusionRunMetadata,
+  buildRoutingRunMetadata,
 } from "@/lib/chat/message-run-metadata"
 import { type AgentExecutionHandle } from "@/lib/ai/agent/execution/agent-execution-handle"
 import { attachInteractiveGrounding } from "@/lib/rag/chat-grounding"
@@ -310,6 +322,14 @@ export async function handleEvent(
     return
   }
   switch (evt.type) {
+    case "call_reserve_request":
+    case "call_attempt_result":
+    case "ledger_bypassed":
+      // Router + Fusion ledger frames (ADR-0188). Only a turn sent with a ledger
+      // stamp produces them; handled on the session's queue so a call's result
+      // is booked before the turn's `result` seals the run.
+      await handleRouterFusionSidecarFrame(evt)
+      return
     case "ready":
       // A fresh sidecar: every line the trail holds was printed by a process
       // that no longer exists, so none of them can explain anything this one
@@ -346,6 +366,13 @@ export async function handleEvent(
       // approval, seal the slice, and surface a retryable error (which also
       // releases the chat lease via the status→error subscription). Mirrors the
       // mobile transport's sidecar_exited handling (use-remote-session-stream).
+      // Router + Fusion (ADR-0188): every ledgered turn of this window ends
+      // with the process — including one whose pane is closed.
+      const sealingFusionTurns = finishAllRouterFusionTurns({
+        code: "SIDECAR_EXITED",
+        message: SIDECAR_EXITED_TRACE_MESSAGE,
+      })
+      if (sealingFusionTurns) await sealingFusionTurns
       const chat = useChatStore.getState()
       for (const [sid, slice] of Object.entries(chat.sessions)) {
         if (slice.status !== "streaming" && slice.status !== "awaiting_approval") continue
@@ -423,6 +450,15 @@ export async function handleEvent(
       // have already paired with its tool_result, but cleanup keeps the
       // module-scope map from leaking entries when the SDK aborts mid-turn.
       clearToolSpansForSession(evt.sessionId)
+      // Router + Fusion (ADR-0188): a ledgered turn with a `result` was sealed
+      // there. One that ended without one — an error, a refusal, a stop — is
+      // sealed here, before a routing fallback may start the next run.
+      if (routerFusionTurnActive(evt.sessionId)) {
+        await finishRouterFusionTurn(evt.sessionId, routerFusionOutcomeOfSessionEnd(evt))
+      }
+      // A refusal ended the turn: the provider did not fail, so neither its
+      // breaker nor a routing fallback may react.
+      const routerFusionRefusal = evt.routerFusionRefusal
       const terminalMessages =
         messagesMirrorRef.current.get(evt.sessionId) ??
         useChatStore.getState().sessions[evt.sessionId]?.messages
@@ -445,7 +481,7 @@ export async function handleEvent(
           // (which overwrites the cached send). Trips its breaker after repeats.
           const failedSend = useChatStore.getState().lastSendBySession[evt.sessionId]
           const failedProvider = failedSend?.options.provider
-          if (failedProvider) {
+          if (failedProvider && !routerFusionRefusal) {
             recordProviderOutcome({
               providerId: failedProvider,
               ok: false,
@@ -468,29 +504,37 @@ export async function handleEvent(
           // error class is transient. `attemptRoutingFallback` returns
           // `true` when a retry was scheduled — in that case suppress
           // the error toast so the UI stays in `streaming`.
-          const retried = isStandaloneChatMode()
-            ? false
-            : await attemptRoutingFallback(evt.sessionId, evt.error, {
-                httpStatus: evt.httpStatus,
-                retryAfterMs: evt.retryAfterMs,
-              })
+          const retried =
+            isStandaloneChatMode() || routerFusionRefusal
+              ? false
+              : await attemptRoutingFallback(evt.sessionId, evt.error, {
+                  httpStatus: evt.httpStatus,
+                  retryAfterMs: evt.retryAfterMs,
+                })
           if (!retried) {
             // Permanent failure — commit + persist the final partial and drop
             // the mirror. (A retry re-issues `send`, which clears it itself.)
             sealSession(evt.sessionId)
             useChatStore.getState().setSessionDiagnostic(
               evt.sessionId,
-              toDiagnostic(evt.error, {
-                source: "provider",
-                meta: {
-                  sessionId: evt.sessionId,
-                  ...(typeof evt.httpStatus === "number" ? { httpStatus: evt.httpStatus } : {}),
-                  ...(typeof evt.retryAfterMs === "number"
-                    ? { retryAfterMs: evt.retryAfterMs }
-                    : {}),
-                  ...(failedProvider ? { providerId: failedProvider } : {}),
-                },
-              })
+              routerFusionRefusal
+                ? await routerFusionRefusalDiagnostic({
+                    code: routerFusionRefusal.code,
+                    reasons: routerFusionRefusal.message ? [routerFusionRefusal.message] : [],
+                    sessionId: evt.sessionId,
+                    ...(failedSend?.options.spanId ? { spanId: failedSend.options.spanId } : {}),
+                  })
+                : toDiagnostic(evt.error, {
+                    source: "provider",
+                    meta: {
+                      sessionId: evt.sessionId,
+                      ...(typeof evt.httpStatus === "number" ? { httpStatus: evt.httpStatus } : {}),
+                      ...(typeof evt.retryAfterMs === "number"
+                        ? { retryAfterMs: evt.retryAfterMs }
+                        : {}),
+                      ...(failedProvider ? { providerId: failedProvider } : {}),
+                    },
+                  })
             )
             // End the agent-trace span on permanent failure (no retry). The
             // success path closes the span via the `sdkResult` branch in
@@ -510,8 +554,11 @@ export async function handleEvent(
                 sessionId: evt.sessionId,
                 surface: "chat",
                 durationMs,
-                errorType:
-                  typeof evt.httpStatus === "number" ? `http_${evt.httpStatus}` : "provider_error",
+                errorType: routerFusionRefusal
+                  ? "router_fusion_refused"
+                  : typeof evt.httpStatus === "number"
+                    ? `http_${evt.httpStatus}`
+                    : "provider_error",
                 ...(failedProvider ? { provider: failedProvider } : {}),
               })
             }
@@ -813,6 +860,10 @@ export async function handleEvent(
       const env = evt as SDKEventEnvelope
       const sessionId = env.sessionId
       await projectDirectChatSdkMessage(sessionId, env.event)
+      // Router + Fusion (ADR-0188): a ledgered Claude Agent SDK turn books its
+      // model calls from the stream. Undefined — no await — for any other turn.
+      const observingRouterFusion = observeRouterFusionTurnMessage(sessionId, env.event)
+      if (observingRouterFusion) await observingRouterFusion
       // A proceeding SDK event means any approval that was routed to a remote
       // device for this session has been answered (or the turn moved past
       // it) — cancel its backstop deny (Remote Session Control).
@@ -965,7 +1016,18 @@ export async function handleEvent(
       // during `resolveSendOptions`; we read it back from the lastSend cache
       // (the same place routing-fallback uses) and merge twin + style sources
       // onto the last assistant message's SourcesPart.
+      let routerFusionSummary: Awaited<ReturnType<typeof finishRouterFusionTurn>> = null
       if (turnComplete) {
+        // Router + Fusion (ADR-0188): seal a ledgered turn at its result, not at
+        // `session_ended` — a goal, loop or steer continuation can start the
+        // session's next run first. What it booked goes on the message and
+        // into the usage row below.
+        if (routerFusionTurnActive(sessionId)) {
+          routerFusionSummary = await finishRouterFusionTurn(
+            sessionId,
+            routerFusionOutcomeOfResult(sdkResult)
+          )
+        }
         const last = useChatStore.getState().lastSendBySession[sessionId]
         const webSearchCtx = last?.options.webSearchContext
         if (webSearchCtx) {
@@ -1042,6 +1104,8 @@ export async function handleEvent(
             completedAt,
             reportedDurationMs: result?.duration_ms,
             finishReason: result?.subtype,
+            routing: last?.options ? buildRoutingRunMetadata(last.options) : undefined,
+            routerFusion: buildRouterFusionRunMetadata(last?.options, routerFusionSummary),
           })
         )
         nextMessages = attachInteractiveGrounding(nextMessages, last?.options)
@@ -1145,6 +1209,15 @@ export async function handleEvent(
             model: lastSendForSpan?.options.model ?? session?.model,
             providerId: lastSendForSpan?.options.provider,
             result: sdkResult,
+            // The ledger is the one writer of a ledgered turn's money.
+            ...(routerFusionSummary
+              ? {
+                  ledger: {
+                    runId: routerFusionSummary.runId,
+                    costUsd: routerFusionSummary.spentMicrousd / 1_000_000,
+                  },
+                }
+              : {}),
           }).catch((err) => {
             console.warn("recordResultUsage failed", err)
           })

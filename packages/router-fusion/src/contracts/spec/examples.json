@@ -1,0 +1,122 @@
+[
+  {
+    "name": "create_panel_run",
+    "schema": "RunRequest",
+    "value": {
+      "schema_version": "1.0.0",
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "比较两种前端状态管理方案，说明并发与测试风险。"
+        }
+      ],
+      "mode": "panel",
+      "allowed_modes": ["panel"],
+      "profile": "balanced",
+      "budget": {
+        "max_cost_usd": "0.500000",
+        "mode": "strict"
+      },
+      "deadline_ms": 120000,
+      "allow_degraded": false,
+      "delivery": "verified_buffered"
+    }
+  },
+  {
+    "name": "routing_features",
+    "schema": "RoutingFeatures",
+    "value": {
+      "schema_version": "1.0.0",
+      "goal": "比较两种前端状态管理方案",
+      "task": "research.synthesis",
+      "phase": "planning",
+      "language": "zh",
+      "missing_information": [],
+      "ambiguity": "medium",
+      "tool_need": "read_only",
+      "scope": "cross_system",
+      "failed_attempts": 0,
+      "verification_kinds": ["evidence_review"],
+      "source_revision": null,
+      "feature_version": "features-1",
+      "context_truncated": false
+    }
+  },
+  {
+    "name": "candidate",
+    "schema": "Candidate",
+    "value": {
+      "schema_version": "1.0.0",
+      "candidate_id": "panel-a",
+      "answer": "这是用于契约测试的候选，不是真实分析。",
+      "claims": [],
+      "assumptions": ["fixture"],
+      "open_questions": []
+    }
+  },
+  {
+    "name": "judge_report",
+    "schema": "JudgeReport",
+    "value": {
+      "schema_version": "1.0.0",
+      "supported_claim_ids": [],
+      "rejected_claim_ids": [],
+      "contradictions": [],
+      "missing_requirements": [],
+      "verification_requests": [],
+      "ready_to_synthesize": true
+    }
+  },
+  {
+    "name": "subtask",
+    "schema": "Subtask",
+    "value": {
+      "schema_version": "1.0.0",
+      "task_id": "33333333-3333-4333-8333-333333333333",
+      "goal": "修复示例项目分页竞态",
+      "base_revision": "fixture-v1",
+      "allowed_paths": ["src/users", "tests/users"],
+      "constraints": ["不得修改后端API"],
+      "acceptance": ["执行受控race-condition验收测试并通过"],
+      "tool_policy_id": "isolated-code-worker",
+      "max_steps": 8,
+      "artifact_namespace": "runs/fixture/subtask-1"
+    }
+  },
+  {
+    "name": "rule_quality_unknown",
+    "schema": "QualityEstimate",
+    "value": {
+      "action_id": "direct_baseline",
+      "p_pass": null,
+      "group_pass_rate": null,
+      "source": "rule",
+      "support_count": 0,
+      "in_distribution": false,
+      "predictor_version": null
+    }
+  },
+  {
+    "name": "new_run_ack",
+    "schema": "RunAccepted",
+    "value": {
+      "schema_version": "1.0.0",
+      "run_id": "11111111-1111-4111-8111-111111111111",
+      "session_id": "22222222-2222-4222-8222-222222222222",
+      "session_version": 1,
+      "status": "queued",
+      "version": 1,
+      "created_at": "2026-09-15T08:00:00Z"
+    }
+  },
+  {
+    "name": "approval_resume",
+    "schema": "ResumeRequest",
+    "value": {
+      "kind": "approval",
+      "expected_run_version": 3,
+      "approval_id": "33333333-3333-4333-8333-333333333333",
+      "decision": "approve"
+    }
+  }
+]

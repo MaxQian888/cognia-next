@@ -158,11 +158,13 @@ const mockMigrateLocalContentDatabase = jest.fn<Promise<void>, [string]>()
 
 let createAccountStore: typeof import("./account-store").createAccountStore
 let selectActiveAccount: typeof import("./account-store").selectActiveAccount
+let dropDexieAccountDatabase: typeof import("./account-store").dropDexieAccountDatabase
 
 beforeAll(async () => {
   const mod = await import("./account-store")
   createAccountStore = mod.createAccountStore
   selectActiveAccount = mod.selectActiveAccount
+  dropDexieAccountDatabase = mod.dropDexieAccountDatabase
 })
 
 const verifier = (tag: string): PasswordVerifierRecord => ({
@@ -1630,5 +1632,41 @@ describe("deleteAccount cascades through the profile's cloud identity (ADR-0149)
     await store.getState().deleteAccount("acct_beta")
 
     expect(mockForgetProfileCloudIdentity).toHaveBeenCalledWith("acct_beta", { hostBound: false })
+  })
+})
+
+describe("dropDexieAccountDatabase", () => {
+  async function createDatabase(name: string): Promise<void> {
+    const { default: Dexie } = await import("dexie")
+    const db = new Dexie(name)
+    db.version(1).stores({ rows: "&id" })
+    await db.open()
+    db.close()
+  }
+
+  it("deletes the account databases and the Router + Fusion ledger beside the encrypted one", async () => {
+    const { default: Dexie } = await import("dexie")
+    const names = [
+      "cognia-account-acct_drop",
+      "cognia-account-acct_drop-encrypted-v1",
+      "cognia-account-acct_drop-encrypted-v1-router-fusion-v1",
+    ]
+    for (const name of names) await createDatabase(name)
+
+    await dropDexieAccountDatabase("acct_drop")
+
+    for (const name of names) expect(await Dexie.exists(name)).toBe(false)
+  })
+
+  it("[ACC:OFF-03] succeeds for an account that never switched Router + Fusion on", async () => {
+    const { default: Dexie } = await import("dexie")
+    await createDatabase("cognia-account-acct_plain-encrypted-v1")
+
+    await expect(dropDexieAccountDatabase("acct_plain")).resolves.toBeUndefined()
+
+    expect(await Dexie.exists("cognia-account-acct_plain-encrypted-v1")).toBe(false)
+    expect(await Dexie.exists("cognia-account-acct_plain-encrypted-v1-router-fusion-v1")).toBe(
+      false
+    )
   })
 })

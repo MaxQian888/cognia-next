@@ -168,6 +168,22 @@ describe("createLlmClient", () => {
     await expect(client.complete("hi")).rejects.toThrow(/unsupported provider/i)
   })
 
+  it("leaves the AI SDK's own retry default alone unless a caller sets one", async () => {
+    // Everything that is not ledgered must keep the exact request it made
+    // before ADR-0188: `maxRetries: undefined` is the SDK's own default (2).
+    const client = createLlmClient({
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      apiKey: "k",
+    })
+    await client.complete("hi")
+    expect(lastGenerateTextCall()).toHaveProperty("maxRetries", undefined)
+
+    // A ledgered call turns the SDK's hidden retries into booked attempts.
+    await client.complete("hi", { maxRetries: 0 })
+    expect(lastGenerateTextCall()).toHaveProperty("maxRetries", 0)
+  })
+
   it("createAnthropicLlmClient is the same factory for back-compat", () => {
     expect(createAnthropicLlmClient).toBe(createLlmClient)
   })

@@ -15,6 +15,10 @@
 //! - `translate` — inbound-format ⇄ upstream-protocol translation.
 //! - `snapshot` — the routing + credential snapshot pushed by the renderer.
 //! - `api_keys` — keyring-backed scoped API keys.
+//! - `brain_bridge` — the Run API's link to the brain, where Dexie is
+//!   authoritative (ADR-0188 D9).
+//! - `runs` — `/v1/runs`: create, read, cancel, resume, feedback and the SSE
+//!   event stream, all served over the brain bridge.
 //! - `keyed_rate_limit` — per-key request budget.
 //!
 //! Config persistence: the non-secret [`GatewayConfig`] is mirrored to
@@ -24,6 +28,7 @@
 //! config file.
 
 pub mod api_keys;
+pub mod brain_bridge;
 #[cfg(feature = "tauri-host")]
 pub mod commands;
 pub mod concurrency;
@@ -35,13 +40,16 @@ pub mod header_policy;
 pub mod host;
 pub mod keyed_rate_limit;
 pub mod lease;
+pub mod passthrough_ledger;
 pub mod route_planner;
 pub mod route_ticket;
+pub mod runs;
 pub mod server;
 pub mod session_key;
 pub mod snapshot;
 pub mod translate;
 pub mod types;
+pub mod virtual_models;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -139,6 +147,11 @@ pub struct GatewayState {
     pub tickets: Arc<route_ticket::RouteTicketRegistry>,
     /// Session → credential leases backing ticket affinity (R4).
     pub leases: Arc<lease::CredentialLeaseMap>,
+    /// The Run API's link to the brain and its surface switches (ADR-0188 B2).
+    /// Detached and switched off until a host installs a bridge and the
+    /// renderer pushes its settings, which is what an untouched install runs
+    /// with: `/v1/runs` refuses, every other endpoint is unchanged.
+    pub runs: runs::RunsState,
 }
 
 struct GatewayInner {
@@ -194,6 +207,7 @@ impl GatewayState {
                 route_ticket::InMemoryTicketMetaStore::default(),
             ))),
             leases: Arc::new(lease::CredentialLeaseMap::default()),
+            runs: runs::RunsState::detached(),
         }
     }
 
@@ -580,6 +594,11 @@ impl GatewayState {
             .routing_policy
             .as_ref()
             .and_then(|policy| policy.auto.strategy_unavailable.clone());
+        // The Router + Fusion switches ride the snapshot the renderer already
+        // pushes, so there is no second channel to keep in step (ADR-0188 D36).
+        // A snapshot that names none leaves both surfaces off.
+        self.runs
+            .set_switches(snapshot.router_fusion.unwrap_or_default());
         *live = Some(snapshot);
         let mut inner = self.inner.lock();
         inner.status.snapshot_generated_at_ms = Some(generated_at);
@@ -686,6 +705,7 @@ impl GatewayState {
             observer,
             self.tickets.clone(),
             self.leases.clone(),
+            self.runs.clone(),
         )
         .await?;
 
@@ -1233,6 +1253,7 @@ mod tests {
             Arc::new(NoopObserver),
             state.tickets.clone(),
             state.leases.clone(),
+            state.runs.clone(),
         )
         .await
         .unwrap();

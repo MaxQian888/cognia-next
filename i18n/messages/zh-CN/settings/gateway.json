@@ -267,5 +267,8 @@
     "ticketMeta": "会话 {session} · {candidates} 个候选 · {expires} 过期",
     "title": "路由票据"
   },
-  "title": "入站网关"
+  "title": "入站网关",
+  "keyScopes": "Run API 权限",
+  "keyScopesNone": "无（仅转发）",
+  "keyScopesHelp": "该密钥在 Router + Fusion Run API 上可以做什么。没有任何权限的密钥在聊天端点上照常工作，只是 /v1/runs 会拒绝它。"
 }

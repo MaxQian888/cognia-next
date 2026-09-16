@@ -85,7 +85,9 @@ export function compareCommandSets(manifest, registered, dispatchArms) {
     const arm = command.arm ?? command.name
     if (command.target !== "client") {
       if (!dispatchArms.has(arm)) {
-        errors.push(`remote command has no dispatch arm — add one or drop the descriptor: ${command.name}`)
+        errors.push(
+          `remote command has no dispatch arm — add one or drop the descriptor: ${command.name}`
+        )
       }
       continue
     }
@@ -119,7 +121,8 @@ function isBacked(name, registered, dispatchArms) {
  */
 export function checkGeneratedTable(manifest, rustSource) {
   const match = rustSource.match(/^pub const CONTRACT_VERSION: u32 = (\d+);$/m)
-  if (!match) return [`${KNOWN_COMMANDS_RUST_PATH}: missing CONTRACT_VERSION — run pnpm companion-api:gen`]
+  if (!match)
+    return [`${KNOWN_COMMANDS_RUST_PATH}: missing CONTRACT_VERSION — run pnpm companion-api:gen`]
   if (Number(match[1]) !== manifest.contractVersion) {
     return [
       `${KNOWN_COMMANDS_RUST_PATH}: CONTRACT_VERSION ${match[1]} lags manifest ${manifest.contractVersion} — run pnpm companion-api:gen`,
@@ -139,7 +142,11 @@ export function dispatchArmIndex(sources) {
   const cache = new Map()
   return {
     has(arm) {
-      if (!cache.has(arm)) cache.set(arm, sources.some((source) => hasArm(source, arm)))
+      if (!cache.has(arm))
+        cache.set(
+          arm,
+          sources.some((source) => hasArm(source, arm))
+        )
       return cache.get(arm)
     },
   }

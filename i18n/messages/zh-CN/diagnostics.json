@@ -277,6 +277,14 @@
       "hint": "此主机已达到智能体进程数上限——请结束或关闭一个后重试。",
       "label": "智能体会话过多"
     },
+    "routerFusionRefused": {
+      "hint": "没有满足本轮预算、限制或数据规则的路由——请在「设置 → AI 连接 → 路由」中提高运行上限或更换模型。",
+      "label": "Router + Fusion 拒绝了本轮"
+    },
+    "routerFusionRunFailed": {
+      "hint": "级联或评审团运行在回答通过验证前停止。可在“运行中心”查看该运行；请重新发送消息，或将对话切换为直接模式。",
+      "label": "Router + Fusion 运行失败"
+    },
     "routingNoCandidates": {
       "hint": "路由链中没有服务商可以处理该请求——请检查服务商与模型映射配置。",
       "label": "没有可用服务商"

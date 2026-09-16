@@ -328,6 +328,10 @@ export const SETTINGS_SYNC = {
   semanticToolRouting: { category: "desktop-only" },
   difficultyRouting: { category: "desktop-only" },
   autoRouting: { category: "desktop-only" },
+  // Router + Fusion runs on the Host that executes it; paired clients read the
+  // Host's effective switches over companion RPC (ADR-0188 D25/D36), never a
+  // mirrored copy they could drift from.
+  routerFusion: { category: "desktop-only" },
   routingFallbackEnabled: { category: "desktop-only" },
   routingPresets: { category: "desktop-only" },
   background: { category: "desktop-only" },

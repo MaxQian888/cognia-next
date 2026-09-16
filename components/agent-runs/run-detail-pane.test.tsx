@@ -332,6 +332,38 @@ describe("RunDetailPane", () => {
     expect(screen.getByRole("button", { name: "actions.stop" })).toBeVisible()
   })
 
+  it("renders the declared approval risk as a badge only when present", () => {
+    detailState.interrupts = [
+      {
+        id: "approval",
+        type: "bot_approval",
+        status: "pending",
+        title: "Publish repair",
+        createdAt: Date.now(),
+        approvalRisk: "high",
+        approvalDetail: { approvedActions: [{ input: { body: "Exact" } }] },
+      },
+    ]
+    detailState.run = {
+      id: "run-1",
+      currentRevision: 12,
+      latestSnapshot: {
+        pendingInterrupt: { id: "approval" },
+        allowedActions: ["approve", "deny", "stop"],
+      },
+    }
+    const { unmount } = render(<RunDetailPane row={row({ kind: "bot" })} actions={makeActions()} />)
+    const region = screen.getByRole("region", { name: "botApproval.title" })
+    const badge = within(region).getByText("botApproval.risk.high")
+    expect(badge).toHaveAttribute("data-variant", "destructive")
+    unmount()
+
+    const [first] = detailState.interrupts as Array<Record<string, unknown>>
+    detailState.interrupts = [{ ...first, approvalRisk: undefined }]
+    render(<RunDetailPane row={row({ kind: "bot" })} actions={makeActions()} />)
+    expect(screen.queryByText(/botApproval\.risk\./)).not.toBeInTheDocument()
+  })
+
   it("keeps historical Bot publication detail readable in approvals", async () => {
     detailState.interrupts = [
       {

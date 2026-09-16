@@ -2308,10 +2308,14 @@
     "filters": {
       "all": "All",
       "allKinds": "All kinds",
+      "allOrigins": "All origins",
       "failed": "Failed",
       "finished": "Finished",
       "kindLabel": "Filter by kind",
       "kindOption": "{label} ({count})",
+      "originGatewayApi": "Gateway API",
+      "originLabel": "Filter by origin",
+      "originLocal": "This device",
       "running": "Running",
       "statusLabel": "Filter by status",
       "waiting": "Waiting"
@@ -2322,6 +2326,7 @@
       "chat": "Chat",
       "connector": "Connector",
       "delegation": "Delegation",
+      "fusion": "Routed run",
       "goal": "Goal",
       "job": "Background task",
       "other": "Other",
@@ -2338,6 +2343,7 @@
     "operations": {
       "unavailable": "This device does not carry this Squad run's record."
     },
+    "originActor": "key {name}",
     "outcome": {
       "action_unavailable": "That action is no longer available — the run has moved on.",
       "already_retried": "This run has already been retried.",
@@ -4775,7 +4781,9 @@
     "description": "Installed Bots: what wakes each one up, what runs it, and what it is allowed to do.",
     "detail": {
       "noSelectionBody": "Pick a Bot from the list to see its triggers, credentials and policy.",
-      "noSelectionTitle": "No Bot selected"
+      "noSelectionTitle": "No Bot selected",
+      "notFoundBody": "The link names an installation this device does not have. It may have been uninstalled, or it lives on another host.",
+      "notFoundTitle": "That Bot is not here"
     },
     "executor": {
       "agent-turn": "Agent turn",
@@ -4835,6 +4843,7 @@
       "filterAria": "Filter Bots by status",
       "label": "Bot list",
       "searchAria": "Search Bots",
+      "searchClearAria": "Clear Bot search",
       "searchPlaceholder": "Search Bots"
     },
     "monitor": {
@@ -4964,6 +4973,12 @@
     "trigger": {
       "armAria": "Arm {name}",
       "armBlockedOrphan": "Triggers cannot be armed while the definition is missing.",
+      "configFallback": {
+        "below-floor": "Using default: below 15s floor",
+        "invalid-cron": "Using default: invalid cron",
+        "invalid-timezone": "Using default: invalid timezone",
+        "missing": "Using default: config value missing"
+      },
       "everyHours": "Every {value}h",
       "everyMinutes": "Every {value}m",
       "everySeconds": "Every {value}s",
@@ -7698,6 +7713,18 @@
         "timestamp": "Time",
         "usage": "Tokens"
       },
+      "routing": {
+        "alias": "Alias · {alias}",
+        "auto": "Auto · {target}",
+        "candidates": "Candidates: {count}",
+        "costCapExceeded": "Proceeded over the per-request cost cap",
+        "judgeUsed": "Judge: {value}",
+        "no": "no",
+        "score": "Score: {score}",
+        "strategy": "Strategy: {strategy}",
+        "tier": "Tier: {tier}",
+        "yes": "yes"
+      },
       "status": {
         "complete": "Complete",
         "error": "Failed",
@@ -8623,7 +8650,7 @@
     "agentsHint": "dispatch & watch",
     "agentsLabel": "◆ Subagents",
     "aliases": "Aliases:",
-    "arguments": "Arguments",
+    "argsTitle": "Arguments",
     "argumentsLabels": {
       "mcp": {
         "add": {
@@ -8698,6 +8725,7 @@
       "handoff": "push this session to the desktop app",
       "help": "show the command list, or detail on one command (/help [command])",
       "hooks": "browse, configure and reload lifecycle hooks",
+      "images": "manage pasted image attachments",
       "init": "create or improve this project's AGENTS.md",
       "inspect": "browse and expand any tool/file output",
       "keybind": "view and customize keyboard shortcuts",
@@ -8776,6 +8804,10 @@
     "helpHint": "all commands & keys",
     "helpLabel": "? Help",
     "helpTitle": "Help: /{command}",
+    "imagesEmpty": "no image attachments — paste with the clipboard-image chord",
+    "imagesFooter": "↑/↓ select · d remove · c clear all · Enter open · Esc close",
+    "imagesMissing": "missing",
+    "imagesTitle": "Image attachments",
     "inspectEmpty": "No tool output to inspect yet.",
     "inspectLine": "1 line",
     "inspectLines": "{count} lines",
@@ -9058,6 +9090,7 @@
     },
     "cacheReused": "{count} reused",
     "cancel": "Esc to cancel",
+    "clipboardImageReady": "image in clipboard · {key} to paste",
     "codexLimits": {
       "creditUnit": "credits",
       "credits": "Credits",
@@ -9081,10 +9114,14 @@
     "crashHint": "The error was logged. Press r to reset the session · q or Esc to quit.",
     "crashTitle": "Something went wrong",
     "defaultModel": "default",
+    "devinLimits": {
+      "noCredential": "No Devin credential found — run `devin auth login`, or set DEVIN_API_KEY."
+    },
     "diffFailed": "Could not load changes: {error}",
     "editingDiscard": "Editing message #{position}/{total} · {later} later turn(s) will be discarded on send · Esc to cancel",
     "editingMessage": "Editing message #{position}/{total} — ↑/↓ choose · Enter to edit · Esc to cancel",
     "filterCommands": "type to filter commands",
+    "imagesAttached": "{count} attached · /images to manage",
     "language": "Interface language",
     "languageHint": "Language for startup, approvals, errors, help and review panels.",
     "mcp": {
@@ -9297,6 +9334,7 @@
     "allPaths": "all",
     "allVisible": "all",
     "binary": "Binary change",
+    "binaryData": "{count} binary payload lines",
     "branch": "Branch vs {ref}",
     "changed": "{count} files changed",
     "changedOne": "1 file changed",
@@ -9309,9 +9347,14 @@
     "failed": "Changes could not be loaded. Press r to retry.",
     "file": "1 file",
     "files": "{count} files",
+    "hideViewed": "X hide viewed",
+    "hunkNav": "[/] hunks",
+    "hunkPosition": "hunk {current}/{total}",
     "hunks": "{count} hunks",
     "loading": "Loading changes…",
+    "markViewed": "x mark viewed",
     "matches": "{current}/{total} matches",
+    "modeChange": "mode {from} → {to}",
     "navigation": "↑/↓ files · PgUp/PgDn page · / filter · Enter open · Tab focus · Ctrl+←/→ scope · Esc back",
     "noMatches": "No matching files",
     "pages": "Page {page}/{pages} · {shown}/{total} files",
@@ -9319,11 +9362,22 @@
     "pathSearch": "Search paths: {query}▌ · Enter apply",
     "refresh": "r refresh",
     "searchDraft": "/{query}{cursor} · enter search · esc cancel",
+    "sectionStaged": "staged",
+    "sectionUnstaged": "unstaged",
+    "sectionUntracked": "new files",
     "selectedFile": "Selected:",
+    "showViewed": "X show viewed",
+    "splitView": "s split view",
     "staged": "Staged changes",
+    "statusDeleted": "deleted",
+    "statusNew": "new file",
+    "statusRenamed": "renamed",
+    "statusRenamedFrom": "renamed from {from}",
     "title": "Git diff",
+    "unifiedView": "s unified view",
     "unstaged": "Unstaged changes",
     "untracked": "New files",
+    "viewedCount": "{count} viewed",
     "viewerNavigation": "↑/↓ scroll · PgUp/PgDn page · g/G top/bottom · / search · n/N next/prev",
     "workingTitle": "Working tree changes"
   },
@@ -9376,6 +9430,7 @@
     "keyDescription": "Current binding — change it from Rebind a key… below.",
     "keys": {
       "agentsPanel": "Open running-agents panel",
+      "attachmentsPanel": "Manage image attachments",
       "clearScreen": "Clear screen",
       "collapseAll": "Expand / collapse all",
       "copyCodeBlock": "Copy last code block",
@@ -12277,6 +12332,14 @@
         "hint": "This host is already running the maximum number of agent processes — finish or close one, then try again.",
         "label": "Too many agent sessions"
       },
+      "routerFusionRefused": {
+        "hint": "No route fits this turn's budget, limits or data rules — raise the run cap or change the model in Settings → AI connections → Routing.",
+        "label": "Router + Fusion refused the turn"
+      },
+      "routerFusionRunFailed": {
+        "hint": "The cascade or panel run stopped before its answer was verified. Agent Runs shows the run; send the message again, or switch the conversation to Direct.",
+        "label": "Router + Fusion run failed"
+      },
       "routingNoCandidates": {
         "hint": "No provider in the routing chain can serve this request — check your providers and model mappings.",
         "label": "No provider available"
@@ -13769,6 +13832,7 @@
       "chat": "Chat",
       "connector": "Connector",
       "delegation": "Delegation",
+      "fusion": "Routed run",
       "goal": "Goal",
       "job": "Background task",
       "plan": "Plan",
@@ -27686,15 +27750,46 @@
       "applyModeOverwrite": "Overwrite",
       "applyModeOverwriteDesc": "Replace the entire alias list with the preset.",
       "auto": {
+        "cacheEnabled": "Cache routing decisions",
+        "cacheTtl": "Cache TTL (seconds)",
+        "categoryAliasesHint": "A configured alias beats the difficulty tier ladder, but never capability or data-policy constraints.",
+        "categoryAliasesTitle": "Category Aliases",
+        "categoryFollowLadder": "Follow difficulty ladder",
         "defaultSelection": "Use Auto for unpinned conversations",
         "defaultSelectionHint": "Concrete session models remain hard overrides.",
         "desc": "Route explicit Auto selections locally by capabilities, reliability, task fit, cost, and latency.",
+        "dormant": {
+          "allowOverride": "A concrete session model is always a hard override.",
+          "customTierModels": "Tier models are the aliases named in candidate aliases + model mappings.",
+          "routingMode": "Replaced by the judge settings — the local score always runs."
+        },
+        "dormantInactive": "Inactive",
+        "dormantTitle": "Legacy fields (persisted, unused)",
         "enabled": "Enable auto routing",
+        "excludedProviders": "Excluded providers",
+        "fallbackHint": "Used only when Auto finds no viable candidate.",
+        "fallbackNone": "None",
+        "fallbackProvider": "Fallback provider",
+        "fallbackTier": "Fallback tier alias",
+        "fallbackTitle": "Fallback",
         "hint": "Auto classifies locally and prefers these live tier aliases when available: {tiers}.",
+        "judgeEnabled": "Difficulty judge (second opinion)",
+        "judgeHint": "Consulted only near tier boundaries. The prompt is never sent when redaction rejects it, and a failed judge leaves the local decision standing.",
+        "judgeTimeoutMs": "Judge timeout (ms)",
+        "judgeUncertaintyBand": "Uncertainty band (0–0.5)",
         "localOnly": "Local providers only",
         "localOnlyHint": "Hard-block cloud candidates for Auto requests.",
+        "maxCostPerRequest": "Max cost per request (cents)",
+        "maxCostPerRequestHint": "Soft limit — if nothing fits, routing proceeds and the message shows a warning.",
+        "preferredProviders": "Preferred providers",
+        "preferredProvidersHint": "Ordered — earlier providers are tried first.",
+        "providerPolicyTitle": "Provider Policy",
+        "routerModel": "Judge model",
+        "routerModelClear": "Use utility default",
+        "routerModelHint": "Model used for the second-opinion judge. Defaults to the utility model.",
         "shadowMode": "Shadow comparison",
         "shadowModeHint": "Compare decisions without sending duplicate model requests.",
+        "showIndicator": "Show routing indicator on messages",
         "thresholdBalanced": "Balanced threshold (0–1)",
         "thresholdPowerful": "Powerful threshold (0–1)",
         "title": "Auto Routing"
@@ -27778,6 +27873,7 @@
       "reasonCode": {
         "affinity-pin": "Session affinity",
         "alias-match": "Alias policy matched",
+        "auto-category-fit": "Task-category alias",
         "auto-task-fit": "Automatic task fit",
         "budget-exceeded": "Budget limit exceeded",
         "capability-required": "Required capability unavailable",
@@ -27785,15 +27881,20 @@
         "cold-start": "Cold deployment order",
         "committed-no-replay": "Committed response cannot be replayed",
         "context-window": "Context window too small",
+        "cost-cap-exceeded": "Per-request cost cap exceeded",
         "data-policy": "Data policy rejected",
         "fallback-content-policy": "Content-policy fallback",
         "fallback-context": "Context fallback",
         "fallback-transient": "Transient-error fallback",
         "filter": "Filter decision ({code})",
+        "judge-agreed": "Difficulty judge agreed",
+        "judge-overrode": "Difficulty judge overrode the heuristic",
+        "judge-unavailable": "Difficulty judge unavailable",
         "manual-override": "Manual override",
         "plugin": "Plugin decision ({code})",
         "plugin-error": "Plugin error",
         "plugin-timeout": "Plugin timeout",
+        "provider-preference": "Preferred provider",
         "provider-unavailable": "Provider unavailable",
         "rate-limited": "Rate limited",
         "reliability-first": "Reliability-first ranking",
@@ -28369,6 +28470,382 @@
       "secure": "Device secure storage",
       "unavailable": "Vault unavailable",
       "unlocked": "Vault unlocked"
+    }
+  },
+  "routerFusion": {
+    "breakerToast": {
+      "body": "Repeated failures ({reason}). Turns use the original path and are not ledgered until you re-arm it in Settings → AI connections → Routing.",
+      "title": "Router + Fusion paused for {surface}"
+    },
+    "grant": {
+      "body": "This turn reserves up to {cap}, but your cost budget only has {available} left. Approve a one-time grant of {shortfall} for this run only.",
+      "title": "Approve this Router + Fusion run?"
+    },
+    "modePicker": {
+      "aria": "Router + Fusion run mode: {mode}",
+      "auto": "Auto",
+      "autoDesc": "Direct, unless a cascade or panel rule you approved matches the turn.",
+      "buffered": "Cascade and panel answers appear once they are verified.",
+      "cascade": "Cascade",
+      "cascadeDesc": "A cheap model drafts, the draft is checked, and a strong model takes over if it fails. Text only, no agent tools.",
+      "direct": "Direct",
+      "directDesc": "One model answers and streams as it writes, with the agent's tools.",
+      "panel": "Panel",
+      "panelDesc": "Independent models answer, a judge compares them against evidence, and one answer is written. Text only, no agent tools.",
+      "paused": "Router + Fusion is paused for chat after repeated failures. Cascade and Panel turns are refused until you re-arm it in Settings → AI connections → Routing.",
+      "title": "How this conversation's turns run"
+    },
+    "progress": {
+      "buffered": "The answer appears once it is verified.",
+      "calls": "{count, plural, =1 {# model call} other {# model calls}}",
+      "details": "Run progress",
+      "runningCascade": "Cascade running",
+      "runningPanel": "Panel running",
+      "spent": "{spent} of {cap}",
+      "starting": "Starting"
+    },
+    "refusal": {
+      "ATTEMPTS_EXHAUSTED": "This call already used every transport attempt it was allowed.",
+      "BUDGET_FROZEN": "The run spent past its cap and was stopped.",
+      "CALL_OUTCOME_UNKNOWN": "A model call's outcome is unknown, so the run stopped rather than pay for it twice.",
+      "CANCELLED": "The run was cancelled.",
+      "CONTEXT_BUDGET_EXHAUSTED": "The conversation is too long to compact within this run's cap.",
+      "CONTEXT_PRECHECK_FAILED": "The conversation does not fit in the context window of the models this run needs.",
+      "DATA_CLASS_NOT_ALLOWED": "The model is not allowed to receive this workspace's data class.",
+      "DEADLINE_EXCEEDED": "The run reached its deadline.",
+      "DECLINED_GRANT": "The one-time budget grant was declined, so the turn did not run.",
+      "DEPLOYMENT_NOT_IN_SNAPSHOT": "The strict budget does not allow a model outside this run's route.",
+      "DISPATCH_FAILED": "The turn could not be sent to the model.",
+      "FORMAT_INVALID": "The model's answer was not in the required format.",
+      "FUSION_INSUFFICIENT_CANDIDATES": "Too few panel answers survived to compare.",
+      "FUSION_TEXT_ONLY": "Cascade and panel runs read text only. Remove the images or switch this conversation to Direct.",
+      "INTERNAL": "Router + Fusion hit an internal error.",
+      "JUDGE_OUTPUT_INVALID": "The judge's report could not be read.",
+      "MAX_MODEL_CALLS": "The run reached its model-call limit.",
+      "PII_BLOCKED": "This conversation contains personal data or a secret (an email address, an ID number or a key), so it was not sent to the cascade or panel models.",
+      "PRICE_UNKNOWN": "The strict budget does not allow a model without an audited price.",
+      "PROVIDER_UNAVAILABLE": "The provider was switched off or lost its credentials during the turn.",
+      "RESERVATION_NOT_ACTIVE": "The reservation for this call was already settled or released.",
+      "RESTRICTED_NOT_GRANTED": "Restricted data may not be sent to this provider.",
+      "REVOKED": "Access to this model was revoked during the turn.",
+      "ROUTER_FUSION_DISABLED": "Router + Fusion for chat was switched off during the turn.",
+      "ROUTER_FUSION_UNAVAILABLE": "Router + Fusion is unavailable right now, so this cascade or panel turn did not run.",
+      "ROUTE_EXPIRED": "The route chosen for this message expired before it was sent. Send it again.",
+      "ROUTE_NO_SOLUTION": "No model fits this turn's budget, limits and data rules.",
+      "RUN_BUDGET_EXHAUSTED": "The next call would exceed this run's cap.",
+      "RUN_BUSY": "Another window is already working on this run.",
+      "RUN_EXISTS": "A run with this id already exists.",
+      "RUN_INPUT_MISSING": "The run's input could not be found.",
+      "RUN_LOST": "The window running this turn closed before it finished.",
+      "RUN_NOT_FOUND": "The run could not be found.",
+      "RUN_NOT_RUNNING": "The run had already ended when the model call was requested.",
+      "RUN_SETUP_FAILED": "The run could not be started.",
+      "RUN_TERMINAL": "The run had already ended, so no further calls can be reserved.",
+      "SESSION_BUSY": "Another Router + Fusion turn is still running in this conversation.",
+      "SESSION_CLOSED": "The conversation closed before the call could be approved.",
+      "SESSION_VERSION_CONFLICT": "The conversation changed while the run was starting.",
+      "STAGE_NOT_HELD": "The budget held for this stage was already used or released.",
+      "STEP_ALREADY_COMMITTED": "This step already completed, so it was not sent to the model again.",
+      "STEP_OUTCOME_UNKNOWN": "A step's outcome is unknown after an interruption, so it was not run again.",
+      "TENANT_BUDGET_EXHAUSTED": "Your cost budget cannot cover this run's cap.",
+      "TOOL_CALL_LIMIT": "The run reached its limit of evidence lookups.",
+      "TOOL_ROUND_EXCEEDED": "A panel member asked for evidence more times than it is allowed.",
+      "VERIFICATION_FAILED": "The answer failed verification.",
+      "VERIFICATION_INCONCLUSIVE": "The answer could not be verified.",
+      "unknown": "Refused with code {code}."
+    },
+    "runCard": {
+      "acceptance": "Accepted by",
+      "acceptanceSchemaOnly": "{profile} (schema only — the answer's content was not verified)",
+      "action": "Action",
+      "budget": "Budget",
+      "budgetStrict": "Strict",
+      "budgetTracked": "Tracked",
+      "bypassed": "Router + Fusion was unavailable ({code}), so this turn used the original path and was not ledgered.",
+      "bypassedTripped": "Router + Fusion was unavailable ({code}) and is now paused for chat. Turns use the original path until you re-arm it in Settings.",
+      "calls": "Model calls",
+      "cap": "Run cap",
+      "cost": "Cost",
+      "costStatus": {
+        "actual": "actual",
+        "estimated": "estimated",
+        "pending": "pending — a call is still unanswered"
+      },
+      "costStatusParenthesized": "({status})",
+      "details": "Run details",
+      "estimatedCap": "Estimated cap: this model has no audited price, so the run may overspend its cap.",
+      "frozen": "Stopped at the cap",
+      "fusion": {
+        "candidates": "Candidates",
+        "candidatesValue": "{members, plural, =1 {# answer} other {# answers}}, {rejected} rejected, {evidence} with invalid evidence",
+        "chipCascade": "Cascade",
+        "chipPanel": "Panel",
+        "compactions": "Context compactions",
+        "contradictions": "{count, plural, =1 {# contradiction} other {# contradictions}}, {unresolved} unresolved",
+        "costOfCap": "{spent} of {cap}",
+        "degraded": "Degraded",
+        "escalated": "Escalated",
+        "judge": "Judge",
+        "judgeValue": "{supported, plural, =1 {# claim} other {# claims}} supported, {rejected} rejected, {unverified} without evidence",
+        "level": {
+          "human_review": "human review",
+          "mixed": "mixed",
+          "model_review": "model review",
+          "schema_only": "schema only",
+          "tool_verified": "checked with tools"
+        },
+        "modeCascade": "Cascade: a cheap draft, escalated if it fails verification",
+        "modePanel": "Panel: independent answers compared by a judge",
+        "phase": {
+          "cascade": "Cascade",
+          "context": "Context",
+          "execution": "Answering",
+          "intake": "Intake",
+          "judge": "Judging",
+          "panel": "Panel",
+          "prepare": "Prepared",
+          "synthesis": "Writing the answer",
+          "verification": "Verifying"
+        },
+        "quality": "Answer quality",
+        "qualityValue": {
+          "accepted": "Accepted",
+          "degraded": "Degraded: fewer checks than the action asks for",
+          "unknown": "Not verified"
+        },
+        "reason": {
+          "FORMAT_INVALID": "The draft was not in the required format",
+          "FUSION_INSUFFICIENT_CANDIDATES": "Only one panel answer survived",
+          "VERIFICATION_FAILED": "The draft failed verification",
+          "VERIFICATION_INCONCLUSIVE": "The draft could not be verified"
+        },
+        "role": {
+          "cheap": "Cheap draft",
+          "judge": "Judge",
+          "lead": "Lead",
+          "panel_a": "Panel member A",
+          "panel_b": "Panel member B",
+          "panel_c": "Panel member C",
+          "reviewer": "Reviewer",
+          "solver": "Solver",
+          "strong": "Strong draft",
+          "synthesizer": "Synthesizer",
+          "worker": "Worker"
+        },
+        "step": {
+          "candidates": "Collecting panel answers",
+          "cheap": "Cheap draft",
+          "compacted": "Context compacted",
+          "escalate": "Escalated to the strong model",
+          "format_repair": "Repairing the format",
+          "invoke": "Calling the model",
+          "member_tools": "Panel member looked up evidence",
+          "reported": "Judge reported",
+          "strong": "Strong draft",
+          "verification_requests_left_open": "Judge left checks open"
+        },
+        "timeline": "Timeline",
+        "unknownCalls": "{count} with an unknown outcome",
+        "verification": "Verification",
+        "verificationStatus": {
+          "failed": "Failed",
+          "inconclusive": "Inconclusive",
+          "not_applicable": "Not applicable",
+          "passed": "Passed"
+        },
+        "verificationValue": "{status} ({level})"
+      },
+      "label": "Router + Fusion",
+      "lane": "Runtime",
+      "laneAgentSdk": "Claude Agent SDK",
+      "laneAiSdk": "AI SDK",
+      "mode": "Mode",
+      "modeDirect": "Direct",
+      "model": "Model",
+      "notLedgered": "Not ledgered",
+      "overspend": "Over cap by {amount}",
+      "refused": "Refused",
+      "rule": "Rule",
+      "ruleBaseline": "Baseline (no rule matched)",
+      "runId": "Run",
+      "status": "Status",
+      "statusValue": {
+        "cancelled": "Cancelled",
+        "cancelling": "Cancelling",
+        "expired": "Expired",
+        "failed": "Failed",
+        "queued": "Queued",
+        "reconciling": "Reconciling",
+        "running": "Running",
+        "succeeded": "Succeeded",
+        "unknown": "{status}"
+      }
+    },
+    "settings": {
+      "actions": {
+        "add": {
+          "added": "Action {id} added.",
+          "id": "Action id",
+          "idDesc": "3–48 lowercase letters, digits or underscores, starting with a letter. The new action starts from the built-in action of its mode.",
+          "mode": "Mode",
+          "submit": "Add",
+          "title": "Add an action"
+        },
+        "builtin": "Built-in",
+        "custom": "Custom",
+        "delegateDormant": "Delegate runs need a sandbox and acceptance checks, which arrive in a later release. This action is never chosen.",
+        "delete": "Delete",
+        "desc": "What each mode runs: the model alias behind every role, how the answer is checked, and the run cap. Every change gives the action a new configuration hash; a run keeps the hash it ran under.",
+        "edit": "Edit {id}",
+        "edited": "Edited",
+        "enabled": "Enable {id}",
+        "hash": "Config hash {hash}",
+        "issue": {
+          "ALIAS_EMPTY": "The {role} role needs a model alias.",
+          "CAP_INVALID": "Enter a dollar amount with at most six decimal places.",
+          "ID_INVALID": "Use 3–48 lowercase letters, digits or underscores, starting with a letter.",
+          "ID_TAKEN": "An action with this id already exists.",
+          "LIMIT_INVALID": "A panel has two or three members.",
+          "MODE_NOT_EDITABLE": "This mode cannot be used yet.",
+          "PANEL_C_REQUIRED": "A panel of three needs the Panel member C role.",
+          "PROFILE_NOT_ALLOWED": "This check is not available for this mode.",
+          "ROLE_MISSING": "The {role} role needs a model alias.",
+          "ROLE_UNKNOWN": "{role} is not a role of this mode."
+        },
+        "mode": {
+          "delegate": "Delegate"
+        },
+        "notChosen": "Not chosen yet",
+        "panelSize": "Panel size",
+        "panelSizeDesc": "Three members need the Panel member C role.",
+        "profile": "Verified by",
+        "profileDesc": {
+          "evidence_review": "Every claim must be backed by evidence the judge can check.",
+          "schema_fixture": "The answer must match the requested JSON schema.",
+          "text_basic": "The answer is checked for format only; its content is not verified.",
+          "text_review": "A reviewer model checks the answer against the request."
+        },
+        "profileDormant": "Needs a runtime verifier, which arrives in a later release; the router does not choose this action until then.",
+        "profileValue": {
+          "code_fixture": "Code tests",
+          "evidence_review": "Evidence review",
+          "schema_fixture": "Schema check",
+          "text_basic": "Format check",
+          "text_review": "Model review"
+        },
+        "reset": "Reset to built-in",
+        "resetCustom": "Clear edits",
+        "roleUnused": "Not used",
+        "roles": "Roles",
+        "rolesDesc": "Each role runs on a model alias from Routing → Model mappings. A panel needs different model revisions for its members.",
+        "runCap": "Run cap (USD)",
+        "runCapDesc": "Leave empty to use the {mode} cap of ${cap}.",
+        "saveRefused": "This change was not saved. {reason}",
+        "title": "Actions",
+        "webTools": "Web evidence",
+        "webToolsDesc": "Panel members may search and read the web for evidence."
+      },
+      "badge": "Opt-in",
+      "breaker": {
+        "rearm": "Re-arm",
+        "rearmed": "Router + Fusion for {surface} re-armed.",
+        "threshold": "Failures before pausing",
+        "thresholdDesc": "Consecutive infrastructure failures after which a surface falls back to the original path until you re-arm it.",
+        "tripped": "Paused after repeated failures ({reason}) since {when}. Turns use the original path and are not ledgered."
+      },
+      "budget": {
+        "cascadeCap": "Run cap per cascade (USD)",
+        "cascadeCapDesc": "A cascade is refused rather than exceed this cap.",
+        "directCap": "Run cap per chat turn (USD)",
+        "directCapDesc": "A turn is refused rather than exceed this cap.",
+        "invalidAmount": "Enter a dollar amount with at most six decimal places.",
+        "mode": "Budget mode",
+        "panelCap": "Run cap per panel (USD)",
+        "panelCapDesc": "A panel is refused rather than exceed this cap.",
+        "strict": "Strict",
+        "strictDesc": "Only models with an audited price and per-call accounting may run; any other model is refused.",
+        "tracked": "Tracked",
+        "trackedDesc": "Every call is reserved and settled. A model without an audited price is held at a conservative estimate and may overspend it.",
+        "unknownReserve": "Hold per call without a price (USD)",
+        "unknownReserveDesc": "In tracked mode, each call to a model without an audited price reserves this much."
+      },
+      "dataClass": {
+        "desc": "Work is treated as this class unless its workspace or conversation raises it. It is never lowered automatically.",
+        "grants": "Providers allowed restricted data",
+        "grantsDesc": "Local models may always receive restricted data; aggregators without a provable destination never may.",
+        "internal": "Internal",
+        "label": "Default data class",
+        "noProviders": "No providers are configured.",
+        "public": "Public",
+        "restricted": "Restricted"
+      },
+      "desc": "Budget-capped, ledgered routing. Off by default: while it is off, routing works exactly as it did before.",
+      "laterRelease": "Later release",
+      "laterReleaseDesc": "Not available in this version. The switch has no effect.",
+      "master": "Enable Router + Fusion",
+      "masterDesc": "The master switch. Nothing is routed differently until a surface below is also on.",
+      "migration": {
+        "dismiss": "Got it",
+        "notice": "Your Auto routing was carried over: the economy rule is approved and your per-request cost limit became the chat run cap.",
+        "restore": "Restore legacy Auto",
+        "restoreDesc": "Switch Router + Fusion off and put Auto back exactly as it was before you enabled it.",
+        "restored": "Legacy Auto restored and Router + Fusion switched off."
+      },
+      "rules": {
+        "desc": "Without evaluation data, Auto uses the baseline action. Approve a rule to let Auto pick another action when the turn matches it.",
+        "provenanceMigrated": "Migrated from legacy Auto",
+        "provenanceUser": "User-approved, not eval-proven",
+        "row": {
+          "cascade_verifiable": {
+            "desc": "Requests that must match a JSON schema — through the Run API or the cognia/auto model — start on a cheap model and escalate if the check fails. A chat turn runs as a cascade only when you pick Cascade.",
+            "label": "Cascade for verifiable output"
+          },
+          "delegate_multifile": {
+            "desc": "Multi-file implementation runs in a sandbox with acceptance checks.",
+            "label": "Delegate for multi-file code changes"
+          },
+          "economy_simple": {
+            "desc": "Transform and extract tasks with low or medium ambiguity use the economy action.",
+            "label": "Economy model for simple text work"
+          },
+          "panel_research": {
+            "desc": "Research synthesis runs independent answers and a judge that checks them against evidence. Text only: the turn runs without agent tools.",
+            "label": "Panel for research synthesis"
+          }
+        },
+        "title": "Auto rules"
+      },
+      "saveFailed": "Could not save the Router + Fusion settings.",
+      "surface": {
+        "agentsWorkflows": {
+          "desc": "Model calls made by agents, Squads and workflows.",
+          "label": "Agents and workflows"
+        },
+        "chat": {
+          "desc": "Chat turns in the desktop app run as direct runs: capped, ledgered, rerouted only visibly, and refused rather than silently downgraded.",
+          "label": "Chat"
+        },
+        "companion": {
+          "desc": "Runs started from paired web and mobile devices.",
+          "label": "Web and mobile"
+        },
+        "gatewayPassthroughLedger": {
+          "desc": "Ledger every model call proxied by the local gateway.",
+          "label": "Gateway passthrough ledger"
+        },
+        "gatewayRuns": {
+          "desc": "The /v1/runs API and the cognia/* virtual models.",
+          "label": "Gateway runs"
+        },
+        "utilityLedger": {
+          "desc": "Titles, memory, judges and other background model calls.",
+          "label": "Background generations"
+        }
+      },
+      "surfaceNeedsMaster": "Turn on the master switch first.",
+      "surfacesDesc": "Each surface is switched on on its own and can be switched off alone if it misbehaves.",
+      "surfacesTitle": "Surfaces",
+      "title": "Router + Fusion"
     }
   },
   "routingFallback": {
@@ -37507,6 +37984,9 @@
       "keyRateLimit": "Rate limit / min",
       "keyRateLimitHelp": "Per-key request budget. Blank = only the global limit applies.",
       "keyRateLimitNone": "—",
+      "keyScopes": "Run API scopes",
+      "keyScopesHelp": "What this key may do on the Router + Fusion Run API. A key with no scopes keeps working on the chat endpoints exactly as before, and /v1/runs refuses it.",
+      "keyScopesNone": "none (passthrough only)",
       "keysEmpty": "No keys yet. Create one to authenticate external tools.",
       "keysHeading": "API keys",
       "keysHelp": "Issue one scoped key per external tool. Each can be limited to specific models, given an expiry and its own rate limit, and disabled or deleted independently.",
@@ -43951,10 +44431,16 @@
       "error": "Limit query failed: {message}",
       "fetchedAt": "Updated {time}",
       "meter": {
+        "acu": "ACU usage",
         "credit": "Credit balance",
+        "daily": "Daily quota",
+        "flexCredits": "Flex credits",
+        "flowCredits": "Flow credits",
         "monthly": "Current month",
         "overage": "Pay-as-you-go overage",
+        "promptCredits": "Prompt credits",
         "session": "Current session",
+        "topUp": "Auto top-up",
         "weekly": "Current week (all models)",
         "weekly_opus": "Current week (Opus only)",
         "weekly_sonnet": "Current week (Sonnet only)"

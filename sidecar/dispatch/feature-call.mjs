@@ -83,23 +83,23 @@ export async function discoverOpenCodeV2Service({
       ([name, value]) => name.trim() && typeof value === "string"
     )
   )
-  const healthResponse = await fetchImpl(new URL("/api/health", endpoint), {
+  const statusResponse = await fetchImpl(new URL("/api/status", endpoint), {
     headers,
     signal: signal
       ? AbortSignal.any([signal, AbortSignal.timeout(2_000)])
       : AbortSignal.timeout(2_000),
   })
-  const health = await healthResponse.json().catch(() => undefined)
+  const status = await statusResponse.json().catch(() => undefined)
   signal?.throwIfAborted()
-  if (!healthResponse.ok) {
+  if (!statusResponse.ok) {
     throw new Error("OpenCode V2 discovery health probe failed")
   }
-  if (!isOpenCodeV2Version(health?.version) || !Number.isInteger(health.pid) || health.pid <= 0) {
+  if (!isOpenCodeV2Version(status?.version) || !Number.isInteger(status.pid) || status.pid <= 0) {
     throw new Error("OpenCode V2 discovery returned an incompatible health contract")
   }
   return {
     endpoint: endpoint.toString().replace(/\/$/, ""),
-    version: health.version,
+    version: status.version,
     headers,
   }
 }

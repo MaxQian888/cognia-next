@@ -2,6 +2,8 @@ import type { SendContent, SendOptions } from "@cognia/agent-config-types"
 
 import { sendPrompt } from "@/lib/claude/ipc"
 import { getWorkSubmissionBundle, type WorkSubmissionRow } from "@/lib/db/work-submissions"
+import { abortRouterFusionSend, prepareRouterFusionSend } from "@/lib/router-fusion/gate/chat-send"
+import { useSettingsStore } from "@/stores/settings"
 
 import { openWorkSubmissionPayload, type WorkSubmissionCryptoDeps } from "./crypto"
 import type { WorkDispatchOutcome } from "./outbox-runner"
@@ -14,6 +16,8 @@ import {
 
 interface StoredChatDispatchDeps extends WorkSubmissionCryptoDeps {
   getBundle?: typeof getWorkSubmissionBundle
+  /** Test seam for the Router + Fusion replay step. */
+  prepareRouterFusionSend?: typeof prepareRouterFusionSend
 }
 
 function recoveryRequired(errorCode: string): WorkDispatchOutcome {
@@ -85,12 +89,36 @@ export function createStoredChatDispatch(
       return recoveryRequired("frozen_context_digest_mismatch")
     }
 
-    await sendPrompt(
-      row.sessionId,
-      input.content as SendContent,
-      context.sendOptions as SendOptions,
-      { commandId: row.triggerId ?? row.id }
-    )
+    // Router + Fusion (ADR-0188): the frozen stamp names a run that ended with
+    // the window that accepted the turn. A replay is a new run on the SAME
+    // deployment — re-checked against the hard filters, never re-resolved.
+    let sendOptions = context.sendOptions as SendOptions
+    if (sendOptions.routerFusion) {
+      const fusionSend = await (deps.prepareRouterFusionSend ?? prepareRouterFusionSend)({
+        sessionId: row.sessionId,
+        options: sendOptions,
+        reused: true,
+        workspaceId: context.projectId ?? null,
+        settings: useSettingsStore.getState().settings,
+      })
+      if (fusionSend.kind === "refused") {
+        return { status: "failed", errorCode: `router_fusion_refused:${fusionSend.code}` }
+      }
+      sendOptions = fusionSend.options
+    }
+
+    try {
+      await sendPrompt(row.sessionId, input.content as SendContent, sendOptions, {
+        commandId: row.triggerId ?? row.id,
+      })
+    } catch (error) {
+      await abortRouterFusionSend(
+        row.sessionId,
+        sendOptions,
+        error instanceof Error ? error.message : String(error)
+      )
+      throw error
+    }
     return { status: "dispatched" }
   }
 }
