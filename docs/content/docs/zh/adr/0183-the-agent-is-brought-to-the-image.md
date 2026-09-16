@@ -5,7 +5,7 @@ description: "agent CLI 不再预装在项目运行的镜像里。每个版本�
 
 # ADR 0183 — 把 agent 带进镜像
 
-**Status:** Accepted — 第 ① 步进行中
+**Status:** Accepted — 第 ① 步已实现（桌面本地容器保持休眠）；第 ②–④ 步规划中
 **Date:** 2026-09-15
 **Related:** [ADR-0182](./0182-a-project-names-the-image-it-runs-in)（指定镜像与 bundle 的规格）、[ADR-0059](./0059-cloud-deployment-headless-brain)（容器执行后端与发布契约）、[ADR-0085](./0085-cloud-shared-browser)（本文在 agent 托管上替换掉的 WorkspaceRuntime 监管进程）
 
@@ -101,6 +101,7 @@ description: "agent CLI 不再预装在项目运行的镜像里。每个版本�
   - 名字带部署作用域，因为多台 server 可以共用一个 daemon，而那套清理别的部署遗留 runner 的扫描绝不能顺手删掉它的 bundle。卷上带 `cognia.bundle-digest` 与 `cognia.bundle-stage`；启动时，属于本部署、但基线已不再提供该 bundle 的卷会被删除，仍被容器挂着的留给下一轮扫描。
   - `install` 会把 manifest digest 写进标记文件，所以重新暂存一个已就绪的卷只花一个短命容器、零拷贝。驱动按卷加锁：`install` 通过带 pid 的临时名暂存，而每个暂存容器都是 PID 1。
   - 探测结果存在 `environment.sqlite`，键是（用户镜像 digest，bundle digest），同时记下目标用户、是否重映射到工作区属主、以及那个属主。换了目标用户、或工作区易主之后的报告不会被复用。带 `probe_workspace_not_writable` 的报告永不缓存：那是关于某一个工作区的事实，不是关于镜像的。在 Linux 上——也就是所有真正跑生产的部署——server 和沙箱透过同一个内核看同一个文件系统，所以 server stat 到的属主就是探测报告里的属主；桌面 daemon 做 uid 映射时缓存只是命不中，正确性仍由 `init-agent` 保证，它自己会 stat 工作区。
+  - 条目的写入与解析都经由同一个类型 `cognia_sandbox_pool::probe_cache::ProbeCacheEntry`，驱动和展示它的控制台命令共用（[ADR-0182](./0182-a-project-names-the-image-it-runs-in)）。版本或结构不同的条目，驱动会忽略，控制台会报告为不可读，绝不会只读一半——拒绝了镜像的报告不能被读成接受了镜像。
   - daemon 前面的 socket proxy 增加 `INFO`（有哪些 OCI runtime，用来认证 gVisor 档位）与 `VOLUMES`（只涉及命名卷）。`EXEC` 与 `BUILD` 保持拒绝。
 
 ### 一次 spawn 跑的是 bundle 里的哪个文件

@@ -5,7 +5,7 @@ description: "Agent CLIs no longer live in the image a project runs in. Each rel
 
 # ADR 0183 — The agent is brought to the image
 
-**Status:** Accepted — Step ① in progress
+**Status:** Accepted — Step ① implemented (desktop local containers dormant); Steps ②–④ planned
 **Date:** 2026-09-15
 **Related:** [ADR-0182](./0182-a-project-names-the-image-it-runs-in) (the spec that names the image and bundle), [ADR-0059](./0059-cloud-deployment-headless-brain) (the container exec backend and release contract), [ADR-0085](./0085-cloud-shared-browser) (the WorkspaceRuntime supervisor this replaces for agent hosting)
 
@@ -101,6 +101,7 @@ The existing persistent runtime supervisor cannot carry that job. `services/work
   - The name is scoped to the deployment because several servers can share one daemon, and the same sweep that removes another deployment's runners must not remove its bundles. Volumes carry `cognia.bundle-digest` and `cognia.bundle-stage`; at boot, a volume of this deployment for a bundle the baseline no longer offers is removed, and one a container still mounts is left for the next sweep.
   - `install` records the manifest digest in a marker, so a restaged volume costs one short container and no copy. The driver holds a lock per volume: `install` stages through a pid-derived name and every staging container is PID 1.
   - Probe results are cached in `environment.sqlite` per (user image digest, bundle digest), with the target user, whether it is remapped onto the workspace owner, and that owner recorded alongside. A report answering for a different user or a workspace that changed hands is not reused. A `probe_workspace_not_writable` report is never cached: it is a fact about one workspace, not about the image. On Linux — every deployment that runs this in production — the server and the sandbox see one filesystem through one kernel, so the owner the server stats is the owner the probe reports; where a desktop daemon maps uids the cache simply misses, and correctness still comes from `init-agent`, which stats the workspace itself.
+  - One type, `cognia_sandbox_pool::probe_cache::ProbeCacheEntry`, writes an entry and parses it back, for the driver and for the console command that shows it ([ADR-0182](./0182-a-project-names-the-image-it-runs-in)). An entry of another version or shape is ignored by the driver and reported as unreadable to the console, never half-read — a report that refused the image must not read back as one that accepted it.
   - The socket proxy in front of the daemon gains `INFO` (which OCI runtimes exist, to attest the gVisor tier) and `VOLUMES` (named volumes only). `EXEC` and `BUILD` stay denied.
 
 ### Which bundled file a spawn runs

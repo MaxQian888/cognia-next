@@ -5,7 +5,7 @@ description: "Cloud and container execution stop using one runner image per depl
 
 # ADR 0182 — A project names the image it runs in
 
-**Status:** Accepted — Step ① in progress
+**Status:** Accepted — Step ① implemented (desktop local containers dormant); Steps ②–④ planned
 **Date:** 2026-09-15
 **Related:** [ADR-0059](./0059-cloud-deployment-headless-brain) (the T2/T3 execution plane this replaces the image choice of), [ADR-0085](./0085-cloud-shared-browser) (the persistent WorkspaceRuntime), [ADR-0147](./0147-repository-declared-workspace) (the repository file and its approval gate this extends), [ADR-0149](./0149-a-person-is-not-a-device) (the roles that approve on a shared Host), [ADR-0183](./0183-the-agent-is-brought-to-the-image) (how agent CLIs reach an arbitrary image)
 
@@ -141,6 +141,65 @@ Two guarantees in this ADR need infrastructure that Step ② builds. Until then 
 
 Neither is a silent downgrade: a project cannot ask for an enforced allowlist in Step ① and be told it got one.
 
+### The companion plane
+
+Sixteen commands in `src-tauri/src/companion_api/rpc/environment.rs`, every one behind the deployment switch: with the pool off each answers `sandbox_pool_disabled`, which a client reads as "this deployment never opted in", not as a failure.
+
+| Command | What it answers |
+| --- | --- |
+| `environment_catalog_list` / `_get` | The merged catalog, one page at a time, with the tenant entries the merge refused |
+| `environment_catalog_create` / `_update` / `_delete` | Tenant entries. Delete revokes and keeps the record, so a revoked id cannot be reused |
+| `environment_declaration_read` | Every declaration file under a workspace root, as bytes plus digest |
+| `environment_spec_resolve_preview` | A dry run of admission: admitted with the tier and bundle it would get, or the refusal and whether it was a fault |
+| `environment_approval_list` / `_get` / `_approve` / `_revoke` | The server-side approval ledger |
+| `environment_egress_grant_create` / `_delete` | A project's egress grant |
+| `environment_probe_get` | The cached probe verdict for one image and bundle |
+| `environment_driver_status` | The driver, the tiers it can attest, whether its daemon answers, and the bundles on offer |
+| `environment_image_inspect` | What a reference is, as its registry answers |
+
+Four of those are shaped by a rule rather than by convenience:
+
+- **Every catalog page carries the deployment facts.** The switch, the tenancy, the floor, the default entry, the size classes, the egress presets and the bundle offer repeat on every page, like `rejected`. Resolution needs them from the same merge as the entries, and a second command would let a client resolve against halves read at different moments.
+- **The declaration comes back unparsed and unchosen.** The Host returns every file it found and picks none of them. The one devcontainer/JSONC parser and the one precedence rule live in the brain (`lib/project-environment/`), and a Host that also parsed or chose would be a second answer to a question that already has one.
+- **A tag becomes a digest in exactly one place.** `environment_image_inspect` is how both a catalog entry and an approval are pinned. Only a registry on the baseline allowlist is contacted, with the scheme taken from the matching rule and never from the reference, so the Host's registry credentials cannot be pointed at a host a caller chose.
+- **The probe cache is read through the writer's type.** `cognia_sandbox_pool::probe_cache::ProbeCacheEntry` is what the Docker driver stores and what `environment_probe_get` parses, so the two cannot disagree about the shape. The view states the user the probe was asked about and the user the image resolved it to, the libc, the architecture, the runtimes the image can run and every problem the probe found. An entry this build cannot read is reported as `unreadable`, not as absent: one means "re-probe", the other "probe".
+
+The approval command canonicalizes the remote itself, so a run looks the approval up by the same form whatever the client sent. The driver command was first sketched as `sandbox.docker.status`; it is `environment_driver_status` because each driver answers for itself.
+
+A client learns whether a Host can have any of this from the `sandbox-pool` capability (`lib/platform/capabilities.ts`). It is listed for server-backed hosts only. Settings → Image catalog requires it, so the tenant catalog is administered where the pool runs. The project's Runtime environment panel is gated on it too: on a host without the pool it says why instead of offering a selection every run would refuse.
+
+### How a run reaches its environment
+
+The brain resolves before it connects:
+
+1. **The chat turn names the project.** The controller passes `ensureExternalAgentReady` the session's project, its environment definition, the project row and the execution root. A session with no project passes nothing and connects as before.
+2. **`prepareRunEnvironment` resolves** (`lib/sandbox/run-environment.ts`). With no selection it reads nothing else. A catalog that cannot be read is the pool being off when the Host says so, and otherwise a fault: refused with `environment_catalog_unreadable` when isolation is mandatory, `sandbox_fallback_catalog_unreadable` when it is not. An approval comes from the Host's ledger. A device approval ([ADR-0147](./0147-repository-declared-workspace)) counts only on a Host that is not multi-tenant.
+3. **A refusal stops the run before any process starts.** Readiness reports the localized reason, and the manager refuses to connect an agent whose run was refused. That refusal is not retried and surfaces as `sandbox_unavailable`.
+4. **The placement waits for the spawn** in `lib/sandbox/spawn-placement-registry.ts`, keyed by agent. It holds the agent's current placement rather than a one-shot one: the manager respawns an agent after a crash, a reconnect or a retried connect without resolving again, and a placement consumed by the first spawn would let every one of those start on the host with nothing to say so. Every spawn of the agent carries it until a later resolution replaces or clears it. The Host re-admits each spawn, so a revocation still refuses the next one.
+5. **Session processes inherit their agent's placement.** Pi runs one process per session, `<agentId>:<sessionId>`, and its capability probes are named the same way, so a spawn id resolves to the longest registered `<agentId>:` prefix.
+6. **A running agent that is in the wrong place is restarted.** The registry records the spec digest each process was started with, `null` for a host spawn. When a new resolution differs, readiness reconnects the agent rather than leave it running under the old answer.
+
+With nothing ever registered, `withSpawnPlacement` returns the caller's own arguments object, so the spawn payload is byte for byte what it was before this subsystem existed.
+
+The Host's answer on `external-agent://placement` is kept per agent. The agent's settings row shows it next to the sandbox status: the tier and image digest, the user with its remap, the bundle release and libc, and the two Step ① labels below. Until the Host answers it shows what was requested, never what was granted. A Host fallback code is localized, and a code this build does not know is still named.
+
+### Desktop local containers stay dormant in Step ①
+
+The desktop does not list `sandbox-pool`, so on the desktop's own host the Runtime environment panel explains that it cannot run one. The panel's "Run in a local container" toggle is kept in the selection, and a run that sets it is refused with `local_container_unavailable` rather than run unsandboxed. The type, the panel label and a test all say so.
+
+What a desktop would run against is still open: it has no Ops Controller release to take a baseline and an agent bundle from. That is decided when the toggle ships, together with the device-approval path of the precedence rule, which only this path uses.
+
+### Compose
+
+- `deploy/compose/docker-compose.runtime-environment.yml` mounts a baseline file as `COGNIA_ENVIRONMENT_BASELINE_FILE`.
+- The T2 overlay forwards `COGNIA_SANDBOX_POOL_ENABLED` for the legacy mapping. A blank value is unset, which is off.
+- `scripts/smoke/compose-runtime-environment.mjs` writes a smoke baseline for a given bundle image and drives the stack with no model credentials:
+  - `node:22-alpine` from the catalog and `python:3.12-slim` from an approved declaration, each resolved to a digest;
+  - each admitted, spawned with a mandatory placement, reported back with the digest, tier, libc and user it got, and greeted with an ACP `initialize` by the bundled codex-acp;
+  - the probe cache checked against the placement;
+  - refusals for a spec that does not match its digest, an unapproved declaration, a revoked approval and a revoked entry.
+- With `--expect pool-off` the same script checks the off path against a stack without the overlay.
+
 ## Consequences
 
 - **What this buys.** A project runs in the toolchain it declares, on the desktop, in compose, and in the cloud pool. A repository that already ships a `devcontainer.json` works without a Cognia-specific file.
@@ -148,7 +207,8 @@ Neither is a silent downgrade: a project cannot ask for an enforced allowlist in
   - Two new Rust stores: `environment.sqlite` now and `sandbox-pool.sqlite` in Step ②.
   - One new crate, `cognia-environment`.
   - A new optional block in `workspace.json`.
-  - A set of companion commands: `environment.catalog.*`, `environment.approval.*`, `environment.spec.resolve_preview`, `environment.declaration.read`, `environment.egress_grant.*`, `environment.probe.get`, `sandbox.docker.status`.
+  - Sixteen companion commands (`environment_*`, above) and the `sandbox-pool` capability.
+  - Two settings surfaces: the project's Runtime environment panel and the tenant Image catalog.
   - No main Dexie version bump.
 - **Legacy deployments are unaffected.** A deployment that does not enable the pool keeps `COGNIA_RUNNER_IMAGE`, its shared workspaces volume and its runner Pods. Only enabling the pool requires the one-shot layout migration of ADR-0187 (planned).
 
@@ -172,4 +232,6 @@ Step ① of the runtime-environment plan, in independently committable slices:
 6. The fourth release image.
 7. Per-spawn routing: `ExternalAgentSpawnConfig.sandbox`, `SandboxRoutingBackend`, the `external-agent://placement` channel, and `crates/cognia-sandbox-pool` with admission, the bundled-command mapping and the Docker driver.
 8. Companion RPC and cloud approval authority.
-9. Brain wiring, the Runtime environment and Image catalog UI, and the compose smoke.
+9. Brain wiring: resolution before connect, the current-placement registry, respawn on a changed resolution, and the placement report.
+10. The Runtime environment panel, the per-run placement badge and the Image catalog settings page.
+11. The compose overlay, the smoke and its baseline.
