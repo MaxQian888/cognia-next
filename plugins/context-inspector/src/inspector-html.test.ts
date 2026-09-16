@@ -53,6 +53,30 @@ describe("buildInspectorHtml", () => {
     expect(html).toContain(`api.dispose(id)`)
   })
 
+  it("reveals the probe panel across frames and guards in-flight register/dispose", () => {
+    // reveal(panelId) qualifies the id under the calling plugin — the
+    // inspector frame can bring its own dynamically registered panel forward.
+    expect(html).toContain(`api.reveal(PROBE_PANEL_ID, "wide")`)
+    // Both buttons disable for the duration of their RPC so a double-click
+    // cannot register the same panel twice or dispose a stale id.
+    expect(html).toContain(`var button = $("register");`)
+    expect(html).toContain(`var button = $("dispose");`)
+    expect(html).toContain(`button.disabled = true;`)
+    expect(html).toContain(`.then(syncProbeButtons)`)
+  })
+
+  it("surfaces the workbench split layout", () => {
+    expect(html).toContain("splitPanelId")
+    expect(html).toContain("chip-split")
+    // [hidden] on an inline-flex chip needs an explicit display rule.
+    expect(html).toContain(".chip[hidden]")
+  })
+
+  it("exposes the log and the missing-API banner to assistive tech", () => {
+    expect(html).toContain('aria-live="polite"')
+    expect(html).toContain('role="alert"')
+  })
+
   it("offers every workbench mode and every reveal mode", () => {
     for (const mode of ["collapsed", "narrow", "wide", "focus"]) {
       expect(html).toContain(`data-mode="${mode}"`)
@@ -121,6 +145,12 @@ describe("buildProbeHtml", () => {
     expect(html).toContain("api.onDidChangeActiveContext(")
     expect(html).toContain("api.onDidChangeVisibility(")
     expect(html).toContain("api.getActiveContext()")
+  })
+
+  it("acts on itself — a dynamically registered panel owns write calls too", () => {
+    expect(html).toContain(`api.setBadge(PANEL_ID, badge)`)
+    expect(html).toContain(`api.reveal(PANEL_ID, "focus")`)
+    expect(html).toContain(JSON.stringify(PROBE_PANEL_ID))
   })
 
   it("is self-contained — no external scripts or stylesheets", () => {

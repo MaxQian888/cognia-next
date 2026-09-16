@@ -23,6 +23,13 @@
  * webview documents are outside the host's next-intl pipeline; the
  * user-facing labels go through the manifest `i18n` block (`labelKey`/
  * `titleKey`) instead.
+ *
+ * Deliberately NOT exercised: `acquireCogniaWebviewApi().postMessage()`. The
+ * frame→module channel is only reachable for webviews created through
+ * `ctx.webview.create()` (the returned handle owns `onMessage`); nothing
+ * subscribes inbound listeners for a manifest-declared webview, so a button
+ * here would post into the void. Surfacing that host gap is better than
+ * demoing a dead end.
  */
 
 import { motionTokens } from "@cognia/plugin-ui"
@@ -92,6 +99,7 @@ const BASE_CSS = `
     word-break: break-word;
   }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: calc(8px * var(--density-spacing, 1)); }
+  .chip[hidden] { display: none; }
   /* plugin-ui Badge: rounded-full border px-2 py-0.5 text-xs font-medium.
      Base reads as the "secondary" variant; [data-on] switches to "success". */
   .chip, .pill {
@@ -188,7 +196,7 @@ export function buildInspectorHtml(): string {
     <h1>Context Inspector</h1>
     <span id="visibility" class="pill" data-visible="true"><i></i>visible</span>
   </header>
-  <div id="api-banner" class="banner" hidden>acquireCogniaContextPanelApi() is not injected — the mirrored panel API is unavailable in this frame.</div>
+  <div id="api-banner" class="banner" role="alert" hidden>acquireCogniaContextPanelApi() is not injected — the mirrored panel API is unavailable in this frame.</div>
   <section>
     <h2>Active context</h2>
     <pre id="active-context" class="json">(waiting for host)</pre>
@@ -200,6 +208,7 @@ export function buildInspectorHtml(): string {
       <span id="chip-mode" class="chip">mode: n/a</span>
       <span id="chip-owns" class="chip" data-on="false">not owner</span>
       <span id="chip-pinned" class="chip" data-on="false">unpinned</span>
+      <span id="chip-split" class="chip" hidden></span>
     </div>
   </section>
   <section>
@@ -231,6 +240,7 @@ export function buildInspectorHtml(): string {
       <span class="group-label">Panel</span>
       <button id="register" type="button" data-variant="primary">register(probe)</button>
       <button id="dispose" type="button" data-variant="outline" disabled>dispose</button>
+      <button id="reveal-probe" type="button" data-variant="outline" disabled>reveal(probe)</button>
     </div>
     <p id="gate-note" class="note">Mode and pin controls enable once this plugin owns the visible panel — use Reveal first.</p>
   </section>
@@ -240,7 +250,7 @@ export function buildInspectorHtml(): string {
   </section>
   <section>
     <h2><span>Log</span><button id="log-clear" class="mini" type="button" data-variant="outline">clear</button></h2>
-    <ol id="log" class="log" role="log"></ol>
+    <ol id="log" class="log" role="log" aria-live="polite"></ol>
   </section>
 </main>
 <script>
@@ -295,6 +305,7 @@ export function buildInspectorHtml(): string {
   function syncProbeButtons() {
     $("dispose").disabled = !probeRegistrationId;
     $("register").disabled = !!probeRegistrationId;
+    $("reveal-probe").disabled = !probeRegistrationId;
   }
   function applyWorkbenchState(state) {
     workbenchState = state;
@@ -308,6 +319,10 @@ export function buildInspectorHtml(): string {
     var pinChip = $("chip-pinned");
     pinChip.dataset.on = String(pinned);
     pinChip.textContent = pinned ? "pinned" : "unpinned";
+    var splitChip = $("chip-split");
+    var splitId = state && state.splitPanelId;
+    splitChip.hidden = !splitId;
+    if (splitId) splitChip.textContent = "split: " + splitId + " (" + (state.splitRatio ?? "?") + "%)";
     var pin = $("pin");
     pin.disabled = !owns;
     pin.setAttribute("aria-pressed", String(pinned));
@@ -368,6 +383,10 @@ export function buildInspectorHtml(): string {
       run("getWorkbenchState()", api.getWorkbenchState());
     });
     $("register").addEventListener("click", function () {
+      // In-flight guard: the button re-enables only when the RPC settles, so a
+      // double-click cannot register the same panel twice.
+      var button = $("register");
+      button.disabled = true;
       api.register({
         id: PROBE_PANEL_ID,
         webview: PROBE_WEBVIEW_ID,
@@ -382,24 +401,31 @@ export function buildInspectorHtml(): string {
         .then(function (registrationId) {
           probeRegistrationId = registrationId;
           save();
-          syncProbeButtons();
           log("register(" + PROBE_PANEL_ID + ") -> " + registrationId);
         })
-        .catch(function (err) { log("register !! " + err.message, true); });
+        .catch(function (err) { log("register !! " + err.message, true); })
+        .then(syncProbeButtons);
     });
     $("dispose").addEventListener("click", function () {
       var id = probeRegistrationId;
       if (!id) return;
+      var button = $("dispose");
+      button.disabled = true;
       api.dispose(id)
         .then(function (ok) {
           // A stale id (the attachment outlived a frame remount) resolves
           // false — either way the frame stops tracking it.
           probeRegistrationId = null;
           save();
-          syncProbeButtons();
           log("dispose(" + id + ") -> " + JSON.stringify(ok));
         })
-        .catch(function (err) { log("dispose !! " + err.message, true); });
+        .catch(function (err) { log("dispose !! " + err.message, true); })
+        .then(syncProbeButtons);
+    });
+    $("reveal-probe").addEventListener("click", function () {
+      // Cross-panel reveal: the RPC qualifies the id under THIS plugin, so the
+      // inspector frame can bring the dynamically registered probe forward.
+      run("reveal(" + PROBE_PANEL_ID + ", wide)", api.reveal(PROBE_PANEL_ID, "wide"));
     });
     $("log-clear").addEventListener("click", function () { $("log").textContent = ""; });
   }
@@ -423,7 +449,8 @@ export function buildInspectorHtml(): string {
 /**
  * Body of the webview an in-frame `api.register()` turns into a second panel.
  * Kept deliberately small — it exists to prove a dynamically registered panel
- * gets its own frame with the same mirrored API injected.
+ * gets its own frame with the same mirrored API injected, and that it can act
+ * on ITSELF: the badge + reveal controls target its own panel id.
  */
 export function buildProbeHtml(): string {
   return `
@@ -437,14 +464,20 @@ export function buildProbeHtml(): string {
     <pre id="probe-context" class="json">(waiting for host)</pre>
     <div class="group">
       <button id="probe-refresh" type="button">getActiveContext()</button>
+      <button id="probe-badge" type="button" data-variant="outline">setBadge(+1)</button>
+      <button id="probe-reveal" type="button" data-variant="outline">reveal(self)</button>
       <span id="probe-visibility" class="pill" data-visible="true"><i></i>visible</span>
     </div>
+    <p id="probe-log" class="note"></p>
   </section>
 </main>
 <script>
+  var PANEL_ID = ${JSON.stringify(PROBE_PANEL_ID)};
   var api = typeof window.acquireCogniaContextPanelApi === "function"
     ? window.acquireCogniaContextPanelApi()
     : null;
+  var badge = 0;
+  function note(line) { document.getElementById("probe-log").textContent = line; }
   if (api) {
     api.onDidChangeActiveContext(function (context) {
       document.getElementById("probe-context").textContent =
@@ -459,7 +492,15 @@ export function buildProbeHtml(): string {
       api.getActiveContext().then(function (context) {
         document.getElementById("probe-context").textContent =
           context === null || context === undefined ? "null" : JSON.stringify(context, null, 2);
+        note("getActiveContext() resolved");
       });
+    });
+    document.getElementById("probe-badge").addEventListener("click", function () {
+      badge += 1;
+      api.setBadge(PANEL_ID, badge).then(function (ok) { note("setBadge(" + badge + ") -> " + JSON.stringify(ok)); });
+    });
+    document.getElementById("probe-reveal").addEventListener("click", function () {
+      api.reveal(PANEL_ID, "focus").then(function (ok) { note("reveal(self) -> " + JSON.stringify(ok)); });
     });
   } else {
     document.getElementById("probe-context").textContent = "acquireCogniaContextPanelApi() unavailable";
