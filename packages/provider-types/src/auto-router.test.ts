@@ -1,8 +1,10 @@
 import {
   DEFAULT_AUTO_ROUTER_SETTINGS,
+  TASK_CATEGORIES,
   type ModelRoutingSelection,
   type RoutingPlan,
   type RoutingStats,
+  type TaskCategory,
 } from "./auto-router"
 
 describe("DEFAULT_AUTO_ROUTER_SETTINGS", () => {
@@ -15,11 +17,38 @@ describe("DEFAULT_AUTO_ROUTER_SETTINGS", () => {
       allowOverride: true,
       enableCache: true,
       cacheTTL: 300,
-      fallbackTier: "balanced",
       defaultSelection: "manual",
       dataPolicy: { locality: "any" },
+      candidateAliases: ["fast", "balanced", "powerful"],
+      categoryAliases: {},
       shadowMode: true,
     })
+  })
+
+  it("defaults to no fallback tier retry", () => {
+    // Absent by design: a tier retry only runs after the ladder already found
+    // no viable candidate, so defaulting to a ladder alias adds nothing.
+    expect(DEFAULT_AUTO_ROUTER_SETTINGS.fallbackTier).toBeUndefined()
+  })
+})
+
+describe("TASK_CATEGORIES", () => {
+  it("lists every TaskCategory exactly once", () => {
+    // Pinned to the union: a category added to TaskCategory without updating
+    // this list breaks the settings UI's category-alias rows silently.
+    const expected: TaskCategory[] = [
+      "general",
+      "coding",
+      "analysis",
+      "creative",
+      "research",
+      "conversation",
+      "math",
+      "translation",
+      "summarization",
+    ]
+    expect([...TASK_CATEGORIES].sort()).toEqual([...expected].sort())
+    expect(new Set(TASK_CATEGORIES).size).toBe(TASK_CATEGORIES.length)
   })
 })
 

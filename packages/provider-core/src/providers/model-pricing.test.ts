@@ -2,6 +2,7 @@ import {
   estimateCallCostUsd,
   resetModelPricingResolverForTesting,
   resolveModelPriceUsdPer1M,
+  resolveModelPricing,
   setModelPricingResolver,
 } from "./model-pricing"
 
@@ -111,6 +112,36 @@ describe("resolveModelPriceUsdPer1M", () => {
 
   it("does not invent pricing for an ordinary unknown id", () => {
     expect(resolveModelPriceUsdPer1M("acme", "totally-unknown")).toBeUndefined()
+  })
+})
+
+describe("resolveModelPricing", () => {
+  it("returns the per-bucket rates, including a virtual model's base", () => {
+    const settings = {
+      customProviders: [
+        {
+          id: "acme",
+          customModelMetadata: {
+            "gpt-5": {
+              pricing: {
+                promptPer1M: 2,
+                completionPer1M: 6,
+                cachedInputPer1M: 0.2,
+                cacheCreationPer1M: 2.5,
+              },
+            },
+          },
+        },
+      ],
+    }
+    expect(resolveModelPricing("acme", "gpt-5-high", settings)).toEqual({
+      currency: "USD",
+      promptPer1M: 2,
+      completionPer1M: 6,
+      cachedInputPer1M: 0.2,
+      cacheCreationPer1M: 2.5,
+    })
+    expect(resolveModelPricing("acme", "totally-unknown")).toBeNull()
   })
 })
 

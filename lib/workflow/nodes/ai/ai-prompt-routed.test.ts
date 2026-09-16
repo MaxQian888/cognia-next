@@ -1,4 +1,5 @@
 import {
+  defaultRoutedPromptDeps,
   runRoutedPrompt,
   type ResolvedCreds,
   type RoutedPromptDeps,
@@ -6,6 +7,34 @@ import {
 } from "./ai-prompt-routed"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import type { ProviderOutcome } from "@/lib/claude/provider-telemetry"
+
+// `defaultRoutedPromptDeps` resolves its collaborators through dynamic
+// imports; mock each module so the production wiring can be exercised
+// without touching stores or the network.
+jest.mock("@/lib/db/settings", () => ({ getSettings: jest.fn() }))
+jest.mock("@cognia/provider-routing/build-preview-engine", () => ({
+  buildRoutingEngine: jest.fn(),
+}))
+jest.mock("@/lib/twin/distill/llm", () => ({ createLlmClient: jest.fn() }))
+jest.mock("@/lib/ai/provider-consumption", () => ({
+  resolveFeatureProvider: jest.fn(),
+  createProviderSettingsSnapshot: jest.fn(() => ({})),
+}))
+jest.mock("@/lib/claude/provider-telemetry", () => ({
+  recordProviderOutcome: jest.fn(),
+}))
+jest.mock("@/stores/settings/circuit-breaker-store", () => ({
+  useCircuitBreakerStore: { getState: jest.fn(() => ({ getState: jest.fn() })) },
+}))
+jest.mock("@cognia/provider-core/providers/model-pricing", () => ({
+  estimateCallCostUsd: jest.fn(),
+}))
+
+import { getSettings } from "@/lib/db/settings"
+import { buildRoutingEngine } from "@cognia/provider-routing/build-preview-engine"
+
+const getSettingsMock = getSettings as jest.Mock
+const buildRoutingEngineMock = buildRoutingEngine as jest.Mock
 
 function okClient(text: string, tokens = { inputTokens: 10, outputTokens: 5 }): LlmClient {
   return {
@@ -233,6 +262,33 @@ describe("runRoutedPrompt", () => {
     const out = await runRoutedPrompt({ ...baseInput }, deps)
     expect(out.completion).toBe("plain")
     expect(client.complete).toHaveBeenCalled()
+  })
+
+  it("propagates honest task hints for a single-turn, tool-less node", async () => {
+    const planRoute = jest.fn().mockResolvedValue(null)
+    buildRoutingEngineMock.mockReturnValue({ planRoute })
+    getSettingsMock.mockResolvedValue({
+      autoRouting: {
+        candidateAliases: ["fast"],
+        thresholds: { balanced: 0.34, powerful: 0.67 },
+      },
+      routingConfig: { strategy: "reliability" },
+    })
+
+    const deps = await defaultRoutedPromptDeps()
+    await deps.selectRoute({ modelAlias: "fast", promptText: "```js\nx\n```" })
+    expect(planRoute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskHints: { hasCode: true, toolCount: 0, messageCount: 1 },
+      })
+    )
+
+    await deps.selectRoute({ promptText: "plain prose" })
+    expect(planRoute).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        taskHints: { hasCode: false, toolCount: 0, messageCount: 1 },
+      })
+    )
   })
 
   it("uses the plan's single primary only once", async () => {

@@ -1832,6 +1832,18 @@
       "timestamp": "时间",
       "usage": "Token"
     },
+    "routing": {
+      "alias": "别名 · {alias}",
+      "auto": "自动 · {target}",
+      "candidates": "候选数：{count}",
+      "costCapExceeded": "已超出单次请求成本上限并继续执行",
+      "judgeUsed": "判定：{value}",
+      "no": "否",
+      "score": "评分：{score}",
+      "strategy": "策略：{strategy}",
+      "tier": "档位：{tier}",
+      "yes": "是"
+    },
     "status": {
       "complete": "已完成",
       "error": "失败",

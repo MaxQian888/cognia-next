@@ -96,6 +96,7 @@ import {
 import {
   attachRunMetadataToLastAssistant,
   buildCompletedRunMetadata,
+  buildRoutingRunMetadata,
 } from "@/lib/chat/message-run-metadata"
 import type {
   ApprovalDecision,
@@ -1634,6 +1635,7 @@ export class RoomRunner {
               completedAt,
               reportedDurationMs: result.duration_ms,
               finishReason: result.subtype,
+              routing: ctx?.options ? buildRoutingRunMetadata(ctx.options) : undefined,
             })
           )
           this.streams.fold(teamSessionId, sub, tagged)

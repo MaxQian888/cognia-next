@@ -843,6 +843,15 @@ export async function runCompletionRail(
         : { kind: "manual", ...manualSelection! },
     promptText: prompt,
     estimatedInputTokens: estimateCJKTokenCount(prompt),
+    taskHints: {
+      // What the run config already knows: transcript depth when the caller
+      // carried one (text-channel multi-turn), fenced code in the task prompt,
+      // the configured tool surface, and the run's own effort dial.
+      ...(config.priorMessages ? { messageCount: config.priorMessages.length } : {}),
+      hasCode: /```/.test(prompt),
+      toolCount: (config.tools?.length ?? 0) + (config.allowedTools?.length ?? 0),
+      ...(config.effort ? { requestedEffort: config.effort } : {}),
+    },
     requirements: {
       streaming: true,
       structuredOutput: Boolean(config.outputFormat),

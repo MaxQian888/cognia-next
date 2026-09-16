@@ -82,6 +82,39 @@ describe("judgeDifficulty", () => {
     expect(complete).toHaveBeenCalledTimes(1)
   })
 
+  it("honours a custom cache TTL instead of the five-minute default", async () => {
+    let at = 1_000
+    const complete = jest.fn(async () => '{"tier":"fast"}')
+    const c = client(complete)
+    const now = () => at
+    await judgeDifficulty(c, { promptText: "ttl", cacheTtlMs: 100, now })
+    at += 50
+    await judgeDifficulty(c, { promptText: "ttl", cacheTtlMs: 100, now })
+    expect(complete).toHaveBeenCalledTimes(1)
+    at += 60 // 110 ms in — past the custom TTL, inside the default
+    await judgeDifficulty(c, { promptText: "ttl", cacheTtlMs: 100, now })
+    expect(complete).toHaveBeenCalledTimes(2)
+  })
+
+  it("disables the cache entirely when cacheTtlMs is 0 — no reads, no writes", async () => {
+    let at = 1_000
+    const complete = jest.fn(async () => '{"tier":"fast"}')
+    const c = client(complete)
+    const now = () => at
+    // Long TTL: the entry is provably fresh for the zero-TTL call below.
+    await judgeDifficulty(c, { promptText: "never cached", cacheTtlMs: 1_000, now })
+    at = 1_100
+    // A cacheTtlMs of 0 must not read the verdict the first call wrote.
+    await judgeDifficulty(c, { promptText: "never cached", cacheTtlMs: 0, now })
+    expect(complete).toHaveBeenCalledTimes(2)
+    at = 1_150
+    // Nor write: this call's TTL (60 ms) has expired the FIRST entry
+    // (1_150 − 1_000 > 60) while a hypothetical write at 1_100 would still be
+    // fresh — so a miss here proves the zero-TTL call stored nothing.
+    await judgeDifficulty(c, { promptText: "never cached", cacheTtlMs: 60, now })
+    expect(complete).toHaveBeenCalledTimes(3)
+  })
+
   it("keys the cache by the heuristic's prior too", async () => {
     // The prior is in the prompt, so two different priors are two different
     // questions and must not share an answer.
@@ -120,6 +153,14 @@ describe("createDifficultyJudge", () => {
   it("returns null when the host has no utility client configured", async () => {
     const judge = createDifficultyJudge(() => null)
     expect(await judge({ promptText: "anything", deterministicTier: "fast" })).toBeNull()
+  })
+
+  it("carries the caller's cacheTtlMs through to judgeDifficulty", async () => {
+    const complete = jest.fn(async () => '{"tier":"fast"}')
+    const judge = createDifficultyJudge(() => client(complete), { cacheTtlMs: 0 })
+    await judge({ promptText: "bound prompt", deterministicTier: "fast" })
+    await judge({ promptText: "bound prompt", deterministicTier: "fast" })
+    expect(complete).toHaveBeenCalledTimes(2)
   })
 
   it("passes the deterministic tier through as the prior", async () => {

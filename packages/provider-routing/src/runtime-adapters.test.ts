@@ -55,6 +55,28 @@ describe("provider-routing runtime adapters", () => {
     expect(runtime.getInFlight("openai")).toBe(3)
   })
 
+  it("defaults the Auto policy to absent when the host has not wired it", () => {
+    expect(getProviderRoutingRuntimeAdapters().getAutoRoutingPolicy()).toBeUndefined()
+  })
+
+  it("forwards the Auto policy through injected adapters", () => {
+    setProviderRoutingRuntimeAdapters({
+      getAutoRoutingPolicy: () => ({
+        preferredProviders: ["groq"],
+        excludedProviders: ["openai"],
+        maxCostPerRequestCents: 50,
+        categoryAliases: { coding: "code-tier" },
+      }),
+    })
+
+    expect(getProviderRoutingRuntimeAdapters().getAutoRoutingPolicy()).toEqual({
+      preferredProviders: ["groq"],
+      excludedProviders: ["openai"],
+      maxCostPerRequestCents: 50,
+      categoryAliases: { coding: "code-tier" },
+    })
+  })
+
   it("keeps model context limit helpers package-local", () => {
     expect(getModelMaxTokens("gpt-4o")).toBe(128000)
     expect(getModelContextLimits("unknown-model")).toEqual({

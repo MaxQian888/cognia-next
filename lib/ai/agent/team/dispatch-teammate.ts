@@ -230,7 +230,8 @@ async function runToolEnabled(
   maxSteps?: number,
   cwdOverride?: string,
   spanId?: string,
-  onSessionCreated?: (sessionId: string) => Promise<void | (() => void)>
+  onSessionCreated?: (sessionId: string) => Promise<void | (() => void)>,
+  taskKind?: DispatchTeammateArgs["taskKind"]
 ): Promise<{ text: string; usage?: TokenUsage }> {
   const cwd = cwdOverride ?? teamCtx.team.config?.workingDir
   const character = teammateToCharacter({
@@ -288,7 +289,14 @@ async function runToolEnabled(
       appSettings: appSettings ?? null,
       ...(ceiling ? { permissionCeiling: ceiling } : {}),
       routingSurface: "agent",
-      routingContextHint: { promptText: prompt },
+      routingContextHint: {
+        promptText: prompt,
+        // The dispatch's declared task kind is the one signal the classifier
+        // cannot read off a fresh session: code and UI work are both `coding`
+        // (UI additionally demands visual proof downstream). "general" is left
+        // out so the text classifier keeps its say.
+        ...(taskKind === "code" || taskKind === "ui" ? { category: "coding" as const } : {}),
+      },
       // Twin-backed teammate (ADR-0003): feed the per-run vector-store deps +
       // the task prompt so resolveSendOptions' twin branch injects the twin's
       // persona + per-task RAG. Guard is satisfied only when the teammate is
@@ -1466,7 +1474,8 @@ export async function dispatchTeammate(
                   },
                   sessionId
                 )
-            : undefined
+            : undefined,
+          args.taskKind
         )
       }
 

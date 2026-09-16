@@ -15,6 +15,10 @@ import type { CircuitBreakerStateValue } from "@cognia/provider-types/circuit-br
 import type { RoutingCandidateCapabilities } from "@cognia/provider-types/auto-router"
 import { registerRoutingStrategy, unregisterRoutingStrategy } from "./strategy-registry"
 import { registerDeploymentFilter, unregisterDeploymentFilter } from "./filter-registry"
+import {
+  resetProviderRoutingRuntimeAdaptersForTesting,
+  setProviderRoutingRuntimeAdapters,
+} from "./runtime-adapters"
 
 function entry(
   providerId: string,
@@ -1217,5 +1221,270 @@ describe("difficulty judge", () => {
     })
     expect(plan.difficulty).toBeUndefined()
     expect(plan.reasonCodes).toContain("manual-override")
+  })
+})
+
+describe("auto policy (ADR-0043 Phase 12)", () => {
+  afterEach(() => {
+    resetProviderRoutingRuntimeAdaptersForTesting()
+  })
+
+  it("routes through a configured, enabled category alias instead of the tier ladder", async () => {
+    const engine = new ProviderRoutingEngine(
+      registry([
+        mapping("fast", [entry("p-fast", "m-fast")]),
+        mapping("code-tier", [entry("p-code", "m-code")]),
+      ]),
+      { ...DEFAULT_ROUTING_CONFIG, strategy: "quality" },
+      makeDeps()
+    )
+    const plan = await engine.planRoute({
+      surface: "chat",
+      selection: { kind: "auto" },
+      // "```" classifies this as coding regardless of the score.
+      promptText: "```ts\nsolve()\n```",
+      candidateAliases: ["fast"],
+      categoryAliases: { coding: "code-tier" },
+    })
+    expect(plan.selected).toMatchObject({ providerId: "p-code", modelId: "m-code" })
+    expect(plan.reasonCodes).toContain("auto-category-fit")
+    expect(plan.reasonCodes).not.toContain("auto-task-fit")
+    // The difficulty outcome is still recorded — the alias replaced the
+    // LADDER, not the classification.
+    expect(plan.difficulty).toBeDefined()
+    expect(plan.classification?.category).toBe("coding")
+  })
+
+  it("falls back to the tier ladder when the configured category alias is disabled", async () => {
+    const engine = new ProviderRoutingEngine(
+      registry([
+        mapping("fast", [entry("p-fast", "m-fast")]),
+        mapping("code-tier", [entry("p-code", "m-code")], { enabled: false }),
+      ]),
+      { ...DEFAULT_ROUTING_CONFIG, strategy: "quality" },
+      makeDeps()
+    )
+    const plan = await engine.planRoute({
+      surface: "chat",
+      selection: { kind: "auto" },
+      promptText: "```ts\nsolve()\n```",
+      candidateAliases: ["fast"],
+      categoryAliases: { coding: "code-tier" },
+    })
+    expect(plan.selected).toMatchObject({ providerId: "p-fast", modelId: "m-fast" })
+    expect(plan.reasonCodes).toContain("auto-task-fit")
+    expect(plan.reasonCodes).not.toContain("auto-category-fit")
+  })
+
+  it("falls back to the tier ladder when every category-alias entry fails a hard constraint", async () => {
+    // Precedence: capability/data-policy constraints > category alias > tier
+    // ladder. The request needs vision; code-tier's only model lacks it, so
+    // the alias is skipped rather than throwing RoutingNoCandidatesError.
+    const engine = new ProviderRoutingEngine(
+      registry([
+        mapping("fast", [entry("p-fast", "m-fast")]),
+        mapping("code-tier", [entry("p-code", "m-code")]),
+      ]),
+      { ...DEFAULT_ROUTING_CONFIG, strategy: "quality" },
+      makeDeps({
+        capabilities: {
+          "p-fast:m-fast": { vision: true },
+          "p-code:m-code": { vision: false },
+        },
+      })
+    )
+    const plan = await engine.planRoute({
+      surface: "chat",
+      selection: { kind: "auto" },
+      promptText: "```ts\nsolve()\n```",
+      requirements: { vision: true },
+      candidateAliases: ["fast"],
+      categoryAliases: { coding: "code-tier" },
+    })
+    expect(plan.selected).toMatchObject({ providerId: "p-fast", modelId: "m-fast" })
+    expect(plan.reasonCodes).toContain("auto-task-fit")
+    expect(plan.reasonCodes).not.toContain("auto-category-fit")
+  })
+
+  it("falls back to the tier ladder when every category-alias provider is excluded", async () => {
+    const engine = new ProviderRoutingEngine(
+      registry([
+        mapping("fast", [entry("p-fast", "m-fast")]),
+        mapping("code-tier", [entry("p-code", "m-code")]),
+      ]),
+      { ...DEFAULT_ROUTING_CONFIG, strategy: "quality" },
+      makeDeps()
+    )
+    const plan = await engine.planRoute({
+      surface: "chat",
+      selection: { kind: "auto" },
+      promptText: "```ts\nsolve()\n```",
+      candidateAliases: ["fast"],
+      categoryAliases: { coding: "code-tier" },
+      providerPreference: { excluded: ["p-code"] },
+    })
+    expect(plan.selected).toMatchObject({ providerId: "p-fast", modelId: "m-fast" })
+    expect(plan.reasonCodes).toContain("auto-task-fit")
+    expect(plan.reasonCodes).not.toContain("auto-category-fit")
+  })
+
+  it("rejects excluded providers under the data-policy reason", async () => {
+    const engine = new ProviderRoutingEngine(
+      registry([mapping("fast", [entry("openai", "gpt-4o"), entry("groq", "llama")])]),
+      { ...DEFAULT_ROUTING_CONFIG, strategy: "quality" },
+      makeDeps()
+    )
+    const plan = await engine.planRoute({
+      surface: "chat",
+      selection: { kind: "alias", alias: "fast" },
+      providerPreference: { excluded: ["openai"] },
+    })
+    expect(plan.selected.providerId).toBe("groq")
+    expect(plan.rejected).toEqual(expect.arrayContaining([{ reasonCode: "data-policy", count: 1 }]))
+  })
+
+  it("stable-sorts preferred providers first and marks the selection", async () => {
+    const engine = new ProviderRoutingEngine(
+      registry([
+        mapping("fast", [
+          entry("openai", "gpt-4o"),
+          entry("groq", "llama"),
+          entry("anthropic", "claude"),
+        ]),
+      ]),
+      { ...DEFAULT_ROUTING_CONFIG, strategy: "quality" },
+      makeDeps()
+    )
+    const plan = await engine.planRoute({
+      surface: "chat",
+      selection: { kind: "alias", alias: "fast" },
+      providerPreference: { preferred: ["groq", "anthropic"] },
+    })
+    // quality = first entry of the preference-sorted chain.
+    expect(plan.selected.providerId).toBe("groq")
+    expect(plan.orderedCandidates.map((candidate) => candidate.providerId)).toEqual([
+      "groq",
+      "anthropic",
+      "openai",
+    ])
+    expect(plan.reasonCodes).toContain("provider-preference")
+  })
+
+  it("drops candidates whose known estimate exceeds the per-request cap", async () => {
+    const engine = new ProviderRoutingEngine(
+      registry([mapping("fast", [entry("openai", "gpt-4o"), entry("groq", "llama")])]),
+      { ...DEFAULT_ROUTING_CONFIG, strategy: "quality" },
+      makeDeps({ pricing: { "openai:gpt-4o": 20, "groq:llama": 1 } })
+    )
+    const plan = await engine.planRoute({
+      surface: "chat",
+      selection: { kind: "alias", alias: "fast" },
+      estimatedInputTokens: 1000,
+      // (1000 in + 1024 out) * $20/1M ≈ $0.0405 for openai, ≈ $0.002 for groq.
+      maxCostPerRequestUsd: 0.01,
+    })
+    expect(plan.selected.providerId).toBe("groq")
+    expect(plan.costCap).toMatchObject({ capUsd: 0.01, exceeded: false })
+    expect(plan.costCap?.estimatedUsd).toBeCloseTo(0.002024, 5)
+    expect(plan.reasonCodes).not.toContain("cost-cap-exceeded")
+  })
+
+  it("keeps the original list cheapest-first and flags the plan when the cap cannot be satisfied", async () => {
+    const engine = new ProviderRoutingEngine(
+      registry([mapping("fast", [entry("openai", "gpt-4o"), entry("groq", "llama")])]),
+      { ...DEFAULT_ROUTING_CONFIG, strategy: "quality" },
+      makeDeps({ pricing: { "openai:gpt-4o": 20, "groq:llama": 1 } })
+    )
+    const plan = await engine.planRoute({
+      surface: "chat",
+      selection: { kind: "alias", alias: "fast" },
+      estimatedInputTokens: 1000,
+      // Both estimates exceed the cap — the send proceeds over-cap rather
+      // than dead-ending.
+      maxCostPerRequestUsd: 0.001,
+    })
+    expect(plan.selected.providerId).toBe("groq")
+    expect(plan.costCap).toMatchObject({ capUsd: 0.001, exceeded: true })
+    expect(plan.reasonCodes).toContain("cost-cap-exceeded")
+  })
+
+  it("keeps candidates whose pricing is unknown (a cap never rejects on missing info)", async () => {
+    const engine = new ProviderRoutingEngine(
+      registry([mapping("fast", [entry("openai", "mystery"), entry("groq", "llama")])]),
+      { ...DEFAULT_ROUTING_CONFIG, strategy: "quality" },
+      makeDeps({ pricing: { "groq:llama": 50 } })
+    )
+    const plan = await engine.planRoute({
+      surface: "chat",
+      selection: { kind: "alias", alias: "fast" },
+      estimatedInputTokens: 1000,
+      maxCostPerRequestUsd: 0.001,
+    })
+    // groq's known estimate is over cap; openai's is unknown so it survives.
+    expect(plan.selected.providerId).toBe("openai")
+    expect(plan.costCap).toMatchObject({ capUsd: 0.001, exceeded: false })
+    expect(plan.costCap && "estimatedUsd" in plan.costCap).toBe(false)
+  })
+
+  it("reads the policy from the runtime adapter when the request omits it", async () => {
+    setProviderRoutingRuntimeAdapters({
+      getAutoRoutingPolicy: () => ({
+        preferredProviders: ["groq"],
+        maxCostPerRequestCents: 1,
+      }),
+    })
+    const engine = new ProviderRoutingEngine(
+      registry([mapping("fast", [entry("openai", "gpt-4o"), entry("groq", "llama")])]),
+      { ...DEFAULT_ROUTING_CONFIG, strategy: "quality" },
+      makeDeps()
+    )
+    const plan = await engine.planRoute({
+      surface: "chat",
+      selection: { kind: "alias", alias: "fast" },
+    })
+    expect(plan.selected.providerId).toBe("groq")
+    expect(plan.reasonCodes).toContain("provider-preference")
+    // Cents normalize to USD at the adapter boundary.
+    expect(plan.costCap).toMatchObject({ capUsd: 0.01, exceeded: false })
+  })
+
+  it("lets a request field win over the runtime policy for that field only", async () => {
+    setProviderRoutingRuntimeAdapters({
+      getAutoRoutingPolicy: () => ({ preferredProviders: ["groq"] }),
+    })
+    const engine = new ProviderRoutingEngine(
+      registry([mapping("fast", [entry("openai", "gpt-4o"), entry("groq", "llama")])]),
+      { ...DEFAULT_ROUTING_CONFIG, strategy: "quality" },
+      makeDeps()
+    )
+    const plan = await engine.planRoute({
+      surface: "chat",
+      selection: { kind: "alias", alias: "fast" },
+      providerPreference: { preferred: ["openai"] },
+    })
+    expect(plan.selected.providerId).toBe("openai")
+    expect(plan.reasonCodes).toContain("provider-preference")
+  })
+
+  it("ignores the policy entirely for a manual selection", async () => {
+    setProviderRoutingRuntimeAdapters({
+      getAutoRoutingPolicy: () => ({
+        excludedProviders: ["openai"],
+        maxCostPerRequestCents: 1,
+      }),
+    })
+    const engine = new ProviderRoutingEngine(
+      registry([]),
+      DEFAULT_ROUTING_CONFIG,
+      makeDeps({ pricing: { "openai:gpt-4o": 100 } })
+    )
+    const plan = await engine.planRoute({
+      surface: "chat",
+      selection: { kind: "manual", providerId: "openai", modelId: "gpt-4o" },
+      providerPreference: { preferred: ["groq"] },
+    })
+    expect(plan.selected.providerId).toBe("openai")
+    expect(plan.costCap).toBeUndefined()
+    expect(plan.reasonCodes).toEqual(["manual-override"])
   })
 })

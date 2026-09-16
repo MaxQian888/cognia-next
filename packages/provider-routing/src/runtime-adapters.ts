@@ -3,6 +3,7 @@ import type { ProviderHealthMetrics } from "@cognia/provider-types/health-metric
 import type {
   RoutingDifficultySignals,
   RoutingDifficultyTier,
+  TaskCategory,
 } from "@cognia/provider-types/auto-router"
 import type { DifficultyRoutingSettings, ToolRouteRecord } from "./routing-types"
 
@@ -60,6 +61,26 @@ export interface ProviderRoutingRuntimeAdapters {
    * is what lets one surface (a workflow node, say) opt out on its own.
    */
   getAutoRoutingJudgeSettings?: () => { enabled: boolean; uncertaintyBand?: number } | undefined
+  /**
+   * Auto policy, read when the request does not carry its own fields.
+   *
+   * Same seam as `getAutoRoutingJudgeSettings`: preferred/excluded providers,
+   * the per-request cost cap, and category→alias overrides reach the engine
+   * through the runtime adapters so a caller that never heard of the policy
+   * still honours the user's settings. A request that DOES specify a field
+   * wins for that field.
+   *
+   * `maxCostPerRequestCents` is in USD cents — the persisted settings unit;
+   * the engine normalizes to `RoutingRequest.maxCostPerRequestUsd`.
+   */
+  getAutoRoutingPolicy?: () =>
+    | {
+        preferredProviders?: string[]
+        excludedProviders?: string[]
+        maxCostPerRequestCents?: number
+        categoryAliases?: Partial<Record<TaskCategory, string>>
+      }
+    | undefined
   semanticToolRouterDeps?: SemanticToolRouterRuntimeDeps
 }
 
@@ -83,6 +104,7 @@ type RequiredRoutingRuntimeAdapters = Required<
     | "setCircuitBreakerSettings"
     | "getDifficultyRoutingSettings"
     | "getAutoRoutingJudgeSettings"
+    | "getAutoRoutingPolicy"
   >
 > &
   Pick<ProviderRoutingRuntimeAdapters, "semanticToolRouterDeps" | "judgeDifficulty">
@@ -155,6 +177,9 @@ function defaultAdapters(): RequiredRoutingRuntimeAdapters {
     getDifficultyRoutingSettings: () => undefined,
     // Inert default: no host, no judge — routing stays deterministic.
     getAutoRoutingJudgeSettings: () => undefined,
+    // Inert default: no host, no policy — no provider preference, no cost
+    // cap, no category aliases.
+    getAutoRoutingPolicy: () => undefined,
   }
 }
 

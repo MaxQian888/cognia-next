@@ -136,3 +136,90 @@ it("does not fall back to an app default owned by an external agent", async () =
   expect(args.override.model).toBeUndefined()
   expect(args.override.providerOverride).toBeUndefined()
 })
+
+describe("routing placeholder models", () => {
+  const mappings = [
+    {
+      id: "m-fast",
+      alias: "fast",
+      providers: [{ providerId: "groq", modelId: "llama-3.3" }],
+      distribution: "priority",
+      enabled: true,
+      createdAt: 1,
+      updatedAt: 1,
+    },
+    {
+      id: "m-powerful",
+      alias: "powerful",
+      providers: [{ providerId: "anthropic", modelId: "claude-opus-4-8" }],
+      distribution: "priority",
+      enabled: true,
+      createdAt: 1,
+      updatedAt: 1,
+    },
+  ]
+  const settingsWithLadder = {
+    modelMappings: mappings,
+    autoRouting: { enabled: false, candidateAliases: ["fast", "powerful"] },
+  } as unknown as AppSettings
+
+  it("resolves a literal 'auto' session model through the role's tier rung", async () => {
+    // utility → ladder[0] = "fast" → groq/llama-3.3; the tier supplies BOTH
+    // provider and model, ahead of the session/agent provider chain.
+    await buildAgentRoleLlmClient({
+      role: "utility",
+      session: { id: "s1", model: "auto" } as ChatSession,
+      appSettings: settingsWithLadder,
+      featureId: "title",
+    })
+    expect(buildUtilityLlmClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        override: { providerOverride: "groq", model: "llama-3.3" },
+      })
+    )
+  })
+
+  it("resolves an enabled alias on the effective model to the role's tier, not the alias itself", async () => {
+    // session.model = "fast" is a placeholder; the plan role's rung
+    // (ladder's last) wins over echoing the alias name as a model id.
+    await buildAgentRoleLlmClient({
+      role: "plan",
+      session: { id: "s1", model: "fast" } as ChatSession,
+      appSettings: settingsWithLadder,
+      featureId: "plan-decompose",
+    })
+    expect(buildUtilityLlmClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        override: { providerOverride: "anthropic", model: "claude-opus-4-8" },
+      })
+    )
+  })
+
+  it("drops the model when the placeholder has no resolvable alias, keeping provider precedence", async () => {
+    resolveCharacterById.mockResolvedValue(character({ providerId: "openai" }))
+    await buildAgentRoleLlmClient({
+      role: "utility",
+      session: { id: "s1", characterId: "agent-1", model: "auto" } as ChatSession,
+      appSettings: { modelMappings: [] } as unknown as AppSettings,
+      featureId: "title",
+    })
+    expect(buildUtilityLlmClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        override: { providerOverride: "openai", model: undefined },
+      })
+    )
+  })
+
+  it("leaves concrete models untouched even when aliases exist", async () => {
+    await buildAgentRoleLlmClient({
+      role: "execute",
+      session: { id: "s1", model: "gpt-4o" } as ChatSession,
+      appSettings: settingsWithLadder,
+      featureId: "f",
+    })
+    const args = buildUtilityLlmClient.mock.calls.at(-1)?.[0] as {
+      override: { model?: string }
+    }
+    expect(args.override.model).toBe("gpt-4o")
+  })
+})

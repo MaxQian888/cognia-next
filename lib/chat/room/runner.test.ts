@@ -495,6 +495,41 @@ describe("a linear turn", () => {
     expect([...w.memberStatus.values()]).toEqual([])
   })
 
+  it("carries the send's routing plan into each member's run metadata", async () => {
+    const w = createWorld({ team: { members: [{ characterId: "a" }] } })
+    w.deps.ai.resolveSendOptions = async () =>
+      ({
+        systemPrompt: "sys",
+        model: "claude-opus-4-8",
+        provider: "anthropic",
+        routingPlan: {
+          decisionId: "d1",
+          surface: "chat",
+          requested: { kind: "auto" },
+          strategy: "reliability",
+          selected: { providerId: "anthropic", modelId: "claude-opus-4-8" },
+          orderedCandidates: [{ providerId: "anthropic", modelId: "claude-opus-4-8" }],
+          reasonCodes: ["auto-task-fit", "reliability-first"],
+          rejected: [],
+          replayPolicy: "pre-commit-only",
+          createdAt: 1,
+        },
+      }) as never
+    await w.runner.send("hello", { sessionId: ROOM })
+    const persisted = w.db.get(ROOM) ?? []
+    const assistant = persisted.find((m) => m.role === "assistant")
+    expect(assistant?.metadata).toMatchObject({
+      run: {
+        routing: {
+          mode: "auto",
+          strategy: "reliability",
+          reasonCodes: ["auto-task-fit", "reliability-first"],
+          candidateCount: 1,
+        },
+      },
+    })
+  })
+
   it("clears a stale error before the room goes streaming, so the status is not stranded", async () => {
     const w = createWorld()
     await w.runner.send("go", { sessionId: ROOM })

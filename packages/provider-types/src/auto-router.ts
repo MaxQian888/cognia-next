@@ -49,6 +49,19 @@ export type TaskCategory =
   | "translation"
   | "summarization"
 
+/** Runtime list of every task category — for selects and exhaustive checks. */
+export const TASK_CATEGORIES: readonly TaskCategory[] = [
+  "general",
+  "coding",
+  "analysis",
+  "creative",
+  "research",
+  "conversation",
+  "math",
+  "translation",
+  "summarization",
+]
+
 export type RoutingSurface = "chat" | "gateway" | "workflow" | "council" | "agent"
 
 export type ModelRoutingSelection =
@@ -169,6 +182,30 @@ export interface RoutingRequest {
   requirements?: RoutingCapabilityRequirements
   dataPolicy?: RoutingDataPolicy
   taskHints?: RoutingTaskHints
+  /**
+   * Provider preference applied to `auto` and `alias` selections: `preferred`
+   * providers are stable-sorted ahead of the rest before the strategy runs,
+   * `excluded` providers join the hard-constraint exclusion set. When absent
+   * the engine reads them from the runtime adapter `getAutoRoutingPolicy()`
+   * (same pattern as `judge`).
+   */
+  providerPreference?: { preferred?: string[]; excluded?: string[] }
+  /**
+   * Soft per-request cost ceiling in USD. Candidates whose estimated cost
+   * exceeds the cap are dropped; if that empties the list, the original list
+   * survives sorted by estimate and the plan reports `costCap.exceeded`. When
+   * absent the engine reads it from the runtime adapter
+   * `getAutoRoutingPolicy()` (same pattern as `judge`).
+   */
+  maxCostPerRequestUsd?: number
+  /**
+   * Task-category → alias overrides for the `auto` selection: when the local
+   * classifier's category has a configured, enabled alias, Auto routes through
+   * it instead of the difficulty tier ladder. When absent the engine reads
+   * them from the runtime adapter `getAutoRoutingPolicy()` (same pattern as
+   * `judge`).
+   */
+  categoryAliases?: Partial<Record<TaskCategory, string>>
   /** Difficulty cut points used to choose the configured Auto alias tier. */
   thresholds?: { balanced: number; powerful: number }
   sessionId?: string
@@ -218,6 +255,13 @@ export type RoutingReasonCode =
   | "judge-agreed"
   | "judge-overrode"
   | "judge-unavailable"
+  // Auto policy (ADR-0043 Phase 12): a configured task-category alias beat the
+  // difficulty tier ladder; a configured provider preference ordered the
+  // candidates; the per-request cost cap could not be satisfied so the plan
+  // proceeded over-cap rather than dead-ending the send.
+  | "auto-category-fit"
+  | "provider-preference"
+  | "cost-cap-exceeded"
   | `plugin:${string}:${string}`
   | `filter:${string}`
 
@@ -244,6 +288,13 @@ export interface RoutingPlan {
   filterNotes?: FilterNotes
   /** Present for `auto` selections; absent when the caller pinned a model. */
   difficulty?: RoutingDifficultyOutcome
+  /**
+   * Per-request cost cap outcome. Present only when a cap was configured;
+   * `estimatedUsd` is the selected candidate's estimate, absent when pricing
+   * is unknown. `exceeded` means every candidate was over cap and the plan
+   * proceeded anyway (the cap is advisory, never a dead end).
+   */
+  costCap?: { capUsd: number; estimatedUsd?: number; exceeded: boolean }
   shadowComparison?: {
     differs: boolean
     selected: { providerId: string; modelId: string }
@@ -345,6 +396,12 @@ export interface AutoRouterSettings {
   enabled: boolean
 
   // Routing mode preference
+  /**
+   * Dormant (ADR-0043 Phase 12): persisted for backward compatibility and read
+   * by nothing. `judge.enabled`/`judge.uncertaintyBand` replace it — the
+   * deterministic score always runs; the only "mode" left is whether the
+   * optional second opinion is consulted.
+   */
   routingMode: RoutingMode
 
   // Routing strategy
@@ -354,6 +411,12 @@ export interface AutoRouterSettings {
   showRoutingIndicator: boolean
 
   // Allow user to override routing decisions
+  /**
+   * Dormant (ADR-0043 Phase 12): persisted for backward compatibility and read
+   * by nothing. Concrete session models are always hard overrides
+   * (`selection.kind === "manual"`), so there is nothing left for a flag to
+   * allow.
+   */
   allowOverride: boolean
 
   // Preferred providers (priority order)
@@ -366,6 +429,11 @@ export interface AutoRouterSettings {
   maxCostPerRequest?: number
 
   // Custom tier overrides
+  /**
+   * Dormant (ADR-0043 Phase 12): persisted for backward compatibility and read
+   * by nothing. Tier models are `modelMappings` aliases named in
+   * `candidateAliases`.
+   */
   customTierModels?: {
     fast?: TierModelEntry[]
     balanced?: TierModelEntry[]
@@ -380,8 +448,14 @@ export interface AutoRouterSettings {
   enableCache: boolean
   cacheTTL: number // seconds
 
-  // Fallback behavior
-  fallbackTier: ModelTier
+  /**
+   * Optional alias retried once when Auto finds no viable candidate. Absent
+   * (the default) means no tier retry: Auto falls straight to
+   * `fallbackProvider`, then the app default. The field was dormant until
+   * Phase 12, and a tier retry only runs after the ladder already failed, so
+   * an implied ladder alias adds nothing by default.
+   */
+  fallbackTier?: ModelTier
   fallbackProvider?: ProviderName
 
   /** Selection used for sessions without an explicit provider/model. */
@@ -390,6 +464,11 @@ export interface AutoRouterSettings {
   dataPolicy: RoutingDataPolicy
   /** Alias tiers used by the local classifier, ordered low to high. */
   candidateAliases: string[]
+  /**
+   * When the local classifier's category has a configured, enabled alias,
+   * Auto routes through it instead of the difficulty tier ladder.
+   */
+  categoryAliases?: Partial<Record<TaskCategory, string>>
   /** Difficulty cut points for the alias tiers. */
   thresholds: { balanced: number; powerful: number }
   /** Compute and trace decisions without dispatching them. */
@@ -427,11 +506,12 @@ export const DEFAULT_AUTO_ROUTER_SETTINGS: AutoRouterSettings = {
   routerModel: undefined,
   enableCache: true,
   cacheTTL: 300, // 5 minutes
-  fallbackTier: "balanced",
+  fallbackTier: undefined,
   fallbackProvider: undefined,
   defaultSelection: "manual",
   dataPolicy: { locality: "any" },
   candidateAliases: ["fast", "balanced", "powerful"],
+  categoryAliases: {},
   thresholds: { balanced: 0.34, powerful: 0.67 },
   shadowMode: true,
   // Off by default. Shadow mode is the intended rollout path: publish the

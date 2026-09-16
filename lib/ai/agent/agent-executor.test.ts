@@ -17,7 +17,7 @@ import { getSettings } from "@/lib/db/settings"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import { runAndCaptureAssistantReply } from "@/lib/claude/run-and-capture"
 import { buildRoutingEngine } from "@cognia/provider-routing/build-preview-engine"
-import { executeAgent } from "./agent-executor"
+import { executeAgent, runCompletionRail } from "./agent-executor"
 
 const mockPlanRoute = jest.fn()
 const mockApplyCircuitBreakerSettings = jest.fn()
@@ -225,6 +225,32 @@ describe("executeAgent", () => {
           promptText: "分析这段代码",
           strategy: "reliability",
           shadowMode: true,
+        })
+      )
+    })
+
+    it("hands the classifier the run's task hints — depth, code, tools, effort", async () => {
+      primeTextChannel(["ok"])
+      // runCompletionRail directly: passing `tools` through `executeAgent` would
+      // flip the execution spec onto the tool rail, which plans through
+      // `resolveSendOptions` instead.
+      await runCompletionRail("```ts\nconst x = 1\n```", {
+        priorMessages: [
+          { role: "user", content: "one" },
+          { role: "assistant", content: "two" },
+        ],
+        tools: [{ name: "Read" }, { name: "Write" }] as never,
+        allowedTools: ["Bash"],
+        effort: "high",
+      })
+      expect(mockPlanRoute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          taskHints: {
+            messageCount: 2,
+            hasCode: true,
+            toolCount: 3,
+            requestedEffort: "high",
+          },
         })
       )
     })

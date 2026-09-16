@@ -29,8 +29,16 @@ jest.mock("@cognia/provider-embedding/embedding", () => ({
     embeddings: texts.map(() => [1, 0]),
   })),
 }))
+jest.mock("@/lib/ai/routing/difficulty-judge", () => ({
+  judgeDifficulty: jest.fn(async () => ({ tier: "fast" })),
+}))
+jest.mock("@/lib/ai/generation/utility-client", () => ({
+  buildUtilityLlmClient: jest.fn(() => ({ complete: jest.fn() })),
+}))
 
 import { listEnabledToolRoutes, cacheToolRouteEmbeddings } from "@/lib/db/tool-routes"
+import { judgeDifficulty } from "@/lib/ai/routing/difficulty-judge"
+import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 
 const deployKey = (providerId: string, modelId: string) =>
   deploymentKeyOf({ providerId, modelId }) as string
@@ -129,6 +137,106 @@ describe("buildRoutingRuntimeAdapters — difficulty settings", () => {
     }
     useSettingsStore.setState({ settings: { difficultyRouting } } as never)
     expect(buildRoutingRuntimeAdapters().getDifficultyRoutingSettings!()).toEqual(difficultyRouting)
+  })
+})
+
+describe("buildRoutingRuntimeAdapters — Auto policy", () => {
+  it("returns undefined when no autoRouting settings exist", () => {
+    expect(buildRoutingRuntimeAdapters().getAutoRoutingPolicy!()).toBeUndefined()
+    useSettingsStore.setState({ settings: {} } as never)
+    expect(buildRoutingRuntimeAdapters().getAutoRoutingPolicy!()).toBeUndefined()
+  })
+
+  it("maps the persisted autoRouting block, cost cap kept in cents", () => {
+    useSettingsStore.setState({
+      settings: {
+        autoRouting: {
+          preferredProviders: ["groq"],
+          excludedProviders: ["openai"],
+          maxCostPerRequest: 25,
+          categoryAliases: { coding: "code-tier" },
+        },
+      },
+    } as never)
+    expect(buildRoutingRuntimeAdapters().getAutoRoutingPolicy!()).toEqual({
+      preferredProviders: ["groq"],
+      excludedProviders: ["openai"],
+      maxCostPerRequestCents: 25,
+      categoryAliases: { coding: "code-tier" },
+    })
+  })
+})
+
+describe("buildRoutingRuntimeAdapters — difficulty judge wiring", () => {
+  const judgeInput = {
+    promptText: "anything",
+    deterministicScore: 0.5,
+    deterministicTier: "fast" as const,
+    signalsOnly: {
+      length: 0,
+      code: 0,
+      keywords: 0,
+      structure: 0,
+      attachments: 0,
+      threadDepth: 0,
+      tools: 0,
+      effortFloor: 0,
+    },
+  }
+
+  it("pins the judge to the configured router model", async () => {
+    useSettingsStore.setState({
+      settings: {
+        autoRouting: {
+          routerModel: { provider: "openai", model: "gpt-4o-mini", priority: 1 },
+        },
+      },
+    } as never)
+    await buildRoutingRuntimeAdapters().judgeDifficulty!(judgeInput)
+    expect(buildUtilityLlmClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        featureId: "routing-difficulty-judge",
+        override: { providerOverride: "openai", model: "gpt-4o-mini" },
+      })
+    )
+  })
+
+  it("passes no override when no router model is configured", async () => {
+    useSettingsStore.setState({ settings: { autoRouting: {} } } as never)
+    await buildRoutingRuntimeAdapters().judgeDifficulty!(judgeInput)
+    const args = jest.mocked(buildUtilityLlmClient).mock.calls.at(-1)?.[0]
+    expect(args).not.toHaveProperty("override")
+  })
+
+  it("sizes the verdict cache from settings — disabled means zero TTL", async () => {
+    useSettingsStore.setState({
+      settings: { autoRouting: { enableCache: false, cacheTTL: 60 } },
+    } as never)
+    await buildRoutingRuntimeAdapters().judgeDifficulty!(judgeInput)
+    expect(judgeDifficulty).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({ cacheTtlMs: 0 })
+    )
+
+    useSettingsStore.setState({
+      settings: { autoRouting: { enableCache: true, cacheTTL: 60 } },
+    } as never)
+    await buildRoutingRuntimeAdapters().judgeDifficulty!(judgeInput)
+    expect(judgeDifficulty).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({ cacheTtlMs: 60_000 })
+    )
+  })
+
+  it("defaults to five minutes when no TTL is configured and forwards judge timeoutMs", async () => {
+    useSettingsStore.setState({
+      settings: { autoRouting: { judge: { enabled: true, timeoutMs: 250 } } },
+    } as never)
+    await buildRoutingRuntimeAdapters().judgeDifficulty!(judgeInput)
+    expect(judgeDifficulty).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({ cacheTtlMs: 300_000, timeoutMs: 250 })
+    )
   })
 })
 

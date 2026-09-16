@@ -114,6 +114,13 @@ export async function defaultRoutedPromptDeps(
           selection: modelAlias ? { kind: "alias", alias: modelAlias } : { kind: "auto" },
           promptText,
           estimatedInputTokens,
+          taskHints: {
+            // A routed prompt node is a single-turn, tool-less completion —
+            // 0/1 are honest signals here, not omissions.
+            hasCode: /```/.test(promptText ?? ""),
+            toolCount: 0,
+            messageCount: 1,
+          },
           candidateAliases: settings.autoRouting?.candidateAliases,
           thresholds: settings.autoRouting?.thresholds,
           strategy: settings.routingConfig?.strategy,

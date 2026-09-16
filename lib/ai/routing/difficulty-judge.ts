@@ -85,6 +85,12 @@ export interface JudgeDifficultyInput {
   /** Included in the prompt as a prior, so the judge is nudging, not guessing. */
   deterministicTier?: RoutingDifficultyTier
   timeoutMs?: number
+  /**
+   * Cache TTL in ms; defaults to {@link CACHE_TTL_MS}. `0` disables the cache
+   * entirely — no reads, no writes — for hosts whose settings turn verdict
+   * caching off.
+   */
+  cacheTtlMs?: number
   now?: () => number
 }
 
@@ -103,9 +109,10 @@ export async function judgeDifficulty(
   const trimmed = (input.promptText ?? "").trim().slice(0, PROMPT_EXCERPT)
   if (!trimmed) return null
 
+  const cacheTtlMs = input.cacheTtlMs ?? CACHE_TTL_MS
   const cacheKey = `${input.deterministicTier ?? "-"}::${trimmed}`
-  const cached = cache.get(cacheKey)
-  if (cached && now() - cached.at < CACHE_TTL_MS) return cached.value
+  const cached = cacheTtlMs > 0 ? cache.get(cacheKey) : undefined
+  if (cached && now() - cached.at < cacheTtlMs) return cached.value
 
   // The prompt is the user's own text. It never leaves for a routing decision
   // if it carries anything the redaction gate objects to — a routing hint is
@@ -141,8 +148,10 @@ export async function judgeDifficulty(
     result = null
   }
 
-  cache.set(cacheKey, { at: now(), value: result })
-  evict()
+  if (cacheTtlMs > 0) {
+    cache.set(cacheKey, { at: now(), value: result })
+    evict()
+  }
   return result
 }
 
@@ -171,7 +180,7 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null
  */
 export function createDifficultyJudge(
   loadClient: () => LlmClient | null,
-  options: { timeoutMs?: number } = {}
+  options: { timeoutMs?: number; cacheTtlMs?: number } = {}
 ): (input: {
   promptText: string
   deterministicTier: RoutingDifficultyTier
@@ -183,6 +192,7 @@ export function createDifficultyJudge(
       promptText: input.promptText,
       deterministicTier: input.deterministicTier,
       ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+      ...(options.cacheTtlMs !== undefined ? { cacheTtlMs: options.cacheTtlMs } : {}),
     })
   }
 }

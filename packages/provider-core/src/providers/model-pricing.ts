@@ -134,6 +134,20 @@ function resolvePricingWithVirtual(
   return modelPricingResolver(providerId, parsed.baseModel, options)
 }
 
+/**
+ * The per-bucket USD price of a provider:model (prompt, completion, cache
+ * tiers), with the same layers and virtual-model fallthrough as
+ * {@link resolveModelPriceUsdPer1M}. Null when no layer knows a base rate.
+ * Callers that bill (ADR-0188's ledger) need the buckets, not a blend.
+ */
+export function resolveModelPricing(
+  providerId: string,
+  modelId: string,
+  settings?: PriceLookupSettings
+): Partial<ModelPricing> | null {
+  return resolvePricingWithVirtual(providerId, modelId, { settings })
+}
+
 export function resolveModelPriceUsdPer1M(
   providerId: string,
   modelId: string,

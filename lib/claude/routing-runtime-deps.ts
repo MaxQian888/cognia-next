@@ -90,6 +90,21 @@ export function buildRoutingRuntimeAdapters(): ProviderRoutingRuntimeAdapters {
 
     getAutoRoutingJudgeSettings: () => useSettingsStore.getState().settings?.autoRouting?.judge,
 
+    // ---- Auto policy (preferred/excluded providers, cost cap, category
+    // aliases). Read per call so a settings edit takes effect on the next
+    // turn without a re-init. Cents → USD normalization happens in the
+    // engine, which owns the unit boundary.
+    getAutoRoutingPolicy: () => {
+      const autoRouting = useSettingsStore.getState().settings?.autoRouting
+      if (!autoRouting) return undefined
+      return {
+        preferredProviders: autoRouting.preferredProviders,
+        excludedProviders: autoRouting.excludedProviders,
+        maxCostPerRequestCents: autoRouting.maxCostPerRequest,
+        categoryAliases: autoRouting.categoryAliases,
+      }
+    },
+
     // ---- Difficulty judge (opt-in INSIDE opted-in Auto routing) -----------
     //
     // Installed unconditionally; the settings gate lives in the engine, which
@@ -103,17 +118,31 @@ export function buildRoutingRuntimeAdapters(): ProviderRoutingRuntimeAdapters {
         import("@/lib/ai/generation/utility-client"),
       ])
       const settings = useSettingsStore.getState().settings
+      const autoRouting = settings?.autoRouting
       const client = buildUtilityLlmClient({
         session: null,
         appSettings: settings,
         featureId: "routing-difficulty-judge",
+        // A configured router model pins the judge to that provider:model;
+        // without one the utility client's own cheap-model chain applies.
+        ...(autoRouting?.routerModel
+          ? {
+              override: {
+                providerOverride: autoRouting.routerModel.provider,
+                model: autoRouting.routerModel.model,
+              },
+            }
+          : {}),
       })
       if (!client) return null
       return judgeDifficulty(client, {
         promptText: input.promptText,
         deterministicTier: input.deterministicTier,
-        ...(settings?.autoRouting?.judge?.timeoutMs !== undefined
-          ? { timeoutMs: settings.autoRouting.judge.timeoutMs }
+        // `enableCache === false` disables the judge's verdict cache entirely;
+        // otherwise `cacheTTL` (seconds, settings unit) sizes it.
+        cacheTtlMs: autoRouting?.enableCache === false ? 0 : (autoRouting?.cacheTTL ?? 300) * 1000,
+        ...(autoRouting?.judge?.timeoutMs !== undefined
+          ? { timeoutMs: autoRouting.judge.timeoutMs }
           : {}),
       })
     },

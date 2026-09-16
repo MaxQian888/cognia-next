@@ -172,3 +172,68 @@ provider permit before acquiring the fallback lane. Team member attempts reuse
 the outer turn's global permit and working-tree slot but still acquire their
 own provider permit. Cancellation and all success/error paths converge on the
 lease's idempotent release.
+
+### Phase 12 — Auto routing completion: policy, category aliases, role tiers, explainability (Accepted, implemented)
+
+Phase 10 gave Auto a richer difficulty signal, but the router still ignored
+most of what the caller and the settings already knew. Every `planRoute`
+caller now propagates task hints — `lib/claude/build-options.ts` (chat) sends
+attachment kinds, message count, tool count, requested effort, and a hasCode
+probe; `lib/ai/agent/agent-executor.ts`, `lib/ai/agent/team/dispatch-teammate.ts`,
+and the workflow surface send what each has, plus the caller's category — so a
+screenshot, a long thread, or a tool-heavy turn is classified as what it is
+rather than as cold text.
+
+Auto's precedence is now total and explicit: a manual selection is a hard
+override the policy never touches; capability/data-policy hard constraints
+(including `excludedProviders`, counted under the existing `data-policy`
+reason) gate everything; a configured `categoryAliases` entry then beats the
+ladder (`auto-category-fit`) — but only if at least one of its entries
+survives those hard constraints, otherwise the plan falls through to the
+difficulty tier ladder (`auto-task-fit`) instead of dead-ending in
+`RoutingNoCandidatesError`; `listCandidates` remains the live fallback.
+
+Two policy levers ride on top, both soft. `maxCostPerRequest` (cents, stored)
+is normalized to USD and each candidate is priced through
+`deps.getPricing`; unknown pricing is always kept — the router never rejects
+on missing information — and when nothing fits the cap the plan proceeds
+cheapest-first, sets `plan.costCap.exceeded`, and emits `cost-cap-exceeded`
+rather than dead-ending. `preferredProviders` stable-sorts the filtered list
+before strategy selection (the strategy still picks), stamping
+`provider-preference` when it lands on a preferred provider.
+
+The judge became configurable end to end: `judge.enabled` / `uncertaintyBand`
+/ `timeoutMs` expose its consultation band, `routerModel` pins the client the
+judge calls, and `enableCache` / `cacheTTL` control the verdict cache (`0`
+bypasses reads and writes). The safety contract from Phase 10 is unchanged —
+the PII gate still vetoes the prompt, the deadline still stands, verdicts are
+fail-open, and timeouts are never cached.
+
+When Auto finds no candidate at all the fallback chain is explicit:
+`fallbackTier` retried once as an alias (optional — absent by default,
+because a tier retry only runs after the ladder already failed), then
+`fallbackProvider`, then the app default; each emits
+`routingDecision.reason = "auto-no-candidates-fallback"`. The literal string
+`"auto"` never reaches a provider: `lib/ai/routing/auto-model-resolution.ts`
+exports `isRoutingPlaceholderModel` (the placeholder `"auto"` plus enabled
+alias names) and a Fusion-style `resolveRoleTierModel` that maps background
+roles onto the enabled `candidateAliases` ladder — plan takes the top rung,
+execute the middle, utility the bottom, walking down then up — so
+`renderer-llm-client` and `agent-role-client` resolve or drop placeholders
+before transport while explicit role models always win.
+
+Decisions are explainable at the message. `buildRoutingRunMetadata`
+(`lib/chat/message-run-metadata.ts`) projects the plan into
+`MessageRunMetadata.routing` — mode, alias, tier, score, strategy, reason
+codes, judge usage, candidate count — read from the plan, never re-derived;
+chat, controller, and room runners attach it to completed assistant messages,
+and `RoutingIndicator` (`components/chat/routing-indicator.tsx`) renders it as
+a tooltip chip gated by `showRoutingIndicator`. Chat spans emit the shared
+`routingPlanTraceAttributes` projection. Three legacy fields —
+`routingMode`, `allowOverride`, `customTierModels` — are now dormant on all
+three axes: documented at the type, labeled inactive in the settings UI, and
+pinned by `dormant-auto-router-settings.test.ts`, which fails if any
+identifier reappears in the routing engine or the send path. The new reason
+codes (`auto-category-fit`, `provider-preference`, `cost-cap-exceeded`,
+`judge-agreed`, `judge-overrode`, `judge-unavailable`) are localized under
+`providers.routingView.reasonCode.*` in both locales.

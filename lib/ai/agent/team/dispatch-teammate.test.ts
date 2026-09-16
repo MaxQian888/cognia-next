@@ -938,6 +938,38 @@ describe("dispatchTeammate — tool-enabled sidecar path", () => {
     expect(result.text).toBe("fallback result")
   })
 
+  it("declares a code dispatch's task kind to the routing classifier", async () => {
+    isTauriMock.mockReturnValue(true)
+    createSessionMock.mockResolvedValue({ id: "sess1" })
+    getSessionMock.mockResolvedValue({ id: "sess1", kind: "team" })
+    runAndCaptureMock.mockResolvedValue({ text: "done" })
+    const { ctx } = makeCtx(makeTeammate())
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "edit code", taskKind: "code" })
+
+    expect(resolveSendOptionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routingContextHint: { promptText: "edit code", category: "coding" },
+      })
+    )
+  })
+
+  it("leaves the category unset for a general dispatch so the text classifier decides", async () => {
+    isTauriMock.mockReturnValue(true)
+    createSessionMock.mockResolvedValue({ id: "sess1" })
+    getSessionMock.mockResolvedValue({ id: "sess1", kind: "team" })
+    runAndCaptureMock.mockResolvedValue({ text: "done" })
+    const { ctx } = makeCtx(makeTeammate())
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "edit code", taskKind: "general" })
+
+    expect(resolveSendOptionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routingContextHint: { promptText: "edit code" },
+      })
+    )
+  })
+
   it("never retries a teammate turn after a tool dispatch commits it", async () => {
     isTauriMock.mockReturnValue(true)
     createSessionMock.mockResolvedValue({ id: "sess1" })

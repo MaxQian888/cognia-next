@@ -236,12 +236,41 @@ export class ProviderRoutingEngine {
           })
         : undefined
 
-    let entries: ModelMappingEntry[]
+    // Auto policy (ADR-0043 Phase 12): preferred/excluded providers, a soft
+    // per-request cost cap, and category→alias overrides. Per field, a value
+    // on the request wins; otherwise the runtime adapter's persisted policy
+    // supplies it — the same seam `judge` uses. A manual selection is a hard
+    // override and the policy never touches it.
+    const policyApplies = request.selection.kind !== "manual"
+    const runtimePolicy = policyApplies
+      ? getProviderRoutingRuntimeAdapters().getAutoRoutingPolicy()
+      : undefined
+    const preferredProviders = policyApplies
+      ? (request.providerPreference?.preferred ?? runtimePolicy?.preferredProviders)
+      : undefined
+    const excludedProviders = policyApplies
+      ? (request.providerPreference?.excluded ?? runtimePolicy?.excludedProviders)
+      : undefined
+    const maxCostPerRequestUsd = policyApplies
+      ? (request.maxCostPerRequestUsd ??
+        (runtimePolicy?.maxCostPerRequestCents !== undefined
+          ? runtimePolicy.maxCostPerRequestCents / 100
+          : undefined))
+      : undefined
+    const categoryAliases = request.categoryAliases ?? runtimePolicy?.categoryAliases
+
+    // `[]` is unreachable on success: the auto branch throws on an empty
+    // candidate set, and the manual/alias branches always assign.
+    let entries: ModelMappingEntry[] = []
     let alias: string | undefined
     let parameterDefaults: AliasResolutionResult["parameterDefaults"]
     let specialFallbacks: ModelMappingSpecialFallbacks | undefined
     let retryPolicy: ModelMappingRetryPolicy | undefined
     let difficulty: RoutingDifficultyOutcome | undefined
+    // Set by the auto branch when a category alias survives the hard-constraint
+    // pass — skips running the identical filter a second time below.
+    let precomputedHardFiltered:
+      ReturnType<ProviderRoutingEngine["applyHardConstraints"]> | undefined
     const reasonCodes: RoutingReasonCode[] = []
 
     if (request.selection.kind === "manual") {
@@ -281,38 +310,77 @@ export class ProviderRoutingEngine {
               : "judge-overrode"
         )
       }
-      const preferredAlias = pickAutoAlias(
-        difficulty.score,
-        configuredAliases?.length ? configuredAliases : ["fast", "balanced", "powerful"],
-        thresholds,
-        availableAliases
-      )
-      const resolution = resolveModelAlias(
-        preferredAlias ?? "",
-        this.registry,
-        this.buildLiteMetricsMap(preferredAlias ?? "")
-      )
-      if (resolution.found && resolution.entries.length > 0) {
-        alias = preferredAlias
-        entries = resolution.entries
-        parameterDefaults = resolution.parameterDefaults
-        specialFallbacks = resolution.mapping?.specialFallbacks
-        retryPolicy = resolution.mapping?.retryPolicy
-      } else {
-        const liveCandidates = this.deps.listCandidates?.() ?? []
-        entries = this.dedupeEntries(
-          liveCandidates.length > 0
-            ? liveCandidates
-            : this.registry.mappings
-                .filter((mapping) => mapping.enabled)
-                .flatMap((mapping) => mapping.providers)
+      // A configured, enabled alias for the classified task category wins
+      // over the difficulty tier ladder — the user said "code goes to X" and
+      // Auto honours that instead of re-deriving a tier for it.
+      const categoryAlias = classification
+        ? categoryAliases?.[classification.category]?.toLowerCase()
+        : undefined
+      let resolvedCategory = false
+      if (categoryAlias && availableAliases.has(categoryAlias)) {
+        const resolution = resolveModelAlias(
+          categoryAlias,
+          this.registry,
+          this.buildLiteMetricsMap(categoryAlias)
         )
+        // Hard constraints outrank the category alias: when every entry it
+        // resolves to fails a capability/data-policy check the request falls
+        // through to the difficulty tier ladder instead of dead-ending on an
+        // alias that cannot serve it. The surviving candidates are reused
+        // below so the constraint pass runs once on this path.
+        if (resolution.found && resolution.entries.length > 0) {
+          const categoryFiltered = this.applyHardConstraints(
+            resolution.entries,
+            request,
+            excludedProviders
+          )
+          if (categoryFiltered.candidates.length > 0) {
+            alias = categoryAlias
+            entries = resolution.entries
+            parameterDefaults = resolution.parameterDefaults
+            specialFallbacks = resolution.mapping?.specialFallbacks
+            retryPolicy = resolution.mapping?.retryPolicy
+            resolvedCategory = true
+            precomputedHardFiltered = categoryFiltered
+            reasonCodes.push("auto-category-fit")
+          }
+        }
       }
-      if (entries.length === 0) throw new RoutingNoCandidatesError("auto")
-      reasonCodes.push("auto-task-fit")
+      if (!resolvedCategory) {
+        const preferredAlias = pickAutoAlias(
+          difficulty.score,
+          configuredAliases?.length ? configuredAliases : ["fast", "balanced", "powerful"],
+          thresholds,
+          availableAliases
+        )
+        const resolution = resolveModelAlias(
+          preferredAlias ?? "",
+          this.registry,
+          this.buildLiteMetricsMap(preferredAlias ?? "")
+        )
+        if (resolution.found && resolution.entries.length > 0) {
+          alias = preferredAlias
+          entries = resolution.entries
+          parameterDefaults = resolution.parameterDefaults
+          specialFallbacks = resolution.mapping?.specialFallbacks
+          retryPolicy = resolution.mapping?.retryPolicy
+        } else {
+          const liveCandidates = this.deps.listCandidates?.() ?? []
+          entries = this.dedupeEntries(
+            liveCandidates.length > 0
+              ? liveCandidates
+              : this.registry.mappings
+                  .filter((mapping) => mapping.enabled)
+                  .flatMap((mapping) => mapping.providers)
+          )
+        }
+        if (entries.length === 0) throw new RoutingNoCandidatesError("auto")
+        reasonCodes.push("auto-task-fit")
+      }
     }
 
-    const hardFiltered = this.applyHardConstraints(entries, request)
+    const hardFiltered =
+      precomputedHardFiltered ?? this.applyHardConstraints(entries, request, excludedProviders)
     if (hardFiltered.candidates.length === 0) {
       throw new RoutingNoCandidatesError(alias ?? request.selection.kind)
     }
@@ -339,6 +407,58 @@ export class ProviderRoutingEngine {
       throw new RoutingNoCandidatesError(alias ?? request.selection.kind)
     }
 
+    // ---- Soft per-request cost cap (ADR-0043 Phase 12) -------------------
+    // Candidates whose KNOWN estimate exceeds the cap drop out. A candidate
+    // with unknown pricing is always kept — a cap is a preference, and we
+    // never reject on missing information. If dropping would empty the list
+    // the cap could not be satisfied at all: the original list survives
+    // cheapest-first and the plan reports `costCap.exceeded` rather than
+    // dead-ending the send.
+    const inputTokensForCost =
+      request.estimatedInputTokens ?? classification?.estimatedInputTokens ?? 0
+    const outputTokensForCost = classification?.estimatedOutputTokens ?? 1024
+    const estimateCost = (entry: ModelMappingEntry): number | undefined => {
+      const pricing = this.deps.getPricing(entry.providerId, entry.modelId)
+      if (pricing === undefined) return undefined
+      return (pricing * (inputTokensForCost + outputTokensForCost)) / 1e6
+    }
+    let costCapExceeded = false
+    let candidates = filtered.candidates
+    if (policyApplies && maxCostPerRequestUsd !== undefined) {
+      const underCap = candidates.filter((entry) => {
+        const estimated = estimateCost(entry)
+        return estimated === undefined || estimated <= maxCostPerRequestUsd
+      })
+      if (underCap.length > 0) {
+        candidates = underCap
+      } else {
+        candidates = [...candidates].sort((left, right) => {
+          const leftCost = estimateCost(left)
+          const rightCost = estimateCost(right)
+          if (leftCost === undefined && rightCost === undefined) return 0
+          if (leftCost === undefined) return 1
+          if (rightCost === undefined) return -1
+          return leftCost - rightCost
+        })
+        costCapExceeded = true
+        reasonCodes.push("cost-cap-exceeded")
+      }
+    }
+
+    // ---- Preferred providers ---------------------------------------------
+    // Stable: preferred providers lead in their listed order, everyone else
+    // keeps the filter chain's relative order. The strategy still picks from
+    // the sorted list — a preference tilts the chain, it does not force a
+    // pick the strategy disagrees with.
+    if (policyApplies && preferredProviders?.length) {
+      const rank = new Map(preferredProviders.map((providerId, index) => [providerId, index]))
+      candidates = [...candidates].sort(
+        (left, right) =>
+          (rank.get(left.providerId) ?? Number.MAX_SAFE_INTEGER) -
+          (rank.get(right.providerId) ?? Number.MAX_SAFE_INTEGER)
+      )
+    }
+
     const bypassStrategy = Boolean(filtered.notes?.windowFallback || filtered.notes?.affinityPinned)
     const decisionContext: RoutingDecisionContext = {
       estimatedInputTokens: request.estimatedInputTokens,
@@ -349,11 +469,14 @@ export class ProviderRoutingEngine {
       ...(strategy === "difficulty" ? { promptText: request.promptText } : {}),
     }
     const selectionResult = bypassStrategy
-      ? { selected: filtered.candidates[0], reasonCode: undefined }
-      : await this.applyStrategyAsync(filtered.candidates, strategy, decisionContext)
-    const selected = selectionResult.selected ?? filtered.candidates[0]
+      ? { selected: candidates[0], reasonCode: undefined }
+      : await this.applyStrategyAsync(candidates, strategy, decisionContext)
+    const selected = selectionResult.selected ?? candidates[0]
     if (!selected) throw new RoutingNoCandidatesError(alias ?? request.selection.kind)
     if (selectionResult.reasonCode) reasonCodes.push(selectionResult.reasonCode)
+    if (preferredProviders?.includes(selected.providerId)) {
+      reasonCodes.push("provider-preference")
+    }
     if (filtered.notes?.affinityPinned) reasonCodes.push("affinity-pin")
     if (strategy === "reliability" && request.selection.kind !== "manual") {
       reasonCodes.push("reliability-first")
@@ -362,9 +485,19 @@ export class ProviderRoutingEngine {
       reasonCodes.push(error.kind === "timeout" ? "plugin-timeout" : "plugin-error")
     }
 
+    const selectedEstimate = estimateCost(selected)
+    const costCap =
+      policyApplies && maxCostPerRequestUsd !== undefined
+        ? {
+            capUsd: maxCostPerRequestUsd,
+            ...(selectedEstimate !== undefined ? { estimatedUsd: selectedEstimate } : {}),
+            exceeded: costCapExceeded,
+          }
+        : undefined
+
     const orderedEntries = [
       selected,
-      ...filtered.candidates.filter(
+      ...candidates.filter(
         (entry) => entry.providerId !== selected.providerId || entry.modelId !== selected.modelId
       ),
     ]
@@ -377,7 +510,7 @@ export class ProviderRoutingEngine {
     }))
     const shadowSelected =
       request.shadowMode && request.selection.kind !== "manual"
-        ? this.applyStrategy(filtered.candidates, strategy, decisionContext)
+        ? this.applyStrategy(candidates, strategy, decisionContext)
         : null
 
     return {
@@ -398,6 +531,7 @@ export class ProviderRoutingEngine {
       ),
       filterNotes: filtered.notes,
       ...(difficulty ? { difficulty } : {}),
+      ...(costCap ? { costCap } : {}),
       ...(shadowSelected
         ? {
             shadowComparison: {
@@ -767,7 +901,8 @@ export class ProviderRoutingEngine {
 
   private applyHardConstraints(
     entries: readonly ModelMappingEntry[],
-    request: RoutingRequest
+    request: RoutingRequest,
+    policyExcludedProviders?: readonly string[]
   ): {
     candidates: ModelMappingEntry[]
     rejected: Map<RoutingReasonCode, number>
@@ -778,7 +913,13 @@ export class ProviderRoutingEngine {
     const allowed = request.dataPolicy?.allowedProviderIds
       ? new Set(request.dataPolicy.allowedProviderIds)
       : undefined
-    const excluded = new Set(request.dataPolicy?.excludedProviderIds ?? [])
+    // Policy exclusions share the `data-policy` reason: both are "the user's
+    // configuration says this provider may not serve the request", one from
+    // the request's data policy, one from the Auto policy.
+    const excluded = new Set([
+      ...(request.dataPolicy?.excludedProviderIds ?? []),
+      ...(policyExcludedProviders ?? []),
+    ])
     const requiredContext = Math.max(
       request.estimatedInputTokens ?? 0,
       request.requirements?.minContextTokens ?? 0

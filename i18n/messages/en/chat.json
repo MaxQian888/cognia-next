@@ -1832,6 +1832,18 @@
       "timestamp": "Time",
       "usage": "Tokens"
     },
+    "routing": {
+      "alias": "Alias · {alias}",
+      "auto": "Auto · {target}",
+      "candidates": "Candidates: {count}",
+      "costCapExceeded": "Proceeded over the per-request cost cap",
+      "judgeUsed": "Judge: {value}",
+      "no": "no",
+      "score": "Score: {score}",
+      "strategy": "Strategy: {strategy}",
+      "tier": "Tier: {tier}",
+      "yes": "yes"
+    },
     "status": {
       "complete": "Complete",
       "error": "Failed",
