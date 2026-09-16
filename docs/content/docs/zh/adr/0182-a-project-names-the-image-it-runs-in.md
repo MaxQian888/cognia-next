@@ -98,6 +98,9 @@ digest 覆盖除「给人看的解析过程」之外的全部内容。Rust 在�
 - **共享云 Host**：多人共用一台 Host 时，「按设备」的回答没有意义，审批是租户数据库里的服务端记录。
   - 记录内容：项目、规范化后的远端地址、路径、声明 digest、解析出的镜像、运行时字段 digest。
   - 只有该工作区的 Maintainer、组织 Owner/Admin（[ADR-0149](./0149-a-person-is-not-a-device)）或 Host 所有者可以创建；每次审批和撤销都写审计。
+  - 这件事由协作面告诉 Host，而不是查本地表：`cognia-collab-server` 上的 `GET /internal/v1/orgs/{org}/workspaces/{workspace}/access/{user}` 用的是该服务里每条鉴权路由都在用的那个 `resolve_workspace_access`，门槛是 `Manage`。brain 那份 Dexie 镜像只是界面便利——`lib/db/identity.ts` 自己在函数上写明了这一点——而「带凭据的沙箱要运行的镜像」不是界面便利。
+  - Host 以它自己的身份认证，因为它不是那个人：配对客户端请它去审批，而它并不持有那个人的 grant，也无法验证——grant 密钥从不离开协作服务器。它出示 `COGNIA_COLLAB_SERVICE_CREDENTIAL`，协作面只存其 SHA-256（`COLLAB_INTERNAL_SERVICE_CREDENTIAL_SHA256`）。没有配置的协作面一律回 401，于是一台从未被授予这项权限的 Host 会拒绝审批，而不是凭本地猜测放行。
+  - 也就是说，持有该凭据者能问出「某人是否在某工作区里」。所以它挂在 `/internal` 前缀下（租户入口不路由这个前缀），并且「没有权限」和「工作区不存在」都回 `null`，让它无法被用来枚举一个组织。
   - 准入时比对这些冻结值，所以 Rust 不需要 devcontainer 解析器。
 - **digest**：两条路径都对解析并规范化后的形式求 digest，复用 ADR-0147 引入的同一个 `canonicalize`，现提取到 `lib/project-environment/canonical-json.ts`。
 

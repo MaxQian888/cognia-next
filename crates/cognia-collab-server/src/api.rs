@@ -76,6 +76,11 @@ pub struct AppState {
     /// The account control plane (bootstrap, discovery, generic invitation
     /// acceptance). Off by default: `COLLAB_ACCOUNT_BOOTSTRAP_ENABLED`.
     pub account_control: AccountControlConfig,
+    /// SHA-256 (lowercase hex) of the credential a tenant Host presents on the
+    /// `/internal` authorization routes. `None` — the default — makes every
+    /// one of them answer 401, so a deployment that never configured a Host
+    /// cannot have one asking about its members.
+    pub internal_service_credential_sha256: Option<String>,
 }
 
 /// Rollout gate and policy for the account control plane.
@@ -106,6 +111,7 @@ impl AppState {
         Self {
             logto: Arc::new(UnconfiguredLogtoManagement),
             account_control: AccountControlConfig::default(),
+            internal_service_credential_sha256: None,
             store,
             chat_store: Arc::new(InMemoryChatStore::new()),
             chat_hub: Arc::new(ChatHub::default()),
@@ -165,12 +171,21 @@ impl AppState {
         self.account_control = config;
         self
     }
+
+    pub fn with_internal_service_credential(mut self, sha256: Option<String>) -> Self {
+        self.internal_service_credential_sha256 = sha256;
+        self
+    }
 }
 
 pub fn router(state: AppState) -> Router {
     let routes = Router::new()
         .route("/health", get(health))
         .route("/internal/shared-chat-metrics", get(shared_chat_metrics))
+        .route(
+            "/internal/v1/orgs/{org_id}/workspaces/{workspace_id}/access/{user_id}",
+            get(internal_workspace_access),
+        )
         .route("/v1/orgs/{org_id}/grants", axum::routing::post(mint_grant))
         .route("/v1/account/memberships", get(account_memberships))
         .route(
@@ -272,6 +287,67 @@ async fn shared_chat_metrics(
     Json(state.chat_metrics.snapshot())
 }
 
+/// What one person may do in one workspace — the answer a tenant Host needs
+/// before it acts on their behalf (ADR-0182: approving the container image a
+/// repository declares).
+///
+/// # Why a service credential and not the person's own grant
+///
+/// The Host is not the person. A paired client asks it to approve something,
+/// and the Host knows which *device* asked and which person that device is
+/// bound to; it holds no grant for them and cannot verify one, because the
+/// grant key never leaves this service. So the Host authenticates as itself
+/// and names the person it is asking about.
+///
+/// That makes this endpoint able to tell its holder whether any given person
+/// is in any given workspace, which is why it lives under `/internal` — the
+/// tenant ingress does not route that prefix — and why an unconfigured
+/// deployment answers 401 rather than answering at all.
+///
+/// # The policy is not here
+///
+/// The two raw memberships are collapsed by `resolve_workspace_access`, the
+/// same function every authorized route in this service uses, and the
+/// resulting capability is returned as-is. Which capability is enough to
+/// approve an image is the Host's rule, and the Host has a case this service
+/// cannot see: its own owner principal on a single-tenant deployment.
+async fn internal_workspace_access(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((org_id, workspace_id, user_id)): Path<(String, String, String)>,
+) -> Result<Json<WorkspaceAccessResponse>, Failure> {
+    require_service_credential(&state, &headers)?;
+    let membership = state
+        .store
+        .membership(&org_id, &user_id, Some(&workspace_id))
+        .await?;
+    Ok(Json(WorkspaceAccessResponse {
+        access: resolve_workspace_access(membership.org_role, membership.workspace_role),
+    }))
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceAccessResponse {
+    /// `null` when this person has no access at all — which is also the answer
+    /// for a workspace that does not exist, so a Host cannot use this to
+    /// enumerate an org's workspaces.
+    pub access: Option<cognia_tenant_auth::membership::EffectiveWorkspaceAccess>,
+}
+
+/// Prove the caller is the Host this deployment configured.
+fn require_service_credential(state: &AppState, headers: &HeaderMap) -> Result<(), Failure> {
+    let Some(expected) = state.internal_service_credential_sha256.as_deref() else {
+        return Err(Failure::ServiceCredentialInvalid);
+    };
+    let token = crate::auth::bearer_token(authorization(headers))
+        .map_err(|_| Failure::ServiceCredentialInvalid)?;
+    if !constant_time_eq(&sha256_hex(token), expected) {
+        return Err(Failure::ServiceCredentialInvalid);
+    }
+    Ok(())
+}
+
 // ── Error shape ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize)]
@@ -307,6 +383,10 @@ enum Failure {
     /// The presented bootstrap credential is not the one this deployment
     /// was minted with. Same shape as a wrong password: no detail.
     BootstrapCredentialInvalid,
+    /// The `/internal` service credential was missing, wrong, or this
+    /// deployment configured none. One answer for all three: a caller that
+    /// cannot present it must not learn which of the three it was.
+    ServiceCredentialInvalid,
     /// The identity provider could not be mutated. The saga is left resumable.
     Idp(LogtoManagementError),
 }
@@ -370,6 +450,10 @@ impl Failure {
             Self::BootstrapCredentialInvalid => (
                 StatusCode::FORBIDDEN,
                 "the bootstrap credential was not accepted".into(),
+            ),
+            Self::ServiceCredentialInvalid => (
+                StatusCode::UNAUTHORIZED,
+                "the service credential was not accepted".into(),
             ),
             Self::Idp(LogtoManagementError::NotConfigured(message)) => {
                 (StatusCode::SERVICE_UNAVAILABLE, message)
@@ -4580,6 +4664,116 @@ mod tests {
         assert!(!constant_time_eq("abc", "abd"));
         assert!(!constant_time_eq("abc", "abcd"));
         assert!(!constant_time_eq("", "a"));
+    }
+
+    // ── /internal workspace access (ADR-0182 approvals) ──────────────────
+
+    const SERVICE_CREDENTIAL: &str = "host-service-credential";
+
+    fn host_app(store: InMemoryStore) -> Router {
+        let mut state = AppState::new(
+            Arc::new(store),
+            signer(),
+            Arc::new(cognia_tenant_auth::oidc::TestAuthenticator),
+        );
+        state.now = Arc::new(|| 1_000);
+        router(state.with_internal_service_credential(Some(sha256_hex(SERVICE_CREDENTIAL))))
+    }
+
+    fn access_path(user: &UserId) -> String {
+        format!(
+            "/internal/v1/orgs/{ORG}/workspaces/proj-1/access/{}",
+            user.as_str()
+        )
+    }
+
+    fn service_credential() -> String {
+        format!("Bearer {SERVICE_CREDENTIAL}")
+    }
+
+    #[tokio::test]
+    async fn a_host_reads_what_one_person_may_do_in_one_workspace() {
+        // Ada holds a workspace role: real access, and deliberately not enough
+        // to approve anything — the Host applies that bar itself.
+        let (status, body) = call(
+            host_app(seeded()),
+            get(&access_path(&ada()), &service_credential()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["access"]["role"], "member");
+        assert_eq!(body["access"]["capability"], "write");
+        assert_eq!(body["access"]["via"], "membership");
+        assert_eq!(body["access"]["guest"], false);
+
+        // Bob is in the org but was never recruited into this workspace.
+        let (status, body) = call(
+            host_app(seeded()),
+            get(&access_path(&bob()), &service_credential()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["access"], serde_json::Value::Null);
+    }
+
+    #[tokio::test]
+    async fn an_org_admin_is_reported_with_the_management_they_traverse_with() {
+        let store = InMemoryStore::new();
+        store.add_user(bob().as_str(), "Bob");
+        store.add_org_member(ORG, bob().as_str(), OrgRole::Admin);
+        let (status, body) = call(
+            host_app(store),
+            get(&access_path(&bob()), &service_credential()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["access"]["role"], "maintainer");
+        assert_eq!(body["access"]["capability"], "manage");
+        assert_eq!(body["access"]["via"], "org-admin");
+    }
+
+    /// The deny path. Everything that is not this deployment's Host credential
+    /// gets one answer, including a perfectly valid person's grant: the route
+    /// answers about third parties, so holding a grant for yourself is not
+    /// permission to ask about somebody else.
+    #[tokio::test]
+    async fn the_internal_access_route_answers_only_the_configured_host() {
+        let unconfigured = call(
+            app(seeded()),
+            get(&access_path(&ada()), &service_credential()),
+        )
+        .await;
+        assert_eq!(
+            unconfigured.0,
+            StatusCode::UNAUTHORIZED,
+            "a deployment that configured no Host has no Host"
+        );
+
+        for presented in [
+            "Bearer not-the-credential".to_string(),
+            // The digest itself, in case a deployment hands out the hash.
+            format!("Bearer {}", sha256_hex(SERVICE_CREDENTIAL)),
+            token_for(&ada()),
+            "Bearer ".to_string(),
+            SERVICE_CREDENTIAL.to_string(),
+            String::new(),
+        ] {
+            let (status, body) =
+                call(host_app(seeded()), get(&access_path(&ada()), &presented)).await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED, "{presented}: {body}");
+            assert_eq!(body["error"], "the service credential was not accepted");
+        }
+
+        // No Authorization header at all.
+        let (status, _) = call(
+            host_app(seeded()),
+            Request::builder()
+                .uri(access_path(&ada()))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]

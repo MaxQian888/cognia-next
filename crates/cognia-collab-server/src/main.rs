@@ -73,6 +73,17 @@ struct Args {
     /// `printf %s "$CRED" | sha256sum`, and hand the clear value to the first owner.
     #[arg(long, env = "COLLAB_ACCOUNT_BOOTSTRAP_CREDENTIAL_SHA256")]
     account_bootstrap_credential_sha256: Option<String>,
+    /// SHA-256 (hex) of the credential a tenant Host presents on `/internal`
+    /// routes — today, to ask what one person may do in one workspace before
+    /// it acts on their behalf (ADR-0182 approvals). Unset means every
+    /// `/internal` authorization route answers 401, which is the safe default:
+    /// the Host then has no approver to verify and refuses the approval.
+    ///
+    /// Mint it with `openssl rand -base64 32`, hash it with
+    /// `printf %s "$CRED" | sha256sum`, and hand the clear value to the Host
+    /// as `COGNIA_COLLAB_SERVICE_CREDENTIAL`.
+    #[arg(long, env = "COLLAB_INTERNAL_SERVICE_CREDENTIAL_SHA256")]
+    internal_service_credential_sha256: Option<String>,
     /// Logto's public base URL (NOT the `/oidc` issuer), for the Management API.
     #[arg(long, env = "COLLAB_LOGTO_ENDPOINT")]
     logto_endpoint: Option<String>,
@@ -168,7 +179,8 @@ async fn main() -> anyhow::Result<()> {
     };
     let account_control = AccountControlConfig {
         enabled: args.account_bootstrap_enabled,
-        bootstrap_credential_sha256: bootstrap_credential_hash(
+        bootstrap_credential_sha256: credential_hash(
+            "COLLAB_ACCOUNT_BOOTSTRAP_CREDENTIAL_SHA256",
             args.account_bootstrap_credential_sha256.as_deref(),
         )?,
         owner_role_name: args.logto_owner_role,
@@ -181,7 +193,11 @@ async fn main() -> anyhow::Result<()> {
         .with_shared_chat_enabled(args.shared_chat_enabled)
         .with_canvas_enabled(args.canvas_enabled)
         .with_logto_management(logto)
-        .with_account_control(account_control);
+        .with_account_control(account_control)
+        .with_internal_service_credential(credential_hash(
+            "COLLAB_INTERNAL_SERVICE_CREDENTIAL_SHA256",
+            args.internal_service_credential_sha256.as_deref(),
+        )?);
 
     let (allowed_origins, rejected_origins) =
         cognia_collab_server::cors::parse_allowed_origins(args.allowed_origins.as_deref());
@@ -219,18 +235,16 @@ fn decode_hex(value: &str) -> Option<Vec<u8>> {
         .collect()
 }
 
-/// The credential hash is compared byte for byte against a hex digest, so a
-/// value that is not one can never match. Refuse it at startup rather than
-/// run a bootstrap that answers 403 forever.
-fn bootstrap_credential_hash(value: Option<&str>) -> anyhow::Result<Option<String>> {
+/// A credential hash is compared byte for byte against a hex digest, so a
+/// value that is not one can never match. Refuse it at startup rather than run
+/// an endpoint that answers 403 forever — the shape this catches is the clear
+/// credential pasted where its hash belongs.
+fn credential_hash(variable: &str, value: Option<&str>) -> anyhow::Result<Option<String>> {
     let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
         return Ok(None);
     };
     if !is_sha256_hex(value) {
-        anyhow::bail!(
-            "COLLAB_ACCOUNT_BOOTSTRAP_CREDENTIAL_SHA256 must be 64 hex characters (got {})",
-            value.len()
-        );
+        anyhow::bail!("{variable} must be 64 hex characters (got {})", value.len());
     }
     Ok(Some(value.to_ascii_lowercase()))
 }
@@ -246,21 +260,26 @@ async fn shutdown() {
 
 #[cfg(test)]
 mod tests {
-    use super::{bootstrap_credential_hash, decode_hex};
+    use super::{credential_hash, decode_hex};
 
     #[test]
-    fn the_bootstrap_credential_hash_must_be_a_sha256_digest() {
+    fn a_credential_hash_must_be_a_sha256_digest() {
+        let variable = "COLLAB_ACCOUNT_BOOTSTRAP_CREDENTIAL_SHA256";
+        let hash = |value: Option<&str>| credential_hash(variable, value);
         let digest = "A".repeat(64);
         assert_eq!(
-            bootstrap_credential_hash(Some(&format!("  {digest}  "))).unwrap(),
+            hash(Some(&format!("  {digest}  "))).unwrap(),
             Some("a".repeat(64))
         );
-        assert_eq!(bootstrap_credential_hash(None).unwrap(), None);
-        assert_eq!(bootstrap_credential_hash(Some("   ")).unwrap(), None);
+        assert_eq!(hash(None).unwrap(), None);
+        assert_eq!(hash(Some("   ")).unwrap(), None);
         // The clear credential pasted where its hash belongs.
-        assert!(bootstrap_credential_hash(Some("hunter2")).is_err());
-        assert!(bootstrap_credential_hash(Some(&"a".repeat(63))).is_err());
-        assert!(bootstrap_credential_hash(Some(&"g".repeat(64))).is_err());
+        assert!(hash(Some("hunter2")).is_err());
+        assert!(hash(Some(&"a".repeat(63))).is_err());
+        assert!(hash(Some(&"g".repeat(64))).is_err());
+        // The variable the operator has to go fix is named in the error.
+        let error = hash(Some("hunter2")).unwrap_err().to_string();
+        assert!(error.contains(variable), "{error}");
     }
 
     #[test]
