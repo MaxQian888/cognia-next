@@ -157,7 +157,7 @@ jobs:
           pnpm e2e:serve:test
 
       - name: Download shard artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: jest-shard-*
           path: shards/
@@ -633,7 +633,7 @@ jobs:
         run: pnpm exec playwright install-deps chromium
 
       - name: Download E2E static export
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: nextjs-build-e2e
           path: out/
@@ -766,7 +766,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Download blob reports
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: e2e-blob-*
           path: all-blob-reports/
@@ -826,7 +826,7 @@ jobs:
       - name: Install Playwright (chromium + webkit)
         run: pnpm exec playwright install --with-deps chromium webkit
       - name: Download E2E static export
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: nextjs-build-e2e
           path: out/
@@ -874,7 +874,7 @@ jobs:
       - name: Install Playwright ${{ matrix.project }}
         run: pnpm exec playwright install --with-deps ${{ matrix.project }}
       - name: Download E2E static export
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: nextjs-build-e2e
           path: out/
@@ -984,7 +984,7 @@ jobs:
       # the already-gated Linux build instead of installing Node and rebuilding
       # the entire frontend on Windows.
       - name: Download Next.js static export
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: nextjs-build
           path: out/
