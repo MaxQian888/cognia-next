@@ -2653,6 +2653,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-sandbox-pool"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cognia-environment",
+ "cognia-external-agent",
+ "cognia-sandboxd",
+ "log",
+ "parking_lot",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "cognia-sandbox-runner"
 version = "0.1.0"
 dependencies = [

@@ -40,6 +40,12 @@ pub trait ExternalAgentEventSink: Send + Sync + 'static {
     /// The process exited (naturally or via kill). `code`/`signal` mirror the
     /// previous poll-loop payload semantics.
     fn exited(&self, agent_id: &str, code: Option<i32>, signal: Option<String>);
+    /// Where a spawn that asked for a runtime environment actually runs: the
+    /// sandbox it got, or the fallback and why (ADR-0182). Emitted before the
+    /// spawn returns, and only for spawns that carried a placement.
+    ///
+    /// Defaulted to a no-op for the same reason as [`Self::stdout_raw`].
+    fn sandbox_placement(&self, _agent_id: &str, _placement: &serde_json::Value) {}
 }
 
 /// Whether a forwarded external-agent stderr line is a known-transient,
@@ -100,6 +106,12 @@ pub struct ExternalAgentSpawnConfig {
     /// so every existing caller and persisted payload keeps its behaviour.
     #[serde(default)]
     pub framing: ExternalAgentStdoutFraming,
+    /// Run in the project's runtime environment instead of this host's
+    /// execution path (ADR-0182/0183). Absent — every caller before runtime
+    /// environments, and every project that selected none — takes today's
+    /// path unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<crate::sandbox_routing_backend::SandboxPlacement>,
 }
 
 /// State of an external agent process
@@ -822,6 +834,7 @@ mod tests {
             env: HashMap::new(),
             cwd: None,
             framing: Default::default(),
+            sandbox: None,
         }
     }
 
@@ -956,6 +969,7 @@ mod tests {
                 ]),
                 cwd: Some(workspace.path().to_string_lossy().into_owned()),
                 framing: Default::default(),
+                sandbox: None,
             };
             manager.spawn(config, sink.clone()).await.unwrap();
             let root = tokio::time::timeout(std::time::Duration::from_secs(3), async {
@@ -1200,6 +1214,7 @@ mod tests {
             env: HashMap::new(),
             cwd: None,
             framing: Default::default(),
+            sandbox: None,
         };
         mgr.spawn(cfg, sink.clone()).await.expect("spawn");
 

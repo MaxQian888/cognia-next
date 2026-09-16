@@ -42,6 +42,9 @@ pub const STDERR_CHANNEL: &str = "external-agent://stderr";
 pub const EXIT_CHANNEL: &str = "external-agent://exit";
 pub const STATE_CHANGE_CHANNEL: &str = "external-agent://state-change";
 pub const SPAWN_CHANNEL: &str = "external-agent://spawn";
+/// Where a spawn that carried a runtime environment placement runs (ADR-0182).
+/// Additive, like `stdout-raw`: only spawns with a placement produce it.
+pub const PLACEMENT_CHANNEL: &str = "external-agent://placement";
 
 pub fn stdout_payload(agent_id: &str, line: &str) -> Value {
     json!({ "agentId": agent_id, "data": line })
@@ -70,6 +73,11 @@ pub fn state_change_payload(agent_id: &str, state: &str) -> Value {
 
 pub fn spawn_payload(agent_id: &str) -> Value {
     json!({ "agentId": agent_id, "status": "starting" })
+}
+
+/// `placement` is `{kind: "sandbox", …}` or `{kind: "fallback", code, message}`.
+pub fn placement_payload(agent_id: &str, placement: &Value) -> Value {
+    json!({ "agentId": agent_id, "placement": placement })
 }
 
 // ---------------------------------------------------------------------------
@@ -124,6 +132,11 @@ impl ExternalAgentEventSink for EmitterEventSink {
             exit_payload(agent_id, code, signal.as_deref()),
         );
     }
+
+    fn sandbox_placement(&self, agent_id: &str, placement: &Value) {
+        self.emitter
+            .emit(PLACEMENT_CHANNEL, placement_payload(agent_id, placement));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -161,6 +174,14 @@ pub trait ExecBackend: Send + Sync + 'static {
     /// override it, because a container very much does outlive us.
     async fn reap_orphans(&self) -> Result<Vec<String>, String> {
         Ok(Vec::new())
+    }
+
+    /// Whether this backend honours a spawn's runtime environment placement
+    /// ([`crate::sandbox_routing_backend::SandboxRoutingBackend`]). False for
+    /// every backend that predates runtime environments; see
+    /// [`spawn_with_events`] for what happens to a placement then.
+    fn routes_sandboxes(&self) -> bool {
+        false
     }
 }
 
@@ -235,19 +256,49 @@ impl ExecBackend for LocalProcessBackend {
 /// `spawn` → `spawn(starting)` event → `set_running` → `state-change(Running)`
 /// on success; `state-change(Failed)` on spawn error. stdout/stderr/exit ride
 /// the sink from the reader/supervisor tasks.
+///
+/// A spawn carrying a runtime environment placement on a backend that does
+/// not route sandboxes (the pool is off on this host, or this is a desktop
+/// without the local-container toggle) is the pool-disabled case of the fault
+/// rule: refused with `sandbox_pool_disabled` when isolation is mandatory,
+/// otherwise run on this path with a `sandbox_fallback_pool_disabled`
+/// placement event. A spawn without a placement never reaches that branch.
 pub async fn spawn_with_events(
     backend: &dyn ExecBackend,
     emitter: Arc<dyn AgentEventEmitter>,
-    config: ExternalAgentSpawnConfig,
+    mut config: ExternalAgentSpawnConfig,
 ) -> Result<String, String> {
-    if config.env.contains_key(crate::devin_mcp_config::PAYLOAD_ENV) && backend.kind() != "local-process" {
+    // A sandboxed agent runs in a container even when the host's own path is
+    // local processes, so it gets none of the local-only payloads.
+    let runs_locally = config.sandbox.is_none() && backend.kind() == "local-process";
+    if config.env.contains_key(crate::devin_mcp_config::PAYLOAD_ENV) && !runs_locally {
         return Err("Isolated Devin MCP configuration requires a local process backend".into());
     }
-    if config.env.contains_key(crate::gateway_task::PAYLOAD_ENV) && backend.kind() != "local-process" {
+    if config.env.contains_key(crate::gateway_task::PAYLOAD_ENV) && !runs_locally {
         return Err("Cognia gateway tasks require a local process backend; remote gateway transport is not configured".into());
     }
     let id = config.id.clone();
     let sink: Arc<dyn ExternalAgentEventSink> = EmitterEventSink::new(Arc::clone(&emitter));
+
+    if let Some(placement) = config.sandbox.as_ref() {
+        if !backend.routes_sandboxes() {
+            let refusal = crate::sandbox_routing_backend::SandboxSpawnError::fault(
+                "sandbox_pool_disabled",
+                "runtime environments are not enabled on this host",
+            );
+            if placement.isolation_mandatory() {
+                return Err(refusal.to_string());
+            }
+            sink.sandbox_placement(
+                &id,
+                &crate::sandbox_routing_backend::fallback_placement(
+                    &refusal.fallback_code(),
+                    &refusal.message,
+                ),
+            );
+            config.sandbox = None;
+        }
+    }
 
     let result = backend.spawn(config, sink).await;
 
@@ -269,8 +320,8 @@ pub async fn spawn_with_events(
 // Tests
 // ---------------------------------------------------------------------------
 
-#[cfg(test)]
-pub(crate) mod test_support {
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support {
     use super::*;
     use parking_lot::Mutex;
 
@@ -375,10 +426,84 @@ mod tests {
         let config = ExternalAgentSpawnConfig {
             id: "devin".into(), command: "devin".into(), args: vec!["acp".into()],
             env: HashMap::from([(crate::devin_mcp_config::PAYLOAD_ENV.into(), "[]".into())]),
-            cwd: None, framing: Default::default(),
+            cwd: None, framing: Default::default(), sandbox: None,
         };
         let result = spawn_with_events(&Remote, RecordingAgentEmitter::new(), config).await;
         assert!(result.unwrap_err().contains("requires a local process backend"));
+    }
+
+    #[test]
+    fn the_placement_payload_shape() {
+        assert_eq!(
+            placement_payload("a1", &json!({ "kind": "fallback", "code": "c", "message": "m" })),
+            json!({ "agentId": "a1", "placement": { "kind": "fallback", "code": "c", "message": "m" } })
+        );
+    }
+
+    fn placed(id: &str, command: &str, isolation_mandatory: bool) -> ExternalAgentSpawnConfig {
+        ExternalAgentSpawnConfig {
+            id: id.into(),
+            command: command.into(),
+            args: vec![],
+            env: HashMap::new(),
+            cwd: None,
+            framing: Default::default(),
+            sandbox: Some(crate::sandbox_routing_backend::SandboxPlacement::Container {
+                spec: json!({}),
+                isolation_mandatory,
+            }),
+        }
+    }
+
+    /// With the pool off there is no router, and a placement the brain sent
+    /// anyway (a stale client, a pool switched off since) is the pool-disabled
+    /// fault: mandatory isolation refuses, anything else runs here and says so.
+    #[tokio::test]
+    async fn a_placement_on_a_host_without_sandboxes_refuses_or_falls_back() {
+        let backend = LocalProcessBackend::new();
+        let emitter = RecordingAgentEmitter::new();
+        let refused = spawn_with_events(
+            backend.as_ref(),
+            emitter.clone(),
+            placed("strict", "definitely-not-a-real-binary-xyz-123", true),
+        )
+        .await
+        .unwrap_err();
+        assert!(refused.starts_with("sandbox_pool_disabled: "), "{refused}");
+        assert!(emitter.events().is_empty(), "nothing was attempted");
+
+        // The fallback reaches the backend without a placement: this binary
+        // does not exist, so the local spawn fails after the event is out.
+        let fell_back = spawn_with_events(
+            backend.as_ref(),
+            emitter.clone(),
+            placed("soft", "definitely-not-a-real-binary-xyz-123", false),
+        )
+        .await;
+        assert!(fell_back.is_err());
+        let events = emitter.events();
+        assert_eq!(events[0].0, PLACEMENT_CHANNEL);
+        assert_eq!(
+            events[0].1["placement"]["code"],
+            "sandbox_fallback_pool_disabled"
+        );
+        assert_eq!(events[1].1["state"], "Failed");
+    }
+
+    #[tokio::test]
+    async fn a_sandboxed_spawn_never_carries_local_only_payloads() {
+        let backend = LocalProcessBackend::new();
+        for env in [
+            crate::gateway_task::PAYLOAD_ENV,
+            crate::devin_mcp_config::PAYLOAD_ENV,
+        ] {
+            let mut config = placed("payload", "codex-acp", false);
+            config.env.insert(env.into(), "{}".into());
+            let error = spawn_with_events(backend.as_ref(), RecordingAgentEmitter::new(), config)
+                .await
+                .unwrap_err();
+            assert!(error.contains("local process backend"), "{env}: {error}");
+        }
     }
 
     #[tokio::test]
@@ -392,6 +517,7 @@ mod tests {
             env: HashMap::new(),
             cwd: None,
             framing: Default::default(),
+            sandbox: None,
         };
         let result = spawn_with_events(backend.as_ref(), emitter.clone(), config).await;
         assert!(result.is_err());
@@ -437,6 +563,7 @@ mod tests {
             env: HashMap::new(),
             cwd: Some(tmp.path().display().to_string()),
             framing: Default::default(),
+            sandbox: None,
         };
 
         let id = spawn_with_events(backend.as_ref(), emitter.clone(), config)

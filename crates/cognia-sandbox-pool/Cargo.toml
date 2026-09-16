@@ -1,0 +1,42 @@
+# ADR-0182/0183 — the host side of runtime environment sandboxes.
+#
+# Admission against the tenant environment store (`cognia-environment`) and the
+# per-spawn Docker driver of Step ①: stage the agent bundle into named volumes,
+# probe the user image with `cognia-sandboxd`, start the agent through
+# `init-agent`. The daemon itself stays behind `cognia-external-agent`'s
+# container seam, so nothing here links bollard and the whole driver is tested
+# against the in-memory daemon.
+#
+# A separate crate because `cognia-sandboxd` (the probe and manifest types) will
+# link `cognia-external-agent` for its Step ② `serve` mode; the driver needs
+# both, and putting it in either would close that cycle.
+[package]
+name = "cognia-sandbox-pool"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+description = "Runtime environment sandboxes: admission and the Docker driver."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "cognia_sandbox_pool"
+path = "src/lib.rs"
+
+[dependencies]
+# `store` only: the registry HTTP transport (and the reqwest it pulls) belongs
+# to the metadata reader in `cognia-environment`, not to a driver that hands
+# every pull to the daemon. `registry::auth` is not behind that feature.
+cognia-environment = { path = "../cognia-environment", default-features = false, features = ["store"] }
+cognia-external-agent = { path = "../cognia-external-agent", default-features = false }
+cognia-sandboxd = { path = "../cognia-sandboxd", default-features = false }
+async-trait = "0.1"
+log = "0.4"
+parking_lot = "0.12"
+serde_json = "1.0"
+tokio = { version = "1", features = ["sync", "time"] }
+
+[dev-dependencies]
+cognia-external-agent = { path = "../cognia-external-agent", default-features = false, features = ["test-support"] }
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }

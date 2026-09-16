@@ -124,16 +124,52 @@ impl ContainerBackendConfig {
     /// `default_deployment_id` is what the caller derived for this data
     /// volume. [`DEPLOYMENT_ID_ENV`] overrides it when set.
     pub fn from_env(default_deployment_id: &str) -> Result<Self, String> {
-        let deployment_id = match std::env::var(DEPLOYMENT_ID_ENV) {
-            Ok(value) if !value.trim().is_empty() => validate_deployment_id(&value)
-                .map_err(|error| format!("invalid {DEPLOYMENT_ID_ENV}: {error}"))?,
-            _ => validate_deployment_id(default_deployment_id)
-                .map_err(|error| format!("invalid default deployment id: {error}"))?,
-        };
+        let deployment_id = deployment_id_from_env(default_deployment_id)?;
         let image = std::env::var(RUNNER_IMAGE_ENV)
             .ok()
             .filter(|v| !v.trim().is_empty())
             .ok_or_else(|| format!("{RUNNER_IMAGE_ENV} is required in container exec mode"))?;
+        let host = RunnerHostSettings::from_env()?;
+        Ok(Self {
+            image,
+            workspaces_dir: host.workspaces_dir,
+            workspaces_volume: host.workspaces_volume,
+            seccomp_json: host.seccomp_json,
+            memory_bytes: host.memory_bytes,
+            nano_cpus: host.nano_cpus,
+            pids_limit: host.pids_limit,
+            network_mode: host.network_mode,
+            deployment_id,
+        })
+    }
+}
+
+/// [`DEPLOYMENT_ID_ENV`] when set, else the caller's derived default.
+pub fn deployment_id_from_env(default_deployment_id: &str) -> Result<String, String> {
+    match std::env::var(DEPLOYMENT_ID_ENV) {
+        Ok(value) if !value.trim().is_empty() => validate_deployment_id(&value)
+            .map_err(|error| format!("invalid {DEPLOYMENT_ID_ENV}: {error}")),
+        _ => validate_deployment_id(default_deployment_id)
+            .map_err(|error| format!("invalid default deployment id: {error}")),
+    }
+}
+
+/// How this host lays workspaces and limits out for any container it runs:
+/// the legacy runner and a runtime environment sandbox read the same
+/// variables, so the two can never disagree about where a workspace is.
+#[derive(Clone, Debug)]
+pub struct RunnerHostSettings {
+    pub workspaces_dir: PathBuf,
+    pub workspaces_volume: Option<String>,
+    pub seccomp_json: Option<String>,
+    pub memory_bytes: i64,
+    pub nano_cpus: i64,
+    pub pids_limit: i64,
+    pub network_mode: String,
+}
+
+impl RunnerHostSettings {
+    pub fn from_env() -> Result<Self, String> {
         let workspaces_dir = std::env::var(WORKSPACES_DIR_ENV)
             .ok()
             .filter(|v| !v.trim().is_empty())
@@ -161,7 +197,6 @@ impl ContainerBackendConfig {
         let network_mode =
             std::env::var(RUNNER_NETWORK_ENV).unwrap_or_else(|_| "bridge".to_string());
         Ok(Self {
-            image,
             workspaces_dir,
             workspaces_volume,
             seccomp_json,
@@ -169,8 +204,47 @@ impl ContainerBackendConfig {
             nano_cpus: (cpus * 1_000_000_000f64) as i64,
             pids_limit: pids,
             network_mode,
-            deployment_id,
         })
+    }
+
+    /// Where the workspace at `cwd` comes from. In volume mode the cwd must
+    /// live under the workspace root (the SpawnPolicy already canonicalizes;
+    /// this is defense in depth for direct callers).
+    pub fn resolve_mount(&self, cwd: &str) -> Result<RunnerMount, String> {
+        resolve_workspace_mount(&self.workspaces_dir, self.workspaces_volume.as_deref(), cwd)
+    }
+}
+
+fn resolve_workspace_mount(
+    workspaces_dir: &Path,
+    workspaces_volume: Option<&str>,
+    cwd: &str,
+) -> Result<RunnerMount, String> {
+    match workspaces_volume {
+        Some(volume) => {
+            let rel = Path::new(cwd).strip_prefix(workspaces_dir).map_err(|_| {
+                format!(
+                    "cwd {cwd} is outside the workspace root {}",
+                    workspaces_dir.display()
+                )
+            })?;
+            let subpath = rel
+                .to_string_lossy()
+                .replace('\\', "/")
+                .trim_matches('/')
+                .to_string();
+            Ok(RunnerMount::Volume {
+                volume: volume.to_string(),
+                subpath: if subpath.is_empty() {
+                    None
+                } else {
+                    Some(subpath)
+                },
+            })
+        }
+        None => Ok(RunnerMount::Bind {
+            host_dir: cwd.to_string(),
+        }),
     }
 }
 
@@ -227,6 +301,15 @@ pub const SCHEMA_LABEL: &str = "cognia.schema-version";
 /// Current value of [`SCHEMA_LABEL`].
 pub const SCHEMA_VERSION: &str = "1";
 
+/// A named volume mounted somewhere other than the workspace: the injected
+/// agent bundle of a runtime environment sandbox (ADR-0183).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VolumeMount {
+    pub volume: String,
+    pub target: String,
+    pub read_only: bool,
+}
+
 /// Everything the daemon needs to run one agent container.
 #[derive(Clone, Debug)]
 pub struct RunnerSpec {
@@ -236,7 +319,9 @@ pub struct RunnerSpec {
     /// `KEY=VALUE`, sorted for determinism.
     pub env: Vec<String>,
     pub working_dir: String,
-    pub mount: RunnerMount,
+    /// The workspace at [`WORKSPACE_TARGET`]. Every agent runner has one; only
+    /// the bundle staging containers of a sandbox run without.
+    pub mount: Option<RunnerMount>,
     pub seccomp_json: Option<String>,
     pub memory_bytes: i64,
     pub nano_cpus: i64,
@@ -246,6 +331,16 @@ pub struct RunnerSpec {
     /// them, which is the whole point: a name convention lives only in this
     /// process, and dies with it.
     pub labels: BTreeMap<String, String>,
+    // The fields below are runtime environment sandboxes only (ADR-0183). A
+    // legacy runner leaves every one empty, and the daemon request it builds
+    // is exactly what it was before they existed.
+    /// Replaces the image's `ENTRYPOINT` (`cognia-sandboxd` in a user image).
+    pub entrypoint: Option<Vec<String>>,
+    /// The container user; `0` so `init-agent` can switch to the declared one.
+    pub user: Option<String>,
+    pub extra_mounts: Vec<VolumeMount>,
+    /// An OCI runtime registered with the daemon (`runsc` for gVisor).
+    pub runtime: Option<String>,
 }
 
 /// Demuxed output of a running container (Tty:false framing).
@@ -305,6 +400,70 @@ pub trait ContainerApi: Send + Sync + 'static {
     /// Ids of every container carrying our owner label, running or not.
     /// Used to reap what a previous process left behind.
     async fn list_owned(&self) -> Result<Vec<OwnedContainer>, String>;
+}
+
+/// Registry credentials for one pull, in the shape the daemon's
+/// `X-Registry-Auth` header takes. Never logged and never stored here: the
+/// Host reads them from `COGNIA_REGISTRY_AUTH_FILE` for each pull.
+#[derive(Clone, PartialEq, Eq, Default)]
+pub struct RegistryAuth {
+    pub server_address: String,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    /// An OAuth2 refresh token the daemon exchanges itself.
+    pub identity_token: Option<String>,
+    /// A bearer token used as-is.
+    pub registry_token: Option<String>,
+}
+
+impl std::fmt::Debug for RegistryAuth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let set = |value: &Option<String>| value.as_ref().map(|_| "<set>");
+        f.debug_struct("RegistryAuth")
+            .field("server_address", &self.server_address)
+            .field("username", &self.username)
+            .field("password", &set(&self.password))
+            .field("identity_token", &set(&self.identity_token))
+            .field("registry_token", &set(&self.registry_token))
+            .finish()
+    }
+}
+
+/// A named volume carrying our owner label.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OwnedVolume {
+    pub name: String,
+    pub labels: BTreeMap<String, String>,
+}
+
+/// What removing a volume did. A volume a container still mounts is not an
+/// error: it is the reference count saying "not yet".
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VolumeRemoval {
+    Removed,
+    InUse,
+    Gone,
+}
+
+/// The extra daemon primitives the runtime environment driver needs on top of
+/// [`ContainerApi`] (ADR-0183 "Injection"): named volumes for the staged
+/// bundle, the registered OCI runtimes (to attest the gVisor tier) and pulls
+/// with registry credentials. Docker only — a Kubernetes sandbox is the pool
+/// of ADR-0184, not a runner pod.
+#[async_trait]
+pub trait SandboxDockerApi: ContainerApi {
+    /// Runtime names from `/info` (`runc`, `runsc`, …).
+    async fn runtimes(&self) -> Result<Vec<String>, String>;
+    /// Create the volume if it does not exist. Idempotent.
+    async fn ensure_volume(&self, name: &str, labels: &BTreeMap<String, String>)
+        -> Result<(), String>;
+    async fn list_owned_volumes(&self) -> Result<Vec<OwnedVolume>, String>;
+    async fn remove_volume(&self, name: &str) -> Result<VolumeRemoval, String>;
+    async fn pull_image_with_auth(
+        &self,
+        image: &str,
+        auth: Option<RegistryAuth>,
+    ) -> Result<(), String>;
 }
 
 /// One container the daemon reports as ours.
@@ -400,227 +559,52 @@ struct AgentEntry {
     stdin: mpsc::UnboundedSender<Vec<u8>>,
     config: ExternalAgentSpawnConfig,
     exit_code: Option<i64>,
+    /// What a runtime environment sandbox reported about where the agent
+    /// runs (ADR-0183); absent for a legacy runner.
+    placement: Option<Value>,
 }
 
-pub struct ContainerBackend {
+/// The agents running in containers of one backend: stdio, line buffering,
+/// state and the exit choreography. Shared by the legacy runner backend and
+/// the runtime environment sandbox driver, which differ only in how the
+/// container is built — so an agent looks the same to the UI whichever ran it.
+pub struct RunnerRegistry {
     api: Arc<dyn ContainerApi>,
-    config: ContainerBackendConfig,
     agents: Arc<Mutex<HashMap<String, AgentEntry>>>,
-    /// Identifies THIS process on every container it creates. A container
-    /// labelled with a different instance belongs to a run that is gone.
-    instance_id: String,
 }
 
-impl ContainerBackend {
-    pub fn new(api: Arc<dyn ContainerApi>, config: ContainerBackendConfig) -> Arc<Self> {
-        Self::with_instance_id(api, config, default_instance_id())
-    }
-
-    /// Construct with an explicit instance id (tests, and any caller that
-    /// wants a stable id across a restart).
-    pub fn with_instance_id(
-        api: Arc<dyn ContainerApi>,
-        config: ContainerBackendConfig,
-        instance_id: String,
-    ) -> Arc<Self> {
-        Arc::new(Self {
+impl RunnerRegistry {
+    pub fn new(api: Arc<dyn ContainerApi>) -> Self {
+        Self {
             api,
-            config,
             agents: Arc::new(Mutex::new(HashMap::new())),
-            instance_id,
-        })
-    }
-
-    /// This process's instance id, as stamped on every container it creates.
-    pub fn instance_id(&self) -> &str {
-        &self.instance_id
-    }
-
-    /// Remove every container of OURS that a previous process left running.
-    ///
-    /// This is the half a name convention cannot do. `process_registry`
-    /// already treats orphan daemons as the failure mode it exists to
-    /// prevent; before ownership labels there was no way to enumerate our
-    /// containers from the daemon at all, so a crash leaked every one of
-    /// them silently.
-    ///
-    /// Returns the ids reaped. Containers from THIS process are left alone,
-    /// and so is everything outside THIS deployment: another server sharing
-    /// the daemon owns its runners just as legitimately, and a container
-    /// with no deployment label predates the label. Its owner is unknown, so
-    /// it is left for the operator rather than guessed at.
-    pub async fn reap_orphans(&self) -> Result<Vec<String>, String> {
-        let owned = self.api.list_owned().await?;
-        let mut reaped = Vec::new();
-        for container in owned {
-            if container.instance() == Some(self.instance_id.as_str()) {
-                continue;
-            }
-            if !is_owned(&container.labels) {
-                continue;
-            }
-            if container.deployment() != Some(self.config.deployment_id.as_str()) {
-                log::debug!(
-                    "orphan sweep: leaving container {} alone (deployment {:?}, ours is {:?})",
-                    container.id,
-                    container.deployment(),
-                    self.config.deployment_id
-                );
-                continue;
-            }
-            match self.api.remove(&container.id).await {
-                Ok(()) => reaped.push(container.id),
-                // One stuck container must not stop the sweep.
-                Err(_) => continue,
-            }
-        }
-        Ok(reaped)
-    }
-
-    /// Resolve the workspace mount for `cwd`. In volume mode the cwd must
-    /// live under the workspace root (the SpawnPolicy already canonicalizes;
-    /// this is defense in depth for direct callers).
-    fn resolve_mount(&self, cwd: &str) -> Result<RunnerMount, String> {
-        match &self.config.workspaces_volume {
-            Some(volume) => {
-                let rel = Path::new(cwd)
-                    .strip_prefix(&self.config.workspaces_dir)
-                    .map_err(|_| {
-                        format!(
-                            "cwd {cwd} is outside the workspace root {}",
-                            self.config.workspaces_dir.display()
-                        )
-                    })?;
-                let subpath = rel
-                    .to_string_lossy()
-                    .replace('\\', "/")
-                    .trim_matches('/')
-                    .to_string();
-                Ok(RunnerMount::Volume {
-                    volume: volume.clone(),
-                    subpath: if subpath.is_empty() {
-                        None
-                    } else {
-                        Some(subpath)
-                    },
-                })
-            }
-            None => Ok(RunnerMount::Bind {
-                host_dir: cwd.to_string(),
-            }),
         }
     }
-}
 
-fn sanitize_container_name(agent_id: &str) -> String {
-    let safe: String = agent_id
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-') {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    format!("cognia-agent-{safe}")
-}
-
-/// Byte-chunk → line splitter mirroring the local reader's semantics
-/// (`\n`-terminated, trailing `\r` trimmed, lossy UTF-8).
-struct LineBuffer(Vec<u8>);
-
-impl LineBuffer {
-    fn new() -> Self {
-        Self(Vec::new())
+    pub fn contains(&self, id: &str) -> bool {
+        self.agents.lock().contains_key(id)
     }
 
-    fn push(&mut self, chunk: &[u8]) -> Vec<String> {
-        self.0.extend_from_slice(chunk);
-        let mut lines = Vec::new();
-        while let Some(pos) = self.0.iter().position(|&b| b == b'\n') {
-            let mut line: Vec<u8> = self.0.drain(..=pos).collect();
-            line.pop(); // the \n
-            if line.last() == Some(&b'\r') {
-                line.pop();
-            }
-            lines.push(String::from_utf8_lossy(&line).into_owned());
-        }
-        lines
-    }
-
-    fn flush(&mut self) -> Option<String> {
-        if self.0.is_empty() {
-            return None;
-        }
-        let line = String::from_utf8_lossy(&self.0).into_owned();
-        self.0.clear();
-        Some(line)
-    }
-}
-
-#[async_trait]
-impl ExecBackend for ContainerBackend {
-    async fn spawn(
+    /// Take over a started container: register it and pump its output to
+    /// `sink` until it exits, then forget it and remove the container.
+    pub fn adopt(
         &self,
         config: ExternalAgentSpawnConfig,
+        running: RunningRunner,
+        placement: Option<Value>,
         sink: Arc<dyn ExternalAgentEventSink>,
-    ) -> Result<String, String> {
+    ) -> String {
         let id = config.id.clone();
-        if self.agents.lock().contains_key(&id) {
-            return Err(format!("Agent {id} already exists"));
-        }
-        let cwd = config
-            .cwd
-            .clone()
-            .ok_or_else(|| "container exec mode requires a workspace cwd".to_string())?;
-        let mount = self.resolve_mount(&cwd)?;
-
-        let mut env: Vec<String> = config.env.iter().map(|(k, v)| format!("{k}={v}")).collect();
-        env.sort();
-
-        let mut cmd = Vec::with_capacity(config.args.len() + 1);
-        cmd.push(config.command.clone());
-        cmd.extend(config.args.iter().cloned());
-
-        let spec = RunnerSpec {
-            name: sanitize_container_name(&id),
-            image: self.config.image.clone(),
-            cmd,
-            env,
-            working_dir: WORKSPACE_TARGET.to_string(),
-            mount,
-            seccomp_json: self.config.seccomp_json.clone(),
-            memory_bytes: self.config.memory_bytes,
-            nano_cpus: self.config.nano_cpus,
-            pids_limit: self.config.pids_limit,
-            network_mode: self.config.network_mode.clone(),
-            labels: ownership_labels(&id, &self.instance_id, &self.config.deployment_id),
-        };
-
-        let running = match self.api.run(spec.clone()).await {
-            Ok(running) => running,
-            Err(RunnerRunError::ImageMissing(_)) => {
-                // Pull once, retry once. A second miss (or a pull failure)
-                // is terminal — no loop, no backoff: spawn latency is user-
-                // visible and the caller can retry.
-                self.api.pull_image(&self.config.image).await?;
-                self.api
-                    .run(spec)
-                    .await
-                    .map_err(RunnerRunError::into_message)?
-            }
-            Err(err) => return Err(err.into_message()),
-        };
         let container_id = running.container_id.clone();
         self.agents.lock().insert(
             id.clone(),
             AgentEntry {
-                container_id: container_id.clone(),
+                container_id,
                 state: ExternalAgentProcessState::Starting,
                 stdin: running.stdin,
                 config,
                 exit_code: None,
+                placement,
             },
         );
 
@@ -676,10 +660,10 @@ impl ExecBackend for ContainerBackend {
             }
         });
 
-        Ok(id)
+        id
     }
 
-    async fn send(&self, id: &str, message: &str) -> Result<(), String> {
+    pub async fn send(&self, id: &str, message: &str) -> Result<(), String> {
         let stdin = {
             let map = self.agents.lock();
             let entry = map.get(id).ok_or(format!("Agent {id} not found"))?;
@@ -692,7 +676,7 @@ impl ExecBackend for ContainerBackend {
             .map_err(|_| format!("Agent {id} stdin is closed"))
     }
 
-    async fn kill(&self, id: &str) -> Result<(), String> {
+    pub async fn kill(&self, id: &str) -> Result<(), String> {
         let container_id = {
             let mut map = self.agents.lock();
             let entry = map.get_mut(id).ok_or(format!("Agent {id} not found"))?;
@@ -711,7 +695,7 @@ impl ExecBackend for ContainerBackend {
         Ok(())
     }
 
-    async fn kill_all(&self) -> Result<(), String> {
+    pub async fn kill_all(&self) -> Result<(), String> {
         let ids: Vec<String> = self.agents.lock().keys().cloned().collect();
         let mut errors = Vec::new();
         for id in ids {
@@ -726,15 +710,15 @@ impl ExecBackend for ContainerBackend {
         }
     }
 
-    async fn status(&self, id: &str) -> Option<ExternalAgentProcessState> {
+    pub fn status(&self, id: &str) -> Option<ExternalAgentProcessState> {
         self.agents.lock().get(id).map(|e| e.state.clone())
     }
 
-    async fn list(&self) -> Vec<String> {
+    pub fn list(&self) -> Vec<String> {
         self.agents.lock().keys().cloned().collect()
     }
 
-    async fn is_running(&self, id: &str) -> Result<bool, String> {
+    pub fn is_running(&self, id: &str) -> Result<bool, String> {
         self.agents
             .lock()
             .get(id)
@@ -742,12 +726,12 @@ impl ExecBackend for ContainerBackend {
             .ok_or(format!("Agent {id} not found"))
     }
 
-    async fn get_info(&self, id: &str) -> Result<Value, String> {
+    pub fn get_info(&self, id: &str) -> Result<Value, String> {
         let map = self.agents.lock();
         let entry = map.get(id).ok_or(format!("Agent {id} not found"))?;
         // Same shape as the local process manager, plus the container id
         // (`pid` has no meaning across the daemon boundary).
-        Ok(json!({
+        let mut info = json!({
             "id": entry.config.id,
             "pid": null,
             "state": entry.state,
@@ -758,21 +742,259 @@ impl ExecBackend for ContainerBackend {
             "exitCode": entry.exit_code,
             "exitSignal": null,
             "containerId": entry.container_id,
-        }))
+        });
+        if let Some(placement) = &entry.placement {
+            info["placement"] = placement.clone();
+        }
+        Ok(info)
+    }
+
+    pub fn set_state(&self, id: &str, state: ExternalAgentProcessState) -> Result<(), String> {
+        let mut map = self.agents.lock();
+        let entry = map.get_mut(id).ok_or(format!("Agent {id} not found"))?;
+        entry.state = state;
+        Ok(())
+    }
+}
+
+/// Remove every container of `deployment_id` a process other than
+/// `instance_id` left behind. See [`ContainerBackend::reap_orphans`].
+pub async fn reap_owned_orphans(
+    api: &Arc<dyn ContainerApi>,
+    instance_id: &str,
+    deployment_id: &str,
+) -> Result<Vec<String>, String> {
+    let owned = api.list_owned().await?;
+    let mut reaped = Vec::new();
+    for container in owned {
+        if container.instance() == Some(instance_id) {
+            continue;
+        }
+        if !is_owned(&container.labels) {
+            continue;
+        }
+        if container.deployment() != Some(deployment_id) {
+            log::debug!(
+                "orphan sweep: leaving container {} alone (deployment {:?}, ours is {:?})",
+                container.id,
+                container.deployment(),
+                deployment_id
+            );
+            continue;
+        }
+        match api.remove(&container.id).await {
+            Ok(()) => reaped.push(container.id),
+            // One stuck container must not stop the sweep.
+            Err(_) => continue,
+        }
+    }
+    Ok(reaped)
+}
+
+pub struct ContainerBackend {
+    api: Arc<dyn ContainerApi>,
+    config: ContainerBackendConfig,
+    runners: RunnerRegistry,
+    /// Identifies THIS process on every container it creates. A container
+    /// labelled with a different instance belongs to a run that is gone.
+    instance_id: String,
+}
+
+impl ContainerBackend {
+    pub fn new(api: Arc<dyn ContainerApi>, config: ContainerBackendConfig) -> Arc<Self> {
+        Self::with_instance_id(api, config, default_instance_id())
+    }
+
+    /// Construct with an explicit instance id (tests, and any caller that
+    /// wants a stable id across a restart).
+    pub fn with_instance_id(
+        api: Arc<dyn ContainerApi>,
+        config: ContainerBackendConfig,
+        instance_id: String,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            runners: RunnerRegistry::new(Arc::clone(&api)),
+            api,
+            config,
+            instance_id,
+        })
+    }
+
+    /// This process's instance id, as stamped on every container it creates.
+    pub fn instance_id(&self) -> &str {
+        &self.instance_id
+    }
+
+    /// Remove every container of OURS that a previous process left running.
+    ///
+    /// This is the half a name convention cannot do. `process_registry`
+    /// already treats orphan daemons as the failure mode it exists to
+    /// prevent; before ownership labels there was no way to enumerate our
+    /// containers from the daemon at all, so a crash leaked every one of
+    /// them silently.
+    ///
+    /// Returns the ids reaped. Containers from THIS process are left alone,
+    /// and so is everything outside THIS deployment: another server sharing
+    /// the daemon owns its runners just as legitimately, and a container
+    /// with no deployment label predates the label. Its owner is unknown, so
+    /// it is left for the operator rather than guessed at.
+    pub async fn reap_orphans(&self) -> Result<Vec<String>, String> {
+        reap_owned_orphans(&self.api, &self.instance_id, &self.config.deployment_id).await
+    }
+
+    /// Resolve the workspace mount for `cwd`. In volume mode the cwd must
+    /// live under the workspace root (the SpawnPolicy already canonicalizes;
+    /// this is defense in depth for direct callers).
+    fn resolve_mount(&self, cwd: &str) -> Result<RunnerMount, String> {
+        resolve_workspace_mount(
+            &self.config.workspaces_dir,
+            self.config.workspaces_volume.as_deref(),
+            cwd,
+        )
+    }
+}
+
+pub fn sanitize_container_name(agent_id: &str) -> String {
+    let safe: String = agent_id
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-') {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    format!("cognia-agent-{safe}")
+}
+
+/// Byte-chunk → line splitter mirroring the local reader's semantics
+/// (`\n`-terminated, trailing `\r` trimmed, lossy UTF-8).
+struct LineBuffer(Vec<u8>);
+
+impl LineBuffer {
+    fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    fn push(&mut self, chunk: &[u8]) -> Vec<String> {
+        self.0.extend_from_slice(chunk);
+        let mut lines = Vec::new();
+        while let Some(pos) = self.0.iter().position(|&b| b == b'\n') {
+            let mut line: Vec<u8> = self.0.drain(..=pos).collect();
+            line.pop(); // the \n
+            if line.last() == Some(&b'\r') {
+                line.pop();
+            }
+            lines.push(String::from_utf8_lossy(&line).into_owned());
+        }
+        lines
+    }
+
+    fn flush(&mut self) -> Option<String> {
+        if self.0.is_empty() {
+            return None;
+        }
+        let line = String::from_utf8_lossy(&self.0).into_owned();
+        self.0.clear();
+        Some(line)
+    }
+}
+
+#[async_trait]
+impl ExecBackend for ContainerBackend {
+    async fn spawn(
+        &self,
+        config: ExternalAgentSpawnConfig,
+        sink: Arc<dyn ExternalAgentEventSink>,
+    ) -> Result<String, String> {
+        let id = config.id.clone();
+        if self.runners.contains(&id) {
+            return Err(format!("Agent {id} already exists"));
+        }
+        let cwd = config
+            .cwd
+            .clone()
+            .ok_or_else(|| "container exec mode requires a workspace cwd".to_string())?;
+        let mount = self.resolve_mount(&cwd)?;
+
+        let mut env: Vec<String> = config.env.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        env.sort();
+
+        let mut cmd = Vec::with_capacity(config.args.len() + 1);
+        cmd.push(config.command.clone());
+        cmd.extend(config.args.iter().cloned());
+
+        let spec = RunnerSpec {
+            name: sanitize_container_name(&id),
+            image: self.config.image.clone(),
+            cmd,
+            env,
+            working_dir: WORKSPACE_TARGET.to_string(),
+            mount: Some(mount),
+            seccomp_json: self.config.seccomp_json.clone(),
+            memory_bytes: self.config.memory_bytes,
+            nano_cpus: self.config.nano_cpus,
+            pids_limit: self.config.pids_limit,
+            network_mode: self.config.network_mode.clone(),
+            labels: ownership_labels(&id, &self.instance_id, &self.config.deployment_id),
+            entrypoint: None,
+            user: None,
+            extra_mounts: Vec::new(),
+            runtime: None,
+        };
+
+        let running = match self.api.run(spec.clone()).await {
+            Ok(running) => running,
+            Err(RunnerRunError::ImageMissing(_)) => {
+                // Pull once, retry once. A second miss (or a pull failure)
+                // is terminal — no loop, no backoff: spawn latency is user-
+                // visible and the caller can retry.
+                self.api.pull_image(&self.config.image).await?;
+                self.api
+                    .run(spec)
+                    .await
+                    .map_err(RunnerRunError::into_message)?
+            }
+            Err(err) => return Err(err.into_message()),
+        };
+        Ok(self.runners.adopt(config, running, None, sink))
+    }
+
+    async fn send(&self, id: &str, message: &str) -> Result<(), String> {
+        self.runners.send(id, message).await
+    }
+
+    async fn kill(&self, id: &str) -> Result<(), String> {
+        self.runners.kill(id).await
+    }
+
+    async fn kill_all(&self) -> Result<(), String> {
+        self.runners.kill_all().await
+    }
+
+    async fn status(&self, id: &str) -> Option<ExternalAgentProcessState> {
+        self.runners.status(id)
+    }
+
+    async fn list(&self) -> Vec<String> {
+        self.runners.list()
+    }
+
+    async fn is_running(&self, id: &str) -> Result<bool, String> {
+        self.runners.is_running(id)
+    }
+
+    async fn get_info(&self, id: &str) -> Result<Value, String> {
+        self.runners.get_info(id)
     }
 
     async fn set_running(&self, id: &str) -> Result<(), String> {
-        let mut map = self.agents.lock();
-        let entry = map.get_mut(id).ok_or(format!("Agent {id} not found"))?;
-        entry.state = ExternalAgentProcessState::Running;
-        Ok(())
+        self.runners.set_state(id, ExternalAgentProcessState::Running)
     }
 
     async fn set_failed(&self, id: &str) -> Result<(), String> {
-        let mut map = self.agents.lock();
-        let entry = map.get_mut(id).ok_or(format!("Agent {id} not found"))?;
-        entry.state = ExternalAgentProcessState::Failed;
-        Ok(())
+        self.runners.set_state(id, ExternalAgentProcessState::Failed)
     }
 
     fn kind(&self) -> &'static str {
@@ -853,8 +1075,8 @@ pub mod bollard_api {
     use bollard::models::{ContainerCreateBody, HostConfig, Mount, MountType, MountVolumeOptions};
     use bollard::query_parameters::{
         AttachContainerOptionsBuilder, CreateContainerOptionsBuilder, CreateImageOptionsBuilder,
-        KillContainerOptionsBuilder, ListContainersOptionsBuilder, RemoveContainerOptionsBuilder,
-        StartContainerOptions, WaitContainerOptionsBuilder,
+        KillContainerOptionsBuilder, ListContainersOptionsBuilder, ListVolumesOptionsBuilder,
+        RemoveContainerOptionsBuilder, StartContainerOptions, WaitContainerOptionsBuilder,
     };
     use bollard::Docker;
     use futures_util::StreamExt;
@@ -917,6 +1139,127 @@ pub mod bollard_api {
         }
     }
 
+    fn to_volume_mount(mount: &VolumeMount) -> Mount {
+        Mount {
+            typ: Some(MountType::VOLUME),
+            source: Some(mount.volume.clone()),
+            target: Some(mount.target.clone()),
+            read_only: Some(mount.read_only),
+            ..Default::default()
+        }
+    }
+
+    /// The daemon's mounts for a spec: the workspace first, then the rest.
+    pub(super) fn mounts_for(spec: &RunnerSpec) -> Vec<Mount> {
+        spec.mount
+            .iter()
+            .map(to_mount)
+            .chain(spec.extra_mounts.iter().map(to_volume_mount))
+            .collect()
+    }
+
+    fn credentials(auth: RegistryAuth) -> bollard::auth::DockerCredentials {
+        bollard::auth::DockerCredentials {
+            username: auth.username,
+            password: auth.password,
+            serveraddress: Some(auth.server_address),
+            identitytoken: auth.identity_token,
+            registrytoken: auth.registry_token,
+            ..Default::default()
+        }
+    }
+
+    #[async_trait]
+    impl SandboxDockerApi for BollardContainerApi {
+        async fn runtimes(&self) -> Result<Vec<String>, String> {
+            let info = self
+                .docker
+                .info()
+                .await
+                .map_err(|e| format!("docker info failed: {e}"))?;
+            let mut names: Vec<String> = info.runtimes.unwrap_or_default().into_keys().collect();
+            names.sort();
+            Ok(names)
+        }
+
+        async fn ensure_volume(
+            &self,
+            name: &str,
+            labels: &BTreeMap<String, String>,
+        ) -> Result<(), String> {
+            // Creating an existing volume with the same driver is a no-op on
+            // the daemon, so there is no inspect-then-create race to lose.
+            self.docker
+                .create_volume(bollard::models::VolumeCreateRequest {
+                    name: Some(name.to_string()),
+                    labels: Some(labels.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
+                    ..Default::default()
+                })
+                .await
+                .map(|_| ())
+                .map_err(|e| format!("create_volume {name} failed: {e}"))
+        }
+
+        async fn list_owned_volumes(&self) -> Result<Vec<OwnedVolume>, String> {
+            let mut filters = std::collections::HashMap::new();
+            filters.insert(
+                "label".to_string(),
+                vec![format!("{OWNER_LABEL}={OWNER_VALUE}")],
+            );
+            let options = ListVolumesOptionsBuilder::default()
+                .filters(&filters)
+                .build();
+            let listed = self
+                .docker
+                .list_volumes(Some(options))
+                .await
+                .map_err(|e| format!("list_volumes failed: {e}"))?;
+            Ok(listed
+                .volumes
+                .unwrap_or_default()
+                .into_iter()
+                .map(|volume| OwnedVolume {
+                    name: volume.name,
+                    labels: volume.labels.into_iter().collect(),
+                })
+                .collect())
+        }
+
+        async fn remove_volume(&self, name: &str) -> Result<VolumeRemoval, String> {
+            match self
+                .docker
+                .remove_volume(name, None::<bollard::query_parameters::RemoveVolumeOptions>)
+                .await
+            {
+                Ok(()) => Ok(VolumeRemoval::Removed),
+                Err(bollard::errors::Error::DockerResponseServerError {
+                    status_code: 404, ..
+                }) => Ok(VolumeRemoval::Gone),
+                Err(bollard::errors::Error::DockerResponseServerError {
+                    status_code: 409, ..
+                }) => Ok(VolumeRemoval::InUse),
+                Err(e) => Err(format!("remove_volume {name} failed: {e}")),
+            }
+        }
+
+        async fn pull_image_with_auth(
+            &self,
+            image: &str,
+            auth: Option<RegistryAuth>,
+        ) -> Result<(), String> {
+            let options = CreateImageOptionsBuilder::default()
+                .from_image(image)
+                .build();
+            let mut stream = self
+                .docker
+                .create_image(Some(options), None, auth.map(credentials));
+            while let Some(item) = stream.next().await {
+                item.map_err(|e| format!("pull {image} failed: {e}"))?;
+            }
+            Ok(())
+        }
+    }
+
     #[async_trait]
     impl ContainerApi for BollardContainerApi {
         async fn run(&self, spec: RunnerSpec) -> Result<RunningRunner, RunnerRunError> {
@@ -926,8 +1269,10 @@ pub mod bollard_api {
             }
             let body = ContainerCreateBody {
                 image: Some(spec.image.clone()),
+                entrypoint: spec.entrypoint.clone(),
                 cmd: Some(spec.cmd.clone()),
                 env: Some(spec.env.clone()),
+                user: spec.user.clone(),
                 working_dir: Some(spec.working_dir.clone()),
                 // Ownership travels ON the container. Everything else about
                 // "is this ours" lived in this process and died with it.
@@ -944,12 +1289,13 @@ pub mod bollard_api {
                 stdin_once: Some(false),
                 tty: Some(false),
                 host_config: Some(HostConfig {
-                    mounts: Some(vec![to_mount(&spec.mount)]),
+                    mounts: Some(mounts_for(&spec)),
                     security_opt: Some(security_opt),
                     memory: Some(spec.memory_bytes),
                     nano_cpus: Some(spec.nano_cpus),
                     pids_limit: Some(spec.pids_limit),
                     network_mode: Some(spec.network_mode.clone()),
+                    runtime: spec.runtime.clone(),
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -1142,15 +1488,101 @@ pub mod bollard_api {
             }
         }
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn spec(mount: Option<RunnerMount>, extra_mounts: Vec<VolumeMount>) -> RunnerSpec {
+            RunnerSpec {
+                name: "n".into(),
+                image: "i".into(),
+                cmd: vec![],
+                env: vec![],
+                working_dir: WORKSPACE_TARGET.into(),
+                mount,
+                seccomp_json: None,
+                memory_bytes: 1,
+                nano_cpus: 1,
+                pids_limit: 1,
+                network_mode: "none".into(),
+                labels: BTreeMap::new(),
+                entrypoint: None,
+                user: None,
+                extra_mounts,
+                runtime: None,
+            }
+        }
+
+        #[test]
+        fn a_legacy_runner_mounts_its_workspace_and_nothing_else() {
+            let mounts = mounts_for(&spec(
+                Some(RunnerMount::Volume {
+                    volume: "cognia_workspaces".into(),
+                    subpath: Some("ws-1".into()),
+                }),
+                vec![],
+            ));
+            assert_eq!(mounts.len(), 1);
+            // Exactly the serialized mount a legacy runner always sent.
+            assert_eq!(
+                serde_json::to_value(&mounts[0]).unwrap(),
+                serde_json::json!({
+                    "Target": "/workspace",
+                    "Source": "cognia_workspaces",
+                    "Type": "volume",
+                    "VolumeOptions": { "Subpath": "ws-1" }
+                })
+            );
+        }
+
+        #[test]
+        fn a_sandbox_mounts_the_bundle_read_only_beside_its_workspace() {
+            let bundle = VolumeMount {
+                volume: "cognia-d-bundle-abc-musl".into(),
+                target: "/cognia".into(),
+                read_only: true,
+            };
+            let mounts = mounts_for(&spec(
+                Some(RunnerMount::Bind {
+                    host_dir: "/srv/ws".into(),
+                }),
+                vec![bundle],
+            ));
+            assert_eq!(mounts[0].target.as_deref(), Some("/workspace"));
+            assert_eq!(mounts[1].source.as_deref(), Some("cognia-d-bundle-abc-musl"));
+            assert_eq!(mounts[1].read_only, Some(true));
+
+            let staging = mounts_for(&spec(
+                None,
+                vec![VolumeMount {
+                    volume: "v".into(),
+                    target: "/cognia".into(),
+                    read_only: false,
+                }],
+            ));
+            assert_eq!(staging.len(), 1);
+            assert_eq!(staging[0].read_only, Some(false));
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-#[cfg(test)]
-pub(crate) mod test_support {
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support {
     use super::*;
+
+    /// What a scripted container prints before it exits by itself.
+    pub struct ScriptedExit {
+        pub stdout: Vec<u8>,
+        pub stderr: Vec<u8>,
+        pub code: i64,
+    }
+
+    type ExitScript = Box<dyn Fn(&RunnerSpec) -> Option<ScriptedExit> + Send + Sync>;
 
     /// Scriptable in-memory daemon: `run` hands back channels the test
     /// drives; `kill` closes the event stream with the configured code.
@@ -1167,6 +1599,20 @@ pub(crate) mod test_support {
         pub missing_image: Mutex<bool>,
         pub pulls: Mutex<Vec<String>>,
         pub fail_pull: Mutex<Option<String>>,
+        // ── SandboxDockerApi ────────────────────────────────────────────
+        /// `/info` runtimes, or the error `/info` fails with.
+        pub runtimes: Mutex<Result<Vec<String>, String>>,
+        pub volumes: Mutex<BTreeMap<String, BTreeMap<String, String>>>,
+        pub volumes_in_use: Mutex<std::collections::BTreeSet<String>>,
+        pub fail_volume: Mutex<Option<String>>,
+        /// Images `run` reports missing until an authenticated pull of that
+        /// image succeeds.
+        pub missing_images: Mutex<std::collections::BTreeSet<String>>,
+        pub auth_pulls: Mutex<Vec<(String, Option<RegistryAuth>)>>,
+        pub fail_auth_pull: Mutex<HashMap<String, String>>,
+        /// Containers the script answers for exit on their own (staging and
+        /// probe containers); every other container waits for the test.
+        pub exit_script: Mutex<Option<ExitScript>>,
         counter: Mutex<u64>,
     }
 
@@ -1187,8 +1633,23 @@ pub(crate) mod test_support {
                 missing_image: Mutex::new(false),
                 pulls: Mutex::new(Vec::new()),
                 fail_pull: Mutex::new(None),
+                runtimes: Mutex::new(Ok(vec!["runc".to_string()])),
+                volumes: Mutex::new(BTreeMap::new()),
+                volumes_in_use: Mutex::new(std::collections::BTreeSet::new()),
+                fail_volume: Mutex::new(None),
+                missing_images: Mutex::new(std::collections::BTreeSet::new()),
+                auth_pulls: Mutex::new(Vec::new()),
+                fail_auth_pull: Mutex::new(HashMap::new()),
+                exit_script: Mutex::new(None),
                 counter: Mutex::new(0),
             })
+        }
+
+        pub fn script_exits(
+            &self,
+            script: impl Fn(&RunnerSpec) -> Option<ScriptedExit> + Send + Sync + 'static,
+        ) {
+            *self.exit_script.lock() = Some(Box::new(script));
         }
 
         pub fn handle_events(&self, container_id: &str) -> mpsc::UnboundedSender<RunnerEvent> {
@@ -1215,7 +1676,7 @@ pub(crate) mod test_support {
     #[async_trait]
     impl ContainerApi for FakeContainerApi {
         async fn run(&self, spec: RunnerSpec) -> Result<RunningRunner, RunnerRunError> {
-            if *self.missing_image.lock() {
+            if *self.missing_image.lock() || self.missing_images.lock().contains(&spec.image) {
                 return Err(RunnerRunError::ImageMissing(format!(
                     "No such image: {}",
                     spec.image
@@ -1232,9 +1693,25 @@ pub(crate) mod test_support {
             self.labels_by_container
                 .lock()
                 .insert(container_id.clone(), spec.labels.clone());
+            let scripted = self
+                .exit_script
+                .lock()
+                .as_ref()
+                .and_then(|script| script(&spec));
             self.specs.lock().push(spec);
             let (event_tx, event_rx) = mpsc::unbounded_channel();
             let (stdin_tx, stdin_rx) = mpsc::unbounded_channel();
+            if let Some(exit) = scripted {
+                if !exit.stdout.is_empty() {
+                    let _ = event_tx.send(RunnerEvent::Stdout(exit.stdout));
+                }
+                if !exit.stderr.is_empty() {
+                    let _ = event_tx.send(RunnerEvent::Stderr(exit.stderr));
+                }
+                let _ = event_tx.send(RunnerEvent::Exited {
+                    code: Some(exit.code),
+                });
+            }
             self.handles.lock().insert(
                 container_id.clone(),
                 FakeHandle {
@@ -1294,6 +1771,64 @@ pub(crate) mod test_support {
             Ok(())
         }
     }
+
+    #[async_trait]
+    impl SandboxDockerApi for FakeContainerApi {
+        async fn runtimes(&self) -> Result<Vec<String>, String> {
+            self.runtimes.lock().clone()
+        }
+
+        async fn ensure_volume(
+            &self,
+            name: &str,
+            labels: &BTreeMap<String, String>,
+        ) -> Result<(), String> {
+            if let Some(err) = self.fail_volume.lock().clone() {
+                return Err(err);
+            }
+            self.volumes
+                .lock()
+                .entry(name.to_string())
+                .or_insert_with(|| labels.clone());
+            Ok(())
+        }
+
+        async fn list_owned_volumes(&self) -> Result<Vec<OwnedVolume>, String> {
+            Ok(self
+                .volumes
+                .lock()
+                .iter()
+                .filter(|(_, labels)| is_owned(labels))
+                .map(|(name, labels)| OwnedVolume {
+                    name: name.clone(),
+                    labels: labels.clone(),
+                })
+                .collect())
+        }
+
+        async fn remove_volume(&self, name: &str) -> Result<VolumeRemoval, String> {
+            if self.volumes_in_use.lock().contains(name) {
+                return Ok(VolumeRemoval::InUse);
+            }
+            Ok(match self.volumes.lock().remove(name) {
+                Some(_) => VolumeRemoval::Removed,
+                None => VolumeRemoval::Gone,
+            })
+        }
+
+        async fn pull_image_with_auth(
+            &self,
+            image: &str,
+            auth: Option<RegistryAuth>,
+        ) -> Result<(), String> {
+            self.auth_pulls.lock().push((image.to_string(), auth));
+            if let Some(err) = self.fail_auth_pull.lock().get(image).cloned() {
+                return Err(err);
+            }
+            self.missing_images.lock().remove(image);
+            Ok(())
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1331,6 +1866,7 @@ mod tests {
             env,
             cwd: Some("/workspaces/ws-1".into()),
             framing: Default::default(),
+            sandbox: None,
         }
     }
 
@@ -1573,10 +2109,10 @@ mod tests {
         assert_eq!(spec.working_dir, WORKSPACE_TARGET);
         assert_eq!(
             spec.mount,
-            RunnerMount::Volume {
+            Some(RunnerMount::Volume {
                 volume: "cognia_workspaces".into(),
                 subpath: Some("ws-1".into())
-            }
+            })
         );
         assert!(spec.seccomp_json.is_some());
         assert_eq!(spec.memory_bytes, 2048 * 1024 * 1024);
@@ -1584,6 +2120,12 @@ mod tests {
         assert_eq!(spec.pids_limit, 512);
         assert_eq!(spec.network_mode, "bridge");
         assert_eq!(backend.kind(), "container");
+        // Off path (ADR-0182): a legacy runner sets none of the runtime
+        // environment fields, so the daemon request is what it always was.
+        assert_eq!(spec.entrypoint, None);
+        assert_eq!(spec.user, None);
+        assert!(spec.extra_mounts.is_empty());
+        assert_eq!(spec.runtime, None);
     }
 
     #[tokio::test]
@@ -1596,9 +2138,9 @@ mod tests {
             .expect("spawn");
         assert_eq!(
             api.specs.lock()[0].mount,
-            RunnerMount::Bind {
+            Some(RunnerMount::Bind {
                 host_dir: "/workspaces/ws-1".into()
-            }
+            })
         );
     }
 
@@ -1713,7 +2255,7 @@ mod tests {
         assert!(events
             .iter()
             .any(|(ch, p)| ch == STATE_CHANGE_CHANNEL && p["state"] == "Stopped"));
-        wait_for(|| backend.agents.lock().is_empty(), "registry cleanup").await;
+        wait_for(|| backend.runners.agents.lock().is_empty(), "registry cleanup").await;
         wait_for(
             || api.removes.lock().contains(&"ctr-1".to_string()),
             "container removal",
@@ -1742,7 +2284,7 @@ mod tests {
         let events = emitter.events();
         let exit = events.iter().find(|(ch, _)| ch == EXIT_CHANNEL).unwrap();
         assert_eq!(exit.1["code"], 137);
-        wait_for(|| backend.agents.lock().is_empty(), "registry forgets").await;
+        wait_for(|| backend.runners.agents.lock().is_empty(), "registry forgets").await;
     }
 
     #[tokio::test]
@@ -2013,6 +2555,7 @@ mod docker_integration {
             env: HashMap::new(),
             cwd: Some(tmp.path().display().to_string()),
             framing: Default::default(),
+            sandbox: None,
         };
         let id = spawn_with_events(backend.as_ref(), emitter.clone(), spawn)
             .await

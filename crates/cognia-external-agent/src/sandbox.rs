@@ -522,6 +522,7 @@ mod tests {
             env: HashMap::new(),
             cwd: cwd.map(|value| value.to_string()),
             framing: Default::default(),
+            sandbox: None,
         }
     }
 

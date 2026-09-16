@@ -51,6 +51,11 @@ members = [
   # init. A static musl binary, so it must stay off cognia-net and anything
   # else that links a network stack.
   "crates/cognia-sandboxd",
+  # ADR-0182/0183 — the host side of runtime environment sandboxes: admission
+  # against the tenant environment store and the Docker driver that stages the
+  # agent bundle, probes the image and starts the agent. Step ② grows the
+  # Kubernetes pool here (ADR-0184).
+  "crates/cognia-sandbox-pool",
   "crates/cognia-git",
   "crates/cognia-ocr",
   "crates/cognia-vector",

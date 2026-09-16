@@ -116,14 +116,29 @@ pub fn pod_name(spec_name: &str) -> String {
 /// Build the runner Pod manifest for `spec`. Pure — unit-tested without a
 /// cluster or the kube dependency.
 pub fn runner_pod_manifest(spec: &RunnerSpec, opts: &KubeRunnerOptions) -> Result<Value, String> {
+    // A runtime environment sandbox on Kubernetes is the pool's pod
+    // (ADR-0184), not a runner pod. Only the Docker driver builds these
+    // fields; one reaching here is refused rather than half-applied.
+    if spec.entrypoint.is_some()
+        || spec.user.is_some()
+        || spec.runtime.is_some()
+        || !spec.extra_mounts.is_empty()
+    {
+        return Err(
+            "kubernetes runner pods do not run runtime environment sandboxes; the Kubernetes \
+             sandbox pool is ADR-0184"
+                .to_string(),
+        );
+    }
     let (claim, sub_path) = match &spec.mount {
-        RunnerMount::Volume { volume, subpath } => (volume.clone(), subpath.clone()),
-        RunnerMount::Bind { host_dir } => {
+        Some(RunnerMount::Volume { volume, subpath }) => (volume.clone(), subpath.clone()),
+        Some(RunnerMount::Bind { host_dir }) => {
             return Err(format!(
                 "kubernetes exec mode has no host binds (got {host_dir}) — set \
                  COGNIA_WORKSPACES_VOLUME to the workspaces PVC name"
             ))
         }
+        None => return Err("a kubernetes runner pod needs a workspace mount".to_string()),
     };
 
     let env: Vec<Value> = spec
@@ -556,13 +571,17 @@ mod tests {
             cmd: vec!["claude-code-acp".into(), "--stdio".into()],
             env: vec!["A_KEY=1".into(), "FLAG".into()],
             working_dir: WORKSPACE_TARGET.into(),
-            mount,
+            mount: Some(mount),
             seccomp_json: Some("{}".into()),
             memory_bytes: 2048 * 1024 * 1024,
             nano_cpus: 1_500_000_000,
             pids_limit: 512,
             network_mode: "bridge".into(),
             labels: ownership_labels("A_1", "test-instance", "test-deployment"),
+            entrypoint: None,
+            user: None,
+            extra_mounts: Vec::new(),
+            runtime: None,
         }
     }
 
@@ -658,6 +677,38 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("COGNIA_WORKSPACES_VOLUME"), "{err}");
+    }
+
+    #[test]
+    fn runtime_environment_fields_and_a_missing_workspace_are_refused() {
+        let workspace = RunnerMount::Volume {
+            volume: "v".into(),
+            subpath: None,
+        };
+        let sandbox_fields: [fn(&mut RunnerSpec); 4] = [
+            |s| s.entrypoint = Some(vec!["/cognia/bin/cognia-sandboxd".into()]),
+            |s| s.user = Some("0".into()),
+            |s| s.runtime = Some("runsc".into()),
+            |s| {
+                s.extra_mounts.push(super::super::container_backend::VolumeMount {
+                    volume: "bundle".into(),
+                    target: "/cognia".into(),
+                    read_only: true,
+                })
+            },
+        ];
+        for set in sandbox_fields {
+            let mut sandboxed = spec(workspace.clone());
+            set(&mut sandboxed);
+            let err = runner_pod_manifest(&sandboxed, &opts()).unwrap_err();
+            assert!(err.contains("ADR-0184"), "{err}");
+        }
+
+        let mut no_workspace = spec(workspace);
+        no_workspace.mount = None;
+        assert!(runner_pod_manifest(&no_workspace, &opts())
+            .unwrap_err()
+            .contains("workspace mount"));
     }
 
     #[tokio::test]

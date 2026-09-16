@@ -552,6 +552,7 @@ mod tests {
             env: HashMap::new(),
             cwd: None,
             framing: Default::default(),
+            sandbox: None,
         }
     }
 

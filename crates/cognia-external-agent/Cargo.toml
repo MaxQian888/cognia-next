@@ -29,6 +29,9 @@ container-exec = ["dep:bollard"]
 # headless image.
 k8s-exec = ["dep:kube", "dep:k8s-openapi"]
 workspace-runtime-exec = ["dep:reqwest", "dep:cognia-net"]
+# The in-memory daemon and event recorder, for crates that build on the
+# container seam (`cognia-sandbox-pool`'s Docker driver) and test against it.
+test-support = []
 
 [dependencies]
 tauri = { version = "=2.11.5", optional = true }

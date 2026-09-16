@@ -461,6 +461,7 @@ mod tests {
                 (WRAPPED_ENV.into(), "1".into()),
             ]),
             framing: Default::default(),
+            sandbox: None,
         }
     }
     fn payload(token: &str) -> Value {
