@@ -183,6 +183,8 @@ brain 先解析，再连接：
 
 Host 在 `external-agent://placement` 上的答复按 agent 保存。agent 设置行会在沙箱状态旁边显示它：隔离级别与镜像 digest、运行用户及其重映射、bundle 版本与 libc，以及下文的两条第 ① 步标注。Host 答复之前只显示「请求了什么」，从不显示「得到了什么」。Host 的回退码会本地化，本版本不认识的码也会原样写出。
 
+Host 的审计日志同样会记下这次请求。带 placement 的 spawn 会在它的 `external_agent_spawn` 记录里加上 `sandbox` 字段，允许和拒绝都一样：种类、声明的规格 digest、项目 id、镜像 digest 与目录条目，以及隔离是否强制。这条记录写在准入之前，所以这些值都是客户端的声明；agent 实际跑在哪里由 placement 事件说明。任何合法规格都不可能出现的值记为 `null`，日志因此无法夹带任意文本，规格里的 `containerEnv` 也不会写进去。不带 placement 的 spawn 写出的记录与以前完全相同。
+
 ### 桌面本地容器在第 ① 步保持休眠
 
 桌面端不列出 `sandbox-pool`，所以在桌面自身的主机上，「运行环境」面板会说明这里无法运行。面板的「在本地容器中运行」开关仍保留在选择里，但打开它的运行会以 `local_container_unavailable` 被拒绝，而不是在沙箱外运行。类型、面板标注和测试都说明了这一点。

@@ -76,6 +76,64 @@ impl SandboxPlacement {
     pub fn claimed_spec_digest(&self) -> Option<&str> {
         self.spec().get("specDigest").and_then(Value::as_str)
     }
+
+    /// What the spawn audit line records about this request (ADR-0182).
+    ///
+    /// The line is written before admission, so every value is the client's
+    /// claim: the log says what was asked for, and `external-agent://placement`
+    /// says what ran. A value is kept only in the shape a valid spec has, so
+    /// the audit log cannot be used to store arbitrary text; anything else is
+    /// `null`.
+    pub fn audit_fields(&self) -> Value {
+        let spec = self.spec();
+        let claimed = |pointer: &str, valid: fn(&str) -> bool| {
+            spec.pointer(pointer)
+                .and_then(Value::as_str)
+                .filter(|value| valid(value))
+        };
+        json!({
+            "kind": "container",
+            "spec_digest": claimed("/specDigest", is_spec_digest),
+            "project_id": claimed("/projectId", is_spec_id),
+            "image_digest": claimed("/image/digest", is_image_digest),
+            "catalog_entry_id": claimed("/image/catalogEntryId", is_catalog_id),
+            "isolation_mandatory": self.isolation_mandatory(),
+        })
+    }
+}
+
+// The four rules below mirror `cognia-environment`'s spec validation, which
+// this crate cannot depend on (it sits below the environment crate).
+
+/// `validate_hex64`: 64 lowercase hex digits.
+fn is_spec_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// `image::validate_digest`: `sha256:` and 64 hex digits of either case.
+fn is_image_digest(value: &str) -> bool {
+    value
+        .strip_prefix("sha256:")
+        .is_some_and(|hex| hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+/// `validate_id`: 1–256 bytes, not blank, no control characters.
+fn is_spec_id(value: &str) -> bool {
+    !value.trim().is_empty() && value.len() <= 256 && !value.chars().any(char::is_control)
+}
+
+/// `is_valid_catalog_id`: `[a-z0-9][a-z0-9._-]{0,63}`.
+fn is_catalog_id(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= 64
+        && (bytes[0].is_ascii_lowercase() || bytes[0].is_ascii_digit())
+        && bytes.iter().all(|b| {
+            b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'_' | b'-')
+        })
 }
 
 /// Whether a failed sandbox start may fall back. See the module docs.
@@ -227,7 +285,11 @@ impl ExecBackend for SandboxRoutingBackend {
             return Ok(spawned);
         };
 
-        match self.sandbox.spawn_sandboxed(config.clone(), Arc::clone(&sink)).await {
+        match self
+            .sandbox
+            .spawn_sandboxed(config.clone(), Arc::clone(&sink))
+            .await
+        {
             Ok(spawned) => {
                 self.owners.lock().insert(spawned.clone(), Owner::Sandbox);
                 Ok(spawned)
@@ -444,7 +506,11 @@ mod tests {
 
     fn router(
         sandbox: Arc<Recording>,
-    ) -> (Arc<Recording>, Arc<SandboxRoutingBackend>, Arc<RecordingAgentEmitter>) {
+    ) -> (
+        Arc<Recording>,
+        Arc<SandboxRoutingBackend>,
+        Arc<RecordingAgentEmitter>,
+    ) {
         let existing = Recording::new("local-process");
         let router = SandboxRoutingBackend::new(existing.clone(), sandbox);
         (existing, router, RecordingAgentEmitter::new())
@@ -475,8 +541,96 @@ mod tests {
             json!({ "kind": "pool", "sandboxId": "s" }),
             json!({ "kind": "container", "spec": {} }),
         ] {
-            assert!(serde_json::from_value::<SandboxPlacement>(invalid.clone()).is_err(), "{invalid}");
+            assert!(
+                serde_json::from_value::<SandboxPlacement>(invalid.clone()).is_err(),
+                "{invalid}"
+            );
         }
+    }
+
+    #[test]
+    fn audit_fields_record_the_claim_in_the_shape_a_spec_has() {
+        let image_digest = format!("sha256:{}", "c".repeat(64));
+        let placement = SandboxPlacement::Container {
+            spec: json!({
+                "specDigest": "b".repeat(64),
+                "projectId": "proj-1",
+                "image": { "digest": image_digest, "catalogEntryId": "node-22" },
+                "containerEnv": { "SECRET": "never logged" },
+            }),
+            isolation_mandatory: true,
+        };
+        assert_eq!(
+            placement.audit_fields(),
+            json!({
+                "kind": "container",
+                "spec_digest": "b".repeat(64),
+                "project_id": "proj-1",
+                "image_digest": image_digest,
+                "catalog_entry_id": "node-22",
+                "isolation_mandatory": true,
+            })
+        );
+    }
+
+    // The line is written before admission, so a malformed claim must not
+    // reach the log as free text.
+    #[test]
+    fn audit_fields_drop_values_no_valid_spec_could_hold() {
+        let placement = SandboxPlacement::Container {
+            spec: json!({
+                "specDigest": "B".repeat(64),
+                "projectId": "x".repeat(257),
+                "image": { "digest": "sha256:short", "catalogEntryId": "line\nbreak" },
+            }),
+            isolation_mandatory: false,
+        };
+        assert_eq!(
+            placement.audit_fields(),
+            json!({
+                "kind": "container",
+                "spec_digest": null,
+                "project_id": null,
+                "image_digest": null,
+                "catalog_entry_id": null,
+                "isolation_mandatory": false,
+            })
+        );
+
+        let empty = SandboxPlacement::Container {
+            spec: json!({ "projectId": "   ", "image": "not an object" }),
+            isolation_mandatory: false,
+        };
+        let fields = empty.audit_fields();
+        assert_eq!(fields["project_id"], Value::Null);
+        assert_eq!(fields["image_digest"], Value::Null);
+
+        // A catalog id is a slug, not any id: a valid project id is not one.
+        let not_a_slug = SandboxPlacement::Container {
+            spec: json!({ "image": { "catalogEntryId": "Node 22" } }),
+            isolation_mandatory: false,
+        };
+        assert_eq!(not_a_slug.audit_fields()["catalog_entry_id"], Value::Null);
+    }
+
+    // Each rule accepts exactly what the spec validation accepts, so a spec
+    // the Host would admit is never logged with a hole in it.
+    #[test]
+    fn audit_fields_keep_every_value_a_valid_spec_can_hold() {
+        let upper = format!("sha256:{}", "AB".repeat(32));
+        let placement = SandboxPlacement::Container {
+            spec: json!({
+                "projectId": "x".repeat(256),
+                "image": { "digest": upper, "catalogEntryId": format!("9{}", "._-".repeat(21)) },
+            }),
+            isolation_mandatory: false,
+        };
+        let fields = placement.audit_fields();
+        assert_eq!(fields["image_digest"], upper);
+        assert_eq!(fields["project_id"], "x".repeat(256));
+        assert_eq!(fields["catalog_entry_id"], format!("9{}", "._-".repeat(21)));
+        assert!(!is_catalog_id(&"a".repeat(65)));
+        assert!(!is_catalog_id("-leading-dash"));
     }
 
     #[test]
@@ -519,7 +673,10 @@ mod tests {
         assert!(placements(&emitter).is_empty());
         assert_eq!(router.kind(), "local-process");
         assert!(router.routes_sandboxes());
-        assert_eq!(router.get_info("plain").await.unwrap()["kind"], "local-process");
+        assert_eq!(
+            router.get_info("plain").await.unwrap()["kind"],
+            "local-process"
+        );
     }
 
     #[tokio::test]
@@ -553,7 +710,10 @@ mod tests {
             .await
             .unwrap();
         let fell_back = existing.spawned.lock()[0].clone();
-        assert_eq!(fell_back.sandbox, None, "the existing path never sees a placement");
+        assert_eq!(
+            fell_back.sandbox, None,
+            "the existing path never sees a placement"
+        );
         assert_eq!(
             placements(&emitter)[0]["placement"],
             json!({
@@ -598,18 +758,29 @@ mod tests {
             multi_tenant: true,
             ..Default::default()
         });
-        *sandbox.sandbox_result.lock() =
-            Some(SandboxSpawnError::fault("sandbox_driver_unavailable", "down"));
+        *sandbox.sandbox_result.lock() = Some(SandboxSpawnError::fault(
+            "sandbox_driver_unavailable",
+            "down",
+        ));
         let (existing, router, emitter) = router(sandbox);
         let sink = EmitterEventSink::new(emitter);
 
-        let unplaced = router.spawn(config("a", None), sink.clone()).await.unwrap_err();
-        assert!(unplaced.starts_with("sandbox_placement_required: "), "{unplaced}");
+        let unplaced = router
+            .spawn(config("a", None), sink.clone())
+            .await
+            .unwrap_err();
+        assert!(
+            unplaced.starts_with("sandbox_placement_required: "),
+            "{unplaced}"
+        );
         let faulted = router
             .spawn(config("b", Some(placement(false))), sink)
             .await
             .unwrap_err();
-        assert!(faulted.starts_with("sandbox_driver_unavailable: "), "{faulted}");
+        assert!(
+            faulted.starts_with("sandbox_driver_unavailable: "),
+            "{faulted}"
+        );
         assert!(existing.spawned.lock().is_empty());
     }
 
@@ -622,7 +793,10 @@ mod tests {
             .spawn(config("same", Some(placement(false))), sink.clone())
             .await
             .unwrap();
-        let duplicate = router.spawn(config("same", None), sink.clone()).await.unwrap_err();
+        let duplicate = router
+            .spawn(config("same", None), sink.clone())
+            .await
+            .unwrap_err();
         assert!(duplicate.contains("already exists"), "{duplicate}");
 
         // The sandboxed agent exits; its id is reusable on the other path.

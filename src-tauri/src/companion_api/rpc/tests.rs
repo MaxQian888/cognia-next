@@ -1347,13 +1347,17 @@ async fn service_scope_executes_terminal_command_on_the_headless_host() {
 
 /// Policy deny → 403 naming the violation, with a `deny` audit line;
 /// policy allow (smoke stub) → spawn succeeds with an `allow` audit line
-/// and the frozen events on the bus.
+/// and the frozen events on the bus. A runtime environment request is
+/// audited as claimed, and a spawn without one gains no `sandbox` field.
+// The guard serializes the process-global audit slot for the whole body.
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn spawn_arm_enforces_the_policy_and_audits_both_outcomes() {
     if !crate::external_agent::command_resolver::check_command_exists("node") {
         eprintln!("skip: node not on PATH");
         return;
     }
+    let _audit_guard = crate::companion_api::audit::test_guard();
     let state = test_state();
     let tmp = tempfile::tempdir().expect("tempdir");
     let audit_path = tmp.path().join("audit.log");
@@ -1441,6 +1445,38 @@ async fn spawn_arm_enforces_the_policy_and_audits_both_outcomes() {
     .await
     .expect("kill");
 
+    // A run that requires a runtime environment: this host has no sandbox
+    // pool, so the spawn is refused after the policy allowed it.
+    let refused = dispatch(
+        "spawn_external_agent",
+        json!({ "config": {
+                "id": "smoke-sandboxed",
+                "command": "node",
+                "args": [stub.display().to_string()],
+                "sandbox": {
+                    "kind": "container",
+                    "spec": {
+                        "specDigest": "d".repeat(64),
+                        "projectId": "proj-1",
+                        "containerEnv": { "TOKEN": "not for the log" },
+                    },
+                    "isolationMandatory": true,
+                },
+            } }),
+        &state,
+        &host,
+        "brain-local",
+        Some(ACCOUNT_ID),
+        Some("service"),
+    )
+    .await
+    .expect_err("a mandatory sandbox needs a pool");
+    assert!(
+        refused.1 .0.message.contains("sandbox_pool_disabled"),
+        "{}",
+        refused.1 .0.message
+    );
+
     // Audit trail: a deny line and an allow line (with the dropped
     // LD_PRELOAD recorded), then the kill.
     let audit = std::fs::read_to_string(&audit_path).expect("audit written");
@@ -1457,6 +1493,30 @@ async fn spawn_arm_enforces_the_policy_and_audits_both_outcomes() {
     assert!(lines
         .iter()
         .any(|l| l["kind"] == "external_agent_kill" && l["scope"] == "service"));
+
+    let allowed = |agent_id: &str| {
+        lines
+            .iter()
+            .find(|l| {
+                l["decision"] == "allow"
+                    && l["kind"] == "external_agent_spawn"
+                    && l["agent_id"] == agent_id
+            })
+            .unwrap_or_else(|| panic!("an allow line for {agent_id}"))
+    };
+    assert!(allowed("smoke-1").get("sandbox").is_none());
+    assert_eq!(
+        allowed("smoke-sandboxed")["sandbox"],
+        json!({
+            "kind": "container",
+            "spec_digest": "d".repeat(64),
+            "project_id": "proj-1",
+            "image_digest": null,
+            "catalog_entry_id": null,
+            "isolation_mandatory": true,
+        })
+    );
+    assert!(!audit.contains("not for the log"));
 
     crate::companion_api::audit::install_at_for_testing(None);
 }

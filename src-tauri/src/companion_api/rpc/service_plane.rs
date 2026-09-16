@@ -166,11 +166,16 @@ pub(super) async fn dispatch(
             let policy = host.remote_spawn_policy().map_err(RpcError::internal)?;
             let config: crate::external_agent::process::ExternalAgentSpawnConfig =
                 required(&args, "config")?;
-            let summary = serde_json::json!({
+            let mut summary = serde_json::json!({
                 "agent_id": config.id,
                 "command": config.command,
                 "args": config.args,
             });
+            // A runtime environment request (ADR-0182), as claimed. Absent
+            // for a spawn without one, so those lines are unchanged.
+            if let Some(placement) = config.sandbox.as_ref() {
+                summary["sandbox"] = placement.audit_fields();
+            }
             match policy.validate(config) {
                 Err(violation) => {
                     let mut fields = summary;

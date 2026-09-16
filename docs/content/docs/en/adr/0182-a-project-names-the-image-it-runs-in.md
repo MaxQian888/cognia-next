@@ -183,6 +183,8 @@ With nothing ever registered, `withSpawnPlacement` returns the caller's own argu
 
 The Host's answer on `external-agent://placement` is kept per agent. The agent's settings row shows it next to the sandbox status: the tier and image digest, the user with its remap, the bundle release and libc, and the two Step ① labels below. Until the Host answers it shows what was requested, never what was granted. A Host fallback code is localized, and a code this build does not know is still named.
 
+The Host's audit log records the request as well. A spawn that carries a placement adds `sandbox` to its `external_agent_spawn` line, on allow and deny alike: the kind, the claimed spec digest, project id, image digest and catalog entry, and whether isolation was mandatory. The line is written before admission, so these are the client's claims, and the placement event is what says where the agent ran. A value no valid spec could hold is recorded as `null`, so the log cannot be used to carry free text, and the spec's `containerEnv` never reaches it. A spawn without a placement writes the same line it always did.
+
 ### Desktop local containers stay dormant in Step ①
 
 The desktop does not list `sandbox-pool`, so on the desktop's own host the Runtime environment panel explains that it cannot run one. The panel's "Run in a local container" toggle is kept in the selection, and a run that sets it is refused with `local_container_unavailable` rather than run unsandboxed. The type, the panel label and a test all say so.
