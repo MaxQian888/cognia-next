@@ -71,6 +71,14 @@ export interface BootScreenProps {
  */
 let lastFillFraction = 0
 
+/**
+ * How long the completion snap gets before the lean-in creep takes over. The
+ * snap itself runs `420ms * --motion-duration-scale` (see `.boot-bar__fill`),
+ * so the creep is scheduled just past it — and scaled the same way, read off
+ * the element exactly like `artifact-workspace-dock.tsx` does.
+ */
+const BOOT_FILL_SNAP_MS = 480
+
 export function __resetBootScreenForTesting(): void {
   lastFillFraction = 0
 }
@@ -108,22 +116,40 @@ export function BootScreen({
   )
   const capabilities = getBootDiagnosticsSnapshot()
 
-  // Progress fill. The element mounts at the previous owner's value (so a
-  // hand-over never jumps) and is then moved to this mount's target
-  // imperatively: forcing a style resolution first gives the CSS transition a
-  // computed start value to run from. Deliberately not `requestAnimationFrame`
-  // — rAF is paused in a hidden document, and a boot that begins in a
-  // background tab must still be at the right place when the tab is shown.
+  // Progress fill. Each mount renders where the previous owner left the bar —
+  // or empty when this mount opens the sequence, so a later route load never
+  // inherits a stale position and animates backwards — and is then moved
+  // imperatively in two beats: a ~400ms snap to this step's boundary (the
+  // previous step's completion tick), then, once the snap has landed, the long
+  // decelerating creep (`data-creep`) toward the lean-in point so the bar
+  // keeps moving while the step runs without ever claiming it done. Forcing a
+  // style resolution first gives the snap a computed start value. The creep
+  // is on a timer rather than `requestAnimationFrame` — rAF is paused in a
+  // hidden document, and a boot that begins backgrounded must still land
+  // right when the tab is shown.
   const target = view.fraction
-  const [initialFill] = useState(() => lastFillFraction)
+  const boundary = view.index / view.total
+  const [initialFill] = useState(() =>
+    view.milestones[0]?.id === milestone ? 0 : lastFillFraction
+  )
   const fillRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = fillRef.current
     if (!el) return
     void getComputedStyle(el).transform
-    el.style.setProperty("--boot-fill", String(target))
-    lastFillFraction = target
-  }, [target])
+    el.style.setProperty("--boot-fill", String(boundary))
+    lastFillFraction = boundary
+    const scale = Number(getComputedStyle(el).getPropertyValue("--motion-duration-scale")) || 1
+    const creepAt = window.setTimeout(
+      () => {
+        el.dataset.creep = "true"
+        el.style.setProperty("--boot-fill", String(target))
+        lastFillFraction = target
+      },
+      BOOT_FILL_SNAP_MS * Math.max(0, scale)
+    )
+    return () => window.clearTimeout(creepAt)
+  }, [boundary, target])
 
   const prolonged = phase === "prolonged" || phase === "escalated"
   // `useLoadingPhase` only reaches "escalated" when `canEscalate` — i.e. when
