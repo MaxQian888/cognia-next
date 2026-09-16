@@ -1607,36 +1607,53 @@ describe("execute — model selection", () => {
     expect(currentMock.setConfigOptionImpl).toHaveBeenCalledWith("s_1", "thinking", "max")
   })
 
-  it("reads the published ladder once, not once per turn", async () => {
+  it("reads the published ladder once per change, not once per turn", async () => {
     // The composer's chips already hold this reply per (agent, session). Asking
     // the agent again on every turn was a second round trip to a real process
     // for an answer nothing had invalidated.
+    //
+    // A thinking WRITE is the one turn that DOES move something — on Devin it
+    // lands as a model-variant switch, which invalidates the shared surface —
+    // so the turn after a write pays one refetch, and reads stop again once the
+    // landed level reads back equal to the request.
     const m = await connectedManager()
+    let current = "low"
+    const optionsFor = () => [
+      {
+        id: "thinking",
+        name: "Thinking",
+        category: "thought_level",
+        type: "select",
+        currentValue: current,
+        options: [
+          { value: "low", name: "Low" },
+          { value: "high", name: "High" },
+        ],
+      },
+    ]
     currentMock.getConfigOptionsImpl = jest.fn((_sessionId: string) => ({
       status: "ok",
-      data: [
-        {
-          id: "thinking",
-          name: "Thinking",
-          category: "thought_level",
-          type: "select",
-          currentValue: "low",
-          options: [
-            { value: "low", name: "Low" },
-            { value: "high", name: "High" },
-          ],
-        },
-      ],
+      data: optionsFor(),
     }))
+    currentMock.setConfigOptionImpl = jest.fn(
+      async (_sessionId: string, _configId: string, value: string | boolean) => {
+        current = String(value)
+        return optionsFor()
+      }
+    )
 
     const first = await m.execute("agent-1", "one", { reasoningEffort: "high" })
     const afterFirst = currentMock.getConfigOptionsImpl.mock.calls.length
     expect(afterFirst).toBeGreaterThan(0)
 
-    // Same conversation, same agent session: nothing has moved, so nothing is
-    // asked again.
+    // Turn one wrote low → high: the next turn re-reads once (the write may
+    // have moved the model and with it the ladder), sees the landed level, and
+    // writes nothing. The turn after that reads nothing again.
     await m.execute("agent-1", "two", { sessionId: first.sessionId, reasoningEffort: "high" })
-    expect(currentMock.getConfigOptionsImpl.mock.calls.length).toBe(afterFirst)
+    const afterSecond = currentMock.getConfigOptionsImpl.mock.calls.length
+    expect(afterSecond).toBeGreaterThan(afterFirst)
+    await m.execute("agent-1", "two-b", { sessionId: first.sessionId, reasoningEffort: "high" })
+    expect(currentMock.getConfigOptionsImpl.mock.calls.length).toBe(afterSecond)
 
     // A model write DOES move the ladder, so that turn pays for a fresh read.
     await m.execute("agent-1", "three", {
@@ -1644,7 +1661,78 @@ describe("execute — model selection", () => {
       reasoningEffort: "high",
       model: "gpt-5.6-codex",
     })
-    expect(currentMock.getConfigOptionsImpl.mock.calls.length).toBeGreaterThan(afterFirst)
+    expect(currentMock.getConfigOptionsImpl.mock.calls.length).toBeGreaterThan(afterSecond)
+  })
+
+  it("books the landed model variant when a thinking write moves the model", async () => {
+    // Devin encodes effort in the model id, so a thought_level write answers
+    // with the model option already moved (swe-2-max → swe-2-high). If the
+    // session kept bookkeeping the pre-write id, the next turn's applyModel
+    // would pin the stale variant and undo the pick. The observable proof:
+    // asking for the LANDED model next turn falls to the `selectedModel`
+    // metadata check and writes nothing — without the write-back it would
+    // issue a setSessionModel the adapter does not even offer here.
+    const m = await connectedManager()
+    let level = "max"
+    // No `model` category option on the read path (e.g. an adapter that only
+    // surfaces the thinking axis) — so applyModel can only consult the
+    // session's own selectedModel bookkeeping.
+    currentMock.getConfigOptionsImpl = jest.fn((_sessionId: string) => ({
+      status: "ok",
+      data: [
+        {
+          id: "devin.thought_level",
+          name: "Thinking",
+          category: "thought_level",
+          type: "select",
+          currentValue: level,
+          options: [
+            { value: "medium", name: "medium" },
+            { value: "high", name: "high" },
+            { value: "max", name: "max" },
+          ],
+        },
+      ],
+    }))
+    currentMock.setConfigOptionImpl = jest.fn(
+      async (_sessionId: string, configId: string, value: string | boolean) => {
+        expect(configId).toBe("devin.thought_level")
+        expect(value).toBe("high")
+        level = String(value)
+        // …but the WRITE answers with the full wire list — including the model
+        // option already moved to the high variant, the way Devin reports it.
+        return [
+          {
+            id: "model",
+            name: "Model",
+            category: "model",
+            type: "select",
+            currentValue: "swe-2-high",
+            options: [
+              { value: "swe-2-max", name: "SWE-2 max" },
+              { value: "swe-2-high", name: "SWE-2 high" },
+            ],
+          },
+        ]
+      }
+    )
+
+    const first = await m.execute("agent-1", "one", { reasoningEffort: "high" })
+    expect(currentMock.setConfigOptionImpl).toHaveBeenCalledWith(
+      "s_1",
+      "devin.thought_level",
+      "high"
+    )
+
+    // The session now books swe-2-high: a next turn that asks for exactly that
+    // model short-circuits instead of writing it again.
+    await m.execute("agent-1", "two", {
+      sessionId: first.sessionId,
+      model: "swe-2-high",
+      reasoningEffort: "high",
+    })
+    expect(currentMock.setSessionModelImpl).not.toHaveBeenCalled()
+    expect(currentMock.setConfigOptionImpl).toHaveBeenCalledTimes(1)
   })
 
   it("folds a requested level DOWN onto the ladder the agent published", async () => {

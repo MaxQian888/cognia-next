@@ -83,6 +83,7 @@ import { clampThinkingLevel, PiRpcClientAdapter } from "./pi-rpc-client"
 import {
   catalogModelSurface,
   EMPTY_THINKING_SURFACE,
+  findModelConfigOption,
   resolveExternalAgentModels,
   resolveExternalAgentThinking,
   type ExternalAgentModelSurface,
@@ -3048,8 +3049,22 @@ export class ExternalAgentManager {
       return
     }
     try {
-      await adapter.setConfigOption(session.id, surface.write.optionId, resolved)
-      session.metadata = { ...(session.metadata ?? {}), thinkingLevel: resolved }
+      // Through the public write path, not the bare adapter: it owns the
+      // gateway remap and, just as importantly, forgetAgentModelSurface — a
+      // Devin thinking write lands as a model-variant switch, and a stale
+      // surface would keep naming the pre-write variant on every chip.
+      const updated = await this.setConfigOption(
+        agentId,
+        session.id,
+        surface.write.optionId,
+        resolved
+      )
+      const landedModel = findModelConfigOption(updated)?.currentValue
+      session.metadata = {
+        ...(session.metadata ?? {}),
+        thinkingLevel: resolved,
+        ...(landedModel ? { selectedModel: landedModel } : {}),
+      }
     } catch (error) {
       externalAgentManagerLogger.warn("setConfigOption failed for thinking level", {
         sessionId: session.id,

@@ -777,6 +777,12 @@ export interface AcpUsageUpdate {
   size: number
   /** Cumulative session cost (optional). */
   cost?: { amount: number; currency: string } | null
+  /**
+   * Vendor metadata. Devin reports cumulative session token counters under
+   * `cognition.ai/inputTokens` / `cognition.ai/outputTokens` /
+   * `cognition.ai/cachedReadTokens` / `cognition.ai/cachedWriteTokens` here.
+   */
+  _meta?: Record<string, unknown> | null
 }
 
 /**
@@ -2138,6 +2144,14 @@ export interface ExternalAgentUsageUpdateEvent extends ExternalAgentEventBase {
   used: number
   size: number
   cost?: { amount: number; currency: string } | null
+  /**
+   * Per-turn-so-far prompt/completion accounting, when the agent reports
+   * cumulative token counters (Devin's `cognition.ai/*` usage meta). The
+   * adapter converts the wire's "across all turns" figures into turn-relative
+   * deltas before attaching them here, so consumers never see raw session
+   * totals. Absent when the agent exposes no token accounting.
+   */
+  tokenUsage?: ExternalAgentTokenUsage
 }
 
 export interface ExternalAgentSessionInfoUpdateEvent extends ExternalAgentEventBase {
@@ -2213,6 +2227,12 @@ export interface ExternalAgentDoneEvent extends ExternalAgentEventBase {
   type: "done"
   success: boolean
   tokenUsage?: ExternalAgentTokenUsage
+  /**
+   * Adapter-measured wall-clock time for the turn, when the transport gives
+   * the adapter a request/response pair to time (e.g. ACP `session/prompt`).
+   * Feeds the output-tokens-per-second readout; absent when unmeasured.
+   */
+  durationMs?: number
   stopReason?: AcpStopReason
 }
 

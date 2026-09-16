@@ -119,6 +119,21 @@ export interface LimitsSourceContext {
    */
   authedGet: (url: string, headers?: Record<string, string>) => Promise<string>
   /**
+   * Typed authed request for sources that need more than `authedGet` — a POST
+   * body (Connect-RPC / JSON-RPC quota endpoints) or the raw non-2xx status.
+   * Tauri injects `subscription_authed_request`; the CLI injects a
+   * node-`fetch`-backed implementation. Absent in environments that only wire
+   * `authedGet`; a source that needs it must decline (return `null`) rather
+   * than fake a GET.
+   */
+  authedRequest?: (request: {
+    url: string
+    method?: "GET" | "POST"
+    headers?: Record<string, string>
+    body?: string
+    timeoutMs?: number
+  }) => Promise<{ status: number; body: string }>
+  /**
    * Refresh the account's bearer and return the new token (or `null` if refresh
    * isn't possible / failed). Injected by the runner for OAuth providers whose
    * access token expires (Anthropic); a source calls it once on an auth failure

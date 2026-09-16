@@ -24,29 +24,36 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function validateProperty(name: string, value: unknown): AcpElicitationPropertySchema | undefined {
-  if (
-    !isRecord(value) ||
-    typeof value.type !== "string" ||
-    !ALLOWED_PROPERTY_TYPES.has(value.type)
-  ) {
-    return undefined
-  }
-  if (SECRET_FIELD.test(name) || value.format === "password" || value.writeOnly === true) {
+  if (!isRecord(value)) return undefined
+  // `type` is required by every schema variant, but real agents omit it on
+  // enum/oneOf properties — JSON Schema permits the omission and the choice
+  // list unambiguously means a string select (or a multi-select via `items`).
+  const type =
+    typeof value.type === "string"
+      ? value.type
+      : value.enum !== undefined || value.oneOf !== undefined
+        ? "string"
+        : value.items !== undefined
+          ? "array"
+          : undefined
+  if (type === undefined || !ALLOWED_PROPERTY_TYPES.has(type)) return undefined
+  const property = { ...value, type }
+  if (SECRET_FIELD.test(name) || property.format === "password" || property.writeOnly === true) {
     throw new Error("unsafe_secret")
   }
-  if (value.type === "array") {
-    if (!isRecord(value.items) || value.items.type !== "string") return undefined
+  if (type === "array") {
+    if (!isRecord(property.items) || property.items.type !== "string") return undefined
   }
   if (
-    value.enum !== undefined &&
-    (!Array.isArray(value.enum) || !value.enum.every((item) => typeof item === "string"))
+    property.enum !== undefined &&
+    (!Array.isArray(property.enum) || !property.enum.every((item) => typeof item === "string"))
   ) {
     return undefined
   }
   if (
-    value.oneOf !== undefined &&
-    (!Array.isArray(value.oneOf) ||
-      !value.oneOf.every(
+    property.oneOf !== undefined &&
+    (!Array.isArray(property.oneOf) ||
+      !property.oneOf.every(
         (item) =>
           isRecord(item) &&
           typeof item.const === "string" &&
@@ -56,18 +63,19 @@ function validateProperty(name: string, value: unknown): AcpElicitationPropertyS
   ) {
     return undefined
   }
-  return value as AcpElicitationPropertySchema
+  return property as AcpElicitationPropertySchema
 }
 
 function validateSchema(value: unknown): AcpElicitationSchema | undefined {
-  if (
-    !isRecord(value) ||
-    (value.type !== undefined && value.type !== "object") ||
-    !isRecord(value.properties)
-  ) {
+  if (!isRecord(value) || (value.type !== undefined && value.type !== "object")) {
     return undefined
   }
-  const entries = Object.entries(value.properties)
+  // `properties` is optional on the wire: a schema-less form is a
+  // message-only confirmation, which the overlay can already ask.
+  if (value.properties !== undefined && value.properties !== null && !isRecord(value.properties)) {
+    return undefined
+  }
+  const entries = isRecord(value.properties) ? Object.entries(value.properties) : []
   if (entries.length > MAX_FIELDS) return undefined
   const properties: Record<string, AcpElicitationPropertySchema> = {}
   for (const [name, property] of entries) {
@@ -79,24 +87,43 @@ function validateSchema(value: unknown): AcpElicitationSchema | undefined {
   if (
     value.required !== undefined &&
     value.required !== null &&
-    (!Array.isArray(value.required) ||
-      !value.required.every((name) => typeof name === "string" && name in properties))
+    (!Array.isArray(value.required) || !value.required.every((name) => typeof name === "string"))
   ) {
     return undefined
   }
-  return { ...(value as unknown as AcpElicitationSchema), properties }
+  // A required name the schema never declares is unanswerable — holding it
+  // would guarantee a "missing required field" failure on the response path.
+  const required = Array.isArray(value.required)
+    ? value.required.filter((name): name is string => name in properties)
+    : (value.required as string[] | null | undefined)
+  return { ...(value as unknown as AcpElicitationSchema), properties, required }
 }
 
 export function normalizeAcpElicitationRequest(
   rpcRequestId: number | string,
   value: unknown
 ): NormalizeResult {
-  if (!isRecord(value) || typeof value.message !== "string" || typeof value.mode !== "string") {
+  if (!isRecord(value) || typeof value.message !== "string") {
     return { ok: false, reason: "invalid_request" }
   }
+  // `mode` is required on the wire, but MCP-dialect elicitations carry only
+  // {message, requestedSchema}. Infer the mode from the fields that exist
+  // rather than hard-failing a request we could answer.
+  const mode =
+    typeof value.mode === "string"
+      ? value.mode
+      : isRecord(value.requestedSchema)
+        ? "form"
+        : typeof value.elicitationId === "string" && typeof value.url === "string"
+          ? "url"
+          : undefined
+  if (mode === undefined) return { ok: false, reason: "invalid_request" }
   const hasSessionScope = typeof value.sessionId === "string"
   const hasRequestScope = typeof value.requestId === "number" || typeof value.requestId === "string"
-  if (hasSessionScope === hasRequestScope) return { ok: false, reason: "invalid_request" }
+  // The wire requires exactly one scope; when an agent sends both, the
+  // session scope is the useful one — requestId only stands in for
+  // pre-session phases.
+  if (!hasSessionScope && !hasRequestScope) return { ok: false, reason: "invalid_request" }
 
   const base = {
     id: String(rpcRequestId),
@@ -112,7 +139,7 @@ export function normalizeAcpElicitationRequest(
     raw: { ...value },
   }
 
-  if (value.mode === "form") {
+  if (mode === "form") {
     let schema: AcpElicitationSchema | undefined
     try {
       schema = validateSchema(value.requestedSchema)
@@ -126,7 +153,7 @@ export function normalizeAcpElicitationRequest(
     return { ok: true, request: { ...base, mode: "form", requestedSchema: schema } }
   }
 
-  if (value.mode === "url") {
+  if (mode === "url") {
     if (typeof value.elicitationId !== "string" || typeof value.url !== "string") {
       return { ok: false, reason: "invalid_request" }
     }

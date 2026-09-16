@@ -97,12 +97,20 @@ describe("the shipped manifest", () => {
     expect(manifest.protocols["opencode-v2"].capabilities.thinking.reasonKey).toBe(
       "modelVariantOverlay"
     )
-    // ACP is the counter-example `capabilityNotes.thinking` names: the row asks
-    // whether the HOST can set the reasoning level, and no ACP method carries
-    // one. Streaming thought chunks — which every ACP agent does — is a
-    // different question, and answering this one with it lit up `/think` on a
-    // backend that forwards the pick nowhere.
-    expect(manifest.protocols.acp.capabilities.thinking.level).toBe("unsupported")
+    // The generic ACP row stays `unknown`: `thought_level` IS a session config
+    // option category in the protocol, but whether a given agent publishes one
+    // (or encodes the ladder elsewhere) is a per-session fact — the handshake's
+    // `thinking` flag only says the agent streams thought chunks, which is a
+    // different question and must not light up `/think` on its own.
+    expect(manifest.protocols.acp.capabilities.thinking.level).toBe("unknown")
+    // Devin is the preset that answers it anyway: `devin acp` publishes no
+    // `thought_level` option, but its model ids encode the ladder, and
+    // `DevinAcpAdapter` synthesizes the axis over the current model family.
+    expect(manifest.presetRefinements.devin.protocol).toBe("acp")
+    expect(manifest.presetRefinements.devin.capabilities.thinking?.level).toBe("equivalent")
+    expect(manifest.presetRefinements.devin.capabilities.thinking?.reasonKey).toBe(
+      "modelVariantOverlay"
+    )
   })
 
   it("answers steering per protocol, and lets the adapter layer tighten it", () => {

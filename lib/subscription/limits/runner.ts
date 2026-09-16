@@ -32,6 +32,8 @@ import type {
 
 export interface LimitsRunnerDeps {
   authedGet: (url: string, headers?: Record<string, string>) => Promise<string>
+  /** POST-capable passthrough (`subscription_authed_request`) for Connect-RPC sources. */
+  authedRequest: NonNullable<LimitsSourceContext["authedRequest"]>
   getAccount: (provider: ProviderId, accountId: string) => Promise<Account | null>
   listPresets: (provider: ProviderId) => Promise<ProviderPreset[]>
   getProviderPreset: (provider: ProviderId) => Promise<ProviderPreset | null>
@@ -65,6 +67,7 @@ const DEFAULT_DEPS: LimitsRunnerDeps = {
     }
     return response.body
   },
+  authedRequest: async (request) => authedRequest(request),
   getAccount: defaultGetAccount,
   listPresets: defaultListPresets,
   getProviderPreset: defaultGetProviderPreset,
@@ -98,6 +101,7 @@ export async function queryAccountLimits(
 ): Promise<ProviderLimits | null> {
   const {
     authedGet,
+    authedRequest: authedRequestDep,
     getAccount,
     listPresets,
     getProviderPreset,
@@ -177,6 +181,7 @@ export async function queryAccountLimits(
     providerKey: preset?.templateId,
     presetHeaders: preset?.extraHeaders,
     authedGet,
+    authedRequest: authedRequestDep,
     refreshToken: refreshBearer
       ? async () => {
           try {

@@ -21,6 +21,8 @@ export function providerIdForPreset(preset: string | null | undefined): Provider
     case "opencode-server":
     case "opencode-remote":
       return "opencode"
+    case "devin":
+      return "devin"
     default:
       return null
   }

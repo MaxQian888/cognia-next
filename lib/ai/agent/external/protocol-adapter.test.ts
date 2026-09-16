@@ -854,6 +854,92 @@ describe("foldUsageUpdate", () => {
       "providerCost"
     )
   })
+
+  it("folds a carried token breakdown over the occupancy figure", () => {
+    // Devin's usage_update carries a turn-relative `tokenUsage` alongside the
+    // context occupancy. The breakdown wins the split fields; `used` stays the
+    // context reading.
+    const folded = foldUsageUpdate(undefined, {
+      used: 30,
+      size: 1000,
+      tokenUsage: {
+        promptTokens: 90,
+        completionTokens: 10,
+        totalTokens: 100,
+        reasoningTokens: 4,
+        cacheReadTokens: 6,
+      },
+    })
+    expect(folded).toEqual({
+      promptTokens: 90,
+      completionTokens: 10,
+      totalTokens: 100,
+      reasoningTokens: 4,
+      cacheReadTokens: 6,
+      contextTokens: 30,
+      modelContextWindow: 1000,
+    })
+  })
+
+  it("replaces, not sums, a token breakdown on a later usage_update", () => {
+    // Each observation is cumulative-within-the-turn: the latest figure is the
+    // whole spend so far, not another increment.
+    const first = foldUsageUpdate(undefined, {
+      used: 10,
+      size: 1000,
+      tokenUsage: { promptTokens: 5, completionTokens: 2, totalTokens: 7 },
+    })
+    const second = foldUsageUpdate(first, {
+      used: 12,
+      size: 1000,
+      tokenUsage: { promptTokens: 6, completionTokens: 4, totalTokens: 10 },
+    })
+    expect(second).toMatchObject({
+      promptTokens: 6,
+      completionTokens: 4,
+      totalTokens: 10,
+      contextTokens: 12,
+    })
+  })
+
+  it("keeps a prior breakdown when a later update carries none", () => {
+    const first = foldUsageUpdate(undefined, {
+      used: 10,
+      size: 1000,
+      tokenUsage: { promptTokens: 5, completionTokens: 2, totalTokens: 7 },
+    })
+    const second = foldUsageUpdate(first, { used: 12, size: 1000 })
+    expect(second).toMatchObject({ promptTokens: 5, completionTokens: 2, totalTokens: 7 })
+  })
+
+  it("folds a live per-turn provider cost over the cumulative standard field", () => {
+    const folded = foldUsageUpdate(undefined, {
+      used: 10,
+      size: 1000,
+      tokenUsage: {
+        promptTokens: 5,
+        completionTokens: 2,
+        totalTokens: 7,
+        providerCost: { amount: 1.6, currency: "ACU" },
+      },
+    })
+    expect(folded).toMatchObject({ providerCost: { amount: 1.6, currency: "ACU" } })
+
+    // `event.cost` is cumulative across the session; the per-turn delta the
+    // vendor tokenUsage carries is what turn accounting needs.
+    const withStandard = foldUsageUpdate(undefined, {
+      used: 10,
+      size: 1000,
+      cost: { amount: 9.9, currency: "ACU" },
+      tokenUsage: {
+        promptTokens: 5,
+        completionTokens: 2,
+        totalTokens: 7,
+        providerCost: { amount: 1.6, currency: "ACU" },
+      },
+    })
+    expect(withStandard).toMatchObject({ providerCost: { amount: 1.6, currency: "ACU" } })
+  })
 })
 
 describe("mergeTurnUsage", () => {

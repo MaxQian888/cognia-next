@@ -9,6 +9,7 @@ import type { ExternalAgentModelSurface } from "@/lib/ai/agent/external/session-
 let runtimeRef: AgentRuntimeRef = { kind: "builtin" } as AgentRuntimeRef
 const loadAgentModelSurface = jest.fn()
 const cachedAgentModelSurface = jest.fn().mockReturnValue(null)
+const bindConversationSession = jest.fn()
 const loadAgentModelCatalog = jest.fn().mockResolvedValue({
   status: "unsupported",
   surface: { choices: [], currentModelId: null, write: { kind: "none" } },
@@ -27,6 +28,7 @@ const cacheListeners = new Set<() => void>()
 jest.mock("@/lib/ai/agent/external/model-surface-cache", () => ({
   loadAgentModelSurface: (...args: unknown[]) => loadAgentModelSurface(...args),
   cachedAgentModelSurface: (...args: unknown[]) => cachedAgentModelSurface(...args),
+  bindConversationSession: (...args: unknown[]) => bindConversationSession(...args),
   loadAgentModelCatalog: (...args: unknown[]) => loadAgentModelCatalog(...args),
   subscribeAgentModelSurface: (listener: () => void) => {
     cacheListeners.add(listener)
@@ -90,6 +92,7 @@ describe("useExternalAgentModels", () => {
     runtimeRef = { kind: "external", agentId: "pi-1" } as AgentRuntimeRef
     loadAgentModelSurface.mockReset().mockResolvedValue({ status: "ready", surface: SURFACE })
     cachedAgentModelSurface.mockReset().mockReturnValue(null)
+    bindConversationSession.mockReset()
     resolveConversationSessionId.mockReset().mockReturnValue("sess-1")
     selectSessionModel.mockReset().mockResolvedValue(undefined)
     mountHostConfigForCatalog.mockReset().mockResolvedValue("eac_1")
@@ -113,6 +116,9 @@ describe("useExternalAgentModels", () => {
     expect(loadAgentModelSurface).toHaveBeenCalledWith("pi-1", "sess-1", { refresh: false })
     expect(resolveConversationSessionId).toHaveBeenCalledWith("pi-1", "chat-1")
     expect(result.current.status).toBe("ready")
+    // The resolved session is published for readers with no hooks, so a plugin
+    // dial reads the ladder of the same session this hook describes.
+    expect(bindConversationSession).toHaveBeenCalledWith("pi-1", "chat-1", "sess-1")
   })
 
   it("does not ask when the agent has no session open yet", async () => {

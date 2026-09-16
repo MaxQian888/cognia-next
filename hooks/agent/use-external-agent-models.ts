@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 
 import {
   AGENT_MODEL_CATALOG,
+  bindConversationSession,
   cachedAgentModelSurface,
   EMPTY_MODEL_SURFACE,
   loadAgentModelCatalog,
@@ -190,6 +191,9 @@ export function useExternalAgentModels(sessionId: string | undefined): ExternalA
         const resolved = sessionId ? await resolveSessionId(agentId, sessionId) : null
         if (cancelled) return
         setExternalSessionId(resolved)
+        // Published to the shared cache as well, so a reader with no hooks (a
+        // plugin's effort dial) describes the same session this hook does.
+        if (sessionId) bindConversationSession(agentId, sessionId, resolved)
         if (!resolved) {
           // Connected, but no session yet. An agent that can list its models
           // without one (Pi, via `--list-models`) still answers, so the picker

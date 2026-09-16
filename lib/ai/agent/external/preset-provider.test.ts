@@ -16,6 +16,10 @@ describe("providerIdForPreset", () => {
     expect(providerIdForPreset("opencode-remote")).toBe("opencode")
   })
 
+  it("maps devin to its own subscription provider", () => {
+    expect(providerIdForPreset("devin")).toBe("devin")
+  })
+
   it("returns null for presets with no subscription provider", () => {
     expect(providerIdForPreset("gemini-cli")).toBeNull()
     expect(providerIdForPreset("cursor-cli")).toBeNull()

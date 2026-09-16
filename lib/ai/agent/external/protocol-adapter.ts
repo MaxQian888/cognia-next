@@ -404,24 +404,43 @@ export interface SessionCreateOptions {
  * `contextTokens`, `size` becomes the window, and `totalTokens` is only filled
  * when nothing better has arrived: overwriting a real breakdown with an
  * occupancy figure would silently halve a caller's token accounting.
+ *
+ * Agents that DO report accounting (Devin's `cognition.ai/*` usage meta) attach
+ * a turn-relative `tokenUsage` — those figures win outright: each observation
+ * is cumulative-within-the-turn, so the latest replaces rather than sums.
  */
 export function foldUsageUpdate(
   current: ExternalAgentTokenUsage | undefined,
-  event: { used: number; size: number; cost?: { amount: number; currency: string } | null }
+  event: {
+    used: number
+    size: number
+    cost?: { amount: number; currency: string } | null
+    tokenUsage?: ExternalAgentTokenUsage
+  }
 ): ExternalAgentTokenUsage {
   const base: ExternalAgentTokenUsage = current ?? {
     promptTokens: 0,
     completionTokens: 0,
     totalTokens: 0,
   }
+  const live = event.tokenUsage
+  const totalTokens = live?.totalTokens ?? base.totalTokens
   return {
     ...base,
+    promptTokens: live?.promptTokens ?? base.promptTokens,
+    completionTokens: live?.completionTokens ?? base.completionTokens,
+    totalTokens: totalTokens === 0 ? event.used : totalTokens,
+    ...(live?.reasoningTokens === undefined ? {} : { reasoningTokens: live.reasoningTokens }),
+    ...(live?.cacheReadTokens === undefined ? {} : { cacheReadTokens: live.cacheReadTokens }),
+    ...(live?.cacheWriteTokens === undefined ? {} : { cacheWriteTokens: live.cacheWriteTokens }),
     contextTokens: event.used,
     ...(event.size > 0 ? { modelContextWindow: event.size } : {}),
-    ...(base.totalTokens === 0 ? { totalTokens: event.used } : {}),
+    // `event.cost` is the CUMULATIVE session figure; a per-turn delta carried
+    // by the vendor tokenUsage wins over it for turn accounting.
     ...(event.cost
       ? { providerCost: { amount: event.cost.amount, currency: event.cost.currency } }
       : {}),
+    ...(live?.providerCost === undefined ? {} : { providerCost: live.providerCost }),
   }
 }
 

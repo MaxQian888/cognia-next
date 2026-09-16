@@ -700,6 +700,100 @@ describe("AcpClientAdapter — Devin permission modes", () => {
   )
 })
 
+describe("AcpClientAdapter — OpenCode permission modes", () => {
+  const modeOptions = (currentValue: string): AcpConfigOption[] => [
+    {
+      id: "mode",
+      name: "Mode",
+      type: "select",
+      category: "mode",
+      currentValue,
+      options: ["build", "plan"].map((value) => ({ value, name: value })),
+    },
+  ]
+
+  function openCodeAdapter() {
+    const adapter = new AcpClientAdapter()
+    ;(adapter as unknown as { _config: ExternalAgentConfig })._config = {
+      ...stdioConfig(),
+      metadata: { preset: "opencode-acp" },
+      process: { command: "opencode", args: ["acp"], cwd: "/work" },
+    }
+    setStatus(adapter, "connected")
+    return adapter
+  }
+
+  it.each([
+    ["build", "default"],
+    ["plan", "plan"],
+  ])("canonicalizes the native %s mode to %s on session/new", async (nativeMode, expected) => {
+    const adapter = openCodeAdapter()
+    ;(adapter as unknown as { sendRequest: jest.Mock }).sendRequest = jest.fn().mockResolvedValue({
+      sessionId: "s",
+      configOptions: modeOptions(nativeMode),
+    })
+    const session = await adapter.createSession({ cwd: "/work" })
+    expect(session.permissionMode).toBe(expected)
+    expect(adapter.getConfigOptions("s")?.[0].currentValue).toBe(nativeMode)
+  })
+
+  it.each<[AcpPermissionMode, string]>([
+    ["default", "build"],
+    ["acceptEdits", "build"],
+    ["bypassPermissions", "build"],
+    ["plan", "plan"],
+    ["dontAsk", "build"],
+  ])("maps %s to native %s", async (mode, nativeMode) => {
+    const adapter = openCodeAdapter()
+    seedSession(adapter, "s", "default")
+    adapter.getSession("s")!.metadata = { configOptions: modeOptions("build") }
+    const sendRequest = jest.fn().mockResolvedValue({ configOptions: modeOptions(nativeMode) })
+    ;(adapter as unknown as { sendRequest: jest.Mock }).sendRequest = sendRequest
+    await adapter.setSessionMode("s", mode)
+    expect(sendRequest).toHaveBeenCalledWith("session/set_config_option", {
+      sessionId: "s",
+      configId: "mode",
+      value: nativeMode,
+    })
+    expect(adapter.getSession("s")?.permissionMode).toBe(mode)
+  })
+
+  it("keeps the canonical mode when the server echoes the shared 'build' value", async () => {
+    const adapter = openCodeAdapter()
+    seedSession(adapter, "s", "default")
+    adapter.getSession("s")!.metadata = { configOptions: modeOptions("build") }
+    ;(adapter as unknown as { sendRequest: jest.Mock }).sendRequest = jest
+      .fn()
+      .mockResolvedValue({ configOptions: modeOptions("build") })
+    await adapter.setSessionMode("s", "dontAsk")
+    const notify = (
+      adapter as unknown as { handleNotification: (notification: unknown) => void }
+    ).handleNotification.bind(adapter)
+    notify({
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: "s",
+        update: { sessionUpdate: "current_mode_update", currentModeId: "build" },
+      },
+    })
+    expect(adapter.getSession("s")?.permissionMode).toBe("dontAsk")
+  })
+
+  it("sends session/set_mode with the native value when no mode option exists", async () => {
+    const adapter = openCodeAdapter()
+    seedSession(adapter, "s", "default")
+    const sendRequest = jest.fn().mockResolvedValue({})
+    ;(adapter as unknown as { sendRequest: jest.Mock }).sendRequest = sendRequest
+    await adapter.setSessionMode("s", "bypassPermissions")
+    expect(sendRequest).toHaveBeenCalledWith("session/set_mode", {
+      sessionId: "s",
+      modeId: "build",
+    })
+    expect(adapter.getSession("s")?.permissionMode).toBe("bypassPermissions")
+  })
+})
+
 describe("buildAcpPromptBlocks", () => {
   const message = (content: ExternalAgentMessage["content"]): ExternalAgentMessage => ({
     id: "m",
@@ -1456,6 +1550,42 @@ describe("AcpClientAdapter — ACP v1 stable elicitation", () => {
       content: { enabled: true },
     })
     await expect(response).resolves.toEqual({ action: "accept", content: { enabled: true } })
+  })
+
+  it("settles the wire request with cancel when the response fails validation", async () => {
+    mockIsTauri.mockReturnValue(true)
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+    const internals = elicitationInternals(a)
+    internals._config = {
+      ...stdioConfig(),
+      metadata: { acpElicitationEnabled: true },
+    }
+
+    const response = internals.handleElicitationRequest(
+      19,
+      {
+        mode: "form",
+        sessionId: "s1",
+        message: "Choose",
+        requestedSchema: {
+          type: "object",
+          properties: { enabled: { type: "boolean" } },
+          required: ["enabled"],
+        },
+      },
+      new AbortController().signal
+    )
+
+    // A malformed answer must still settle the pending wire request — a
+    // rethrow here would orphan the agent's tool call until the timeout and
+    // kill the turn on top.
+    await a.respondToElicitation({
+      requestId: "19",
+      action: "accept",
+      content: { enabled: "yes" },
+    })
+    await expect(response).resolves.toEqual({ action: "cancel" })
   })
 
   it("rejects elicitation when the current host cannot back it", async () => {
@@ -2947,6 +3077,101 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
     )._sessions.get("s1")
     expect(session?.permissionMode).toBe("plan")
   })
+
+  it("suppresses a republished identical command catalog but emits a changed one", () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+    const commands = [{ name: "compact", description: "Compact context", input: null }]
+
+    expect(
+      handleUpdate(a, "s1", {
+        sessionUpdate: "available_commands_update",
+        availableCommands: commands,
+      })
+    ).toMatchObject({ type: "commands_update" })
+    // Agents republish the same catalog at every prompt boundary — an
+    // identical list is a state mirror, not a change.
+    expect(
+      handleUpdate(a, "s1", {
+        sessionUpdate: "available_commands_update",
+        availableCommands: commands.map((c) => ({ ...c })),
+      })
+    ).toBeNull()
+    expect(
+      handleUpdate(a, "s1", {
+        sessionUpdate: "available_commands_update",
+        availableCommands: [...commands, { name: "new", description: "", input: null }],
+      })
+    ).toMatchObject({ type: "commands_update" })
+    // Metadata always tracks the latest catalog even when the event is suppressed.
+    expect(sessionMeta(a, "s1")?.availableCommands).toHaveLength(2)
+  })
+
+  it("suppresses current_mode_update that republishes the active mode", () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+
+    expect(
+      handleUpdate(a, "s1", { sessionUpdate: "current_mode_update", currentModeId: "bypass" })
+    ).toMatchObject({ type: "mode_update", modeId: "bypass" })
+    expect(
+      handleUpdate(a, "s1", { sessionUpdate: "current_mode_update", currentModeId: "bypass" })
+    ).toBeNull()
+    expect(
+      handleUpdate(a, "s1", { sessionUpdate: "current_mode_update", currentModeId: "plan" })
+    ).toMatchObject({ type: "mode_update", modeId: "plan" })
+  })
+
+  it("suppresses an identical config_option republish", () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+    const configOptions = [
+      {
+        id: "mode",
+        name: "Mode",
+        type: "select",
+        category: "mode",
+        currentValue: "bypass",
+        options: [{ value: "bypass", name: "Bypass" }],
+      },
+    ]
+
+    expect(
+      handleUpdate(a, "s1", { sessionUpdate: "config_option_update", configOptions })
+    ).toMatchObject({ type: "config_options_update" })
+    expect(
+      handleUpdate(a, "s1", {
+        sessionUpdate: "config_option_update",
+        configOptions: configOptions.map((o) => ({ ...o })),
+      })
+    ).toBeNull()
+  })
+
+  it("suppresses session_info_update without a new title", () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+
+    expect(
+      handleUpdate(a, "s1", { sessionUpdate: "session_info_update", title: "T" })
+    ).toMatchObject({ type: "session_info_update", title: "T" })
+    // `updatedAt` ticks every turn — republishing the same title is churn.
+    expect(
+      handleUpdate(a, "s1", {
+        sessionUpdate: "session_info_update",
+        title: "T",
+        updatedAt: "2026-01-01T00:00:00Z",
+      })
+    ).toBeNull()
+    expect(
+      handleUpdate(a, "s1", {
+        sessionUpdate: "session_info_update",
+        updatedAt: "2026-01-01T00:01:00Z",
+      })
+    ).toBeNull()
+    expect(
+      handleUpdate(a, "s1", { sessionUpdate: "session_info_update", title: "T2" })
+    ).toMatchObject({ type: "session_info_update", title: "T2" })
+  })
 })
 
 describe("AcpClientAdapter — boolean session config options", () => {
@@ -3816,5 +4041,269 @@ describe("DeepSeek Harness ACP capability boundaries", () => {
         [Symbol.asyncIterator]()
         .next()
     ).rejects.toThrow("PII gate")
+  })
+})
+
+describe("AcpClientAdapter — per-turn token usage accounting", () => {
+  const userMessage = (): ExternalAgentMessage => ({
+    id: "m",
+    role: "user",
+    content: [{ type: "text", text: "hi" }],
+    timestamp: new Date(),
+  })
+
+  function usageHarness() {
+    const adapter = new AcpClientAdapter()
+    const internal = adapter as unknown as {
+      _config: ExternalAgentConfig
+      _connectionStatus: string
+      sendRequest: jest.Mock
+      handleNotification: (n: { method: string; params?: Record<string, unknown> }) => void
+      primedUsageSessions: Set<string>
+    }
+    internal._config = { ...stdioConfig(), metadata: { preset: "devin" } }
+    internal._connectionStatus = "connected"
+    internal.sendRequest = jest.fn()
+    seedSession(adapter, "s", "default")
+    return { adapter, internal }
+  }
+
+  function devinUsageNotification(
+    meta: Record<string, number>,
+    used = 60,
+    size = 200000
+  ): { method: string; params: Record<string, unknown> } {
+    return {
+      method: "session/update",
+      params: {
+        sessionId: "s",
+        update: { sessionUpdate: "usage_update", used, size, _meta: meta },
+      },
+    }
+  }
+
+  async function runTurn(adapter: AcpClientAdapter, midTurn?: () => void) {
+    const events: ExternalAgentEvent[] = []
+    const consume = (async () => {
+      for await (const event of adapter.prompt("s", userMessage())) events.push(event)
+    })()
+    midTurn?.()
+    await consume
+    return events
+  }
+
+  it("reports the turn's delta from streamed cognition.ai counters", async () => {
+    const { adapter, internal } = usageHarness()
+    internal.sendRequest.mockResolvedValue({ stopReason: "end_turn" })
+    const events = await runTurn(adapter, () =>
+      internal.handleNotification(
+        devinUsageNotification({
+          "cognition.ai/inputTokens": 100,
+          "cognition.ai/outputTokens": 30,
+          "cognition.ai/thoughtTokens": 12,
+        })
+      )
+    )
+    // The streamed update carries the turn-relative figure already — the
+    // wire counters are cumulative, the delta is computed against the
+    // baseline the prompt send snapshotted.
+    expect(events.find((e) => e.type === "usage_update")).toMatchObject({
+      tokenUsage: {
+        promptTokens: 100,
+        completionTokens: 30,
+        totalTokens: 142,
+        reasoningTokens: 12,
+      },
+    })
+    // The done event repeats the same turn figure (replace, not sum) and
+    // carries the occupancy snapshot + measured duration the rate display
+    // needs alongside it.
+    expect(events.find((e) => e.type === "done")).toMatchObject({
+      tokenUsage: {
+        promptTokens: 100,
+        completionTokens: 30,
+        totalTokens: 142,
+        reasoningTokens: 12,
+        contextTokens: 60,
+        modelContextWindow: 200000,
+      },
+      durationMs: expect.any(Number),
+    })
+  })
+
+  it("prefers PromptResponse.usage and delta-converts it against the turn baseline", async () => {
+    const { adapter, internal } = usageHarness()
+    // Turn one leaves the session's cumulative counters at 40/10/50.
+    internal.sendRequest.mockResolvedValueOnce({
+      stopReason: "end_turn",
+      usage: { inputTokens: 40, outputTokens: 10, totalTokens: 50 },
+    })
+    const first = await runTurn(adapter)
+    expect(first.find((e) => e.type === "done")).toMatchObject({
+      tokenUsage: { promptTokens: 40, completionTokens: 10, totalTokens: 50 },
+    })
+    // Turn two's response reports the new cumulative total — the emitted
+    // figure is the delta, never the session total.
+    internal.sendRequest.mockResolvedValueOnce({
+      stopReason: "end_turn",
+      usage: { inputTokens: 60, outputTokens: 25, totalTokens: 85 },
+    })
+    const second = await runTurn(adapter)
+    expect(second.find((e) => e.type === "done")).toMatchObject({
+      tokenUsage: { promptTokens: 20, completionTokens: 15, totalTokens: 35 },
+      durationMs: expect.any(Number),
+    })
+  })
+
+  it("primes a restored session's baseline instead of billing history to its first turn", () => {
+    const { adapter, internal } = usageHarness()
+    // loadSession/resumeSession mark the session so the first counter
+    // sighting becomes the baseline — pre-existing history is not this
+    // turn's spend.
+    internal.primedUsageSessions.add("s")
+    const first = handleUpdate(adapter, "s", {
+      sessionUpdate: "usage_update",
+      used: 10,
+      size: 1000,
+      _meta: { "cognition.ai/inputTokens": 900, "cognition.ai/outputTokens": 100 },
+    }) as Record<string, unknown>
+    expect(first).not.toHaveProperty("tokenUsage")
+    const second = handleUpdate(adapter, "s", {
+      sessionUpdate: "usage_update",
+      used: 12,
+      size: 1000,
+      _meta: { "cognition.ai/inputTokens": 940, "cognition.ai/outputTokens": 120 },
+    })
+    expect(second).toMatchObject({
+      tokenUsage: { promptTokens: 40, completionTokens: 20, totalTokens: 60 },
+    })
+  })
+
+  it("clamps a counter reset to a non-negative delta", () => {
+    const { adapter } = usageHarness()
+    // A turn whose send-time baseline already holds spend — then the agent
+    // restarts its counters mid-turn. A negative delta would fabricate spend
+    // the wire never reported, so the reading is clamped to what it proves.
+    const internals = adapter as unknown as {
+      cumulativeUsage: Map<string, unknown>
+      turnStartUsage: Map<string, unknown>
+    }
+    const baseline = { inputTokens: 100, outputTokens: 40, totalTokens: 140 }
+    internals.cumulativeUsage.set("s", baseline)
+    internals.turnStartUsage.set("s", baseline)
+    const reset = handleUpdate(adapter, "s", {
+      sessionUpdate: "usage_update",
+      used: 10,
+      size: 1000,
+      _meta: { "cognition.ai/inputTokens": 5, "cognition.ai/outputTokens": 2 },
+    }) as Record<string, unknown>
+    expect(reset).not.toHaveProperty("tokenUsage")
+  })
+
+  it("leaves tokenUsage off a usage_update that carries no vendor counters", () => {
+    const { adapter } = usageHarness()
+    const ev = handleUpdate(adapter, "s", {
+      sessionUpdate: "usage_update",
+      used: 5,
+      size: 100,
+    }) as Record<string, unknown>
+    expect(ev).toMatchObject({ type: "usage_update", used: 5, size: 100 })
+    expect(ev).not.toHaveProperty("tokenUsage")
+  })
+
+  it("emits done without tokenUsage when the agent reports none", async () => {
+    const { adapter, internal } = usageHarness()
+    internal.sendRequest.mockResolvedValue({ stopReason: "end_turn" })
+    const events = await runTurn(adapter)
+    const done = events.find((e) => e.type === "done")
+    expect(done).toMatchObject({ type: "done", success: true, durationMs: expect.any(Number) })
+    expect(done).not.toHaveProperty("tokenUsage")
+  })
+
+  it("surfaces cache counters and the ACU cost delta under its own label", async () => {
+    const { adapter, internal } = usageHarness()
+    internal.sendRequest.mockResolvedValue({ stopReason: "end_turn" })
+    const events = await runTurn(adapter, () =>
+      internal.handleNotification(
+        devinUsageNotification({
+          "cognition.ai/inputTokens": 100,
+          "cognition.ai/outputTokens": 30,
+          "cognition.ai/cachedReadTokens": 70,
+          "cognition.ai/cachedWriteTokens": 20,
+          "cognition.ai/totalAcuCost": 1.6,
+        })
+      )
+    )
+    expect(events.find((e) => e.type === "done")).toMatchObject({
+      tokenUsage: {
+        promptTokens: 100,
+        completionTokens: 30,
+        cacheReadTokens: 70,
+        cacheWriteTokens: 20,
+        // Devin's billing unit rides along labeled — never relabelled as USD.
+        providerCost: { amount: 1.6, currency: "ACU" },
+      },
+    })
+  })
+
+  it("emits reported-zero cache fields once the counters exist on the wire", async () => {
+    const { adapter, internal } = usageHarness()
+    // Turn one moves the cache counters; turn two sees the same cumulative
+    // readings — the delta is zero but the counter was reported, which is
+    // distinct from telemetry that never arrived.
+    internal.sendRequest.mockResolvedValue({ stopReason: "end_turn" })
+    await runTurn(adapter, () =>
+      internal.handleNotification(
+        devinUsageNotification({
+          "cognition.ai/inputTokens": 100,
+          "cognition.ai/outputTokens": 30,
+          "cognition.ai/cachedReadTokens": 70,
+        })
+      )
+    )
+    const events = await runTurn(adapter, () =>
+      internal.handleNotification(
+        devinUsageNotification({
+          "cognition.ai/inputTokens": 120,
+          "cognition.ai/outputTokens": 40,
+          "cognition.ai/cachedReadTokens": 70,
+        })
+      )
+    )
+    expect(events.find((e) => e.type === "done")).toMatchObject({
+      tokenUsage: { promptTokens: 20, completionTokens: 10, cacheReadTokens: 0 },
+    })
+    expect(events.find((e) => e.type === "done")).not.toMatchObject({
+      tokenUsage: { cacheWriteTokens: expect.any(Number) },
+    })
+  })
+
+  it("prefers the per-turn ACU delta over the cumulative usage_update cost", async () => {
+    const { adapter, internal } = usageHarness()
+    internal.sendRequest.mockResolvedValue({ stopReason: "end_turn" })
+    const events = await runTurn(adapter, () =>
+      internal.handleNotification({
+        method: "session/update",
+        params: {
+          sessionId: "s",
+          update: {
+            sessionUpdate: "usage_update",
+            used: 60,
+            size: 200000,
+            cost: { amount: 9.9, currency: "ACU" },
+            _meta: {
+              "cognition.ai/inputTokens": 100,
+              "cognition.ai/outputTokens": 30,
+              "cognition.ai/totalAcuCost": 1.6,
+            },
+          },
+        },
+      })
+    )
+    // `update.cost` is cumulative across the session; the meta delta is the
+    // per-turn figure and wins.
+    expect(events.find((e) => e.type === "done")).toMatchObject({
+      tokenUsage: { providerCost: { amount: 1.6, currency: "ACU" } },
+    })
   })
 })

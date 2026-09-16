@@ -124,4 +124,80 @@ describe("ACP elicitation validation", () => {
       })
     ).toThrow("enabled")
   })
+
+  it("infers form mode from an MCP-dialect request without a mode field", () => {
+    const result = normalizeAcpElicitationRequest("rpc-7", {
+      sessionId: "session-1",
+      message: "Pick one",
+      requestedSchema: {
+        type: "object",
+        properties: { choice: { type: "string", enum: ["a", "b"] } },
+      },
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      request: { mode: "form", sessionId: "session-1" },
+    })
+  })
+
+  it("accepts a schema-less form as a message-only confirmation", () => {
+    const result = normalizeAcpElicitationRequest("rpc-8", {
+      mode: "form",
+      sessionId: "session-1",
+      message: "Proceed?",
+      requestedSchema: { type: "object" },
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      request: { mode: "form", requestedSchema: { properties: {} } },
+    })
+  })
+
+  it("infers a string select from enum without an explicit type", () => {
+    const result = normalizeAcpElicitationRequest("rpc-9", {
+      mode: "form",
+      sessionId: "session-1",
+      message: "Which?",
+      requestedSchema: {
+        properties: { pick: { enum: ["one", "two"] } },
+      },
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      request: { requestedSchema: { properties: { pick: { type: "string" } } } },
+    })
+  })
+
+  it("prefers the session scope when an agent sends both", () => {
+    const result = normalizeAcpElicitationRequest("rpc-10", {
+      mode: "form",
+      sessionId: "session-1",
+      requestId: "req-9",
+      message: "Scoped",
+      requestedSchema: { properties: {} },
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      request: { sessionId: "session-1", requestId: "req-9" },
+    })
+  })
+
+  it("drops required names the schema never declares", () => {
+    const result = normalizeAcpElicitationRequest("rpc-11", {
+      mode: "form",
+      sessionId: "session-1",
+      message: "Fields",
+      requestedSchema: {
+        properties: { a: { type: "string" } },
+        required: ["a", "ghost"],
+      },
+    })
+
+    if (!result.ok) throw new Error("expected valid request")
+    expect(result.request.requestedSchema?.required).toEqual(["a"])
+  })
 })

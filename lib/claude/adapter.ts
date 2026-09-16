@@ -91,6 +91,12 @@ export interface UsageInfo {
    */
   reasoningTokens?: number
   totalCostUsd?: number
+  /**
+   * Provider-reported cost in the provider's own unit, when it named one that
+   * is not USD (Devin reports ACU). Carried verbatim with its label — never
+   * converted or summed into {@link totalCostUsd}, which stays USD-only.
+   */
+  providerCost?: { amount: number; currency?: string }
   durationMs?: number
 }
 

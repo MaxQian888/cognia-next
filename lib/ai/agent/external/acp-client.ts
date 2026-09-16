@@ -61,6 +61,7 @@ import type {
   PromptRequest as SdkPromptRequest,
   PromptResponse as SdkPromptResponse,
   ContentBlock as SdkContentBlock,
+  Usage as SdkUsage,
 } from "@agentclientprotocol/sdk"
 
 const log = loggers.agent
@@ -87,6 +88,20 @@ const DEVIN_PERMISSION_MODES: Record<AcpPermissionMode, string> = {
   bypassPermissions: "bypass",
   plan: "plan",
   dontAsk: "ask",
+}
+
+/**
+ * OpenCode's ACP surface exposes its agent selector through the session `mode`
+ * config option, whose only values are "build" and "plan". Tool approval still
+ * flows through `session/request_permission`, so every non-plan canonical mode
+ * maps to "build" and the local permission broker keeps the requested policy.
+ */
+const OPENCODE_PERMISSION_MODES: Record<AcpPermissionMode, string> = {
+  default: "build",
+  acceptEdits: "build",
+  bypassPermissions: "build",
+  plan: "plan",
+  dontAsk: "build",
 }
 
 type CachedAcpToolCall = Extract<AcpSessionUpdate, { sessionUpdate: "tool_call_update" }> & {
@@ -161,6 +176,7 @@ import type {
   AcpSessionModelState,
   AcpSessionModesState,
   AcpConfigOption,
+  AcpAvailableCommand,
   AcpReadTextFileParams,
   AcpWriteTextFileParams,
   AcpTerminalCreateParams,
@@ -179,6 +195,156 @@ import type {
   ExternalAgentSessionExtensionSupport,
   ExternalAgentExtensionSupportStatus,
 } from "@/types/agent/external-agent"
+
+/**
+ * Cumulative token counters as ACP reports them — `PromptResponse.usage`
+ * (unstable in the spec) and Devin's `cognition.ai/*` usage meta are both
+ * "across all turns" figures. Per-turn accounting is a DELTA between two of
+ * these snapshots.
+ */
+interface AcpCumulativeUsage {
+  inputTokens: number
+  outputTokens: number
+  thoughtTokens?: number
+  cachedReadTokens?: number
+  cachedWriteTokens?: number
+  totalTokens: number
+  /**
+   * Devin's cumulative session costs in ITS billing units — `totalAcuCost`
+   * is ACU, `totalCreditCost` is plan credits. Neither is USD; they ride the
+   * same cumulative→delta treatment as tokens.
+   */
+  totalAcuCost?: number
+  totalCreditCost?: number
+}
+
+const ZERO_CUMULATIVE_USAGE: AcpCumulativeUsage = {
+  inputTokens: 0,
+  outputTokens: 0,
+  totalTokens: 0,
+}
+
+function metaNumber(meta: Record<string, unknown>, key: string): number | undefined {
+  const value = meta[key]
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined
+}
+
+/**
+ * Read Devin's cumulative token counters off a `usage_update` `_meta` block
+ * (`cognition.ai/inputTokens` etc.). Returns undefined for agents that carry
+ * no vendor usage meta — absent fields stay absent, never zero-filled.
+ */
+function cumulativeUsageFromMeta(meta: unknown): AcpCumulativeUsage | undefined {
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return undefined
+  const record = meta as Record<string, unknown>
+  const inputTokens = metaNumber(record, "cognition.ai/inputTokens")
+  const outputTokens = metaNumber(record, "cognition.ai/outputTokens")
+  const thoughtTokens = metaNumber(record, "cognition.ai/thoughtTokens")
+  const cachedReadTokens = metaNumber(record, "cognition.ai/cachedReadTokens")
+  const cachedWriteTokens = metaNumber(record, "cognition.ai/cachedWriteTokens")
+  const totalAcuCost = metaNumber(record, "cognition.ai/totalAcuCost")
+  const totalCreditCost = metaNumber(record, "cognition.ai/totalCreditCost")
+  if (
+    inputTokens === undefined &&
+    outputTokens === undefined &&
+    thoughtTokens === undefined &&
+    cachedReadTokens === undefined &&
+    cachedWriteTokens === undefined &&
+    totalAcuCost === undefined &&
+    totalCreditCost === undefined
+  ) {
+    return undefined
+  }
+  return {
+    inputTokens: inputTokens ?? 0,
+    outputTokens: outputTokens ?? 0,
+    ...(thoughtTokens === undefined ? {} : { thoughtTokens }),
+    ...(cachedReadTokens === undefined ? {} : { cachedReadTokens }),
+    ...(cachedWriteTokens === undefined ? {} : { cachedWriteTokens }),
+    ...(totalAcuCost === undefined ? {} : { totalAcuCost }),
+    ...(totalCreditCost === undefined ? {} : { totalCreditCost }),
+    totalTokens:
+      (inputTokens ?? 0) +
+      (outputTokens ?? 0) +
+      (thoughtTokens ?? 0) +
+      (cachedReadTokens ?? 0) +
+      (cachedWriteTokens ?? 0),
+  }
+}
+
+function cumulativeUsageFromPromptUsage(usage: SdkUsage): AcpCumulativeUsage {
+  return {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    ...(usage.thoughtTokens === undefined || usage.thoughtTokens === null
+      ? {}
+      : { thoughtTokens: usage.thoughtTokens }),
+    ...(usage.cachedReadTokens === undefined || usage.cachedReadTokens === null
+      ? {}
+      : { cachedReadTokens: usage.cachedReadTokens }),
+    ...(usage.cachedWriteTokens === undefined || usage.cachedWriteTokens === null
+      ? {}
+      : { cachedWriteTokens: usage.cachedWriteTokens }),
+    totalTokens: usage.totalTokens,
+  }
+}
+
+/** Per-turn delta of two cumulative snapshots. A counter that resets never
+ * reports a negative turn — it is clamped to what the new reading can prove. */
+function usageDelta(current: AcpCumulativeUsage, baseline: AcpCumulativeUsage): AcpCumulativeUsage {
+  const delta = (a?: number, b?: number) => Math.max(0, (a ?? 0) - (b ?? 0))
+  return {
+    inputTokens: delta(current.inputTokens, baseline.inputTokens),
+    outputTokens: delta(current.outputTokens, baseline.outputTokens),
+    ...(current.thoughtTokens === undefined && baseline.thoughtTokens === undefined
+      ? {}
+      : { thoughtTokens: delta(current.thoughtTokens, baseline.thoughtTokens) }),
+    ...(current.cachedReadTokens === undefined && baseline.cachedReadTokens === undefined
+      ? {}
+      : { cachedReadTokens: delta(current.cachedReadTokens, baseline.cachedReadTokens) }),
+    ...(current.cachedWriteTokens === undefined && baseline.cachedWriteTokens === undefined
+      ? {}
+      : { cachedWriteTokens: delta(current.cachedWriteTokens, baseline.cachedWriteTokens) }),
+    ...(current.totalAcuCost === undefined && baseline.totalAcuCost === undefined
+      ? {}
+      : { totalAcuCost: delta(current.totalAcuCost, baseline.totalAcuCost) }),
+    ...(current.totalCreditCost === undefined && baseline.totalCreditCost === undefined
+      ? {}
+      : { totalCreditCost: delta(current.totalCreditCost, baseline.totalCreditCost) }),
+    totalTokens: delta(current.totalTokens, baseline.totalTokens),
+  }
+}
+
+/** A turn's usage in the shape consumers expect, or undefined when the delta
+ * proves nothing was spent (a primed baseline observation is not a turn). */
+function tokenUsageFromDelta(delta: AcpCumulativeUsage): ExternalAgentTokenUsage | undefined {
+  const totalTokens =
+    delta.totalTokens > 0
+      ? delta.totalTokens
+      : delta.inputTokens +
+        delta.outputTokens +
+        (delta.thoughtTokens ?? 0) +
+        (delta.cachedReadTokens ?? 0) +
+        (delta.cachedWriteTokens ?? 0)
+  if (totalTokens <= 0) return undefined
+  return {
+    promptTokens: delta.inputTokens,
+    completionTokens: delta.outputTokens,
+    totalTokens,
+    // Optional counters are emitted whenever the wire reported them — a
+    // reported zero is a real reading, distinct from absent telemetry.
+    ...(delta.thoughtTokens === undefined ? {} : { reasoningTokens: delta.thoughtTokens }),
+    ...(delta.cachedReadTokens === undefined ? {} : { cacheReadTokens: delta.cachedReadTokens }),
+    ...(delta.cachedWriteTokens === undefined ? {} : { cacheWriteTokens: delta.cachedWriteTokens }),
+    // Devin bills in ACU (its compute unit) or plan credits — carry the
+    // figure with its own label rather than mislabelling it as dollars.
+    ...(delta.totalAcuCost !== undefined
+      ? { providerCost: { amount: delta.totalAcuCost, currency: "ACU" } }
+      : delta.totalCreditCost !== undefined
+        ? { providerCost: { amount: delta.totalCreditCost, currency: "CREDIT" } }
+        : {}),
+  }
+}
 
 let dynamicMcpHostController: AcpDynamicMcpHostController | undefined
 
@@ -290,6 +456,19 @@ function requirePromptCapability(
   if (capabilities.promptCapabilities?.[capability] !== true) {
     throw new Error(`Agent does not advertise ACP prompt capability '${capability}'`)
   }
+}
+
+/** Structural equality for republished command catalogs (order-sensitive). */
+function sameCommands(a: AcpAvailableCommand[], b: AcpAvailableCommand[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every(
+      (cmd, i) =>
+        cmd.name === b[i].name &&
+        cmd.description === b[i].description &&
+        JSON.stringify(cmd.input ?? null) === JSON.stringify(b[i].input ?? null)
+    )
+  )
 }
 
 /** Translate Cognia transcript content to schema-valid ACP prompt blocks. */
@@ -577,6 +756,29 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 
   private toolCallStates = new Map<string, Map<string, CachedAcpToolCall>>()
 
+  /**
+   * Last cumulative token counters observed per session. ACP reports usage as
+   * "across all turns" totals (`PromptResponse.usage`, Devin's
+   * `cognition.ai/*` usage meta), so the per-turn figure consumers expect is
+   * the delta between two observations — this holds the most recent one.
+   */
+  private cumulativeUsage = new Map<string, AcpCumulativeUsage>()
+  /**
+   * The cumulative counters as they stood when the current turn began — the
+   * baseline every mid-turn `usage_update` delta and the turn's final usage
+   * are measured against. Snapshotted from {@link cumulativeUsage} at prompt
+   * send; a session with no observation yet resolves its baseline on the
+   * first sighting (see {@link primedUsageSessions}).
+   */
+  private turnStartUsage = new Map<string, AcpCumulativeUsage>()
+  /**
+   * Sessions whose counters already carry history we never saw — created via
+   * `session/load`, `session/resume`, or `session/fork`. Their first
+   * observation establishes the baseline rather than being reported as this
+   * turn's spend: a session's whole history is not a turn.
+   */
+  private primedUsageSessions = new Set<string>()
+
   // Pending permission requests waiting for UI response
   private pendingPermissions: Map<
     string,
@@ -853,6 +1055,9 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     this._sessions.clear()
     this.toolCallStates.clear()
     this.terminalSessions.clear()
+    this.cumulativeUsage.clear()
+    this.turnStartUsage.clear()
+    this.primedUsageSessions.clear()
     await this.cleanupDynamicMcpConnections()
     this.dynamicMcpServerSessions.clear()
     for (const [, pending] of this.pendingPermissions) {
@@ -1736,6 +1941,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     await this.cleanupNativeSessionTerminals(sessionId)
     this.forgetSessionTerminals(sessionId)
     this._sessions.delete(sessionId)
+    this.clearUsageTracking(sessionId)
     log.info("Closed session", { sessionId })
   }
 
@@ -1773,6 +1979,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     await this.cleanupNativeSessionTerminals(sessionId)
     this.forgetSessionTerminals(sessionId)
     this._sessions.delete(sessionId)
+    this.clearUsageTracking(sessionId)
   }
 
   private cancelPendingElicitations(sessionId?: string): void {
@@ -2085,7 +2292,20 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   async respondToElicitation(response: AcpElicitationResponse): Promise<void> {
     const pending = this.pendingElicitations.get(response.requestId)
     if (!pending) return
-    const validated = validateAcpElicitationResponse(pending.request, response)
+    let validated: Omit<AcpElicitationResponse, "requestId">
+    try {
+      validated = validateAcpElicitationResponse(pending.request, response)
+    } catch (error) {
+      // A response that fails schema validation must still SETTLE the wire
+      // request — rethrowing leaves it pending until the 5-minute timeout,
+      // so the agent's tool call hangs and the throwing caller kills the
+      // turn on top. Cancel is the only honest action left.
+      log.warn("Elicitation response failed schema validation; cancelling", {
+        requestId: response.requestId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      validated = { action: "cancel" }
+    }
     clearTimeout(pending.timeout)
     this.pendingElicitations.delete(response.requestId)
     if (pending.request.mode === "url" && pending.request.elicitationId) {
@@ -2146,6 +2366,14 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     // share it (they coalesce into one assistant message).
     this.toolCallStates.delete(sessionId)
     this.turnMessageId.set(sessionId, `msg_${++this.messageIdSeq}`)
+    const promptStartedAt = Date.now()
+    // ACP reports usage as cumulative "across all turns" counters, so the
+    // turn's spend is the delta measured from this baseline. A session with
+    // no observation yet (fresh, or restored with unseen history) resolves
+    // the baseline on its first sighting instead.
+    const priorUsage = this.cumulativeUsage.get(sessionId)
+    if (priorUsage) this.turnStartUsage.set(sessionId, priorUsage)
+    else this.turnStartUsage.delete(sessionId)
     // Send as request but handle response asynchronously
     this.sendRequest<AcpPromptResult>(
       "session/prompt",
@@ -2156,14 +2384,42 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         // Turn over — retire the per-turn message id.
         this.toolCallStates.delete(sessionId)
         this.turnMessageId.delete(sessionId)
-        // ACP carries no token accounting (only context-window occupancy via
-        // `usage_update`, kept in session metadata); emit `done` without a
-        // fabricated token total.
+        // `PromptResponse.usage` (unstable spec field) is the authoritative
+        // turn total; Devin's `cognition.ai/*` usage meta streamed during the
+        // turn is the fallback. Agents reporting neither keep the honest
+        // "unknown" — no fabricated token total.
+        const tokenUsage = this.resolveTurnTokenUsage(sessionId, result.usage)
+        // The usage figure replaces the UI's usage entry wholesale, so the
+        // occupancy snapshot the turn's usage_updates recorded rides along —
+        // otherwise the context gauge would blank between turns.
+        const occupancy = this.sessionUsageOccupancy(sessionId)
+        const enrichedUsage =
+          tokenUsage && occupancy
+            ? {
+                ...tokenUsage,
+                contextTokens: occupancy.used,
+                ...(occupancy.size > 0 ? { modelContextWindow: occupancy.size } : {}),
+                // `update.cost` is the CUMULATIVE session figure — a per-turn
+                // cost delta the usage meta produced wins over it.
+                ...(tokenUsage.providerCost
+                  ? { providerCost: tokenUsage.providerCost }
+                  : occupancy.cost
+                    ? {
+                        providerCost: {
+                          amount: occupancy.cost.amount,
+                          currency: occupancy.cost.currency,
+                        },
+                      }
+                    : {}),
+              }
+            : tokenUsage
         this.emitEvent({
           type: "done",
           sessionId,
           timestamp: new Date(),
           success: result.stopReason !== "cancelled" && result.stopReason !== "refusal",
+          ...(enrichedUsage ? { tokenUsage: enrichedUsage } : {}),
+          durationMs: Date.now() - promptStartedAt,
           stopReason: result.stopReason,
         })
       })
@@ -2205,6 +2461,82 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   }
 
   /**
+   * Baseline for the current turn's usage delta on `sessionId`. The snapshot
+   * taken at prompt send wins; otherwise the last cumulative observation
+   * stands in (a sighting can arrive between turns) — and for a restored
+   * session whose counters were never seen, the sighting itself, since
+   * pre-existing history is not this turn's spend.
+   */
+  private usageBaseline(sessionId: string, snapshot: AcpCumulativeUsage): AcpCumulativeUsage {
+    const existing = this.turnStartUsage.get(sessionId)
+    if (existing) return existing
+    const baseline =
+      this.cumulativeUsage.get(sessionId) ??
+      (this.primedUsageSessions.has(sessionId) ? snapshot : ZERO_CUMULATIVE_USAGE)
+    this.primedUsageSessions.delete(sessionId)
+    this.turnStartUsage.set(sessionId, baseline)
+    return baseline
+  }
+
+  /**
+   * Record a cumulative counter observation — Devin's usage meta mid-turn or
+   * the prompt response at the end — and return the turn-relative usage it
+   * proves. Advances the session's latest counters and, on first sighting,
+   * establishes the baseline the delta is measured against.
+   */
+  private observeUsage(
+    sessionId: string,
+    snapshot: AcpCumulativeUsage
+  ): ExternalAgentTokenUsage | undefined {
+    const baseline = this.usageBaseline(sessionId, snapshot)
+    this.cumulativeUsage.set(sessionId, snapshot)
+    return tokenUsageFromDelta(usageDelta(snapshot, baseline))
+  }
+
+  /**
+   * Per-turn token accounting for a settled `session/prompt`. The response's
+   * `usage` is authoritative when the agent fills it; otherwise the counters
+   * streamed via `usage_update` meta during the turn stand in for the turn
+   * total. Both are cumulative — the emitted figure is the delta against the
+   * baseline captured when the prompt was sent.
+   */
+  private resolveTurnTokenUsage(
+    sessionId: string,
+    promptUsage: SdkUsage | null | undefined
+  ): ExternalAgentTokenUsage | undefined {
+    if (promptUsage) {
+      return this.observeUsage(sessionId, cumulativeUsageFromPromptUsage(promptUsage))
+    }
+    const latest = this.cumulativeUsage.get(sessionId)
+    if (!latest) return undefined
+    return tokenUsageFromDelta(
+      usageDelta(latest, this.turnStartUsage.get(sessionId) ?? ZERO_CUMULATIVE_USAGE)
+    )
+  }
+
+  /** Drop every usage counter a session accumulated. */
+  private clearUsageTracking(sessionId: string): void {
+    this.cumulativeUsage.delete(sessionId)
+    this.turnStartUsage.delete(sessionId)
+    this.primedUsageSessions.delete(sessionId)
+  }
+
+  /**
+   * The occupancy snapshot the latest `usage_update` stored on the session —
+   * context tokens in the window, the window size, and the provider-reported
+   * cost. `undefined` when the agent never published one.
+   */
+  private sessionUsageOccupancy(
+    sessionId: string
+  ): { used: number; size: number; cost?: { amount: number; currency: string } } | undefined {
+    const usage = this._sessions.get(sessionId)?.metadata?.usage as
+      { used?: unknown; size?: unknown; cost?: { amount: number; currency: string } } | undefined
+    return typeof usage?.used === "number" && typeof usage?.size === "number"
+      ? { used: usage.used, size: usage.size, ...(usage.cost ? { cost: usage.cost } : {}) }
+      : undefined
+  }
+
+  /**
    * Set session mode
    * @see https://agentclientprotocol.com/protocol/session-modes
    */
@@ -2215,7 +2547,29 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     )
   }
 
+  private isOpenCodeAgent(): boolean {
+    return (
+      this._config?.metadata?.preset === "opencode-acp" ||
+      /(?:^|[\\/])opencode(?:\.exe)?$/i.test(this._config?.process?.command ?? "")
+    )
+  }
+
+  private nativePermissionMode(modeId: AcpPermissionMode): string {
+    if (this.isDevinAgent()) return DEVIN_PERMISSION_MODES[modeId] ?? modeId
+    if (this.isOpenCodeAgent()) return OPENCODE_PERMISSION_MODES[modeId] ?? modeId
+    return modeId
+  }
+
   private canonicalPermissionMode(nativeMode: string, sessionId?: string): AcpPermissionMode {
+    if (this.isOpenCodeAgent()) {
+      if (nativeMode === "plan") return "plan"
+      // "build" is the wire value for every executable canonical mode. Keep the
+      // session's current mode when it already maps there so a server echo does
+      // not collapse acceptEdits / bypassPermissions / dontAsk into "default".
+      const current = sessionId ? this._sessions.get(sessionId)?.permissionMode : undefined
+      if (current && OPENCODE_PERMISSION_MODES[current] === nativeMode) return current
+      return "default"
+    }
     if (!this.isDevinAgent()) return nativeMode as AcpPermissionMode
     if (nativeMode === "accept-edits") return "acceptEdits"
     if (nativeMode === "bypass") return "bypassPermissions"
@@ -2238,7 +2592,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       this.updateSession(sessionId, { permissionMode: modeId })
       return
     }
-    const nativeMode = this.isDevinAgent() ? (DEVIN_PERMISSION_MODES[modeId] ?? modeId) : modeId
+    const nativeMode = this.nativePermissionMode(modeId)
     const modeOption = this.getConfigOptions(sessionId)?.find(
       (option) => option.type === "select" && option.category === "mode"
     )
@@ -2450,6 +2804,9 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
 
     this._sessions.set(session.id, session)
+    // A loaded session's usage counters already carry history. Mark it so the
+    // first cumulative sighting becomes the baseline rather than turn spend.
+    this.primedUsageSessions.add(sessionId)
     try {
       const result = await this.sendRequest<
         Pick<AcpNewSessionResult, "models" | "modes" | "configOptions">
@@ -2478,6 +2835,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     } catch (error) {
       if (previousSession) this._sessions.set(sessionId, previousSession)
       else this._sessions.delete(sessionId)
+      this.primedUsageSessions.delete(sessionId)
       throw error
     }
   }
@@ -2639,6 +2997,8 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         },
       }
       this._sessions.set(forkedSession.id, forkedSession)
+      // A fork inherits the parent's history — its counters are not fresh.
+      this.primedUsageSessions.add(forkedSession.id)
       this.registerDynamicMcpServers(forkedSession.id, mcpServers)
       this.setExtensionSupport(method, "supported", "ok")
       return forkedSession
@@ -2751,6 +3111,8 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         },
       }
       this._sessions.set(resumedSession.id, resumedSession)
+      // A resumed session's usage counters already carry history.
+      this.primedUsageSessions.add(resumedSession.id)
       this.registerDynamicMcpServers(resumedSession.id, mcpServers)
       this.setExtensionSupport(method, "supported", "ok")
       return resumedSession
@@ -3949,21 +4311,27 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         }
       }
 
-      case "available_commands_update":
+      case "available_commands_update": {
         // Store available commands in session metadata
         const cmdSession = this._sessions.get(sessionId)
+        const previous = cmdSession?.metadata?.availableCommands as
+          AcpAvailableCommand[] | undefined
         if (cmdSession) {
           cmdSession.metadata = {
             ...cmdSession.metadata,
             availableCommands: update.availableCommands,
           }
         }
+        // Agents republish the same catalog at every prompt boundary — the
+        // event is a state mirror, so an identical list is noise, not news.
+        if (previous && sameCommands(previous, update.availableCommands)) return null
         return {
           type: "commands_update",
           sessionId,
           timestamp,
           commands: update.availableCommands,
         }
+      }
 
       case "mode_change":
         this.updateSession(sessionId, {
@@ -3974,21 +4342,31 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       case "current_mode_update": {
         // Agent-initiated mode change
         const modeSession = this._sessions.get(sessionId)
+        // The session/new response seeds `metadata.modes`; once a
+        // current_mode_update lands, `metadata.currentModeId` is fresher.
+        const previousModeId =
+          (modeSession?.metadata?.currentModeId as string | undefined) ??
+          (modeSession?.metadata?.modes as AcpSessionModesState | undefined)?.currentModeId
         if (modeSession) {
+          // Metadata first: updateSession replaces the map entry, and the
+          // spread only carries fields already present on the session.
+          const configOpts = modeSession.metadata?.configOptions as AcpConfigOption[] | undefined
+          const updatedOpts = configOpts?.map((opt) =>
+            opt.category === "mode" && opt.type === "select"
+              ? { ...opt, currentValue: update.currentModeId }
+              : opt
+          )
+          modeSession.metadata = {
+            ...modeSession.metadata,
+            ...(updatedOpts ? { configOptions: updatedOpts } : {}),
+            currentModeId: update.currentModeId,
+          }
           this.updateSession(sessionId, {
             permissionMode: this.canonicalPermissionMode(update.currentModeId, sessionId),
           })
-          // Also update configOptions if they exist
-          const configOpts = modeSession.metadata?.configOptions as AcpConfigOption[] | undefined
-          if (configOpts) {
-            const updatedOpts = configOpts.map((opt) =>
-              opt.category === "mode" && opt.type === "select"
-                ? { ...opt, currentValue: update.currentModeId }
-                : opt
-            )
-            modeSession.metadata = { ...modeSession.metadata, configOptions: updatedOpts }
-          }
         }
+        // Re-published mode at each turn boundary — only a real change is news.
+        if (previousModeId === update.currentModeId) return null
         return {
           type: "mode_update" as const,
           sessionId,
@@ -4003,6 +4381,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       case "config_options_update": {
         // Agent-initiated config options change
         const cfgSession = this._sessions.get(sessionId)
+        const previousOptions = cfgSession?.metadata?.configOptions as AcpConfigOption[] | undefined
         if (cfgSession) {
           cfgSession.metadata = {
             ...cfgSession.metadata,
@@ -4018,6 +4397,13 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
             })
           }
         }
+        // The full option set rides every update; an identical republish is
+        // the same state mirror the commands catalog is, not a change.
+        if (
+          previousOptions &&
+          JSON.stringify(previousOptions) === JSON.stringify(update.configOptions)
+        )
+          return null
         return {
           type: "config_options_update" as const,
           sessionId,
@@ -4028,10 +4414,12 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 
       case "usage_update": {
         // `used` is context-window *occupancy* (tokens currently in context),
-        // NOT a cumulative prompt/completion count — ACP exposes no token
-        // accounting. Record the occupancy + cost snapshot in session metadata
-        // (drives the context-% UI); do NOT fabricate an `ExternalAgentTokenUsage`
-        // that would misreport occupancy as a token total.
+        // NOT a prompt/completion count. Record the occupancy + cost snapshot
+        // in session metadata (drives the context-% UI). Real token
+        // accounting, when an agent offers it, arrives separately: Devin
+        // reports cumulative counters in `cognition.ai/*` meta keys, which
+        // `observeUsage` converts to a turn-relative delta — never the raw
+        // session total, and never an occupancy figure mislabelled as spend.
         const usageSession = this._sessions.get(sessionId)
         if (usageSession) {
           usageSession.metadata = {
@@ -4043,6 +4431,8 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
             },
           }
         }
+        const cumulative = cumulativeUsageFromMeta(update._meta)
+        const tokenUsage = cumulative ? this.observeUsage(sessionId, cumulative) : undefined
         return {
           type: "usage_update",
           sessionId,
@@ -4050,6 +4440,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
           used: update.used,
           size: update.size,
           cost: update.cost,
+          ...(tokenUsage ? { tokenUsage } : {}),
         }
       }
 
@@ -4057,6 +4448,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         // Session metadata (title / last-activity). Stored locally; not a
         // user-visible event in the chat stream.
         const infoSession = this._sessions.get(sessionId)
+        const previousTitle = infoSession?.metadata?.title
         if (infoSession) {
           infoSession.metadata = {
             ...infoSession.metadata,
@@ -4067,6 +4459,10 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
             if (!Number.isNaN(ts.getTime())) infoSession.lastActivityAt = ts
           }
         }
+        // Only a NEW title is news: `updatedAt` ticks on every turn and agents
+        // republish the same title alongside it, and the event mapper can only
+        // render a title anyway.
+        if (typeof update.title !== "string" || update.title === previousTitle) return null
         return {
           type: "session_info_update",
           sessionId,

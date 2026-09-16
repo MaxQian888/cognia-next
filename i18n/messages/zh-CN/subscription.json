@@ -442,10 +442,16 @@
     "error": "限额查询失败：{message}",
     "fetchedAt": "更新于 {time}",
     "meter": {
+      "acu": "ACU 用量",
       "credit": "余额",
+      "daily": "每日配额",
+      "flexCredits": "Flex 点数",
+      "flowCredits": "Flow 点数",
       "monthly": "本月",
       "overage": "按量付费超额",
+      "promptCredits": "Prompt 点数",
       "session": "当前会话",
+      "topUp": "自动充值",
       "weekly": "本周（所有模型）",
       "weekly_opus": "本周（仅 Opus）",
       "weekly_sonnet": "本周（仅 Sonnet）"

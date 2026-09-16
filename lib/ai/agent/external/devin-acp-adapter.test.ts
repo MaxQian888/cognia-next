@@ -2,6 +2,7 @@ jest.mock("./acp-client", () => ({ AcpClientAdapter: class {} }))
 
 import type { AcpClientAdapter } from "./acp-client"
 import type {
+  AcpConfigOption,
   ExternalAgentConfig,
   ExternalAgentEvent,
   ExternalAgentSession,
@@ -66,10 +67,16 @@ function fake(id: string) {
       }
     }),
     getSessionModels: jest.fn(() => ({ currentModelId: "swe-2-medium", availableModels: [] })),
-    getConfigOptions: jest.fn(() => []),
+    getConfigOptions: jest.fn((): AcpConfigOption[] | undefined => []),
     setSessionModel: jest.fn(),
     setSessionMode: jest.fn(),
-    setConfigOption: jest.fn(),
+    setConfigOption: jest.fn(
+      async (
+        _sessionId: string,
+        _configId: string,
+        _value: string | boolean
+      ): Promise<AcpConfigOption[]> => []
+    ),
     getCompactionCapability: jest.fn(),
     compactSession: jest.fn(),
     getProviderUndoCapability: jest.fn(),
@@ -324,6 +331,80 @@ it("passes per-session model, configuration and advertised commands to their own
   expect(children[0].undoLastProviderChange).toHaveBeenCalledWith(session.id)
   await adapter.disconnect()
   expect(() => adapter.cancel(session.id)).toThrow("Session not found")
+})
+
+it("synthesizes a thought_level axis out of the Devin model list", async () => {
+  const { adapter, children } = harness()
+  await adapter.connect(config)
+  const session = await adapter.createSession()
+  let wireOptions: AcpConfigOption[] = [
+    {
+      id: "model",
+      name: "Model",
+      category: "model",
+      type: "select" as const,
+      currentValue: "claude-opus-5-high",
+      options: [
+        { value: "claude-opus-5-low", name: "Claude Opus 5 Low Thinking" },
+        { value: "claude-opus-5-medium", name: "Claude Opus 5 Medium Thinking" },
+        { value: "claude-opus-5-high", name: "Claude Opus 5 High Thinking" },
+        { value: "claude-opus-5-max", name: "Claude Opus 5 Max Thinking" },
+        { value: "swe-1-6", name: "SWE-1.6" },
+        { value: "swe-1-7", name: "SWE-1.7 Max" },
+      ],
+    },
+    {
+      id: "mode",
+      name: "Mode",
+      category: "mode",
+      type: "select" as const,
+      currentValue: "smart",
+      options: [{ value: "smart", name: "Smart" }],
+    },
+  ]
+  children[0].getConfigOptions.mockImplementation(() => wireOptions)
+  children[0].setConfigOption.mockImplementation(
+    async (_id: string, configId: string, value: string | boolean) => {
+      wireOptions = wireOptions.map((option) =>
+        option.id === configId && option.type === "select"
+          ? { ...option, currentValue: String(value) }
+          : option
+      )
+      return wireOptions
+    }
+  )
+
+  const listed = adapter.getConfigOptions(session.id)
+  expect(listed?.map((option) => option.id)).toEqual(["model", "mode", "devin.thought_level"])
+  const axis = listed?.[2]
+  expect(axis).toMatchObject({ category: "thought_level", currentValue: "high" })
+  expect(
+    axis?.type === "select" &&
+      axis.options
+        .flatMap((entry) => ("group" in entry ? entry.options : [entry]))
+        .map((e) => e.value)
+  ).toEqual(["low", "medium", "high", "max"])
+
+  // A thinking write is a model write to the family member carrying that level.
+  const after = await adapter.setConfigOption(session.id, "devin.thought_level", "low")
+  expect(children[0].setConfigOption).toHaveBeenCalledWith(session.id, "model", "claude-opus-5-low")
+  expect(after.find((option) => option.id === "model")).toMatchObject({
+    currentValue: "claude-opus-5-low",
+  })
+  expect(after.find((option) => option.id === "devin.thought_level")).toMatchObject({
+    currentValue: "low",
+  })
+
+  // Other config ids delegate untouched; unknown levels reject without a write.
+  await adapter.setConfigOption(session.id, "mode", "plan")
+  expect(children[0].setConfigOption).toHaveBeenLastCalledWith(session.id, "mode", "plan")
+  await expect(adapter.setConfigOption(session.id, "devin.thought_level", "none")).rejects.toThrow(
+    "not available"
+  )
+  await expect(adapter.setConfigOption(session.id, "devin.thought_level", true)).rejects.toThrow(
+    "not available"
+  )
+  await adapter.disconnect()
 })
 
 it("retains the discovery connection's feature gates for connection-level APIs", async () => {

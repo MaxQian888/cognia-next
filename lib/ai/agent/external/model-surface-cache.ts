@@ -77,6 +77,16 @@ const issued = new Map<string, number>()
  * picker is telling them there is nothing to pick.
  */
 const failures = new Map<string, { attempts: number; retryAt: number }>()
+/**
+ * Which external session each Cognia conversation has open, as the hook last
+ * resolved it. Keyed like `cache`, with the CHAT session id in the second slot.
+ *
+ * Resolving it needs the agent manager, which a synchronous reader (a plugin
+ * dial asking `effortSurfaceForSession`) cannot import. Without this that
+ * reader could only guess at the catalog entry, and on a conversation whose
+ * session was open it offered a different ladder from the host's own chip.
+ */
+const conversationSessions = new Map<string, string>()
 /** Which machine the cached answers describe. See `retireStaleScope`. */
 let cachedScope: string | null = null
 const listeners = new Set<() => void>()
@@ -152,12 +162,51 @@ export function forgetAgentModelSurface(agentId?: string): void {
   const keys = [...new Set([...cache.keys(), ...inFlight.keys(), ...failures.keys()])]
   if (!agentId) {
     for (const entry of keys) invalidate(entry)
+    conversationSessions.clear()
     publish()
     return
   }
   const prefix = `${agentId}\u0000`
   for (const entry of keys) if (entry.startsWith(prefix)) invalidate(entry)
+  // A reconnect is a new process with new session ids, so a binding to the old
+  // one would point every reader at an entry that can never be loaded again.
+  for (const entry of [...conversationSessions.keys()])
+    if (entry.startsWith(prefix)) conversationSessions.delete(entry)
   publish()
+}
+
+/**
+ * Record which external session a conversation has open (or that it has none).
+ *
+ * Publishes only on a change, because the hook calls this on every resolve and
+ * every reader wakes on a publish.
+ */
+export function bindConversationSession(
+  agentId: string,
+  chatSessionId: string,
+  externalSessionId: string | null
+): void {
+  const id = key(agentId, chatSessionId)
+  if ((conversationSessions.get(id) ?? null) === externalSessionId) return
+  if (externalSessionId) conversationSessions.set(id, externalSessionId)
+  else conversationSessions.delete(id)
+  publish()
+}
+
+/**
+ * What the cache holds for one conversation, with no round trip: the answer
+ * for its open session, else the agent's session-less catalog. The same
+ * precedence `useExternalAgentModels` renders, for a caller that has no hooks.
+ */
+export function cachedConversationSurface(
+  agentId: string,
+  chatSessionId: string | undefined
+): ModelSurfaceResult | null {
+  const bound = chatSessionId ? conversationSessions.get(key(agentId, chatSessionId)) : undefined
+  return (
+    (bound ? cachedAgentModelSurface(agentId, bound) : null) ??
+    cachedAgentModelSurface(agentId, AGENT_MODEL_CATALOG)
+  )
 }
 
 /** Injected so the loader is testable without standing up a manager. */

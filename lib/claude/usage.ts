@@ -148,6 +148,7 @@ export function externalTokenUsageToUsageInfo(usage: {
     ...(usage.providerCost && usage.providerCost.currency === "USD"
       ? { totalCostUsd: usage.providerCost.amount }
       : {}),
+    ...(usage.providerCost === undefined ? {} : { providerCost: usage.providerCost }),
   }
 }
 

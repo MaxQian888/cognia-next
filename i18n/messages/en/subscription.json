@@ -442,10 +442,16 @@
     "error": "Limit query failed: {message}",
     "fetchedAt": "Updated {time}",
     "meter": {
+      "acu": "ACU usage",
       "credit": "Credit balance",
+      "daily": "Daily quota",
+      "flexCredits": "Flex credits",
+      "flowCredits": "Flow credits",
       "monthly": "Current month",
       "overage": "Pay-as-you-go overage",
+      "promptCredits": "Prompt credits",
       "session": "Current session",
+      "topUp": "Auto top-up",
       "weekly": "Current week (all models)",
       "weekly_opus": "Current week (Opus only)",
       "weekly_sonnet": "Current week (Sonnet only)"

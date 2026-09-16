@@ -1,0 +1,5 @@
+---
+"cognia-next": patch
+---
+
+Stop rendering ACP state-mirror republishes as transcript rows: `available_commands_update`, `current_mode_update`, `config_option_update`, and `session_info_update` are full-state snapshots the agent re-sends at every prompt boundary, so identical republishes are now suppressed at the client instead of producing a "commands changed: 150 commands available" / "External mode" line on every turn (metadata still tracks the latest state). Harden `elicitation/create` handling for the Devin ACP path so the agent's ask tool no longer hard-fails: the request normalizer now accepts MCP-dialect payloads without a `mode` field, schemas with no `properties`, enum/oneOf properties missing an explicit `type`, dual-scope requests, and drops undeclared `required` names; integer/number answers are coerced to numbers; and a response that fails schema validation now settles the wire request with `cancel` instead of orphaning the agent's tool call until the 5-minute timeout while killing the turn.

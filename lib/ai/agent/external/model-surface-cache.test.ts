@@ -1,6 +1,9 @@
 import {
   __setModelSurfaceDepsForTests,
+  AGENT_MODEL_CATALOG,
+  bindConversationSession,
   cachedAgentModelSurface,
+  cachedConversationSurface,
   forgetAgentModelSurface,
   loadAgentModelSurface,
   subscribeAgentModelSurface,
@@ -341,5 +344,66 @@ describe("subscribeAgentModelSurface", () => {
     off()
     await loadAgentModelSurface("b", "s")
     expect(woke).toBe(2)
+  })
+})
+
+/**
+ * A plugin dial reads the ladder synchronously and cannot resolve which
+ * external session a conversation has open (that takes the agent manager), so
+ * the hook that does resolve it records the answer here.
+ */
+describe("a conversation's bound session", () => {
+  let restore: (() => void) | undefined
+
+  beforeEach(() => forgetAgentModelSurface())
+  afterEach(() => {
+    restore?.()
+    restore = undefined
+  })
+
+  it("answers from the bound session, and from the catalog before one is open", async () => {
+    const catalog = { ...THINKING, levels: ["low", "medium", "high"] }
+    const fetchSurface = jest.fn(async (_agent: string, session: string) =>
+      session === AGENT_MODEL_CATALOG
+        ? { status: "ok" as const, data: { models: SURFACE, thinking: catalog } }
+        : reply()
+    )
+    restore = __setModelSurfaceDepsForTests({ fetchSurface })
+    await loadAgentModelSurface("a", AGENT_MODEL_CATALOG)
+    await loadAgentModelSurface("a", "ext-1")
+
+    expect(cachedConversationSurface("a", "chat-1")?.thinking).toEqual(catalog)
+    expect(cachedConversationSurface("a", undefined)?.thinking).toEqual(catalog)
+
+    bindConversationSession("a", "chat-1", "ext-1")
+    expect(cachedConversationSurface("a", "chat-1")?.thinking).toEqual(THINKING)
+    // Another conversation on the same agent is not bound by this one.
+    expect(cachedConversationSurface("a", "chat-2")?.thinking).toEqual(catalog)
+  })
+
+  it("wakes readers only when the binding actually changes", () => {
+    let woke = 0
+    const off = subscribeAgentModelSurface(() => {
+      woke += 1
+    })
+    bindConversationSession("a", "chat-1", "ext-1")
+    bindConversationSession("a", "chat-1", "ext-1")
+    expect(woke).toBe(1)
+    bindConversationSession("a", "chat-1", null)
+    expect(woke).toBe(2)
+    off()
+  })
+
+  it("drops the agent's bindings on disconnect, since its session ids die with it", async () => {
+    restore = __setModelSurfaceDepsForTests({ fetchSurface: jest.fn().mockResolvedValue(reply()) })
+    bindConversationSession("a", "chat-1", "ext-1")
+    bindConversationSession("b", "chat-1", "ext-9")
+    forgetAgentModelSurface("a")
+    await loadAgentModelSurface("a", "ext-1")
+    await loadAgentModelSurface("b", "ext-9")
+
+    // `a` is unbound, so with no catalog entry it has nothing to answer from.
+    expect(cachedConversationSurface("a", "chat-1")).toBeNull()
+    expect(cachedConversationSurface("b", "chat-1")?.thinking).toEqual(THINKING)
   })
 })

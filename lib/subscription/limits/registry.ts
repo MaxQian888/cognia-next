@@ -13,6 +13,7 @@ import { CATALOG_SOURCES } from "./descriptor/catalog"
 import { anthropicLimitsSource } from "./sources/anthropic"
 import { balanceLimitsSource } from "./sources/balance"
 import { codexLimitsSource } from "./sources/codex"
+import { devinLimitsSource } from "./sources/devin"
 import { volcengineLimitsSource } from "./sources/volcengine"
 
 import type { LimitsSource } from "@/types/subscription"
@@ -27,6 +28,7 @@ export const LIMITS_SOURCES: readonly LimitsSource[] = [
   volcengineLimitsSource,
   anthropicLimitsSource,
   codexLimitsSource,
+  devinLimitsSource,
   balanceLimitsSource,
 ]
 

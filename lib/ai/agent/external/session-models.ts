@@ -232,7 +232,7 @@ export function findModelConfigOption(
 }
 
 /** Flatten `AcpConfigOptionValue[] | AcpConfigOptionGroup[]` into plain values. */
-function flattenValues(
+export function flattenValues(
   options: Extract<AcpConfigOption, { type: "select" }>["options"]
 ): AcpConfigOptionValue[] {
   return options.flatMap((entry) => ("group" in entry ? entry.options : [entry]))

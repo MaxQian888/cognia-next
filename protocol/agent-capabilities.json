@@ -112,9 +112,8 @@
           "reasonKey": "agentOwned"
         },
         "thinking": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
+          "level": "unknown",
+          "evidence": "none"
         },
         "context-management": {
           "level": "unsupported",
@@ -1347,10 +1346,21 @@
       "protocol": "opencode-v2",
       "note": "Current local service discovery or explicit remote endpoint; Cognia does not stop a service it does not own.",
       "capabilities": {}
+    },
+    "devin": {
+      "protocol": "acp",
+      "note": "`devin acp` publishes only `mode` and `model` session config options; reasoning intensity is encoded in the model ids themselves (`…-low`, `…-high`, `…-xhigh`, `…-max`). DevinAcpAdapter synthesizes a `thought_level` select over the current model family and writes a level back as a model-variant switch, so the axis is `equivalent`, not `native`.",
+      "capabilities": {
+        "thinking": {
+          "level": "equivalent",
+          "evidence": "adapter-code",
+          "reasonKey": "modelVariantOverlay"
+        }
+      }
     }
   },
   "capabilityNotes": {
-    "thinking": "For an external agent this asks whether the HOST can set the thinking / reasoning level, which is the only question any surface acts on. An agent that merely streams thought chunks (every ACP agent) does not satisfy it -- there is nothing to configure. Codex takes it on its options channel and Pi has `set_thinking_level`, so those two are `native`. OpenCode expresses the same idea as variants -- named request overlays for one model, its docs' words -- so v2 is `equivalent`, not `native`: `opencode-v2-client.ts` sends the chosen id as the `variant` half of the `ModelRef` on `session.switchModel`, which is the `provider/model#variant` reference OpenCode itself documents.",
+    "thinking": "For an external agent this asks whether the HOST can set the thinking / reasoning level, which is the only question any surface acts on. An agent that merely streams thought chunks (every ACP agent) does not satisfy it -- there is nothing to configure. Codex takes it on its options channel and Pi has `set_thinking_level`, so those two are `native`. OpenCode expresses the same idea as variants -- named request overlays for one model, its docs' words -- so v2 is `equivalent`, not `native`: `opencode-v2-client.ts` sends the chosen id as the `variant` half of the `ModelRef` on `session.switchModel`, which is the `provider/model#variant` reference OpenCode itself documents. Devin folds the ladder into its model catalog instead (`claude-opus-5-high`, `gpt-5-6-sol-max`), so `DevinAcpAdapter` synthesizes a `thought_level` config option over the current model family and a level write becomes a model-variant switch -- `equivalent` via `modelVariantOverlay`. The generic ACP row stays `unknown`: the `thought_level` category exists in the protocol's session config options, but whether a given agent publishes one (or encodes levels elsewhere) is a per-session fact.",
     "mcp": "Whether Cognia can attach an MCP server to the running conversation. ACP carries per-session servers, Codex uses per-thread config, DeepSeek Harness mounts a session-owned composition, and Pi uses the bundled Cognia extension. Remote A2A has no reverse tool channel. OpenCode uses a private local service per conversation; shared remote endpoints cannot attach the local bridge.",
     "session.resume": "Reopening a prior session. On ACP this is gated on the agent advertising stable `sessionCapabilities.resume`, with legacy `loadSession` as a fallback, so the row is `unknown` and the handshake answers it.",
     "compaction": "ACP has no compaction method: the only route is a `/compact` or `/compress` the agent chose to advertise, which is a per-session live fact. Pi and Codex have native methods.",

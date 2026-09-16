@@ -9,11 +9,18 @@ import type {
   ExternalAgentEvent,
   ExternalAgentMessage,
   ExternalAgentExecutionOptions,
+  AcpConfigOption,
   AcpElicitationResponse,
 } from "@/types/agent/external-agent"
 import { loggers } from "@cognia/logging"
 import { AcpClientAdapter } from "./acp-client"
 import { BaseProtocolAdapter, type SessionCreateOptions } from "./protocol-adapter"
+import {
+  DEVIN_THOUGHT_LEVEL_OPTION_ID,
+  devinModelIdForLevel,
+  withDevinThoughtLevelOption,
+} from "./devin-model-axis"
+import { findModelConfigOption } from "./session-models"
 
 export class DevinAcpAdapter extends BaseProtocolAdapter {
   readonly protocol = "acp"
@@ -366,11 +373,39 @@ export class DevinAcpAdapter extends BaseProtocolAdapter {
   getSessionModels(...args: Parameters<AcpClientAdapter["getSessionModels"]>) {
     return this.owner(args[0]).getSessionModels(...args)
   }
-  setConfigOption(...args: Parameters<AcpClientAdapter["setConfigOption"]>) {
-    return this.owner(args[0]).setConfigOption(...args)
+  /**
+   * Devin publishes no `thought_level` option — its reasoning ladder lives
+   * inside the `model` select's ids (`…-low`, `…-high`, `…-max`). A write to
+   * the synthesized axis is therefore a `model` write to the family member
+   * carrying that level; every other config id delegates unchanged. The reply
+   * re-synthesizes the option so the caller sees model and thinking state
+   * agree after the write.
+   */
+  async setConfigOption(
+    sessionId: string,
+    configId: string,
+    value: string | boolean
+  ): Promise<AcpConfigOption[]> {
+    const child = this.owner(sessionId)
+    if (configId !== DEVIN_THOUGHT_LEVEL_OPTION_ID) {
+      return child.setConfigOption(sessionId, configId, value)
+    }
+    const modelOption = findModelConfigOption(child.getConfigOptions(sessionId))
+    const modelId = typeof value === "string" ? devinModelIdForLevel(modelOption, value) : undefined
+    if (!modelOption || !modelId) {
+      throw new Error(`Devin thinking level '${String(value)}' is not available on this model`)
+    }
+    await child.setConfigOption(sessionId, modelOption.id, modelId)
+    return this.getConfigOptions(sessionId) ?? []
   }
-  getConfigOptions(...args: Parameters<AcpClientAdapter["getConfigOptions"]>) {
-    return this.owner(args[0]).getConfigOptions(...args)
+  /**
+   * The child's wire options plus the synthesized `thought_level` axis —
+   * appended rather than merged into session metadata so the raw list stays
+   * exactly what the agent sent (and a genuine `thought_level`, if Devin ever
+   * publishes one, wins untouched).
+   */
+  getConfigOptions(sessionId: string): AcpConfigOption[] | undefined {
+    return withDevinThoughtLevelOption(this.owner(sessionId).getConfigOptions(sessionId))
   }
   getCompactionCapability(...args: Parameters<AcpClientAdapter["getCompactionCapability"]>) {
     return this.owner(args[0]).getCompactionCapability(...args)

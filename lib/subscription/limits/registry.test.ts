@@ -15,6 +15,7 @@ describe("LIMITS_SOURCES", () => {
       "volcengine",
       "anthropic",
       "codex",
+      "devin",
       "balance",
     ])
   })

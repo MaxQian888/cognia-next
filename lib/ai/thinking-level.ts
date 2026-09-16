@@ -236,7 +236,7 @@ export function externalAgentThinkingLevels(published?: readonly string[]): Effo
  * published: the slider indexes into this list, and an agent that listed its
  * levels deepest-first would invert the whole control.
  */
-function projectAgentLevels(published: readonly string[] | undefined): EffortTier[] {
+export function projectAgentLevels(published: readonly string[] | undefined): EffortTier[] {
   if (!published || published.length === 0) return []
   const declared = new Set(published)
   return EFFORT_SLIDER_LEVELS.filter(
