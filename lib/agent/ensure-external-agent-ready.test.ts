@@ -23,12 +23,24 @@ jest.mock("@/lib/ai/agent/external/config-normalizer", () => ({
 const managerGetAgent = jest.fn()
 const managerAddAgent = jest.fn()
 const managerConnect = jest.fn()
+const managerReconnect = jest.fn()
 jest.mock("@/lib/ai/agent/external/manager", () => ({
   getExternalAgentManager: () => ({
     getAgent: (...a: unknown[]) => managerGetAgent(...a),
     addAgent: (...a: unknown[]) => managerAddAgent(...a),
     connect: (...a: unknown[]) => managerConnect(...a),
+    reconnect: (...a: unknown[]) => managerReconnect(...a),
   }),
+}))
+
+const placeAgentRun = jest.fn()
+const agentNeedsRespawn = jest.fn(() => false)
+jest.mock("@/lib/sandbox/run-environment", () => ({
+  placeAgentRun: (...a: unknown[]) => placeAgentRun(...a),
+  agentNeedsRespawn: (...a: unknown[]) => agentNeedsRespawn(...(a as [])),
+}))
+jest.mock("@/lib/sandbox/environment-outcome-message", () => ({
+  outcomeMessage: async (outcome: { code: string }) => `localized:${outcome.code}`,
 }))
 
 const config = { id: "pi-1", name: "Pi", protocol: "pi-rpc" }
@@ -41,6 +53,9 @@ beforeEach(() => {
   managerGetAgent.mockReturnValue(undefined)
   managerAddAgent.mockResolvedValue(undefined)
   managerConnect.mockResolvedValue(undefined)
+  managerReconnect.mockResolvedValue(undefined)
+  placeAgentRun.mockResolvedValue({ kind: "off" })
+  agentNeedsRespawn.mockReturnValue(false)
 })
 
 describe("ensureExternalAgentReady", () => {
@@ -138,6 +153,102 @@ describe("ensureExternalAgentReady", () => {
   it("shows the attempt as connecting while it runs", async () => {
     await ensureExternalAgentReady("pi-1")
     expect(setConnectionStatus.mock.calls.map((call) => call[1])).toContain("connecting")
+  })
+})
+
+describe("ensureExternalAgentReady — the run's environment (ADR-0182)", () => {
+  const environment = {
+    projectId: "prj1",
+    environmentId: "env-1",
+    project: { roots: [{ id: "r1", path: "/repo", isPrimary: true }] },
+    executionRoot: "/repo",
+    surface: "interactive" as const,
+  }
+
+  // Q39: a caller that is not a project run resolves nothing at all.
+  it("resolves nothing for a bare connect", async () => {
+    await ensureExternalAgentReady("pi-1")
+    expect(placeAgentRun).not.toHaveBeenCalled()
+    expect(managerConnect).toHaveBeenCalledWith("pi-1")
+  })
+
+  it("resolves the environment for this agent before connecting", async () => {
+    await expect(ensureExternalAgentReady("pi-1", { environment })).resolves.toEqual({
+      ok: true,
+      alreadyConnected: false,
+    })
+    expect(placeAgentRun).toHaveBeenCalledWith({ ...environment, agentId: "pi-1" })
+    expect(placeAgentRun.mock.invocationCallOrder[0]).toBeLessThan(
+      managerConnect.mock.invocationCallOrder[0]!
+    )
+  })
+
+  // A refusal means running on the ordinary path would do less than asked,
+  // so no process may start at all.
+  it("refuses a run whose environment was refused, before any process starts", async () => {
+    placeAgentRun.mockResolvedValue({ kind: "refused", code: "sandbox_pool_disabled", notices: [] })
+    await expect(ensureExternalAgentReady("pi-1", { environment })).resolves.toEqual({
+      ok: false,
+      reason: "blocked",
+      detail: "localized:sandbox_pool_disabled",
+    })
+    expect(managerConnect).not.toHaveBeenCalled()
+    expect(managerReconnect).not.toHaveBeenCalled()
+  })
+
+  // Carrying on after a resolution that could not run would start an agent a
+  // mandatory project never allowed on the host.
+  it("fails, rather than connecting, when resolution itself throws", async () => {
+    placeAgentRun.mockRejectedValue(new Error("dexie closed"))
+    await expect(ensureExternalAgentReady("pi-1", { environment })).resolves.toEqual({
+      ok: false,
+      reason: "failed",
+      detail: "dexie closed",
+    })
+    expect(managerConnect).not.toHaveBeenCalled()
+    expect(recordAgentFailure).toHaveBeenCalled()
+  })
+
+  it("reuses a running agent that already runs where this run belongs", async () => {
+    managerGetAgent.mockReturnValue({ connectionStatus: "connected" })
+    await expect(ensureExternalAgentReady("pi-1", { environment })).resolves.toEqual({
+      ok: true,
+      alreadyConnected: true,
+    })
+    expect(managerReconnect).not.toHaveBeenCalled()
+  })
+
+  // The project changed environment while its agent kept running.
+  it("restarts a running agent that runs somewhere else", async () => {
+    managerGetAgent.mockReturnValue({ connectionStatus: "connected" })
+    agentNeedsRespawn.mockReturnValue(true)
+
+    await expect(ensureExternalAgentReady("pi-1", { environment })).resolves.toEqual({
+      ok: true,
+      alreadyConnected: false,
+    })
+    expect(managerReconnect).toHaveBeenCalledWith("pi-1")
+    expect(managerConnect).not.toHaveBeenCalled()
+  })
+
+  // A bare connect answering "connected" must not stand in for a project run
+  // whose environment nobody resolved.
+  it("does not share an in-flight answer between a bare connect and a project run", async () => {
+    const releases: Array<() => void> = []
+    managerConnect.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          releases.push(resolve)
+        })
+    )
+    const bare = ensureExternalAgentReady("pi-1")
+    const scoped = ensureExternalAgentReady("pi-1", { environment })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    // Two attempts, not one shared: the project run resolved its environment.
+    expect(placeAgentRun).toHaveBeenCalledTimes(1)
+    expect(managerConnect).toHaveBeenCalledTimes(2)
+    for (const release of releases) release()
+    await Promise.all([bare, scoped])
   })
 })
 

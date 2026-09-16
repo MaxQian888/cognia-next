@@ -7,6 +7,8 @@
 
 import { invoke } from "@tauri-apps/api/core"
 import { listen, UnlistenFn } from "@tauri-apps/api/event"
+import { withSpawnPlacement } from "@/lib/sandbox/spawn-placement-registry"
+import type { SandboxPlacement } from "@/types/sandbox/environment-spec"
 
 // ============================================================================
 // Types
@@ -32,6 +34,16 @@ export interface ExternalAgentSpawnConfig {
    * `cli/src/runtime/external/node-backend.ts`.
    */
   framing?: "line" | "raw"
+  /**
+   * Run the agent in the project's runtime environment instead of this host's
+   * own execution path (ADR-0182).
+   *
+   * Absent on every spawn that resolved no environment, which is every spawn
+   * before a project opts in. Set from the pending-placement registry by
+   * `spawnExternalAgent` rather than by callers, because the placement belongs
+   * to the run and this config is the agent's.
+   */
+  sandbox?: SandboxPlacement
 }
 
 /** Terminal state */
@@ -103,7 +115,11 @@ export interface ExternalAgentStderrEvent {
 // ============================================================================
 
 export async function spawnExternalAgent(config: ExternalAgentSpawnConfig): Promise<string> {
-  return invoke<string>("spawn_external_agent", { config })
+  // The run's runtime-environment placement, if one was resolved for this
+  // agent id. `withSpawnPlacement` returns the same arguments object when
+  // there is none, so a deployment without runtime environments sends exactly
+  // the payload it always did (ADR-0182 Q39).
+  return invoke<string>("spawn_external_agent", withSpawnPlacement({ config }))
 }
 
 export async function sendToExternalAgent(agentId: string, message: string): Promise<void> {

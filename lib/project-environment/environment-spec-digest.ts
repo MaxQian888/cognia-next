@@ -14,6 +14,8 @@ import { sha256String } from "@/lib/ocr/hash"
 import { canonicalizeJson } from "@/lib/plugin/character-pack/canonical-json"
 import type { EnvironmentSpec } from "@/types/sandbox/environment-spec"
 
+import type { EnvironmentDeclaration } from "./environment-declaration"
+
 export type EnvironmentSpecBody = Omit<EnvironmentSpec, "specDigest">
 
 /** The digest a spec's content hashes to — `specDigest` and `explain` excluded. */
@@ -56,4 +58,30 @@ export async function environmentRuntimeFieldsDigest(
       user: spec.user,
     })
   )
+}
+
+/**
+ * The runtime-fields digest a declaration WILL have once it is the source.
+ *
+ * An approval freezes the runtime fields of the spec the declaration resolves
+ * to, and admission compares them against the spec a run actually carries. A
+ * person approving from the panel is looking at the declaration, not at a
+ * spec — the resolver has not chosen it yet, because it is not approved. So
+ * this computes the digest the resolver's declaration branch would produce:
+ * the fields copied verbatim, and the declared user wrapped exactly as
+ * `chooseUser` wraps it. Pinned against the resolver in the test, so the two
+ * cannot drift apart silently.
+ */
+export async function declarationRuntimeFieldsDigest(
+  declaration: Pick<
+    EnvironmentDeclaration,
+    "containerEnv" | "lifecycleCommands" | "forwardPorts" | "user"
+  >
+): Promise<string> {
+  return environmentRuntimeFieldsDigest({
+    containerEnv: { ...declaration.containerEnv },
+    lifecycleCommands: declaration.lifecycleCommands,
+    forwardPorts: declaration.forwardPorts,
+    user: declaration.user ? { declared: { ...declaration.user } } : {},
+  })
 }

@@ -279,6 +279,26 @@
     "connectingHint": "Connecting to the agent… You can keep using Cognia while it starts.",
     "devinSetupHint": "Install Devin CLI and run `devin auth login` once. Cognia launches `devin acp` and discovers models from the session; use `acp --model swe2` to select SWE-2 at launch. Choose Accept Edits (Code) when you want Devin to modify files. Cognia tools are available in each conversation alongside Devin’s native tools."
   },
+  "placement": {
+    "fallback": "Not sandboxed",
+    "pending": "Sandbox requested",
+    "pendingTooltip": "This run asked for a runtime environment; the host has not reported where it started yet.",
+    "refused": "Environment refused",
+    "sandboxed": "Sandbox · {tier}",
+    "sandboxedUntiered": "Sandbox",
+    "tooltip": {
+      "bundle": "Agent bundle: {tag} ({libc})",
+      "credentials": "Credentials: this host's own ({mode}); per-sandbox gateway tickets are not available yet",
+      "egressEnforced": "Network: {tier}, enforced",
+      "egressNotEnforced": "Network: {tier}, recorded but not enforced",
+      "image": "Image: {image}",
+      "notReported": "not reported",
+      "tier": "Isolation: {tier}",
+      "user": "Runs as {user}",
+      "userRemapped": "Runs as {user}, remapped onto the workspace owner"
+    },
+    "unknown": "Placement not recognized"
+  },
   "runCommand": "Run /{name}",
   "runtimes": {
     "title": "Installed runtimes",

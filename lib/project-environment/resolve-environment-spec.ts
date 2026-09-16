@@ -88,7 +88,16 @@ export interface ResolveEnvironmentSpecInput {
 }
 
 export type SandboxFallbackCode =
-  "sandbox_fallback_pool_disabled" | "sandbox_fallback_bundle_unavailable"
+  | "sandbox_fallback_pool_disabled"
+  | "sandbox_fallback_bundle_unavailable"
+  /**
+   * The catalog could not be read at all — the Host is unreachable, or its
+   * environment store answered an error. An infrastructure fault, so it falls
+   * back (Q40) unless isolation is mandatory. Decided by
+   * `lib/sandbox/run-environment.ts`, which is what holds the Host call; the
+   * code lives here so there is one fallback table to localize.
+   */
+  | "sandbox_fallback_catalog_unreadable"
 
 export type EnvironmentRefusalCode =
   | "runtime_selection_invalid"
@@ -108,6 +117,20 @@ export type EnvironmentRefusalCode =
   | "egress_preset_unknown"
   | "egress_domain_invalid"
   | "egress_domain_limit"
+  /**
+   * The project asked for a desktop local container and this host cannot run
+   * one (ADR-0182). Decided by `lib/sandbox/environment-placement.ts`, not
+   * here: which environment a project should get is this resolver's question,
+   * and whether THIS host can host it is the spawn's. The code lives in this
+   * union anyway so the UI has one refusal table to localize.
+   */
+  | "local_container_unavailable"
+  /**
+   * The catalog could not be read and isolation is mandatory, so the run
+   * refuses rather than taking the unsandboxed path. Same origin as
+   * `sandbox_fallback_catalog_unreadable` and the same reason for living here.
+   */
+  | "environment_catalog_unreadable"
 
 /** Something the person should see about how their environment was chosen. */
 export interface ResolutionNotice {

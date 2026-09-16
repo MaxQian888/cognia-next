@@ -1703,6 +1703,81 @@ describe("useClaudeChat — actions", () => {
     )
   })
 
+  // ADR-0182. A project run is readied where its runtime environment puts it,
+  // so the readiness check is told the session's project, its environment
+  // definition and the root it runs in. A session with no project is told
+  // nothing (the plain-lane tests above), which is the Q39 off path.
+  it("readies an external agent for the session's project and environment", async () => {
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    chatState.activeSessionId = "sess-1"
+    getProjectEnvironmentMock.mockResolvedValue({
+      id: "env-1",
+      projectId: "project-1",
+      name: "Development",
+      isEnabled: true,
+      actions: [],
+      variables: {},
+      keyringReferences: [],
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    // The project rides on the execution context, as the other project-run
+    // tests here do: a top-level `projectId` also sends the turn through the
+    // Workspace Trust read, which this suite does not stand up.
+    getSessionMock.mockResolvedValue({
+      id: "sess-1",
+      title: "Project run",
+      executionContext: {
+        location: "local",
+        projectId: "project-1",
+        projectRoot: "/repo",
+        environmentId: "env-1",
+        taskWorkspace: { taskId: "task-1" },
+      },
+    })
+    executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "ok" })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hi", undefined, { sessionId: "sess-1" })
+    })
+
+    expect(ensureExternalAgentReadyMock).toHaveBeenCalledWith(
+      "ext-1",
+      expect.objectContaining({
+        environment: expect.objectContaining({
+          projectId: "project-1",
+          environmentId: "env-1",
+          executionRoot: "/repo",
+          surface: "interactive",
+          project: expect.objectContaining({ id: "project-1" }),
+        }),
+      })
+    )
+  })
+
+  it("stops the turn when readiness refuses the run's environment", async () => {
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    chatState.activeSessionId = "sess-1"
+    getSessionMock.mockResolvedValue({
+      id: "sess-1",
+      title: "Project run",
+      executionContext: { location: "local", projectId: "project-1", projectRoot: "/repo" },
+    })
+    ensureExternalAgentReadyMock.mockResolvedValueOnce({
+      ok: false,
+      reason: "blocked",
+      detail: "Runtime environments are not enabled on this deployment",
+    } as never)
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hi", undefined, { sessionId: "sess-1" })
+    })
+
+    expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
+  })
+
   it("routes an internal model and account through the external task gateway", async () => {
     useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
     chatState.activeSessionId = "sess-1"

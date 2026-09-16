@@ -90,6 +90,10 @@ import { detectInstalledRuntimes } from "./installed-runtimes"
 import { __setProcessPlaneDepsForTests } from "./process-plane"
 import { EMPTY_THINKING_SURFACE } from "./session-models"
 import { parseGatewaySessionId } from "./gateway-task"
+import {
+  __resetRunEnvironmentForTests,
+  recordRunEnvironmentOutcome,
+} from "@/lib/sandbox/run-environment"
 import type {
   ExternalAgentConfig,
   ExternalAgentEvent,
@@ -989,6 +993,67 @@ describe("addAgent / removeAgent / connect", () => {
     const m = freshManager()
     await m.addAgent(buildBaseConfig({ enabled: false }))
     await expect(m.connect("agent-1")).rejects.toThrow(/disabled/i)
+  })
+
+  // ADR-0182. A refused runtime environment is terminal: the project asked for
+  // something the deployment cannot give, and connecting anyway would start
+  // the agent on the ordinary unsandboxed path — exactly what the refusal
+  // said must not happen. It must also not be retried, or every attempt is
+  // spent re-deriving the same answer and the reason is buried under
+  // "connection failed".
+  describe("a refused runtime environment", () => {
+    afterEach(() => {
+      __resetRunEnvironmentForTests()
+    })
+
+    it("stops the connect before the adapter is asked, once, with sandbox_unavailable", async () => {
+      const m = freshManager()
+      protocolAdapterRegistry.register("codex-app-server", () => currentMock as never)
+      await m.addAgent(
+        buildBaseConfig({
+          protocol: "codex-app-server",
+          retryConfig: {
+            maxRetries: 3,
+            retryDelay: 0,
+            exponentialBackoff: false,
+            maxRetryDelay: 0,
+            retryOnErrors: ["connection", "sandbox", "environment"],
+          },
+        }),
+        { connect: false }
+      )
+      recordRunEnvironmentOutcome("agent-1", {
+        kind: "refused",
+        code: "catalog_entry_unavailable",
+        detail: { catalogEntryId: "gone" },
+        notices: [],
+      })
+
+      await expect(m.connect("agent-1")).rejects.toMatchObject({
+        name: "RunEnvironmentRefusedError",
+        code: "catalog_entry_unavailable",
+      })
+      expect(currentMock.connectImpl).not.toHaveBeenCalled()
+      expect(m.getAgent("agent-1")?.validity?.blockingReasonCode).toBe("sandbox_unavailable")
+    })
+
+    it.each([
+      ["off", { kind: "off" as const }],
+      [
+        "a fallback",
+        {
+          kind: "fallback" as const,
+          code: "sandbox_fallback_pool_disabled" as const,
+          notices: [],
+        },
+      ],
+    ])("lets %s through, because both mean run on the existing path", async (_label, outcome) => {
+      const m = freshManager()
+      await m.addAgent(buildBaseConfig(), { connect: false })
+      recordRunEnvironmentOutcome("agent-1", outcome)
+      await m.connect("agent-1")
+      expect(m.getAgent("agent-1")?.connectionStatus).toBe("connected")
+    })
   })
 })
 

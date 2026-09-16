@@ -13,11 +13,25 @@
  * if it is missing, and connect if it is not connected. Failures are recorded
  * against the agent through the same channel a manual connect uses, so they
  * surface where the agent is rather than as a raw error on the next send.
+ *
+ * # The run's environment (ADR-0182)
+ *
+ * A send that knows its project passes `environment`, and readiness then
+ * includes WHERE the agent runs: the project's runtime environment is
+ * resolved first, a refusal stops the send before any process starts, and an
+ * agent already running somewhere other than where this run belongs is
+ * restarted rather than reused. Without `environment` nothing here changes —
+ * which is every caller that is not a project run, and every run on a
+ * deployment that never enabled the pool (Q39).
  */
 
 import { describeExternalAgentFailure } from "@/lib/ai/agent/external/agent-failure"
 import { getExternalAgentExecutionBlockReason } from "@/lib/ai/agent/external/config-normalizer"
+import type { RunEnvironmentRequest } from "@/lib/sandbox/run-environment"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
+
+/** The project context of the run an agent is being readied for. */
+export type ReadinessEnvironment = Omit<RunEnvironmentRequest, "agentId">
 
 export type ExternalAgentReadiness =
   | { ok: true; alreadyConnected: boolean }
@@ -36,7 +50,11 @@ export type ExternalAgentReadiness =
  */
 const inFlight = new Map<string, Promise<ExternalAgentReadiness>>()
 
-async function run(agentId: string, deferConnect = false): Promise<ExternalAgentReadiness> {
+async function run(
+  agentId: string,
+  deferConnect = false,
+  environment?: ReadinessEnvironment
+): Promise<ExternalAgentReadiness> {
   const store = useExternalAgentStore.getState()
   const config = store.getAgent(agentId)
   if (!config) return { ok: false, reason: "unknown-agent" }
@@ -76,10 +94,32 @@ async function run(agentId: string, deferConnect = false): Promise<ExternalAgent
     }
   }
 
+  // Resolved before anything can start, so a refusal never leaves a process
+  // running on the path the refusal ruled out.
+  let respawn = false
+  if (environment) {
+    try {
+      const { agentNeedsRespawn, placeAgentRun } = await import("@/lib/sandbox/run-environment")
+      const outcome = await placeAgentRun({ ...environment, agentId })
+      if (outcome.kind === "refused") {
+        const { outcomeMessage } = await import("@/lib/sandbox/environment-outcome-message")
+        const detail = (await outcomeMessage(outcome).catch(() => undefined)) ?? outcome.code
+        return { ok: false, reason: "blocked", detail }
+      }
+      respawn = agentNeedsRespawn(agentId, outcome)
+    } catch (error) {
+      // Resolution itself failing is not "the environment is off": carrying on
+      // would start an agent a mandatory project never allowed on the host.
+      const detail = error instanceof Error ? error.message : String(error)
+      store.recordAgentFailure(describeExternalAgentFailure(agentId, "connect", error))
+      return { ok: false, reason: "failed", detail }
+    }
+  }
+
   const instance = manager.getAgent(agentId)
   // A task-scoped gateway process must acquire its route before any launch.
   if (deferConnect || config.cogniaModel) return { ok: true, alreadyConnected: false }
-  if (instance?.connectionStatus === "connected") {
+  if (instance?.connectionStatus === "connected" && !respawn) {
     store.setConnectionStatus(agentId, "connected")
     return { ok: true, alreadyConnected: true }
   }
@@ -87,7 +127,10 @@ async function run(agentId: string, deferConnect = false): Promise<ExternalAgent
   store.clearAgentFailure(agentId)
   store.setConnectionStatus(agentId, "connecting")
   try {
-    await manager.connect(agentId)
+    // Running somewhere this run does not belong: start it again, where it
+    // does. `reconnect` tears the old process down first.
+    if (instance?.connectionStatus === "connected") await manager.reconnect(agentId)
+    else await manager.connect(agentId)
     store.setConnectionStatus(agentId, manager.getAgent(agentId)?.connectionStatus ?? "connected")
     return { ok: true, alreadyConnected: false }
   } catch (error) {
@@ -108,12 +151,18 @@ async function run(agentId: string, deferConnect = false): Promise<ExternalAgent
  */
 export function ensureExternalAgentReady(
   agentId: string,
-  options?: { deferConnect?: boolean }
+  options?: { deferConnect?: boolean; environment?: ReadinessEnvironment }
 ): Promise<ExternalAgentReadiness> {
-  const key = `${agentId}:${options?.deferConnect === true ? "register" : "connect"}`
+  // A project run and a bare connect are different questions: sharing one
+  // in-flight answer would let a click's "connected" stand in for a run whose
+  // environment was never resolved.
+  const scope = options?.environment
+    ? `env:${options.environment.projectId}:${options.environment.environmentId ?? ""}:${options.environment.executionRoot ?? ""}`
+    : "bare"
+  const key = `${agentId}:${options?.deferConnect === true ? "register" : "connect"}:${scope}`
   const existing = inFlight.get(key)
   if (existing) return existing
-  const attempt = run(agentId, options?.deferConnect)
+  const attempt = run(agentId, options?.deferConnect, options?.environment)
     .catch((error: unknown): ExternalAgentReadiness => ({
       ok: false,
       reason: "failed",

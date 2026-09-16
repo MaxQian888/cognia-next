@@ -96,6 +96,10 @@ import {
 import { createDshRuntimeTransport, resolveDshLaunchFromConfig } from "./dsh-runtime-transport"
 import { canProjectOpenCodeV2Mcp } from "./opencode-v2-launcher"
 import { runsExternalAgentProcessesLocally } from "./agent-transport"
+import {
+  assertRunEnvironmentPlaced,
+  RunEnvironmentRefusedError,
+} from "@/lib/sandbox/run-environment"
 import { acpToolsToAgentTools } from "./translators"
 import { detectInstalledRuntimes } from "./installed-runtimes"
 import { externalAgentProcessPlane, PROCESS_PLANE_COMMANDS } from "./process-plane"
@@ -1658,6 +1662,15 @@ export class ExternalAgentManager {
       return false
     }
 
+    // ADR-0182. An environment refusal is a decision about what this project
+    // asked for, not a transient failure: retrying would spend every attempt
+    // re-deriving the same answer and bury the reason under "connection
+    // failed". The user has to change the selection, approve the declaration,
+    // or enable the pool.
+    if (error instanceof RunEnvironmentRefusedError) {
+      return false
+    }
+
     const message = this.normalizeErrorMessage(error).toLowerCase()
     if (!message) {
       return false
@@ -1797,7 +1810,15 @@ export class ExternalAgentManager {
     )
   }
 
-  private mapConnectionErrorToReasonCode(message: string): ExternalAgentBranchReasonCode {
+  private mapConnectionErrorToReasonCode(
+    message: string,
+    error?: unknown
+  ): ExternalAgentBranchReasonCode {
+    // The message is already localized, so no substring rule below can read
+    // it. The error's own type is what says what happened.
+    if (error instanceof RunEnvironmentRefusedError) {
+      return "sandbox_unavailable"
+    }
     const normalized = message.toLowerCase()
     if (normalized.includes("protocol") && normalized.includes("unsupported")) {
       return "protocol_unsupported"
@@ -2408,6 +2429,11 @@ export class ExternalAgentManager {
       }
 
       try {
+        // ADR-0182. Resolution already happened, before any process existed;
+        // a refusal there means running on the ordinary path would silently
+        // do less than the project asked for, so the connect stops here
+        // rather than starting an unsandboxed agent.
+        await assertRunEnvironmentPlaced(agentId)
         const launchConfig = await prepareDshManagedLaunch(instance.config)
         const connectTimeout = this.resolveExecutionTimeoutMs(instance)
         if (instance.config.protocol === "codex-app-server") {
@@ -2466,7 +2492,7 @@ export class ExternalAgentManager {
       } catch (error) {
         lastError = error
         const errorMessage = this.normalizeErrorMessage(error)
-        const reasonCode = this.mapConnectionErrorToReasonCode(errorMessage)
+        const reasonCode = this.mapConnectionErrorToReasonCode(errorMessage, error)
         this.updateInstanceState(agentId, instance, {
           lastError: errorMessage,
           validity: {

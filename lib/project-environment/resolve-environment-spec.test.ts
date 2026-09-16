@@ -9,7 +9,11 @@ import {
   environmentDeclarationDigest,
   parseWorkspaceEnvironmentBlock,
 } from "./environment-declaration"
-import { computeEnvironmentSpecDigest } from "./environment-spec-digest"
+import {
+  computeEnvironmentSpecDigest,
+  declarationRuntimeFieldsDigest,
+  environmentRuntimeFieldsDigest,
+} from "./environment-spec-digest"
 import type { EnvironmentDeclarationVerdict } from "./read-environment-declaration"
 import {
   deviceApprovalRef,
@@ -692,5 +696,24 @@ describe("image users and device approvals", () => {
     })
     await expect(deviceApprovalView(null, approved)).resolves.toBeUndefined()
     await expect(deviceApprovalView("/repo", undefined)).resolves.toBeUndefined()
+  })
+})
+
+describe("declarationRuntimeFieldsDigest", () => {
+  // A person approves from the declaration, before the resolver has chosen
+  // it; admission compares against the spec a run carries. The two digests
+  // must be the same number, or every approval made in the panel is refused
+  // at admission with a mismatch nobody can see.
+  it("equals the runtime-fields digest of the spec that declaration resolves to", async () => {
+    const declaration = await devcontainerVerdict()
+    const { spec } = resolved(
+      await resolveEnvironmentSpec(
+        input({ declaration, approval: approvalFor(declaration), repository: REPOSITORY })
+      )
+    )
+    expect(spec.source.kind).toBe("repo-declaration")
+    await expect(declarationRuntimeFieldsDigest(declaration.declaration)).resolves.toBe(
+      await environmentRuntimeFieldsDigest(spec)
+    )
   })
 })

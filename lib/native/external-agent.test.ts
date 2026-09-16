@@ -577,8 +577,18 @@ describe("the spawn request contract accepts every field the config carries", ()
 
     // The field list of `ExternalAgentSpawnConfig` (lib/native/external-agent.ts)
     // and of the Rust struct it serializes into
-    // (crates/cognia-external-agent/src/process.rs).
-    expect([...declared].sort()).toEqual(["args", "command", "cwd", "env", "framing", "id"])
+    // (crates/cognia-external-agent/src/process.rs). `sandbox` is the
+    // runtime-environment placement (ADR-0182): optional on both sides, and
+    // absent from every spawn that resolved no environment.
+    expect([...declared].sort()).toEqual([
+      "args",
+      "command",
+      "cwd",
+      "env",
+      "framing",
+      "id",
+      "sandbox",
+    ])
   })
 
   it("admits both framings, because the two hosts must offer the same choice", async () => {

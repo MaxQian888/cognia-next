@@ -279,6 +279,26 @@
     "connectingHint": "正在连接 Agent… 启动期间你可以继续使用 Cognia。",
     "devinSetupHint": "安装 Devin CLI 并运行一次 `devin auth login`。Cognia 通过 `devin acp` 启动并读取会话模型列表；使用 `acp --model swe2` 可在启动时选择 SWE-2。 如需修改文件，请选择“接受编辑（Code）”模式。 每个会话均可使用 Cognia 工具和 Devin 原生工具。"
   },
+  "placement": {
+    "fallback": "未使用沙箱",
+    "pending": "已请求沙箱",
+    "pendingTooltip": "本次运行请求了运行环境，主机尚未报告实际启动位置。",
+    "refused": "运行环境被拒绝",
+    "sandboxed": "沙箱 · {tier}",
+    "sandboxedUntiered": "沙箱",
+    "tooltip": {
+      "bundle": "Agent 运行时包：{tag}（{libc}）",
+      "credentials": "凭据：该主机自身的凭据（{mode}）；暂不支持按沙箱签发的网关票据",
+      "egressEnforced": "网络：{tier}，已强制执行",
+      "egressNotEnforced": "网络：{tier}，仅记录、未强制执行",
+      "image": "镜像：{image}",
+      "notReported": "未报告",
+      "tier": "隔离级别：{tier}",
+      "user": "以 {user} 身份运行",
+      "userRemapped": "以 {user} 身份运行（已映射为工作区所有者）"
+    },
+    "unknown": "无法识别的放置结果"
+  },
   "runCommand": "运行 /{name}",
   "runtimes": {
     "title": "已安装的运行时",

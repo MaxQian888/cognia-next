@@ -203,3 +203,81 @@ export const ENVIRONMENT_SPEC_LIMITS = {
 
 /** Where the workspace is mounted inside every sandbox (ADR-0183). */
 export const SANDBOX_WORKSPACE_FOLDER = "/workspace"
+
+/** The event channel the Host reports each spawn's actual placement on. */
+export const SANDBOX_PLACEMENT_CHANNEL = "external-agent://placement"
+
+/**
+ * What one spawn carries to run in a runtime environment (ADR-0182).
+ *
+ * Mirrors `SandboxPlacement` in
+ * `crates/cognia-external-agent/src/sandbox_routing_backend.rs`, which is a
+ * tagged enum with `deny_unknown_fields` — so `kind` is the discriminant and
+ * an extra field is a refusal, not an ignored key.
+ *
+ * Absent on every spawn that resolved no runtime environment, which is every
+ * spawn before a project opts in. A Host with the pool off that receives one
+ * anyway does not fail the spawn: it strips the placement, runs the existing
+ * path and says so with `sandbox_fallback_pool_disabled` — unless
+ * `isolationMandatory`, which refuses instead.
+ */
+export interface SandboxPlacement {
+  kind: "container"
+  /** The sealed spec. The Host re-admits it; nothing in it is trusted. */
+  spec: EnvironmentSpec
+  /**
+   * The client's half of the fault rule: this project set `requireSandbox` or
+   * named a minimum isolation tier, so an infrastructure fault must refuse
+   * rather than fall back. A client can only make its own run stricter with
+   * this — the Host adds its own half from a multi-tenant baseline.
+   */
+  isolationMandatory: boolean
+}
+
+/**
+ * What the Host reports on {@link SANDBOX_PLACEMENT_CHANNEL} after a spawn
+ * that carried a placement (ADR-0182).
+ *
+ * The frozen envelope is `placement_payload` in
+ * `crates/cognia-external-agent/src/exec_backend.rs`; the sandbox body is
+ * `sandbox_placement` in `crates/cognia-sandbox-pool/src/docker.rs` and the
+ * fallback body is `fallback_placement` in `sandbox_routing_backend.rs`.
+ * Every field is optional on purpose: a newer or older Host may send more or
+ * less, and a reader must say "not reported" rather than guess.
+ */
+export interface SandboxPlacementEvent {
+  agentId: string
+  placement: SandboxPlacementPayload
+}
+
+export type SandboxPlacementPayload =
+  | {
+      kind: "sandbox"
+      driver?: string
+      specDigest?: string
+      /** The canonical pinned reference, `registry/repository@sha256:…`. */
+      image?: string
+      sizeClassId?: string
+      /** The tier the driver attested, which may be stronger than asked. */
+      isolationTier?: IsolationTier
+      bundle?: { digest?: string; releaseTag?: string; libc?: string }
+      /** The agent command the bundle ran. */
+      command?: string
+      /** Absent or null when the probe could not name one. */
+      user?: {
+        name?: string
+        uid?: number
+        gid?: number
+        /** Set when a declared user was remapped onto the workspace owner. */
+        remappedFrom?: { uid: number; gid: number } | null
+      } | null
+      /**
+       * `enforced` is false through Step ① on every tier but `off`, which is
+       * honoured by cutting the network. The per-tenant egress proxy arrives
+       * with ADR-0185.
+       */
+      egress?: { tier?: EgressTier; enforced?: boolean }
+      /** `spawn-env` through Step ①; gateway tickets arrive with ADR-0185. */
+      credentials?: { mode?: string }
+    }
+  | { kind: "fallback"; code?: string; message?: string }

@@ -160,6 +160,61 @@ describe("agentInvoke / agentListen routing", () => {
     expect(transportSubscribe).toHaveBeenCalledWith("external-agent://exit", handler)
     expect(listenMock).not.toHaveBeenCalled()
   })
+
+  // ADR-0182. Seven clients build a spawn payload and all of them come through
+  // here, so this is where the run's placement is attached — and where the off
+  // path has to stay byte-for-byte identical.
+  it("attaches a registered runtime-environment placement to a spawn", async () => {
+    const { registerSpawnPlacement, __resetSpawnPlacementsForTests } =
+      await import("@/lib/sandbox/spawn-placement-registry")
+    __resetSpawnPlacementsForTests()
+    const placement = {
+      kind: "container" as const,
+      spec: { projectId: "prj1" } as never,
+      isolationMandatory: true,
+    }
+    registerSpawnPlacement("agent-7", placement)
+
+    setTauri(true)
+    invokeMock.mockResolvedValueOnce("pid-7")
+    await agentInvoke("spawn_external_agent", { config: { id: "agent-7", command: "codex" } })
+
+    expect(invokeMock).toHaveBeenCalledWith("spawn_external_agent", {
+      config: { id: "agent-7", command: "codex", sandbox: placement },
+    })
+    __resetSpawnPlacementsForTests()
+  })
+
+  it("sends the unchanged payload when no placement was registered", async () => {
+    const { __resetSpawnPlacementsForTests } =
+      await import("@/lib/sandbox/spawn-placement-registry")
+    __resetSpawnPlacementsForTests()
+
+    setTauri(true)
+    invokeMock.mockResolvedValueOnce("pid-8")
+    await agentInvoke("spawn_external_agent", { config: { id: "agent-8", command: "codex" } })
+
+    expect(invokeMock).toHaveBeenCalledWith("spawn_external_agent", {
+      config: { id: "agent-8", command: "codex" },
+    })
+  })
+
+  it("leaves other commands alone even with a placement pending", async () => {
+    const { registerSpawnPlacement, __resetSpawnPlacementsForTests } =
+      await import("@/lib/sandbox/spawn-placement-registry")
+    __resetSpawnPlacementsForTests()
+    registerSpawnPlacement("agent-9", {
+      kind: "container",
+      spec: {} as never,
+      isolationMandatory: false,
+    })
+
+    setTauri(true)
+    invokeMock.mockResolvedValueOnce(null)
+    await agentInvoke("kill_external_agent", { agentId: "agent-9" })
+    expect(invokeMock).toHaveBeenCalledWith("kill_external_agent", { agentId: "agent-9" })
+    __resetSpawnPlacementsForTests()
+  })
 })
 
 describe("agent fs seam", () => {

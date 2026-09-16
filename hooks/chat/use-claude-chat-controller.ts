@@ -2288,8 +2288,28 @@ export function useClaudeChat() {
         if (turnRuntimeRef?.kind === "external") {
           const { ensureExternalAgentReady } =
             await import("@/lib/agent/ensure-external-agent-ready")
+          // ADR-0182: a project run is readied WHERE its runtime environment
+          // puts it — resolved first, refused before any process starts, and
+          // restarted if the agent is running somewhere else. A session with
+          // no project has nothing to resolve and connects as before (Q39).
+          const runProjectId = session?.projectId ?? executionContext?.projectId
           const readiness = await ensureExternalAgentReady(extAgentId, {
             deferConnect: managedGatewayTask,
+            ...(runProjectId
+              ? {
+                  environment: {
+                    projectId: runProjectId,
+                    ...(executionContext?.environmentId
+                      ? { environmentId: executionContext.environmentId }
+                      : {}),
+                    project: useProjectStore
+                      .getState()
+                      .projects.find((candidate) => candidate.id === runProjectId),
+                    executionRoot: boundWorkspaceRoot ?? executionContext?.projectRoot,
+                    surface: "interactive" as const,
+                  },
+                }
+              : {}),
           })
           if (!readiness.ok) {
             store.getState().replaceSessionMessages(sessionId, previousMessages)

@@ -21,6 +21,7 @@ import { isPathUnderRoot } from "@/lib/sandbox/policy-bridge"
 import { isTauri } from "@/lib/utils"
 import type { AcpHostCapabilities } from "./acp-feature-profile"
 import { canStartExternalAgentProcess } from "./process-plane"
+import { withSpawnPlacement } from "@/lib/sandbox/spawn-placement-registry"
 
 /**
  * Whether an external agent process can be started from here at all.
@@ -94,8 +95,18 @@ export function getAcpHostCapabilities(): AcpHostCapabilities {
   }
 }
 
-/** Invoke a process-plane command on whichever host is present. */
+/**
+ * Invoke a process-plane command on whichever host is present.
+ *
+ * A spawn picks up the run's runtime-environment placement on the way past
+ * (ADR-0182). This is the one seam every client's spawn goes through, so no
+ * runtime can lose its placement by being the one that was not updated — and
+ * with no placement registered `withSpawnPlacement` returns the caller's own
+ * object, so a deployment without runtime environments sends exactly the
+ * payload it always did.
+ */
 export async function agentInvoke<T>(name: string, args: Record<string, unknown>): Promise<T> {
+  if (name === "spawn_external_agent") args = withSpawnPlacement(args)
   if (isTauri()) {
     const { invoke } = await import("@tauri-apps/api/core")
     return invoke<T>(name, args)
