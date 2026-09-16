@@ -67,12 +67,56 @@ impl RuntimeLeaseAcquireOutcome {
     }
 }
 
-#[derive(Default)]
+/// One image staged for the Lark app-registration confirm page.
+///
+/// `appPreset.avatar` must be a publicly reachable image URL — a Cognia-side
+/// avatar (a `data:` URL or a bundled asset) is not one, so the bytes are
+/// parked here and served by `GET /lark/app-avatar/{token}` through the same
+/// tunnel/`/connectors` ingress the platform webhooks already use. Entries
+/// are in-memory only and die with the process.
+#[derive(Debug, Clone)]
+pub struct StagedAvatar {
+    pub bytes: Vec<u8>,
+    pub content_type: String,
+    pub expires_at: Instant,
+}
+
+/// Hard cap on staged-avatar entries — staging is a provisioning-time
+/// convenience, never a blob store. Oldest-expiry entries are evicted first.
+pub const MAX_STAGED_AVATARS: usize = 64;
+/// Decoded-bytes cap. Feishu accepts png/jpg/webp/gif avatars; none of the
+/// bundled portraits exceed ~100 KiB, so 4 MiB leaves generous headroom for
+/// user-supplied images without making the endpoint a memory DoS.
+pub const MAX_STAGED_AVATAR_BYTES: usize = 4 * 1024 * 1024;
+/// Allowed `ttl_secs` bounds for a staged avatar.
+pub const STAGED_AVATAR_MIN_TTL_SECS: u64 = 60;
+pub const STAGED_AVATAR_MAX_TTL_SECS: u64 = 3600;
+pub const STAGED_AVATAR_DEFAULT_TTL_SECS: u64 = 900;
+
 pub struct ConnectorsStateInner {
     pub registered_adapters: HashMap<String, AdapterRegistration>,
     pub server_running: bool,
     pub bound_addr: Option<String>,
+    /// Bearer that authenticates `POST /internal/lark/app-avatar`. Minted once
+    /// per process and disclosed only through `connectors_health` — a surface
+    /// the renderer and the service-scoped brain already hold, so no new
+    /// command is needed to hand it out.
+    pub staging_token: String,
+    staged_avatars: HashMap<String, StagedAvatar>,
     runtime_lease: Option<ConnectorRuntimeLease>,
+}
+
+impl Default for ConnectorsStateInner {
+    fn default() -> Self {
+        Self {
+            registered_adapters: HashMap::new(),
+            server_running: false,
+            bound_addr: None,
+            staging_token: uuid::Uuid::new_v4().simple().to_string(),
+            staged_avatars: HashMap::new(),
+            runtime_lease: None,
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -89,6 +133,70 @@ impl ConnectorsState {
     /// into the axum server without consuming the managed copy.
     pub fn inner_state(&self) -> Self {
         self.clone()
+    }
+
+    // -----------------------------------------------------------------------
+    // Lark app-avatar staging (appPreset.avatar public-URL host)
+    // -----------------------------------------------------------------------
+
+    /// Park `bytes` under a fresh unguessable token. Returns the token and the
+    /// absolute expiry (epoch ms). Expired entries are pruned on every call;
+    /// at capacity the entries nearest expiry are evicted first.
+    pub fn stage_lark_app_avatar(
+        &self,
+        bytes: Vec<u8>,
+        content_type: String,
+        ttl_secs: u64,
+    ) -> Result<(String, u64), String> {
+        if bytes.is_empty() || bytes.len() > MAX_STAGED_AVATAR_BYTES {
+            return Err(format!(
+                "avatar bytes must be 1..={MAX_STAGED_AVATAR_BYTES} bytes"
+            ));
+        }
+        let ttl = ttl_secs.clamp(STAGED_AVATAR_MIN_TTL_SECS, STAGED_AVATAR_MAX_TTL_SECS);
+        let now = Instant::now();
+        let expires_at = now
+            .checked_add(Duration::from_secs(ttl))
+            .ok_or_else(|| "staged avatar expiry overflow".to_string())?;
+
+        let mut inner = self.inner.lock();
+        inner.staged_avatars.retain(|_, v| v.expires_at > now);
+        if inner.staged_avatars.len() >= MAX_STAGED_AVATARS {
+            // Evict the entry that expires soonest.
+            if let Some(oldest) = inner
+                .staged_avatars
+                .iter()
+                .min_by_key(|(_, v)| v.expires_at)
+                .map(|(k, _)| k.clone())
+            {
+                inner.staged_avatars.remove(&oldest);
+            }
+        }
+        let token = uuid::Uuid::new_v4().simple().to_string();
+        inner.staged_avatars.insert(
+            token.clone(),
+            StagedAvatar {
+                bytes,
+                content_type,
+                expires_at,
+            },
+        );
+        let expires_at_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64 + ttl * 1000)
+            .unwrap_or(0);
+        Ok((token, expires_at_ms))
+    }
+
+    /// Read a staged avatar; expired entries are dropped and report as absent.
+    pub fn staged_lark_app_avatar(&self, token: &str) -> Option<(Vec<u8>, String)> {
+        let mut inner = self.inner.lock();
+        let entry = inner.staged_avatars.get(token)?;
+        if entry.expires_at <= Instant::now() {
+            inner.staged_avatars.remove(token);
+            return None;
+        }
+        Some((entry.bytes.clone(), entry.content_type.clone()))
     }
 
     /// Acquire or refresh the host-scoped connector-runtime lease.

@@ -65,6 +65,7 @@ pub async fn connectors_health(
         server_running: inner.server_running,
         bound_addr: inner.bound_addr.clone(),
         registered_adapter_count: inner.registered_adapters.len(),
+        staging_token: Some(inner.staging_token.clone()),
     })
 }
 

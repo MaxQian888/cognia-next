@@ -22,14 +22,16 @@
 use axum::{
     body::Body,
     extract::{DefaultBodyLimit, Path, RawQuery, State},
-    http::{HeaderMap, Method, StatusCode},
+    http::{header, HeaderMap, Method, StatusCode},
     response::Response,
-    routing::{any, get},
-    Extension, Router,
+    routing::{any, get, post},
+    Extension, Json, Router,
 };
 use bytes::Bytes;
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
+use subtle::ConstantTimeEq;
 
 use super::sigverify::declarative::{DeclarativeRequest, WebhookVerificationSpec};
 use super::state::ConnectorsState;
@@ -86,6 +88,8 @@ pub fn build_unresolved_router() -> Router<ConnectorsState> {
             get(oauth_connector_callback),
         )
         .route("/oauth/docs/{provider}/callback", get(oauth_docs_callback))
+        .route("/internal/lark/app-avatar", post(lark_app_avatar_stage))
+        .route("/lark/app-avatar/{token}", get(lark_app_avatar_serve))
         .route("/webhook/{adapter_type}/{adapter_id}", any(webhook_handler));
     ws_server::register_routes(base).layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
 }
@@ -99,6 +103,105 @@ pub fn build_router(state: ConnectorsState, emitter: Arc<dyn EventEmitter>) -> R
 
 async fn health_handler() -> &'static str {
     r#"{"ok":true}"#
+}
+
+// ---------------------------------------------------------------------------
+// Lark app-avatar staging
+//
+// `appPreset.avatar` on the registration confirm page must be a publicly
+// reachable image URL. A Cognia avatar (a `data:` URL or a bundled static
+// asset) is not one, so the caller parks the bytes here and hands Feishu the
+// `/lark/app-avatar/{token}` URL, which resolves through the same
+// tunnel/`/connectors` ingress that already serves webhooks.
+//
+// The stage POST is bearer-authenticated by the per-process `staging_token`
+// disclosed only via `connectors_health` — the token is the authorization,
+// not the network position, so the route is safe to mount on both the
+// loopback desktop server and the public headless `/connectors` nest.
+// ---------------------------------------------------------------------------
+
+/// Content types Feishu accepts for an app avatar.
+const STAGED_AVATAR_CONTENT_TYPES: [&str; 4] = [
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/gif",
+];
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LarkAppAvatarStageBody {
+    /// Base64-encoded image bytes.
+    bytes_b64: String,
+    content_type: String,
+    /// Lifetime in seconds; clamped to the state.rs bounds.
+    ttl_secs: Option<u64>,
+}
+
+async fn lark_app_avatar_stage(
+    State(state): State<ConnectorsState>,
+    headers: HeaderMap,
+    Json(body): Json<LarkAppAvatarStageBody>,
+) -> Response {
+    let expected = state.inner.lock().staging_token.clone();
+    let provided = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .unwrap_or("");
+    // Constant-time compare — the bearer is unguessable anyway, but a timing
+    // oracle on a publicly mounted route is cheap to rule out.
+    let authorized: bool = provided.as_bytes().ct_eq(expected.as_bytes()).into();
+    if !authorized {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    if !STAGED_AVATAR_CONTENT_TYPES.contains(&body.content_type.as_str()) {
+        return (
+            StatusCode::BAD_REQUEST,
+            format!(
+                "contentType must be one of {}",
+                STAGED_AVATAR_CONTENT_TYPES.join(", ")
+            ),
+        )
+            .into_response();
+    }
+    use base64::Engine;
+    let bytes = match base64::engine::general_purpose::STANDARD.decode(body.bytes_b64.as_bytes())
+    {
+        Ok(bytes) => bytes,
+        Err(_) => return (StatusCode::BAD_REQUEST, "bytesB64 is not valid base64").into_response(),
+    };
+    match state.stage_lark_app_avatar(
+        bytes,
+        body.content_type,
+        body.ttl_secs
+            .unwrap_or(super::state::STAGED_AVATAR_DEFAULT_TTL_SECS),
+    ) {
+        Ok((token, expires_at_ms)) => Json(serde_json::json!({
+            "token": token,
+            "expiresAtMs": expires_at_ms,
+        }))
+        .into_response(),
+        Err(err) => (StatusCode::BAD_REQUEST, err).into_response(),
+    }
+}
+
+async fn lark_app_avatar_serve(
+    State(state): State<ConnectorsState>,
+    Path(token): Path<String>,
+) -> Response {
+    match state.staged_lark_app_avatar(&token) {
+        Some((bytes, content_type)) => (
+            [
+                (header::CONTENT_TYPE, content_type),
+                (header::CACHE_CONTROL, "public, max-age=600".to_string()),
+                (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_string()),
+            ],
+            bytes,
+        )
+            .into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 /// Lark send-as-user OAuth relay.
@@ -1046,6 +1149,7 @@ mod tests {
     use axum::body::to_bytes;
     use axum::http::Request;
     use parking_lot::Mutex;
+    use std::time::{Duration, Instant};
     use tower::ServiceExt;
 
     /// Recording emitter for tests — captures every webhook event so assertions
@@ -2725,5 +2829,159 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
         assert!(emitter.events.lock().is_empty());
+    }
+
+    // -----------------------------------------------------------------
+    // Lark app-avatar staging (appPreset.avatar public URL)
+    // -----------------------------------------------------------------
+
+    fn stage_body() -> String {
+        use base64::Engine;
+        serde_json::json!({
+            "bytesB64": base64::engine::general_purpose::STANDARD.encode(b"fake-webp"),
+            "contentType": "image/webp",
+            "ttlSecs": 900,
+        })
+        .to_string()
+    }
+
+    #[tokio::test]
+    async fn app_avatar_stage_requires_the_staging_bearer() {
+        let state = ConnectorsState::new();
+        let (app, _) = test_router_with(state);
+
+        // No Authorization header at all.
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/internal/lark/app-avatar")
+                    .header("content-type", "application/json")
+                    .body(Body::from(stage_body()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        // Wrong bearer.
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/internal/lark/app-avatar")
+                    .header("content-type", "application/json")
+                    .header("authorization", "Bearer wrong")
+                    .body(Body::from(stage_body()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn app_avatar_stage_then_serve_round_trip() {
+        let state = ConnectorsState::new();
+        let token = state.inner.lock().staging_token.clone();
+        let (app, _) = test_router_with(state);
+
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/internal/lark/app-avatar")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::from(stage_body()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body: serde_json::Value =
+            serde_json::from_slice(&to_bytes(resp.into_body(), 4096).await.unwrap()).unwrap();
+        let avatar_token = body["token"].as_str().unwrap().to_string();
+        assert!(body["expiresAtMs"].as_u64().unwrap() > 0);
+
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/lark/app-avatar/{avatar_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get("content-type").unwrap(),
+            "image/webp"
+        );
+        assert_eq!(
+            resp.headers().get("x-content-type-options").unwrap(),
+            "nosniff"
+        );
+        let body = to_bytes(resp.into_body(), 4096).await.unwrap();
+        assert_eq!(&body[..], b"fake-webp");
+
+        // Unknown token → 404.
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/lark/app-avatar/does-not-exist")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn app_avatar_stage_rejects_unsupported_content_type() {
+        let state = ConnectorsState::new();
+        let token = state.inner.lock().staging_token.clone();
+        let (app, _) = test_router_with(state);
+
+        let body = serde_json::json!({
+            "bytesB64": "AAAA",
+            "contentType": "application/octet-stream",
+        })
+        .to_string();
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/internal/lark/app-avatar")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn staged_avatar_expiry_is_reported_missing() {
+        let state = ConnectorsState::new();
+        // TTL clamps to the 60s floor — so drive expiry directly in state for
+        // a deterministic test rather than sleeping.
+        let (token, _) = state
+            .stage_lark_app_avatar(b"x".to_vec(), "image/png".into(), 60)
+            .unwrap();
+        state
+            .inner
+            .lock()
+            .staged_avatars
+            .get_mut(&token)
+            .unwrap()
+            .expires_at = Instant::now() - Duration::from_secs(1);
+        assert!(state.staged_lark_app_avatar(&token).is_none());
     }
 }

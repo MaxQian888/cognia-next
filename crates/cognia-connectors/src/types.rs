@@ -34,6 +34,12 @@ pub struct ConnectorsHealth {
     pub server_running: bool,
     pub bound_addr: Option<String>,
     pub registered_adapter_count: usize,
+    /// Bearer for `POST /internal/lark/app-avatar` (appPreset.avatar staging).
+    /// Deserialization tolerates its absence so a response produced by an
+    /// older host still parses; callers treat a missing token as "avatar
+    /// staging unsupported" and skip the param.
+    #[serde(default)]
+    pub staging_token: Option<String>,
 }
 
 /// A OneBot reverse-WS client that currently holds a live connection to the

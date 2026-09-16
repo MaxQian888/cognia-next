@@ -912,6 +912,7 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let count = services.connectors.inner.lock().registered_adapters.len();
+            let staging_token = services.connectors.inner.lock().staging_token.clone();
             // On the headless front door the `/connectors` ingress router is
             // mounted by the companion server itself — there is no separately
             // started local axum server (and thus no distinct bound address).
@@ -919,6 +920,7 @@ pub(super) async fn dispatch(
                 server_running: true,
                 bound_addr: None,
                 registered_adapter_count: count,
+                staging_token: Some(staging_token),
             })
         }
 
