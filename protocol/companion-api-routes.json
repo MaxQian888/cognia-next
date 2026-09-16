@@ -254,6 +254,12 @@
       "reason": "Inbound Lark surface called by Lark and by the user's browser, not by a paired device. Authoring it into the headless spec needs each handler's real status codes."
     },
     {
+      "path": "/integrations/lark/workbench/resolve",
+      "method": "post",
+      "document": "none",
+      "reason": "Inbound Lark surface called by Lark and by the user's browser, not by a paired device. Authoring it into the headless spec needs each handler's real status codes."
+    },
+    {
       "path": "/integrations/lark/entry/resolve",
       "method": "post",
       "document": "none",
