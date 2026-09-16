@@ -651,7 +651,7 @@ describe("mapOpenCodeV2Messages", () => {
         { type: "shell", shellID: "timeout", command: "sleep 10", status: "timeout" },
         { type: "shell", shellID: "killed", command: "sleep 10", status: "killed" },
         { type: "model-switched", model: { providerID: "p", id: "m" } },
-        { type: "location-switched", location: { workspaceID: "wrk_1" } },
+        { type: "location-switched", location: { directory: "/wrk_1" } },
         { type: "compaction", status: "running", reason: "auto", summary: "Partial", recent: "" }
       )
     )
@@ -665,7 +665,7 @@ describe("mapOpenCodeV2Messages", () => {
     expect(result[5].content[1]).toMatchObject({ isError: true })
     expect(result[6].content[1]).toMatchObject({ isError: true })
     expect(result[7].content).toEqual([{ type: "text", text: "p/m" }])
-    expect(result[8].content).toEqual([{ type: "text", text: "wrk_1" }])
+    expect(result[8].content).toEqual([{ type: "text", text: "/wrk_1" }])
     expect(result[9].content).toEqual([{ type: "text", text: "Partial" }])
   })
 })

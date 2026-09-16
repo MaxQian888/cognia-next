@@ -119,9 +119,9 @@ minimumReleaseAgeExclude:
   - ai@7.0.48
   - get-tsconfig@4.14.1
   - tsx@4.23.3
-  - "@opencode/client@2.0.0"
-  - "@opencode/protocol@2.0.0"
-  - "@opencode/schema@2.0.0"
+  - "@opencode/client@2.0.5"
+  - "@opencode/protocol@2.0.5"
+  - "@opencode/schema@2.0.5"
 
 # `pnpm audit` is a BLOCKING gate (CI_CD.md, supply-chain group), so every entry
 # here has to name the advisory and say why no safe upgrade exists. The

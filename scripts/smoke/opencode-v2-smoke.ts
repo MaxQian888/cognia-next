@@ -127,6 +127,9 @@ async function main() {
     join(workspace, "opencode.json"),
     JSON.stringify({
       model: "fixture/fixture",
+      agents: {
+        smoke: { description: "Isolated smoke agent", mode: "primary" },
+      },
       commands: {
         smoke: { template: "SMOKE_TEXT $ARGUMENTS", description: "Run the local protocol fixture" },
       },
@@ -201,9 +204,9 @@ async function main() {
     assert.ok(endpoint, `OpenCode did not become ready: ${startupError}`)
     checked("registered service discovery and authentication")
     client = OpenCode.make({ baseUrl: endpoint.url, headers: Service.headers(endpoint) })
-    const health = await client.health.get(request())
-    assert.match(health.version, /^2\./)
-    assert.ok(health.pid > 0)
+    const status = await client.server.status(request())
+    assert.match(status.version, /^2\./)
+    assert.ok(status.pid > 0)
     checked("health contract")
 
     const observed: V2Event[] = []
@@ -226,7 +229,6 @@ async function main() {
       "SSE server.connected missing"
     )
     const location = { directory: workspace }
-    await client.plugin.awaitActivation({ location }, request())
     const agents = await client.agent.list({ location }, request())
     const models = await client.model.list({ location }, request())
     const commands = await client.command.list({ location }, request())
@@ -245,22 +247,24 @@ async function main() {
     const listed = await client.session.list({ directory: workspace }, request())
     assert.ok(listed.data.some((session) => session.id === sessionID))
     assert.equal((await client.session.get({ sessionID }, request())).id, sessionID)
-    await client.session.rename({ sessionID, title: "Cognia resumed smoke" }, request())
+    await client.session.update({ sessionID, title: "Cognia resumed smoke" }, request())
     assert.equal((await client.session.get({ sessionID }, request())).title, "Cognia resumed smoke")
     checked("session create/list/get/resume/rename")
 
     await client.session.shell({ sessionID, command: "printf 'cognia protocol smoke'" }, request())
     await client.session.wait({ sessionID }, request())
-    const forked = await client.session.fork(
-      { sessionID, boundary: { type: "through" } },
-      request()
-    )
+    const forked = await client.session.fork({ sessionID }, request())
     sessions.push(forked.id)
     assert.notEqual(forked.id, sessionID)
     assert.equal(forked.fork?.sessionID, sessionID)
     checked("session fork with current boundary contract")
 
-    const agent = agents.data.find((item) => item.mode === "primary" || item.mode === "all")
+    // Built-in agents materialize lazily: the catalog is empty until a session
+    // exists at the location, so re-list after session creation.
+    const agentsAfterSession = await client.agent.list({ location }, request())
+    const agent = agentsAfterSession.data.find(
+      (item) => item.mode === "primary" || item.mode === "all"
+    )
     assert.ok(agent, "Expected a primary built-in agent")
     await client.session.switchAgent({ sessionID, agent: agent.id }, request())
     assert.equal((await client.session.get({ sessionID }, request())).agent, agent.id)
@@ -273,7 +277,7 @@ async function main() {
       assert.equal(selected?.providerID, reference.providerID)
       checked("session model selection")
     }
-    await client.permission.rules(
+    await client.session.update(
       { sessionID, permissions: [{ action: "*", resource: "*", effect: "ask" }] },
       request()
     )
@@ -452,7 +456,7 @@ async function main() {
         {
           ok: true,
           cli: version,
-          serviceVersion: health.version,
+          serviceVersion: status.version,
           checks,
           modelCount: models.data.length,
           modelPrompt: process.argv.includes("--adapter")

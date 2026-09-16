@@ -128,7 +128,7 @@ export function mapOpenCodeV2Messages(messages: SessionMessageInfo[]): ExternalA
       case "location-switched":
         content.push({
           type: "text",
-          text: message.location.directory ?? message.location.workspaceID ?? "",
+          text: message.location.directory ?? "",
         })
         break
       case "compaction":

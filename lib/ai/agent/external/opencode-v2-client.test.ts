@@ -35,8 +35,11 @@ const event = (type: string, data: object = {}) => ({
 })
 function fakeClient() {
   return {
-    plugin: { awaitActivation: jest.fn().mockResolvedValue(undefined) },
-    health: { get: jest.fn().mockResolvedValue({ healthy: true, version: "2.0.0", pid: 12 }) },
+    server: {
+      status: jest
+        .fn()
+        .mockResolvedValue({ version: "2.0.5", pid: 12, urls: ["http://localhost"] }),
+    },
     session: {
       list: jest.fn().mockResolvedValue({ data: [info()], cursor: {} }),
       create: jest.fn().mockResolvedValue(info()),
@@ -52,6 +55,12 @@ function fakeClient() {
       switchModel: jest.fn().mockResolvedValue(undefined),
       switchAgent: jest.fn().mockResolvedValue(undefined),
       instructions: { entry: { put: jest.fn().mockResolvedValue(undefined) } },
+      update: jest.fn().mockResolvedValue(undefined),
+      form: {
+        list: jest.fn().mockResolvedValue([]),
+        reply: jest.fn().mockResolvedValue(undefined),
+        cancel: jest.fn().mockResolvedValue(undefined),
+      },
     },
     message: { list: jest.fn().mockResolvedValue({ data: [], cursor: {} }) },
     model: {
@@ -75,13 +84,7 @@ function fakeClient() {
     },
     permission: {
       list: jest.fn().mockResolvedValue([]),
-      rules: jest.fn().mockResolvedValue(undefined),
       reply: jest.fn().mockResolvedValue(undefined),
-    },
-    form: {
-      list: jest.fn().mockResolvedValue([]),
-      reply: jest.fn().mockResolvedValue(undefined),
-      cancel: jest.fn().mockResolvedValue(undefined),
     },
     event: {
       subscribe: jest.fn((_options?: { signal?: AbortSignal }) =>
@@ -235,7 +238,7 @@ describe("current OpenCode V2 adapter", () => {
       })
     )
     await adapter.setSessionMode("first", "default")
-    expect(first.permission.rules).toHaveBeenLastCalledWith({
+    expect(first.session.update).toHaveBeenLastCalledWith({
       sessionID: "first",
       permissions: [
         { action: "*", resource: "*", effect: "ask" },
@@ -311,7 +314,7 @@ describe("current OpenCode V2 adapter", () => {
       })
     )
     await adapter.disconnect()
-    client.health.get.mockResolvedValue({ healthy: true, version: "2.0.0-beta.1", pid: 12 })
+    client.server.status.mockResolvedValue({ version: "2.0.0-beta.1", pid: 12, urls: [] })
     await expect(adapter.connect(config)).rejects.toThrow(/current OpenCode V2/)
     expect(adapter.connectionStatus).toBe("error")
   })
@@ -322,17 +325,17 @@ describe("current OpenCode V2 adapter", () => {
   it.each(["1.18.14", "2.0.0-beta.1", "3.0.0"])(
     "rejects unsupported server version %s",
     async (version) => {
-      client.health.get.mockResolvedValue({ healthy: true, version, pid: 12 })
+      client.server.status.mockResolvedValue({ version, pid: 12, urls: [] })
       await expect(adapter.connect(config)).rejects.toThrow(/current OpenCode V2/)
       expect(() => adapter.getSdkClient()).toThrow(/Not connected/)
     }
   )
 
   it.each([
-    { healthy: false, version: "2.0.0", pid: 12 },
-    { healthy: true, version: "2.0.0", pid: 0 },
-  ])("rejects invalid health %#", async (health) => {
-    client.health.get.mockResolvedValue(health)
+    { version: "2.0.0", pid: 0, urls: [] },
+    { version: "not-a-version", pid: 12, urls: [] },
+  ])("rejects invalid status %#", async (status) => {
+    client.server.status.mockResolvedValue(status)
     await expect(adapter.connect(config)).rejects.toThrow(/current OpenCode V2/)
   })
 
@@ -376,7 +379,7 @@ describe("current OpenCode V2 adapter", () => {
     await adapter.connect(config)
     await adapter.createSession()
     expect(await adapter.healthCheck()).toBe(true)
-    client.health.get.mockRejectedValueOnce(new Error("offline"))
+    client.server.status.mockRejectedValueOnce(new Error("offline"))
     expect(await adapter.healthCheck()).toBe(false)
     await adapter.disconnect()
     expect(adapter.getSessions()).toEqual([])
@@ -482,7 +485,7 @@ describe("current OpenCode V2 adapter", () => {
       permissionMode: "acceptEdits",
     })
     expect(session.id).toBe("s1")
-    expect(client.permission.rules).toHaveBeenCalledWith({
+    expect(client.session.update).toHaveBeenCalledWith({
       sessionID: "s1",
       permissions: expect.arrayContaining([{ action: "edit", resource: "*", effect: "allow" }]),
     })
@@ -493,10 +496,7 @@ describe("current OpenCode V2 adapter", () => {
     await adapter.createSession()
     const fork = await adapter.forkSession("s1")
     expect(fork.id).toBe("s2")
-    expect(client.session.fork).toHaveBeenCalledWith({
-      sessionID: "s1",
-      boundary: { type: "through" },
-    })
+    expect(client.session.fork).toHaveBeenCalledWith({ sessionID: "s1" })
     await adapter.closeSession("s2")
     expect(client.session.remove).not.toHaveBeenCalled()
     expect(adapter.getSession("s2")).toBeUndefined()
@@ -504,6 +504,30 @@ describe("current OpenCode V2 adapter", () => {
     expect(client.session.remove).toHaveBeenCalledWith({ sessionID: "s1" })
     expect(adapter.getSession("s1")).toBeUndefined()
     expect(adapter.getConfigOptions("s1")).toBeUndefined()
+  })
+
+  it("tolerates SessionNotFoundError when interrupting an already-removed session", async () => {
+    await adapter.connect(config)
+    await adapter.createSession()
+    client.session.interrupt.mockImplementation(({ sessionID }: { sessionID: string }) => {
+      if (sessionID === "removed-remotely")
+        return Promise.reject({
+          _tag: "SessionNotFoundError",
+          sessionID,
+          message: `Session not found: ${sessionID}`,
+        })
+      return Promise.resolve(undefined)
+    })
+    client.session.get.mockImplementation(({ sessionID }: { sessionID: string }) => {
+      if (sessionID === "removed-remotely")
+        return Promise.resolve({ ...info(), id: "removed-remotely" })
+      return Promise.resolve({ ...info(), id: sessionID })
+    })
+    await adapter.resumeSession("removed-remotely")
+    await expect(adapter.closeSession("removed-remotely")).resolves.toBeUndefined()
+    await expect(adapter.deleteSession("s1")).resolves.toBeUndefined()
+    client.session.interrupt.mockRejectedValueOnce(new Error("interrupt transport down"))
+    await expect(adapter.closeSession("s2")).rejects.toThrow("interrupt transport down")
   })
 
   it("changes model variants through switchModel and rejects invalid config writes", async () => {
@@ -535,7 +559,7 @@ describe("current OpenCode V2 adapter", () => {
     }
     await expect(adapter.setSessionMode("s1", "dontAsk")).rejects.toThrow(/does not support/)
     await adapter.setSessionMode("s1", "bypassPermissions")
-    expect(client.permission.rules).toHaveBeenLastCalledWith({
+    expect(client.session.update).toHaveBeenLastCalledWith({
       sessionID: "s1",
       permissions: [{ action: "*", resource: "*", effect: "allow" }],
     })
@@ -549,7 +573,7 @@ describe("current OpenCode V2 adapter", () => {
     await adapter.createSession()
     await collect(adapter.prompt("s1", textMessage("/review staged files")))
     expect(client.session.command).toHaveBeenCalledWith(
-      { sessionID: "s1", command: "review", text: "staged files", delivery: "queue" },
+      { sessionID: "s1", name: "review", text: "staged files", delivery: "queue" },
       expect.any(Object)
     )
     await collect(adapter.prompt("s1", textMessage("/unknown input")))
@@ -694,9 +718,9 @@ describe("current OpenCode V2 adapter", () => {
     })
     await adapter.respondToPermission("s1", { requestId: "r3", granted: false })
     expect(client.permission.reply.mock.calls.map(([input]) => input)).toEqual([
-      { sessionID: "s1", requestID: "r1", reply: "once" },
-      { sessionID: "s1", requestID: "r2", reply: "always", message: "Approved" },
-      { sessionID: "s1", requestID: "r3", reply: "reject" },
+      { sessionID: "s1", requestID: "r1", decision: "once" },
+      { sessionID: "s1", requestID: "r2", decision: "always", message: "Approved" },
+      { sessionID: "s1", requestID: "r3", decision: "reject" },
     ])
   })
 
@@ -724,7 +748,7 @@ describe("current OpenCode V2 adapter", () => {
       action: "accept",
       content: { choice: "yes" },
     })
-    expect(client.form.reply).toHaveBeenCalledWith({
+    expect(client.session.form.reply).toHaveBeenCalledWith({
       sessionID: "s1",
       formID: "f1",
       answer: { choice: "yes" },
@@ -734,7 +758,7 @@ describe("current OpenCode V2 adapter", () => {
     ).rejects.toThrow(/Unknown OpenCode form/)
     await stream.next()
     await adapter.respondToElicitation({ requestId: "f2", action: "cancel" })
-    expect(client.form.cancel).toHaveBeenCalledWith({ sessionID: "s1", formID: "f2" })
+    expect(client.session.form.cancel).toHaveBeenCalledWith({ sessionID: "s1", formID: "f2" })
     await stream.return?.()
   })
 
@@ -819,7 +843,7 @@ describe("current OpenCode V2 adapter", () => {
   it("applies fork permissions remotely and removes a fork when initialization fails", async () => {
     await adapter.connect(config)
     await adapter.forkSession("s1", { permissionMode: "plan" })
-    expect(client.permission.rules).toHaveBeenCalledWith(
+    expect(client.session.update).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionID: "s2",
         permissions: expect.arrayContaining([{ action: "*", resource: "*", effect: "deny" }]),
@@ -986,7 +1010,7 @@ describe("current OpenCode V2 adapter", () => {
       })
     ).rejects.toThrow(/PII/)
     expect(client.session.prompt).toHaveBeenCalledTimes(calls)
-    expect(client.form.reply).not.toHaveBeenCalled()
+    expect(client.session.form.reply).not.toHaveBeenCalled()
     await stream.return?.()
   })
 
@@ -1005,7 +1029,7 @@ describe("current OpenCode V2 adapter", () => {
     expect(await adapter.getProviderUndoCapability("s1")).toMatchObject({ status: "supported" })
     await adapter.undoLastProviderChange("s1")
     expect(client.session.command).toHaveBeenCalledWith(
-      expect.objectContaining({ command: "undo", text: "" }),
+      expect.objectContaining({ name: "undo", text: "" }),
       expect.any(Object)
     )
   })
@@ -1064,14 +1088,11 @@ describe("current OpenCode V2 adapter", () => {
     await expect(adapter.resumeSession("s1")).rejects.toThrow(/message pagination repeated/)
   })
 
-  it("waits for plugin activation and uses the location default model for an unbound session", async () => {
+  it("uses the location default model for an unbound session", async () => {
     await adapter.connect(config)
     client.session.create.mockResolvedValueOnce({ ...info(), model: undefined } as never)
     await adapter.createSession()
     expect(client.model.default).toHaveBeenCalledWith({ location: { directory: "/workspace" } })
-    expect(client.plugin.awaitActivation.mock.invocationCallOrder[0]).toBeLessThan(
-      client.model.list.mock.invocationCallOrder[0]
-    )
     expect(adapter.getSessionModels("s1")?.currentModelId).toBe("vendor/model")
   })
 
@@ -1099,7 +1120,10 @@ describe("current OpenCode V2 adapter", () => {
         expect.objectContaining({ type: "error", code: "opencode_form_conditional_fields" }),
       ])
     )
-    expect(client.form.cancel).toHaveBeenCalledWith({ sessionID: "s1", formID: "conditional" })
+    expect(client.session.form.cancel).toHaveBeenCalledWith({
+      sessionID: "s1",
+      formID: "conditional",
+    })
   })
   it.each([
     [
@@ -1250,7 +1274,7 @@ describe("current OpenCode V2 adapter", () => {
         source: { type: "tool", id: "call1", messageID: "msg_previous" },
       },
     ])
-    client.form.list.mockResolvedValue([
+    client.session.form.list.mockResolvedValue([
       {
         id: "restored-form",
         sessionID: "s1",
@@ -1269,7 +1293,7 @@ describe("current OpenCode V2 adapter", () => {
     ])
     const session = await adapter.resumeSession("s1")
     expect(client.permission.list).toHaveBeenCalledWith({ sessionID: "s1" })
-    expect(client.form.list).toHaveBeenCalledWith({ sessionID: "s1" })
+    expect(client.session.form.list).toHaveBeenCalledWith({ sessionID: "s1" })
     expect(session.metadata?.pendingInteractions).toEqual([
       expect.objectContaining({
         type: "permission_request",
@@ -1297,7 +1321,7 @@ describe("current OpenCode V2 adapter", () => {
       action: "accept",
       content: answer,
     })
-    expect(client.form.reply).toHaveBeenCalledWith({
+    expect(client.session.form.reply).toHaveBeenCalledWith({
       sessionID: "s1",
       formID: "restored-form",
       answer,
@@ -1325,7 +1349,7 @@ describe("current OpenCode V2 adapter", () => {
 
   it("keeps a restored form answerable after validation or transport failure", async () => {
     await adapter.connect(config)
-    client.form.list.mockResolvedValue([
+    client.session.form.list.mockResolvedValue([
       {
         id: "form-retry",
         sessionID: "s1",
@@ -1341,8 +1365,8 @@ describe("current OpenCode V2 adapter", () => {
         content: { count: "wrong type" },
       })
     ).rejects.toThrow()
-    expect(client.form.reply).not.toHaveBeenCalled()
-    client.form.reply.mockRejectedValueOnce(new Error("form offline"))
+    expect(client.session.form.reply).not.toHaveBeenCalled()
+    client.session.form.reply.mockRejectedValueOnce(new Error("form offline"))
     await expect(
       adapter.respondToElicitation({
         requestId: "form-retry",
@@ -1364,7 +1388,7 @@ describe("current OpenCode V2 adapter", () => {
 
   it("cancels restored forms and preserves failed cancellation for retry", async () => {
     await adapter.connect(config)
-    client.form.list.mockResolvedValue([
+    client.session.form.list.mockResolvedValue([
       {
         id: "form-cancel",
         sessionID: "s1",
@@ -1373,19 +1397,22 @@ describe("current OpenCode V2 adapter", () => {
       },
     ])
     const session = await adapter.resumeSession("s1")
-    client.form.cancel.mockRejectedValueOnce(new Error("cancel offline"))
+    client.session.form.cancel.mockRejectedValueOnce(new Error("cancel offline"))
     await expect(
       adapter.respondToElicitation({ requestId: "form-cancel", action: "cancel" })
     ).rejects.toThrow("cancel offline")
     expect(session.metadata?.pendingInteractions).toHaveLength(1)
     await adapter.respondToElicitation({ requestId: "form-cancel", action: "decline" })
-    expect(client.form.cancel).toHaveBeenLastCalledWith({ sessionID: "s1", formID: "form-cancel" })
+    expect(client.session.form.cancel).toHaveBeenLastCalledWith({
+      sessionID: "s1",
+      formID: "form-cancel",
+    })
     expect(session.metadata?.pendingInteractions).toEqual([])
   })
 
   it("explicitly cancels unsupported restored forms and retains their diagnostic event", async () => {
     await adapter.connect(config)
-    client.form.list.mockResolvedValue([
+    client.session.form.list.mockResolvedValue([
       {
         id: "restored-conditional",
         sessionID: "s1",
@@ -1394,7 +1421,7 @@ describe("current OpenCode V2 adapter", () => {
       },
     ])
     const session = await adapter.resumeSession("s1")
-    expect(client.form.cancel).toHaveBeenCalledWith({
+    expect(client.session.form.cancel).toHaveBeenCalledWith({
       sessionID: "s1",
       formID: "restored-conditional",
     })
@@ -1414,7 +1441,7 @@ describe("current OpenCode V2 adapter", () => {
     "forgets restored requests after %s",
     async (operation) => {
       await adapter.connect(config)
-      client.form.list.mockResolvedValueOnce([
+      client.session.form.list.mockResolvedValueOnce([
         {
           id: "stale-form",
           sessionID: "s1",
@@ -1429,12 +1456,12 @@ describe("current OpenCode V2 adapter", () => {
       await expect(
         adapter.respondToElicitation({ requestId: "stale-form", action: "cancel" })
       ).rejects.toThrow(/Unknown OpenCode form/)
-      expect(client.form.cancel).not.toHaveBeenCalled()
+      expect(client.session.form.cancel).not.toHaveBeenCalled()
     }
   )
   it("enforces numeric bounds on a restored typed form before sending an answer", async () => {
     await adapter.connect(config)
-    client.form.list.mockResolvedValue([
+    client.session.form.list.mockResolvedValue([
       {
         id: "bounded-form",
         sessionID: "s1",
@@ -1450,7 +1477,7 @@ describe("current OpenCode V2 adapter", () => {
         content: { count: 0 },
       })
     ).rejects.toThrow()
-    expect(client.form.reply).not.toHaveBeenCalled()
+    expect(client.session.form.reply).not.toHaveBeenCalled()
     expect(session.metadata?.pendingInteractions).toHaveLength(1)
   })
   it.each<[string, Record<string, unknown>, AcpElicitationValue]>([
@@ -1485,7 +1512,7 @@ describe("current OpenCode V2 adapter", () => {
     "rejects restored form %s violations without consuming the pending request",
     async (_label, field, value) => {
       await adapter.connect(config)
-      client.form.list.mockResolvedValue([
+      client.session.form.list.mockResolvedValue([
         {
           id: "constraints",
           sessionID: "s1",
@@ -1501,7 +1528,7 @@ describe("current OpenCode V2 adapter", () => {
           content: { value: value as AcpElicitationValue },
         })
       ).rejects.toThrow()
-      expect(client.form.reply).not.toHaveBeenCalled()
+      expect(client.session.form.reply).not.toHaveBeenCalled()
       expect(session.metadata?.pendingInteractions).toHaveLength(1)
     }
   )
@@ -1534,7 +1561,7 @@ describe("current OpenCode V2 adapter", () => {
     "accepts restored form %s boundaries with the original typed value",
     async (_label, field, value) => {
       await adapter.connect(config)
-      client.form.list.mockResolvedValue([
+      client.session.form.list.mockResolvedValue([
         {
           id: "valid-boundary",
           sessionID: "s1",
@@ -1548,7 +1575,7 @@ describe("current OpenCode V2 adapter", () => {
         action: "accept",
         content: { value: value as AcpElicitationValue },
       })
-      expect(client.form.reply).toHaveBeenCalledWith({
+      expect(client.session.form.reply).toHaveBeenCalledWith({
         sessionID: "s1",
         formID: "valid-boundary",
         answer: { value },

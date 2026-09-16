@@ -1,6 +1,6 @@
 ---
 title: CCSwitch Interop
-description: Read-only access to CCSwitch's SQLite database, one-click switching across 50+ third-party Claude providers, and synchronized writes to Claude Code's settings.json.
+description: Read-only access to CCSwitch's SQLite database, one-click switching across 50+ third-party Claude providers, and synchronized writes to external agents' config files.
 ---
 
 # CCSwitch Interop
@@ -8,7 +8,7 @@ description: Read-only access to CCSwitch's SQLite database, one-click switching
 <Status variant="stable">stable</Status>
 
 <TLDR>
-CCSwitch is a community open-source Claude multi-account switcher. Cognia opens its `~/.cc-switch/cc-switch.db` read-only, surfaces 50+ providers, MCP servers, prompts, and skills directly in Settings, and switches cognia-next itself plus any checked external agents in one action (v1 only writes `claude-code`'s `~/.claude/settings.json`). We **never write** to the CCSwitch database.
+CCSwitch is a community open-source Claude multi-account switcher. Cognia opens its `cc-switch.db` read-only, surfaces 50+ providers, MCP servers, prompts, and skills directly in Settings, and switches cognia-next itself plus any checked external agents in one action (Claude Code's `~/.claude/settings.json`, Codex's `~/.codex/auth.json`, Gemini's `~/.gemini/settings.json`, OpenCode's `auth.json`). We **never write** to the CCSwitch database.
 </TLDR>
 
 CCSwitch interop has two independent capabilities:
@@ -28,17 +28,22 @@ CCSwitch interop has two independent capabilities:
 ## Code Locations
 
 ```
-src-tauri/src/ccswitch/
-  paths.rs      # cross-platform resolution for ~/.cc-switch/cc-switch.db
+crates/cognia-ccswitch/src/
+  paths.rs      # db-path resolution chain (env → manual → app_paths.json → default)
   db.rs         # read-only SQLite + tolerant column mapping
-  commands.rs   # 5 Tauri commands
+  commands.rs   # 5 read commands + 3 agent-env write commands
+  watcher.rs    # ccswitch_watch_start/stop → ccswitch://db-changed events
+
+src-tauri/src/settings.rs   # write_claude_settings_env (the claude-code writer)
+src-tauri/src/lib.rs        # `pub use cognia_ccswitch as ccswitch` (ADR-0067 split)
+
+types/ccswitch/  # CcswitchProvider / SwitchPlan / ActiveProviderState / CcswitchAgentId …
 
 lib/ccswitch/
-  types.ts      # CcswitchProvider / SwitchPlan / ActiveProviderState …
-  client.ts     # thin wrappers around the 5 Tauri commands
-  switch.ts     # planSwitch / applySwitch / detectActive
-  import.ts     # adapter from CCSwitch rows to existing import paths
-  hooks.ts      # useLiveCcswitchStatus / useLiveCcswitchProviders …
+  client.ts     # thin wrappers around the Tauri commands
+  switch.ts     # planSwitch / applySwitch / detectActive / buildProviderRegistration
+  import.ts     # adapters from CCSwitch rows to existing import paths
+  hooks.ts      # useCcswitchStatus / useCcswitchProviders … (+ live db watch)
 
 components/settings/ccswitch/
   ccswitch-section.tsx
@@ -54,10 +59,11 @@ flowchart LR
     DB[("cc-switch.db<br/>providers · mcpServers · prompts · skills")]
   end
 
-  subgraph Rust["🦀 src-tauri/src/ccswitch/"]
-    Paths["paths.rs<br/>dirs::home_dir().join('.cc-switch')"]
+  subgraph Rust["🦀 crates/cognia-ccswitch/"]
+    Paths["paths.rs<br/>env → manual → app_paths.json → ~/.cc-switch"]
     Tolerant["db.rs<br/>SQLITE_OPEN_READ_ONLY<br/>tolerates missing tables/columns"]
-    Cmds["commands.rs<br/>status / list_*"]
+    Cmds["commands.rs<br/>status / list_* / write_*_env"]
+    Watch["watcher.rs<br/>ccswitch://db-changed"]
   end
 
   subgraph TS["📚 lib/ccswitch/"]
@@ -73,17 +79,19 @@ flowchart LR
 
   subgraph Targets["🎯 Switch destinations"]
     Cognia["cognia-next AppSettings + sidecar env"]
-    ClaudeCode["~/.claude/settings.json (Claude Code)"]
+    Agents["claude-code · codex · gemini · opencode<br/>per-agent config files"]
   end
 
   DB --> Tolerant
   Paths --> Tolerant
   Tolerant --> Cmds
+  DB -.-> Watch
   Cmds --> Client
+  Watch --> Client
   Client --> Switch
   Client --> Import
   Switch --> Cognia
-  Switch --> ClaudeCode
+  Switch --> Agents
   UI --> Switch
 
   classDef layer fill:#1e293b,stroke:#475569,color:#e2e8f0
@@ -94,9 +102,16 @@ flowchart LR
   class CC,Targets ext
 ```
 
-## Database Liveness Check
+## Path Resolution and Liveness Check
 
-`src-tauri/src/ccswitch/paths.rs` defines the DB path as `~/.cc-switch/cc-switch.db` — consistent across OSes. CCSwitch itself allows redirecting this path via a cloud-sync directory (Dropbox / iCloud / WebDAV); v1 does not follow the redirect; the user needs to switch CCSwitch back to the default location.
+`crates/cognia-ccswitch/src/paths.rs` resolves `cc-switch.db` through a priority chain rather than assuming a fixed location:
+
+1. `CC_SWITCH_HOME` env var — a cognia-specific test/debug override.
+2. `ccswitchSync.manualDataDir` — the manual data-dir override from Settings (threaded into every command as `manualDataDir`).
+3. CCSwitch's own `app_paths.json` → `app_config_dir_override` — this is how cloud-sync redirects (Dropbox / iCloud / WebDAV) are followed. A redirect whose target no longer exists on disk falls back to the default.
+4. `~/.cc-switch/cc-switch.db` — the default, consistent across OSes.
+
+`CcswitchStatus.resolutionSource` (`"env" | "manual" | "redirect" | "default"`) is reported back so the Overview tab can show where the path actually came from.
 
 `ccswitch_status()` always succeeds and returns one of three states:
 
@@ -116,7 +131,7 @@ The CCSwitch schema is not under our control. The core constraints of `db.rs`:
 | Corrupted file | `status` returns `error`, `list_*` returns Err                     |
 | Renamed schema | We map a generated superset of column names; whatever matches wins |
 
-```rust title="src-tauri/src/ccswitch/db.rs"
+```rust title="crates/cognia-ccswitch/src/db.rs"
 let conn = Connection::open_with_flags(
     path,
     OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -125,20 +140,33 @@ let conn = Connection::open_with_flags(
 
 `SQLITE_OPEN_NO_MUTEX` is used because CCSwitch is a single-threaded writer; read-only connections do not need SQLite's built-in connection lock.
 
-## Five Tauri Commands
+## Tauri Commands
 
 ```ts title="lib/ccswitch/client.ts"
+// reads — the first five open the CCSwitch DB read-only
 ccswitchStatus() // always returns, 3 states
 ccswitchListProviders() // CcswitchProvider[]
 ccswitchListMcpServers() // CcswitchMcpServer[]
 ccswitchListPrompts() // CcswitchPrompt[]
 ccswitchListSkills() // CcswitchSkill[]
 
-// the only write command — does not write to CCSwitch DB, writes to Claude Code's settings.json
-writeClaudeSettingsEnv(envUpdates)
+// live watch — emits `ccswitch://db-changed` on debounced db mutations
+ccswitchWatchStart()
+ccswitchWatchStop()
+
+// writes — never touch the CCSwitch DB; they patch each agent's own file
+writeClaudeSettingsEnv(envUpdates)   // env block of ~/.claude/settings.json
+writeCodexAuthEnv(envUpdates)        // OPENAI_API_KEY + auth_mode in ~/.codex/auth.json
+writeGeminiSettingsEnv(envUpdates)   // env block of ~/.gemini/settings.json
+writeOpencodeAuthEnv(envUpdates)     // {type:"api",key} entry in opencode's auth.json
 ```
 
-The target of `writeClaudeSettingsEnv` is the `env` block in `~/.claude/settings.json` — where the Claude Code CLI reads environment variables, **not** `~/.claude.json` (that is the MCP config). The Rust side handles path resolution, atomic writes, and backups.
+The claude-code writer lives in `src-tauri/src/settings.rs`; the other three live alongside the readers in `crates/cognia-ccswitch/src/commands.rs`. Every writer:
+
+- resolves the target file itself (e.g. `writeClaudeSettingsEnv` patches the `env` block of `~/.claude/settings.json` — where the Claude Code CLI reads environment variables, **not** `~/.claude.json`, which is the MCP config);
+- refuses when the agent isn't installed (missing `~/.codex/` etc. — we never materialise an auth file for a CLI the user never set up);
+- writes atomically with an **mtime drift check** — if the agent's own app (or cc-switch) touched the file between our read and write, the command returns the `drift_detected` error instead of clobbering it;
+- keeps a bounded `.bak.<ts>` backup history (10 retained, rotated after each write).
 
 ## Switch Flow
 
@@ -152,39 +180,55 @@ Switching is a three-layer action — preview, confirm, execute:
   <Step>
     **plan** — `planSwitch(provider, scope, current)` is a pure function (no I/O) that turns "switch
     to this provider" into a `SwitchPlan`: - `cogniaChanges`: before/after for
-    apiKey/baseUrl/activeProviderId, and whether a sidecar restart is needed. - `agentChanges[]`:
-    one row per checked agent — target path (`~/.claude/settings.json` etc.), whether v1 supports
-    it, and the envUpdates array.
+    apiKey/baseUrl/activeProviderId, whether a sidecar restart is needed, and `useSubscription`
+    (true for official Claude providers — a Claude-kind entry with no API key, meaning "use the
+    Anthropic subscription"). - `agentChanges[]`: one row per checked agent — target path
+    (`~/.claude/settings.json` etc.), whether we support it, and the envUpdates array.
   </Step>
   <Step>**confirm** — user reviews the preview and clicks "Apply"; only then does I/O begin.</Step>
   <Step>
-    **applySwitch** — execution order is deliberate: 1. Write Dexie `settings` (cheap,
-    rollback-capable). 2. Call `setProviderEnv` to push the new env to the sidecar; if key or URL
-    changed, call `restartSidecar()`. 3. For each supported agent, call `writeClaudeSettingsEnv` to
-    write the env patch. A failed agent does not abort the whole operation — each row is recorded
-    individually as `ok / error`, and the UI shows a partial-success result.
+    **applySwitch** — execution order is deliberate: 1. Save through the settings store — apiKey,
+    apiBaseUrl, activeProviderId, plus the relay's tiered model list registered under the built-in
+    `anthropic` provider by `buildProviderRegistration` (cheap, rollback-capable). 2. Call
+    `setProviderEnv` to push the new env — including the relay's forwarded headers — to the sidecar;
+    for an official Claude provider, activate the Anthropic subscription first (vault account, or
+    adopt the local Claude Code CLI login); restart the sidecar when the key, URL, or headers
+    changed. 3. For each supported agent, call its write command to apply the env patch. A failed
+    agent does not abort the whole operation — each row is recorded individually as `ok / error`,
+    and the UI shows a partial-success result.
   </Step>
 </Steps>
 
-```ts title="lib/ccswitch/switch.ts (env updates)"
-function envUpdatesForProvider(provider: CcswitchProvider) {
-  return [
-    { key: "ANTHROPIC_API_KEY", value: provider.apiKey?.trim() || null },
-    { key: "ANTHROPIC_BASE_URL", value: provider.baseUrl?.trim() || null },
-  ]
-}
+```ts title="lib/ccswitch/switch.ts (env updates, per agent)"
+// claude-code → ~/.claude/settings.json env block
+[
+  { key: "ANTHROPIC_API_KEY", value: provider.apiKey?.trim() || null },
+  { key: "ANTHROPIC_BASE_URL", value: provider.baseUrl?.trim() || null },
+]
+// codex → ~/.codex/auth.json (baseUrl intentionally not propagated)
+[{ key: "OPENAI_API_KEY", value: provider.apiKey?.trim() || null }]
+// gemini → ~/.gemini/settings.json env block
+[
+  { key: "GEMINI_API_KEY", value: provider.apiKey?.trim() || null },
+  { key: "GOOGLE_GEMINI_BASE_URL", value: provider.baseUrl?.trim() || null },
+]
+// opencode → auth.json; "__provider" is consumed by the Rust writer, never persisted
+[
+  { key: "OPENCODE_API_KEY", value: provider.apiKey?.trim() || null },
+  { key: "__provider", value: opencodeProviderFor(provider) },
+]
 ```
 
-`value: null` explicitly _deletes_ the key, preventing a stale endpoint from routing requests to the wrong proxy.
+`value: null` explicitly _deletes_ the key, preventing a stale endpoint from routing requests to the wrong proxy. Codex and OpenCode don't get `baseUrl` — codex-cli reads base URLs from `config.toml` model-provider tables and OpenCode from its own `opencode.json`, so the dialog surfaces a warning instead of writing a guessed location.
 
 ## detectActive — Drift Detection
 
-When Settings regains focus, the UI calls `detectActive()` to determine the current CCSwitch provider id used by each surface:
+When Settings regains focus — or the live db watcher fires `ccswitch://db-changed` — the UI calls `detectActive(providers, { agentReaders })` to determine the current CCSwitch provider id used by each surface. Comparison is by `(apiKey, baseUrl)` tuple: provider records with the same key+URL pair are equivalent regardless of name. Agent reads are injected (`agentReaders`) — the Overview tab passes a reader that calls `read_claude_user_settings` to fill the `claude-code` slot:
 
-```ts title="lib/ccswitch/types.ts"
+```ts title="types/ccswitch/switch.ts"
 interface ActiveProviderState {
   cognia: string | undefined
-  agents: Partial<Record<AgentId, string | undefined>>
+  agents: Partial<Record<CcswitchAgentId, string | undefined>>
   drift: boolean // true if any agent is inconsistent with cognia
 }
 ```

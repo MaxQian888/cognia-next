@@ -44,6 +44,16 @@ import type {
 const NO_VARIANT = "#none"
 const CURRENT_VERSION = /^2\.\d+\.\d+(?:\+[\w.-]+)?$/
 
+// The SDK is lazy-imported for code-splitting, so mirror its
+// isSessionNotFoundError tag check rather than adding a static import.
+function isSessionNotFound(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { _tag?: unknown })._tag === "SessionNotFoundError"
+  )
+}
+
 function string(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined
 }
@@ -200,14 +210,13 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
           return platformStreamingFetch(input, { ...init, readTimeout: 90_000 })
         },
       })
-      const health = await this.client.health.get({ signal: this.connection.signal })
+      const status = await this.client.server.status({ signal: this.connection.signal })
       if (
-        health.healthy !== true ||
-        !CURRENT_VERSION.test(health.version) ||
-        !Number.isSafeInteger(health.pid) ||
-        health.pid <= 0
+        !CURRENT_VERSION.test(status.version) ||
+        !Number.isSafeInteger(status.pid) ||
+        status.pid <= 0
       ) {
-        throw new Error(`Requires current OpenCode V2; received ${health.version ?? "unknown"}`)
+        throw new Error(`Requires current OpenCode V2; received ${status.version ?? "unknown"}`)
       }
       const probe = await this.client.session.list({ limit: 1 }, { signal: this.connection.signal })
       if (!Array.isArray(probe.data)) throw new Error("Invalid OpenCode V2 session contract")
@@ -219,7 +228,7 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
         mcpTools: canProjectOpenCodeV2Mcp(config),
         multiTurn: true,
         permissionModes: ["default", "acceptEdits", "bypassPermissions", "plan"],
-        custom: { serviceVersion: health.version, nativeApi: "@opencode/client", protocol: "v2" },
+        custom: { serviceVersion: status.version, nativeApi: "@opencode/client", protocol: "v2" },
       }
       this._connectionStatus = "connected"
     } catch (error) {
@@ -305,12 +314,11 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
           return platformStreamingFetch(input, { ...init, readTimeout: 90_000 })
         },
       })
-      const health = await client.health.get({ signal: this.connection.signal })
+      const status = await client.server.status({ signal: this.connection.signal })
       if (
-        health.healthy !== true ||
-        !CURRENT_VERSION.test(health.version) ||
-        !Number.isSafeInteger(health.pid) ||
-        health.pid <= 0
+        !CURRENT_VERSION.test(status.version) ||
+        !Number.isSafeInteger(status.pid) ||
+        status.pid <= 0
       )
         throw new Error("Requires current OpenCode V2 for Cognia tool projection")
       return { ...service, client }
@@ -323,8 +331,10 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
   async healthCheck(): Promise<boolean> {
     if (!this.isConnected()) return false
     try {
-      const health = await this.getSdkClient().health.get({ signal: AbortSignal.timeout(5_000) })
-      return health.healthy === true && CURRENT_VERSION.test(health.version)
+      const status = await this.getSdkClient().server.status({
+        signal: AbortSignal.timeout(5_000),
+      })
+      return CURRENT_VERSION.test(status.version)
     } catch {
       return false
     }
@@ -358,7 +368,6 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
       },
     }
     const location = { directory: info.location.directory }
-    await this.getSdkClient(info.id).plugin.awaitActivation({ location })
     const [models, commands] = await Promise.all([
       this.getSdkClient(info.id).model.list({ location }),
       this.getSdkClient(info.id).command.list({ location }),
@@ -531,7 +540,7 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
       session.messages = mapOpenCodeV2Messages(messages)
       const [permissions, forms] = await Promise.all([
         this.getSdkClient(sessionId).permission.list({ sessionID: sessionId }),
-        this.getSdkClient(sessionId).form.list({ sessionID: sessionId }),
+        this.getSdkClient(sessionId).session.form.list({ sessionID: sessionId }),
       ])
       for (const [id, form] of this.restoredForms)
         if (form.sessionId === sessionId) this.restoredForms.delete(id)
@@ -555,7 +564,7 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
           if (event.type === "elicitation_request")
             this.restoredForms.set(event.request.id, { sessionId, request: event.request })
           if (event.type === "error")
-            await this.getSdkClient(sessionId).form.cancel({
+            await this.getSdkClient(sessionId).session.form.cancel({
               sessionID: sessionId,
               formID: form.id,
             })
@@ -585,10 +594,7 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
     const source = await sourceClient.session.get({ sessionID: sessionId })
     if (options?.cwd && source.location.directory !== options.cwd)
       throw new Error("OpenCode fork belongs to a different working directory")
-    const info = await this.getSdkClient(sessionId).session.fork({
-      sessionID: sessionId,
-      boundary: { type: "through" },
-    })
+    const info = await this.getSdkClient(sessionId).session.fork({ sessionID: sessionId })
     try {
       return await this.resumeSession(info.id, options)
     } catch (error) {
@@ -733,7 +739,7 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
           ? client.session.command(
               {
                 sessionID: sessionId,
-                command: command[1],
+                name: command[1],
                 text: command[2] ?? "",
                 ...(files.length ? { files } : {}),
                 delivery: "queue",
@@ -810,7 +816,7 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
             // server waiting indefinitely for an answer the user cannot send.
             for (const formID of turn.mapper.pendingForms.keys()) {
               if (!turn.requests.has(formID)) {
-                await client.form.cancel({ sessionID: sessionId, formID })
+                await client.session.form.cancel({ sessionID: sessionId, formID })
                 turn.mapper.pendingForms.delete(formID)
               }
             }
@@ -850,11 +856,18 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
           { sessionID: sessionId },
           { signal: AbortSignal.timeout(5_000) }
         )
-        await turn.interrupt
+        await turn.interrupt.catch((error: unknown) => {
+          if (!isSessionNotFound(error)) throw error
+        })
       }
       return
     }
-    if (this.client) await this.getSdkClient(sessionId).session.interrupt({ sessionID: sessionId })
+    if (this.client)
+      await this.getSdkClient(sessionId)
+        .session.interrupt({ sessionID: sessionId })
+        .catch((error: unknown) => {
+          if (!isSessionNotFound(error)) throw error
+        })
   }
 
   async steerTurn(sessionId: string, text: string): Promise<void> {
@@ -874,7 +887,7 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
     await this.getSdkClient(sessionId).permission.reply({
       sessionID: sessionId,
       requestID: response.requestId,
-      reply: response.granted
+      decision: response.granted
         ? response.rememberChoice || response.scope === "always"
           ? "always"
           : "once"
@@ -945,12 +958,12 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
       string(request.raw.openCodeForm && (request.raw.openCodeForm as { id?: string }).id) ??
       response.requestId
     if (answer.action === "accept")
-      await this.getSdkClient(sessionId).form.reply({
+      await this.getSdkClient(sessionId).session.form.reply({
         sessionID: sessionId,
         formID,
         answer: answer.content ?? {},
       })
-    else await this.getSdkClient(sessionId).form.cancel({ sessionID: sessionId, formID })
+    else await this.getSdkClient(sessionId).session.form.cancel({ sessionID: sessionId, formID })
     entry?.[1].requests.delete(response.requestId)
     entry?.[1].mapper.pendingForms.delete(formID)
     this.restoredForms.delete(response.requestId)
@@ -959,7 +972,7 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
 
   async setSessionMode(sessionId: string, mode: AcpPermissionMode): Promise<void> {
     this.requireSession(sessionId)
-    await this.getSdkClient(sessionId).permission.rules({
+    await this.getSdkClient(sessionId).session.update({
       sessionID: sessionId,
       permissions: permissionRules(mode, this.mountedMcp.get(sessionId)),
     })
