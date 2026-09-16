@@ -46,7 +46,7 @@ type Ctx = Parameters<NonNullable<typeof definition.activate>>[0]
  */
 const SLOT_PROPS = {
   pluginId: "cognia-anime-effort",
-  extensionId: "cognia-anime-effort:chat.input.actions",
+  extensionId: "cognia-anime-effort:chat.input.effort",
   formFactor: "row",
 } as unknown as ExtensionProps
 

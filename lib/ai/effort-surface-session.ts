@@ -13,6 +13,33 @@ import { runtimeRefForSession, useAgentRuntimeStore } from "@/stores/agent/agent
 import { resolveEffortSurface, type EffortSurface } from "@/lib/ai/effort-surface"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { resolveAppDefaultModel } from "@/lib/ai/app-default-model"
+import {
+  cachedConversationSurface,
+  subscribeAgentModelSurface,
+} from "@/lib/ai/agent/external/model-surface-cache"
+import type { AgentRuntimeRef } from "@/lib/ai/agent/runtime-catalog/types"
+
+/** The agent a lane dispatches to: its id, or the host configuration's. */
+function laneAgentId(ref: AgentRuntimeRef): string | null {
+  if (ref.kind === "external") return ref.agentId
+  if (ref.kind === "host") return ref.configId
+  return null
+}
+
+/**
+ * The agent's OWN thinking vocabulary for this conversation, from the cache
+ * `useExternalAgentModels` fills. The composer's hook passes the same list, so
+ * without it this path offered Pi's generic `low | medium | high` while the
+ * host chip on the same row offered `xhigh` and `max`.
+ */
+function externalLevelsFor(
+  sessionId: string | undefined,
+  ref: AgentRuntimeRef
+): readonly string[] | undefined {
+  const agentId = laneAgentId(ref)
+  if (!agentId) return undefined
+  return cachedConversationSurface(agentId, sessionId)?.thinking.levels
+}
 
 /**
  * The same answer, for a caller that has a session row but no React.
@@ -46,16 +73,17 @@ export function effortSurfaceForSession(
     defaultModel: appDefault.model,
     defaultProvider: appDefault.provider,
     hiddenTiers: settings?.composerBehavior?.hiddenEffortTiers,
+    externalLevels: externalLevelsFor(session?.id, runtimeRef),
   })
 }
 
 /**
  * Tell me when {@link effortSurfaceForSession} would answer differently.
  *
- * The snapshot alone is a trap for a non-React caller. Three of the four inputs
+ * The snapshot alone is a trap for a non-React caller. Four of the five inputs
  * live in stores, not on the session row: the runtime lane, the app-level
- * model/provider defaults behind an unpinned session, and the hidden-tier
- * preference. A caller that reads once and memoises on the row goes on offering
+ * model/provider defaults behind an unpinned session, the hidden-tier
+ * preference, and the external agent's own published ladder. A caller that reads once and memoises on the row goes on offering
  * `max` and `ultracode` after the conversation moved to an external agent whose
  * real ladder is `low | medium | high`, which is the divergence from the
  * composer's chip this module exists to close. The composer's hook subscribes
@@ -75,11 +103,18 @@ export function subscribeEffortSurface(
     // Signed on the RESOLVED pair, the same one the snapshot reads: an
     // agent-owned default that this lane ignores must not wake a listener.
     const appDefault = resolveAppDefaultModel(settings)
+    const runtimeRef = runtimeRefForSession(sessionId)
     return JSON.stringify([
       appDefault.model,
       appDefault.provider,
       settings?.composerBehavior?.hiddenEffortTiers,
-      runtimeRefForSession(sessionId).kind,
+      runtimeRef.kind,
+      laneAgentId(runtimeRef),
+      // The agent's ladder arrives in a `config_options` reply long after the
+      // lane was chosen, so the cache is a fifth input, not a detail of the
+      // fourth. Signed on the levels rather than the cache revision, because
+      // the cache also moves for the model list, which cannot change a ladder.
+      externalLevelsFor(sessionId, runtimeRef),
     ])
   }
   let last = signature()
@@ -89,7 +124,11 @@ export function subscribeEffortSurface(
     last = next
     listener()
   }
-  const stops = [useSettingsStore.subscribe(notify), useAgentRuntimeStore.subscribe(notify)]
+  const stops = [
+    useSettingsStore.subscribe(notify),
+    useAgentRuntimeStore.subscribe(notify),
+    subscribeAgentModelSurface(notify),
+  ]
   return () => {
     for (const stop of stops) stop()
   }

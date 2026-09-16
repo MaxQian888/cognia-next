@@ -8,6 +8,7 @@
 // no-guardrail mode. Tooltip explains what each mode does.
 
 import { useTranslations } from "next-intl"
+import { ShieldAlertIcon, ShieldCheckIcon, ShieldIcon, type LucideIcon } from "lucide-react"
 import { useChatStore, type PermissionMode } from "@/stores/chat"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -15,8 +16,20 @@ import { cn } from "@/lib/utils"
 import {
   cyclePermissionMode,
   permissionModeMeta,
-  permissionRiskMarker,
+  type PermissionModeMeta,
 } from "@/lib/settings/permission-mode-meta"
+
+/**
+ * The glyph carries the risk the `⚠` / `•` text prefix used to. Every other
+ * per-turn chip on the composer row leads with an icon (model, thinking), and
+ * this one alone opened on bare text, so the row read as two different kinds of
+ * control. Keyed by risk, not by mode, so a new mode inherits the right glyph.
+ */
+const RISK_ICON: Record<PermissionModeMeta["risk"], LucideIcon> = {
+  safe: ShieldCheckIcon,
+  elevated: ShieldIcon,
+  danger: ShieldAlertIcon,
+}
 
 /** The next mode when the chip is clicked / Shift+Tab is pressed (safe core). */
 export function nextPermissionMode(cur: PermissionMode | null): PermissionMode | null {
@@ -45,7 +58,7 @@ export function PermissionModeIndicator({
   const meta = permissionModeMeta(mode ?? "default")
   const label = t(`${meta.i18nKey}.label`)
   const tooltip = t(`${meta.i18nKey}.tooltip`)
-  const marker = permissionRiskMarker(mode ?? "default")
+  const RiskIcon = RISK_ICON[meta.risk]
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -56,21 +69,20 @@ export function PermissionModeIndicator({
           disabled={disabled}
           onClick={() => onCycle(nextPermissionMode(mode))}
           className={cn(
-            "h-auto min-w-0 shrink px-2 py-0.5 text-[11px] font-normal transition-colors hover:bg-accent",
+            "h-auto min-w-0 shrink gap-1 px-2 py-0.5 text-[11px] font-normal transition-colors hover:bg-accent",
             className,
             meta.tone
           )}
           aria-label={t("aria", { label })}
+          data-risk={meta.risk}
         >
+          <RiskIcon aria-hidden className="size-3.5 shrink-0" />
           {/* The `⇧⇥` keycap that used to prefix this label taught the cycle
               shortcut on every turn, forever, in a mono face that made the chip
               read as a third typeface on the composer's status line. The hint
               lives in the tooltip below, where it is read once and costs the
               row nothing. */}
-          <span className="min-w-0 truncate">
-            {marker ? `${marker} ` : ""}
-            {label}
-          </span>
+          <span className="min-w-0 truncate">{label}</span>
         </Button>
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-xs">

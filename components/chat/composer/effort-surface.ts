@@ -14,6 +14,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { useRuntimeRefForSession } from "@/stores/agent/agent-runtime-store"
 import { useExternalAgentModels } from "@/hooks/agent/use-external-agent-models"
 import { resolveEffortSurface, type EffortSurface } from "@/lib/ai/effort-surface"
+import { resolveAppDefaultModel } from "@/lib/ai/app-default-model"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { AgentRuntime } from "@/stores/agent/agent-runtime-store"
 
@@ -41,13 +42,19 @@ export function useEffortSurface(session: ChatSession | null): EffortSurface {
   // asking costs nothing extra, and it is what lets Pi's `max` appear instead
   // of the generic three tiers every external agent used to be given.
   const agentThinking = useExternalAgentModels(session?.id).thinking
+  // The RESOLVED app default, as `effortSurfaceForSession` reads it. The raw
+  // pair can hold an external agent's model plus the reserved marker provider;
+  // handed through as-is, a built-in session behind that default derived its
+  // ladder from a provider that does not exist, found none, and hid the chip,
+  // while the plugin path resolved it and showed the full ladder.
+  const appDefault = resolveAppDefaultModel({ defaultModel, defaultProvider })
 
   return resolveEffortSurface({
     runtime,
     sessionModel: session?.model,
     sessionProvider: session?.providerOverride,
-    defaultModel,
-    defaultProvider,
+    defaultModel: appDefault.model,
+    defaultProvider: appDefault.provider,
     hiddenTiers,
     externalLevels: agentThinking.levels,
   })

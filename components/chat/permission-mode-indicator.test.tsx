@@ -47,11 +47,22 @@ describe("PermissionModeIndicator", () => {
     expect(onCycle).toHaveBeenCalledWith("acceptEdits")
   })
 
-  it("prefixes a danger marker for bypassPermissions", () => {
+  it("leads with a risk-keyed glyph instead of a text marker", () => {
     currentMode = "bypassPermissions"
-    renderChip(<PermissionModeIndicator onCycle={jest.fn()} />)
-    expect(screen.getByRole("button")).toHaveTextContent("⚠")
-    expect(screen.getByRole("button")).toHaveTextContent("bypass.label")
+    const { rerender } = renderChip(<PermissionModeIndicator onCycle={jest.fn()} />)
+    const button = screen.getByRole("button")
+    expect(button).toHaveAttribute("data-risk", "danger")
+    expect(button.querySelector("svg.lucide-shield-alert")).not.toBeNull()
+    expect(button).toHaveTextContent(/^bypass\.label$/)
+
+    currentMode = null
+    rerender(
+      <TooltipProvider>
+        <PermissionModeIndicator onCycle={jest.fn()} />
+      </TooltipProvider>
+    )
+    expect(screen.getByRole("button")).toHaveAttribute("data-risk", "safe")
+    expect(screen.getByRole("button").querySelector("svg.lucide-shield-check")).not.toBeNull()
   })
 
   it("can be disabled", () => {

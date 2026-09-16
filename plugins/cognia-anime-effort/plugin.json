@@ -17,7 +17,7 @@
   "activationEvents": ["startup"],
   "extensions": [
     {
-      "point": "chat.input.actions",
+      "point": "chat.input.effort",
       "entry": "src/index.tsx",
       "export": "AnimeEffortControl",
       "priority": 18,

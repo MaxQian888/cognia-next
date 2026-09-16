@@ -23,7 +23,7 @@ type PluginSession = NonNullable<ReturnType<PluginContext["session"]["getCurrent
 /**
  * The host context, published as a tiny store rather than a bare `let`.
  *
- * The composer's `chat.input.actions` slot can mount this control before the
+ * The composer's `chat.input.effort` slot can mount this control before the
  * plugin manager has run `activate`, and `deactivate` can null the context out
  * from under a mounted one. A component that read the variable once would sit
  * there permanently disabled with nothing that could ever wake it, so the
@@ -106,11 +106,12 @@ export function AnimeEffortControl({ pluginId }: ExtensionProps) {
   const sessionId = session?.id
   const modelId = session?.model
   const providerOverride = session?.providerOverride
-  // Three of those four inputs live in host stores, not on the row, so the row
-  // alone is not a dependency list. Without this the dial keeps offering
+  // Four of the five inputs (the fifth being the external agent's own published
+  // ladder) live in host stores, not on the row, so the row alone is not a
+  // dependency list. Without this the dial keeps offering
   // `xhigh`/`max`/`ultracode` after the conversation moves to an external agent
   // whose real ladder is `low | medium | high`, and writes a depth that agent
-  // folds away. `subscribeEffortSurface` fires only when one of the four would
+  // folds away. `subscribeEffortSurface` fires only when one of them would
   // change the answer, so an unrelated settings write costs nothing.
   const [surfaceEpoch, setSurfaceEpoch] = useState(0)
   useEffect(
@@ -173,16 +174,19 @@ export function AnimeEffortControl({ pluginId }: ExtensionProps) {
           size="sm"
           disabled={!usable}
           aria-label={triggerLabel}
+          title={t("control.label")}
           className="aef-trigger"
           data-level={level}
         >
+          {/* One line, glyph then value, the shape of every other chip on the
+              composer row where this control stands in for the host's effort
+              chip. The caption moved to the tooltip: a stacked two-line
+              uppercase label was the one control there that did not read as a
+              chip. */}
           <span className="aef-trigger-mark" aria-hidden>
             <span />
           </span>
-          <span className="aef-trigger-copy">
-            <span>{t("control.label")}</span>
-            <strong>{t(`level.${level}.name`)}</strong>
-          </span>
+          <strong className="aef-trigger-value">{t(`level.${level}.name`)}</strong>
         </Button>
       </PopoverTrigger>
 
@@ -275,19 +279,21 @@ export const ANIME_EFFORT_CSS = String.raw`
   --aef-ink: oklch(.97 .004 249);
 }
 .aef-trigger {
-  height: 2rem;
+  height: 1.75rem;
   min-width: 0;
   gap: .45rem;
   border-radius: var(--radius-control);
-  padding: 0 .45rem;
+  padding: 0 .5rem;
   color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 400;
 }
 .aef-trigger:hover { color: var(--foreground); }
 .aef-trigger-mark {
   position: relative;
   display: grid;
-  width: 1.1rem;
-  height: 1.1rem;
+  width: .65rem;
+  height: .65rem;
   flex: none;
   place-items: center;
   transform: rotate(45deg);
@@ -299,33 +305,22 @@ export const ANIME_EFFORT_CSS = String.raw`
 .aef-trigger-mark span {
   content: "";
   position: absolute;
-  width: 2px;
+  width: 1.5px;
   background: var(--primary);
 }
 .aef-trigger-mark::before { height: 26%; }
-.aef-trigger-mark span { height: 48%; transform: translateX(-4px); }
-.aef-trigger-mark::after { height: 76%; transform: translateX(4px); }
+.aef-trigger-mark span { height: 48%; transform: translateX(-2px); }
+.aef-trigger-mark::after { height: 76%; transform: translateX(2px); }
 .aef-trigger[data-level="ultracode"] .aef-trigger-mark {
   border-color: var(--aef-accent);
   box-shadow: 0 0 12px color-mix(in oklab, var(--aef-accent) 45%, transparent);
 }
-.aef-trigger-copy {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  align-items: flex-start;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 8px;
-  line-height: 1.05;
-  text-transform: uppercase;
-  letter-spacing: .08em;
-}
-.aef-trigger-copy strong {
-  max-width: 4.8rem;
+.aef-trigger-value {
+  max-width: 6rem;
   overflow: hidden;
-  color: var(--foreground);
-  font-size: 10px;
+  font-weight: inherit;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .aef-panel {
   width: min(25rem, calc(100vw - 1rem));

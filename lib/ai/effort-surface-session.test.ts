@@ -26,8 +26,24 @@ jest.mock("@/stores/settings", () => ({
   },
 }))
 
+// The agent-surface cache the composer's `useExternalAgentModels` fills. A real
+// module singleton in production; here a value plus a listener set, so a test
+// can publish an agent's ladder after the lane was chosen, the way a
+// `config_options` reply actually arrives.
+let agentLevels: readonly string[] | null = null
+const cacheListeners = new Set<() => void>()
+const cachedConversationSurface = jest.fn((_agentId: string, _chatSessionId?: string) =>
+  agentLevels ? { status: "ready", thinking: { levels: agentLevels } } : null
+)
+jest.mock("@/lib/ai/agent/external/model-surface-cache", () => ({
+  cachedConversationSurface: (agentId: string, chatSessionId?: string) =>
+    cachedConversationSurface(agentId, chatSessionId),
+  subscribeAgentModelSurface: (listener: () => void) => subscriber(cacheListeners)(listener),
+}))
+
 jest.mock("@/stores/agent/agent-runtime-store", () => ({
-  runtimeRefForSession: () => ({ kind: runtimeKind }),
+  runtimeRefForSession: () =>
+    runtimeKind === "external" ? { kind: "external", agentId: "pi-1" } : { kind: runtimeKind },
   useAgentRuntimeStore: {
     subscribe: (listener: () => void) => subscriber(runtimeListeners)(listener),
   },
@@ -41,6 +57,9 @@ beforeEach(() => {
   runtimeKind = "builtin"
   settingsListeners.clear()
   runtimeListeners.clear()
+  cacheListeners.clear()
+  agentLevels = null
+  cachedConversationSurface.mockClear()
 })
 
 describe("effortSurfaceForSession", () => {
@@ -91,6 +110,27 @@ describe("effortSurfaceForSession", () => {
     expect(surface.levels).not.toContain("ultracode")
   })
 
+  /**
+   * The composer's hook passes the agent's own `thought_level` vocabulary. This
+   * path did not, so on Pi a plugin dial offered `low | medium | high` beside a
+   * host chip that offered `xhigh` and `max`.
+   */
+  it("offers the external agent's own published ladder for this conversation", () => {
+    runtimeKind = "external"
+    agentLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
+
+    const surface = effortSurfaceForSession({ id: "s1" })
+
+    expect(cachedConversationSurface).toHaveBeenCalledWith("pi-1", "s1")
+    expect(surface.levels).toEqual(["low", "medium", "high", "xhigh", "max"])
+  })
+
+  it("never consults the agent cache on a built-in lane", () => {
+    agentLevels = ["low", "medium", "high", "xhigh", "max"]
+    effortSurfaceForSession({ id: "s1", model: "claude-opus-5" })
+    expect(cachedConversationSurface).not.toHaveBeenCalled()
+  })
+
   /** A model that does not reason at all gets no depth control, not a full ladder. */
   it("gates on whether the model reasons", () => {
     const surface = effortSurfaceForSession({
@@ -125,6 +165,23 @@ describe("effortSurfaceForSession", () => {
  * conversation moved to a lane that cannot carry them.
  */
 describe("subscribeEffortSurface", () => {
+  // The ladder arrives in a `config_options` reply long after the lane was
+  // picked. Without this wake-up the dial sat on the generic three tiers until
+  // some unrelated input changed.
+  it("fires when the agent publishes its ladder, and not for a cache write that cannot move it", () => {
+    runtimeKind = "external"
+    const listener = jest.fn()
+    subscribeEffortSurface("s1", listener)
+
+    agentLevels = ["low", "medium", "high", "xhigh", "max"]
+    notify(cacheListeners)
+    expect(listener).toHaveBeenCalledTimes(1)
+
+    // A model-list refresh moves the cache revision but not the ladder.
+    notify(cacheListeners)
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
   it("fires when the lane changes even though the session row did not", () => {
     const listener = jest.fn()
     subscribeEffortSurface("s1", listener)

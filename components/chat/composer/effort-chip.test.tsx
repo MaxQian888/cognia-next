@@ -4,6 +4,7 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import { EffortChip } from "./effort-chip"
 import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
+import { externalAgentProviderId } from "@/lib/ai/agent/external/session-models"
 
 jest.mock("@/lib/db/sessions", () => ({
   updateSession: jest.fn(async () => undefined),
@@ -68,6 +69,19 @@ describe("self-gating", () => {
   // The whole point of the fix: the shipped default model must show the chip.
   it("renders on a Claude 5 model", () => {
     render(<EffortChip session={{ ...session, model: "claude-sonnet-5" }} />)
+    expect(screen.getByTestId("effort-chip")).toBeInTheDocument()
+  })
+
+  // The app default can be an external agent's model plus the reserved marker
+  // provider. Handed through raw, a built-in session behind it derived its
+  // ladder from that marker, found none and hid the chip, while the plugin path
+  // resolved the default and showed the full ladder on the same row.
+  it("renders on a built-in session whose app default an external agent owns", () => {
+    mockSettings = {
+      defaultModel: "deepseek/deepseek-v4-pro",
+      defaultProvider: externalAgentProviderId("a1"),
+    }
+    render(<EffortChip session={{ ...session, model: undefined, providerOverride: undefined }} />)
     expect(screen.getByTestId("effort-chip")).toBeInTheDocument()
   })
 
