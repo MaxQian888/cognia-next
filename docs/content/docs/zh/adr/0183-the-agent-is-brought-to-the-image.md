@@ -96,7 +96,22 @@ description: "agent CLI 不再预装在项目运行的镜像里。每个版本�
   3. `bundle-libc`（bundle 镜像）只拷贝探测出的那套 libc 目录。
 
   用户镜像的 entrypoint 被替换为 `cognia-sandboxd`，和 devcontainer 的 `overrideCommand` 一样。只有在验证过的节点池上（例如 Kubernetes ≥ 1.35 且 containerd ≥ 2.1 的 ACK），才改为把 bundle 以只读镜像卷挂载，只剩探测一步。
-- **Docker**：bundle 只暂存一次，放进命名卷 `cognia-bundle-<digest12>-<libc>`，引用计数、只读挂载。探测结果按（用户镜像 digest，bundle digest）缓存。
+- **Docker**：bundle 暂存进命名卷 `cognia-<deployment>-bundle-<digest12>-<stage>`，用到它的容器一律只读挂载。
+  - `<stage>` 取 `core`、`glibc` 或 `musl`。探测容器挂的是 `core` 卷——镜像没探测过之前选不出 libc。libc 卷里同时放 core **和**那套 libc 目录，这样 agent 挂的那一个卷就是自洽的；在 `/cognia` 下再套一层挂载被否决了，脆弱且没有收益——core 只是一个静态 supervisor 加 `git` 和 `rg`。
+  - 名字带部署作用域，因为多台 server 可以共用一个 daemon，而那套清理别的部署遗留 runner 的扫描绝不能顺手删掉它的 bundle。卷上带 `cognia.bundle-digest` 与 `cognia.bundle-stage`；启动时，属于本部署、但基线已不再提供该 bundle 的卷会被删除，仍被容器挂着的留给下一轮扫描。
+  - `install` 会把 manifest digest 写进标记文件，所以重新暂存一个已就绪的卷只花一个短命容器、零拷贝。驱动按卷加锁：`install` 通过带 pid 的临时名暂存，而每个暂存容器都是 PID 1。
+  - 探测结果存在 `environment.sqlite`，键是（用户镜像 digest，bundle digest），同时记下目标用户、是否重映射到工作区属主、以及那个属主。换了目标用户、或工作区易主之后的报告不会被复用。带 `probe_workspace_not_writable` 的报告永不缓存：那是关于某一个工作区的事实，不是关于镜像的。在 Linux 上——也就是所有真正跑生产的部署——server 和沙箱透过同一个内核看同一个文件系统，所以 server stat 到的属主就是探测报告里的属主；桌面 daemon 做 uid 映射时缓存只是命不中，正确性仍由 `init-agent` 保证，它自己会 stat 工作区。
+  - daemon 前面的 socket proxy 增加 `INFO`（有哪些 OCI runtime，用来认证 gVisor 档位）与 `VOLUMES`（只涉及命名卷）。`EXEC` 与 `BUILD` 保持拒绝。
+
+### 一次 spawn 跑的是 bundle 里的哪个文件
+
+预设声明 agent 的写法和「本机装了该 CLI」时一样：裸命令（`claude-agent-acp`），或 `npx -y <package>`（codex-acp、Gemini CLI、Qwen Code）。在沙箱里两者都不会去 `PATH` 里查找、也不会下载——镜像的 `PATH` 属于项目，而启动时下载会让实际运行的版本取决于沙箱何时启动。两种写法都映射到探测报告为该镜像 libc 给出的某个命令，以 `/cognia/<libc>/bin/<name>` 绝对路径调用：
+
+- 裸命令匹配 manifest 命令的 `name`；
+- `npx [-y|--yes] <package>[@version] args…` 匹配它的 `package`，并且故意忽略请求的版本——跑发布锁定的版本而不是浮动 tag，正是打 bundle 的意义；
+- 其他任何 `npx` 选项（`--package`、`-c`）都会改变实际运行的东西，bundle 无法替代。
+
+其余一律以 `sandbox_command_unavailable` 拒绝，并说明命令名与探测出的 libc。
 
 ### agent 以哪个用户运行
 
@@ -139,6 +154,6 @@ description: "agent CLI 不再预装在项目运行的镜像里。每个版本�
 
 ## 实现
 
-- **第 ① 步**：`crates/cognia-sandboxd`（install、probe、init-agent）、`deploy/bundle/`、CI 矩阵条目、版本生成器、第四个发布镜像、带探测缓存的 Docker bundle 暂存。
+- **第 ① 步**：`crates/cognia-sandboxd`（install、probe、init-agent）、`deploy/bundle/`、CI 矩阵条目、版本生成器、第四个发布镜像，以及 `crates/cognia-sandbox-pool`——暂存 bundle、探测镜像、映射命令、启动 agent 的 Docker 驱动。它和 `cognia-sandboxd` 分成两个 crate，是因为第 ② 步的 `serve` 模式要链接 `cognia-external-agent`，而驱动同样需要它；把驱动放进任何一边都会形成循环依赖。
 - **第 ② 步**：`serve` 与协议 v2。
 - **后续**：池、凭据、构建、迁移分别是 ADR-0184 到 ADR-0187（规划中）。

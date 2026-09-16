@@ -617,6 +617,18 @@ pub static EVENT_CHANNELS: &[EventChannelSpec] = &[
         tauri_forwarded: true,
         note: "external agent exit; ids and exit code",
     },
+    // ADR-0182 — where a spawn that asked for a runtime environment actually
+    // ran: the sandbox it got, or the fallback and why. Emitted only for a
+    // spawn that carried a placement, so a deployment with the pool off never
+    // sees it.
+    EventChannelSpec {
+        pattern: "external-agent://placement",
+        audience: ChannelAudience::Any,
+        default_on: false,
+        tauri_forwarded: true,
+        note: "external agent sandbox placement; image digest, isolation tier and user, \
+               or the fallback reason",
+    },
     // A run the HOST is driving on a remote client's behalf. Unlike the six
     // above — which describe a process to whoever is watching — this one IS
     // the turn: without it a browser that asked the host to run an agent sees

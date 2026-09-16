@@ -24,10 +24,18 @@ services:
       CONTAINERS: "1" # create/attach/start/wait/kill/remove runners
       IMAGES: "1" # auto-pull the runner image on first spawn
       POST: "1" # mutating verbs for the two above
-      # Exec stays denied: the backend never uses the exec API (one
-      # container per agent, agent as PID 1 — not exec-into-warm-runner).
+      # Runtime environment sandboxes (ADR-0183) need two more, and only
+      # while the sandbox pool is on. Granting them with the pool off costs
+      # nothing that matters: `/info` is read-only, and the volume API here is
+      # scoped to named volumes, not to the host filesystem.
+      INFO: "1" # /info — which OCI runtimes exist, to attest the gVisor tier
+      VOLUMES: "1" # the named volumes the agent bundle is staged into
+      # Exec stays denied: neither backend uses the exec API (one container
+      # per agent, agent as PID 1 — not exec-into-warm-runner). BUILD stays
+      # denied too; devcontainer builds are the build service of ADR-0186 and
+      # run in their own sandbox, not through this proxy.
       EXEC: "0"
-      # Everything else (volumes, networks, swarm, host info) stays denied.
+      # Everything else (networks, swarm, secrets) stays denied.
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: unless-stopped

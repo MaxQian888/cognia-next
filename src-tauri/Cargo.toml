@@ -139,6 +139,11 @@ cognia-mcp-server = { path = "../crates/cognia-mcp-server" }
 # behind the crate's own features; see [features] forwarding below).
 # Re-aliased as `crate::external_agent`.
 cognia-external-agent = { path = "../crates/cognia-external-agent" }
+# ADR-0182/0183 — runtime environment sandboxes. Linked unconditionally so the
+# boot seam decides in every build: a deployment that enabled the pool must
+# never boot into a binary that silently ignores the switch. The Docker driver
+# itself needs the `docker` feature, forwarded from `container-exec` below.
+cognia-sandbox-pool = { path = "../crates/cognia-sandbox-pool" }
 # ADR-0067 Phase 5 — Computer Use automation + execution sandbox cluster. Owns
 # uiautomation/enigo/xcap/accessibility/seccompiler; re-aliased as
 # crate::{automation,sandbox,cua_sandbox}. windows/core-graphics/core-foundation/
@@ -557,7 +562,13 @@ ocr-paddle = ["cognia-ocr/ocr-paddle", "cognia-observability/ocr-paddle"]
 # ADR-0059 R13 — ExecBackend::Container for per-workspace runner containers
 # (T2 topology). Off desktop builds: only the headless `cognia-server` image
 # enables it, so the Docker client never enters the Tauri binary.
-container-exec = ["cognia-external-agent/container-exec"]
+# Also arms the ADR-0183 Docker sandbox driver: both flavors talk to the same
+# daemon through the same seam, so a build that can run legacy runners is
+# exactly the build that can run runtime environment sandboxes.
+container-exec = [
+  "cognia-external-agent/container-exec",
+  "cognia-sandbox-pool/docker",
+]
 # ADR-0059 R13 (T3) — kubernetes flavor of the exec backend: runner Pods with
 # attached stdio, PVC-subPath workspace mounts. In-cluster only; enabled in
 # the headless image alongside `container-exec`.

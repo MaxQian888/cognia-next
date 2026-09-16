@@ -1635,7 +1635,18 @@ async fn run_serve(
         .map_err(|e| format!("deployment id: {e}"))?;
     log::info!("deployment id: {deployment_id}");
     let exec = exec_backend_from_env(&deployment_id).map_err(|e| format!("exec backend: {e}"))?;
-    log::info!("exec backend: {}", exec.kind());
+    // ADR-0182/0183 — runtime environment sandboxes, in front of whatever the
+    // line above resolved. Off unless this deployment enabled the pool, and
+    // then it hands the same backend straight back; a deployment that DID
+    // enable it and cannot get a sandbox is refused here rather than served by
+    // the legacy runner it asked to stop using.
+    let exec = cognia_sandbox_pool::boot::wrap_exec_backend(exec, &data_dir, &deployment_id)
+        .map_err(|e| format!("sandbox pool: {e}"))?;
+    log::info!(
+        "exec backend: {} (runtime environment sandboxes: {})",
+        exec.kind(),
+        if exec.routes_sandboxes() { "on" } else { "off" }
+    );
     // Reap what a previous run left behind. A container outlives the process
     // that started it, so a crash used to leak one per agent with no way to
     // find them again — the in-process registry was the only record that they

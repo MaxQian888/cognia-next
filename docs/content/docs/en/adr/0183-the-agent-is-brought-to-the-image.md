@@ -96,7 +96,22 @@ The existing persistent runtime supervisor cannot carry that job. `services/work
   3. `bundle-libc` (bundle image) copies only the probed libc tree.
 
   The user image's entrypoint is replaced by `cognia-sandboxd`, as devcontainer `overrideCommand` does. Only on node pools where it has been verified (for example ACK with Kubernetes ≥ 1.35 and containerd ≥ 2.1) is the bundle mounted as a read-only image volume instead, leaving just the probe step.
-- **Docker.** The bundle is staged once into a named volume `cognia-bundle-<digest12>-<libc>`, reference-counted and mounted read-only. Probe results are cached per (user image digest, bundle digest).
+- **Docker.** The bundle is staged into named volumes `cognia-<deployment>-bundle-<digest12>-<stage>`, mounted read-only by the containers that use them.
+  - `<stage>` is `core`, `glibc` or `musl`. The `core` volume is what the probe container mounts, because the libc cannot be chosen before the image has been probed. A libc volume holds core **and** that libc tree, so the one volume an agent mounts is self-contained; nesting a second mount under `/cognia` was rejected as a fragility with no benefit — core is a static supervisor plus `git` and `rg`.
+  - The name is scoped to the deployment because several servers can share one daemon, and the same sweep that removes another deployment's runners must not remove its bundles. Volumes carry `cognia.bundle-digest` and `cognia.bundle-stage`; at boot, a volume of this deployment for a bundle the baseline no longer offers is removed, and one a container still mounts is left for the next sweep.
+  - `install` records the manifest digest in a marker, so a restaged volume costs one short container and no copy. The driver holds a lock per volume: `install` stages through a pid-derived name and every staging container is PID 1.
+  - Probe results are cached in `environment.sqlite` per (user image digest, bundle digest), with the target user, whether it is remapped onto the workspace owner, and that owner recorded alongside. A report answering for a different user or a workspace that changed hands is not reused. A `probe_workspace_not_writable` report is never cached: it is a fact about one workspace, not about the image. On Linux — every deployment that runs this in production — the server and the sandbox see one filesystem through one kernel, so the owner the server stats is the owner the probe reports; where a desktop daemon maps uids the cache simply misses, and correctness still comes from `init-agent`, which stats the workspace itself.
+  - The socket proxy in front of the daemon gains `INFO` (which OCI runtimes exist, to attest the gVisor tier) and `VOLUMES` (named volumes only). `EXEC` and `BUILD` stay denied.
+
+### Which bundled file a spawn runs
+
+A preset names its agent the way a host with the CLI installed would: a bare command (`claude-agent-acp`) or `npx -y <package>` (codex-acp, Gemini CLI, Qwen Code). Inside a sandbox neither is looked up on `PATH` or downloaded — the image's `PATH` belongs to the project, and a download at start would make the running version depend on when the sandbox started. Both forms map onto a command the probe reported for the image's libc, addressed as `/cognia/<libc>/bin/<name>`:
+
+- a bare name matches a manifest command's `name`;
+- `npx [-y|--yes] <package>[@version] args…` matches its `package`, and the requested version is ignored on purpose — running the release's pin instead of a floating tag is the point of bundling;
+- any other `npx` option (`--package`, `-c`) changes what runs, so the bundle cannot stand in for it.
+
+Anything else is refused with `sandbox_command_unavailable`, naming the command and the probed libc.
 
 ### Which user the agent runs as
 
@@ -135,4 +150,4 @@ The supervisor removes its own secrets from every child's environment, following
 
 ## Implementation
 
-Step ①: `crates/cognia-sandboxd` (install, probe, init-agent), `deploy/bundle/`, the CI matrix entry, the version generator, the fourth release image, and Docker bundle staging with a probe cache. Step ②: `serve` and protocol v2. The pool, credentials, builds and migration are ADR-0184 to ADR-0187 (planned).
+Step ①: `crates/cognia-sandboxd` (install, probe, init-agent), `deploy/bundle/`, the CI matrix entry, the version generator, the fourth release image, and `crates/cognia-sandbox-pool` — the Docker driver that stages the bundle, probes the image, maps the command and starts the agent. It is a separate crate from `cognia-sandboxd` because the Step ② `serve` mode links `cognia-external-agent`, which the driver also needs; putting the driver in either would close that cycle. Step ②: `serve` and protocol v2. The pool, credentials, builds and migration are ADR-0184 to ADR-0187 (planned).

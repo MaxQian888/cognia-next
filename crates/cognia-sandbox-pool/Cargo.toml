@@ -23,6 +23,14 @@ publish = false
 name = "cognia_sandbox_pool"
 path = "src/lib.rs"
 
+[features]
+# The bollard client behind `cognia-external-agent`'s container seam. Off by
+# default so a desktop build links the boot seam and admission without a
+# Docker client; the headless image and the desktop local-container toggle
+# turn it on. With it off, a deployment that enables the pool is refused at
+# boot rather than downgraded (see `boot`).
+docker = ["cognia-external-agent/container-exec"]
+
 [dependencies]
 # `store` only: the registry HTTP transport (and the reqwest it pulls) belongs
 # to the metadata reader in `cognia-environment`, not to a driver that hands

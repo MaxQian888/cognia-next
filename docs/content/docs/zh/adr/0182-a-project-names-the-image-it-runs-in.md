@@ -29,6 +29,22 @@ Cognia 里容器化的 agent，每个部署只能跑在一个镜像里。`COGNIA
 
 任何一层关闭时，`spawn_external_agent`、工作区命令、网关、出网都走现有路径，行为不变。每个触及这些路径的切片都带一个「关闭路径」测试把它钉住。
 
+部署开关关闭时，spawn 路径上根本没有路由器：`cognia_sandbox_pool::boot::wrap_exec_backend` 把 Host 传进来的那个执行后端原样还回去，测试断言的是同一个 `Arc`，而不是「行为看起来一样」。只有在运维确实设置了什么、却拿不到沙箱时才拒绝启动：基线文件解析不了、开关值读不懂、开关打开却没有目录、开关打开但二进制没编进驱动。一个新变量都没设的部署，不可能被这个子系统拒绝启动。
+
+### 每次 spawn 各自选环境
+
+选择环境的是一次 spawn，而不是一个进程。`ExternalAgentSpawnConfig.sandbox` 是可选的 `SandboxPlacement`；运行环境之前的所有调用方都不带它，不带时也不出现在协议里：
+
+```
+{ "kind": "container", "spec": <EnvironmentSpec>, "isolationMandatory": false }
+```
+
+规格以 JSON travel，因为它来自 Host 并不信任的客户端；容器存在之前，它会被重新对照本 Host 自己的基线、目录、审批与出网授权做一次准入。`isolationMandatory` 是下文故障规则里属于客户端的那一半：客户端只能用它把自己这次运行变得更严格。
+
+`SandboxRoutingBackend` 位于 Host 原有执行路径（本地进程、旧 runner 容器，或 ADR-0085 的 workspace-runtime 路由）之前，逐次 spawn 做决定。agent 最终跑在哪里通过 `external-agent://placement` 发出，并在 `get_info` 里重复一遍，这样界面才能说出真正运行的是什么：镜像 digest、实际认证到的隔离档位、bundle 里的命令，以及用户——被重映射时连声明的 uid 一起给出。回退走同一个通道，形如 `{ "kind": "fallback", "code", "message" }`。
+
+一个 placement 落到池关闭的 Host 上时不需要路由器介入：`spawn_with_events` 在隔离强制时拒绝（`sandbox_pool_disabled`），否则剥掉它并报告 `sandbox_fallback_pool_disabled`。多租户 Host 上不带 placement 的 spawn 以 `sandbox_placement_required` 拒绝。
+
 ### 一份解析好的、不可变的规格
 
 每次获取沙箱时，brain 解析一次 `EnvironmentSpec`。类型定义在 `types/sandbox/environment-spec.ts`，Rust 侧由 `crates/cognia-environment` 镜像实现。规格包含：
@@ -92,6 +108,19 @@ digest 覆盖除「给人看的解析过程」之外的全部内容。Rust 在�
 - **隔离不是强制的**：项目没有把隔离标为强制（`ProjectEnvironmentPolicy.requireSandbox` 或显式最低档位），就走现有执行路径，UI 显示 `sandbox_fallback_*` 原因。
 - **隔离是强制的**：项目标了强制，或处在基线强制沙箱的多租户 Host 上，就拒绝运行。在那种情况下回退，意味着在 server 容器里、挨着其他租户的数据跑不可信的仓库代码。
 
+哪些失败才算「故障」是这条规则的另一半，判据是这次失败说明了什么：
+
+| 拒绝——永不回退 | 故障——除非隔离强制，否则回退 |
+| --- | --- |
+| 规格没有通过准入（`catalog_entry_unavailable`、`approval_missing`、`approval_mismatch`、`isolation_below_floor`、`egress_open_requires_grant`、`size_class_not_offered`、`gpu_not_supported`、`isolation_tier_unavailable`……） | `sandbox_pool_disabled`、`bundle_unavailable`、`sandbox_store_unavailable` |
+| 镜像撑不起 agent（`probe_libc_unsupported`、`probe_glibc_too_old`、`probe_no_shell`、`probe_user_missing`、`probe_workspace_not_writable`、`bundle_arch_mismatch`、`sandbox_probe_failed`、`sandbox_probe_timeout`、`sandbox_image_unavailable`） | `sandbox_daemon_unreachable`、`sandbox_volume_unavailable`、`sandbox_bundle_stage_failed`、`sandbox_container_start_failed` |
+| bundle 里没有这个命令（`sandbox_command_unavailable`） | |
+| spawn 本身不合规（`sandbox_placement_required`、`sandbox_workspace_required`、`sandbox_workspace_outside_root`） | |
+
+回退时展示的原因码是故障码换掉 `sandbox_` 前缀后的形式：`bundle_unavailable` 变成 `sandbox_fallback_bundle_unavailable`。
+
+拒绝是对「所要求的东西」下的判断，把 agent 放到别处跑就会悄悄少做一些事；故障是基础设施挂了，它对这次请求本身什么也没说。所以镜像拉不下来是拒绝，而 daemon 连不上是故障。
+
 ### Docker 与 Kubernetes 遵守规格，E2B 不遵守
 
 解析与注入路径由 Docker 驱动（compose T2 与桌面开关）和 Kubernetes 池（ADR-0184，规划中）共用。E2B 工作区后端不遵守运行环境，这一点在它的类型、UI、测试三处标注。
@@ -99,6 +128,15 @@ digest 覆盖除「给人看的解析过程」之外的全部内容。Rust 在�
 ### 桌面凭据是明确的例外
 
 桌面端本机容器里的 agent 拿到的是用户自己的 key，和今天 `env-builder.ts` 的做法一样，因为桌面网关只监听回环。ADR-0185（规划中）的「沙箱永不持有原始模型 key」规则约束的是 compose T2 与 Kubernetes。这个例外在「运行环境」面板里标注。
+
+### 第 ① 步既不强制出网也不改写凭据，并且明说这一点
+
+本文里有两条保证要靠第 ② 步的基础设施才成立。在那之前，第 ① 步的驱动是故意更弱的，这个缺口在类型、界面读到的 placement、以及测试三处标注：
+
+- **出网**：`off` 会被真正执行——容器完全没有网络。`allowlist` 与 `on` 拿到的是旧 runner 那张网，没有任何东西在过滤，因为按租户的 L7 出网代理属于 ADR-0185。placement 里带 `egress.enforced: false`，下游任何地方都不能把一个没过滤的沙箱说成「已强制的白名单」。
+- **凭据**：沙箱拿到的是和旧 runner 相同的、经 `SpawnPolicy` 过滤的环境变量，包含 provider key；网关那条只认票据的沙箱入口属于 ADR-0185 §②.7。placement 里带 `credentials.mode: "spawn-env"`。沙箱内的 supervisor 仍然会按驱动声明的变量名清单，剥掉那些来自镜像而非来自 Cognia 的环境凭据（[ADR-0183](./0183-the-agent-is-brought-to-the-image)）。
+
+两者都不是悄悄降级：项目不可能在第 ① 步要求「强制白名单」，然后被告知它拿到了。
 
 ## 影响
 
@@ -129,6 +167,6 @@ digest 覆盖除「给人看的解析过程」之外的全部内容。Rust 在�
 4. TS 规格类型、devcontainer 子集解析、解析器、`workspace.json` 的 `environment` 块、桌面 devcontainer 审批；
 5. `cognia-sandboxd` 的 install/probe/init 模式与 agent bundle 镜像（[ADR-0183](./0183-the-agent-is-brought-to-the-image)）；
 6. 第四个发布镜像；
-7. 按 spawn 路由；
+7. 按 spawn 路由：`ExternalAgentSpawnConfig.sandbox`、`SandboxRoutingBackend`、`external-agent://placement` 通道，以及包含准入、bundle 命令映射与 Docker 驱动的 `crates/cognia-sandbox-pool`；
 8. companion RPC 与云端审批权限；
 9. brain 接线、「运行环境」与「镜像目录」界面、compose 冒烟。

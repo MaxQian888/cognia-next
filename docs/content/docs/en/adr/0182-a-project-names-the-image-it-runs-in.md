@@ -29,6 +29,22 @@ This is a large subsystem on the spawn path, so it is opt-in and cannot break no
 
 When any layer is off, `spawn_external_agent`, workspace commands, the gateway and egress take today's paths unchanged. Every slice that touches one of those paths carries an "off path" test that pins it.
 
+With the deployment switch off there is no router on the spawn path at all: `cognia_sandbox_pool::boot::wrap_exec_backend` hands the Host back the same execution backend it was given, and a test asserts the identity of the `Arc` rather than that the behaviour matches. Boot is refused only when an operator set something and cannot have it: a baseline file that does not parse, an unreadable switch, the switch on with no catalog, or the switch on in a binary built without a driver. A deployment that set none of the new variables can never be refused by this subsystem.
+
+### One placement per spawn
+
+A spawn, not a process, chooses its environment. `ExternalAgentSpawnConfig.sandbox` is an optional `SandboxPlacement`, absent for every caller that predates runtime environments and omitted from the wire when absent:
+
+```
+{ "kind": "container", "spec": <EnvironmentSpec>, "isolationMandatory": false }
+```
+
+The spec travels as JSON because it came through a client the Host does not trust, and is re-admitted against the Host's own baseline, catalog, approvals and egress grants before a container exists. `isolationMandatory` is the client's half of the fault rule below: a client can only make its own run stricter with it.
+
+`SandboxRoutingBackend` sits in front of whatever execution path the Host already had — local processes, legacy runner containers, or the ADR-0085 workspace-runtime router — and decides per spawn. Where an agent ended up is emitted on `external-agent://placement` and repeated in `get_info`, so the UI can say what actually ran: the image digest, the isolation tier it was attested at, the bundled command, and the user, with the declared uid when it was remapped. A fallback arrives on the same channel as `{ "kind": "fallback", "code", "message" }`.
+
+A stray placement reaching a Host with the pool off is handled without a router: `spawn_with_events` refuses it when isolation is mandatory (`sandbox_pool_disabled`) and otherwise strips it and reports `sandbox_fallback_pool_disabled`. A spawn with no placement on a multi-tenant Host is refused with `sandbox_placement_required`.
+
 ### One resolved, immutable spec
 
 The brain resolves an `EnvironmentSpec` once per sandbox acquisition. The shape is `types/sandbox/environment-spec.ts`, mirrored in Rust by `crates/cognia-environment`. The spec carries:
@@ -92,6 +108,19 @@ When the pool, a driver, the gateway sandbox ingress or the egress proxy is unav
 - **Isolation not mandatory:** a project that did not mark isolation mandatory (`ProjectEnvironmentPolicy.requireSandbox`, or an explicit minimum tier) runs on today's execution path. The UI shows a `sandbox_fallback_*` reason.
 - **Isolation mandatory:** a project that did mark it, or any project on a multi-tenant Host whose baseline forces sandboxes, is refused. Falling back there would run untrusted repository code inside the server container next to other tenants' data.
 
+Which failures are faults at all is the other half of the rule, and it is decided by what the failure says about the request:
+
+| Refused — never falls back | Fault — falls back unless isolation is mandatory |
+| --- | --- |
+| The spec was not admitted (`catalog_entry_unavailable`, `approval_missing`, `approval_mismatch`, `isolation_below_floor`, `egress_open_requires_grant`, `size_class_not_offered`, `gpu_not_supported`, `isolation_tier_unavailable`, …) | `sandbox_pool_disabled`, `bundle_unavailable`, `sandbox_store_unavailable` |
+| The image cannot host the agent (`probe_libc_unsupported`, `probe_glibc_too_old`, `probe_no_shell`, `probe_user_missing`, `probe_workspace_not_writable`, `bundle_arch_mismatch`, `sandbox_probe_failed`, `sandbox_probe_timeout`, `sandbox_image_unavailable`) | `sandbox_daemon_unreachable`, `sandbox_volume_unavailable`, `sandbox_bundle_stage_failed`, `sandbox_container_start_failed` |
+| The bundle has no such command (`sandbox_command_unavailable`) | |
+| The spawn is malformed (`sandbox_placement_required`, `sandbox_workspace_required`, `sandbox_workspace_outside_root`) | |
+
+The reason code shown for a fallback is the fault's code with its `sandbox_` prefix replaced: `bundle_unavailable` becomes `sandbox_fallback_bundle_unavailable`.
+
+A refusal is a decision about what was asked for, and running the agent somewhere else would silently do less than that. A fault is the infrastructure being down, which says nothing about the request. That is why an image that cannot be pulled is a refusal while a daemon that cannot be reached is a fault.
+
 ### Docker and Kubernetes honour the spec; E2B does not
 
 The resolver and injection path are shared by the Docker driver (compose T2 and the desktop toggle) and the Kubernetes pool (ADR-0184, planned). The E2B workspace backend does not honour runtime environments. That is stated on its type, labelled in its UI and pinned by a test.
@@ -99,6 +128,15 @@ The resolver and injection path are shared by the Docker driver (compose T2 and 
 ### Desktop credentials are the stated exception
 
 In a local container on the desktop, the agent receives the user's own keys exactly as `env-builder.ts` does today. The desktop gateway is loopback-only. The "sandboxes never hold raw model keys" rule of ADR-0185 (planned) applies to compose T2 and Kubernetes. The desktop exception is labelled in the Runtime environment panel.
+
+### Step ① enforces neither egress nor credential routing, and says so
+
+Two guarantees in this ADR need infrastructure that Step ② builds. Until then the Step ① driver is deliberately weaker, and the gap is labelled on the type, in the placement the UI renders, and in a test:
+
+- **Egress.** `off` is honoured by giving the container no network at all. `allowlist` and `on` get the network the legacy runner had, with nothing filtering it, because the per-tenant L7 egress proxy is ADR-0185. The placement carries `egress.enforced: false`, so nothing downstream can present an unfiltered sandbox as an enforced allowlist.
+- **Credentials.** A sandbox receives the same `SpawnPolicy`-filtered environment the legacy runner received, provider keys included; the gateway's ticket-only sandbox ingress is ADR-0185 §②.7. The placement carries `credentials.mode: "spawn-env"`. The in-sandbox supervisor still strips ambient credentials that came from the image rather than from Cognia, using the list of names the driver declares ([ADR-0183](./0183-the-agent-is-brought-to-the-image)).
+
+Neither is a silent downgrade: a project cannot ask for an enforced allowlist in Step ① and be told it got one.
 
 ## Consequences
 
@@ -129,6 +167,6 @@ Step ① of the runtime-environment plan, in independently committable slices:
 4. TS spec types, devcontainer subset parser, resolver, `workspace.json` `environment` block, desktop devcontainer approval.
 5. `cognia-sandboxd` install/probe/init modes and the agent bundle image ([ADR-0183](./0183-the-agent-is-brought-to-the-image)).
 6. The fourth release image.
-7. Per-spawn routing.
+7. Per-spawn routing: `ExternalAgentSpawnConfig.sandbox`, `SandboxRoutingBackend`, the `external-agent://placement` channel, and `crates/cognia-sandbox-pool` with admission, the bundled-command mapping and the Docker driver.
 8. Companion RPC and cloud approval authority.
 9. Brain wiring, the Runtime environment and Image catalog UI, and the compose smoke.

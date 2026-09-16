@@ -11258,6 +11258,34 @@
                 "raw"
               ],
               "description": "How stdout is delivered. `line` is the default every ACP, Codex and OpenCode adapter uses. `pi-rpc` is the only caller that sets `raw`, because Pi's JSONL frames are delimited by the newline BYTE and its adapter owns a strict codec with frame ceilings that pre-split lines would move out of reach. Omitting it here made this whole object `additionalProperties: false` against a struct that has the field, so every Pi session from a paired client was refused 422 while the desktop, which never validates, worked."
+            },
+            "sandbox": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "description": "ADR-0182/0183 — run the agent in the project's runtime environment instead of this host's execution path. Absent (or null) is every caller before runtime environments, and takes today's path unchanged. `spec` is not described here on purpose: the host re-admits it against its own baseline, catalog and approvals and answers with a typed refusal code, which is far more useful than a 422 from a schema that would have to mirror `EnvironmentSpec` field by field.",
+              "required": [
+                "kind",
+                "spec",
+                "isolationMandatory"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "container"
+                  ]
+                },
+                "spec": {
+                  "type": "object"
+                },
+                "isolationMandatory": {
+                  "type": "boolean",
+                  "description": "The client's half of the fault rule: the project set `requireSandbox` or named a minimum isolation tier, so an infrastructure fault must refuse rather than fall back. A client can only make its own run stricter with this; the host adds its own half from a multi-tenant baseline."
+                }
+              },
+              "additionalProperties": false
             }
           },
           "additionalProperties": false

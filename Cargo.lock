@@ -2376,6 +2376,7 @@ dependencies = [
  "cognia-ocr",
  "cognia-plugin-runtime",
  "cognia-problem",
+ "cognia-sandbox-pool",
  "cognia-scheduling",
  "cognia-secrets",
  "cognia-signaling-core",
