@@ -56,8 +56,13 @@
         "type": "object",
         "required": ["id", "realmOverridable"],
         "properties": {
-          "id": { "type": "string", "minLength": 1 },
-          "realmOverridable": { "type": "boolean" }
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "realmOverridable": {
+            "type": "boolean"
+          }
         },
         "additionalProperties": false
       }
@@ -378,6 +383,58 @@
               },
               "additionalProperties": false
             }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "wireOps": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "required": ["id", "idempotent", "resourceEffect"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "idempotent": {
+            "type": "boolean"
+          },
+          "resourceEffect": {
+            "type": "object",
+            "required": ["kind"],
+            "properties": {
+              "kind": {
+                "enum": ["none", "returned-disposer", "returned-handle", "host-owned"]
+              },
+              "disposeMethod": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "requiredPermissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          },
+          "scopeBinding": {
+            "enum": ["plugin", "project", "session", "run"]
+          },
+          "executionPlacement": {
+            "enum": ["ui", "workspace", "host-service"]
+          },
+          "introducedIn": {
+            "type": "string"
+          },
+          "deprecatedIn": {
+            "type": "string"
+          },
+          "replacementId": {
+            "type": "string"
           }
         },
         "additionalProperties": false

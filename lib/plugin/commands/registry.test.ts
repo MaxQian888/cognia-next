@@ -1,4 +1,10 @@
 import {
+  registerInterceptor,
+  __resetInterceptorDispatchForTesting,
+  __resetInterceptorRegistryForTesting,
+} from "@/lib/plugin/interceptors"
+import { executeCommandWithOptions, type UiActionInvokeValue } from "./registry"
+import {
   CommandNotFoundError,
   __resetCommandRegistryForTesting,
   executeCommand,
@@ -149,6 +155,90 @@ describe("command registry", () => {
         warn.mockRestore()
       }
     })
+  })
+})
+
+describe("ui.action.invoke guard (ADR-0189)", () => {
+  beforeEach(() => {
+    __resetInterceptorRegistryForTesting()
+    __resetInterceptorDispatchForTesting()
+    __resetCommandRegistryForTesting()
+  })
+
+  const guard = (
+    registrationId: string,
+    handler: (value: UiActionInvokeValue) => unknown
+  ): void => {
+    registerInterceptor({
+      registrationId,
+      pluginId: "policy",
+      pluginInstanceId: "policy#1",
+      generation: 1,
+      realmId: "global",
+      pointId: "ui.action.invoke",
+      semantic: "guard",
+      trustTier: "community",
+      order: {},
+      timeoutMs: 500,
+      handler: handler as never,
+      source: "interceptors",
+      runtime: "frontend",
+    })
+  }
+
+  it("runs the handler when every guard passes", async () => {
+    const handler = jest.fn(() => "ran")
+    registerCommand({ id: "cmd.a", pluginId: "policy-target", handler })
+    guard("g1", () => ({ decision: "pass" }))
+    await expect(executeCommand("cmd.a")).resolves.toBe("ran")
+    expect(handler).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not run the handler when a guard denies", async () => {
+    const handler = jest.fn()
+    registerCommand({ id: "cmd.b", pluginId: "policy-target", handler })
+    guard("g1", () => ({ decision: "deny", reason: "policy" }))
+    await expect(executeCommand("cmd.b")).rejects.toThrow(/deny on "ui.action.invoke"/)
+    expect(handler).not.toHaveBeenCalled()
+  })
+
+  it("denies when the guard itself crashes — fail-closed", async () => {
+    const handler = jest.fn()
+    registerCommand({ id: "cmd.c", pluginId: "policy-target", handler })
+    guard("g1", () => {
+      throw new Error("policy engine crashed")
+    })
+    await expect(executeCommand("cmd.c")).rejects.toThrow()
+    expect(handler).not.toHaveBeenCalled()
+  })
+
+  it("passes the invocation origin to the guard as provenance", async () => {
+    const seen: UiActionInvokeValue[] = []
+    registerCommand({ id: "cmd.d", pluginId: "policy-target", handler: () => "ok" })
+    guard("g1", (value) => {
+      seen.push(value)
+      return { decision: "pass" }
+    })
+
+    await executeCommandWithOptions("cmd.d", { origin: "model" }, 1, 2)
+    expect(seen[0]).toMatchObject({ commandId: "cmd.d", origin: "model", args: [1, 2] })
+
+    // A user gesture is provenance, not a grant — the guard still runs for it.
+    await executeCommand("cmd.d")
+    expect(seen[1]?.origin).toBe("user")
+  })
+
+  it("skips the guard round-trip entirely when no plugin registered one", async () => {
+    const handler = jest.fn(() => "ok")
+    registerCommand({ id: "cmd.e", pluginId: "policy-target", handler })
+    await expect(executeCommand("cmd.e")).resolves.toBe("ok")
+  })
+
+  it("still throws CommandNotFoundError before consulting any guard", async () => {
+    const seen = jest.fn(() => ({ decision: "pass" }))
+    guard("g1", seen)
+    await expect(executeCommand("cmd.missing")).rejects.toThrow(CommandNotFoundError)
+    expect(seen).not.toHaveBeenCalled()
   })
 })
 

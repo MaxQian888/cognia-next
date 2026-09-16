@@ -3,6 +3,7 @@
  */
 
 import {
+  hasPostToolUseListeners,
   dispatchUserPromptSubmit,
   dispatchPreToolUse,
   dispatchPostToolUse,
@@ -17,6 +18,10 @@ import {
   __hasListenersForTests,
 } from "./adapter-hooks"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
+import {
+  registerInterceptor,
+  __resetInterceptorRegistryForTesting,
+} from "@/lib/plugin/interceptors"
 import {
   getPluginEventHooks,
   getPluginLifecycleHooks,
@@ -78,9 +83,12 @@ function enableAllEventHooks() {
 beforeEach(() => {
   jest.clearAllMocks()
   seedPlugins({})
-  // Fresh singletons per test so registered lifecycle hooks don't leak.
+  // Fresh singletons per test so registered lifecycle hooks don't leak — and
+  // the interceptor registry with them, since registering a hook bag now mints
+  // normalized records that would otherwise survive into the next test.
   resetPluginEventHooks()
   resetPluginLifecycleHooks()
+  __resetInterceptorRegistryForTesting()
 })
 
 describe("adapter-hooks", () => {
@@ -111,6 +119,70 @@ describe("adapter-hooks", () => {
       .mockResolvedValue({ modifiedResult: { ok: true } } as never)
     const result = await dispatchPostToolUse("calc", {}, { ok: false }, "s")
     expect(result.modifiedResult).toEqual({ ok: true })
+  })
+
+  it("skips the dispatch entirely when nothing is registered on the point", async () => {
+    __resetInterceptorRegistryForTesting()
+    const spy = jest.spyOn(getPluginEventHooks(), "dispatchPostToolUse")
+    expect(await dispatchPostToolUse("calc", {}, { ok: false }, "s")).toEqual({})
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it("counts a defineInterceptors contribution, not just the legacy hook bag", () => {
+    // `hasPostToolUseListeners` decides whether the turn pays for the sidecar's
+    // `tool_result_review` round-trip. Reading the legacy bag alone would make
+    // an interceptor-only plugin invisible to that decision, so its handler
+    // would never be asked for a projection.
+    __resetInterceptorRegistryForTesting()
+    seedPlugins({ p1: { status: "enabled" } })
+    expect(hasPostToolUseListeners()).toBe(false)
+
+    registerInterceptor({
+      registrationId: "p1:redact",
+      pluginId: "p1",
+      pluginInstanceId: "p1#1",
+      generation: 1,
+      realmId: "global",
+      pointId: "tool.result.project",
+      semantic: "transform",
+      trustTier: "community",
+      order: {},
+      timeoutMs: 1_000,
+      handler: ((value: unknown) => value) as never,
+      source: "interceptors",
+      runtime: "frontend",
+    })
+    expect(hasPostToolUseListeners()).toBe(true)
+  })
+
+  it("propagates a fail-closed projection failure instead of delivering the raw result", async () => {
+    // The old wrapper caught everything and returned `{}`, so a redactor that
+    // crashed read as "there was nothing to redact". A registration that
+    // narrowed itself to fail-closed now blocks the output instead.
+    __resetInterceptorRegistryForTesting()
+    seedPlugins({ p1: { status: "enabled" } })
+    registerInterceptor({
+      registrationId: "p1:redact",
+      pluginId: "p1",
+      pluginInstanceId: "p1#1",
+      generation: 1,
+      realmId: "global",
+      pointId: "tool.result.project",
+      semantic: "transform",
+      trustTier: "community",
+      order: {},
+      timeoutMs: 1_000,
+      failurePolicy: "fail-closed",
+      handler: (() => {
+        throw new Error("redactor died")
+      }) as never,
+      source: "interceptors",
+      runtime: "frontend",
+    })
+
+    await expect(dispatchPostToolUse("calc", {}, { secret: true }, "s")).rejects.toThrow(
+      /fail-closed/
+    )
   })
 
   it("dispatchOnAssistantMessage falls back to the input on dispatcher errors", async () => {

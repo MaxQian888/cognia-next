@@ -248,9 +248,20 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     id: "hooks",
     support: "supported",
     manifestFields: [],
-    runtimeBinding: "PluginLifecycleHooks + hooks-system",
-    hostBindings: ["lib/plugin/messaging/hooks-system.ts", "lib/plugin/contracts/plugin-points.ts"],
-    typescriptSdk: ["packages/plugin-sdk/src/hooks/index.ts", "packages/plugin-sdk/src/index.ts"],
+    runtimeBinding: "PluginLifecycleHooks + hooks-system + interceptor dispatcher",
+    hostBindings: [
+      "lib/plugin/messaging/hooks-system.ts",
+      "lib/plugin/contracts/plugin-points.ts",
+      // ADR-0189: the interceptor-shaped hooks normalize into one registry and
+      // dispatch through one dispatcher, so the capability binds both.
+      "lib/plugin/interceptors/registry.ts",
+      "lib/plugin/interceptors/dispatch.ts",
+    ],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/hooks/index.ts",
+      "packages/plugin-sdk/src/define/define-interceptors.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
     pythonSdk: [
       "plugin-sdk/python/src/cognia/decorators.py",
       "plugin-sdk/python/src/cognia/types.py",
@@ -261,7 +272,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "plugins/workspace-tools/src/index.ts",
     ],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
-    requiredTests: ["lib/plugin/core/manager.test.ts"],
+    requiredTests: ["lib/plugin/core/manager.test.ts", "lib/plugin/interceptors/dispatch.test.ts"],
   },
   {
     id: "processors",

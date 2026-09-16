@@ -3,7 +3,10 @@
   "type": "object",
   "required": ["schemaVersion", "pluginPoints"],
   "properties": {
-    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "schemaVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
     "pluginPoints": {
       "type": "array",
       "uniqueItems": true,
@@ -11,21 +14,103 @@
         "type": "object",
         "required": ["id", "kind", "stability", "status", "introducedIn"],
         "properties": {
-          "id": { "type": "string" },
-          "kind": { "enum": ["ui-slot", "hook", "activation", "runtime"] },
-          "stability": { "enum": ["stable", "experimental", "deprecated"] },
-          "status": { "enum": ["implemented", "virtual", "deprecated"] },
-          "introducedIn": { "type": "string" },
-          "deprecatedIn": { "type": "string" },
-          "replacementId": { "type": "string" },
-          "retirementNote": { "type": "string" },
-          "permission": { "type": "string" },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": ["ui-slot", "hook", "activation", "runtime", "interceptor"]
+          },
+          "stability": {
+            "enum": ["stable", "experimental", "deprecated"]
+          },
+          "status": {
+            "enum": ["implemented", "virtual", "deprecated"]
+          },
+          "introducedIn": {
+            "type": "string"
+          },
+          "deprecatedIn": {
+            "type": "string"
+          },
+          "replacementId": {
+            "type": "string"
+          },
+          "retirementNote": {
+            "type": "string"
+          },
+          "permission": {
+            "type": "string"
+          },
           "aliases": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "uniqueItems": true
           },
-          "formFactor": { "enum": ["icon", "row", "block", "panel"] }
+          "formFactor": {
+            "enum": ["icon", "row", "block", "panel"]
+          },
+          "interceptor": {
+            "type": "object",
+            "required": [
+              "semantic",
+              "failurePolicy",
+              "reentrancy",
+              "scopeBinding",
+              "executionPlacement",
+              "timeoutCeilingMs",
+              "allowShortCircuit",
+              "parallelTransforms",
+              "observeQueueLimit"
+            ],
+            "properties": {
+              "semantic": {
+                "enum": ["observe", "transform", "guard", "around"]
+              },
+              "permission": {
+                "type": "string"
+              },
+              "failurePolicy": {
+                "enum": ["fail-open", "fail-closed", "require-approval"]
+              },
+              "reentrancy": {
+                "type": "object",
+                "required": ["kind"],
+                "properties": {
+                  "kind": {
+                    "enum": ["forbid-same-operation", "allow-child-call", "bounded"]
+                  },
+                  "maxDepth": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "additionalProperties": false
+              },
+              "scopeBinding": {
+                "enum": ["plugin", "project", "session", "run"]
+              },
+              "executionPlacement": {
+                "enum": ["ui", "workspace", "host-service"]
+              },
+              "timeoutCeilingMs": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "allowShortCircuit": {
+                "type": "boolean"
+              },
+              "parallelTransforms": {
+                "type": "boolean"
+              },
+              "observeQueueLimit": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "additionalProperties": false
+          }
         },
         "additionalProperties": false
       }

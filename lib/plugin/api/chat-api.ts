@@ -193,8 +193,23 @@ export function createChatAPI(pluginId: string): PluginChatAPI {
         logger.warn("[chat] appendMessagePart: no session to append to")
         return null
       }
+      // The target has to EXIST. `appendMessageToSession` routes an unknown id
+      // through `sliceForId`, which seeds an empty slice rather than failing —
+      // so a typo would quietly create a phantom conversation holding the
+      // plugin's message, and the plugin would get an id back as if it had
+      // landed somewhere real.
+      if (sessionId !== state.activeSessionId && !state.sessions[sessionId]) {
+        logger.warn(`[chat] appendMessagePart: unknown session ${sessionId}`)
+        return null
+      }
       const id = `plugin-${pluginId}-${nanoid(8)}`
-      state.appendMessage({
+      // Addressed write. The previous call was `state.appendMessage(msg)`, which
+      // ignores `sessionId` entirely and always writes to whichever session has
+      // focus — so a plugin appending to a background session landed its message
+      // in the one the user was reading. Switching the active session to make
+      // the write land would be worse still: it moves the user's view as a side
+      // effect of a plugin's write.
+      state.appendMessageToSession(sessionId, {
         id,
         role: "system",
         parts: [part],

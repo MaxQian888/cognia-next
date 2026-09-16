@@ -93,7 +93,16 @@ describe("canonical plugin author contract", () => {
 
   it("exposes every plugin point through the language-neutral author contract", () => {
     expect(PLUGIN_POINT_CONTRACT_SCHEMA_VERSION).toBe(1)
-    expect(CANONICAL_PLUGIN_POINT_KINDS).toEqual(["ui-slot", "hook", "activation", "runtime"])
+    expect(CANONICAL_PLUGIN_POINT_KINDS).toEqual([
+      "ui-slot",
+      "hook",
+      "activation",
+      "runtime",
+      // ADR-0189: semantic interceptor points (observe / transform / guard /
+      // around) are a fourth kind, not a flavour of `hook` — the host dispatches
+      // them under different failure, ordering and re-entrancy rules.
+      "interceptor",
+    ])
     expect(AUTHOR_PLUGIN_POINT_CONTRACTS).toHaveLength(sourcePluginPoints.pluginPoints.length)
     expect(
       new Set(AUTHOR_PLUGIN_POINT_CONTRACTS.map((point) => `${point.kind}:${point.id}`)).size

@@ -11,6 +11,7 @@ export {
   PLUGIN_API_RESOURCE_EFFECTS,
   PLUGIN_SDK_VERSION,
 } from "./generated"
+import { PLUGIN_API_WIRE_OPS as GENERATED_WIRE_OPS } from "./generated"
 export type { CanonicalPluginErrorCode, CanonicalPluginPermission } from "./generated"
 
 export type PluginCapabilitySupport = "supported" | "partial" | "experimental" | "blocked"
@@ -108,7 +109,48 @@ export interface PluginApiNamespaceContract {
   methods: readonly PluginApiMethodContract[]
 }
 
-export const CANONICAL_PLUGIN_POINT_KINDS = ["ui-slot", "hook", "activation", "runtime"] as const
+/**
+ * A host-brokered wire operation.
+ *
+ * Distinct from `PluginApiMethodContract`, which describes the AUTHOR-facing
+ * `ctx.*` surface. The transport speaks a different vocabulary: `ctx.window
+ * .getMain()` is a method an author calls, `window:getSize` is an operation on
+ * the handle it returns, and only the latter ever crosses the gateway. The
+ * transport's retry decision needs a declaration for THAT vocabulary — which is
+ * why guessing it from the shape of the string (`/:(get|list|read|watch|…)/`)
+ * was wrong in both directions: a `watch` that creates a subscription is not
+ * safe to retry, and a genuinely safe op whose name starts with another verb
+ * never got one.
+ */
+export interface PluginApiWireOpContract {
+  /** The exact `namespace:method` string the transport sends. */
+  id: string
+  idempotent: boolean
+  resourceEffect: PluginApiResourceEffect
+  requiredPermissions?: readonly string[]
+  scopeBinding?: "plugin" | "project" | "session" | "run"
+  executionPlacement?: "ui" | "workspace" | "host-service"
+  introducedIn?: string
+  deprecatedIn?: string
+  replacementId?: string
+}
+
+/** Wire-op contracts keyed by their `namespace:method` id. */
+export const PLUGIN_API_WIRE_OP_CONTRACTS = GENERATED_WIRE_OPS as unknown as Readonly<
+  Record<string, PluginApiWireOpContract>
+>
+
+export function getPluginApiWireOpContract(api: string): PluginApiWireOpContract | undefined {
+  return PLUGIN_API_WIRE_OP_CONTRACTS[api]
+}
+
+export const CANONICAL_PLUGIN_POINT_KINDS = [
+  "ui-slot",
+  "hook",
+  "activation",
+  "runtime",
+  "interceptor",
+] as const
 
 export type AuthorPluginPointKind = (typeof CANONICAL_PLUGIN_POINT_KINDS)[number]
 export type AuthorPluginPointStability = "stable" | "experimental" | "deprecated"

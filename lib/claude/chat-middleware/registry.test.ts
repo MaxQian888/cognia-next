@@ -1,5 +1,6 @@
 import {
   CIRCUIT_BREAKER_THRESHOLD,
+  MAX_MIDDLEWARE_TIMEOUT_MS,
   __resetChatMiddlewareRegistryForTesting,
   clearChatMiddlewaresForPlugin,
   listActiveChatMiddlewares,
@@ -13,6 +14,10 @@ import {
   type ChatMiddlewareEvent,
 } from "./registry"
 import type { ChatMiddleware } from "@/types/plugin/plugin-chat-middleware"
+import {
+  listInterceptorsForPoint,
+  __resetInterceptorRegistryForTesting,
+} from "@/lib/plugin/interceptors"
 
 const noop: ChatMiddleware = async (_req, next) => next()
 
@@ -118,5 +123,57 @@ describe("chat-middleware registry", () => {
     registerChatMiddleware({ pluginId: "p", middlewareId: "m", fn: noop })
     for (let i = 0; i < CIRCUIT_BREAKER_THRESHOLD; i++) recordMiddlewareFailure("p:m", "boom")
     expect(events.some((e) => e.type === "breaker-tripped")).toBe(true)
+  })
+})
+
+describe("interceptor normalization (ADR-0189)", () => {
+  beforeEach(() => {
+    __resetChatMiddlewareRegistryForTesting()
+    __resetInterceptorRegistryForTesting()
+  })
+
+  it("mints one interceptor record per registered middleware", () => {
+    registerChatMiddleware({ pluginId: "a", middlewareId: "one", fn: async (_r, n) => n() })
+    registerChatMiddleware({ pluginId: "b", middlewareId: "two", fn: async (_r, n) => n() })
+    expect(
+      listInterceptorsForPoint("model.request.invoke")
+        .map((e) => e.registrationId)
+        .sort()
+    ).toEqual(["a:one", "b:two"])
+  })
+
+  it("drops the record when the middleware is unregistered", () => {
+    const dispose = registerChatMiddleware({
+      pluginId: "a",
+      middlewareId: "one",
+      fn: async (_r, n) => n(),
+    })
+    dispose()
+    expect(listInterceptorsForPoint("model.request.invoke")).toHaveLength(0)
+  })
+
+  it("drops every record when a plugin's middlewares are cleared", () => {
+    registerChatMiddleware({ pluginId: "a", middlewareId: "one", fn: async (_r, n) => n() })
+    registerChatMiddleware({ pluginId: "a", middlewareId: "two", fn: async (_r, n) => n() })
+    registerChatMiddleware({ pluginId: "b", middlewareId: "keep", fn: async (_r, n) => n() })
+    clearChatMiddlewaresForPlugin("a")
+    expect(listInterceptorsForPoint("model.request.invoke").map((e) => e.registrationId)).toEqual([
+      "b:keep",
+    ])
+  })
+
+  it("carries the middleware's priority and clamped timeout onto the record", () => {
+    registerChatMiddleware({
+      pluginId: "a",
+      middlewareId: "one",
+      fn: async (_r, n) => n(),
+      priority: 7,
+      // Above both the registry clamp and the point ceiling.
+      timeoutMs: 999_999,
+    })
+    const [record] = listInterceptorsForPoint("model.request.invoke")
+    expect(record?.order.priority).toBe(7)
+    expect(record?.timeoutMs).toBe(MAX_MIDDLEWARE_TIMEOUT_MS)
+    expect(record?.source).toBe("chat-middleware")
   })
 })

@@ -1,0 +1,184 @@
+---
+title: Interceptors
+description: Four semantics — observe, transform, guard, around — with one registry, one ordering rule, and a declared failure policy per point.
+---
+
+# Interceptors
+
+A hook tells you *something happened*. An interceptor tells the host **which of
+four things you are doing**, and that answer decides how the host treats your
+handler: whether a failure may be swallowed, whether you run in parallel with
+your peers, and whether your return value is allowed to replace a real one.
+
+See [ADR-0189](../en/adr/0189-a-plugin-says-which-of-four-things-it-is-doing)
+for the full rationale.
+
+## The four semantics
+
+| Semantic    | Question                              | Execution                                                                            |
+| ----------- | ------------------------------------- | ------------------------------------------------------------------------------------ |
+| `observe`   | What happened?                        | Cannot change the result. Async, bounded, dropped under load.                          |
+| `transform` | How should this input change?         | Gets its own snapshot, returns a new value, must be repeatable.                        |
+| `guard`     | May this proceed?                     | `pass` / `deny` / `requireApproval`. Cannot turn a higher layer's deny into an allow.  |
+| `around`    | How is this execution wrapped?        | Typed in and out. `next` at most once, explicit error and cancellation semantics.      |
+
+## Declaring one
+
+`defineInterceptors` is pure — it builds a description, and the host registers
+it when it reads your `activate()` return value. Nothing is registered as a
+side effect of importing a module.
+
+```ts title="src/index.ts"
+import { defineInterceptors, type PluginContext } from "@cognia/plugin-sdk"
+
+export function activate(ctx: PluginContext) {
+  return defineInterceptors([
+    {
+      point: "tool.result.project",
+      // Run after whatever `@cognia/redact` contributes on this point.
+      after: ["@cognia/redact"],
+      // Narrowing: if THIS handler dies, block the output rather than
+      // delivering an unprojected tool result.
+      failurePolicy: "fail-closed",
+      handler: (value) => ({
+        ...value,
+        projection: { modifiedResult: scrub(value.projection.modifiedResult) },
+      }),
+    },
+  ])
+}
+```
+
+`activate()` may return the historical `PluginHooks` bag, a `defineInterceptors`
+result, or one object carrying both — adopt interceptors one at a time.
+
+## Points
+
+| Point                    | Semantic    | What it wraps                                                |
+| ------------------------ | ----------- | ------------------------------------------------------------ |
+| `agent.context.prepare`  | `transform` | Assembled send options, before the turn leaves.               |
+| `model.request.prepare`  | `transform` | The outgoing chat request.                                    |
+| `model.request.invoke`   | `around`    | The whole billed send.                                        |
+| `tool.call.prepare`      | `transform` | Plugin-tool arguments, before the consent gate.               |
+| `tool.execute`           | `around`    | A plugin tool's execution.                                    |
+| `tool.result.project`    | `transform` | What the model is allowed to see of a tool result.            |
+| `ui.action.invoke`       | `guard`     | A command or quick action about to run.                       |
+| `operation.completed`    | `observe`   | A wrapped operation finished. Metadata only.                  |
+
+Three more (`model.stream.transform`, `agent.turn.decide`,
+`ui.surface.project`) are **declared but not yet fired**. They appear in the
+catalog with `status: "virtual"` so you can see where the surface is going;
+registering on one today does nothing, and the host says so rather than letting
+you ship a handler that silently never runs.
+
+## Ordering
+
+Four stages, most significant first:
+
+1. **Trust tier** — built-in wraps marketplace wraps community. Derived from
+   install provenance, not from your manifest.
+2. **`before` / `after`** — name another registration id, or a plugin id to
+   order against everything that plugin contributes on the point.
+3. **`priority`** — breaks ties the DAG leaves open.
+4. **Registration id** — the final, stable tiebreak.
+
+A `before`/`after` naming something that is not installed is ignored with a
+diagnostic, and a cycle drops the edges that close it rather than taking the
+point offline. Check the plugin devtools panel when your ordering does not look
+the way you expect.
+
+## Writing an `around` handler
+
+```ts
+{
+  point: "tool.execute",
+  handler: async (args, next, meta) => {
+    const started = Date.now()
+    const result = await next(args)          // at most once
+    await ctx.logger.info(`${meta.operationId} took ${Date.now() - started}ms`)
+    return result
+  },
+}
+```
+
+Rules the host enforces for you:
+
+- **`next` enters at most once.** A second call rejects with
+  `InterceptorNextReentryError`, and the downstream operation is **not** re-run.
+- **A failure after delegating waits on that same operation.** It never starts
+  another one, so a crash in your post-processing cannot double-send a turn or
+  re-execute a tool.
+- **A timeout revokes your `next`.** Calling it late rejects with
+  `InterceptorRevokedError`; the host does not pretend it rolled back work that
+  already committed.
+- **Downstream time is not charged to you.** Your breaker counts your own
+  latency, not the model's.
+- **Inventing a result** — returning without calling `next` — is refused on
+  points that require a real execution (`tool.execute`). It is allowed on
+  `model.request.invoke`, where a cache hit is legitimate, and the response
+  carries `shortCircuited` so it is never mistaken for a real completion.
+
+## Writing a `transform` handler
+
+Transforms run **serially**: you see the previous handler's output, not the
+original. Returning nothing means "no change" — a forgotten `return` cannot
+blank the request.
+
+Each point declares invariant fields (`sessionId`, `toolName`, `pluginId`).
+Rewriting one has your output rejected under the point's failure policy: a
+transform may reshape what an operation says, never redirect it to a different
+session, tool or owner.
+
+## Writing a `guard` handler
+
+```ts
+{
+  point: "ui.action.invoke",
+  handler: (value) =>
+    value.commandId.startsWith("danger.")
+      ? { decision: "deny", reason: "blocked by policy" }
+      : { decision: "pass" },
+}
+```
+
+The chain stops at the first non-`pass`, so nothing after a deny runs — which is
+what makes "a guard cannot re-allow" structural rather than a rule someone has
+to remember. `value.origin` tells you whether a human, the model or an
+automation started the call; that is **provenance, not authorization**, and the
+host's own permission checks run either way.
+
+`ui.action.invoke` is fail-closed: a guard that throws or times out denies.
+
+## Failure policy
+
+Every point declares one. Your registration may only make it **stricter**:
+
+| Point policy       | You ask for         | You get            |
+| ------------------ | ------------------- | ------------------ |
+| `fail-open`        | `fail-closed`       | `fail-closed`      |
+| `fail-open`        | `require-approval`  | `require-approval` |
+| `fail-closed`      | `fail-open`         | `fail-closed`      |
+
+There is no way to opt out of a safety gate by declaring yourself best-effort.
+
+## Timeouts
+
+`timeoutMs` is a request, clamped down by the point's ceiling and never up. A
+handler that exceeds it is dropped (or the operation fails, per the failure
+policy) and its `next` capability is revoked.
+
+## Migrating from hooks
+
+`onChatRequest`, `onBuildOptions` and `onPostToolUse` are normalized into
+`model.request.prepare`, `agent.context.prepare` and `tool.result.project`
+automatically — you do not have to change anything, and you gain serial pipeline
+semantics. Two behaviours change as a result:
+
+- With two plugins on `onChatRequest`, **both** now run, in order. Previously
+  only one of them mattered.
+- On `onPostToolUse`, you now receive the projection so far rather than the raw
+  tool result, so an earlier plugin's redaction is visible to you.
+
+`onPreToolUse` is **not** normalized. Its shape is allow/deny/modify — a guard
+fused with a transform — and folding it into a transform chain would let a later
+plugin undo an earlier `deny`. Use `tool.execute` for new work.

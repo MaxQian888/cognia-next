@@ -20,6 +20,11 @@
  */
 
 import type { ChatMiddleware } from "@/types/plugin/plugin-chat-middleware"
+import {
+  interceptorFromChatMiddleware,
+  registerInterceptor,
+  unregisterInterceptor,
+} from "@/lib/plugin/interceptors"
 
 export const DEFAULT_MIDDLEWARE_TIMEOUT_MS = 5_000
 export const MAX_MIDDLEWARE_TIMEOUT_MS = 60_000
@@ -94,6 +99,14 @@ export function registerChatMiddleware(args: RegisterChatMiddlewareArgs): () => 
     disabled: false,
     breakerTripped: false,
   })
+  // Normalize into the one interceptor registry (ADR-0189 §6.1). This registry
+  // stays the owner of the breaker and of the events the settings panel reads;
+  // the interceptor record is what the dispatcher orders and runs, so a
+  // middleware and a `defineInterceptors` contribution on the same point sit on
+  // one chain with one ordering rule instead of two chains that cannot see each
+  // other.
+  const entry = registry.get(fullId)!
+  registerInterceptor(interceptorFromChatMiddleware(entry))
   emit({ type: "registered", fullId, pluginId: args.pluginId })
   return () => unregisterChatMiddleware(fullId)
 }
@@ -102,6 +115,7 @@ export function unregisterChatMiddleware(fullId: string): boolean {
   const entry = registry.get(fullId)
   if (!entry) return false
   registry.delete(fullId)
+  unregisterInterceptor(fullId)
   emit({ type: "unregistered", fullId, pluginId: entry.pluginId })
   return true
 }
@@ -195,6 +209,7 @@ export function subscribeChatMiddlewareRegistry(
 
 /** Test-only — wipe registry + listeners. */
 export function __resetChatMiddlewareRegistryForTesting(): void {
+  for (const fullId of registry.keys()) unregisterInterceptor(fullId)
   registry.clear()
   listeners.clear()
 }

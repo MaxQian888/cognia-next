@@ -11,8 +11,12 @@
  */
 
 import type { PluginSurfaceFormFactor } from "@/types/plugin/plugin-surface"
+import type {
+  InterceptorPointSemantics,
+  PluginInterceptorPoint,
+} from "@/types/plugin/plugin-interceptors"
 
-export type PluginPointKind = "ui-slot" | "hook" | "activation" | "runtime"
+export type PluginPointKind = "ui-slot" | "hook" | "activation" | "runtime" | "interceptor"
 export type PluginPointStability = "stable" | "experimental" | "deprecated"
 export type PluginPointStatus = "implemented" | "virtual" | "deprecated"
 export type PluginPointGovernanceMode = "warn" | "block"
@@ -69,6 +73,15 @@ export interface PluginPointContract {
   retirementNote?: string
   permission?: string
   aliases?: readonly string[]
+  /**
+   * Execution semantics, for `kind: "interceptor"` points only.
+   *
+   * Lives on the point contract rather than in a parallel table so there is
+   * exactly one place that answers "what is this point and how does it
+   * dispatch" — a second registry keyed by the same ids is how `status` and
+   * `binding` drifted apart from the fire sites the last time.
+   */
+  interceptor?: InterceptorPointSemantics
 }
 
 export interface PluginPointProofAudit {
@@ -141,6 +154,11 @@ export const CANONICAL_EXTENSION_POINTS = [
   "chat.input.above",
   "chat.input.below",
   "chat.input.actions",
+  // The composer's thinking-depth control. A REPLACING slot, not an additive
+  // one: the host's own effort chip is this point's fallback, so a plugin that
+  // ships a dial takes the chip's place instead of adding a second control
+  // that sets the same two session fields beside it.
+  "chat.input.effort",
   // ADR-0026 §3 §C — composer dropdown groups. Lives next to (not
   // replacing) `chat.input.actions` so flat buttons and menu groups can
   // coexist in the composer toolbar.
@@ -272,6 +290,7 @@ const IMPLEMENTED_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
   "chat.input.above",
   "chat.input.below",
   "chat.input.actions",
+  "chat.input.effort",
   "chat.input.menu",
   "chat.message.before",
   "chat.message.after",
@@ -373,6 +392,7 @@ export const EXTENSION_POINT_FORM_FACTORS: Record<
 
   // Horizontal action rows — a button or two alongside the host's own.
   "chat.input.actions": "row",
+  "chat.input.effort": "row",
   "chat.input.menu": "row",
   "chat.message.actions": "row",
   "chat.message.footer": "row",
@@ -453,6 +473,7 @@ const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoi
   "chat.input.above": "components/chat/composer.tsx",
   "chat.input.below": "components/chat/composer.tsx",
   "chat.input.actions": "components/chat/composer/bottom-toolbar.tsx",
+  "chat.input.effort": "components/chat/composer/bottom-toolbar.tsx",
   "chat.input.menu": "components/chat/composer/bottom-toolbar.tsx",
   "chat.message.before": "components/chat/message-renderer.tsx",
   "chat.message.after": "components/chat/message-renderer.tsx",
@@ -979,6 +1000,322 @@ const hookPointContracts: Record<CanonicalHookPoint, PluginPointContract> = Obje
 ) as Record<CanonicalHookPoint, PluginPointContract>
 
 /**
+ * Semantic interceptor points (ADR-0189 §6.2).
+ *
+ * A `hook` point answers "something happened"; an `interceptor` point answers
+ * one of four sharper questions — rewrite this, may this proceed, wrap this
+ * execution, or record that it happened — and the answer decides how the host
+ * treats a failure, whether handlers may run concurrently, and whether a
+ * returned value is allowed to replace the real one.
+ *
+ * Every entry below names the production site that dispatches it. A point with
+ * no fire site is `virtual` and says so; declaring an interceptor point the
+ * host never reaches would hand plugin authors an API that silently does
+ * nothing, which is worse than not shipping it.
+ */
+const INTERCEPTOR_POINT_DOCS = "docs/content/docs/en/adr/0189-semantic-interceptors.mdx"
+
+const INTERCEPTOR_POINT_TESTS = [
+  "lib/plugin/interceptors/dispatch.test.ts",
+  "lib/plugin/interceptors/registry.test.ts",
+] as const
+
+/**
+ * Same eleven ids the SDK names, typed against the author-facing union.
+ *
+ * Derived from `INTERCEPTOR_POINT_DECLARATIONS` below rather than re-exporting
+ * the SDK's tuple as a value: this module is loaded by `audit:slots` through
+ * `ts-node` in CommonJS, where a runtime `@/…` import does not resolve, and a
+ * type-only import is elided. The `Record<CanonicalInterceptorPoint, …>`
+ * annotation on the declarations makes the two lists provably identical — a
+ * missing id and an extra one are both type errors — and
+ * `plugin-points.test.ts` pins it at runtime too.
+ */
+export type CanonicalInterceptorPoint = PluginInterceptorPoint
+
+interface InterceptorPointDeclaration {
+  semantics: InterceptorPointSemantics
+  binding: string
+  status: PluginPointStatus
+  stability: PluginPointStability
+  introducedIn: string
+}
+
+/** Shared default: the strict end of every axis, relaxed only where declared. */
+const GUARDED_TRANSFORM = {
+  failurePolicy: "fail-closed",
+  reentrancy: { kind: "forbid-same-operation" },
+  scopeBinding: "session",
+  executionPlacement: "ui",
+  timeoutCeilingMs: 5_000,
+  allowShortCircuit: false,
+  parallelTransforms: false,
+  observeQueueLimit: 32,
+} as const satisfies Omit<InterceptorPointSemantics, "semantic">
+
+const INTERCEPTOR_POINT_DECLARATIONS: Record<
+  CanonicalInterceptorPoint,
+  InterceptorPointDeclaration
+> = {
+  // Extra context (RAG, project files) folded into the outgoing turn. Bounded
+  // by the token budget the host already enforces on assembled options.
+  "agent.context.prepare": {
+    semantics: {
+      ...GUARDED_TRANSFORM,
+      semantic: "transform",
+      permission: "hooks:chat-intercept",
+      scopeBinding: "run",
+      timeoutCeilingMs: 8_000,
+      // Enrichment. A context provider that dies leaves the turn with the
+      // host's own context, which is a smaller answer, not an unsafe one — and
+      // it is the behaviour `onBuildOptions` already has. A provider whose
+      // absence IS unsafe narrows its own registration to `fail-closed`.
+      failurePolicy: "fail-open",
+    },
+    binding: "lib/claude/build-options.ts:resolveSendOptions",
+    status: "implemented",
+    stability: "experimental",
+    introducedIn: "0.9.0",
+  },
+  // Routing + request shaping. A rewrite here re-opens the routing and
+  // data-egress questions, so the host re-validates after the chain.
+  "model.request.prepare": {
+    semantics: {
+      ...GUARDED_TRANSFORM,
+      semantic: "transform",
+      permission: "hooks:chat-intercept",
+      scopeBinding: "run",
+      // A failed rewrite leaves the host's own request standing, which is the
+      // conservative outcome and matches `onChatRequest` today.
+      failurePolicy: "fail-open",
+    },
+    binding: "lib/claude/chat-middleware/runner.ts:runChatMiddlewareChain",
+    status: "implemented",
+    stability: "experimental",
+    introducedIn: "0.9.0",
+  },
+  // The whole billed send, wrapped. Short-circuiting IS allowed — a cache hit
+  // is a legitimate answer — but the response carries `shortCircuited`, so a
+  // synthetic reply is never indistinguishable from a real completion.
+  "model.request.invoke": {
+    semantics: {
+      ...GUARDED_TRANSFORM,
+      semantic: "around",
+      permission: "hooks:chat-intercept",
+      scopeBinding: "run",
+      timeoutCeilingMs: 60_000,
+      reentrancy: { kind: "forbid-same-operation" },
+      allowShortCircuit: true,
+      // A middleware that dies mid-turn must not take the user's send with it:
+      // the host drops it and delivers the model's answer. Anything that has to
+      // block output declares `fail-closed` on its own registration, which the
+      // host may only narrow toward, never away from.
+      failurePolicy: "fail-open",
+    },
+    binding: "lib/claude/chat-middleware/runner.ts:runChatMiddlewareChain",
+    status: "implemented",
+    stability: "experimental",
+    introducedIn: "0.9.0",
+  },
+  // Per-chunk projection. Stateful across a stream, so re-entry on the same
+  // operation is exactly the bug to catch rather than a pattern to allow.
+  "model.stream.transform": {
+    semantics: {
+      ...GUARDED_TRANSFORM,
+      semantic: "transform",
+      permission: "hooks:chat-intercept",
+      scopeBinding: "run",
+      timeoutCeilingMs: 1_000,
+      // Per-chunk presentation: a dropped transform shows the raw chunk.
+      failurePolicy: "fail-open",
+    },
+    // Declared, not fired. `dispatchStreamChunk` is synchronous and its callers
+    // discard the return value, so there is nowhere for a rewritten chunk to
+    // go — turning it into a transform means making the per-chunk path await,
+    // which is a change to the streaming contract rather than to this catalog.
+    // Marked virtual until that seam exists, because an interceptor point the
+    // host never reads is worse than one that is honestly absent.
+    binding: "declared only (no fire site)",
+    status: "virtual",
+    stability: "experimental",
+    introducedIn: "0.9.0",
+  },
+  // Argument normalization. Any change invalidates an approval taken against
+  // the previous arguments — the host re-derives the approval digest after.
+  "tool.call.prepare": {
+    semantics: {
+      ...GUARDED_TRANSFORM,
+      semantic: "transform",
+      permission: "hooks:chat-intercept",
+      scopeBinding: "run",
+      // A failed normalization leaves the ORIGINAL arguments — the ones the
+      // approval was taken against — so dropping it is safe. A policy plugin
+      // that must not be bypassed narrows to `fail-closed`.
+      failurePolicy: "fail-open",
+    },
+    binding: "lib/plugin/core/invoke-plugin-tool.ts:invokePluginTool",
+    status: "implemented",
+    stability: "experimental",
+    introducedIn: "0.9.0",
+  },
+  // The execution itself. `next` at most once; the resource-side guard still
+  // runs afterwards and an interceptor cannot stand in for it.
+  "tool.execute": {
+    semantics: {
+      ...GUARDED_TRANSFORM,
+      semantic: "around",
+      permission: "hooks:chat-intercept",
+      scopeBinding: "run",
+      timeoutCeilingMs: 60_000,
+    },
+    binding: "lib/plugin/core/invoke-plugin-tool.ts:invokePluginTool",
+    status: "implemented",
+    stability: "experimental",
+    introducedIn: "0.9.0",
+  },
+  // What the model is allowed to see. Fail-closed: a redactor that crashed
+  // must not read as "there was nothing to redact".
+  "tool.result.project": {
+    semantics: {
+      ...GUARDED_TRANSFORM,
+      semantic: "transform",
+      permission: "hooks:chat-intercept",
+      scopeBinding: "run",
+      // The point keeps `onPostToolUse`'s historical fail-open default so
+      // normalizing the legacy bag does not silently start blocking output for
+      // plugins written against it. A redaction interceptor — the case where a
+      // crash must NOT read as "nothing to redact" — narrows its own
+      // registration to `fail-closed`, which the host honours and the plugin
+      // can never widen back.
+      failurePolicy: "fail-open",
+    },
+    binding: "lib/claude/adapter-hooks.ts:dispatchPostToolUse",
+    status: "implemented",
+    stability: "experimental",
+    introducedIn: "0.9.0",
+  },
+  // Continue / stop / ask a human. Declared but not yet fired: the turn loop
+  // lives inside the sidecar, so the host has no continue decision to gate.
+  // Marked virtual rather than implemented until that seam exists.
+  "agent.turn.decide": {
+    semantics: {
+      ...GUARDED_TRANSFORM,
+      semantic: "guard",
+      permission: "hooks:chat-intercept",
+      scopeBinding: "run",
+      failurePolicy: "require-approval",
+    },
+    binding: "declared only (no fire site)",
+    status: "virtual",
+    stability: "experimental",
+    introducedIn: "0.9.0",
+  },
+  // A command or quick action about to run. The user gesture that started it
+  // is provenance, not authorization — the final grant check still applies.
+  "ui.action.invoke": {
+    semantics: {
+      ...GUARDED_TRANSFORM,
+      semantic: "guard",
+      permission: "commands:read",
+      scopeBinding: "session",
+      timeoutCeilingMs: 2_000,
+    },
+    binding: "lib/plugin/commands/registry.ts:executeCommand",
+    status: "implemented",
+    stability: "experimental",
+    introducedIn: "0.9.0",
+  },
+  // Decoration of a host-owned surface view-model. Presentation only, so a
+  // failure drops the decoration instead of blanking the surface.
+  "ui.surface.project": {
+    semantics: {
+      ...GUARDED_TRANSFORM,
+      semantic: "transform",
+      permission: "extension:ui",
+      failurePolicy: "fail-open",
+      scopeBinding: "session",
+      timeoutCeilingMs: 250,
+    },
+    // Declared, not fired. Surface projection has to run inside a synchronous
+    // render, and a synchronous handler cannot be given the deadline and
+    // revocation semantics every other point here relies on. Shipping it with
+    // a weaker contract than the rest would make "the failure policy decides"
+    // false exactly where a plugin is closest to the user.
+    binding: "declared only (no fire site)",
+    status: "virtual",
+    stability: "experimental",
+    introducedIn: "0.9.0",
+  },
+  // Terminal observation for a WRAPPED operation — the `around` points, which
+  // are the only ones that have a whole operation to be terminal about. A
+  // transform or a guard is a step inside someone else's operation, so firing
+  // this for each of them would announce the same turn several times. Never
+  // blocks, never changes a result, and sheds load past the queue limit rather
+  // than growing without bound.
+  "operation.completed": {
+    semantics: {
+      ...GUARDED_TRANSFORM,
+      semantic: "observe",
+      failurePolicy: "fail-open",
+      scopeBinding: "plugin",
+      timeoutCeilingMs: 2_000,
+    },
+    binding: "lib/plugin/interceptors/dispatch.ts:emitOperationCompleted",
+    status: "implemented",
+    stability: "experimental",
+    introducedIn: "0.9.0",
+  },
+}
+
+/**
+ * Every interceptor point id, in declaration order.
+ *
+ * See `CanonicalInterceptorPoint` for why this is derived here rather than
+ * re-exported from the SDK tuple.
+ */
+export const CANONICAL_INTERCEPTOR_POINTS = Object.keys(
+  INTERCEPTOR_POINT_DECLARATIONS
+) as readonly CanonicalInterceptorPoint[]
+
+/** Execution semantics by point id, for the dispatcher. */
+export const INTERCEPTOR_POINT_SEMANTICS: Readonly<
+  Record<CanonicalInterceptorPoint, InterceptorPointSemantics>
+> = Object.freeze(
+  Object.fromEntries(
+    CANONICAL_INTERCEPTOR_POINTS.map((id) => [id, INTERCEPTOR_POINT_DECLARATIONS[id].semantics])
+  ) as Record<CanonicalInterceptorPoint, InterceptorPointSemantics>
+)
+
+const interceptorPointContracts: Record<CanonicalInterceptorPoint, PluginPointContract> =
+  Object.fromEntries(
+    CANONICAL_INTERCEPTOR_POINTS.map((id) => {
+      const declaration = INTERCEPTOR_POINT_DECLARATIONS[id]
+      return [
+        id,
+        {
+          id,
+          kind: "interceptor",
+          stability: declaration.stability,
+          status: declaration.status,
+          owner: "plugin-platform",
+          binding: declaration.binding,
+          docs: INTERCEPTOR_POINT_DOCS,
+          requiredTests: INTERCEPTOR_POINT_TESTS,
+          introducedIn: declaration.introducedIn,
+          ...(declaration.semantics.permission
+            ? { permission: declaration.semantics.permission }
+            : {}),
+          interceptor: declaration.semantics,
+        } as PluginPointContract,
+      ]
+    })
+  ) as Record<CanonicalInterceptorPoint, PluginPointContract>
+
+export function getInterceptorPointContract(point: CanonicalInterceptorPoint): PluginPointContract {
+  return interceptorPointContracts[point]
+}
+
+/**
  * Runtime extension points — host-managed registries plugins can contribute
  * implementations to (e.g., workflow node executors and triggers). Distinct
  * from `ui-slot` (host renders a plugin's React node) and `hook` (host fires
@@ -1410,6 +1747,7 @@ function vscodeActivationContract(
 export const PLUGIN_POINT_CONTRACTS: readonly PluginPointContract[] = [
   ...Object.values(extensionPointContracts),
   ...Object.values(hookPointContracts),
+  ...Object.values(interceptorPointContracts),
   ...Object.values(runtimePointContracts),
   ...Object.values(activationPatternContracts),
 ]

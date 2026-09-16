@@ -156,6 +156,42 @@ describe("chat write surface", () => {
     expect(createChatAPI("cognia-ocr").appendMessagePart({ type: "x" })).toBeNull()
   })
 
+  it("writes to the ADDRESSED session, not to whichever one has focus", () => {
+    // The previous implementation read `options.sessionId` and then called
+    // `appendMessage`, which only ever writes to the active session — so a
+    // plugin appending to a background conversation landed its message in the
+    // one the user was reading.
+    // A real background session, so the write has somewhere legitimate to land.
+    useChatStore.getState().appendMessageToSession("s-2", {
+      id: "seed",
+      role: "user",
+      parts: [],
+    } as never)
+
+    const part = { type: "data-ocr-result", text: "background" }
+    const id = createChatAPI("cognia-ocr").appendMessagePart(part, { sessionId: "s-2" })
+
+    expect(id).not.toBeNull()
+    const state = useChatStore.getState()
+    expect(state.activeSessionId).toBe("s-active")
+    expect(state.messages.find((m) => m.id === id)).toBeUndefined()
+    expect(state.sessions["s-2"]?.messages.find((m) => m.id === id)).toMatchObject({
+      role: "system",
+      parts: [part],
+    })
+  })
+
+  it("refuses a session that does not exist instead of seeding a phantom one", () => {
+    // `appendMessageToSession` routes an unknown id through `sliceForId`, which
+    // creates an empty slice rather than failing — so a typo would quietly
+    // invent a conversation and report success.
+    const before = Object.keys(useChatStore.getState().sessions)
+    expect(
+      createChatAPI("cognia-ocr").appendMessagePart({ type: "x" }, { sessionId: "s-typo" })
+    ).toBeNull()
+    expect(Object.keys(useChatStore.getState().sessions)).toEqual(before)
+  })
+
   it("stages an intent against the active session by default", () => {
     const candidateId = createChatAPI("wiki").stageIntent("Explain this module")
     expect(candidateId).toMatch(/^plugin_wiki_/)

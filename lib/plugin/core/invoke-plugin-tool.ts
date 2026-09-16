@@ -41,6 +41,16 @@ import { ensureBootCapability, getBootProfile } from "@/lib/boot/capabilities"
 import { breakerKey, getOrCreateBreaker } from "@/lib/plugin/resilience/breaker-registry"
 import { resolveResilienceConfig } from "@/lib/plugin/resilience/config"
 import { CircuitOpenError, runResilient } from "@/lib/plugin/resilience/run-resilient"
+import { dispatchAround, dispatchTransform } from "@/lib/plugin/interceptors"
+import { nanoid } from "nanoid"
+
+/** The value `tool.call.prepare` transforms. */
+export interface ToolCallPrepareValue {
+  pluginId: string
+  toolName: string
+  args: Record<string, unknown>
+  sessionId?: string
+}
 
 export type InvokePluginToolErrorCode =
   | "plugin-not-found"
@@ -288,6 +298,26 @@ export async function invokePluginTool(
     )
   }
 
+  // ── Argument preparation (`tool.call.prepare`, ADR-0189) ───────────────
+  // Runs BEFORE the consent gate on purpose. A plugin that normalizes or
+  // narrows arguments must do so where the gate — and the reason string the
+  // user is shown — still sees the FINAL arguments; rewriting them afterwards
+  // would mean the approval was taken against something other than what ran.
+  // `toolName` and `pluginId` are invariant: a transform may reshape what a
+  // call says, never redirect it to a different tool or owner.
+  const operationId = `plugin-tool:${pluginId}:${toolName}:${nanoid(8)}`
+  const { value: prepared } = await dispatchTransform<ToolCallPrepareValue>(
+    "tool.call.prepare",
+    { pluginId, toolName, args, sessionId: options.sessionId },
+    {
+      operationId,
+      ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+      ...(options.signal ? { signal: options.signal } : {}),
+      invariantFields: ["pluginId", "toolName"],
+    }
+  )
+  const effectiveArgs = prepared.args
+
   // ── Permission consent gate ────────────────────────────────────────────
   // Tools don't declare per-tool permissions; gating operates on the
   // plugin's manifest-declared permission set. `silent` (the historical
@@ -351,15 +381,32 @@ export async function invokePluginTool(
   })
 
   try {
-    const result = await runResilient(
-      (attemptSignal) => tool.execute(args, { ...context, signal: attemptSignal }),
+    // ── The execution, wrapped (`tool.execute`, ADR-0189) ────────────────
+    // `fail-closed`: an around interceptor that dies must not leave the tool
+    // running unwrapped, because the reason to wrap a tool execution is almost
+    // always to constrain or record it. The resilience envelope (timeout,
+    // retry, breaker) stays INSIDE the wrapper so an interceptor observes one
+    // logical execution rather than each retry attempt, and so a retry cannot
+    // re-enter the interceptor chain.
+    const { result } = await dispatchAround<Record<string, unknown>, unknown>(
+      "tool.execute",
+      effectiveArgs,
+      (finalArgs) =>
+        runResilient(
+          (attemptSignal) => tool.execute(finalArgs, { ...context, signal: attemptSignal }),
+          {
+            timeoutMs: cfg.timeoutMs,
+            maxRetries: cfg.maxRetries,
+            retryable: cfg.retryable,
+            breaker,
+            label: `${pluginId}/${toolName}`,
+            signal: options.signal,
+          }
+        ),
       {
-        timeoutMs: cfg.timeoutMs,
-        maxRetries: cfg.maxRetries,
-        retryable: cfg.retryable,
-        breaker,
-        label: `${pluginId}/${toolName}`,
-        signal: options.signal,
+        operationId,
+        ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+        ...(options.signal ? { signal: options.signal } : {}),
       }
     )
     return { result, pluginId, toolName }

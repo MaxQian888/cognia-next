@@ -23,6 +23,10 @@ import {
   resolveCommandOwner,
   __resetPluginHookErrorsForTesting,
 } from "./hooks-system"
+import {
+  registerInterceptor,
+  __resetInterceptorRegistryForTesting,
+} from "@/lib/plugin/interceptors"
 import type { PluginTeamStartPayload } from "@/types/plugin"
 import type {
   PromptSubmitContext,
@@ -1570,5 +1574,158 @@ describe("resolveCommandOwner", () => {
       handler: () => ({}),
     })
     expect(resolveCommandOwner("compact", ["other"])).toBeUndefined()
+  })
+})
+
+describe("chat dispatchers route through the interceptor chain (ADR-0189)", () => {
+  const hooks = new PluginEventHooks()
+
+  const register = (
+    registrationId: string,
+    pointId: string,
+    handler: unknown,
+    priority = 0
+  ): void => {
+    registerInterceptor({
+      registrationId,
+      pluginId: registrationId.split(":")[0]!,
+      pluginInstanceId: `${registrationId}#1`,
+      generation: 1,
+      realmId: "global",
+      pointId,
+      semantic: "transform",
+      trustTier: "community",
+      order: { priority },
+      timeoutMs: 1_000,
+      handler: handler as never,
+      source: "interceptors",
+      runtime: "frontend",
+    })
+  }
+
+  beforeEach(() => {
+    __resetInterceptorRegistryForTesting()
+  })
+
+  afterEach(() => {
+    __resetInterceptorRegistryForTesting()
+  })
+
+  describe("dispatchChatRequest", () => {
+    it("returns the messages untouched when nothing is registered", async () => {
+      const messages = [{ role: "user", content: "hi" }] as never
+      expect(await hooks.dispatchChatRequest(messages, "m1")).toBe(messages)
+    })
+
+    it("threads BOTH plugins, in order — not last-writer-wins", async () => {
+      // The old body ran every plugin against the same array and scanned the
+      // results backwards for the last successful one, so with two plugins
+      // installed exactly one of them mattered.
+      register(
+        "a:req",
+        "model.request.prepare",
+        (value: { messages: Array<{ content: string }> }) => ({
+          ...value,
+          messages: value.messages.map((m) => ({ ...m, content: `${m.content}-a` })),
+        }),
+        10
+      )
+      register(
+        "b:req",
+        "model.request.prepare",
+        (value: { messages: Array<{ content: string }> }) => ({
+          ...value,
+          messages: value.messages.map((m) => ({ ...m, content: `${m.content}-b` })),
+        }),
+        5
+      )
+
+      const out = await hooks.dispatchChatRequest(
+        [{ role: "user", content: "base" }] as never,
+        "m1"
+      )
+      expect((out[0] as unknown as { content: string }).content).toBe("base-a-b")
+    })
+  })
+
+  describe("dispatchBuildOptions", () => {
+    it("returns the input unchanged when nothing is registered", async () => {
+      const options = { sessionId: "s1", model: "m1" } as never
+      expect(await hooks.dispatchBuildOptions(options)).toEqual(options)
+    })
+
+    it("applies each patch in order, leaving omitted fields alone", async () => {
+      register("a:opts", "agent.context.prepare", (value: object) => ({
+        ...value,
+        model: "override",
+      }))
+      register("b:opts", "agent.context.prepare", (value: object) => ({
+        ...value,
+        systemPrompt: "added",
+      }))
+
+      const out = await hooks.dispatchBuildOptions({
+        sessionId: "s1",
+        model: "host",
+        appendSystemPrompt: "keep me",
+      } as never)
+
+      expect(out).toMatchObject({
+        model: "override",
+        systemPrompt: "added",
+        appendSystemPrompt: "keep me",
+      })
+    })
+
+    it("refuses a rewrite that would move the turn to another session", async () => {
+      register("a:opts", "agent.context.prepare", (value: object) => ({
+        ...value,
+        sessionId: "somebody-elses",
+      }))
+      const out = await hooks.dispatchBuildOptions({ sessionId: "s1", model: "m" } as never)
+      expect(out.sessionId).toBe("s1")
+    })
+  })
+
+  describe("dispatchPostToolUse", () => {
+    it("shows a later plugin the earlier plugin's projection", async () => {
+      register(
+        "a:post",
+        "tool.result.project",
+        (value: { toolResult: unknown; projection: { modifiedResult?: unknown } }) => ({
+          ...value,
+          projection: { ...value.projection, modifiedResult: "[redacted]" },
+        }),
+        10
+      )
+      const seen: unknown[] = []
+      register(
+        "b:post",
+        "tool.result.project",
+        (value: { projection: { modifiedResult?: unknown } }) => {
+          seen.push(value.projection.modifiedResult)
+          return value
+        },
+        5
+      )
+
+      const result = await hooks.dispatchPostToolUse("read", {}, "SECRET", "s1")
+      expect(seen).toEqual(["[redacted]"])
+      expect(result.modifiedResult).toBe("[redacted]")
+    })
+
+    it("refuses a rewrite that would reattribute the call to another tool", async () => {
+      const seen: string[] = []
+      register("a:post", "tool.result.project", (value: { toolName: string }) => ({
+        ...value,
+        toolName: "another_tool",
+      }))
+      register("b:post", "tool.result.project", (value: { toolName: string }) => {
+        seen.push(value.toolName)
+        return value
+      })
+      await hooks.dispatchPostToolUse("read", {}, null, "s1")
+      expect(seen).toEqual(["read"])
+    })
   })
 })

@@ -101,4 +101,59 @@ describe("decideNextAttempt", () => {
     })
     expect(decision.lastError).toBe("boom")
   })
+
+  it("lets a policy narrow the attempt budget but never widen it", () => {
+    const narrow = decideNextAttempt({
+      attempts: 1,
+      error: new Error("503"),
+      nowMs: 0,
+      random: () => 0,
+      policy: { maxAttempts: 2 },
+    })
+    expect(narrow.status).toBe("deadlettered")
+
+    // maxAttempts above the host ceiling is ignored, not honored.
+    const wide = decideNextAttempt({
+      attempts: MAX_ATTEMPTS - 1,
+      error: new Error("503"),
+      nowMs: 0,
+      random: () => 0,
+      policy: { maxAttempts: 99 },
+    })
+    expect(wide.status).toBe("deadlettered")
+    expect(wide.attempts).toBe(MAX_ATTEMPTS)
+  })
+
+  it("lets a policy raise the delay floor and cap, never lower them", async () => {
+    const raised = decideNextAttempt({
+      attempts: 0,
+      error: new Error("503"),
+      nowMs: 0,
+      random: () => 0,
+      policy: { baseDelayMs: 30_000 },
+    })
+    expect(raised.status).toBe("pending")
+    expect(raised.nextAttemptAt).toBeGreaterThanOrEqual(30_000)
+    expect(raised.nextAttemptAt).toBeLessThanOrEqual(37_500)
+
+    // A lower policy base never undercuts the host's default delay.
+    const lowered = decideNextAttempt({
+      attempts: 0,
+      error: new Error("503"),
+      nowMs: 0,
+      random: () => 0,
+      policy: { baseDelayMs: 1 },
+    })
+    expect(lowered.nextAttemptAt).toBeGreaterThanOrEqual(1_000)
+  })
+
+  it("behaves identically when no policy is declared", () => {
+    const base = {
+      attempts: 1,
+      error: new Error("503"),
+      nowMs: 1_000,
+      random: () => 0,
+    }
+    expect(decideNextAttempt(base)).toEqual(decideNextAttempt({ ...base, policy: {} }))
+  })
 })

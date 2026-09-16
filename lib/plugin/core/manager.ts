@@ -149,6 +149,14 @@ import {
 } from "@/lib/plugin/core/compatibility"
 import { withTimeout } from "@cognia/primitives"
 import { loggers } from "@/lib/plugin/core/logger"
+import {
+  registerDeclaredInterceptors,
+  setInterceptorIdentityResolver,
+  splitActivationContributions,
+  unregisterInterceptorsForPlugin,
+  type InterceptorIdentity,
+} from "@/lib/plugin/interceptors"
+import { pluginApiRuntimeForType } from "@/lib/plugin/contracts/interface-catalog"
 import { createPluginVerificationSnapshot } from "@/lib/plugin/core/verification"
 import { isDeveloperModeEnabled } from "@/lib/plugin/devtools/developer-mode"
 import { getPluginSignatureVerifier } from "@/lib/plugin/security/signature"
@@ -791,6 +799,8 @@ export class PluginManager {
   private activationSpecCache = new WeakMap<PluginManifest, ParsedActivationSpec>()
   private activationPatternCache = new Map<string, RegExp>()
   private idleSweepTimer: ReturnType<typeof setInterval> | null = null
+  /** Restores the default interceptor identity resolver on teardown. */
+  private interceptorIdentityDisposer?: () => void
   /** Guards against overlapping idle sweeps — one slow suspend must not let the
    * next interval tick start a second concurrent sweep on the same plugins. */
   private idleSweepRunning = false
@@ -835,6 +845,13 @@ export class PluginManager {
     })
     this.registry = new PluginRegistry()
     this.hooksManager = getPluginLifecycleHooks()
+    // Interceptor records carry the identity the DISPATCHER trusts, so it has
+    // to come from the activation lease rather than from anything a plugin
+    // states about itself. The manager owns the lease, so it installs the
+    // resolver; the interceptor modules stay below it and never import it back.
+    this.interceptorIdentityDisposer = setInterceptorIdentityResolver((pluginId) =>
+      this.resolveInterceptorIdentity(pluginId)
+    )
     this.compatibilityMode = config.compatibilityMode || "warn"
     this.pluginPointGovernanceMode = resolveGovernanceMode(config.pluginPointGovernanceMode)
     this.runtimeProfile = config.runtimeProfile || "tauri"
@@ -3353,11 +3370,23 @@ export class PluginManager {
           )) || undefined
       }
 
-      // Register hooks
+      // Register hooks + semantic interceptors (ADR-0189).
+      //
+      // `activate()` may return the historical hook bag, a `defineInterceptors`
+      // result, or one object carrying both. Splitting here rather than asking
+      // authors to choose keeps the older shape working byte-for-byte while the
+      // new one gets the ordering, failure-policy and re-entrancy semantics the
+      // bag cannot express.
       if (hooks) {
-        this.validateHookDeclarations(pluginId, hooks)
-        store.registerPluginHooks(pluginId, hooks)
-        this.hooksManager.registerHooks(pluginId, hooks)
+        const { interceptors, hookBag } = splitActivationContributions(hooks)
+        if (hookBag) {
+          this.validateHookDeclarations(pluginId, hookBag)
+          store.registerPluginHooks(pluginId, hookBag)
+          this.hooksManager.registerHooks(pluginId, hookBag)
+        }
+        registerDeclaredInterceptors(pluginId, interceptors, {
+          generation: this.activationLeases.get(pluginId)?.generation ?? 0,
+        })
       }
 
       // Only python/hybrid plugins carry a Python module — wasm (and
@@ -4452,6 +4481,30 @@ export class PluginManager {
     if (this.idleSweepTimer) {
       clearInterval(this.idleSweepTimer)
       this.idleSweepTimer = null
+    }
+    // Put the default identity resolver back. A disposed manager whose closure
+    // stayed installed would keep answering for leases it no longer owns, and
+    // the next manager's registrations would inherit a dead generation.
+    this.interceptorIdentityDisposer?.()
+    this.interceptorIdentityDisposer = undefined
+  }
+
+  /**
+   * Identity for an interceptor registration, read off the activation lease.
+   *
+   * `scopeId` is the instance id: it changes on every activation, which is what
+   * makes a stale handler from a previous generation distinguishable from the
+   * live one rather than merely "the same plugin, again".
+   */
+  private resolveInterceptorIdentity(pluginId: string): InterceptorIdentity {
+    const scope = this.disposableScopes.get(pluginId)
+    const lease = this.activationLeases.get(pluginId)
+    const manifestType = usePluginStore.getState().plugins[pluginId]?.manifest?.type
+    return {
+      pluginInstanceId: scope?.token.scopeId ?? pluginId,
+      generation: lease?.generation ?? scope?.token.generation ?? 0,
+      realmId: scope?.token.realmId ?? "global",
+      runtime: pluginApiRuntimeForType(manifestType),
     }
   }
 
@@ -6050,6 +6103,11 @@ export class PluginManager {
     }
 
     this.hooksManager.unregisterHooks(pluginId)
+    // Belt and braces over the per-surface cleanups above: whatever authoring
+    // surface a registration came through, an unloaded plugin must have nothing
+    // left on any chain. A handler that outlives its scope closes over a torn
+    // down context and would rewrite a live request from a dead generation.
+    unregisterInterceptorsForPlugin(pluginId)
     this.contexts.delete(pluginId)
     getPluginIPC().unsubscribe(pluginId)
     getPluginIPC().unexpose(pluginId)

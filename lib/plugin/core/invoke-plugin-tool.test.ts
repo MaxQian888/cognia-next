@@ -17,6 +17,11 @@ jest.mock("@/lib/boot/capabilities", () => ({
 import type { PluginPermission, PluginResilienceConfig, PluginTool } from "@/types/plugin"
 
 import { __resetRegistryForTesting } from "@/lib/plugin/resilience/breaker-registry"
+import {
+  registerInterceptor,
+  __resetInterceptorDispatchForTesting,
+  __resetInterceptorRegistryForTesting,
+} from "@/lib/plugin/interceptors"
 
 import {
   __setInvokePluginToolDepsForTesting,
@@ -619,5 +624,116 @@ describe("invokePluginTool", () => {
     await invokePluginTool("plug-a", "demo_tool", {})
     // A signal is always provided to the tool, even with no caller signal.
     expect(receivedSignal).toBeInstanceOf(AbortSignal)
+  })
+})
+
+describe("invokePluginTool — interceptor points (ADR-0189)", () => {
+  const interceptor = (
+    registrationId: string,
+    pointId: string,
+    semantic: "transform" | "around",
+    handler: unknown
+  ): void => {
+    registerInterceptor({
+      registrationId,
+      pluginId: "policy",
+      pluginInstanceId: "policy#1",
+      generation: 1,
+      realmId: "global",
+      pointId,
+      semantic,
+      trustTier: "community",
+      order: {},
+      timeoutMs: 5_000,
+      handler: handler as never,
+      source: "interceptors",
+      runtime: "frontend",
+    })
+  }
+
+  beforeEach(() => {
+    __resetInterceptorRegistryForTesting()
+    __resetInterceptorDispatchForTesting()
+  })
+
+  afterEach(() => {
+    __resetInterceptorRegistryForTesting()
+  })
+
+  it("hands the tool the arguments `tool.call.prepare` produced", async () => {
+    let received: Record<string, unknown> | undefined
+    const deps = makeDeps({
+      tools: [
+        makeTool({
+          execute: async (args: Record<string, unknown>) => {
+            received = args
+            return "ok"
+          },
+        }),
+      ],
+    })
+    __setInvokePluginToolDepsForTesting(deps)
+    interceptor("prep", "tool.call.prepare", "transform", (value: { args: unknown }) => ({
+      ...value,
+      args: { normalized: true },
+    }))
+
+    await invokePluginTool("plug-a", "demo_tool", { raw: true })
+    expect(received).toEqual({ normalized: true })
+  })
+
+  it("refuses a transform that redirects the call to another tool", async () => {
+    const deps = makeDeps()
+    __setInvokePluginToolDepsForTesting(deps)
+    interceptor("prep", "tool.call.prepare", "transform", (value: object) => ({
+      ...value,
+      toolName: "something_else",
+    }))
+
+    // `toolName` is invariant: a transform may reshape what a call SAYS, never
+    // redirect it. The rewrite is rejected and the original call proceeds.
+    await expect(invokePluginTool("plug-a", "demo_tool", {})).resolves.toMatchObject({
+      toolName: "demo_tool",
+    })
+  })
+
+  it("wraps the execution in the `tool.execute` chain", async () => {
+    const deps = makeDeps({ tools: [makeTool({ execute: async () => "inner" })] })
+    __setInvokePluginToolDepsForTesting(deps)
+    interceptor(
+      "wrap",
+      "tool.execute",
+      "around",
+      async (args: unknown, next: (value?: unknown) => Promise<unknown>) =>
+        `wrapped(${String(await next(args))})`
+    )
+
+    await expect(invokePluginTool("plug-a", "demo_tool", {})).resolves.toMatchObject({
+      result: "wrapped(inner)",
+    })
+  })
+
+  it("does not run the tool unwrapped when the wrapper fails — fail-closed", async () => {
+    const execute = jest.fn(async () => "inner")
+    const deps = makeDeps({ tools: [makeTool({ execute })] })
+    __setInvokePluginToolDepsForTesting(deps)
+    interceptor("wrap", "tool.execute", "around", () => {
+      throw new Error("wrapper died")
+    })
+
+    // The reason to wrap a tool execution is almost always to constrain or
+    // record it, so a dead wrapper must not become "run it anyway".
+    await expect(invokePluginTool("plug-a", "demo_tool", {})).rejects.toThrow()
+    expect(execute).not.toHaveBeenCalled()
+  })
+
+  it("refuses a wrapper that invents a result instead of executing the tool", async () => {
+    const execute = jest.fn(async () => "inner")
+    const deps = makeDeps({ tools: [makeTool({ execute })] })
+    __setInvokePluginToolDepsForTesting(deps)
+    interceptor("wrap", "tool.execute", "around", async () => "fabricated receipt")
+
+    await expect(invokePluginTool("plug-a", "demo_tool", {})).rejects.toThrow()
+    expect(execute).not.toHaveBeenCalled()
   })
 })

@@ -8,7 +8,7 @@
  */
 
 import {
-  executeCommand,
+  executeCommandWithOptions,
   getCommands,
   registerCommand,
   unregisterCommand,
@@ -207,7 +207,14 @@ export function installVscodeRuntimeRpcHandlers(): Array<() => void> {
     registerMethod("commands:execute", (payload, context) => {
       const value = ownedPayload(payload, context)
       const args = Array.isArray(value.args) ? value.args : []
-      return executeCommand(requiredString(value, "command"), ...args)
+      // Extension code calling `vscode.commands.executeCommand` is the
+      // extension acting, not a user gesture — a `ui.action.invoke` guard is
+      // entitled to treat the two differently.
+      return executeCommandWithOptions(
+        requiredString(value, "command"),
+        { origin: "model" },
+        ...args
+      )
     })
   )
   disposers.push(

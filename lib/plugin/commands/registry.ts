@@ -19,6 +19,8 @@
  * VS Code-extension-side callers.
  */
 
+import { hasInterceptors, requireGuardPass } from "@/lib/plugin/interceptors"
+
 export type CommandHandler = (...args: unknown[]) => unknown | Promise<unknown>
 
 export interface CommandRegistration {
@@ -139,9 +141,62 @@ export function listCommandsByPlugin(pluginId: string): CommandRegistration[] {
  * unknown — VS Code throws the same.
  */
 export async function executeCommand<T = unknown>(id: string, ...args: unknown[]): Promise<T> {
+  return executeCommandWithOptions<T>(id, {}, ...args)
+}
+
+/** What a `ui.action.invoke` guard is asked about. */
+export interface UiActionInvokeValue {
+  /** Command id about to run. */
+  commandId: string
+  /** Plugin that owns the command, when one does. */
+  pluginId?: string
+  /** Where the invocation came from. Provenance, NOT authorization. */
+  origin: UiActionOrigin
+  args: readonly unknown[]
+}
+
+/**
+ * How a command invocation was started.
+ *
+ * A user gesture and an automated trigger are different facts about the same
+ * call, and a guard is entitled to treat them differently — but neither is a
+ * grant. `"user"` does not mean "already authorized"; it means a human was
+ * present, and the permission checks downstream still run either way.
+ */
+export type UiActionOrigin = "user" | "model" | "automation"
+
+export interface ExecuteCommandOptions {
+  origin?: UiActionOrigin
+}
+
+/**
+ * `executeCommand` with invocation provenance attached.
+ *
+ * Passes through the `ui.action.invoke` guard chain (ADR-0189) before running
+ * the handler. The point is fail-closed: a guard that throws or times out
+ * denies, because "the policy check crashed" must never read as "the policy
+ * allowed it".
+ */
+export async function executeCommandWithOptions<T = unknown>(
+  id: string,
+  options: ExecuteCommandOptions,
+  ...args: unknown[]
+): Promise<T> {
   const entry = registry.get(id)
   if (!entry) {
     throw new CommandNotFoundError(id)
+  }
+  if (hasInterceptors("ui.action.invoke")) {
+    await requireGuardPass<UiActionInvokeValue>(
+      "ui.action.invoke",
+      {
+        commandId: id,
+        ...(entry.pluginId ? { pluginId: entry.pluginId } : {}),
+        origin: options.origin ?? "user",
+        args,
+      },
+      { operationId: `command:${id}` }
+    )
   }
   const result = await entry.handler(...args)
   return result as T

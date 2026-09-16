@@ -7,6 +7,11 @@ jest.mock("@/stores/plugin-runtime", () => ({
 import { usePluginStore } from "@/stores/plugin-runtime"
 import type { PluginHooksAll } from "@/types/plugin/plugin-hooks"
 import {
+  registerInterceptor,
+  resolveInterceptorChain,
+  __resetInterceptorRegistryForTesting,
+} from "@/lib/plugin/interceptors"
+import {
   getPluginHookContribution,
   getPluginHookHandler,
   isPluginHooksEnabled,
@@ -117,5 +122,74 @@ describe("getPluginHookHandler", () => {
   it("ignores a non-function value under a hook name", () => {
     registerPluginHookContribution("p1", hooks({ onMessageSend: "not a function" }))
     expect(getPluginHookHandler("p1", "onMessageSend")).toBeUndefined()
+  })
+})
+
+describe("interceptor normalization (ADR-0189)", () => {
+  beforeEach(() => {
+    __resetInterceptorRegistryForTesting()
+  })
+
+  it("mints an interceptor record for each interceptor-shaped hook", () => {
+    setPlugins({ p1: { status: "enabled" } })
+    registerPluginHookContribution(
+      "p1",
+      hooks({ onChatRequest: () => undefined, onPostToolUse: () => undefined })
+    )
+
+    expect(resolveInterceptorChain("model.request.prepare").ordered).toHaveLength(1)
+    expect(resolveInterceptorChain("tool.result.project").ordered).toHaveLength(1)
+  })
+
+  it("does NOT normalize the guard-shaped onPreToolUse", () => {
+    // Its shape is allow/deny/modify. In a transform chain a later plugin could
+    // turn an earlier plugin's `deny` back into `allow`.
+    setPlugins({ p1: { status: "enabled" } })
+    registerPluginHookContribution("p1", hooks({ onPreToolUse: () => undefined }))
+    expect(resolveInterceptorChain("tool.call.prepare").ordered).toHaveLength(0)
+  })
+
+  it("replaces rather than stacks when a plugin re-registers", () => {
+    setPlugins({ p1: { status: "enabled" } })
+    registerPluginHookContribution("p1", hooks({ onChatRequest: () => undefined }))
+    registerPluginHookContribution("p1", hooks({ onChatRequest: () => undefined }))
+    expect(resolveInterceptorChain("model.request.prepare").ordered).toHaveLength(1)
+  })
+
+  it("stops dispatching a hook the plugin dropped between reloads", () => {
+    setPlugins({ p1: { status: "enabled" } })
+    registerPluginHookContribution("p1", hooks({ onChatRequest: () => undefined }))
+    registerPluginHookContribution("p1", hooks({ onEnable: () => undefined }))
+    expect(resolveInterceptorChain("model.request.prepare").ordered).toHaveLength(0)
+  })
+
+  it("drops the records when the contribution is unregistered", () => {
+    setPlugins({ p1: { status: "enabled" } })
+    registerPluginHookContribution("p1", hooks({ onChatRequest: () => undefined }))
+    unregisterPluginHookContribution("p1")
+    expect(resolveInterceptorChain("model.request.prepare").ordered).toHaveLength(0)
+  })
+
+  it("leaves a middleware the same activation registered through ctx.chat.use", () => {
+    // A hook refresh is scoped to the hook surface; a plugin-wide sweep here
+    // would take `ctx.chat.use` down with it.
+    setPlugins({ p1: { status: "enabled" } })
+    registerInterceptor({
+      registrationId: "p1:mw",
+      pluginId: "p1",
+      pluginInstanceId: "p1#1",
+      generation: 1,
+      realmId: "global",
+      pointId: "model.request.invoke",
+      semantic: "around",
+      trustTier: "community",
+      order: {},
+      timeoutMs: 100,
+      handler: (() => undefined) as never,
+      source: "chat-middleware",
+      runtime: "frontend",
+    })
+    registerPluginHookContribution("p1", hooks({ onChatRequest: () => undefined }))
+    expect(resolveInterceptorChain("model.request.invoke").ordered).toHaveLength(1)
   })
 })

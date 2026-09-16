@@ -137,6 +137,15 @@
       "formFactor": "row"
     },
     {
+      "id": "chat.input.effort",
+      "kind": "ui-slot",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "extension:ui",
+      "formFactor": "row"
+    },
+    {
       "id": "chat.input.menu",
       "kind": "ui-slot",
       "stability": "stable",
@@ -1486,6 +1495,93 @@
       "stability": "stable",
       "status": "implemented",
       "introducedIn": "0.1.0"
+    },
+    {
+      "id": "agent.context.prepare",
+      "kind": "interceptor",
+      "stability": "experimental",
+      "status": "implemented",
+      "introducedIn": "0.9.0",
+      "permission": "hooks:chat-intercept"
+    },
+    {
+      "id": "model.request.prepare",
+      "kind": "interceptor",
+      "stability": "experimental",
+      "status": "implemented",
+      "introducedIn": "0.9.0",
+      "permission": "hooks:chat-intercept"
+    },
+    {
+      "id": "model.request.invoke",
+      "kind": "interceptor",
+      "stability": "experimental",
+      "status": "implemented",
+      "introducedIn": "0.9.0",
+      "permission": "hooks:chat-intercept"
+    },
+    {
+      "id": "model.stream.transform",
+      "kind": "interceptor",
+      "stability": "experimental",
+      "status": "virtual",
+      "introducedIn": "0.9.0",
+      "permission": "hooks:chat-intercept"
+    },
+    {
+      "id": "tool.call.prepare",
+      "kind": "interceptor",
+      "stability": "experimental",
+      "status": "implemented",
+      "introducedIn": "0.9.0",
+      "permission": "hooks:chat-intercept"
+    },
+    {
+      "id": "tool.execute",
+      "kind": "interceptor",
+      "stability": "experimental",
+      "status": "implemented",
+      "introducedIn": "0.9.0",
+      "permission": "hooks:chat-intercept"
+    },
+    {
+      "id": "tool.result.project",
+      "kind": "interceptor",
+      "stability": "experimental",
+      "status": "implemented",
+      "introducedIn": "0.9.0",
+      "permission": "hooks:chat-intercept"
+    },
+    {
+      "id": "agent.turn.decide",
+      "kind": "interceptor",
+      "stability": "experimental",
+      "status": "virtual",
+      "introducedIn": "0.9.0",
+      "permission": "hooks:chat-intercept"
+    },
+    {
+      "id": "ui.action.invoke",
+      "kind": "interceptor",
+      "stability": "experimental",
+      "status": "implemented",
+      "introducedIn": "0.9.0",
+      "permission": "commands:read"
+    },
+    {
+      "id": "ui.surface.project",
+      "kind": "interceptor",
+      "stability": "experimental",
+      "status": "virtual",
+      "introducedIn": "0.9.0",
+      "permission": "extension:ui"
+    },
+    {
+      "id": "operation.completed",
+      "kind": "interceptor",
+      "stability": "experimental",
+      "status": "implemented",
+      "introducedIn": "0.9.0"
     },
     {
       "id": "workflow.node",

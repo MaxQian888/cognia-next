@@ -1,3 +1,6 @@
+import { getPluginApiMethodContract } from "@/lib/plugin/contracts/interface-catalog"
+import { getPluginApiWireOpContract } from "@cognia/plugin-sdk/contracts"
+import { loggers } from "@/lib/plugin/core/logger"
 import { isTauri } from "@/lib/native/utils"
 import { isHeadlessHost } from "@/lib/platform/detect"
 import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
@@ -146,14 +149,72 @@ function shouldRetry(code: PluginApiErrorCode): boolean {
 }
 
 /**
- * Read-shaped APIs are safe to retry; anything else (set/write/delete/run/…)
- * may have executed host-side before the failure surfaced (W6.3).
+ * Transport ids are `namespace:method`; the Interface Catalog keys the same
+ * method as `namespace.method`. Only the FIRST separator is rewritten, so a
+ * method name that itself contains a colon cannot be reinterpreted as a
+ * different namespace.
  */
-const IDEMPOTENT_API_PATTERN =
-  /:(get|list|read|stat|exists|has|describe|query|watch|status|info|count|peek)([:.]|$)/
+export function transportApiToMethodId(api: string): string {
+  const separator = api.indexOf(":")
+  if (separator < 0) return api
+  return `${api.slice(0, separator)}.${api.slice(separator + 1)}`
+}
 
+const unmappedApisReported = new Set<string>()
+
+/**
+ * Is this call safe to retry after a TIMEOUT?
+ *
+ * The answer comes from the declared contract, never from the method's NAME.
+ * The previous implementation matched
+ * `/:(get|list|read|stat|exists|has|describe|query|watch|status|info|count|peek)/`
+ * and treated a hit as "safe to retry", which is wrong in both directions:
+ * `managedIdeState:watch` CREATES a subscription (a retried timeout leaves two
+ * behind), and `fs:stat` — which the catalog declares non-idempotent — got a
+ * free retry because its name starts with a read verb.
+ *
+ * Two declaration sources, consulted in the order the transport actually sees
+ * things:
+ *
+ *   1. `wireOps` — the host-brokered operations the gateway receives verbatim
+ *      (`window:getSize`, `db:commit`, `managedIdeState:watch`).
+ *   2. the ctx method catalog, for wire ids that mirror an author-facing method
+ *      one-for-one (`fs:readText` → `fs.readText`).
+ *
+ * An UNDECLARED operation is not retried. Guessing from the shape of a string
+ * is how the wrong answer got here in the first place, and a missing retry
+ * costs one failed call while a wrong one can double-execute a write.
+ */
 export function isIdempotentPluginApi(api: string): boolean {
-  return IDEMPOTENT_API_PATTERN.test(api)
+  const wireOp = getPluginApiWireOpContract(api)
+  if (wireOp) {
+    return wireOp.resourceEffect.kind === "none" && wireOp.idempotent
+  }
+  const contract = getPluginApiMethodContract(transportApiToMethodId(api))
+  if (!contract) {
+    if (!unmappedApisReported.has(api)) {
+      unmappedApisReported.add(api)
+      // Defensive: the logger is a lazily-bound facade and some test
+      // environments stub it partially. A missing diagnostic must never turn a
+      // retry decision into a crash.
+      loggers.ipc?.warn?.(
+        `[plugin-transport] "${api}" has no contract entry; treating it as ` +
+          `non-idempotent (no retry). Declare it under \`wireOps\` in ` +
+          `packages/plugin-sdk/contract/catalog.json to get retry behaviour back.`
+      )
+    }
+    return false
+  }
+  // A method that hands back a host-owned resource or a disposer has produced
+  // something even when the CALL times out, so retrying it leaks the first one
+  // regardless of what `idempotent` claims.
+  if (contract.resourceEffect.kind !== "none") return false
+  return contract.idempotent
+}
+
+/** Test-only: forget which unmapped APIs have already been warned about. */
+export function __resetTransportContractWarningsForTesting(): void {
+  unmappedApisReported.clear()
 }
 
 function sleep(ms: number): Promise<void> {
@@ -167,8 +228,16 @@ export async function invokePluginApi<T = unknown>(
   options: InvokePluginApiOptions = {}
 ): Promise<T> {
   const requestId = createRequestId()
-  const idempotent = options.idempotent ?? isIdempotentPluginApi(api)
-  const retries = options.retries ?? (idempotent ? 1 : 0)
+  // The caller may only NARROW. `options.idempotent === true` on a method the
+  // catalog calls unsafe is ignored: the safety classification belongs to
+  // whoever owns the method, not to whoever happens to be calling it, or every
+  // call site becomes a place to opt a write into double execution.
+  const declaredIdempotent = isIdempotentPluginApi(api)
+  const idempotent = options.idempotent === false ? false : declaredIdempotent
+  // The COUNT stays the caller's choice; whether retrying is safe at all does
+  // not. A non-idempotent (or undeclared) method gets zero attempts back no
+  // matter what the call site asked for.
+  const retries = idempotent ? Math.max(0, options.retries ?? 1) : 0
   const retryDelayMs = options.retryDelayMs ?? 150
   const request: PluginApiInvokeRequest = {
     sdkVersion: options.sdkVersion ?? PLUGIN_GATEWAY_CLIENT_VERSION,

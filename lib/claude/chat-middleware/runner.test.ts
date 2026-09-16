@@ -3,6 +3,11 @@ import {
   listAllChatMiddlewares,
   registerChatMiddleware,
 } from "./registry"
+import {
+  resolveInterceptorChain,
+  __resetInterceptorDispatchForTesting,
+  __resetInterceptorRegistryForTesting,
+} from "@/lib/plugin/interceptors"
 import { runChatMiddlewareChain } from "./runner"
 import type {
   ChatMiddleware,
@@ -134,5 +139,82 @@ describe("runChatMiddlewareChain", () => {
     }))
     const { response } = await runChatMiddlewareChain(baseRequest({ model: "x" }), terminal)
     expect(response.text).toBe("model=x")
+  })
+})
+
+describe("runChatMiddlewareChain — the send happens once (ADR-0189)", () => {
+  beforeEach(() => {
+    __resetChatMiddlewareRegistryForTesting()
+    __resetInterceptorRegistryForTesting()
+    __resetInterceptorDispatchForTesting()
+  })
+
+  it("does not re-send when a middleware throws AFTER awaiting next()", async () => {
+    // The old runner called `next(req)` again on the error path, so a
+    // middleware that had already delegated produced two model requests for one
+    // user turn.
+    const terminal = jest.fn(async () => terminalOk)
+    const middleware: ChatMiddleware = async (_req, next) => {
+      await next()
+      throw new Error("post-processing blew up")
+    }
+
+    const { response } = await runChatMiddlewareChain(baseRequest(), terminal, {
+      middlewares: [
+        {
+          pluginId: "p",
+          middlewareId: "m",
+          fullId: "p:m",
+          fn: middleware,
+          priority: 0,
+          timeoutMs: 1_000,
+          consecutiveFailures: 0,
+          disabled: false,
+          breakerTripped: false,
+        },
+      ],
+    })
+
+    expect(terminal).toHaveBeenCalledTimes(1)
+    expect(response).toEqual(terminalOk)
+  })
+
+  it("does not re-send when a middleware times out while delegating", async () => {
+    const terminal = jest.fn(
+      () =>
+        new Promise<ChatMiddlewareResponse>((resolve) => setTimeout(() => resolve(terminalOk), 40))
+    )
+    const middleware: ChatMiddleware = (_req, next) => next()
+
+    const { response } = await runChatMiddlewareChain(baseRequest(), terminal, {
+      middlewares: [
+        {
+          pluginId: "p",
+          middlewareId: "slow",
+          fullId: "p:slow",
+          fn: middleware,
+          priority: 0,
+          timeoutMs: 10,
+          consecutiveFailures: 0,
+          disabled: false,
+          breakerTripped: false,
+        },
+      ],
+    })
+
+    expect(terminal).toHaveBeenCalledTimes(1)
+    expect(response).toEqual(terminalOk)
+  })
+
+  it("registers a middleware into the interceptor chain, not a second registry", async () => {
+    registerChatMiddleware({
+      pluginId: "p",
+      middlewareId: "m",
+      fn: async (_req, next) => next(),
+    })
+    expect(
+      resolveInterceptorChain("model.request.invoke").ordered.map((e) => e.registrationId)
+    ).toEqual(["p:m"])
+    expect(listAllChatMiddlewares()).toHaveLength(1)
   })
 })

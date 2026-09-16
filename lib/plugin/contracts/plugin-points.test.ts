@@ -87,6 +87,18 @@ describe("plugin point contracts", () => {
       "onWorkflowNodeUnregister",
       "onWorkflowTriggerRegister",
       "onWorkflowTriggerUnregister",
+      // ADR-0189 interceptor points declared ahead of a fire site.
+      // `agent.turn.decide`: the turn loop lives inside the sidecar, so the
+      // host has no continue/stop decision to gate yet.
+      "agent.turn.decide",
+      // `model.stream.transform`: `dispatchStreamChunk` is synchronous and its
+      // callers discard the return value, so a rewritten chunk has nowhere to
+      // go until the streaming contract learns to await.
+      "model.stream.transform",
+      // `ui.surface.project`: surface projection runs inside a synchronous
+      // render, which cannot carry the deadline and revocation semantics every
+      // other point relies on.
+      "ui.surface.project",
     ]
     const virtualIds = PLUGIN_POINT_CONTRACTS.filter((e) => e.status === "virtual")
       .map((e) => e.id)

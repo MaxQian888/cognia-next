@@ -20,6 +20,10 @@ import {
   __resetChatMiddlewareRegistryForTesting,
 } from "./chat-middleware/registry"
 import {
+  registerInterceptor,
+  __resetInterceptorRegistryForTesting,
+} from "@/lib/plugin/interceptors"
+import {
   setChatMiddlewareExecutionEnabled,
   __resetChatMiddlewareFlagForTesting,
 } from "./chat-middleware/feature-flag"
@@ -64,6 +68,9 @@ jest.mock("./ipc", () => ({
 }))
 
 beforeEach(() => {
+  // Interceptor registrations are module-global; leaking one turns every
+  // later test in this file into a middleware test.
+  __resetInterceptorRegistryForTesting()
   captured = null
   preToolUseMock.mockReset().mockResolvedValue({ action: "allow" })
   postToolUseMock.mockReset().mockResolvedValue({})
@@ -872,6 +879,84 @@ describe("runAndCaptureAssistantReply", () => {
     expect(result.text).toBe("blocked")
     expect(result.messageId).toBe("")
     expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  // ── Interceptor points on the send path (ADR-0189) ────────────────────
+
+  const prepare = (registrationId: string, handler: unknown): void => {
+    registerInterceptor({
+      registrationId,
+      pluginId: "p",
+      pluginInstanceId: "p#1",
+      generation: 1,
+      realmId: "global",
+      pointId: "model.request.prepare",
+      semantic: "transform",
+      trustTier: "community",
+      order: {},
+      timeoutMs: 1_000,
+      handler: handler as never,
+      source: "interceptors",
+      runtime: "frontend",
+    })
+  }
+
+  it("runs `model.request.prepare` even with the middleware flag off", async () => {
+    // The around stage wraps the whole billed send and keeps its default-off
+    // flag. A request transform is a different animal, and gating it with the
+    // around stage would leave a registered interceptor silently dead.
+    let seen: string | undefined
+    prepare("p:peek", (value: { messages: Array<{ content: string }> }) => {
+      seen = value.messages[0]?.content
+      return value
+    })
+
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
+    await flushUntilSubscribed()
+    fire(assistantEvent("hello"))
+    fire(sessionEnded())
+    await promise
+    expect(seen).toBe("hi")
+  })
+
+  it("sends what the prepare chain produced, not what it was handed", async () => {
+    // The terminal used to close over the ORIGINAL prompt and ignore its
+    // argument, so a rewrite survived the chain and was discarded one line
+    // before the send.
+    prepare("p:rewrite", (value: { messages: Array<{ content: string }> }) => ({
+      ...value,
+      messages: [{ ...value.messages[0], content: "rewritten" }],
+    }))
+
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
+    await flushUntilSubscribed()
+    await flushMicrotasks()
+    fire(assistantEvent("hello"))
+    fire(sessionEnded())
+    await promise
+    expect(sendPromptMock).toHaveBeenCalledWith(expect.anything(), "rewritten", expect.anything())
+  })
+
+  it("keeps a structured prompt intact when the chain did not touch the messages", async () => {
+    prepare("p:model-only", (value: object) => ({ ...value, model: "swapped" }))
+
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
+    await flushUntilSubscribed()
+    await flushMicrotasks()
+    fire(assistantEvent("hello"))
+    fire(sessionEnded())
+    await promise
+    // The prompt is untouched; only the declared option override lands.
+    expect(sendPromptMock).toHaveBeenCalledWith(SESSION, "hi", expect.anything())
+  })
+
+  it("skips the whole chain when no interceptor is registered on either point", async () => {
+    setChatMiddlewareExecutionEnabled(true)
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
+    await flushUntilSubscribed()
+    fire(assistantEvent("hello"))
+    fire(sessionEnded())
+    expect((await promise).text).toBe("hello")
   })
 
   // ── A2UI surface accumulator (G2 addition) ────────────────────────────

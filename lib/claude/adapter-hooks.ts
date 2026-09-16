@@ -19,6 +19,7 @@
  */
 
 import { getPluginEventHooks, getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
+import { hasInterceptors } from "@/lib/plugin/interceptors"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import type { PluginHooks, PluginMessage } from "@/types/plugin"
 import type { PluginHooksAll } from "@/types/plugin/plugin-hooks"
@@ -41,7 +42,7 @@ function hasEventListeners(hookName: keyof PluginHooksAll): boolean {
  * for the turn (`sendOptions.toolResultReviewEnabled`).
  */
 export function hasPostToolUseListeners(): boolean {
-  return hasEventListeners("onPostToolUse")
+  return hasInterceptors("tool.result.project")
 }
 
 export interface PromptSubmitContextLike {
@@ -106,24 +107,29 @@ export interface PostToolUseResultLike {
   additionalMessages?: PluginMessage[]
 }
 
-/** Fired after a tool returns a result. */
+/**
+ * Fired after a tool returns a result.
+ *
+ * Dispatched as the `tool.result.project` interceptor point (ADR-0189) inside
+ * `PluginEventHooks.dispatchPostToolUse`: a SERIAL chain, so a redaction that
+ * ran in one plugin is visible to the next and cannot be undone by a later
+ * plugin simply returning the original value it was handed. The listener check
+ * consults the interceptor registry rather than the legacy hook bag, so a
+ * `defineInterceptors` contribution counts too.
+ */
 export async function dispatchPostToolUse(
   toolName: string,
   toolArgs: unknown,
   toolResult: unknown,
   sessionId: string
 ): Promise<PostToolUseResultLike> {
-  if (!hasEventListeners("onPostToolUse")) return {}
-  try {
-    return (await getPluginEventHooks().dispatchPostToolUse(
-      toolName,
-      toolArgs,
-      toolResult,
-      sessionId
-    )) as PostToolUseResultLike
-  } catch {
-    return {}
-  }
+  if (!hasInterceptors("tool.result.project")) return {}
+  return (await getPluginEventHooks().dispatchPostToolUse(
+    toolName,
+    toolArgs,
+    toolResult,
+    sessionId
+  )) as PostToolUseResultLike
 }
 
 /** Fired when an assistant message is received from the SDK. */

@@ -30,7 +30,10 @@ import {
   listPluginPermissions,
   PluginGatewayError,
   normalizePluginRuntimeHandshake,
+  isIdempotentPluginApi,
+  transportApiToMethodId,
 } from "./transport"
+import { getPluginApiMethodContract } from "@/lib/plugin/contracts/interface-catalog"
 import { setActiveRemoteTransport, __resetRoutingForTests } from "@/lib/tauri/transport-routing"
 
 describe("isPluginGatewayAvailable", () => {
@@ -150,7 +153,7 @@ describe("invokePluginApi", () => {
     expect(mockTransportCall).toHaveBeenCalledTimes(1)
   })
 
-  it("retries on TIMEOUT errors up to the retry count", async () => {
+  it("retries a DECLARED-idempotent api on TIMEOUT up to the retry count", async () => {
     const timeoutResponse = {
       requestId: "req-1",
       success: false,
@@ -162,7 +165,7 @@ describe("invokePluginApi", () => {
     mockTransportCall.mockResolvedValue(timeoutResponse)
 
     await expect(
-      invokePluginApi("my-plugin", "slowOp", {}, { retries: 2, retryDelayMs: 1 })
+      invokePluginApi("my-plugin", "fs:readText", {}, { retries: 2, retryDelayMs: 1 })
     ).rejects.toThrow(PluginGatewayError)
 
     // 1 initial + 2 retries = 3 total calls
@@ -187,7 +190,12 @@ describe("invokePluginApi", () => {
 
     mockTransportCall.mockResolvedValueOnce(internalError).mockResolvedValueOnce(successResponse)
 
-    const result = await invokePluginApi("my-plugin", "op", {}, { retries: 2, retryDelayMs: 1 })
+    const result = await invokePluginApi(
+      "my-plugin",
+      "fs:readText",
+      {},
+      { retries: 2, retryDelayMs: 1 }
+    )
     expect(result).toBe("recovered")
     expect(mockTransportCall).toHaveBeenCalledTimes(2)
   })
@@ -393,13 +401,75 @@ describe("idempotency-aware retry (W6.3)", () => {
     expect(mockTransportCall).toHaveBeenCalledTimes(1)
   })
 
-  it("honours an explicit idempotent override", async () => {
+  it("ignores a caller trying to declare a write idempotent", async () => {
+    // The classification belongs to whoever owns the method, not to whoever
+    // happens to be calling it — otherwise every call site is a place to opt a
+    // write into double execution (ADR-0189 §2.3).
+    mockTransportCall.mockResolvedValue(timeoutResponse)
+    await expect(
+      invokePluginApi("p", "fs:writeText", {}, { idempotent: true, retryDelayMs: 1 })
+    ).rejects.toThrow()
+    expect(mockTransportCall).toHaveBeenCalledTimes(1)
+  })
+
+  it("honours a caller NARROWING a read to non-idempotent", async () => {
+    mockTransportCall.mockResolvedValue(timeoutResponse)
+    await expect(
+      invokePluginApi("p", "fs:readText", {}, { idempotent: false, retryDelayMs: 1 })
+    ).rejects.toThrow()
+    expect(mockTransportCall).toHaveBeenCalledTimes(1)
+  })
+
+  it("retries a wire op the catalog declares idempotent", async () => {
+    // `window:getSize` is a handle operation, not a `ctx.*` method — it only
+    // has a contract because `wireOps` declares the transport's own vocabulary.
     mockTransportCall
       .mockResolvedValueOnce(timeoutResponse)
-      .mockResolvedValueOnce({ ...timeoutResponse, success: true, data: "ok", error: undefined })
-    await expect(
-      invokePluginApi("p", "cache:set", {}, { idempotent: true, retryDelayMs: 1 })
-    ).resolves.toBe("ok")
+      .mockResolvedValueOnce({ ...timeoutResponse, success: true, data: 1, error: undefined })
+    await expect(invokePluginApi("p", "window:getSize", {}, { retryDelayMs: 1 })).resolves.toBe(1)
     expect(mockTransportCall).toHaveBeenCalledTimes(2)
+  })
+
+  it("does NOT retry a wire op the catalog declares as a write", async () => {
+    mockTransportCall.mockResolvedValue(timeoutResponse)
+    await expect(invokePluginApi("p", "db:commit", {}, { retryDelayMs: 1 })).rejects.toThrow()
+    expect(mockTransportCall).toHaveBeenCalledTimes(1)
+  })
+
+  it("does NOT retry a `watch` that creates a subscription", async () => {
+    // The old name-shaped classifier read `watch` as a read verb and retried
+    // it, which leaves the first subscription behind. The wire op declares
+    // `resourceEffect: host-owned`, which settles it whatever the name says.
+    expect(isIdempotentPluginApi("managedIdeState:watch")).toBe(false)
+    mockTransportCall.mockResolvedValue(timeoutResponse)
+    await expect(
+      invokePluginApi("p", "managedIdeState:watch", {}, { retries: 3, retryDelayMs: 1 })
+    ).rejects.toThrow()
+    expect(mockTransportCall).toHaveBeenCalledTimes(1)
+  })
+
+  it("does NOT retry an UNDECLARED api, even with an explicit retry count", async () => {
+    expect(isIdempotentPluginApi("somethingNew:list")).toBe(false)
+    mockTransportCall.mockResolvedValue(timeoutResponse)
+    await expect(
+      invokePluginApi("p", "somethingNew:list", {}, { retries: 3, retryDelayMs: 1 })
+    ).rejects.toThrow()
+    expect(mockTransportCall).toHaveBeenCalledTimes(1)
+  })
+
+  it("does NOT retry a read that hands back a host-owned resource", async () => {
+    // A call that produced something before it timed out leaks the first one on
+    // retry, whatever `idempotent` claims.
+    const contract = getPluginApiMethodContract("modal.openModal")
+    expect(contract?.resourceEffect.kind).not.toBe("none")
+    expect(isIdempotentPluginApi("modal:openModal")).toBe(false)
+  })
+})
+
+describe("transportApiToMethodId", () => {
+  it("rewrites only the first separator, so a method name cannot rename its namespace", () => {
+    expect(transportApiToMethodId("fs:readText")).toBe("fs.readText")
+    expect(transportApiToMethodId("ns:a:b")).toBe("ns.a:b")
+    expect(transportApiToMethodId("bare")).toBe("bare")
   })
 })

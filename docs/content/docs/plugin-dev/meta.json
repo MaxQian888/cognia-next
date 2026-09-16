@@ -13,6 +13,7 @@
     "bots",
     "connector-adapters",
     "lifecycle-hooks",
+    "interceptors",
     "devtools",
     "packaging"
   ]

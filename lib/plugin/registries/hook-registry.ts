@@ -26,7 +26,12 @@
  */
 
 import type { PluginHooksAll } from "@/types/plugin/plugin-hooks"
-import { usePluginStore } from "@/stores/plugin-runtime"
+import { isPluginHooksEnabled } from "./plugin-liveness"
+import {
+  interceptorsFromLegacyHooks,
+  registerInterceptor,
+  unregisterInterceptorsForPluginSource,
+} from "@/lib/plugin/interceptors"
 import { createOverlayRegistry } from "./createOverlayRegistry"
 
 /** One plugin's hook contribution. */
@@ -44,17 +49,35 @@ const registry = createOverlayRegistry<RegisteredPluginHooks>({
   conflictPolicy: "last-wins",
 })
 
-/** Register (or refresh) one plugin's hooks. */
+/**
+ * Register (or refresh) one plugin's hooks.
+ *
+ * Also normalizes the interceptor-shaped hooks into the interceptor registry
+ * (ADR-0189 §6.1), so a `PluginHooks` bag and a `defineInterceptors`
+ * contribution land on the same chain with the same ordering and liveness rules
+ * rather than in two stores that disagree. Refreshing replaces rather than
+ * stacks: the normalized ids are derived from `pluginId` + hook name, so a hot
+ * reload cannot leave the previous generation's closure on the chain.
+ */
 export function registerPluginHookContribution(
   pluginId: string,
   hooks: PluginHooksAll,
   priority = 0
 ): void {
   registry.register(pluginId, { hooks, priority }, { pluginId })
+  // Drop the previous generation's normalized records first — a plugin that
+  // removes a hook between reloads must stop being dispatched for it. Scoped to
+  // this surface: a plugin-wide drop here would also sweep away the middleware
+  // the same activation registered through `ctx.chat.use`.
+  unregisterInterceptorsForPluginSource(pluginId, "legacy-hooks")
+  for (const registration of interceptorsFromLegacyHooks(pluginId, hooks, priority)) {
+    registerInterceptor(registration)
+  }
 }
 
 /** Drop one plugin's hooks. Returns true when something was removed. */
 export function unregisterPluginHookContribution(pluginId: string): boolean {
+  unregisterInterceptorsForPluginSource(pluginId, "legacy-hooks")
   return registry.unregisterById(pluginId)
 }
 
@@ -64,19 +87,13 @@ export function getPluginHookContribution(pluginId: string): RegisteredPluginHoo
 }
 
 /**
- * The ONE liveness rule, shared by both dispatchers.
+ * The ONE liveness rule, shared by every dispatcher.
  *
- * A plugin's hooks run only while the plugin is enabled. Reads the plugin store
- * rather than caching, because enablement flips at runtime and a cached copy is
- * how the two dispatchers drifted apart in the first place. A plugin that has
- * registered hooks but has no store row yet (mid-activation) counts as live so
- * an `onEnable` hook can still fire for its own activation.
+ * Re-exported rather than defined here: the interceptor registry needs the same
+ * rule and this module imports THAT one to normalize legacy hooks, so the rule
+ * lives in a leaf module both can reach. See `plugin-liveness.ts`.
  */
-export function isPluginHooksEnabled(pluginId: string): boolean {
-  const row = usePluginStore.getState().plugins[pluginId]
-  if (!row) return true
-  return row.status === "enabled"
-}
+export { isPluginHooksEnabled }
 
 /**
  * Every ENABLED plugin with hooks, in priority order (descending), tie-broken
@@ -135,5 +152,8 @@ export function listRegisteredHookPlugins(): string[] {
 
 /** Test-only: drop every registration. */
 export function __resetHookRegistryForTesting(): void {
-  for (const pluginId of listRegisteredHookPlugins()) registry.unregisterById(pluginId)
+  for (const pluginId of listRegisteredHookPlugins()) {
+    unregisterInterceptorsForPluginSource(pluginId, "legacy-hooks")
+    registry.unregisterById(pluginId)
+  }
 }

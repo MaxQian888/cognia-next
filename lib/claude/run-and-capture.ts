@@ -41,7 +41,7 @@ import type { CanonicalAgentEvent } from "@cognia/agent-config-types/agent-execu
 import type { A2UISegmentContent } from "@/types/connectors/segment"
 import { extractUsage, type UsageInfo } from "./adapter"
 import { runChatMiddlewareChain } from "@/lib/claude/chat-middleware/runner"
-import { listActiveChatMiddlewares } from "@/lib/claude/chat-middleware/registry"
+import { hasInterceptors } from "@/lib/plugin/interceptors"
 import { isChatMiddlewareExecutionEnabled } from "@/lib/claude/chat-middleware/feature-flag"
 import type { ChatMiddlewareRequest } from "@/types/plugin/plugin-chat-middleware"
 import type { PluginMessage } from "@/types/plugin/plugin"
@@ -602,6 +602,49 @@ export async function runAndCaptureAssistantReply(
 }
 
 /**
+ * Fold a prepared request back onto the prompt.
+ *
+ * Only a single text message can round-trip: the request carries a
+ * `PluginMessage[]` projection of the turn, and anything richer (attachments,
+ * multi-part content) was never representable in it, so the original prompt is
+ * authoritative for those. Returning the original unchanged when nothing
+ * usable came back is the conservative half of that trade — a transform that
+ * did not touch the messages must not flatten a structured prompt to text.
+ */
+function applyPreparedPrompt(
+  original: SendContent,
+  before: ChatMiddlewareRequest,
+  after: ChatMiddlewareRequest
+): SendContent {
+  if (after.messages === before.messages) return original
+  if (typeof original !== "string") return original
+  if (after.messages.length !== 1) return original
+  const content = after.messages[0]?.content
+  return typeof content === "string" ? content : original
+}
+
+/** Fold the prepared request's option overrides back onto the send options. */
+function applyPreparedOptions(
+  original: SendOptions | undefined,
+  before: ChatMiddlewareRequest,
+  after: ChatMiddlewareRequest
+): SendOptions | undefined {
+  const patch: Partial<SendOptions> = {}
+  if (after.model !== before.model && after.model) patch.model = after.model
+  if (after.options.systemPrompt !== before.options.systemPrompt) {
+    patch.systemPrompt = after.options.systemPrompt
+  }
+  if (after.options.appendSystemPrompt !== before.options.appendSystemPrompt) {
+    patch.appendSystemPrompt = after.options.appendSystemPrompt
+  }
+  if (after.options.allowedTools !== before.options.allowedTools) {
+    patch.allowedTools = after.options.allowedTools
+  }
+  if (Object.keys(patch).length === 0) return original
+  return { ...(original ?? {}), ...patch } as SendOptions
+}
+
+/**
  * The middleware-aware capture. Was the body of {@link runAndCaptureAssistantReply}
  * before broker admission was layered on top; kept as a private seam so the
  * admission wrapper stays thin and the middleware logic is unchanged.
@@ -612,11 +655,22 @@ async function runCaptureWithMiddleware(
   options?: SendOptions,
   cap?: RunAndCaptureOptions
 ): Promise<RunAndCaptureResult> {
-  if (!isChatMiddlewareExecutionEnabled()) {
-    return captureAssistantReplyCore(sessionId, prompt, options, cap)
-  }
-  const active = listActiveChatMiddlewares()
-  if (active.length === 0) {
+  // Two stages, two gates (ADR-0189 §6.2).
+  //
+  // `model.request.invoke` wraps the whole billed send, so it keeps the
+  // default-off flag ADR-0026 §4 §A locked it behind. `model.request.prepare`
+  // only rewrites the request object before it leaves — the same class of work
+  // `onBuildOptions` already does unflagged on every turn — so gating it with
+  // the around stage would leave a declared, registered interceptor silently
+  // never running, which is worse than the overhead it saves.
+  //
+  // Both gates ask the interceptor registry rather than counting chat
+  // middlewares: a `defineInterceptors` contribution is not in that Map, and
+  // reading the Map is how it became invisible here in the first place.
+  const invokeEnabled = isChatMiddlewareExecutionEnabled()
+  const wrapsSend = invokeEnabled && hasInterceptors("model.request.invoke")
+  const preparesRequest = hasInterceptors("model.request.prepare")
+  if (!wrapsSend && !preparesRequest) {
     return captureAssistantReplyCore(sessionId, prompt, options, cap)
   }
 
@@ -641,12 +695,22 @@ async function runCaptureWithMiddleware(
   const holder: { value: RunAndCaptureResult | null } = { value: null }
   const { response } = await runChatMiddlewareChain(
     request,
-    async () => {
-      const result = await captureAssistantReplyCore(sessionId, prompt, options, cap)
+    async (prepared) => {
+      // Send what the chain produced, not what it was handed. The terminal used
+      // to close over the ORIGINAL `prompt`/`options` and ignore its argument,
+      // so a middleware that rewrote the request changed nothing that reached
+      // the model — the rewrite survived the chain and was then discarded one
+      // line before the send.
+      const result = await captureAssistantReplyCore(
+        sessionId,
+        applyPreparedPrompt(prompt, request, prepared),
+        applyPreparedOptions(options, request, prepared),
+        cap
+      )
       holder.value = result
       return { text: result.text }
     },
-    { signal: cap?.signal }
+    { signal: cap?.signal, skipInvoke: !invokeEnabled }
   )
 
   if (!holder.value) {
