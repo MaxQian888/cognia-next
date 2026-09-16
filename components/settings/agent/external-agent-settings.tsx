@@ -42,6 +42,7 @@ import { canUseCogniaModels } from "@/lib/ai/agent/external/gateway-task"
 import { HostExternalAgentConfigs } from "./host-external-agent-configs"
 import { UnsandboxedConsentAction } from "@/components/agent/external-agent/unsandboxed-consent-action"
 import { UnsandboxedStatusBadge } from "@/components/agent/external-agent/unsandboxed-status-badge"
+import { SandboxPlacementBadge } from "@/components/agent/external-agent/sandbox-placement-badge"
 import { isTauri } from "@/lib/tauri"
 import { platform as tauriPlatform } from "@tauri-apps/plugin-os"
 import { cn } from "@/lib/utils"
@@ -1782,6 +1783,10 @@ function AgentDetail({
                 unsandboxed={Boolean(agent.unsandboxedConsent)}
                 executablePath={agent.unsandboxedConsent?.executablePath}
               />
+              {/* ADR-0182: where the last run actually landed — the tier, user
+                  and digest the Host attested, which can all differ from what
+                  the project asked for. Nothing at all when it asked for none. */}
+              <SandboxPlacementBadge agentId={agent.id} />
             </div>
             {agent.description && <CardDescription>{agent.description}</CardDescription>}
             {executionBlockedReason && (

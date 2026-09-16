@@ -197,6 +197,29 @@ describe("SettingsShell host-reachability backstop", () => {
     expect(screen.getByText("hostUnavailableSectionBody")).toBeInTheDocument()
   })
 
+  // ADR-0182: the image catalog is administered on the server-backed host
+  // that runs the sandbox pool. A desktop runs none, and pairing one is the
+  // way in, so this is the capability explanation, not the desktop-only one.
+  it("keeps the image catalog closed on a desktop, which runs no sandbox pool", () => {
+    setDesktop(true)
+    mockSection = "image-catalog"
+    render(<SettingsShell />)
+    expect(screen.queryByTestId("section-body")).not.toBeInTheDocument()
+    expect(screen.getByText("hostUnavailableSectionTitle")).toBeInTheDocument()
+    // Not "open the desktop app": the desktop cannot open it either.
+    expect(screen.getByText("serverOnlySectionBody")).toBeInTheDocument()
+    expect(screen.queryByText("hostUnavailableSectionBody")).not.toBeInTheDocument()
+    expect(replace).not.toHaveBeenCalled()
+  })
+
+  it("keeps the general capability copy for a section a desktop could open", () => {
+    setDesktop(false)
+    mockSection = "subscription"
+    render(<SettingsShell />)
+    expect(screen.getByText("hostUnavailableSectionBody")).toBeInTheDocument()
+    expect(screen.queryByText("serverOnlySectionBody")).not.toBeInTheDocument()
+  })
+
   it("tells a desktop-pinned section apart from a capability gap", () => {
     // `desktop` (window chrome, tray, hotkeys) is pinned to the local shell:
     // no pairing opens it, so the capability copy — "pair a host that runs
@@ -228,6 +251,7 @@ describe("SettingsShell host-reachability backstop", () => {
         "desktopOnlySectionBody",
         "hostUnavailableSectionTitle",
         "hostUnavailableSectionBody",
+        "serverOnlySectionBody",
       ]) {
         expect(typeof catalogue[key]).toBe("string")
         expect(catalogue[key].length).toBeGreaterThan(0)

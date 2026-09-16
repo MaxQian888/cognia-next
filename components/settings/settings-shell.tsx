@@ -18,7 +18,11 @@ import { requestCommandPalette } from "@/lib/shell/command-palette-request"
 import { resetKeysForSection } from "@/lib/settings/section-keys"
 import { useSettingsSectionReachability } from "@/hooks/settings/use-settings-section-reachability"
 import { useSettingFocus } from "@/hooks/settings/use-setting-focus"
-import { SETTINGS_NAV, type SettingsSectionId } from "./settings-nav-config"
+import {
+  SETTINGS_NAV,
+  settingsSectionNeedsServer,
+  type SettingsSectionId,
+} from "./settings-nav-config"
 import { CONNECTIVITY_PANEL_PARAM, panelForLegacySection } from "./connectivity/nav-config"
 
 const SectionLoading = () => {
@@ -275,6 +279,10 @@ const ProIdeSection = dynamic(
 )
 const SandboxSection = dynamic(
   () => import("./sandbox/sandbox-section").then((m) => m.SandboxSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
+const ImageCatalogSection = dynamic(
+  () => import("./image-catalog/image-catalog-section").then((m) => m.ImageCatalogSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
 const SecuritySection = dynamic(
@@ -561,12 +569,20 @@ function SectionContent({
   // failing to notice their pairing.
   if (!isReachable(section)) {
     const pinnedToLocalShell = blockReason(section) === "profile"
+    // And a section only a server deployment runs must not suggest the
+    // desktop app: opening it there fails the same way.
+    const item = SETTINGS_NAV.find((candidate) => candidate.id === section)
+    const serverOnly = !pinnedToLocalShell && item !== undefined && settingsSectionNeedsServer(item)
     return (
       <SettingsEmptyState
         icon={<MonitorIcon />}
         title={t(pinnedToLocalShell ? "desktopOnlySectionTitle" : "hostUnavailableSectionTitle")}
         description={t(
-          pinnedToLocalShell ? "desktopOnlySectionBody" : "hostUnavailableSectionBody"
+          pinnedToLocalShell
+            ? "desktopOnlySectionBody"
+            : serverOnly
+              ? "serverOnlySectionBody"
+              : "hostUnavailableSectionBody"
         )}
       />
     )
@@ -677,6 +693,8 @@ function SectionContent({
       return <ProIdeSection />
     case "sandbox":
       return <SandboxSection />
+    case "image-catalog":
+      return <ImageCatalogSection />
     case "security":
       return <SecuritySection />
     case "connectivity":

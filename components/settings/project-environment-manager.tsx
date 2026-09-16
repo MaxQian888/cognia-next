@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { PlusIcon, Trash2Icon } from "lucide-react"
+import { CapabilityGate } from "@/components/platform/capability-gate"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -25,6 +26,7 @@ import {
 import { executeProjectEnvironment } from "@/lib/project-environment/executor"
 import { ProjectEnvironmentProvisioning } from "./project-environment-provisioning"
 import { ProjectEnvironmentRepoConfig } from "./project-environment-repo-config"
+import { ProjectEnvironmentRuntime } from "./project-environment-runtime"
 import { useProjectStore } from "@/stores/project/project-store"
 import type {
   ProjectEnvironment,
@@ -490,6 +492,32 @@ export function ProjectEnvironmentManager({
               {t("addAction")}
             </Button>
           </div>
+
+          {/* Its own save, and it writes only `runtime`: the stored row is what
+              it starts from, so it cannot publish the unsaved edits above, and
+              the draft is told the new selection so a later save here does not
+              write the old one back. Only a host that runs the sandbox pool
+              can act on a selection (ADR-0182), so anywhere else the gate says
+              why instead of offering one. */}
+          <CapabilityGate capability="sandbox-pool" explain>
+            <ProjectEnvironmentRuntime
+              projectId={projectId}
+              executionRoot={executionRoot}
+              environment={environments.find((row) => row.id === draft.id)}
+              onRuntimeSaved={(runtime) => {
+                const apply = <T extends ProjectEnvironment>(row: T): T => {
+                  const { runtime: _previous, ...rest } = row
+                  return (runtime ? { ...rest, runtime } : rest) as T
+                }
+                setEnvironments((rows) =>
+                  rows.map((row) => (row.id === draft.id ? apply(row) : row))
+                )
+                setDraft((current) =>
+                  current && current.id === draft.id ? apply(current) : current
+                )
+              }}
+            />
+          </CapabilityGate>
 
           {draft.lastInitialization && (
             <p className="text-[11px] text-muted-foreground">

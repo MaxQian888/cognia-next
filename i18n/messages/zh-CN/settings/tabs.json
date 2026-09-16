@@ -29,6 +29,7 @@
   "general": "常规",
   "goals": "目标",
   "hooks": "钩子",
+  "imageCatalog": "镜像目录",
   "logs": "日志",
   "lsp": "语言服务器",
   "mcp": "MCP",

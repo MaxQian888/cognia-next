@@ -29,12 +29,17 @@ afterEach(() => {
 })
 
 describe("useSettingsSectionReachability", () => {
-  it("on the desktop every nav item is reachable, in nav order", () => {
+  it("on the desktop every nav item is reachable, in nav order, but the image catalog", () => {
     platformMock = "tauri"
     const { result } = renderHook(() => useSettingsSectionReachability())
     expect(result.current.context.profile).toBe("desktop")
-    expect(result.current.navItems.map((item) => item.id)).toEqual(SETTINGS_NAV.map((i) => i.id))
-    expect(result.current.sections.size).toBe(SETTINGS_NAV.length)
+    // ADR-0182: the desktop runs no sandbox pool, so the catalog it would
+    // administer lives on a server-backed host.
+    const serverOnly = new Set(["image-catalog"])
+    const expected = SETTINGS_NAV.map((i) => i.id).filter((id) => !serverOnly.has(id))
+    expect(result.current.navItems.map((item) => item.id)).toEqual(expected)
+    expect(result.current.sections.size).toBe(expected.length)
+    expect(result.current.isReachable("image-catalog")).toBe(false)
     expect(result.current.isReachable("desktop")).toBe(true)
     expect(result.current.isReachable("automation")).toBe(true)
   })
@@ -60,6 +65,7 @@ describe("useSettingsSectionReachability", () => {
     expect(result.current.isReachable("automation")).toBe(false)
     expect(result.current.isReachable("desktop")).toBe(false)
     expect(result.current.isReachable("connectivity")).toBe(true)
+    expect(result.current.isReachable("image-catalog")).toBe(true)
   })
 
   it("a browser paired through Settings > Remote hosts reaches host-backed sections", () => {

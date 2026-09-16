@@ -29,6 +29,7 @@
   "general": "General",
   "goals": "Goals",
   "hooks": "Hooks",
+  "imageCatalog": "Image Catalog",
   "logs": "Logs",
   "lsp": "Language Servers",
   "mcp": "MCP",

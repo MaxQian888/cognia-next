@@ -36559,6 +36559,7 @@
       "general": "默认模型、工作目录、系统提示词、权限模式与始终允许的工具。",
       "goals": "持久化的聊天目标(ADR-0019)。用 /goal 设定目标后,agent 自动续 turn,直到 judge 模型确认达成,或预算 / 超时触发退出。",
       "hooks": "生命周期钩子（~/.claude/settings.json）。21 种事件 × 匹配器 × 命令或 webhook 处理器。整文档原样写回，不会丢失未识别字段。",
+      "imageCatalog": "项目可用于运行智能体的容器镜像",
       "logs": "日志级别、传输（控制台 / IndexedDB / 原生 / 远程 / Langfuse / OpenTelemetry）、保留策略、脱敏与按模块的采样。",
       "lsp": "配置由智能体运行时与编辑器共享的 LSP 语言服务器",
       "mcp": "Model Context Protocol 服务器（stdio / SSE / HTTP）。",
@@ -37868,6 +37869,132 @@
     },
     "hostUnavailableSectionBody": "该设置项管理的能力在你当前连接的主机上不可用——它需要桌面应用，或一台已配对且运行该能力的主机。请在那里打开 Cognia 使用。",
     "hostUnavailableSectionTitle": "当前主机不可用",
+    "imageCatalog": {
+      "bundle": {
+        "current": "当前版本：{tag}",
+        "digest": "Digest：{digest}",
+        "none": "未配置智能体包，因此无法在沙箱中运行任何内容。",
+        "retained": "仍可供已固定版本的项目使用：{tags}",
+        "title": "智能体包"
+      },
+      "description": "本部署中的项目可以用来运行智能体的容器镜像。",
+      "editor": {
+        "cancel": "取消",
+        "createTitle": "添加镜像",
+        "defaultSize": "默认规格",
+        "description": "描述",
+        "editTitle": "编辑 {label}",
+        "floor": "最低隔离级别",
+        "floorHint": "无论此处如何选择，运行的隔离级别都不会低于部署自身的下限（{tier}）。",
+        "id": "ID",
+        "idHint": "小写字母、数字、点、短横线和下划线。创建后不可修改。",
+        "image": "镜像",
+        "imagePlaceholder": "ghcr.io/acme/dev:1.2",
+        "label": "名称",
+        "platforms": "平台：{platforms}",
+        "problem": {
+          "description": "描述不能超过 2000 个字符。",
+          "id": "请使用 1–64 个小写字母、数字、点、短横线或下划线，并以字母或数字开头。",
+          "imageUnpinned": "目录中的镜像必须固定到 digest。",
+          "imageUnresolved": "请先解析镜像，使条目固定到它当前指向的 digest。",
+          "imageUserAmbiguous": "该镜像的各平台以不同用户运行。请改用单个平台的 digest。",
+          "label": "请为镜像填写 1–128 个字符的名称。",
+          "sizeClassIds": "请至少选择一个规格。"
+        },
+        "resolve": "解析",
+        "resolved": "已固定到 {reference}",
+        "resolvedRoot": "以 root 身份运行",
+        "resolvedUser": "以 {user} 身份运行",
+        "resolving": "正在解析…",
+        "save": "保存",
+        "saved": "已保存 {label}。",
+        "saving": "正在保存…",
+        "sizes": "规格"
+      },
+      "egress": {
+        "empty": "基线未定义任何网络预设。",
+        "notEnforced": "仅记录、尚未强制执行：在出口代理上线前，只有关闭网络的沙箱才会真正受限。",
+        "title": "网络预设"
+      },
+      "entries": {
+        "add": "添加镜像",
+        "default": "默认",
+        "description": "基线镜像来自部署配置，无法在此修改。为本租户添加的镜像可以编辑或撤销。",
+        "edit": "编辑",
+        "editFor": "编辑 {label}",
+        "empty": "目前还没有可用的镜像。",
+        "floor": "隔离级别不低于 {tier}",
+        "revoke": "撤销",
+        "revokeFor": "撤销 {label}",
+        "scope": {
+          "baseline": "基线",
+          "tenant": "本租户"
+        },
+        "sizes": "规格：{sizes}",
+        "source": {
+          "build": "由声明构建",
+          "legacy": "旧版运行器镜像",
+          "manual": "手动添加"
+        },
+        "title": "镜像",
+        "unpinned": "未固定到 digest，因此仅列出、不会被使用。",
+        "user": "以 {user} 身份运行",
+        "userRoot": "以 root 身份运行"
+      },
+      "errors": {
+        "catalogEntryDuplicate": "已存在（或曾存在并已撤销）使用此 ID 的镜像，请换一个 ID。",
+        "catalogEntryInvalid": "条目格式不正确。",
+        "catalogEntryUnpinned": "目录中的镜像必须固定到 digest。",
+        "catalogRegistryNotAllowlisted": "该镜像仓库不在部署的允许列表中。",
+        "catalogSizeClassUnknown": "所选规格未在部署中定义。",
+        "environmentRecordNotFound": "该镜像已不存在。",
+        "forbidden": "只有本部署的管理员才能修改镜像目录。",
+        "imageReferenceInvalid": "这不是有效的镜像引用。",
+        "sandboxPoolDisabled": "本部署未启用运行环境。",
+        "tenantEntryScope": "此处只能写入本租户的镜像。",
+        "unknown": "请求被拒绝。",
+        "upstreamUnavailable": "无法连接镜像仓库。"
+      },
+      "facts": {
+        "driver": "沙箱驱动：{driver}",
+        "driverProblem": "无法查询沙箱驱动状态。",
+        "driverReachable": "可访问",
+        "driverUnreachable": "不可访问：{reason}",
+        "driverUnreachableUnknown": "不可访问",
+        "floor": "最低隔离级别：{tier}",
+        "multiTenant": "由多个租户共享：无法在沙箱中运行时会直接拒绝",
+        "singleTenant": "单租户",
+        "tiers": "可用隔离级别：{tiers}",
+        "tiersNone": "当前没有可用的隔离级别。",
+        "title": "部署"
+      },
+      "failed": "无法读取镜像目录。",
+      "hostSaid": "主机返回：{message}",
+      "loading": "正在读取镜像目录…",
+      "poolOff": {
+        "body": "本部署尚未启用运行环境，所有项目都走标准执行路径。运维人员可通过 COGNIA_SANDBOX_POOL_ENABLED 开启。",
+        "title": "运行环境未启用"
+      },
+      "rejected": {
+        "description": "这些条目已保存但不会提供使用，因为部署基线不允许它们。",
+        "title": "被拒绝的租户镜像"
+      },
+      "reload": "重新加载",
+      "revoke": {
+        "body": "选择了此镜像的项目将改用部署默认镜像；如果项目强制要求该镜像，则运行会被拒绝。记录会被保留，因此 ID {id} 不能再次使用。",
+        "cancel": "取消",
+        "confirm": "撤销",
+        "done": "已撤销 {label}。",
+        "title": "撤销 {label}？"
+      },
+      "sizes": {
+        "empty": "基线未定义任何规格，因此无法添加镜像。",
+        "gpuDormant": "GPU（{count} × {resource}）：GPU 沙箱暂不可用",
+        "spec": "{label}：{cpu} vCPU · {memory} MiB 内存 · {storage} MiB 临时存储 · {volume} MiB 工作区",
+        "title": "规格"
+      },
+      "title": "镜像目录"
+    },
     "instructions": {
       "description": "将活动工作区的磁盘指令文件（CLAUDE.md / AGENTS.md / AGENT.md）加载进 Agent 的系统提示，支持嵌套目录发现与 @import 展开。",
       "enabled": "启用指令文件",
@@ -39415,6 +39542,7 @@
       "testTitle": "测试生物识别提示",
       "title": "安全与隐私"
     },
+    "serverOnlySectionBody": "该设置项管理的内容只有 Cognia 服务端部署才会运行。请先配对一台提供该能力的服务器，再打开此设置项。",
     "shortcuts": {
       "bindFailed": "绑定快捷键失败",
       "cancel": "取消",
@@ -40214,6 +40342,7 @@
       "general": "常规",
       "goals": "目标",
       "hooks": "钩子",
+      "imageCatalog": "镜像目录",
       "logs": "日志",
       "lsp": "语言服务器",
       "mcp": "MCP",

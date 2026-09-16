@@ -6,6 +6,7 @@ import {
   isSearchMatch,
   isSettingsSectionReachable,
   settingsSectionBlockReason,
+  settingsSectionNeedsServer,
   reachableSettingsSections,
   type NavItem,
   type SettingsReachabilityContext,
@@ -179,6 +180,7 @@ describe("settings-nav-config", () => {
       "connector-runtime",
       "mcp-runtime",
       "headless",
+      "sandbox-pool",
     ]
     const desktop = withCaps("desktop", DESKTOP_CAPS)
     const cloudCompanion = withCaps("cloud-companion", COMPANION_CAPS)
@@ -236,8 +238,30 @@ describe("settings-nav-config", () => {
       }
     })
 
-    it("the desktop reaches every section", () => {
-      expect(reachableSettingsSections(desktop).size).toBe(SETTINGS_NAV.length)
+    it("the desktop reaches every section but the server-run image catalog", () => {
+      const reachable = reachableSettingsSections(desktop)
+      // ADR-0182: only a server-backed host runs the sandbox pool, so its
+      // catalog is administered there. Local containers are dormant.
+      expect(SETTINGS_NAV.filter((item) => !reachable.has(item.id)).map((item) => item.id)).toEqual(
+        ["image-catalog"]
+      )
+    })
+
+    it("names the sections only a server deployment can open", () => {
+      const serverOnly = SETTINGS_NAV.filter(settingsSectionNeedsServer).map((item) => item.id)
+      expect(serverOnly).toEqual(["image-catalog"])
+      expect(settingsSectionNeedsServer({})).toBe(false)
+      expect(settingsSectionNeedsServer({ requires: ["shell"] })).toBe(false)
+      expect(settingsSectionNeedsServer({ requires: ["shell", "sandbox-pool"] })).toBe(true)
+    })
+
+    it("the image catalog follows the sandbox pool, not the host", () => {
+      const item = SETTINGS_NAV.find((n) => n.id === "image-catalog")
+      expect(item).toMatchObject({ group: "privacy", requires: ["sandbox-pool"] })
+      expect(item?.profiles).toBeUndefined()
+      expect(settingsSectionBlockReason(item!, desktop)).toBe("capability")
+      expect(reachableSettingsSections(cloudCompanion).has("image-catalog")).toBe(true)
+      expect(reachableSettingsSections(webStandalone).has("image-catalog")).toBe(false)
     })
 
     it("a cloud companion reaches the sections its brain executes, not local-shell surfaces", () => {

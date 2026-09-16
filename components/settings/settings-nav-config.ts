@@ -49,6 +49,7 @@ import {
   GitBranchIcon,
   BracesIcon,
   BoxIcon,
+  ContainerIcon,
   CircleUserIcon,
   ClipboardCheckIcon,
   KeyboardIcon,
@@ -57,7 +58,11 @@ import {
   DownloadCloudIcon,
 } from "lucide-react"
 
-import type { CapabilityId, HostProfile } from "@/lib/platform/capabilities"
+import {
+  capabilitiesForPlatform,
+  type CapabilityId,
+  type HostProfile,
+} from "@/lib/platform/capabilities"
 
 export type SettingsGroup =
   | "account"
@@ -136,6 +141,7 @@ export type SettingsSectionId =
   | "lsp"
   | "pro-ide"
   | "sandbox"
+  | "image-catalog"
   | "security"
   | "about"
   | "updates"
@@ -218,6 +224,17 @@ export function isSettingsSectionReachable(
   ctx: SettingsReachabilityContext
 ): boolean {
   return settingsSectionBlockReason(item, ctx) === null
+}
+
+/**
+ * Whether `item` administers something only a server deployment provides — a
+ * required capability the desktop app itself never has, such as ADR-0182's
+ * `sandbox-pool`. The refusal for such a section must not send the user to the
+ * desktop app, which cannot open it either.
+ */
+export function settingsSectionNeedsServer(item: Pick<NavItem, "requires">): boolean {
+  const desktop = capabilitiesForPlatform("tauri")
+  return (item.requires ?? []).some((cap) => !desktop.includes(cap))
 }
 
 /** Every reachable section id for `ctx`, derived from the nav so the two can't drift. */
@@ -688,6 +705,17 @@ export const SETTINGS_NAV: NavItem[] = [
     icon: BoxIcon,
     // Sandbox confinement for processes the execution host spawns.
     requires: ["shell"],
+  },
+  {
+    id: "image-catalog",
+    labelKey: "imageCatalog",
+    descriptionKey: "imageCatalog",
+    group: "privacy",
+    icon: ContainerIcon,
+    // ADR-0182: the runtime-environment catalog lives on a server-backed host
+    // that runs the sandbox pool. The desktop runs none (local containers are
+    // dormant in Step ①), so the section follows the pool, not the host.
+    requires: ["sandbox-pool"],
   },
   // === System ===
   {
@@ -1677,6 +1705,22 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
     "语言服务器",
     "代码补全",
     "诊断",
+  ],
+  "image-catalog": [
+    "image",
+    "images",
+    "container",
+    "docker",
+    "registry",
+    "devcontainer",
+    "runtime environment",
+    "size class",
+    "agent bundle",
+    "镜像",
+    "容器",
+    "镜像仓库",
+    "运行环境",
+    "规格",
   ],
   sandbox: [
     "sandbox",

@@ -734,6 +734,41 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     })
   })
 
+  // ADR-0182. The header says where the last run actually landed, and says
+  // nothing at all for an agent that never asked for a runtime environment.
+  describe("the sandbox placement badge", () => {
+    afterEach(async () => {
+      const { __resetPlacementReportsForTests } = await import("@/lib/sandbox/placement-report")
+      __resetPlacementReportsForTests()
+    })
+
+    it("shows the Host's placement for the selected agent and nothing for an unplaced one", async () => {
+      const { recordPlacementReport } = await import("@/lib/sandbox/placement-report")
+      const { TooltipProvider } = await import("@/components/ui/tooltip")
+      const user = userEvent.setup()
+      // The app mounts the provider in its root layout; a badge rendered
+      // alone needs one here.
+      render(
+        <TooltipProvider>
+          <ExternalAgentSettings />
+        </TooltipProvider>
+      )
+      await act(async () => {
+        await user.click(screen.getByTestId("agent-row-agent-2"))
+      })
+      const detail = await screen.findByTestId("agent-detail-agent-2")
+      expect(within(detail).queryByTestId("sandbox-placement-sandboxed")).not.toBeInTheDocument()
+
+      act(() => {
+        recordPlacementReport({ agentId: "agent-2", kind: "sandbox", tier: "gvisor" })
+      })
+
+      // This suite's translator echoes keys; the wording is the badge's own
+      // suite's concern. Here: it is mounted, for this agent, once reported.
+      expect(await within(detail).findByTestId("sandbox-placement-sandboxed")).toBeInTheDocument()
+    })
+  })
+
   it("shows the quick-start gallery in the detail pane until an agent is selected", () => {
     render(<ExternalAgentSettings />)
     // Nothing selected → the detail pane hosts the gallery, no agent detail.

@@ -36559,6 +36559,7 @@
       "general": "Default model, working directory, system prompt, permission mode and always-allowed tools.",
       "goals": "Persistent chat goals (ADR-0019). Set an objective with /goal and the agent auto-continues until a judge confirms it's done, or budgets / timeouts kick in.",
       "hooks": "Lifecycle hooks for ~/.claude/settings.json (User / Project / Local). 21 events × matcher × command-or-webhook handlers.",
+      "imageCatalog": "Container images projects may run their agents in",
       "logs": "Log levels, transports (console / IndexedDB / native / remote / Langfuse / OpenTelemetry), retention, redaction and per-module sampling.",
       "lsp": "Configure LSP language servers shared by the agent runtime and editor",
       "mcp": "Model Context Protocol servers (stdio / SSE / HTTP).",
@@ -37868,6 +37869,132 @@
     },
     "hostUnavailableSectionBody": "This section administers a capability the host you are connected to doesn't provide — it needs the desktop app, or a paired host that runs it. Open Cognia there to use it.",
     "hostUnavailableSectionTitle": "Not available on this host",
+    "imageCatalog": {
+      "bundle": {
+        "current": "Current release: {tag}",
+        "digest": "Digest: {digest}",
+        "none": "No agent bundle is configured, so nothing can be sandboxed.",
+        "retained": "Still available to projects that pinned them: {tags}",
+        "title": "Agent bundle"
+      },
+      "description": "The container images this deployment's projects may run their agents in.",
+      "editor": {
+        "cancel": "Cancel",
+        "createTitle": "Add an image",
+        "defaultSize": "Default size",
+        "description": "Description",
+        "editTitle": "Edit {label}",
+        "floor": "Minimum isolation",
+        "floorHint": "Runs are never less isolated than the deployment's own floor ({tier}), whatever is chosen here.",
+        "id": "ID",
+        "idHint": "Lowercase letters, digits, dots, dashes and underscores. It cannot be changed later.",
+        "image": "Image",
+        "imagePlaceholder": "ghcr.io/acme/dev:1.2",
+        "label": "Name",
+        "platforms": "Platforms: {platforms}",
+        "problem": {
+          "description": "Keep the description under 2,000 characters.",
+          "id": "Use 1–64 lowercase letters, digits, dots, dashes or underscores, starting with a letter or digit.",
+          "imageUnpinned": "Catalog images must be pinned to a digest.",
+          "imageUnresolved": "Resolve the image first, so the entry is pinned to the digest it names now.",
+          "imageUserAmbiguous": "The image's platforms run as different users. Use one platform's digest instead.",
+          "label": "Give the image a name of 1–128 characters.",
+          "sizeClassIds": "Choose at least one size."
+        },
+        "resolve": "Resolve",
+        "resolved": "Pinned to {reference}",
+        "resolvedRoot": "Runs as root",
+        "resolvedUser": "Runs as {user}",
+        "resolving": "Resolving…",
+        "save": "Save",
+        "saved": "{label} saved.",
+        "saving": "Saving…",
+        "sizes": "Sizes"
+      },
+      "egress": {
+        "empty": "The baseline defines no network presets.",
+        "notEnforced": "Recorded, not yet enforced: until the egress proxy ships, only a sandbox with networking off is actually restricted.",
+        "title": "Network presets"
+      },
+      "entries": {
+        "add": "Add image",
+        "default": "Default",
+        "description": "Baseline images come from the deployment and cannot be changed here. Images added for this tenant can be edited or revoked.",
+        "edit": "Edit",
+        "editFor": "Edit {label}",
+        "empty": "No images are offered yet.",
+        "floor": "Isolation at least {tier}",
+        "revoke": "Revoke",
+        "revokeFor": "Revoke {label}",
+        "scope": {
+          "baseline": "Baseline",
+          "tenant": "This tenant"
+        },
+        "sizes": "Sizes: {sizes}",
+        "source": {
+          "build": "Built from a declaration",
+          "legacy": "Legacy runner image",
+          "manual": "Added by hand"
+        },
+        "title": "Images",
+        "unpinned": "Not pinned to a digest, so it is listed but never used.",
+        "user": "Runs as {user}",
+        "userRoot": "Runs as root"
+      },
+      "errors": {
+        "catalogEntryDuplicate": "An image with this ID exists, or existed and was revoked. Choose another ID.",
+        "catalogEntryInvalid": "The entry is malformed.",
+        "catalogEntryUnpinned": "Catalog images must be pinned to a digest.",
+        "catalogRegistryNotAllowlisted": "This registry is not on the deployment's allowlist.",
+        "catalogSizeClassUnknown": "A chosen size is not defined by the deployment.",
+        "environmentRecordNotFound": "That image no longer exists.",
+        "forbidden": "Only an administrator of this deployment can change the image catalog.",
+        "imageReferenceInvalid": "That is not a valid image reference.",
+        "sandboxPoolDisabled": "Runtime environments are off on this deployment.",
+        "tenantEntryScope": "Only this tenant's images can be written here.",
+        "unknown": "The request was refused.",
+        "upstreamUnavailable": "The registry could not be reached."
+      },
+      "facts": {
+        "driver": "Sandbox driver: {driver}",
+        "driverProblem": "The sandbox driver could not be asked.",
+        "driverReachable": "Reachable",
+        "driverUnreachable": "Unreachable: {reason}",
+        "driverUnreachableUnknown": "Unreachable",
+        "floor": "Minimum isolation: {tier}",
+        "multiTenant": "Shared by several tenants: a run that cannot be sandboxed is refused",
+        "singleTenant": "Single tenant",
+        "tiers": "Isolation available: {tiers}",
+        "tiersNone": "No isolation tier is available right now.",
+        "title": "Deployment"
+      },
+      "failed": "The image catalog could not be read.",
+      "hostSaid": "Host: {message}",
+      "loading": "Reading the image catalog…",
+      "poolOff": {
+        "body": "This deployment has not enabled runtime environments, so every project runs on the standard execution path. An operator turns them on with COGNIA_SANDBOX_POOL_ENABLED.",
+        "title": "Runtime environments are off"
+      },
+      "rejected": {
+        "description": "These entries are stored but not offered, because the deployment's baseline does not allow them.",
+        "title": "Refused tenant images"
+      },
+      "reload": "Reload",
+      "revoke": {
+        "body": "Projects that chose this image use the deployment default instead, or are refused if they require it. The record is kept, so the ID {id} cannot be used again.",
+        "cancel": "Cancel",
+        "confirm": "Revoke",
+        "done": "{label} was revoked.",
+        "title": "Revoke {label}?"
+      },
+      "sizes": {
+        "empty": "The baseline defines no size classes, so no image can be added.",
+        "gpuDormant": "GPU ({count} × {resource}): GPU sandboxes are not available yet",
+        "spec": "{label}: {cpu} vCPU · {memory} MiB memory · {storage} MiB scratch · {volume} MiB workspace",
+        "title": "Size classes"
+      },
+      "title": "Image catalog"
+    },
     "instructions": {
       "description": "Load on-disk instruction files (CLAUDE.md / AGENTS.md / AGENT.md) from the active workspace into the agent's system prompt, with nested directory discovery and @import expansion.",
       "enabled": "Enable instruction files",
@@ -39415,6 +39542,7 @@
       "testTitle": "Test biometric prompt",
       "title": "Security & Privacy"
     },
+    "serverOnlySectionBody": "This section administers something only a Cognia server deployment runs. Pair a server that provides it, then open this section again.",
     "shortcuts": {
       "bindFailed": "Failed to bind shortcut",
       "cancel": "Cancel",
@@ -40214,6 +40342,7 @@
       "general": "General",
       "goals": "Goals",
       "hooks": "Hooks",
+      "imageCatalog": "Image Catalog",
       "logs": "Logs",
       "lsp": "Language Servers",
       "mcp": "MCP",

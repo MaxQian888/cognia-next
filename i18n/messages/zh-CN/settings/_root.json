@@ -24,5 +24,6 @@
   "loadingSettings": "正在加载设置…",
   "noSettingsFound": "没有匹配的设置。",
   "searchPlaceholder": "搜索设置…",
+  "serverOnlySectionBody": "该设置项管理的内容只有 Cognia 服务端部署才会运行。请先配对一台提供该能力的服务器，再打开此设置项。",
   "title": "设置"
 }

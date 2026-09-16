@@ -29,6 +29,7 @@
   "general": "默认模型、工作目录、系统提示词、权限模式与始终允许的工具。",
   "goals": "持久化的聊天目标(ADR-0019)。用 /goal 设定目标后,agent 自动续 turn,直到 judge 模型确认达成,或预算 / 超时触发退出。",
   "hooks": "生命周期钩子（~/.claude/settings.json）。21 种事件 × 匹配器 × 命令或 webhook 处理器。整文档原样写回，不会丢失未识别字段。",
+  "imageCatalog": "项目可用于运行智能体的容器镜像",
   "logs": "日志级别、传输（控制台 / IndexedDB / 原生 / 远程 / Langfuse / OpenTelemetry）、保留策略、脱敏与按模块的采样。",
   "lsp": "配置由智能体运行时与编辑器共享的 LSP 语言服务器",
   "mcp": "Model Context Protocol 服务器（stdio / SSE / HTTP）。",
