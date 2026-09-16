@@ -50,7 +50,10 @@ describe("publishSyncInvalidate", () => {
 
     jest.advanceTimersByTime(INVALIDATE_COALESCE_MS)
     expect(published).toEqual([
-      { topic: SYNC_INVALIDATE_TOPIC, payload: { table: "messages", conversationKey: "telegram:tg:1" } },
+      {
+        topic: SYNC_INVALIDATE_TOPIC,
+        payload: { table: "messages", conversationKey: "telegram:tg:1" },
+      },
     ])
   })
 

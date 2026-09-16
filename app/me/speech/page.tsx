@@ -230,9 +230,7 @@ export default function MobileSpeechPage() {
             <Item size="sm" className="px-0">
               <ItemContent>
                 <ItemTitle className="text-xs">{t("localEndpoint")}</ItemTitle>
-                <ItemDescription className="text-[11px]">
-                  {t("localEndpointHelp")}
-                </ItemDescription>
+                <ItemDescription className="text-[11px]">{t("localEndpointHelp")}</ItemDescription>
                 <Input
                   aria-label={t("localEndpoint")}
                   disabled={!ttsEnabled}

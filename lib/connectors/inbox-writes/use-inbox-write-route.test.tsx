@@ -5,8 +5,11 @@ import { act, render, screen } from "@testing-library/react"
 
 // The hook re-renders on three independent inputs; each is a plain
 // subscribe(cb) => unsubscribe seam, so the fakes just capture the listener.
-const listeners: { remote: Array<() => void>; snapshot: Array<() => void>; store: Array<() => void> } =
-  { remote: [], snapshot: [], store: [] }
+const listeners: {
+  remote: Array<() => void>
+  snapshot: Array<() => void>
+  store: Array<() => void>
+} = { remote: [], snapshot: [], store: [] }
 
 jest.mock("@/lib/tauri/transport-routing", () => ({
   isRemoteHostActive: jest.fn(() => false),

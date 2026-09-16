@@ -85,7 +85,11 @@ const TARGET = {
 
 import { MessageImActions, hasPlatformMessage, quoteForComposer } from "./message-im-actions"
 
-const plainMessage: UIMessage = { id: "m1", role: "assistant", parts: [{ type: "text", text: "Hi" }] }
+const plainMessage: UIMessage = {
+  id: "m1",
+  role: "assistant",
+  parts: [{ type: "text", text: "Hi" }],
+}
 const inboundMessage = {
   id: "m2",
   role: "user",

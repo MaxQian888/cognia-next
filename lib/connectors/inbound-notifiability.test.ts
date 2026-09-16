@@ -54,8 +54,8 @@ describe("isNotifiableInboundEvent", () => {
 
   it("still accepts a message from a sender with no resolved remote id", () => {
     // `selfId` matching is the echo test; an unresolved sender is not an echo.
-    expect(
-      isNotifiableInboundEvent(event({ sender: { displayName: "Anonymous" } as never }))
-    ).toBe(true)
+    expect(isNotifiableInboundEvent(event({ sender: { displayName: "Anonymous" } as never }))).toBe(
+      true
+    )
   })
 })

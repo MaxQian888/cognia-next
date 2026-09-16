@@ -45,7 +45,9 @@ function companionSnapshot(
   })
 }
 
-function manifest(operations: readonly string[] = INBOX_RELAY_HOST_OPERATIONS): HostFeatureManifest {
+function manifest(
+  operations: readonly string[] = INBOX_RELAY_HOST_OPERATIONS
+): HostFeatureManifest {
   return {
     schemaVersion: 1,
     hostBuildId: "test-host",

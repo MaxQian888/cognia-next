@@ -48,12 +48,14 @@ describe("LabelPicker", () => {
     render(<LabelPicker conversationKey="k" sessionId="s" selectedIds={["l1"]} />)
     await user.click(screen.getByTestId("label-picker-trigger"))
     await user.click(await screen.findByRole("menuitemcheckbox", { name: /Bug/ }))
-    await waitFor(() => expect(mockMutate).toHaveBeenCalledWith({
+    await waitFor(() =>
+      expect(mockMutate).toHaveBeenCalledWith({
         kind: "addLabel",
         conversationKey: "k",
         labelId: "l2",
         sessionId: "s",
-      }))
+      })
+    )
   })
 
   it("removes a selected label from the popover", async () => {
@@ -61,24 +63,28 @@ describe("LabelPicker", () => {
     render(<LabelPicker conversationKey="k" sessionId="s" selectedIds={["l1"]} />)
     await user.click(screen.getByTestId("label-picker-trigger"))
     await user.click(await screen.findByRole("menuitemcheckbox", { name: /VIP/ }))
-    await waitFor(() => expect(mockMutate).toHaveBeenCalledWith({
+    await waitFor(() =>
+      expect(mockMutate).toHaveBeenCalledWith({
         kind: "removeLabel",
         conversationKey: "k",
         labelId: "l1",
         sessionId: "s",
-      }))
+      })
+    )
   })
 
   it("removes a label via the chip × affordance", async () => {
     const user = userEvent.setup()
     render(<LabelPicker conversationKey="k" sessionId="s" selectedIds={["l1"]} />)
     await user.click(screen.getByRole("button", { name: /Remove label VIP/i }))
-    await waitFor(() => expect(mockMutate).toHaveBeenCalledWith({
+    await waitFor(() =>
+      expect(mockMutate).toHaveBeenCalledWith({
         kind: "removeLabel",
         conversationKey: "k",
         labelId: "l1",
         sessionId: "s",
-      }))
+      })
+    )
   })
 
   it("surfaces a toast when a toggle rejects", async () => {

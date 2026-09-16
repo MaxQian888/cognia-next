@@ -131,8 +131,7 @@ describe("ConnectorBusProvider lease-loss reclaim", () => {
   /** Fire the lease-loss callback the provider handed to the installer. */
   function releaseRuntime(call = 0) {
     const options = mockInstall.mock.calls[call]?.[0] as
-      | { onRuntimeReleased?: (reason: "unmount" | "lease-lost") => void }
-      | undefined
+      { onRuntimeReleased?: (reason: "unmount" | "lease-lost") => void } | undefined
     options?.onRuntimeReleased?.("lease-lost")
   }
 
