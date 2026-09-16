@@ -15,12 +15,13 @@
  * link a plugin page, a notification or the palette can hand over.
  */
 
-import { useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { BotMessageSquareIcon, PlusIcon } from "lucide-react"
+import { BotMessageSquareIcon, PlusIcon, TriangleAlertIcon } from "lucide-react"
 
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useBotInstallations } from "@/hooks/bots/use-bot-installations"
@@ -68,6 +69,22 @@ export function BotConsole({
   }
 
   /**
+   * The overlay tier keeps the list in a Sheet. A row tap there selects the
+   * CENTER pane's content, so the sheet must close on selection or the tap
+   * updates a pane the reader cannot see — the dead end the shell's own
+   * contract warns about. Controlled here; the desktop branch ignores both
+   * props.
+   */
+  const [listOpen, setListOpen] = useState(false)
+  const selectRow = useCallback(
+    (installationId: string) => {
+      setListOpen(false)
+      onSelect(installationId)
+    },
+    [onSelect]
+  )
+
+  /**
    * A deep link naming an installation this device does not have resolves to
    * nothing rather than quietly landing on the first row. Selecting something
    * else would make a broken link look like it worked.
@@ -76,6 +93,26 @@ export function BotConsole({
     () => rows.find((row) => row.id === selectedId) ?? null,
     [rows, selectedId]
   )
+
+  /**
+   * First visit selects the most recently touched Bot, the same way
+   * `/devices` reopens on the local device: a console that opens blank makes
+   * the reader ask for the thing the page could have answered itself. Rows
+   * are already `updatedAt`-descending, so `rows[0]` is that Bot.
+   *
+   * One-shot. Once it fires it never re-arms, so `onDeselect` (which clears
+   * `?bot=`) is not immediately overwritten, and a deep link that names a row
+   * we do not have keeps the documented "resolve to nothing" behaviour —
+   * `selectedId` being set at all is enough to stay out of the link's way.
+   */
+  const didAutoSelect = useRef(false)
+  useEffect(() => {
+    if (didAutoSelect.current || loading || selectedId !== undefined || rows.length === 0) {
+      return
+    }
+    didAutoSelect.current = true
+    onSelect(rows[0].id)
+  }, [loading, onSelect, rows, selectedId])
 
   return (
     <FeaturePageShell
@@ -86,7 +123,13 @@ export function BotConsole({
           icon={<BotMessageSquareIcon className="size-5" />}
           title={t("title")}
           description={t("description")}
-          summary={t("summary", { armed: summary.armed, total: summary.total })}
+          summary={
+            // "0 of 0 armed" is a stat about nothing; the empty rail already
+            // says the page has no Bots.
+            summary.total > 0
+              ? t("summary", { armed: summary.armed, total: summary.total })
+              : undefined
+          }
           actions={
             <Button size="sm" onClick={() => setInstallOpen(true)} data-testid="bots-install-open">
               <PlusIcon className="size-3.5" aria-hidden />
@@ -126,25 +169,45 @@ export function BotConsole({
             loading={loading || failed}
             onSearchChange={setSearch}
             onStatusFilterChange={setStatusFilter}
-            onSelect={onSelect}
+            onSelect={selectRow}
           />
         ),
         label: t("listPane.label"),
-        defaultSize: 26,
-        minSize: 18,
-        maxSize: 40,
+        // A fixed rail, not a percentage: a two-line row does not get more
+        // readable as the window widens, and a percentage cap let the rail
+        // eat enough of the center pane to collapse the detail grid at
+        // ordinary window widths. `centerPaneSize` hands back `undefined`
+        // for a CSS-length sibling and the center takes the remainder.
+        defaultSize: "19rem",
+        minSize: "15rem",
+        maxSize: "22rem",
+        open: listOpen,
+        onOpenChange: setListOpen,
       }}
       centerClassName="min-h-0"
     >
       <div className="flex h-full min-h-0 flex-col">
         <BotRuntimeNotice />
-        {failed && (
-          <p role="alert" className="p-3 text-sm text-destructive">
-            {t("syncFailed")}
-          </p>
-        )}
+        {failed ? (
+          // A persistent read failure, not an event — a toast would fire once
+          // and leave the stale rows unmarked. Kept inline but compact, in
+          // the same surface as the runtime notice above it.
+          <Alert
+            variant="destructive"
+            className="mx-3 mt-2 w-auto py-2"
+            data-testid="bots-sync-failed"
+          >
+            <TriangleAlertIcon className="size-4" />
+            <AlertDescription className="text-xs">{t("syncFailed")}</AlertDescription>
+          </Alert>
+        ) : null}
         <div className="min-h-0 flex-1">
-          <BotDetail row={selected} {...(onDeselect ? { onUninstalled: onDeselect } : {})} />
+          <BotDetail
+            row={selected}
+            loading={loading}
+            missing={Boolean(selectedId) && !loading && !failed && !selected}
+            {...(onDeselect ? { onUninstalled: onDeselect } : {})}
+          />
         </div>
       </div>
       <InstallBotSheet open={installOpen} onOpenChange={setInstallOpen} onInstalled={onSelect} />

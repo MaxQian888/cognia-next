@@ -1491,6 +1491,12 @@ PLUGIN_PATH_FIELD_CONTRACTS = [
         "requiredFor": [],
         "executable": True,
     },
+    {
+        "path": "bots[].lifecycle.entry",
+        "runtime": "javascript",
+        "requiredFor": [],
+        "executable": True,
+    },
 ]
 
 PLUGIN_POINT_SCHEMA_VERSION = 1
@@ -1624,6 +1630,15 @@ PLUGIN_POINT_CONTRACTS = [
     },
     {
         "id": "chat.input.actions",
+        "kind": "ui-slot",
+        "stability": "stable",
+        "status": "implemented",
+        "introducedIn": "0.1.0",
+        "permission": "extension:ui",
+        "formFactor": "row",
+    },
+    {
+        "id": "chat.input.effort",
         "kind": "ui-slot",
         "stability": "stable",
         "status": "implemented",
@@ -2981,6 +2996,93 @@ PLUGIN_POINT_CONTRACTS = [
         "stability": "stable",
         "status": "implemented",
         "introducedIn": "0.1.0",
+    },
+    {
+        "id": "agent.context.prepare",
+        "kind": "interceptor",
+        "stability": "experimental",
+        "status": "implemented",
+        "introducedIn": "0.9.0",
+        "permission": "hooks:chat-intercept",
+    },
+    {
+        "id": "model.request.prepare",
+        "kind": "interceptor",
+        "stability": "experimental",
+        "status": "implemented",
+        "introducedIn": "0.9.0",
+        "permission": "hooks:chat-intercept",
+    },
+    {
+        "id": "model.request.invoke",
+        "kind": "interceptor",
+        "stability": "experimental",
+        "status": "implemented",
+        "introducedIn": "0.9.0",
+        "permission": "hooks:chat-intercept",
+    },
+    {
+        "id": "model.stream.transform",
+        "kind": "interceptor",
+        "stability": "experimental",
+        "status": "virtual",
+        "introducedIn": "0.9.0",
+        "permission": "hooks:chat-intercept",
+    },
+    {
+        "id": "tool.call.prepare",
+        "kind": "interceptor",
+        "stability": "experimental",
+        "status": "implemented",
+        "introducedIn": "0.9.0",
+        "permission": "hooks:chat-intercept",
+    },
+    {
+        "id": "tool.execute",
+        "kind": "interceptor",
+        "stability": "experimental",
+        "status": "implemented",
+        "introducedIn": "0.9.0",
+        "permission": "hooks:chat-intercept",
+    },
+    {
+        "id": "tool.result.project",
+        "kind": "interceptor",
+        "stability": "experimental",
+        "status": "implemented",
+        "introducedIn": "0.9.0",
+        "permission": "hooks:chat-intercept",
+    },
+    {
+        "id": "agent.turn.decide",
+        "kind": "interceptor",
+        "stability": "experimental",
+        "status": "virtual",
+        "introducedIn": "0.9.0",
+        "permission": "hooks:chat-intercept",
+    },
+    {
+        "id": "ui.action.invoke",
+        "kind": "interceptor",
+        "stability": "experimental",
+        "status": "implemented",
+        "introducedIn": "0.9.0",
+        "permission": "commands:read",
+    },
+    {
+        "id": "ui.surface.project",
+        "kind": "interceptor",
+        "stability": "experimental",
+        "status": "virtual",
+        "introducedIn": "0.9.0",
+        "permission": "extension:ui",
+    },
+    {
+        "id": "operation.completed",
+        "kind": "interceptor",
+        "stability": "experimental",
+        "status": "implemented",
+        "introducedIn": "0.9.0",
     },
     {
         "id": "workflow.node",
@@ -5056,6 +5158,174 @@ API_NAMESPACE_CONTRACTS = [
                 ],
                 "consentTier": "policy",
                 "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "bots.stepBegin",
+                "name": "stepBegin",
+                "requiredPermissions": [
+                    "agent:control",
+                ],
+                "consentTier": "policy",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "bots.stepComplete",
+                "name": "stepComplete",
+                "requiredPermissions": [
+                    "agent:control",
+                ],
+                "consentTier": "policy",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "bots.stepFail",
+                "name": "stepFail",
+                "requiredPermissions": [
+                    "agent:control",
+                ],
+                "consentTier": "policy",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "bots.waitForApproval",
+                "name": "waitForApproval",
+                "requiredPermissions": [
+                    "agent:control",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "bots.waitForEvent",
+                "name": "waitForEvent",
+                "requiredPermissions": [
+                    "agent:control",
+                ],
+                "consentTier": "policy",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "bots.log",
+                "name": "log",
+                "requiredPermissions": [
+                    "agent:control",
+                ],
+                "consentTier": "policy",
+                "risk": "low",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "bots.progress",
+                "name": "progress",
+                "requiredPermissions": [
+                    "agent:control",
+                ],
+                "consentTier": "policy",
+                "risk": "low",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "bots.writeTriggerState",
+                "name": "writeTriggerState",
+                "requiredPermissions": [
+                    "agent:control",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "bots.setTriggerArmed",
+                "name": "setTriggerArmed",
+                "requiredPermissions": [
+                    "agent:control",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "bots.listDeliveries",
+                "name": "listDeliveries",
+                "requiredPermissions": [
+                    "agent:control",
+                ],
+                "consentTier": "policy",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "bots.getRunResult",
+                "name": "getRunResult",
+                "requiredPermissions": [
+                    "agent:control",
+                ],
+                "consentTier": "policy",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "bots.emit",
+                "name": "emit",
+                "requiredPermissions": [
+                    "agent:control",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
                 "idempotent": True,
                 "cancellable": False,
                 "resourceEffect": {
@@ -16307,4 +16577,5 @@ PLUGIN_PATH_FIELDS = (
     "vscodeExtension.contributes.chatInstructions[].path",
     "vscodeExtension.contributes.chatPromptFiles[].path",
     "bots[].entry",
+    "bots[].lifecycle.entry",
 )

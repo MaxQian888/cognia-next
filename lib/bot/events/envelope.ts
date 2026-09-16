@@ -28,6 +28,25 @@ export function botEventId(source: BotEventSource, sourceRecordId: string): stri
   return `bev_${source}_${sourceRecordId}`
 }
 
+/**
+ * Largest payload an envelope may carry: UTF-8 bytes of its JSON encoding.
+ *
+ * Nothing else on the Bot plane bounds a payload today, and `ctx.bots.emit`
+ * hands authors a fan-out onto other installations' queues — one limit shared
+ * by `enqueue` and `emit` keeps a self-enqueued and an emitted envelope under
+ * the same ceiling. 64 KiB holds a GitHub webhook body with room to spare.
+ */
+export const BOT_EVENT_PAYLOAD_MAX_BYTES = 64 * 1024
+
+/** Throw when `payload`'s JSON encoding exceeds `BOT_EVENT_PAYLOAD_MAX_BYTES`. */
+export function assertBotEventPayloadSize(payload: unknown): void {
+  const json = JSON.stringify(payload)
+  const bytes = json === undefined ? 0 : new TextEncoder().encode(json).byteLength
+  if (bytes > BOT_EVENT_PAYLOAD_MAX_BYTES) {
+    throw new Error("Bot event payload exceeds 65536 bytes")
+  }
+}
+
 /** A delivery id is per recipient, so a fan-out produces distinct rows. */
 export function botDeliveryId(eventId: string, installationId: string): string {
   return `bdl_${installationId}_${eventId}`
@@ -95,16 +114,14 @@ export function oneOffSourceRecordId(prefix: string): string {
 }
 
 /**
- * Read a dotted path out of an envelope.
+ * Read a dotted path out of an envelope or a config object.
  *
  * Only plain own properties, and never through a prototype: the payload is
  * whoever opened the pull request, so `__proto__.x` must read as a miss rather
  * than as anything at all.
  */
-export function readEnvelopePath(envelope: BotEventEnvelopeV1, path: string): unknown {
-  const segments = path.split(".").filter(Boolean)
-  if (segments.length === 0) return undefined
-  let cursor: unknown = envelope
+function readObjectPath(root: unknown, segments: readonly string[]): unknown {
+  let cursor: unknown = root
   for (const segment of segments) {
     if (segment === "__proto__" || segment === "prototype" || segment === "constructor") {
       return undefined
@@ -114,6 +131,12 @@ export function readEnvelopePath(envelope: BotEventEnvelopeV1, path: string): un
     cursor = (cursor as Record<string, unknown>)[segment]
   }
   return cursor
+}
+
+export function readEnvelopePath(envelope: BotEventEnvelopeV1, path: string): unknown {
+  const segments = path.split(".").filter(Boolean)
+  if (segments.length === 0) return undefined
+  return readObjectPath(envelope, segments)
 }
 
 const TEMPLATE_PATTERN = /\{\{\s*([A-Za-z0-9_.]+)\s*\}\}/g
@@ -129,10 +152,16 @@ const TEMPLATE_PATTERN = /\{\{\s*([A-Za-z0-9_.]+)\s*\}\}/g
  */
 export function interpolateEnvelopeTemplate(
   template: string,
-  envelope: BotEventEnvelopeV1
+  envelope: BotEventEnvelopeV1,
+  extra?: { config?: Record<string, unknown> }
 ): string {
   return template.replace(TEMPLATE_PATTERN, (_match, path: string) => {
-    const value = readEnvelopePath(envelope, path)
+    // `config.*` paths read the installation config, not the envelope — an
+    // agent-turn prompt says `{{config.repository}}` where a concurrency key
+    // says `{{resource.id}}`.
+    const value = path.startsWith("config.")
+      ? readObjectPath(extra?.config ?? {}, path.slice("config.".length).split(".").filter(Boolean))
+      : readEnvelopePath(envelope, path)
     if (value === null || value === undefined) return ""
     if (typeof value === "object") return ""
     return String(value)

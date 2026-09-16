@@ -455,3 +455,52 @@ describe("installation reads", () => {
     expect((await getBotInstallation(row.id))?.triggerOverrides).toEqual({ run: false })
   })
 })
+
+describe("setBotTriggerArmedLocally lifecycle hook", () => {
+  async function installWithHook(onArm: jest.Mock) {
+    registerBot(
+      "digest",
+      {
+        id: "acme:digest",
+        definition: def(),
+        handler: jest.fn(),
+        lifecycle: { onArm },
+      },
+      { pluginId: "acme" }
+    )
+    return installBot({
+      definitionId: "acme:digest",
+      definitionSource: "plugin",
+      pinnedVersion: "1.0.0",
+      scope: { kind: "account" },
+      now: NOW,
+    })
+  }
+
+  it("invokes onArm with the trigger and the new armed state", async () => {
+    const onArm = jest.fn()
+    const row = await installWithHook(onArm)
+    await setBotTriggerArmedLocally({ installationId: row.id, triggerId: "nightly", armed: true })
+    expect(onArm).toHaveBeenCalledTimes(1)
+    const ctx = onArm.mock.calls[0][0]
+    expect(ctx.trigger).toEqual({ id: "nightly", armed: true })
+    expect(ctx.installation.id).toBe(row.id)
+  })
+
+  it("fires for disarm too — a Bot turning itself off still sees onArm", async () => {
+    const onArm = jest.fn()
+    const row = await installWithHook(onArm)
+    await setBotTriggerArmedLocally({ installationId: row.id, triggerId: "run", armed: false })
+    expect(onArm).toHaveBeenCalledTimes(1)
+    expect(onArm.mock.calls[0][0].trigger).toEqual({ id: "run", armed: false })
+  })
+
+  it("lets onArm veto: the override never lands", async () => {
+    const onArm = jest.fn(() => Promise.reject(new Error("keep it disarmed")))
+    const row = await installWithHook(onArm)
+    await expect(
+      setBotTriggerArmedLocally({ installationId: row.id, triggerId: "nightly", armed: true })
+    ).rejects.toMatchObject({ name: "BotLifecycleHookError", phase: "onArm" })
+    expect((await getBotInstallation(row.id))?.triggerOverrides).toBeUndefined()
+  })
+})

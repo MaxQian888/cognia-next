@@ -87,6 +87,16 @@ _CONTRIBUTIONS = {}
 #: exempt from the private-name guard below because it is host-owned, not a
 #: plugin symbol.
 CONTRIBUTION_DISPATCH = "__cognia_dispatch_contribution__"
+
+# camelCase manifest hook name -> snake_case Python method. Mirrors
+# `BOT_LIFECYCLE_PY_METHODS` in plugin-sdk/python/src/cognia/bot.py — the SDK
+# is not importable inside this shim, so the table is duplicated here.
+_BOT_LIFECYCLE_METHODS = {
+    "onInstall": "on_install",
+    "onConfigure": "on_configure",
+    "onArm": "on_arm",
+    "onUninstall": "on_uninstall",
+}
 _MAIN_MODULE = None
 _CONFIG = {}  # persisted plugin config, pushed by the host app
 _CONFIG_LISTENERS = []  # cognia.on_config_changed(fn) subscribers, fired on push_config
@@ -662,6 +672,12 @@ async def _dispatch_contribution(args):
     if entry is None:
         raise RuntimeError(f"unknown contribution: {contribution_id}")
     fn = entry.get(method)
+    if fn is None and method in _BOT_LIFECYCLE_METHODS:
+        # Bot lifecycle hooks: the manifest declares camelCase names, the
+        # Python author implements the snake_case method of the same name.
+        # Exact-name lookup wins, so a contribution that literally defines
+        # `onInstall` keeps working.
+        fn = entry.get(_BOT_LIFECYCLE_METHODS[method])
     if fn is None or not callable(fn):
         raise RuntimeError(f"contribution '{contribution_id}' has no method '{method}'")
 

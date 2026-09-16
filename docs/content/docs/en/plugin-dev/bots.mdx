@@ -1,0 +1,177 @@
+---
+title: Bots
+description: Declaring a Bot in the manifest, the handler contract in TypeScript and Python, the ctx.bots host API, lifecycle hooks, and the limits that keep the plane safe.
+---
+
+# Bots
+
+A Bot is a **binding, not an engine**. Its definition names an executor that already exists — a workflow, a squad, an agent turn, or a plugin handler — plus the triggers that start it. The value is the pairing of "when" with "what" and the policy ceiling that pairing carries. A Bot is declared in `manifest.bots[]`, never registered through a callback: a registration function cannot cross the Python stdio boundary, so declaration is the only shape that gives TypeScript and Python plugins the same capability.
+
+## Manifest
+
+Each entry in `manifest.bots[]` requires `id`, `name`, `version`, `executor`, and at least one `triggers[]` entry. Plugin Bot ids are namespaced by the host as `<pluginId>:<botId>`; installations pin that namespaced `definitionId` and a `pinnedVersion`.
+
+### Executors
+
+| `executor` | Required field | Backs the Bot with |
+| --- | --- | --- |
+| `workflow` | `workflow` | A published workflow deployment |
+| `squad` | `team` | An agent team |
+| `agent-turn` | `prompt` | A single agent turn; `{{config.x}}` and `{{event.*}}` interpolate |
+| `handler` | `entry` + `export` (JS) or `backend: "python"` | A durable in-plugin handler function |
+
+For `handler`, JS plugins declare `entry` (a relative module path) and optionally `export` (default `default`). Python plugins declare no `entry`; the host dispatches a `run` method on the `@cognia.contribution("<bot id>")` object.
+
+### Triggers
+
+| `kind` | Fires when | Required fields |
+| --- | --- | --- |
+| `interaction` | An inbound IM message the Bot observes | — |
+| `event` | A Bot-plane event matches `source` + `types` | `source`, `types` |
+| `schedule` | A cron fires | `cron`, optional `timezone` |
+| `poll` | An interval elapses | `everyMs` |
+| `derivedState` | An interval elapses; reads host-stored `state` | `everyMs`, `state` |
+| `manual` | A person or `ctx.bots.enqueue` starts it | — |
+
+Common fields: `enabledByDefault` (default armed unless `false`), `holdConcurrencyWhileWaiting`, `inputSchema` (manual trigger form), `conditions`, `retry`.
+
+### `conditions.match`
+
+Structured envelope matching, evaluated after the existing GitHub-style conditions. Keys are envelope-rooted dotted paths (`/^[A-Za-z0-9_.]+$/`); values are scalars or non-empty scalar lists (membership). A missing or non-scalar leaf never matches — this is routing, not authorization.
+
+```json
+{ "id": "lark", "kind": "event", "source": "integration", "types": ["im.message"],
+  "conditions": { "match": { "payload.event.type": "message", "actor.kind": "bot" } } }
+```
+
+### `retry`
+
+Per-trigger retry policy — a narrowing, never above the host ceiling:
+
+```json
+{ "retry": { "maxAttempts": 2, "baseDelayMs": 5000, "maxDelayMs": 60000 } }
+```
+
+`maxAttempts` is an integer 1–5 (host ceiling wins). `baseDelayMs`/`maxDelayMs` can only widen the default backoff. The policy is snapshotted onto the delivery row at enqueue time, so a retry decision never re-resolves the definition.
+
+### Config-driven schedules
+
+`cronConfigKey`, `timezoneConfigKey` (schedule only) and `everyMsConfigKey` (poll/derivedState only) name a key in the Bot's `configSchema.properties`. A valid config value wins; the declared value is the fallback. When the host falls back it records why in `triggerState[triggerId].configFallback`:
+
+| Code | Meaning |
+| --- | --- |
+| `missing` | The config key was absent or empty |
+| `invalid-cron` | The configured cron failed validation |
+| `invalid-timezone` | The configured timezone failed `Intl.DateTimeFormat` |
+| `below-floor` | The configured interval is under 15000 ms |
+
+The console renders these as badges on the trigger row.
+
+### `requires` and `policy`
+
+`requires.credentials[]` declares credential slots (`{ id, label, optional?, integration?, strategy? }`); unbound required slots hold the installation at `needs_setup`. `policy` is the definition-layer ceiling — `maxAuthority`, `maxAutonomy`, `requireApprovalForWrites` — intersected (never widened) with organization, plugin, installation, and per-request layers.
+
+### `lifecycle`
+
+`lifecycle: { entry?: string, hooks: [...] }` declares up to four hooks the host resolves at registration: `onInstall`, `onConfigure`, `onArm`, `onUninstall`. JS plugins resolve named exports from `lifecycle.entry ?? entry` — a non-handler executor has no `entry` to fall back on, so `lifecycle.entry` is required there. Python plugins implement snake_case methods on the contribution object and ignore `entry`. A bad hook fails the whole Bot registration.
+
+## Handler contract
+
+A handler Bot re-enters from the top after a crash or a resumed wait; anything that must not happen twice belongs inside `ctx.step.run` (TypeScript) or `run.step` (Python), which memoizes completed steps in `botRunSteps`. Step names beginning `__host:` are reserved for the host's own bookkeeping (publication checkpoints, snapshots, results).
+
+<table>
+<tr><th>TypeScript (`BotRunContextV1`)</th><th>Python (`BotRun`)</th></tr>
+<tr><td>
+
+```ts
+export default async function run(ctx: BotRunContextV1) {
+  const snap = await ctx.step.run("snapshot", fetchSnapshot)
+  const decision = await ctx.step.waitForApproval("gate", {
+    title: "Push changes?", risk: "medium",
+  })
+  const event = await ctx.step.waitForEvent("ci", {
+    key: run.correlation, timeoutMs: 300_000,
+  })
+  await ctx.log("info", "done", { pr: snap.pr })
+  await ctx.progress({ fraction: 0.9 })
+  return { summary: "ok", output: { pr: snap.pr } }
+}
+```
+
+</td><td>
+
+```python
+@cognia.contribution("daily-digest")
+class DailyDigest:
+    async def run(self, run: BotRun):
+        async with run.step("snapshot") as s:
+            s.complete({"pr": 7})
+        decision = await run.wait_for_approval(
+            "gate", {"title": "Push?", "risk": "medium"})
+        event = await run.wait_for_event(
+            "ci", key="pr:7", timeout_ms=300_000)
+        await run.log("info", "done", {"pr": 7})
+        await run.progress(fraction=0.9)
+        return {"summary": "ok"}
+```
+
+</td></tr>
+</table>
+
+TypeScript gets the full `BotRunContextV1` (`runId`, `installationId`, `botId`, `event`, `config`, `signal`, `step`, `log`, `progress`). Python receives a `BotRun` built from the serializable `BotRunSnapshotV1` and drives the identical surface through `ctx.bots.*` host calls. A wait that cannot be answered returns `{"status": "parked"}`; the host records the park and the bridge rethrows `BotRunParkedError` after `run` settles — the SDK's `BotRunParked` exception is courtesy only.
+
+## `ctx.bots` reference
+
+All methods are gated on the `agent:control` permission and `requireOwnedBotRun` — a handler can only touch its own installation. The *live* column marks methods that additionally require the run to be executing on this host (they fail for a settled or companion-mirrored run).
+
+| Method | Purpose | Live run |
+| --- | --- | --- |
+| `getInstallation` | `BotInstallationSnapshot`: config, triggers, armed state, bound-slot booleans (never credential ids), publications, webhookEnabled | no |
+| `enqueue` | Child work through a declared `manual` trigger; returns `deliveryId` | no |
+| `cancelResource` | Cancel non-terminal deliveries (and their runs) matching a resource | no |
+| `recordMonitor` | Merge `lastSuccessAt`/`retryAt`/`lastError` into `monitor` | no |
+| `stepBegin` | Begin a named durable step; memoized replay returns the stored value | yes |
+| `stepComplete` | Store a step's output; a changed value on re-entry throws | yes |
+| `stepFail` | Record a step failure | yes |
+| `waitForApproval` | Park until a human/policy decision; `{status:"parked"}` cross-process | no |
+| `waitForEvent` | Park until a correlated event or timeout | no |
+| `log` | Append a handler log line to the run journal | yes |
+| `progress` | Report `{fraction, message}` on the journal | yes |
+| `writeTriggerState` | Write `cursor`/`watermark` on poll/derivedState triggers only | no |
+| `setTriggerArmed` | Arm/disarm a declared trigger; fires the `onArm` hook | no |
+| `listDeliveries` | `BotDeliverySummary[]` newest-first; filters: `resourceId`, `triggerId`, `status`; limit ≤ 200, default 50 | no |
+| `getRunResult` | A sibling run's `{status, summary, output}`; `null` for missing or foreign runs | no |
+| `emit` | Publish a `<pluginId>.<type>` event; returns `{matchedInstallations}` | no |
+
+## Lifecycle hooks
+
+The host resolves declared hooks like the handler: named exports of `lifecycle.entry ?? entry` for JS, snake_case methods on the contribution object for Python (`on_install`, `on_configure`, `on_arm`, `on_uninstall`).
+
+Each hook receives `BotLifecycleContextV1`: `installation` (the same `BotInstallationSnapshot` `getInstallation` returns — bound-slot booleans, no credential ids), `previousConfig` for `onConfigure`, `trigger: {id, armed}` for `onArm`. There is no `runId` — a hook is not a run, creates no journal events, and must finish within `BOT_LIFECYCLE_HOOK_TIMEOUT_MS` (30 s).
+
+| Hook | Runs | Failure |
+| --- | --- | --- |
+| `onInstall` | Before the installation row is written | Vetoes — no row is created |
+| `onConfigure` | Before the config blob is replaced | Vetoes — old config stays |
+| `onArm` | Before a trigger armed-state write (both directions, including `ctx.bots.setTriggerArmed`) | Vetoes — override never lands |
+| `onUninstall` | After schedules are removed, before row deletion | Advisory — logged, removal proceeds |
+
+Hooks run inside the administrative mutation on the owning host. Remote callers reach them through `mutateBotInstallationOnHost`, exactly once — never once per peer.
+
+## Loop safety
+
+- `emit` requires a `<pluginId>.<type>` namespace; a free-form type could spoof host events or another plugin's.
+- Emitted envelopes carry `provenance` (`selfProduced`, `depth`, `causationEventIds`, `producedByInstallationId`); the router's sibling-bot loop guard rejects a Bot answering itself unless the definition sets `allowSelfTriggering`.
+- A deterministic `sourceRecordId` (hash of runId + type + canonical payload) folds re-emitted identical events onto one delivery.
+
+## Limits
+
+| Limit | Value |
+| --- | --- |
+| Event payload (`enqueue`/`emit`) | `BOT_EVENT_PAYLOAD_MAX_BYTES` = 64 KiB of JSON |
+| `listDeliveries` limit | default 50, clamped to [1, 200] |
+| Poll/derivedState `everyMs` floor | `BOT_TIMED_TRIGGER_MIN_EVERY_MS` = 15000 ms |
+| `retry.maxAttempts` | 1–5, host ceiling wins |
+| Lifecycle hook duration | `BOT_LIFECYCLE_HOOK_TIMEOUT_MS` = 30 s |
+| `emit` type | `^<pluginId>\.[A-Za-z0-9_.-]+$` |
+| `writeTriggerState` keys | `cursor`, `watermark` only |

@@ -11,18 +11,30 @@
 export { defineBot, defineBotHandler } from "../define/define-bot"
 export type {
   PluginBotsAPI,
+  BotCredentialSlotSnapshot,
+  BotDeliveryStatus,
+  BotDeliverySummary,
   BotEnqueueInput,
   BotInstallationSnapshot,
+  BotInstallationStatus,
   BotMonitorState,
+  BotScopeKind,
+  BotStepBeginResult,
+  BotTriggerSnapshot,
+  BotWaitOutcome,
 } from "@/types/bot/api"
 
 export type {
+  BotMatchScalar,
   PluginBotDef,
   PluginBotExecutor,
+  PluginBotRetryPolicy,
   PluginBotTriggerDef,
   PluginBotTriggerConditions,
   PluginBotTriggerKind,
   PluginBotEventSource,
+  PluginBotLifecycleDef,
+  PluginBotLifecycleHookName,
   PluginBotInteractionTrigger,
   PluginBotEventTrigger,
   PluginBotScheduleTrigger,
@@ -39,7 +51,12 @@ export type {
   PluginHandlerBotDef,
 } from "@/types/plugin/plugin-bot"
 
-export { PLUGIN_BOT_EXECUTORS, PLUGIN_BOT_TRIGGER_KINDS } from "@/types/plugin/plugin-bot"
+export {
+  BOT_TIMED_TRIGGER_MIN_EVERY_MS,
+  PLUGIN_BOT_EXECUTORS,
+  PLUGIN_BOT_LIFECYCLE_HOOKS,
+  PLUGIN_BOT_TRIGGER_KINDS,
+} from "@/types/plugin/plugin-bot"
 
 export type {
   BotEventEnvelopeV1,
@@ -52,6 +69,8 @@ export type {
 export type {
   BotHandlerV1,
   BotHandlerResultV1,
+  BotLifecycleContextV1,
+  BotLifecycleHookV1,
   BotRunContextV1,
   BotRunSnapshotV1,
   BotStepApiV1,

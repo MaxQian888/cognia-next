@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Fix the `/bots` console layout: first visit now selects the most recently touched Bot instead of opening on an empty pane, the list rail is a fixed width (15–22rem) rather than a percentage that starved the detail grid, a deep link naming an installation this device does not have says so instead of showing the pick-one copy, the detail pane skeletons while the installations read is in flight, the hero folds run/lifecycle controls into one row and stops repeating its meta line in the identity card, and the Runs card decides its list/detail split from the card's own width rather than the viewport. Below `lg` the page inverts like `/devices`: the Bot list is the page, the detail opens as a drawer, and `?bot=` deep links open it directly. The rail's search and status filter now share one row — search stays a collapsed icon until asked, then the field animates rightward over the filter — and the runtime notice no longer overflows its pane (an `Alert`'s `w-full` plus outer margins painted 24px wider than the rail), while the installation-read failure became a compact inline `Alert` instead of a bare red paragraph.

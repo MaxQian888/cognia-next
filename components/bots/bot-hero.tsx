@@ -89,19 +89,19 @@ export function BotHero({ row, onUninstalled }: BotHeroProps) {
             ) : null}
             <span aria-hidden className="size-0.5 rounded-full bg-muted-foreground/50" />
             <span>{t(`scope.${row.scope.kind}`)}</span>
-            <span aria-hidden className="size-0.5 rounded-full bg-muted-foreground/50" />
-            <span className="truncate font-mono text-[11px]">{row.definitionId}</span>
           </div>
           {row.description ? (
             <p className="mt-1.5 text-xs leading-snug text-muted-foreground">{row.description}</p>
           ) : null}
         </div>
       </div>
-      {/* Its own row rather than beside the title: when the write plane cannot
-          act, the reason is a sentence, and a sentence does not fit in a
-          heading. Above the strip because it acts on the Bot the strip
+      {/* One wrapping row rather than two stacked: "run it" and "switch or
+          remove it" are the same question's two halves, and two rows spent
+          ~40px of masthead on a seam nobody reads. When the write plane
+          cannot act, each half still prints its own reason sentence beside
+          its control. Above the strip because it acts on the Bot the strip
           describes. */}
-      <div className="mt-3 flex flex-col gap-2">
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
         <RunBotNowButton row={row} />
         <BotLifecycleControls row={row} {...(onUninstalled ? { onUninstalled } : {})} />
       </div>

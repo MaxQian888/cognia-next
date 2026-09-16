@@ -135,6 +135,29 @@ describe("BotTriggersSection", () => {
     expect(screen.getByTestId("bot-trigger-push")).toHaveTextContent("On new PR")
   })
 
+  it("badges a trigger whose schedule fell back to the definition value", () => {
+    render(
+      <BotTriggersSection
+        row={row({
+          triggers: [
+            {
+              id: "watch",
+              kind: "poll",
+              armed: true,
+              everyMs: 60_000,
+              configFallback: "below-floor",
+            },
+            { id: "push", kind: "event", armed: true },
+          ],
+        })}
+      />
+    )
+    expect(screen.getByTestId("bot-trigger-fallback-watch")).toHaveTextContent(
+      "Using default: below 15s floor"
+    )
+    expect(screen.queryByTestId("bot-trigger-fallback-push")).not.toBeInTheDocument()
+  })
+
   it("says why an orphan has no triggers, apart from a Bot that declares none", () => {
     const { unmount } = render(<BotTriggersSection row={row({ triggers: [], armedTriggers: 0 })} />)
     expect(screen.getByText("No triggers")).toBeInTheDocument()

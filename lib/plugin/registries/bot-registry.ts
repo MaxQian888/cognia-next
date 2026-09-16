@@ -15,8 +15,8 @@
  * Per-plugin cleanup: `unregisterBotsByPlugin(pluginId)`.
  */
 
-import type { PluginBotDef } from "@/types/plugin/plugin-bot"
-import type { BotHandlerV1 } from "@/types/bot/run"
+import type { PluginBotDef, PluginBotLifecycleHookName } from "@/types/plugin/plugin-bot"
+import type { BotHandlerV1, BotLifecycleHookV1 } from "@/types/bot/run"
 
 import { reportRegistryConflict } from "@/lib/plugin/contracts/conflict-reporter"
 import { createOverlayRegistry } from "./createOverlayRegistry"
@@ -30,6 +30,13 @@ export interface RegisteredBot {
    * synthesized function here too, so the runtime never branches on backend.
    */
   handler?: BotHandlerV1
+  /**
+   * Resolved lifecycle hooks, keyed by the names `def.lifecycle.hooks`
+   * declared. Only the declared names are present — an absent key means
+   * "no hook", never "hook failed to resolve" (that fails the whole
+   * registration in the bridge).
+   */
+  lifecycle?: Partial<Record<PluginBotLifecycleHookName, BotLifecycleHookV1>>
 }
 
 /**

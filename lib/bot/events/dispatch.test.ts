@@ -195,6 +195,28 @@ describe("dispatchBotEvent", () => {
     expect(row.notBefore).toBe(NOW + 5_000)
   })
 
+  it("snapshots the trigger's retry policy onto the enqueued row", async () => {
+    await install(
+      "a",
+      def({ id: "a", triggers: [{ ...OPENED, retry: { maxAttempts: 2, baseDelayMs: 5_000 } }] })
+    )
+
+    const [row] = (await dispatchBotEvent({ envelope: envelope(), query: QUERY, now: NOW }))
+      .enqueued
+    expect(row.retry).toEqual({ maxAttempts: 2, baseDelayMs: 5_000 })
+
+    const stored = await getDb().botEventDeliveries.get(row.id)
+    expect(stored?.retry).toEqual({ maxAttempts: 2, baseDelayMs: 5_000 })
+  })
+
+  it("leaves the row without a retry snapshot when the trigger declares none", async () => {
+    await install("a", def({ id: "a" }))
+
+    const [row] = (await dispatchBotEvent({ envelope: envelope(), query: QUERY, now: NOW }))
+      .enqueued
+    expect("retry" in row).toBe(false)
+  })
+
   it("carries the interpolated concurrency key onto the enqueued row", async () => {
     const installation = await install(
       "a",

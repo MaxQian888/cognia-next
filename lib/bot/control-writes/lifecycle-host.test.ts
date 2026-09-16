@@ -321,3 +321,70 @@ it("refuses a mutation in a companion process even if it holds installation mirr
     release()
   }
 })
+
+describe("lifecycle hooks on the host path", () => {
+  const registerLifecycleBot = (lifecycle: Record<string, jest.Mock>) =>
+    registerBot(
+      "lc",
+      {
+        id: "bot:lc",
+        handler: async () => ({}),
+        definition: {
+          id: "lc",
+          name: "Lifecycle",
+          version: "1.0.0",
+          executor: "handler",
+          triggers: [{ id: "manual", kind: "manual" }],
+        },
+        lifecycle,
+      },
+      { pluginId: "bot" }
+    )
+
+  it("runs onInstall exactly once even when the mutation is replayed", async () => {
+    const onInstall = jest.fn()
+    registerLifecycleBot({ onInstall })
+    const install = {
+      operation: "install",
+      operationId,
+      definitionId: "bot:lc",
+      version: "1.0.0",
+      scope: { kind: "account" },
+    }
+    const first = await mutateBotInstallationOnHost(install)
+    // A replayed relay command returns the existing row through the
+    // idempotency branch — before installBotFromCatalogLocally, so the hook
+    // must not fire a second time.
+    const second = await mutateBotInstallationOnHost(install)
+    expect(second).toEqual(first)
+    expect(onInstall).toHaveBeenCalledTimes(1)
+  })
+
+  it("runs onConfigure and onUninstall once each through the host route", async () => {
+    const onConfigure = jest.fn()
+    const onUninstall = jest.fn()
+    registerLifecycleBot({ onConfigure, onUninstall })
+    const installed = await mutateBotInstallationOnHost({
+      operation: "install",
+      operationId,
+      definitionId: "bot:lc",
+      version: "1.0.0",
+      scope: { kind: "account" },
+    })
+    await mutateBotInstallationOnHost({
+      operation: "config",
+      operationId,
+      installationId: installed.id,
+      config: { a: 1 },
+    })
+    expect(onConfigure).toHaveBeenCalledTimes(1)
+    expect(onConfigure.mock.calls[0][0].installation.config).toEqual({ a: 1 })
+    await mutateBotInstallationOnHost({
+      operation: "uninstall",
+      operationId,
+      installationId: installed.id,
+    })
+    expect(onUninstall).toHaveBeenCalledTimes(1)
+    expect(await getDb().botInstallations.get(installed.id)).toBeUndefined()
+  })
+})

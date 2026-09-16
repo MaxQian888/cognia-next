@@ -64,6 +64,28 @@ describe("agentTurnPrompt", () => {
     // prompt they co-authored.
     expect(agentTurnPrompt(ctx())).not.toContain("Ignore previous instructions")
   })
+
+  it("resolves config placeholders against the installation config", () => {
+    const context = ctx({
+      config: { repository: "a/b", tuning: { model: "small" } },
+      definition: {
+        ...ctx().definition,
+        prompt: "Review {{config.repository}} PR {{resource.id}}",
+      },
+    })
+    expect(agentTurnPrompt(context)).toBe("Review a/b PR 42")
+  })
+
+  it("walks nested config paths and empties object-valued or missing ones", () => {
+    const context = ctx({
+      config: { a: { b: "deep" }, repo: { full: "x/y" } },
+      definition: {
+        ...ctx().definition,
+        prompt: "{{config.a.b}}|{{config.repo}}|{{config.missing}}",
+      },
+    })
+    expect(agentTurnPrompt(context)).toBe("deep||")
+  })
 })
 
 describe("createAgentTurnBotExecutor", () => {

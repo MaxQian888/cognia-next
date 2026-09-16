@@ -19,8 +19,9 @@
 
 import type { BotInstallationRow } from "@/lib/db/bot-types"
 import type { InstalledBot } from "@/lib/bot/installed-bot"
-import type { PluginBotTriggerDef } from "@/types/plugin/plugin-bot"
+import { BOT_TIMED_TRIGGER_MIN_EVERY_MS, type PluginBotTriggerDef } from "@/types/plugin/plugin-bot"
 import type { TaskTrigger } from "@/types/scheduler"
+import { defaultsFromConfigSchema, resolveBotConfig } from "@/lib/bot/config/resolve-effective"
 
 /** The task type `lib/scheduler/executors/bot-executor.ts` is registered for. */
 export const BOT_TRIGGER_TASK_TYPE = "bot"
@@ -72,12 +73,73 @@ async function scheduler() {
 }
 
 /**
+ * The trigger after its `*ConfigKey` overrides, plus WHY it fell back when a
+ * config value was declared but unusable.
+ *
+ * `configFallback` is a code from a fixed set — the console translates it.
+ * A `*ConfigKey` that resolves to a valid value wins over the definition's;
+ * anything else leaves the definition value in place. The `everyMs` floor
+ * also applies to the definition itself: manifest validation rejects a
+ * sub-floor plugin definition, but a local definition never saw that gate.
+ */
+function resolveTimedTriggerConfig(
+  def: PluginBotTriggerDef,
+  config: Record<string, unknown>,
+  validateCron: (expression: string) => { valid: boolean }
+): { def: PluginBotTriggerDef; fallback?: string } {
+  if (def.kind === "schedule") {
+    let cron = def.cron
+    let timezone = def.timezone
+    let fallback: string | undefined
+    if (def.cronConfigKey) {
+      const value = config[def.cronConfigKey]
+      if (typeof value !== "string" || !value.trim()) fallback = "missing"
+      else if (!validateCron(value).valid) fallback = "invalid-cron"
+      else cron = value
+    }
+    if (def.timezoneConfigKey) {
+      const value = config[def.timezoneConfigKey]
+      if (typeof value !== "string" || !value.trim()) {
+        fallback ??= "missing"
+      } else {
+        try {
+          // `Intl` is the host's IANA database; a zone it rejects would fail
+          // at fire time anyway.
+          new Intl.DateTimeFormat(undefined, { timeZone: value })
+          timezone = value
+        } catch {
+          fallback ??= "invalid-timezone"
+        }
+      }
+    }
+    return {
+      def: { ...def, cron, ...(timezone ? { timezone } : {}) },
+      ...(fallback ? { fallback } : {}),
+    }
+  }
+  if (def.kind === "poll" || def.kind === "derivedState") {
+    let everyMs = def.everyMs
+    let fallback: string | undefined
+    if (def.everyMsConfigKey) {
+      const value = config[def.everyMsConfigKey]
+      if (typeof value !== "number" || !Number.isInteger(value)) fallback = "missing"
+      else if (value < BOT_TIMED_TRIGGER_MIN_EVERY_MS) fallback = "below-floor"
+      else everyMs = value
+    }
+    everyMs = Math.max(everyMs, BOT_TIMED_TRIGGER_MIN_EVERY_MS)
+    return { def: { ...def, everyMs }, ...(fallback ? { fallback } : {}) }
+  }
+  return { def }
+}
+
+/**
  * Bring one installation's schedule rows in line with its armed triggers.
  *
  * Idempotent, so it is safe to call on every install, every edit, and at boot.
  */
 export async function syncBotTriggerSchedules(resolved: InstalledBot): Promise<void> {
-  const { isBotTriggerArmed } = await import("@/lib/db/bot-installations")
+  const [{ isBotTriggerArmed, writeBotTriggerState }, { validateCronExpression }] =
+    await Promise.all([import("@/lib/db/bot-installations"), import("@/lib/scheduler/cron-parser")])
   const installation = resolved.installation
   // A row this device mirrored from a Host belongs to that Host's scheduler.
   // Reconciling one here would create a local `type: "bot"` task firing the
@@ -93,10 +155,27 @@ export async function syncBotTriggerSchedules(resolved: InstalledBot): Promise<v
   // A disabled installation wants none of them. That is the difference between
   // "turned off" and "deleted": the rows go, the installation stays.
   if (installation.status === "enabled") {
-    for (const def of resolved.definition.triggers) {
-      const trigger = schedulerTriggerFor(def)
-      if (!trigger || !isBotTriggerArmed(installation, def)) continue
-      wanted.set(botTriggerScheduleTag(installation.id, def.id), { trigger, def })
+    const config = resolveBotConfig({
+      installation: installation.config,
+      definitionDefaults: defaultsFromConfigSchema(resolved.definition.configSchema),
+    }).values
+    for (const declared of resolved.definition.triggers) {
+      const effective = resolveTimedTriggerConfig(declared, config, validateCronExpression)
+      // There is no run to journal against at reconcile time, so the reason a
+      // config value fell back is recorded on the trigger state itself —
+      // written when it changes, cleared when the config becomes valid again.
+      const recorded = installation.triggerState?.[declared.id]?.configFallback
+      if (effective.fallback !== recorded) {
+        await writeBotTriggerState(installation.id, declared.id, {
+          configFallback: effective.fallback,
+        })
+      }
+      const trigger = schedulerTriggerFor(effective.def)
+      if (!trigger || !isBotTriggerArmed(installation, declared)) continue
+      wanted.set(botTriggerScheduleTag(installation.id, declared.id), {
+        trigger,
+        def: effective.def,
+      })
     }
   }
 

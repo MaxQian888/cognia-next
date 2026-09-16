@@ -8,6 +8,7 @@ description: "Six trigger kinds and four executors behind one durable delivery q
 **Status:** Accepted
 **Date:** 2026-09-07
 **Amends:** ADR-0009 (platform connectors)
+**Amended:** 2026-09-15 (Bot plugin API surface, docs/plans/2026-09-15-bot-plugin-api-surface.md)
 **Related:** ADR-0026 (plugin extension points), ADR-0027 (mobile sync), ADR-0045 (plan hub), ADR-0128 (scheduler host placement), ADR-0131 (IM delegation and relay), ADR-0137 (one delegation, one card), ADR-0155 (plugin author boundary)
 
 ## Context
@@ -182,6 +183,90 @@ receiver reports healthy and answers nothing.
 The adapter's declared `transportModes` now decides whenever it names exactly
 one, and the row only disambiguates a genuinely dual-mode adapter.
 
+## Amendment 2026-09-15: the plugin door grows, the engine does not
+
+The Bot plane was reachable from the console but not from plugin code, which
+meant a TypeScript handler had a durable-step surface a Python handler could
+only look at. The amendment opens the plane to plugins without adding an
+engine: everything new is either a declarative field on the definition or a
+plain-value host call on `ctx.bots`. The delivery queue, the park protocol and
+the memoised step table did not change.
+
+### Step parity crosses processes as plain values, not closures
+
+`BotRunContextV1` carries an `AbortSignal`, a `step` object and two callbacks;
+none of it crosses stdio. A Python handler is handed `BotRunSnapshotV1` and
+reaches the same surface through `ctx.bots.*` host calls keyed by `runId`
+(`lib/plugin/api/bots-api.ts`, `plugin-sdk/python/src/cognia/bot.py` `BotRun`).
+
+A wait the host cannot answer returns `{ status: "parked", ... }` rather than
+throwing, because `wrapFailure` preserves only `message` across the boundary —
+an error's identity cannot cross. The host records the park intent in
+`pendingParks` and `bots-bridge` rethrows the recorded `BotRunParkedError`
+once `run` settles, so the recorded intent wins over both a normal result and
+a proxy error. A Python `BotRunParked` raised by the SDK is courtesy only.
+
+### Reads are scoped to the run that asks, and emit carries a namespace
+
+Every `ctx.bots` method is gated on `agent:control` and `requireOwnedBotRun`,
+so a handler sees only its own installation's `BotInstallationSnapshot`
+(projected by `lib/bot/installation-snapshot.ts`: bound-slot booleans, never
+the account/session/adapter ids underneath), its own deliveries
+(`listDeliveries`, bounded, `syncedFromHost` excluded), and sibling run
+results (`getRunResult` answers `null` for both "missing" and "foreign" — an
+existence oracle is a leak).
+
+`emit` must be namespaced `<pluginId>.<type>`; a free-form type could spoof a
+host type like `run.completed` or another plugin's. `writeTriggerState`
+accepts only `cursor`/`watermark`, because host-owned keys (edge memory,
+debounce, last-fired) are exactly what turns an edge trigger into a level one.
+
+### The definition layer says more, still declaratively
+
+`conditions.match` evaluates envelope-rooted dotted paths against scalar
+equality or membership (`lib/bot/events/conditions.ts`): a missing or
+non-scalar leaf never matches, which is routing, not authorization.
+
+`cronConfigKey`, `timezoneConfigKey` and `everyMsConfigKey` let a
+configuration value override the declared schedule; when the value is absent
+or invalid the reconciler uses the declared value and records the reason as
+`configFallback` on the trigger state (`missing`, `invalid-cron`,
+`invalid-timezone`, `below-floor`), which the console surfaces instead of
+silently disagreeing with the manifest.
+
+A trigger's `retry` narrows the queue's policy, never widens it —
+`decideNextAttempt` floors at the host ceiling (`lib/queue/retry-policy.ts`).
+The policy is snapshotted onto `BotEventDeliveryRow.retry` at enqueue time, so
+a retry decision never depends on resolving the definition again.
+
+`waitForApproval`'s `risk` is validated, persisted on the interrupt as
+`approvalRisk` (`types/execution/run.ts`), and folded into the content-drift
+comparison, so the console can show the risk a person is about to approve and
+a replay cannot quietly change it.
+
+### Lifecycle hooks are resolved exports, not events
+
+`PluginBotLifecycleDef` names up to four hooks. The bridge resolves them at
+registration exactly like the handler — named exports of
+`lifecycle.entry ?? entry` for JS, same-named methods on the contribution
+object for Python (`lib/plugin/bridge/bots-bridge.ts`) — and a bad hook fails
+the whole Bot rather than leaving a half-registered definition.
+
+They execute inside the administrative mutation on the owning host
+(`lib/bot/control-writes/lifecycle-hooks.ts`), receive no `runId` because
+there is no run, and must finish within `BOT_LIFECYCLE_HOOK_TIMEOUT_MS`
+(30 s). `onInstall`, `onConfigure` and `onArm` veto; `onUninstall` is advisory
+and its failure is only logged — a hook that cannot stop a deletion must not
+be able to strand one. Remote callers reach them exactly once through
+`mutateBotInstallationOnHost`, never once per peer.
+
+### The payload clamp lives in the envelope, not the caller
+
+`BOT_EVENT_PAYLOAD_MAX_BYTES` (64 KiB) is asserted in `enqueue` and `emit`
+inside `lib/bot/events/envelope.ts`, measured as UTF-8 bytes of the JSON with
+`undefined` counting as zero, so every producer path rejects an oversized
+payload the same way instead of each growing its own estimate.
+
 ## Known limitations
 
 These are recorded here rather than left for the next person to discover.
@@ -196,10 +281,12 @@ These are recorded here rather than left for the next person to discover.
    does not justify, so the cross-device read is a bounded window scan on
    `receivedAt` filtered in memory. It is the most expensive read in the sync
    set.
-3. **`bots:read` and `bots:execute` are still only a doc comment.** They appear
-   once in `types/plugin/plugin.ts` and nowhere else in the tree, so
-   `bot_run_manual` reuses `workspace.write` as its capability. Making them real
-   is its own change, with its own vocabulary gate.
+3. **`bots:read` and `bots:execute` remain unimplemented by decision.** Every
+   `ctx.bots` method is gated on `agent:control`; the two finer permissions
+   still appear once in `types/plugin/plugin.ts` and nowhere else.
+   Introducing the vocabulary later is additive: the catalog's
+   `requiredPermissions` grows, and `agent:control` stays accepted for one
+   minor version.
 4. **WeCom and DingTalk have an unbuilt second transport.** Both platforms
    publish an HTTP callback and only their gateway path is implemented here.
    `SINGLE_TRANSPORT_PLATFORMS` records this as `unbuilt` rather than as a
@@ -222,3 +309,9 @@ the plugin path a tested path rather than a bridge with no consumers.
 On the connector side, a cloud install can be told where its own callbacks live,
 a plugin connector can receive over webhook, and an adapter whose two transport
 fields disagree no longer sits silently down.
+
+The 2026-09-15 amendment makes a plugin Bot a first-class thing an author can
+ship: TypeScript and Python handlers hold the same durable-step surface, the
+manifest can say more about when and how often work fires and how it retries,
+and four lifecycle hooks let a definition participate in its own install,
+configure, arm and removal — without ever being able to strand a removal.

@@ -18,7 +18,7 @@ Contract `1.2.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.auth` | 5 | `auth:provide`, `auth:consume` | frontend, hybrid | secret |
 | `ctx.automation` | 24 | `automation:read`, `automation:screenshot`, `automation:click`, `automation:pointer`, `automation:type`, `automation:window` | frontend, hybrid | internal |
 | `ctx.backup` | 6 | `backup:read`, `backup:write` | frontend, hybrid | internal |
-| `ctx.bots` | 4 | `agent:control` | frontend, hybrid, python | sensitive |
+| `ctx.bots` | 16 | `agent:control` | frontend, hybrid, python | sensitive |
 | `ctx.browser` | 4 | `agent:control`, `session:read` | frontend, hybrid | sensitive |
 | `ctx.canvas` | 32 | `canvas:write`, `canvas:read` | frontend, hybrid | internal |
 | `ctx.capabilities` | 0 | None | frontend, hybrid | internal |
@@ -237,6 +237,18 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `bots.enqueue` | `agent:control` | medium | Yes |
 | `bots.cancelResource` | `agent:control` | medium | Yes |
 | `bots.recordMonitor` | `agent:control` | low | Yes |
+| `bots.stepBegin` | `agent:control` | low | Yes |
+| `bots.stepComplete` | `agent:control` | low | Yes |
+| `bots.stepFail` | `agent:control` | low | Yes |
+| `bots.waitForApproval` | `agent:control` | medium | Yes |
+| `bots.waitForEvent` | `agent:control` | low | Yes |
+| `bots.log` | `agent:control` | low | No |
+| `bots.progress` | `agent:control` | low | No |
+| `bots.writeTriggerState` | `agent:control` | medium | Yes |
+| `bots.setTriggerArmed` | `agent:control` | medium | Yes |
+| `bots.listDeliveries` | `agent:control` | low | Yes |
+| `bots.getRunResult` | `agent:control` | low | Yes |
+| `bots.emit` | `agent:control` | medium | Yes |
 
 ## `ctx.browser`
 

@@ -26,11 +26,14 @@
 
 import { resolveInstalledBot } from "@/lib/bot/installed-bot"
 import {
+  buildBotInstallationRow,
   getBotInstallation,
-  installBot,
+  persistBotInstallation,
   uninstallBot,
   updateBotInstallation,
+  type InstallBotInput,
 } from "@/lib/db/bot-installations"
+import { runBotLifecycleHook } from "./lifecycle-hooks"
 import type {
   BotCredentialBinding,
   BotInstallationRow,
@@ -150,7 +153,7 @@ export async function installBotFromCatalogLocally(
 ): Promise<BotInstallationRow> {
   assertAvailable()
   if (input.entry.unresolvedHandler) throw new BotNotInstallableError(input.entry.definitionId)
-  return installBot({
+  const installInput: InstallBotInput = {
     ...(id ? { id } : {}),
     definitionId: input.entry.definitionId,
     definitionSource: input.entry.source,
@@ -159,7 +162,21 @@ export async function installBotFromCatalogLocally(
     requiredCredentials: input.entry.slots,
     ...(input.config ? { config: input.config } : {}),
     ...(input.credentialBindings ? { credentialBindings: input.credentialBindings } : {}),
-  })
+  }
+  // The hook sees the exact row about to be written — a hand-rolled
+  // approximation would drift from `installBot`'s shape. Its throw lands
+  // before `persistBotInstallation`, so a vetoed install leaves no row.
+  const provisional = buildBotInstallationRow(installInput)
+  const resolved = await resolveInstalledBot(provisional)
+  if (resolved) {
+    await runBotLifecycleHook({
+      installation: provisional,
+      definition: resolved.definition,
+      phase: "onInstall",
+    })
+  }
+  await persistBotInstallation(provisional)
+  return provisional
 }
 
 /**
@@ -179,8 +196,20 @@ export async function updateBotConfigLocally(
   if (!installation) throw new BotControlTargetMissingError("installation", installationId)
   if (installation.syncedFromHost)
     throw new BotLifecycleUnavailableError({ state: "unsupported", reason: "requires-companion" })
-  const requiredCredentials = await requiredSlotsFor(installation)
+  const resolved = await resolveInstalledBot(installation)
+  if (!resolved) {
+    throw new BotDefinitionMissingError(installation.id, installation.definitionId)
+  }
+  const requiredCredentials = resolved.definition.requires?.credentials ?? []
   const grant = policyGrant === undefined ? undefined : botPolicyGrantSchema.parse(policyGrant)
+  // The snapshot reflects the NEW config — that is the state the hook is
+  // being asked to accept — while `previousConfig` is what it replaces.
+  await runBotLifecycleHook({
+    installation: { ...installation, config },
+    definition: resolved.definition,
+    phase: "onConfigure",
+    previousConfig: installation.config,
+  })
   const updated = await updateBotInstallation(installationId, {
     config,
     requiredCredentials,
@@ -284,6 +313,25 @@ export async function uninstallBotInstallationLocally(installationId: string): P
   if (!installation) throw new BotControlTargetMissingError("installation", installationId)
   if (installation.syncedFromHost)
     throw new BotLifecycleUnavailableError({ state: "unsupported", reason: "requires-companion" })
+  // Schedules come down before the hook runs — `onUninstall` must never see
+  // a still-armed Bot — and its failure is advisory, so removal proceeds
+  // either way. An orphan (`resolved` null) is removable too: there is no
+  // hook to run when there is no definition.
+  const resolved = await resolveInstalledBot(installation)
+  try {
+    const { removeBotTriggerSchedules } =
+      await import("@/lib/bot/schedule/reconcile-timed-triggers")
+    await removeBotTriggerSchedules(installationId)
+  } catch {
+    // The boot sweep drops rows whose installation no longer resolves.
+  }
+  if (resolved) {
+    await runBotLifecycleHook({
+      installation,
+      definition: resolved.definition,
+      phase: "onUninstall",
+    })
+  }
   await uninstallBot(installationId)
 }
 

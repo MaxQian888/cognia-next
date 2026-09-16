@@ -84,7 +84,13 @@ export interface FeaturePaneConfig {
 }
 
 export interface FeaturePageShellProps {
-  /** Stable id used for `autoSaveId` (panel size persistence) and Sheet keys. */
+  /**
+   * Stable id used for the panel group's DOM id and the Sheet keys.
+   *
+   * Despite the name it is NOT an `autoSaveId`: per-route size persistence is
+   * deliberately unwired (see the module doc), so a resized rail resets on
+   * reload until a route opts in.
+   */
   storageId: string
   /** Optional header that spans the full content width and owns its own chrome. */
   header?: React.ReactNode

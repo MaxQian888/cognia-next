@@ -18,11 +18,29 @@
  * {@link BotRunSnapshotV1} and reaches everything else through `ctx.bots.*`
  * host calls keyed by `runId`, which is exactly why those host methods take
  * and return plain values.
+ *
+ * A wait the Python handler cannot answer parks the same way an in-process
+ * one does: the host call records the park intent in `pendingParks` and this
+ * bridge throws the recorded `BotRunParkedError` once `proxy.run` settles —
+ * it wins over both a normal result and a proxy error, so a handler that
+ * ignored the park still parks. The SDK's own `BotRunParked` exception is
+ * courtesy only: `wrapFailure` preserves only `message`, never the error's
+ * identity, so the host never depends on it.
  */
 
 import type { PluginManifest } from "@/types/plugin/plugin"
-import type { PluginHandlerBotDef } from "@/types/plugin/plugin-bot"
-import type { BotHandlerResultV1, BotHandlerV1, BotRunSnapshotV1 } from "@/types/bot/run"
+import type {
+  PluginBotDef,
+  PluginBotLifecycleHookName,
+  PluginHandlerBotDef,
+} from "@/types/plugin/plugin-bot"
+import type {
+  BotHandlerResultV1,
+  BotHandlerV1,
+  BotLifecycleContextV1,
+  BotLifecycleHookV1,
+  BotRunSnapshotV1,
+} from "@/types/bot/run"
 
 import { loggers } from "@/lib/plugin/core/logger"
 import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
@@ -35,6 +53,7 @@ import {
   registerBot,
   unregisterBotsByPlugin,
 } from "@/lib/plugin/registries/bot-registry"
+import { takePendingPark } from "@/lib/bot/runtime/host-step"
 
 export interface BotsBridgeError {
   pluginId: string
@@ -89,9 +108,12 @@ export async function registerBotsForPlugin(
         def.executor === "handler"
           ? await resolveHandler(def, pluginId, manifest.type, installRoot, importer)
           : undefined
+      // Resolved inside the same try: a bad lifecycle fails the whole entry,
+      // never leaves a half-Bot registered.
+      const lifecycle = await resolveLifecycle(def, pluginId, manifest.type, installRoot, importer)
       registerBot(
         def.id,
-        { id: botDefinitionId(pluginId, def.id), definition: def, handler },
+        { id: botDefinitionId(pluginId, def.id), definition: def, handler, lifecycle },
         { pluginId }
       )
       registered++
@@ -121,14 +143,23 @@ async function resolveHandler(
       methods: ["run"],
       label: "Bot handler",
     })
-    return async (ctx) =>
-      proxy.run({
-        runId: ctx.runId,
-        installationId: ctx.installationId,
-        botId: ctx.botId,
-        event: ctx.event,
-        config: ctx.config,
-      })
+    return async (ctx) => {
+      try {
+        return await proxy.run({
+          runId: ctx.runId,
+          installationId: ctx.installationId,
+          botId: ctx.botId,
+          event: ctx.event,
+          config: ctx.config,
+        })
+      } finally {
+        // A park the host recorded while the handler ran wins over whatever
+        // `run` settled into — the wait was never answered, so the run must
+        // leave the queue whether the handler agreed or not.
+        const parked = takePendingPark(ctx.runId)
+        if (parked) throw parked
+      }
+    }
   }
 
   if (!def.entry) {
@@ -150,6 +181,60 @@ async function resolveHandler(
     )
   }
   return exported as BotHandlerV1
+}
+
+/**
+ * Resolve `def.lifecycle.hooks` to callable functions, or `undefined` when
+ * the definition declares none. A Python-backed Bot gets a second proxy on
+ * the same contribution (`createPythonBackedProxy` carries no per-
+ * contribution state, so the `run` proxy and this one coexist); a JS-backed
+ * Bot's hooks are named exports of `lifecycle.entry ?? entry`.
+ */
+async function resolveLifecycle(
+  def: PluginBotDef,
+  pluginId: string,
+  pluginType: PluginManifest["type"],
+  installRoot: string,
+  importer: NonNullable<BotsBridgeOptions["importer"]>
+): Promise<Partial<Record<PluginBotLifecycleHookName, BotLifecycleHookV1>> | undefined> {
+  const hooks = def.lifecycle?.hooks
+  if (!hooks || hooks.length === 0) return undefined
+
+  if (isPythonBackedContribution(def, pluginType)) {
+    const proxy = createPythonBackedProxy<
+      Record<PluginBotLifecycleHookName, (ctx: BotLifecycleContextV1) => Promise<void>>
+    >({
+      pluginId,
+      contributionId: def.id,
+      methods: hooks,
+      label: "Bot lifecycle",
+    })
+    const lifecycle: Partial<Record<PluginBotLifecycleHookName, BotLifecycleHookV1>> = {}
+    for (const hook of hooks) {
+      lifecycle[hook] = (ctx) => proxy[hook](ctx)
+    }
+    return lifecycle
+  }
+
+  const entry = def.lifecycle?.entry ?? (def.executor === "handler" ? def.entry : undefined)
+  if (!entry) {
+    throw new Error(
+      `JS-backed bot "${def.id}" declares lifecycle hooks but no entry to load them from`
+    )
+  }
+  const resolved = resolvePluginPath(installRoot, entry)
+  const mod = await importer(resolved)
+  const lifecycle: Partial<Record<PluginBotLifecycleHookName, BotLifecycleHookV1>> = {}
+  for (const hook of hooks) {
+    const exported = mod[hook]
+    if (typeof exported !== "function") {
+      throw new Error(
+        `entry "${entry}" does not export a lifecycle hook named "${hook}" (got ${typeof exported})`
+      )
+    }
+    lifecycle[hook] = exported as BotLifecycleHookV1
+  }
+  return lifecycle
 }
 
 /** Plugin-disable hook. Drops every Bot this plugin contributed. */

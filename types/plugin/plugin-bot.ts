@@ -52,6 +52,9 @@ export type PluginBotEventSource =
   /** Another Bot run. Ignored unless the installation opts in explicitly. */
   | "bot"
 
+/** A scalar an envelope path may be required to equal or be one of. */
+export type BotMatchScalar = string | number | boolean
+
 export interface PluginBotTriggerConditions {
   repositories?: string[]
   /** Read the repository from an installation configuration field. */
@@ -61,6 +64,28 @@ export interface PluginBotTriggerConditions {
   actors?: string[]
   draft?: boolean
   conclusions?: string[]
+  /**
+   * Envelope-rooted dotted paths (for example `"payload.event.type"`,
+   * `"actor.kind"`) mapped to a required scalar, or to a list the scalar must
+   * be one of. A path that resolves to nothing — or to an object — never
+   * matches, so a typo fails closed rather than firing on everything. This is
+   * routing, not authorization: a match decides whether the event reaches the
+   * handler at all.
+   */
+  match?: Record<string, BotMatchScalar | BotMatchScalar[]>
+}
+
+/**
+ * A retry ceiling the trigger declares. Every field is a NARROWING of the
+ * host default: `maxAttempts` can only count down sooner, and delays can only
+ * grow longer — the policy asks for patience or resignation, never for more
+ * work than the host's own ceiling allows.
+ */
+export interface PluginBotRetryPolicy {
+  /** Delivery attempts before dead-lettering. Clamped to the host maximum. */
+  maxAttempts?: number
+  baseDelayMs?: number
+  maxDelayMs?: number
 }
 
 interface PluginBotTriggerBase {
@@ -102,6 +127,11 @@ interface PluginBotTriggerBase {
    * answers.
    */
   correlationKey?: string
+  /**
+   * Retry narrowing for deliveries this trigger starts. Absent means the
+   * host's default backoff; see `PluginBotRetryPolicy`.
+   */
+  retry?: PluginBotRetryPolicy
 }
 
 /** A human addressed the Bot in a conversation it is bound to. */
@@ -127,6 +157,15 @@ export interface PluginBotScheduleTrigger extends PluginBotTriggerBase {
   kind: "schedule"
   cron: string
   timezone?: string
+  /**
+   * Names a key in the Bot's `configSchema` whose value replaces `cron` when
+   * the configured value is a valid cron expression. The definition's `cron`
+   * is the fallback, and the reason for falling back is recorded on the
+   * installation's trigger state.
+   */
+  cronConfigKey?: string
+  /** Like `cronConfigKey`, for `timezone`. */
+  timezoneConfigKey?: string
 }
 
 /**
@@ -136,6 +175,12 @@ export interface PluginBotScheduleTrigger extends PluginBotTriggerBase {
 export interface PluginBotPollTrigger extends PluginBotTriggerBase {
   kind: "poll"
   everyMs: number
+  /**
+   * Names a key in the Bot's `configSchema` whose value replaces `everyMs`
+   * when it is an integer at or above the host floor. The definition's
+   * `everyMs` is the fallback.
+   */
+  everyMsConfigKey?: string
   /** Cursor name, so one Bot can keep several independent cursors. */
   cursor?: string
 }
@@ -156,6 +201,8 @@ export interface PluginBotPollTrigger extends PluginBotTriggerBase {
 export interface PluginBotDerivedStateTrigger extends PluginBotTriggerBase {
   kind: "derivedState"
   everyMs: number
+  /** Like `PluginBotPollTrigger.everyMsConfigKey`. */
+  everyMsConfigKey?: string
   /** Name of the state the handler evaluates. */
   state: string
   edge?: "rising" | "falling" | "both"
@@ -246,6 +293,38 @@ export interface PluginBotPolicyV1 {
   allowSelfTriggering?: boolean
 }
 
+/**
+ * The lifecycle phases a Bot definition may hook.
+ *
+ * `onInstall` runs before the installation row is written, `onConfigure`
+ * before a config replace, `onArm` before a trigger-armed write, and
+ * `onUninstall` while the row is being removed. The first three may veto the
+ * mutation by throwing; `onUninstall` never blocks removal.
+ */
+export const PLUGIN_BOT_LIFECYCLE_HOOKS = [
+  "onInstall",
+  "onConfigure",
+  "onArm",
+  "onUninstall",
+] as const
+export type PluginBotLifecycleHookName = (typeof PLUGIN_BOT_LIFECYCLE_HOOKS)[number]
+
+/**
+ * Which lifecycle hooks this definition implements, and where they live.
+ *
+ * JS plugins resolve named exports of the same names from
+ * `lifecycle.entry ?? entry` — so a non-handler executor (workflow, squad,
+ * agent-turn), which has no `entry` of its own, MUST set `lifecycle.entry` to
+ * have hooks at all. Python plugins implement the same-named methods on the
+ * `@contribution(<bot id>)` object and `entry` is ignored.
+ */
+export interface PluginBotLifecycleDef {
+  /** Module path; defaults to the handler's `entry` for a JS plugin. Ignored for Python. */
+  entry?: string
+  /** Hooks this definition implements. The host only resolves what is declared. */
+  hooks: PluginBotLifecycleHookName[]
+}
+
 interface PluginBotDefBase {
   id: string
   name: string
@@ -269,6 +348,8 @@ interface PluginBotDefBase {
   policy?: PluginBotPolicyV1
   /** JSON Schema for the per-installation configuration form. */
   configSchema?: Record<string, unknown>
+  /** Lifecycle hooks the host invokes around install/configure/arm/uninstall. */
+  lifecycle?: PluginBotLifecycleDef
 }
 
 /**
@@ -300,7 +381,8 @@ export interface PluginSquadBotDef extends PluginBotDefBase {
 
 /**
  * Runs one bounded agent turn. The prompt is a template interpolated against
- * the event envelope and the installation config.
+ * the event envelope and the installation config: `{{resource.id}}` reads the
+ * envelope, `{{config.repository}}` reads the resolved installation config.
  */
 export interface PluginAgentTurnBotDef extends PluginBotDefBase {
   executor: "agent-turn"
@@ -340,6 +422,14 @@ export type PluginBotDef =
 /** The executor discriminants, as a runtime list for validators and pickers. */
 export const PLUGIN_BOT_EXECUTORS = ["workflow", "squad", "agent-turn", "handler"] as const
 export type PluginBotExecutor = (typeof PLUGIN_BOT_EXECUTORS)[number]
+
+/**
+ * Smallest interval a timed trigger may run at, whether the value came from
+ * the definition or from a `*ConfigKey` config value. A faster cadence is a
+ * resource problem for every host the Bot runs on, so the floor is the
+ * host's, not the author's.
+ */
+export const BOT_TIMED_TRIGGER_MIN_EVERY_MS = 15_000
 
 /** The trigger discriminants, as a runtime list for validators and pickers. */
 export const PLUGIN_BOT_TRIGGER_KINDS = [

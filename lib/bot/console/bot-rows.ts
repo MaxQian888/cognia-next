@@ -50,6 +50,12 @@ export interface BotTriggerSummary {
   /** Present for `poll` and `derivedState`. The caller formats it. */
   everyMs?: number
   inputSchema?: Record<string, unknown>
+  /**
+   * Why the schedule this row describes fell back to the definition's value.
+   * A code (`"missing"`, `"invalid-cron"`, `"invalid-timezone"`,
+   * `"below-floor"`) copied from `triggerState`; the caller translates it.
+   */
+  configFallback?: string
 }
 
 /**
@@ -163,7 +169,7 @@ export function triggerDetail(trigger: PluginBotTriggerDef): string | undefined 
 }
 
 export function summarizeTrigger(
-  installation: Pick<BotInstallationRow, "triggerOverrides">,
+  installation: Pick<BotInstallationRow, "triggerOverrides" | "triggerState">,
   trigger: PluginBotTriggerDef
 ): BotTriggerSummary {
   const everyMs =
@@ -179,6 +185,9 @@ export function summarizeTrigger(
     ...(everyMs !== undefined ? { everyMs } : {}),
     ...(trigger.kind === "manual" && trigger.inputSchema
       ? { inputSchema: trigger.inputSchema }
+      : {}),
+    ...(installation.triggerState?.[trigger.id]?.configFallback
+      ? { configFallback: installation.triggerState[trigger.id].configFallback }
       : {}),
   }
 }

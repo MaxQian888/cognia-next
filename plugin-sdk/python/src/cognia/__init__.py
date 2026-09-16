@@ -114,6 +114,9 @@ from .bot import (
     BOT_EXECUTORS,
     BOT_TRIGGER_KINDS,
     Bot,
+    BotRun,
+    BotRunParked,
+    bot_run,
     define_bot,
 )
 from .modes import Mode, define_mode
@@ -170,6 +173,9 @@ __all__ = [
     "BOT_EXECUTORS",
     "BOT_TRIGGER_KINDS",
     "Bot",
+    "BotRun",
+    "BotRunParked",
+    "bot_run",
     "define_bot",
     "Ctx",
     "HostNamespace",

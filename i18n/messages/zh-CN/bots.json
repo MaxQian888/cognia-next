@@ -65,7 +65,9 @@
   "description": "已安装的 Bot：各自被什么唤醒、由什么执行、被允许做什么。",
   "detail": {
     "noSelectionBody": "从左侧选一个 Bot，查看它的触发器、凭据与策略。",
-    "noSelectionTitle": "未选择 Bot"
+    "noSelectionTitle": "未选择 Bot",
+    "notFoundTitle": "找不到这个 Bot",
+    "notFoundBody": "链接指向的安装在这台设备上不存在。它可能已被卸载，或位于另一台主机上。"
   },
   "executor": {
     "agent-turn": "单次 Agent 回合",
@@ -125,6 +127,7 @@
     "filterAria": "按状态筛选 Bot",
     "label": "Bot 列表",
     "searchAria": "搜索 Bot",
+    "searchClearAria": "清除 Bot 搜索",
     "searchPlaceholder": "搜索 Bot"
   },
   "never": "从未",
@@ -246,6 +249,12 @@
     "everyHours": "每 {value} 小时",
     "everyMinutes": "每 {value} 分钟",
     "everySeconds": "每 {value} 秒",
+    "configFallback": {
+      "missing": "使用默认值：配置项缺失",
+      "invalid-cron": "使用默认值：cron 表达式无效",
+      "invalid-timezone": "使用默认值：时区无效",
+      "below-floor": "使用默认值：低于 15 秒下限"
+    },
     "kind": {
       "derivedState": "状态变化",
       "event": "事件",

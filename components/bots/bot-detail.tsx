@@ -42,6 +42,7 @@ import { ConsoleSection } from "@/components/surface/console-section"
 import { FactList, FactRow } from "@/components/surface/fact-list"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
+import { Skeleton } from "@/components/ui/skeleton"
 import type { BotConsoleRow } from "@/lib/bot/console/bot-rows"
 
 import { BotHero } from "./bot-hero"
@@ -55,11 +56,24 @@ import { useBotProblemText, useBotRelativeTime } from "./bot-visuals"
 
 export interface BotDetailProps {
   row: BotConsoleRow | null
+  /** The installations read is still in flight — show a skeleton, not "pick one". */
+  loading?: boolean
+  /**
+   * The URL named an installation that does not exist. Distinct from "nothing
+   * selected": the link was followed and missed, and the pane says so rather
+   * than greeting the reader with the pick-one copy as if nothing happened.
+   */
+  missing?: boolean
   /** Called after the installation is removed, so the console can deselect. */
   onUninstalled?: () => void
 }
 
-export function BotDetail({ row, onUninstalled }: BotDetailProps) {
+export function BotDetail({
+  row,
+  loading = false,
+  missing = false,
+  onUninstalled,
+}: BotDetailProps) {
   const t = useTranslations("bots")
   const relative = useBotRelativeTime()
   const problemText = useBotProblemText()
@@ -70,12 +84,30 @@ export function BotDetail({ row, onUninstalled }: BotDetailProps) {
     if (scroller.current) scroller.current.scrollTop = 0
   }, [id])
 
+  if (loading && !row) {
+    // Bars in the shape of the hero + first card row, not a spinner: the
+    // pane's shape is known before its contents are.
+    return (
+      <div className="flex h-full flex-col gap-3.5 p-4" data-testid="bot-detail-loading">
+        <Skeleton className="h-24 w-full" />
+        <div className="grid gap-3.5">
+          <Skeleton className="h-40 w-full" />
+          <Skeleton className="h-40 w-full" />
+        </div>
+      </div>
+    )
+  }
+
   if (!row) {
     return (
       <Empty className="h-full border-none" data-testid="bot-detail-empty">
         <EmptyHeader>
-          <EmptyTitle>{t("detail.noSelectionTitle")}</EmptyTitle>
-          <EmptyDescription>{t("detail.noSelectionBody")}</EmptyDescription>
+          <EmptyTitle>
+            {missing ? t("detail.notFoundTitle") : t("detail.noSelectionTitle")}
+          </EmptyTitle>
+          <EmptyDescription>
+            {missing ? t("detail.notFoundBody") : t("detail.noSelectionBody")}
+          </EmptyDescription>
         </EmptyHeader>
       </Empty>
     )
@@ -112,20 +144,15 @@ export function BotDetail({ row, onUninstalled }: BotDetailProps) {
         {/* `items-start` so a short card keeps its own height instead of being
             stretched to match the tall one beside it. */}
         <div className="grid items-start gap-3.5 @3xl/console-pane:grid-cols-2">
+          {/* Installation-facing facts only: source, executor and scope are
+              the hero's meta line — repeating them here printed the same three
+              answers twice, a screen-height apart. */}
           <ConsoleSection id="identity" title={t("overview.identity")} icon={IdCardIcon}>
             <FactList>
               <FactRow label={t("overview.definition")} mono>
                 {row.definitionId}
               </FactRow>
-              <FactRow label={t("overview.source")}>{t(`source.${row.source}`)}</FactRow>
-              <FactRow label={t("overview.executor")}>
-                {row.executor ? t(`executor.${row.executor}`) : t("notAvailable")}
-              </FactRow>
               <FactRow label={t("overview.status")}>{t(`status.${row.status}`)}</FactRow>
-              <FactRow label={t("overview.scope")}>
-                {t(`scope.${row.scope.kind}`)}
-                {row.scope.projectId ? ` · ${row.scope.projectId}` : ""}
-              </FactRow>
               <FactRow label={t("overview.installation")} mono>
                 {row.id}
               </FactRow>

@@ -1,6 +1,8 @@
 import type { BotEventEnvelopeV1 } from "@/types/bot/event"
 
 import {
+  assertBotEventPayloadSize,
+  BOT_EVENT_PAYLOAD_MAX_BYTES,
   botDeliveryId,
   botEventId,
   buildBotEventEnvelope,
@@ -135,5 +137,55 @@ describe("interpolateEnvelopeTemplate", () => {
 
   it("leaves a template with no placeholders alone", () => {
     expect(interpolateEnvelopeTemplate("constant", envelope())).toBe("constant")
+  })
+
+  it("resolves config.* against the extra config, not the envelope", () => {
+    const config = { repository: "a/b", nested: { value: 7 }, obj: { x: 1 } }
+    expect(
+      interpolateEnvelopeTemplate("Review {{config.repository}} PR {{resource.id}}", envelope(), {
+        config,
+      })
+    ).toBe("Review a/b PR 42")
+    // Nested paths work; object-valued and missing config keys empty out.
+    expect(
+      interpolateEnvelopeTemplate(
+        "{{config.nested.value}}|{{config.obj}}|{{config.none}}",
+        envelope(),
+        {
+          config,
+        }
+      )
+    ).toBe("7||")
+  })
+
+  it("reads config.* from the envelope when no config is handed in", () => {
+    // A caller that does not pass `extra` (concurrencyKey, correlationKey)
+    // sees the same resolution as before — `config.*` is just a path then.
+    expect(interpolateEnvelopeTemplate("{{config.x}}", envelope())).toBe("")
+  })
+})
+
+describe("assertBotEventPayloadSize", () => {
+  it("counts UTF-8 bytes of the JSON encoding, not characters", () => {
+    // A 20k-char string of 3-byte characters is 60 KiB encoded — under the cap.
+    expect(() => assertBotEventPayloadSize("界".repeat(20_000))).not.toThrow()
+    // The same characters as ASCII would be ~20 KiB; the byte count is the
+    // rule. The JSON quotes around a string count toward the total.
+    expect(() =>
+      assertBotEventPayloadSize("x".repeat(BOT_EVENT_PAYLOAD_MAX_BYTES - 2))
+    ).not.toThrow()
+    expect(() => assertBotEventPayloadSize("x".repeat(BOT_EVENT_PAYLOAD_MAX_BYTES - 1))).toThrow(
+      "Bot event payload exceeds 65536 bytes"
+    )
+  })
+
+  it("treats an absent payload as zero bytes", () => {
+    expect(() => assertBotEventPayloadSize(undefined)).not.toThrow()
+  })
+
+  it("rejects a payload whose encoding crosses the cap", () => {
+    expect(() =>
+      assertBotEventPayloadSize({ blob: "y".repeat(BOT_EVENT_PAYLOAD_MAX_BYTES) })
+    ).toThrow("exceeds 65536 bytes")
   })
 })

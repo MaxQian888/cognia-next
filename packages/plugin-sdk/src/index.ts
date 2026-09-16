@@ -214,10 +214,18 @@ export type {
 export { PLUGIN_BOT_EXECUTORS, PLUGIN_BOT_TRIGGER_KINDS } from "@/types/plugin/plugin-bot"
 export type {
   PluginBotsAPI,
+  BotCredentialSlotSnapshot,
+  BotDeliveryStatus,
+  BotDeliverySummary,
   BotEnqueueInput,
   BotInstallationSnapshot,
+  BotInstallationStatus,
   BotPublicationReference,
   BotMonitorState,
+  BotScopeKind,
+  BotStepBeginResult,
+  BotTriggerSnapshot,
+  BotWaitOutcome,
 } from "@/types/bot/api"
 export type {
   BotEventEnvelopeV1,
@@ -247,6 +255,26 @@ export { defineMessageRenderer } from "./define/define-message-renderer"
 export { defineToolRenderer } from "./define/define-tool-renderer"
 export { defineDensityPreset } from "./define/define-density-preset"
 export { defineChatMiddleware } from "./define/define-chat-middleware"
+export {
+  defineInterceptor,
+  defineInterceptors,
+  type PluginInterceptorContributions,
+} from "./define/define-interceptors"
+export type {
+  InterceptorAroundHandler,
+  InterceptorFailurePolicy,
+  InterceptorGuardHandler,
+  InterceptorGuardVerdict,
+  InterceptorInvocationMetadata,
+  InterceptorNext,
+  InterceptorObserveHandler,
+  InterceptorReentrancy,
+  InterceptorSemantic,
+  InterceptorTransformHandler,
+  PluginInterceptorContribution,
+  PluginInterceptorPoint,
+} from "@/types/plugin/plugin-interceptors"
+export { PLUGIN_INTERCEPTOR_POINTS } from "@/types/plugin/plugin-interceptors"
 export { defineModalMount } from "./define/define-modal-mount"
 export { defineTerminalCompletionProvider } from "./define/define-terminal-completion"
 export { defineRoutingStrategy } from "./define/define-routing-strategy"

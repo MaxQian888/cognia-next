@@ -14,6 +14,14 @@ jest.mock("@/hooks/bots/use-bot-installations", () => ({
   // Also read by `use-bot-catalog`, which the install sheet pulls in.
   enabledPluginKey: () => "",
 }))
+
+// The shell folds the rail into a Sheet below `lg`; `"tablet"` exercises that
+// overlay branch. jsdom's non-matching matchMedia stub reports `desktop`.
+let breakpointValue: "mobile" | "tablet" | "desktop" = "desktop"
+jest.mock("@/hooks/ui", () => ({
+  ...jest.requireActual("@/hooks/ui"),
+  useBreakpoint: () => breakpointValue,
+}))
 jest.mock("./bot-runtime-notice", () => ({
   BotRuntimeNotice: () => <div data-testid="bot-runtime-notice-stub" />,
 }))
@@ -54,6 +62,7 @@ beforeEach(() => {
   rows = [row()]
   summary = { total: 1, armed: 1, needsAttention: 0, deadLetters: 0 }
   loading = false
+  breakpointValue = "desktop"
 })
 
 describe("BotConsole", () => {
@@ -83,6 +92,9 @@ describe("BotConsole", () => {
     // worked, and act on a Bot the user did not ask for.
     render(<BotConsole selectedId="boti_missing" onSelect={jest.fn()} />)
     expect(screen.getByTestId("bot-detail-empty")).toBeInTheDocument()
+    // And the empty pane says the link missed — not the pick-one copy, which
+    // reads as if nothing had been asked for.
+    expect(screen.getByText("That Bot is not here")).toBeInTheDocument()
   })
 
   it("hands the installation id to the route when a row is clicked", () => {
@@ -96,6 +108,66 @@ describe("BotConsole", () => {
     render(<BotConsole onSelect={jest.fn()} />)
     expect(screen.getByTestId("bot-runtime-notice-stub")).toBeInTheDocument()
   })
+})
+
+describe("first visit", () => {
+  it("selects the most recently touched Bot, the way /devices reopens on the local one", () => {
+    // A console that opens blank makes the reader ask for the thing the page
+    // could have answered itself; rows arrive `updatedAt`-descending.
+    const onSelect = jest.fn()
+    render(<BotConsole onSelect={onSelect} />)
+    expect(onSelect).toHaveBeenCalledTimes(1)
+    expect(onSelect).toHaveBeenCalledWith("boti_1")
+  })
+
+  it("waits for the first read rather than selecting on a loading list", () => {
+    loading = true
+    const onSelect = jest.fn()
+    const { rerender } = render(<BotConsole onSelect={onSelect} />)
+    expect(onSelect).not.toHaveBeenCalled()
+    loading = false
+    rerender(<BotConsole onSelect={onSelect} />)
+    expect(onSelect).toHaveBeenCalledWith("boti_1")
+  })
+
+  it("never re-arms, so clearing the selection is not undone a commit later", () => {
+    const onSelect = jest.fn()
+    const { rerender } = render(<BotConsole onSelect={onSelect} />)
+    rerender(<BotConsole selectedId="boti_1" onSelect={onSelect} />)
+    rerender(<BotConsole onSelect={onSelect} />)
+    expect(onSelect).toHaveBeenCalledTimes(1)
+  })
+
+  it("stays out of a deep link's way even when the link names nothing", () => {
+    const onSelect = jest.fn()
+    render(<BotConsole selectedId="boti_missing" onSelect={onSelect} />)
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+})
+
+it("prints no armed-fraction on an empty page", () => {
+  // "0 of 0 armed" is a stat about nothing; the empty rail already says it.
+  rows = []
+  summary = { total: 0, armed: 0, needsAttention: 0, deadLetters: 0 }
+  render(<BotConsole onSelect={jest.fn()} />)
+  expect(screen.queryByText("0 of 0 armed")).not.toBeInTheDocument()
+})
+
+it("skeletons the detail while the first read is in flight", () => {
+  loading = true
+  render(<BotConsole onSelect={jest.fn()} />)
+  expect(screen.getByTestId("bot-detail-loading")).toBeInTheDocument()
+})
+
+it("closes the list sheet when a row is picked in the overlay tier", () => {
+  // Below `lg` the rail is a Sheet over the detail pane; leaving it open on
+  // selection is the dead-end the shell's own contract warns about.
+  breakpointValue = "tablet"
+  render(<BotConsole onSelect={jest.fn()} />)
+  fireEvent.click(screen.getByLabelText("Open Bot list"))
+  expect(screen.getByTestId("bot-list-pane")).toBeInTheDocument()
+  fireEvent.click(screen.getByTestId("bot-row-boti_1"))
+  expect(screen.queryByTestId("bot-list-pane")).not.toBeInTheDocument()
 })
 
 describe("the install entry point", () => {

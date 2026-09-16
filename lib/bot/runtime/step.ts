@@ -117,7 +117,7 @@ export interface BotStepDeps {
 
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
-function assertPublicStepName(name: string): void {
+export function assertPublicStepName(name: string): void {
   if (!name.trim() || name.startsWith("__host:")) {
     throw new Error("Bot step name is empty or reserved for the host")
   }
@@ -125,6 +125,33 @@ function assertPublicStepName(name: string): void {
 
 function assertLive(signal: AbortSignal, runId: string): void {
   if (signal.aborted) throw new BotRunCancelledError(runId)
+}
+
+/**
+ * Append one step lifecycle event to the run journal.
+ *
+ * The journal is a timeline, not the memoization store — it already redacts
+ * payload strings, which is why `botRunSteps` exists beside it. Shared by the
+ * in-process step API and the `ctx.bots.step*` host calls, so both project the
+ * same `stepId`-keyed events onto a run's history.
+ */
+export async function journalBotStep(
+  runId: string,
+  type: "step.started" | "step.completed" | "step.failed",
+  name: string,
+  payload: Record<string, unknown>,
+  now: () => number
+): Promise<void> {
+  await runEventJournal
+    .append(
+      runId,
+      semanticRunEvent(
+        type,
+        { stepId: name, ...payload },
+        { ts: now(), sourceEventId: `${type}:${name}` }
+      )
+    )
+    .catch(() => undefined)
 }
 
 /**
@@ -157,16 +184,7 @@ export function createBotStepApi(input: {
     name: string,
     payload: Record<string, unknown> = {}
   ): Promise<void> {
-    await runEventJournal
-      .append(
-        runId,
-        semanticRunEvent(
-          type,
-          { stepId: name, ...payload },
-          { ts: now(), sourceEventId: `${type}:${name}` }
-        )
-      )
-      .catch(() => undefined)
+    await journalBotStep(runId, type, name, payload, now)
   }
 
   async function run<T>(name: string, fn: () => Promise<T> | T): Promise<T> {
@@ -197,6 +215,8 @@ export function createBotStepApi(input: {
     assertLive(signal, runId)
     if (request.decisionMode !== undefined && !["human", "policy"].includes(request.decisionMode))
       throw new Error("Invalid Bot approval decision mode")
+    if (request.risk !== undefined && !["low", "medium", "high"].includes(request.risk))
+      throw new Error("Invalid Bot approval risk")
     const generatedId = await botApprovalInterruptId(runId, name)
     const prior =
       (await getDb().executionRunInterrupts.get(generatedId)) ??
@@ -207,6 +227,7 @@ export function createBotStepApi(input: {
       (JSON.stringify(prior.approvalDetail) !== JSON.stringify(request.detail) ||
         prior.title !== request.title ||
         prior.approvalMessage !== request.message ||
+        prior.approvalRisk !== request.risk ||
         (prior.approvalDecisionMode === "policy" && request.decisionMode !== "policy"))
     ) {
       await getDb().executionRunInterrupts.update(prior.id, {
@@ -237,6 +258,7 @@ export function createBotStepApi(input: {
         prior?.approvalDecisionMode ?? (prior ? "human" : (request.decisionMode ?? "human")),
       ...(request.detail ? { approvalDetail: structuredClone(request.detail) } : {}),
       ...(request.message ? { approvalMessage: request.message } : {}),
+      ...(request.risk ? { approvalRisk: request.risk } : {}),
       expiresAt,
       createdAt: now(),
       ...(input.projectId ? { projectId: input.projectId } : {}),

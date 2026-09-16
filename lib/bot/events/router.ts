@@ -14,7 +14,11 @@
  */
 
 import type { BotEventEnvelopeV1, BotEventSource } from "@/types/bot/event"
-import type { PluginBotPolicyV1, PluginBotTriggerDef } from "@/types/plugin/plugin-bot"
+import type {
+  PluginBotPolicyV1,
+  PluginBotRetryPolicy,
+  PluginBotTriggerDef,
+} from "@/types/plugin/plugin-bot"
 
 import { interpolateEnvelopeTemplate } from "./envelope"
 import { evaluateBotLoopGuard, type BotLoopVerdict } from "./provenance"
@@ -96,6 +100,8 @@ export interface RoutedBotDelivery {
   holdConcurrencyWhileWaiting?: boolean
   /** Hold the delivery until this instant, for a debounced trigger. */
   notBefore?: number
+  /** The trigger's declared retry policy, snapshotted onto the row at enqueue. */
+  retry?: PluginBotRetryPolicy
 }
 
 /** A binding the event reached but that refused it, and why. */
@@ -192,6 +198,7 @@ export function routeBotEvent(input: RouteBotEventInput): BotRouteResult {
         ? { holdConcurrencyWhileWaiting: binding.trigger.holdConcurrencyWhileWaiting }
         : {}),
       ...(debounce && debounce > 0 ? { notBefore: now + debounce } : {}),
+      ...(binding.trigger.retry ? { retry: binding.trigger.retry } : {}),
     })
   }
 

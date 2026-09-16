@@ -1,0 +1,227 @@
+---
+title: Bots
+description: 在 manifest 中声明 Bot、TypeScript 与 Python 的 handler 契约、ctx.bots 宿主 API、生命周期钩子，以及让平面保持安全的限制。
+---
+
+# Bots
+
+Bot 是**绑定，不是引擎**。它的定义命名一个已经存在的执行器——workflow、
+squad、agent turn 或插件 handler——外加启动它的触发器。价值在于「何时」
+与「什么」的配对，以及这个配对携带的策略上限。Bot 声明在
+`manifest.bots[]` 里，从不通过回调注册：注册函数过不了 Python stdio 边界，
+所以声明是唯一能让 TypeScript 和 Python 插件拥有同样能力的形态。
+
+## Manifest
+
+`manifest.bots[]` 中每条都要求 `id`、`name`、`version`、`executor`，
+以及至少一个 `triggers[]` 条目。插件 Bot id 由宿主命名空间化为
+`<pluginId>:<botId>`；安装会固定这个带命名空间的 `definitionId`
+和 `pinnedVersion`。
+
+### 执行器
+
+| `executor` | 必填字段 | 背后的执行者 |
+| --- | --- | --- |
+| `workflow` | `workflow` | 一个已发布的 workflow 部署 |
+| `squad` | `team` | 一个 agent 团队 |
+| `agent-turn` | `prompt` | 单个 agent turn；支持 `{{config.x}}` 与 `{{event.*}}` 插值 |
+| `handler` | `entry` + `export`（JS）或 `backend: "python"` | 插件内的 durable handler 函数 |
+
+`handler` 执行器下，JS 插件声明 `entry`（相对模块路径）和可选的
+`export`（默认 `default`）。Python 插件不声明 `entry`；宿主把 `run`
+方法分发到 `@cognia.contribution("<bot id>")` 对象上。
+
+### 触发器
+
+| `kind` | 何时触发 | 必填字段 |
+| --- | --- | --- |
+| `interaction` | Bot 观察到一条入站 IM 消息 | — |
+| `event` | Bot 平面事件匹配 `source` + `types` | `source`、`types` |
+| `schedule` | cron 到点 | `cron`，可选 `timezone` |
+| `poll` | 间隔到达 | `everyMs` |
+| `derivedState` | 间隔到达；读取宿主存的 `state` | `everyMs`、`state` |
+| `manual` | 人或 `ctx.bots.enqueue` 启动 | — |
+
+公共字段：`enabledByDefault`（除非 `false` 否则默认武装）、
+`holdConcurrencyWhileWaiting`、`inputSchema`（manual 触发表单）、
+`conditions`、`retry`。
+
+### `conditions.match`
+
+结构化事件匹配，在现有 GitHub 风格条件之后求值。键是以事件根为起点的
+点分路径（`/^[A-Za-z0-9_.]+$/`）；值是标量或非空标量列表（成员判断）。
+缺失或非标量的叶子永不匹配——这是路由，不是授权。
+
+```json
+{ "id": "lark", "kind": "event", "source": "integration", "types": ["im.message"],
+  "conditions": { "match": { "payload.event.type": "message", "actor.kind": "bot" } } }
+```
+
+### `retry`
+
+每个触发器的重试策略——只会收窄，绝不越过宿主上限：
+
+```json
+{ "retry": { "maxAttempts": 2, "baseDelayMs": 5000, "maxDelayMs": 60000 } }
+```
+
+`maxAttempts` 是 1–5 的整数（宿主上限优先）。
+`baseDelayMs`/`maxDelayMs` 只能放宽默认退避。策略在入队时快照到
+投递行上，重试决策永远不需要再解析一次定义。
+
+### 配置驱动的调度
+
+`cronConfigKey`、`timezoneConfigKey`（仅 schedule）和
+`everyMsConfigKey`（仅 poll/derivedState）命名 Bot
+`configSchema.properties` 中的一个键。合法配置值胜出；
+声明值是回退。宿主回退时会把原因记进
+`triggerState[triggerId].configFallback`：
+
+| 代码 | 含义 |
+| --- | --- |
+| `missing` | 配置键缺失或为空 |
+| `invalid-cron` | 配置的 cron 校验失败 |
+| `invalid-timezone` | 配置的时区过不了 `Intl.DateTimeFormat` |
+| `below-floor` | 配置的间隔低于 15000 ms |
+
+控制台把这些渲染成触发器行上的徽标。
+
+### `requires` 与 `policy`
+
+`requires.credentials[]` 声明凭据槽位
+（`{ id, label, optional?, integration?, strategy? }`）；
+未绑定的必需槽位会把安装停在 `needs_setup`。
+`policy` 是定义层的上限——`maxAuthority`、`maxAutonomy`、
+`requireApprovalForWrites`——与组织、插件、安装、单次请求各层
+取交集（绝不放宽）。
+
+### `lifecycle`
+
+`lifecycle: { entry?: string, hooks: [...] }` 声明最多四个由宿主在注册时
+解析的钩子：`onInstall`、`onConfigure`、`onArm`、`onUninstall`。
+JS 插件从 `lifecycle.entry ?? entry` 解析具名导出——非 handler 执行器
+没有 `entry` 可回退，所以那里必须有 `lifecycle.entry`。Python 插件在
+contribution 对象上实现 snake_case 方法，`entry` 被忽略。
+坏钩子会让整个 Bot 注册失败。
+
+## Handler 契约
+
+handler Bot 在崩溃或等待恢复后从头重入；任何不得执行两次的工作都必须
+放进 `ctx.step.run`（TypeScript）或 `run.step`（Python），它把已完成的
+step 记忆化在 `botRunSteps` 里。以 `__host:` 开头的 step 名是宿主自留的
+记账名（发布检查点、快照、结果）。
+
+<table>
+<tr><th>TypeScript（`BotRunContextV1`）</th><th>Python（`BotRun`）</th></tr>
+<tr><td>
+
+```ts
+export default async function run(ctx: BotRunContextV1) {
+  const snap = await ctx.step.run("snapshot", fetchSnapshot)
+  const decision = await ctx.step.waitForApproval("gate", {
+    title: "Push changes?", risk: "medium",
+  })
+  const event = await ctx.step.waitForEvent("ci", {
+    key: run.correlation, timeoutMs: 300_000,
+  })
+  await ctx.log("info", "done", { pr: snap.pr })
+  await ctx.progress({ fraction: 0.9 })
+  return { summary: "ok", output: { pr: snap.pr } }
+}
+```
+
+</td><td>
+
+```python
+@cognia.contribution("daily-digest")
+class DailyDigest:
+    async def run(self, run: BotRun):
+        async with run.step("snapshot") as s:
+            s.complete({"pr": 7})
+        decision = await run.wait_for_approval(
+            "gate", {"title": "Push?", "risk": "medium"})
+        event = await run.wait_for_event(
+            "ci", key="pr:7", timeout_ms=300_000)
+        await run.log("info", "done", {"pr": 7})
+        await run.progress(fraction=0.9)
+        return {"summary": "ok"}
+```
+
+</td></tr>
+</table>
+
+TypeScript 拿到完整的 `BotRunContextV1`（`runId`、`installationId`、
+`botId`、`event`、`config`、`signal`、`step`、`log`、`progress`）。
+Python 收到由可序列化 `BotRunSnapshotV1` 构造的 `BotRun`，
+通过 `ctx.bots.*` 宿主调用驱动完全相同的表面。宿主答不了的等待返回
+`{"status": "parked"}`；宿主记录停泊意图，bridge 在 `run` 落定后重新抛出
+`BotRunParkedError`——SDK 的 `BotRunParked` 异常只是礼貌性的。
+
+## `ctx.bots` 参考
+
+所有方法都门控在 `agent:control` 权限与 `requireOwnedBotRun` 上——
+handler 只能触碰自己的安装。「Live」列标记那些还要求运行正在本宿主
+执行的方法（对已落定或 companion 镜像的运行会失败）。
+
+| 方法 | 用途 | Live run |
+| --- | --- | --- |
+| `getInstallation` | `BotInstallationSnapshot`：config、triggers、armed、槽位绑定布尔值（绝无凭据 id）、publications、webhookEnabled | 否 |
+| `enqueue` | 经已声明的 `manual` 触发器入队子工作；返回 `deliveryId` | 否 |
+| `cancelResource` | 取消匹配某 resource 的非终态投递（及其运行） | 否 |
+| `recordMonitor` | 把 `lastSuccessAt`/`retryAt`/`lastError` 并入 `monitor` | 否 |
+| `stepBegin` | 开始一个具名 durable step；记忆化重放返回已存值 | 是 |
+| `stepComplete` | 存储 step 输出；重入时值变了会抛错 | 是 |
+| `stepFail` | 记录 step 失败 | 是 |
+| `waitForApproval` | 停泊至人或策略给出决定；跨进程返回 `{status:"parked"}` | 否 |
+| `waitForEvent` | 停泊至关联事件到达或超时 | 否 |
+| `log` | 往运行 journal 追加一条 handler 日志 | 是 |
+| `progress` | 在 journal 上报告 `{fraction, message}` | 是 |
+| `writeTriggerState` | 只写 poll/derivedState 触发器的 `cursor`/`watermark` | 否 |
+| `setTriggerArmed` | 武装/解除已声明的触发器；触发 `onArm` 钩子 | 否 |
+| `listDeliveries` | `BotDeliverySummary[]` 最新在前；过滤：`resourceId`、`triggerId`、`status`；上限 ≤ 200，默认 50 | 否 |
+| `getRunResult` | 兄弟运行的 `{status, summary, output}`；缺失或他人的运行返回 `null` | 否 |
+| `emit` | 发布 `<pluginId>.<type>` 事件；返回 `{matchedInstallations}` | 否 |
+
+## 生命周期钩子
+
+宿主像解析 handler 一样解析声明的钩子：JS 取 `lifecycle.entry ?? entry`
+的具名导出，Python 取 contribution 对象上的 snake_case 方法
+（`on_install`、`on_configure`、`on_arm`、`on_uninstall`）。
+
+每个钩子收到 `BotLifecycleContextV1`：`installation`（与
+`getInstallation` 返回的同一份 `BotInstallationSnapshot`——槽位绑定
+布尔值，无凭据 id）、`onConfigure` 的 `previousConfig`、`onArm` 的
+`trigger: {id, armed}`。没有 `runId`——钩子不是运行，不产生 journal
+事件，且必须在 `BOT_LIFECYCLE_HOOK_TIMEOUT_MS`（30 秒）内完成。
+
+| 钩子 | 何时运行 | 失败后果 |
+| --- | --- | --- |
+| `onInstall` | 安装行写入之前 | 否决——不建行 |
+| `onConfigure` | 配置块替换之前 | 否决——旧配置保留 |
+| `onArm` | 触发器武装状态写入之前（两个方向，含 `ctx.bots.setTriggerArmed`） | 否决——override 不落盘 |
+| `onUninstall` | 调度移除之后、行删除之前 | 建议性——记日志，移除照常 |
+
+钩子在拥有该安装的宿主上、于管理性变更内部执行。远程调用方经
+`mutateBotInstallationOnHost` 触达它们，恰好一次——绝不每个 peer 各一次。
+
+## 回环安全
+
+- `emit` 要求 `<pluginId>.<type>` 命名空间；自由形态的类型可以伪造宿主
+  事件或别的插件的事件。
+- 发出的信封携带 `provenance`（`selfProduced`、`depth`、
+  `causationEventIds`、`producedByInstallationId`）；路由器的兄弟 Bot
+  回环防护会拒绝 Bot 响应自己，除非定义设置 `allowSelfTriggering`。
+- 确定性的 `sourceRecordId`（runId + type + 规范化载荷的哈希）把重复
+  发出的相同事件折叠到一条投递上。
+
+## 限制
+
+| 限制 | 值 |
+| --- | --- |
+| 事件载荷（`enqueue`/`emit`） | `BOT_EVENT_PAYLOAD_MAX_BYTES` = 64 KiB JSON |
+| `listDeliveries` 上限 | 默认 50，钳制在 [1, 200] |
+| poll/derivedState `everyMs` 下限 | `BOT_TIMED_TRIGGER_MIN_EVERY_MS` = 15000 ms |
+| `retry.maxAttempts` | 1–5，宿主上限优先 |
+| 生命周期钩子时长 | `BOT_LIFECYCLE_HOOK_TIMEOUT_MS` = 30 s |
+| `emit` 类型 | `^<pluginId>\.[A-Za-z0-9_.-]+$` |
+| `writeTriggerState` 键 | 仅 `cursor`、`watermark` |

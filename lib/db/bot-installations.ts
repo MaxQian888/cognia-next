@@ -106,10 +106,17 @@ async function syncSchedules(row: BotInstallationRow): Promise<void> {
   }
 }
 
-export async function installBot(input: InstallBotInput): Promise<BotInstallationRow> {
+/**
+ * The row `installBot` would write, without writing it.
+ *
+ * Split out so `onInstall` can veto against the exact row the installation
+ * will carry — same generated id, same derived status — instead of a
+ * hand-rolled approximation that drifts from this shape.
+ */
+export function buildBotInstallationRow(input: InstallBotInput): BotInstallationRow {
   const now = input.now ?? Date.now()
   const credentialBindings = input.credentialBindings ?? {}
-  const row: BotInstallationRow = {
+  return {
     id: input.id ?? `boti_${nanoid(12)}`,
     definitionId: input.definitionId,
     definitionSource: input.definitionSource,
@@ -130,8 +137,21 @@ export async function installBot(input: InstallBotInput): Promise<BotInstallatio
     ...(input.policyGrant ? { policyGrant: input.policyGrant } : {}),
     ...(input.placementRef ? { placementRef: input.placementRef } : {}),
   }
+}
+
+/**
+ * Write a prepared row and arm its schedules. Exported alongside
+ * {@link buildBotInstallationRow} so a lifecycle hook can run between
+ * construction and persistence without duplicating either half.
+ */
+export async function persistBotInstallation(row: BotInstallationRow): Promise<void> {
   await getDb().botInstallations.add(row)
   await syncSchedules(row)
+}
+
+export async function installBot(input: InstallBotInput): Promise<BotInstallationRow> {
+  const row = buildBotInstallationRow(input)
+  await persistBotInstallation(row)
   return row
 }
 
@@ -260,7 +280,14 @@ export async function writeBotTriggerState(
   return db.transaction("rw", db.botInstallations, async () => {
     const row = await db.botInstallations.get(installationId)
     if (!row) return undefined
-    const next: BotTriggerRuntimeState = { ...(row.triggerState?.[triggerId] ?? {}), ...patch }
+    const next: BotTriggerRuntimeState = { ...(row.triggerState?.[triggerId] ?? {}) }
+    // A key explicitly patched to `undefined` is a delete, not a stored
+    // `undefined`: `configFallback` is cleared this way when the config value
+    // becomes valid again.
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === undefined) delete next[key as keyof BotTriggerRuntimeState]
+      else next[key as keyof BotTriggerRuntimeState] = value as never
+    }
     await db.botInstallations.put({
       ...row,
       triggerState: { ...(row.triggerState ?? {}), [triggerId]: next },

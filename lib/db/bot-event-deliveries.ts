@@ -15,6 +15,7 @@ import Dexie from "dexie"
 
 import { getDb } from "@/lib/db/schema"
 import type { BotDeliveryStatus, BotEventDeliveryRow } from "@/lib/db/bot-types"
+import type { PluginBotRetryPolicy } from "@/types/plugin/plugin-bot"
 import type { BotEventEnvelopeV1 } from "@/types/bot/event"
 import { decideNextAttempt } from "@/lib/queue/retry-policy"
 
@@ -98,6 +99,7 @@ function chargeAbandonedAttempt(
     error: new Error(BOT_DELIVERY_INTERRUPTED_ERROR),
     nowMs: now,
     random,
+    ...(row.retry ? { policy: row.retry } : {}),
   })
   const deadlettered = decision.status === "deadlettered"
   const next: BotEventDeliveryRow = {
@@ -131,6 +133,8 @@ export interface EnqueueBotDeliveryInput {
   notBefore?: number
   concurrencyKey?: string
   holdConcurrencyWhileWaiting?: boolean
+  /** The trigger's declared retry policy, snapshotted onto the row. */
+  retry?: PluginBotRetryPolicy
   now?: number
 }
 
@@ -172,6 +176,7 @@ export async function enqueueBotDelivery(
       ? { holdConcurrencyWhileWaiting: input.holdConcurrencyWhileWaiting }
       : {}),
     ...(envelope.correlation ? { correlation: envelope.correlation } : {}),
+    ...(input.retry ? { retry: input.retry } : {}),
   }
 
   try {
@@ -335,7 +340,13 @@ export async function failBotDelivery(
   const row = await db.botEventDeliveries.get(id)
   if (!row) return undefined
 
-  const decision = decideNextAttempt({ attempts: row.attempts, error, nowMs: now, random })
+  const decision = decideNextAttempt({
+    attempts: row.attempts,
+    error,
+    nowMs: now,
+    random,
+    ...(row.retry ? { policy: row.retry } : {}),
+  })
   const deadlettered = decision.status === "deadlettered"
   const next: BotEventDeliveryRow = {
     ...row,

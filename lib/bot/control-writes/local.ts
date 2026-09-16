@@ -21,6 +21,7 @@ import { getBotDelivery, replayBotDelivery } from "@/lib/db/bot-event-deliveries
 import { getExecutionRun } from "@/lib/db/execution-runs"
 import type { BotInstallationRow } from "@/lib/db/bot-types"
 import { getDb } from "@/lib/db/schema"
+import { runBotLifecycleHook } from "./lifecycle-hooks"
 
 /** The event type a manual run carries. Named so a handler can branch on it. */
 export const MANUAL_RUN_EVENT_TYPE = "manual.run"
@@ -75,6 +76,18 @@ export async function setBotTriggerArmedLocally(
   const resolved = await resolveInstalledBot(installation)
   const trigger = resolved?.definition.triggers.find((t) => t.id === input.triggerId)
   if (!trigger) throw new BotControlTargetMissingError("trigger", input.triggerId)
+
+  // `onArm` may veto the arm/disarm before the override lands. It fires for
+  // BOTH directions — `ctx.bots.setTriggerArmed` flows through here too, so
+  // a Bot disarming itself still sees `onArm(armed: false)`.
+  if (resolved) {
+    await runBotLifecycleHook({
+      installation,
+      definition: resolved.definition,
+      phase: "onArm",
+      trigger: { id: input.triggerId, armed: input.armed },
+    })
+  }
 
   const next = await updateBotInstallation(input.installationId, {
     ...(input.armed && installation.activatedAt === undefined ? { activatedAt: Date.now() } : {}),

@@ -212,6 +212,47 @@ describe("botEventDeliveries", () => {
     expect(last?.status).toBe("deadletter")
   })
 
+  it("honors the trigger's snapshotted retry budget, dead-lettering after it", async () => {
+    await enqueueBotDelivery({
+      envelope: envelope(),
+      retry: { maxAttempts: 2 },
+      now: NOW,
+    })
+
+    const first = await failBotDelivery("del_1", new Error("upstream 500"), NOW, () => 0)
+    expect(first?.status).toBe("pending")
+
+    const second = await failBotDelivery("del_1", new Error("upstream 500"), NOW, () => 0)
+    expect(second?.status).toBe("deadletter")
+    expect(second?.attempts).toBe(2)
+  })
+
+  it("stores the retry snapshot on the row so the decision needs no definition", async () => {
+    await enqueueBotDelivery({
+      envelope: envelope(),
+      retry: { maxAttempts: 1, baseDelayMs: 90_000 },
+      now: NOW,
+    })
+
+    const row = await getDb().botEventDeliveries.get("del_1")
+    expect(row?.retry).toEqual({ maxAttempts: 1, baseDelayMs: 90_000 })
+
+    // maxAttempts 1: the first failure is already the whole budget.
+    const next = await failBotDelivery("del_1", new Error("upstream 500"), NOW, () => 0)
+    expect(next?.status).toBe("deadletter")
+  })
+
+  it("lets the snapshot raise the retry delay above the host floor", async () => {
+    await enqueueBotDelivery({
+      envelope: envelope(),
+      retry: { baseDelayMs: 30_000 },
+      now: NOW,
+    })
+    const next = await failBotDelivery("del_1", new Error("upstream 500"), NOW, () => 0)
+    expect(next?.status).toBe("pending")
+    expect(next?.nextAttemptAt).toBeGreaterThanOrEqual(NOW + 30_000)
+  })
+
   it("keeps a dismissal apart from a failure", async () => {
     await enqueueBotDelivery({ envelope: envelope(), now: NOW })
     await dismissBotDelivery("del_1", "superseded by a later edit", NOW + 1)

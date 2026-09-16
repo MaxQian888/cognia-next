@@ -29,9 +29,14 @@ export interface AgentTurnExecutorDeps {
   >
 }
 
-/** The prompt a turn is given, with placeholders resolved from the envelope. */
+/**
+ * The prompt a turn is given, with placeholders resolved from the envelope
+ * and `{{config.*}}` placeholders from the resolved installation config.
+ */
 export function agentTurnPrompt(ctx: BotExecutorContext): string {
-  return interpolateEnvelopeTemplate(ctx.definition.prompt ?? "", ctx.event)
+  return interpolateEnvelopeTemplate(ctx.definition.prompt ?? "", ctx.event, {
+    config: ctx.config,
+  })
 }
 
 export function createAgentTurnBotExecutor(deps: AgentTurnExecutorDeps = {}): BotExecutorFn {

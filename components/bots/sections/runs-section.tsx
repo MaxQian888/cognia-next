@@ -19,16 +19,27 @@
  * one of its runs the same length while meaning different things.
  */
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 
 import { AgentRunsPanel } from "@/components/agent-runs/agent-runs-panel"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
+import { useElementWidth } from "@/hooks/use-element-width"
 import type { BotConsoleRow } from "@/lib/bot/console/bot-rows"
+
+/**
+ * The narrowest card that honestly seats the embedded cockpit's split: a
+ * 384px (`max-w-sm`) run list plus ~336px of run detail. Below it the panel
+ * collapses to list-plus-drawer — decided by THIS width, not the viewport's,
+ * because a card in a draggable pane can be narrow on a very wide monitor.
+ */
+const SIDE_BY_SIDE_MIN_PX = 720
 
 export function BotRunsSection({ row }: { row: BotConsoleRow }) {
   const t = useTranslations("bots")
   const [runId, setRunId] = useState<string | undefined>(undefined)
+  const box = useRef<HTMLDivElement>(null)
+  const width = useElementWidth(box)
 
   if (row.orphaned) {
     // The runs exist and are still readable on `/agent-runs`. What is gone is
@@ -48,9 +59,13 @@ export function BotRunsSection({ row }: { row: BotConsoleRow }) {
     // A fixed height rather than `flex-1`: this section is one card in a grid
     // that scrolls as a whole, so an unbounded panel would stretch the card to
     // whatever the run list happened to be.
-    <div className="h-[26rem] min-h-0 overflow-hidden" data-testid="bot-runs">
+    <div ref={box} className="h-[26rem] min-h-0 overflow-hidden" data-testid="bot-runs">
       <AgentRunsPanel
         embedded
+        // `0` is "not yet measured" — keep the panel's own viewport answer
+        // until the first layout pass, rather than collapsing to compact for
+        // one commit.
+        compact={width > 0 ? width < SIDE_BY_SIDE_MIN_PX : undefined}
         filterKind="bot"
         botInstallationId={row.id}
         {...(runId ? { selectedId: runId } : {})}

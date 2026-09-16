@@ -13,6 +13,7 @@ import type { BotEventEnvelopeV1 } from "@/types/bot/event"
 
 import { BotExecutorUnavailableError, type BotExecutorContext } from "./executors/types"
 import { BotRunParkedError } from "./step"
+import { pendingParks, recordPendingPark } from "./host-step"
 import {
   __resetLiveBotRunsForTesting,
   botRunId,
@@ -487,6 +488,19 @@ describe("runBotDelivery", () => {
 
   it("cancelLiveBotRun reports whether the run was running here", async () => {
     expect(cancelLiveBotRun("run_bot_nope")).toBe(false)
+  })
+
+  it("clears a pending park recorded by a host call when the attempt settles", async () => {
+    const { delivery, resolved } = await seed()
+    recordPendingPark(new BotRunParkedError(botRunId(delivery.id), "stale", NOW + 100))
+    const outcome = await runBotDelivery({
+      delivery,
+      resolved,
+      now,
+      executors: { handler: async () => ({}) },
+    })
+    expect(outcome.status).toBe("completed")
+    expect(pendingParks.get(outcome.runId)).toBeUndefined()
   })
 })
 

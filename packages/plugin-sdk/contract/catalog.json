@@ -948,6 +948,12 @@
       "runtime": "javascript",
       "requiredFor": [],
       "executable": true
+    },
+    {
+      "path": "bots[].lifecycle.entry",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true
     }
   ],
   "manifestContributions": [
@@ -2592,6 +2598,150 @@
           "requiredPermissions": ["agent:control"],
           "consentTier": "policy",
           "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "bots.stepBegin",
+          "name": "stepBegin",
+          "requiredPermissions": ["agent:control"],
+          "consentTier": "policy",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "bots.stepComplete",
+          "name": "stepComplete",
+          "requiredPermissions": ["agent:control"],
+          "consentTier": "policy",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "bots.stepFail",
+          "name": "stepFail",
+          "requiredPermissions": ["agent:control"],
+          "consentTier": "policy",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "bots.waitForApproval",
+          "name": "waitForApproval",
+          "requiredPermissions": ["agent:control"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "bots.waitForEvent",
+          "name": "waitForEvent",
+          "requiredPermissions": ["agent:control"],
+          "consentTier": "policy",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "bots.log",
+          "name": "log",
+          "requiredPermissions": ["agent:control"],
+          "consentTier": "policy",
+          "risk": "low",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "bots.progress",
+          "name": "progress",
+          "requiredPermissions": ["agent:control"],
+          "consentTier": "policy",
+          "risk": "low",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "bots.writeTriggerState",
+          "name": "writeTriggerState",
+          "requiredPermissions": ["agent:control"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "bots.setTriggerArmed",
+          "name": "setTriggerArmed",
+          "requiredPermissions": ["agent:control"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "bots.listDeliveries",
+          "name": "listDeliveries",
+          "requiredPermissions": ["agent:control"],
+          "consentTier": "policy",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "bots.getRunResult",
+          "name": "getRunResult",
+          "requiredPermissions": ["agent:control"],
+          "consentTier": "policy",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "bots.emit",
+          "name": "emit",
+          "requiredPermissions": ["agent:control"],
+          "consentTier": "policy",
+          "risk": "medium",
           "idempotent": true,
           "cancellable": false,
           "resourceEffect": {
@@ -12217,6 +12367,263 @@
           }
         }
       ]
+    }
+  ],
+  "wireOps": [
+    {
+      "id": "db:beginTransaction",
+      "idempotent": false,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "scopeBinding": "plugin",
+      "executionPlacement": "host-service",
+      "introducedIn": "0.9.0"
+    },
+    {
+      "id": "db:commit",
+      "idempotent": false,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "scopeBinding": "plugin",
+      "executionPlacement": "host-service",
+      "introducedIn": "0.9.0"
+    },
+    {
+      "id": "db:rollback",
+      "idempotent": false,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "scopeBinding": "plugin",
+      "executionPlacement": "host-service",
+      "introducedIn": "0.9.0"
+    },
+    {
+      "id": "db:txExecute",
+      "idempotent": false,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "scopeBinding": "plugin",
+      "executionPlacement": "host-service",
+      "introducedIn": "0.9.0"
+    },
+    {
+      "id": "db:txQuery",
+      "idempotent": true,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "scopeBinding": "plugin",
+      "executionPlacement": "host-service",
+      "introducedIn": "0.9.0"
+    },
+    {
+      "id": "managedIdeState:get",
+      "idempotent": true,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "scopeBinding": "project",
+      "executionPlacement": "host-service",
+      "introducedIn": "0.9.0"
+    },
+    {
+      "id": "managedIdeState:keys",
+      "idempotent": true,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "scopeBinding": "project",
+      "executionPlacement": "host-service",
+      "introducedIn": "0.9.0"
+    },
+    {
+      "id": "managedIdeState:set",
+      "idempotent": false,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "scopeBinding": "project",
+      "executionPlacement": "host-service",
+      "introducedIn": "0.9.0"
+    },
+    {
+      "id": "managedIdeState:delete",
+      "idempotent": false,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "scopeBinding": "project",
+      "executionPlacement": "host-service",
+      "introducedIn": "0.9.0"
+    },
+    {
+      "id": "managedIdeState:watch",
+      "idempotent": false,
+      "resourceEffect": {
+        "kind": "host-owned"
+      },
+      "scopeBinding": "project",
+      "executionPlacement": "host-service",
+      "introducedIn": "0.9.0"
+    },
+    {
+      "id": "managedIdeSecrets:get",
+      "idempotent": true,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "requiredPermissions": ["secrets:read"],
+      "scopeBinding": "project",
+      "executionPlacement": "host-service",
+      "introducedIn": "0.9.0"
+    },
+    {
+      "id": "managedIdeSecrets:keys",
+      "idempotent": true,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "requiredPermissions": ["secrets:read"],
+      "scopeBinding": "project",
+      "executionPlacement": "host-service",
+      "introducedIn": "0.9.0"
+    },
+    {
+      "id": "managedIdeSecrets:set",
+      "idempotent": false,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "requiredPermissions": ["secrets:write"],
+      "scopeBinding": "project",
+      "executionPlacement": "host-service",
+      "introducedIn": "0.9.0"
+    },
+    {
+      "id": "managedIdeSecrets:delete",
+      "idempotent": false,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "requiredPermissions": ["secrets:write"],
+      "scopeBinding": "project",
+      "executionPlacement": "host-service",
+      "introducedIn": "0.9.0"
+    },
+    {
+      "id": "secrets:set",
+      "idempotent": false,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "requiredPermissions": ["secrets:write"],
+      "scopeBinding": "plugin",
+      "executionPlacement": "host-service",
+      "introducedIn": "0.9.0"
+    },
+    {
+      "id": "window:getSize",
+      "idempotent": true,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "scopeBinding": "plugin",
+      "executionPlacement": "ui",
+      "introducedIn": "0.9.0"
+    },
+    {
+      "id": "window:getPosition",
+      "idempotent": true,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "scopeBinding": "plugin",
+      "executionPlacement": "ui",
+      "introducedIn": "0.9.0"
+    },
+    {
+      "id": "window:isMaximized",
+      "idempotent": true,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "scopeBinding": "plugin",
+      "executionPlacement": "ui",
+      "introducedIn": "0.9.0"
+    },
+    {
+      "id": "window:center",
+      "idempotent": false,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "scopeBinding": "plugin",
+      "executionPlacement": "ui",
+      "introducedIn": "0.9.0"
+    },
+    {
+      "id": "window:close",
+      "idempotent": false,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "scopeBinding": "plugin",
+      "executionPlacement": "ui",
+      "introducedIn": "0.9.0"
+    },
+    {
+      "id": "window:hide",
+      "idempotent": false,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "scopeBinding": "plugin",
+      "executionPlacement": "ui",
+      "introducedIn": "0.9.0"
+    },
+    {
+      "id": "window:show",
+      "idempotent": false,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "scopeBinding": "plugin",
+      "executionPlacement": "ui",
+      "introducedIn": "0.9.0"
+    },
+    {
+      "id": "window:setPosition",
+      "idempotent": false,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "scopeBinding": "plugin",
+      "executionPlacement": "ui",
+      "introducedIn": "0.9.0"
+    },
+    {
+      "id": "window:setSize",
+      "idempotent": false,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "scopeBinding": "plugin",
+      "executionPlacement": "ui",
+      "introducedIn": "0.9.0"
+    },
+    {
+      "id": "window:setTitle",
+      "idempotent": false,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "scopeBinding": "plugin",
+      "executionPlacement": "ui",
+      "introducedIn": "0.9.0"
     }
   ]
 }

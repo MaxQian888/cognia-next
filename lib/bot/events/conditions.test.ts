@@ -64,4 +64,78 @@ describe("structured Bot trigger conditions", () => {
       "labels"
     )
   })
+
+  it("matches envelope-rooted paths against scalars and lists", () => {
+    // Lark/Slack-shaped payloads: the type sits inside payload.event, the
+    // sender kind on the envelope actor.
+    const lark = event(
+      { event: { type: "im.message.receive_v1", message: { chat_id: "c1" } } },
+      { actor: { kind: "user", id: "u-1" } }
+    )
+    expect(
+      botConditionMismatch(
+        { match: { "payload.event.type": "im.message.receive_v1", "actor.kind": "user" } },
+        lark
+      )
+    ).toBeUndefined()
+    expect(
+      botConditionMismatch({ match: { "payload.event.type": "im.message.recalled" } }, lark)
+    ).toBe("match:payload.event.type")
+    // Array membership.
+    expect(botConditionMismatch({ match: { "actor.kind": ["bot", "user"] } }, lark)).toBeUndefined()
+    expect(botConditionMismatch({ match: { "actor.kind": ["bot", "app"] } }, lark)).toBe(
+      "match:actor.kind"
+    )
+  })
+
+  it("never matches a missing, null, or object-valued path", () => {
+    const conditions = { match: { "payload.deep.value": 1 } }
+    expect(botConditionMismatch(conditions, event({}))).toBe("match:payload.deep.value")
+    expect(botConditionMismatch(conditions, event({ deep: { value: null } }))).toBe(
+      "match:payload.deep.value"
+    )
+    expect(botConditionMismatch(conditions, event({ deep: { value: { x: 1 } } }))).toBe(
+      "match:payload.deep.value"
+    )
+    // Prototype segments are misses, not reads.
+    expect(botConditionMismatch({ match: { "__proto__.polluted": true } }, event({}))).toBe(
+      "match:__proto__.polluted"
+    )
+  })
+
+  it("compares numbers and booleans with strict equality", () => {
+    const payload = { pr: { count: 3, merged: true } }
+    expect(
+      botConditionMismatch(
+        { match: { "payload.pr.count": 3, "payload.pr.merged": true } },
+        event(payload)
+      )
+    ).toBeUndefined()
+    expect(botConditionMismatch({ match: { "payload.pr.count": "3" } }, event(payload))).toBe(
+      "match:payload.pr.count"
+    )
+    expect(botConditionMismatch({ match: { "payload.pr.merged": false } }, event(payload))).toBe(
+      "match:payload.pr.merged"
+    )
+  })
+
+  it("composes with the structured conditions", () => {
+    const payload = {
+      pull_request: { base: { ref: "main" }, draft: false },
+      repository: { full_name: "owner/repo" },
+      action: "opened",
+    }
+    const conditions = {
+      repositories: ["owner/repo"],
+      branches: ["main"],
+      match: { "payload.action": ["opened", "reopened"] },
+    }
+    expect(botConditionMismatch(conditions, event(payload))).toBeUndefined()
+    expect(botConditionMismatch(conditions, event({ ...payload, action: "closed" }))).toBe(
+      "match:payload.action"
+    )
+    expect(
+      botConditionMismatch(conditions, event({ ...payload, repository: { full_name: "x/y" } }))
+    ).toBe("repository")
+  })
 })

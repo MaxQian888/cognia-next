@@ -112,10 +112,30 @@ class Runtime:
         entry = self._contributions.get(contribution_id)
         if entry is None:
             raise RuntimeError(f"unknown contribution: {contribution_id}")
+        from .bot import BOT_LIFECYCLE_PY_METHODS, is_bot_contribution
+
         fn = entry.get(method)
+        if (
+            fn is None
+            and method in BOT_LIFECYCLE_PY_METHODS
+            and is_bot_contribution(contribution_id)
+        ):
+            # The host calls the manifest's camelCase hook names; a Python
+            # author implements the snake_case method of the same name.
+            fn = entry.get(BOT_LIFECYCLE_PY_METHODS[method])
         if fn is None:
             raise RuntimeError(f"contribution '{contribution_id}' has no method '{method}'")
-        return fn(*(args or []))
+        call_args = list(args or [])
+        if method == "run" and call_args:
+            # A Bot handler's `run` takes a snapshot; give it the BotRun
+            # wrapper so `ctx.bots.*` host calls are reachable. Mirrors the
+            # wrap the host-side bridge relies on.
+            from .bot import BotRun
+            from .ctx import ctx as host_ctx
+
+            if is_bot_contribution(contribution_id):
+                call_args[0] = BotRun(host_ctx, call_args[0])
+        return fn(*call_args)
 
     def register_tool(
         self,

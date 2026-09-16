@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Plugin Bots are now a first-class authoring surface with full Python parity. A Python handler gets the same durable-step API a TypeScript handler has — `run.step`, `wait_for_approval`, `wait_for_event`, `log`, `progress` — driven by the new `ctx.bots` host calls (`getInstallation`, `enqueue`, `cancelResource`, `recordMonitor`, `stepBegin`/`stepComplete`/`stepFail`, `waitForApproval`, `waitForEvent`, `log`, `progress`, `writeTriggerState`, `setTriggerArmed`, `listDeliveries`, `getRunResult`, `emit`), all scoped to the owning installation under `agent:control`. The manifest says more declaratively: `conditions.match` routes on envelope fields, `cronConfigKey`/`timezoneConfigKey`/`everyMsConfigKey` let config override schedules with a visible config-fallback badge in the console, per-trigger `retry` narrows backoff, `waitForApproval` accepts a risk level the approval card displays as a badge, and `lifecycle` hooks (`onInstall`/`onConfigure`/`onArm`/`onUninstall`) let a definition veto or observe its own admin mutations.

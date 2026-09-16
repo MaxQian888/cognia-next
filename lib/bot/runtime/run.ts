@@ -15,8 +15,6 @@
  *   - CANCELLED: somebody stopped it. Not a failure and not retried.
  */
 
-import { nanoid } from "nanoid"
-
 import {
   completeBotDelivery,
   dismissBotDelivery,
@@ -50,6 +48,8 @@ import {
   type BotExecutorFn,
 } from "./executors/types"
 import { BotRunCancelledError, BotRunParkedError, createBotStepApi, type BotStepDeps } from "./step"
+import { appendBotRunLog, appendBotRunProgress } from "./journal"
+import { clearPendingPark } from "./host-step"
 
 /** The run a delivery maps to. Derived, so a re-entry finds its own state. */
 export function botRunId(deliveryId: string): string {
@@ -287,21 +287,10 @@ export async function runBotDelivery(input: RunBotDeliveryInput): Promise<BotRun
     signal: controller.signal,
     step,
     log: (level: BotLogLevel, message: string, data?: Record<string, unknown>) => {
-      void runEventJournal
-        .append(
-          runId,
-          semanticRunEvent(
-            level === "error" ? "step.failed" : "step.progress",
-            { message, ...(data ?? {}) },
-            { ts: now(), sourceEventId: `log:${nanoid(10)}` }
-          )
-        )
-        .catch(() => undefined)
+      appendBotRunLog(runId, level, message, data, now)
     },
     progress: (update: BotProgressUpdateV1) => {
-      void runEventJournal
-        .append(runId, semanticRunEvent("step.progress", { ...update }, { ts: now() }))
-        .catch(() => undefined)
+      appendBotRunProgress(runId, update, now)
     },
     installation: resolved.installation,
     definition: resolved.definition,
@@ -466,6 +455,9 @@ export async function runBotDelivery(input: RunBotDeliveryInput): Promise<BotRun
       liveRuns.delete(runId)
       liveInstallations.delete(runId)
     }
+    // A parked intent recorded by a cross-process host call must not outlive
+    // the attempt that recorded it: a stale entry would park the next entry.
+    clearPendingPark(runId)
     if (executionTimer) clearTimeout(executionTimer)
     input.signal?.removeEventListener("abort", abort)
   }

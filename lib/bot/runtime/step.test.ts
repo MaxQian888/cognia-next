@@ -209,6 +209,32 @@ describe("botApprovalInterruptId", () => {
     ).rejects.toThrow("content changed")
   })
 
+  it("carries the declared risk onto the interrupt and rejects an unknown one", async () => {
+    await expect(
+      parkingApi().waitForApproval("publish", { title: "Publish", risk: "high" })
+    ).rejects.toBeInstanceOf(BotRunParkedError)
+    const saved = await getDb().executionRunInterrupts.get(
+      await botApprovalInterruptId(RUN_ID, "publish")
+    )
+    expect(saved?.approvalRisk).toBe("high")
+
+    await expect(
+      api().waitForApproval("other", { title: "Publish", risk: "extreme" as never })
+    ).rejects.toThrow("Invalid Bot approval risk")
+  })
+
+  it("invalidates an approval whose declared risk changed", async () => {
+    await expect(
+      parkingApi().waitForApproval("publish", { title: "Publish", risk: "low" })
+    ).rejects.toBeInstanceOf(BotRunParkedError)
+    await expect(
+      parkingApi().waitForApproval("publish", { title: "Publish", risk: "high" })
+    ).rejects.toThrow("content changed")
+    await expect(parkingApi().waitForApproval("publish", { title: "Publish" })).rejects.toThrow(
+      "content changed"
+    )
+  })
+
   it.each(["denied", "expired"] as const)(
     "retains a %s decision without actor metadata",
     async (status) => {

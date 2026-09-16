@@ -3599,11 +3599,214 @@ describe("manifest.bots validation", () => {
     ).toContain("manifest.bots.trigger.state.missing")
   })
 
+  it("accepts structured conditions.match rules", () => {
+    const triggers = [
+      {
+        id: "lark",
+        kind: "event",
+        source: "integration",
+        types: ["im.message.receive_v1"],
+        conditions: { match: { "payload.event.type": "message", "actor.kind": "bot" } },
+      },
+      {
+        id: "slack",
+        kind: "event",
+        source: "integration",
+        types: ["message"],
+        conditions: { match: { "payload.retry": [1, 2, 3] } },
+      },
+    ]
+    expect(validatePluginManifest(manifestWith([bot({ triggers })])).valid).toBe(true)
+  })
+
+  it.each([
+    "message",
+    { "bad path!": "x" },
+    { "payload.a": { nested: true } },
+    { "payload.a": [] },
+    { "payload.a": ["ok", { nested: true }] },
+  ])("rejects invalid conditions.match %p", (match) => {
+    expect(
+      codesFor([
+        bot({
+          triggers: [
+            { id: "e", kind: "event", source: "integration", types: ["t"], conditions: { match } },
+          ],
+        }),
+      ])
+    ).toContain("manifest.bots.trigger.conditions.invalid")
+  })
+
+  it("accepts a narrowing retry policy", () => {
+    const triggers = [
+      { id: "p", kind: "poll", everyMs: 60000, retry: { maxAttempts: 3, baseDelayMs: 60000 } },
+    ]
+    expect(validatePluginManifest(manifestWith([bot({ triggers })])).valid).toBe(true)
+  })
+
+  it.each([
+    "fast",
+    { maxAttempts: 0 },
+    { maxAttempts: 6 },
+    { maxAttempts: 2.5 },
+    { baseDelayMs: 0 },
+    { maxDelayMs: -1 },
+    { baseDelayMs: 5000, maxDelayMs: 1000 },
+  ])("rejects an invalid retry policy %p", (retry) => {
+    expect(
+      codesFor([bot({ triggers: [{ id: "p", kind: "poll", everyMs: 60000, retry }] })])
+    ).toContain("manifest.bots.trigger.retry.invalid")
+  })
+
+  it("accepts config keys that name configSchema properties on the right kind", () => {
+    const triggers = [
+      {
+        id: "s",
+        kind: "schedule",
+        cron: "0 9 * * *",
+        cronConfigKey: "schedule",
+        timezoneConfigKey: "zone",
+      },
+      { id: "p", kind: "poll", everyMs: 60000, everyMsConfigKey: "interval" },
+    ]
+    const entry = bot({
+      triggers,
+      configSchema: {
+        type: "object",
+        properties: {
+          schedule: { type: "string" },
+          zone: { type: "string" },
+          interval: { type: "number" },
+        },
+      },
+    })
+    expect(validatePluginManifest(manifestWith([entry])).valid).toBe(true)
+  })
+
+  it.each([
+    { key: "cronConfigKey", kind: "poll", everyMs: 60000 },
+    { key: "timezoneConfigKey", kind: "manual" },
+    { key: "everyMsConfigKey", kind: "schedule", cron: "0 9 * * *" },
+  ])("rejects %s on a %s trigger", ({ key, ...rest }) => {
+    expect(
+      codesFor([
+        bot({
+          triggers: [{ id: "t", ...rest, [key]: "schedule" }],
+          configSchema: { type: "object", properties: { schedule: { type: "string" } } },
+        }),
+      ])
+    ).toContain("manifest.bots.trigger.configKey.invalid")
+  })
+
+  it.each([{ other: { type: "string" } }, {}])(
+    "rejects a config key naming no configSchema property %p",
+    (properties) => {
+      const configSchema =
+        Object.keys(properties).length > 0 ? { type: "object", properties } : undefined
+      expect(
+        codesFor([
+          bot({
+            triggers: [{ id: "s", kind: "schedule", cron: "0 9 * * *", cronConfigKey: "schedule" }],
+            configSchema,
+          }),
+        ])
+      ).toContain("manifest.bots.trigger.configKey.invalid")
+    }
+  )
+
+  it("rejects an everyMs below the host poll floor", () => {
+    expect(codesFor([bot({ triggers: [{ id: "p", kind: "poll", everyMs: 5000 }] })])).toContain(
+      "manifest.bots.trigger.everyMs.belowFloor"
+    )
+    expect(
+      validatePluginManifest(
+        manifestWith([bot({ triggers: [{ id: "p", kind: "poll", everyMs: 15000 }] })])
+      ).valid
+    ).toBe(true)
+  })
+
   it("accepts a manual trigger with nothing but an id", () => {
     expect(
       validatePluginManifest(manifestWith([bot({ triggers: [{ id: "run", kind: "manual" }] })]))
         .valid
     ).toBe(true)
+  })
+
+  describe("lifecycle", () => {
+    const lc = (lifecycle: unknown, overrides: Record<string, unknown> = {}) =>
+      bot({ lifecycle, ...overrides })
+
+    it("accepts a handler bot whose hooks fall back to its entry", () => {
+      expect(
+        validatePluginManifest(manifestWith([lc({ hooks: ["onInstall", "onUninstall"] })])).valid
+      ).toBe(true)
+    })
+
+    it("accepts a non-handler bot that names lifecycle.entry", () => {
+      expect(
+        validatePluginManifest(
+          manifestWith([
+            lc(
+              { hooks: ["onConfigure"], entry: "./bots/hooks.js" },
+              { executor: "workflow", workflow: "wf_1", entry: undefined }
+            ),
+          ])
+        ).valid
+      ).toBe(true)
+    })
+
+    it.each(["nope", 42, null, [1]])("rejects a non-object lifecycle: %p", (lifecycle) => {
+      expect(codesFor([lc(lifecycle)])).toContain("manifest.bots.lifecycle.invalid")
+    })
+
+    it.each([[], "onInstall", 42])("rejects a missing hook list: %p", (hooks) => {
+      expect(codesFor([lc({ hooks })])).toContain("manifest.bots.lifecycle.hooks.missing")
+    })
+
+    it("rejects an unknown hook name", () => {
+      expect(codesFor([lc({ hooks: ["onBoot"] })])).toContain(
+        "manifest.bots.lifecycle.hooks.invalid"
+      )
+    })
+
+    it("rejects a duplicated hook name", () => {
+      expect(codesFor([lc({ hooks: ["onArm", "onArm"] })])).toContain(
+        "manifest.bots.lifecycle.hooks.duplicate"
+      )
+    })
+
+    it("rejects a non-string lifecycle.entry", () => {
+      expect(codesFor([lc({ hooks: ["onInstall"], entry: 4 })])).toContain(
+        "manifest.bots.lifecycle.entry.invalid"
+      )
+    })
+
+    it("requires lifecycle.entry on a JS-backed non-handler executor", () => {
+      expect(
+        codesFor([
+          lc(
+            { hooks: ["onInstall"] },
+            { executor: "workflow", workflow: "wf_1", entry: undefined }
+          ),
+        ])
+      ).toContain("manifest.bots.lifecycle.entry.missing")
+    })
+
+    it("exempts a python plugin from the lifecycle.entry requirement", () => {
+      const manifest = {
+        ...(manifestWith([
+          lc(
+            { hooks: ["onInstall"] },
+            { executor: "workflow", workflow: "wf_1", entry: undefined }
+          ),
+        ]) as unknown as Record<string, unknown>),
+        type: "python",
+      }
+      const codes = (validatePluginManifest(manifest as PluginManifest).diagnostics ?? []).map(
+        (d) => d.code
+      )
+      expect(codes).not.toContain("manifest.bots.lifecycle.entry.missing")
+    })
   })
 })
 

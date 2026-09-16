@@ -1,5 +1,6 @@
 import type { PluginBotTriggerConditions } from "@/types/plugin/plugin-bot"
 import type { BotEventEnvelopeV1 } from "@/types/bot/event"
+import { readEnvelopePath } from "./envelope"
 
 function object(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -37,5 +38,19 @@ export function botConditionMismatch(
   if (!matches(conditions.actors, object(payload.sender).login ?? event.actor?.id)) return "actor"
   if (conditions.draft !== undefined && pr.draft !== conditions.draft) return "draft"
   if (!matches(conditions.conclusions, check.conclusion ?? payload.conclusion)) return "conclusion"
+  if (conditions.match) {
+    for (const [path, expected] of Object.entries(conditions.match)) {
+      const actual = readEnvelopePath(event, path)
+      if (typeof actual !== "string" && typeof actual !== "number" && typeof actual !== "boolean") {
+        // Missing or object-valued: the condition fails closed, so a typo in
+        // the path silences the trigger instead of firing it on everything.
+        return `match:${path}`
+      }
+      const hit = Array.isArray(expected)
+        ? expected.some((option) => option === actual)
+        : expected === actual
+      if (!hit) return `match:${path}`
+    }
+  }
   return undefined
 }

@@ -31,12 +31,14 @@ function row(over: Partial<BotConsoleRow> = {}): BotConsoleRow {
 }
 
 describe("BotHero", () => {
-  it("names the Bot, its source, executor, scope and definition", () => {
+  it("names the Bot, its source, executor and scope — the definition id lives in the identity card", () => {
+    // The meta line used to print `definitionId` too, which the identity
+    // card's first fact then repeated verbatim a screen-height later.
     render(<BotHero row={row()} />)
     expect(screen.getByText("Review")).toBeInTheDocument()
     expect(screen.getByText("Workflow")).toBeInTheDocument()
     expect(screen.getByText("Account-wide")).toBeInTheDocument()
-    expect(screen.getByText("acme:review")).toBeInTheDocument()
+    expect(screen.queryByText("acme:review")).not.toBeInTheDocument()
     expect(screen.getByText("Reviews pull requests")).toBeInTheDocument()
   })
 

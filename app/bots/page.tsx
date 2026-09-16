@@ -4,6 +4,8 @@ import { Suspense, useCallback } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 
 import { BotConsole } from "@/components/bots/bot-console"
+import { BotsMobileBody } from "@/components/mobile/bots/bots-mobile-body"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 
 /**
  * `/bots`, the Bot control plane's console.
@@ -16,14 +18,16 @@ import { BotConsole } from "@/components/bots/bot-console"
  * `?install=1` opens the install sheet, the same hand-off shape `/devices`
  * uses for `?addHost=1`.
  *
- * No compact branch yet, unlike `/devices`. `FeaturePageShell` already folds
- * its rail into a Sheet below `lg`, and a phone cannot drain a Bot queue on
- * its own, so an inverted list-first body would be answering a question the
- * mobile shell does not yet get to ask.
+ * The compact branch is not a smaller console but an inverted one, exactly
+ * like `/devices`: on a phone the Bot list IS the page and the detail
+ * arrives as a drawer, where `FeaturePageShell` would have put the list
+ * behind a Sheet trigger — and because `?bot=` IS the selection, a deep link
+ * on a phone opens the detail drawer directly.
  */
 function BotsRoute() {
   const router = useRouter()
   const params = useSearchParams()
+  const compact = useCompactLayout()
   const selectedId = params.get("bot") ?? undefined
 
   const select = useCallback(
@@ -45,14 +49,14 @@ function BotsRoute() {
     router.replace(query ? `/bots?${query}` : "/bots")
   }, [params, router])
 
-  return (
-    <BotConsole
-      selectedId={selectedId}
-      onSelect={select}
-      onDeselect={deselect}
-      installParam={params.get("install")}
-    />
-  )
+  const bodyProps = {
+    selectedId,
+    onSelect: select,
+    onDeselect: deselect,
+    installParam: params.get("install"),
+  }
+
+  return compact ? <BotsMobileBody {...bodyProps} /> : <BotConsole {...bodyProps} />
 }
 
 export default function BotsPage() {

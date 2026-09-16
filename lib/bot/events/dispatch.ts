@@ -127,6 +127,7 @@ export async function dispatchBotEvent(
         ...(delivery.holdConcurrencyWhileWaiting !== undefined
           ? { holdConcurrencyWhileWaiting: delivery.holdConcurrencyWhileWaiting }
           : {}),
+        ...(delivery.retry ? { retry: delivery.retry } : {}),
       })
     )
   }
@@ -191,6 +192,7 @@ export async function dispatchManualBotRun(
     ...(trigger.holdConcurrencyWhileWaiting !== undefined
       ? { holdConcurrencyWhileWaiting: trigger.holdConcurrencyWhileWaiting }
       : {}),
+    ...(trigger.retry ? { retry: trigger.retry } : {}),
     ...(input.now !== undefined ? { now: input.now } : {}),
   })
 }

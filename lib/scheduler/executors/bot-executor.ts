@@ -116,6 +116,7 @@ export async function executeBotTask(
     envelope,
     now,
     ...(trigger.concurrencyKey ? { concurrencyKey: `${installationId}::${trigger.id}` } : {}),
+    ...(trigger.retry ? { retry: trigger.retry } : {}),
   })
 
   return {

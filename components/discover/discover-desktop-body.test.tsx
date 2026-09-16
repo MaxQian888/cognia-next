@@ -22,10 +22,11 @@ jest.mock("next/link", () => ({
   ),
 }))
 
-// Stand-in for useIsMobile inside FeaturePageShell — the desktop body test
-// asserts the 3-pane desktop layout, not the mobile collapse behaviour.
+// Stand-in for the breakpoint hook inside FeaturePageShell — the desktop body
+// test asserts the 3-pane desktop layout, not the mobile collapse behaviour.
 jest.mock("@/hooks/ui", () => ({
   useIsMobile: () => false,
+  useBreakpoint: () => "desktop",
 }))
 
 // Capture URL state in a module-level var so router.replace updates flow

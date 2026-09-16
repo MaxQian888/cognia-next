@@ -21,6 +21,7 @@
  */
 
 import type { BotEventEnvelopeV1 } from "./event"
+import type { BotInstallationSnapshot } from "./api"
 
 /** Severity for a handler's own log lines. Mirrors the run journal's levels. */
 export type BotLogLevel = "debug" | "info" | "warn" | "error"
@@ -165,3 +166,31 @@ export interface BotHandlerResultV1 {
 export type BotHandlerV1 = (
   ctx: BotRunContextV1
 ) => Promise<BotHandlerResultV1 | void> | BotHandlerResultV1 | void
+
+/**
+ * What a lifecycle hook is handed.
+ *
+ * Hooks run inside an admin mutation on the owning host — there is no run,
+ * so no `runId` and no `step`. Everything else the plugin needs it reaches
+ * through the ordinary `PluginContext` (`ctx.storage`, `ctx.integrations`…),
+ * which the runtime supplies alongside this argument. The `installation`
+ * snapshot is the same projection `ctx.bots.getInstallation` returns: no
+ * credential ids, no secrets.
+ *
+ * A hook must finish within `BOT_LIFECYCLE_HOOK_TIMEOUT_MS` or the host
+ * treats it as failed.
+ */
+export interface BotLifecycleContextV1 {
+  installation: BotInstallationSnapshot
+  /** Present for `onConfigure`: the config blob about to be replaced. */
+  previousConfig?: Record<string, unknown>
+  /** Present for `onArm`: the trigger being armed or disarmed. */
+  trigger?: { id: string; armed: boolean }
+}
+
+/**
+ * One lifecycle hook implementation. Throwing (or timing out) vetoes the
+ * mutation for `onInstall`, `onConfigure` and `onArm`; `onUninstall` is
+ * advisory and its failure is logged, never blocking removal.
+ */
+export type BotLifecycleHookV1 = (ctx: BotLifecycleContextV1) => Promise<void> | void

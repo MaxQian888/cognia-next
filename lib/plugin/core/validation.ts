@@ -46,10 +46,12 @@ import {
   CONTEXT_RESOURCE_READ_PERMISSIONS,
 } from "@/types/context-workbench"
 import {
+  BOT_TIMED_TRIGGER_MIN_EVERY_MS,
   PLUGIN_BOT_EVENT_SOURCES,
   PLUGIN_BOT_EXECUTOR_FIELDS,
   PLUGIN_BOT_EXECUTOR_REQUIRED_FIELD,
   PLUGIN_BOT_EXECUTORS,
+  PLUGIN_BOT_LIFECYCLE_HOOKS,
   PLUGIN_BOT_TRIGGER_KINDS,
   type PluginBotExecutor,
 } from "@/types/plugin/plugin-bot"
@@ -3521,6 +3523,66 @@ function validateBots(m: PluginManifest, pushError: PushDiagnostic): void {
       }
     }
 
+    const lifecycle = bot.lifecycle
+    if (lifecycle !== undefined) {
+      if (!lifecycle || typeof lifecycle !== "object" || Array.isArray(lifecycle)) {
+        pushError(
+          `${field}.lifecycle`,
+          "manifest.bots.lifecycle.invalid",
+          `${field}.lifecycle must be an object`
+        )
+      } else {
+        const lc = lifecycle as Record<string, unknown>
+        if (lc.entry !== undefined && typeof lc.entry !== "string") {
+          pushError(
+            `${field}.lifecycle.entry`,
+            "manifest.bots.lifecycle.entry.invalid",
+            `${field}.lifecycle.entry must be a string`
+          )
+        }
+        const hooks = lc.hooks
+        if (!Array.isArray(hooks) || hooks.length === 0) {
+          pushError(
+            `${field}.lifecycle.hooks`,
+            "manifest.bots.lifecycle.hooks.missing",
+            `${field}.lifecycle.hooks must name at least one hook`
+          )
+        } else {
+          const seenHooks = new Set<unknown>()
+          hooks.forEach((hook, h) => {
+            if (typeof hook !== "string" || !PLUGIN_BOT_LIFECYCLE_HOOKS.includes(hook as never)) {
+              pushError(
+                `${field}.lifecycle.hooks[${h}]`,
+                "manifest.bots.lifecycle.hooks.invalid",
+                `${field}.lifecycle.hooks[${h}] must be one of ${PLUGIN_BOT_LIFECYCLE_HOOKS.join(", ")}`
+              )
+            } else if (seenHooks.has(hook)) {
+              pushError(
+                `${field}.lifecycle.hooks[${h}]`,
+                "manifest.bots.lifecycle.hooks.duplicate",
+                `${field}.lifecycle.hooks names "${hook}" twice`
+              )
+            }
+            seenHooks.add(hook)
+          })
+        }
+        // A non-handler executor has no `entry` to fall back on, so a
+        // JS-backed definition must say where its hooks live. A python
+        // plugin's hooks are methods on the contribution object — `entry`
+        // is meaningless there, exactly as for the handler itself.
+        const pythonBacked =
+          bot.backend === "python" ||
+          (m.type === "python" && typeof bot.entry !== "string" && typeof lc.entry !== "string")
+        if (executor !== "handler" && !pythonBacked && typeof lc.entry !== "string") {
+          pushError(
+            `${field}.lifecycle.entry`,
+            "manifest.bots.lifecycle.entry.missing",
+            `${field} declares lifecycle hooks but no entry to load them from; a non-handler executor has no handler entry to fall back on`
+          )
+        }
+      }
+    }
+
     const triggers = bot.triggers
     if (!Array.isArray(triggers) || triggers.length === 0) {
       pushError(
@@ -3604,7 +3666,24 @@ function validateBots(m: PluginManifest, pushError: PushDiagnostic): void {
                 ? typeof value === "boolean"
                 : key === "repositoryConfigKey"
                   ? typeof value === "string" && value.trim().length > 0
-                  : false
+                  : key === "match"
+                    ? isPlainObject(value) &&
+                      Object.entries(value).every(
+                        ([path, expected]) =>
+                          /^[A-Za-z0-9_.]+$/.test(path) &&
+                          (typeof expected === "string" ||
+                            typeof expected === "number" ||
+                            typeof expected === "boolean" ||
+                            (Array.isArray(expected) &&
+                              expected.length > 0 &&
+                              expected.every(
+                                (item) =>
+                                  typeof item === "string" ||
+                                  typeof item === "number" ||
+                                  typeof item === "boolean"
+                              )))
+                      )
+                    : false
             if (!valid)
               pushError(
                 `${triggerField}.conditions.${key}`,
@@ -3612,6 +3691,70 @@ function validateBots(m: PluginManifest, pushError: PushDiagnostic): void {
                 `${triggerField}.conditions.${key} is invalid`
               )
           }
+        }
+      }
+
+      if (trigger.retry !== undefined) {
+        const retry = trigger.retry
+        const valid =
+          isPlainObject(retry) &&
+          (retry.maxAttempts === undefined ||
+            (Number.isInteger(retry.maxAttempts) &&
+              (retry.maxAttempts as number) >= 1 &&
+              (retry.maxAttempts as number) <= 5)) &&
+          (retry.baseDelayMs === undefined ||
+            (Number.isInteger(retry.baseDelayMs) && (retry.baseDelayMs as number) > 0)) &&
+          (retry.maxDelayMs === undefined ||
+            (Number.isInteger(retry.maxDelayMs) && (retry.maxDelayMs as number) > 0)) &&
+          (retry.baseDelayMs === undefined ||
+            retry.maxDelayMs === undefined ||
+            (retry.maxDelayMs as number) >= (retry.baseDelayMs as number))
+        if (!valid) {
+          pushError(
+            `${triggerField}.retry`,
+            "manifest.bots.trigger.retry.invalid",
+            `${triggerField}.retry must declare integer maxAttempts in 1..5 and positive delays with maxDelayMs >= baseDelayMs`
+          )
+        }
+      }
+
+      // A `*ConfigKey` only makes sense on the trigger kind whose schedule it
+      // overrides, and it must name a real `configSchema` property so the
+      // console has something to render for it.
+      const configSchemaKeys =
+        isPlainObject(bot.configSchema) &&
+        isPlainObject((bot.configSchema as Record<string, unknown>).properties)
+          ? new Set(
+              Object.keys(
+                (bot.configSchema as Record<string, unknown>).properties as Record<string, unknown>
+              )
+            )
+          : undefined
+      const configKeyRules: Array<{
+        key: "cronConfigKey" | "timezoneConfigKey" | "everyMsConfigKey"
+        kinds: string[]
+      }> = [
+        { key: "cronConfigKey", kinds: ["schedule"] },
+        { key: "timezoneConfigKey", kinds: ["schedule"] },
+        { key: "everyMsConfigKey", kinds: ["poll", "derivedState"] },
+      ]
+      for (const { key, kinds } of configKeyRules) {
+        const value = trigger[key]
+        if (value === undefined) continue
+        if (!kinds.includes(kind)) {
+          pushError(
+            `${triggerField}.${key}`,
+            "manifest.bots.trigger.configKey.invalid",
+            `${triggerField}.${key} is only valid on ${kinds.join("/")} triggers`
+          )
+          continue
+        }
+        if (typeof value !== "string" || value.trim() === "" || !configSchemaKeys?.has(value)) {
+          pushError(
+            `${triggerField}.${key}`,
+            "manifest.bots.trigger.configKey.invalid",
+            `${triggerField}.${key} must name a key in the Bot's configSchema properties`
+          )
         }
       }
 
@@ -3648,6 +3791,15 @@ function validateBots(m: PluginManifest, pushError: PushDiagnostic): void {
           `${triggerField}.everyMs`,
           "manifest.bots.trigger.everyMs.missing",
           `${triggerField} needs a numeric "everyMs"`
+        )
+      } else if (
+        (kind === "poll" || kind === "derivedState") &&
+        (trigger.everyMs as number) < BOT_TIMED_TRIGGER_MIN_EVERY_MS
+      ) {
+        pushError(
+          `${triggerField}.everyMs`,
+          "manifest.bots.trigger.everyMs.belowFloor",
+          `${triggerField}.everyMs must be at least ${BOT_TIMED_TRIGGER_MIN_EVERY_MS}ms; the host does not poll faster than that`
         )
       }
 

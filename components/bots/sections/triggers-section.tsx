@@ -21,6 +21,7 @@
 
 import { useTranslations } from "next-intl"
 
+import { Badge } from "@/components/ui/badge"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Switch } from "@/components/ui/switch"
 import { useBotControlActions, useBotWriteReadiness } from "@/hooks/bots/use-bot-control-writes"
@@ -81,6 +82,15 @@ function TriggerRow({ trigger, canArm, busy, onArmedChange }: TriggerRowProps) {
           {t(`trigger.kind.${trigger.kind}`)}
           {detail ? ` · ${detail}` : ""}
         </p>
+        {trigger.configFallback ? (
+          <Badge
+            variant="outline"
+            className="mt-1 text-[10px]"
+            data-testid={`bot-trigger-fallback-${trigger.id}`}
+          >
+            {t(`trigger.configFallback.${trigger.configFallback}`)}
+          </Badge>
+        ) : null}
       </div>
     </li>
   )

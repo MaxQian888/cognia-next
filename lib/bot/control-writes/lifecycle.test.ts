@@ -504,3 +504,115 @@ it("refuses local configuration mutations against a synced host mirror after dis
     await expect(operation()).rejects.toMatchObject({ code: "bot_lifecycle_unavailable" })
   expect(await getBotInstallation(mirrored.id)).toMatchObject({ syncedFromHost: true })
 })
+
+describe("plugin lifecycle hooks", () => {
+  const registerWithHooks = (
+    lifecycle: Partial<Record<"onInstall" | "onConfigure" | "onArm" | "onUninstall", jest.Mock>>
+  ) =>
+    registerBot(
+      "digest",
+      { id: "acme:digest", definition: definition(), handler: jest.fn(), lifecycle },
+      { pluginId: "acme" }
+    )
+
+  it("invokes onInstall with the row about to be written", async () => {
+    const onInstall = jest.fn()
+    registerWithHooks({ onInstall })
+    const row = await installBotFromCatalog({
+      entry: entry(),
+      scope: { kind: "account" },
+      config: { channel: "#alerts" },
+    })
+    expect(onInstall).toHaveBeenCalledTimes(1)
+    const ctx = onInstall.mock.calls[0][0]
+    expect(ctx.installation.id).toBe(row.id)
+    expect(ctx.installation.config).toEqual({ channel: "#alerts" })
+    expect(ctx.installation.definitionId).toBe("acme:digest")
+    expect(ctx).not.toHaveProperty("previousConfig")
+  })
+
+  it("lets onInstall veto: a throw aborts the write and no row remains", async () => {
+    const onInstall = jest.fn(() => {
+      throw new Error("refuse this tenant")
+    })
+    registerWithHooks({ onInstall })
+    const before = await listBotInstallations({ definitionId: "acme:digest" })
+    await expect(
+      installBotFromCatalog({ entry: entry(), scope: { kind: "account" } })
+    ).rejects.toMatchObject({ name: "BotLifecycleHookError", phase: "onInstall" })
+    expect(await listBotInstallations({ definitionId: "acme:digest" })).toHaveLength(before.length)
+  })
+
+  it("runs onInstall again for a genuinely second installation", async () => {
+    const onInstall = jest.fn()
+    registerWithHooks({ onInstall })
+    await installBotFromCatalog({ entry: entry(), scope: { kind: "account" } })
+    await installBotFromCatalog({ entry: entry(), scope: { kind: "account" } })
+    expect(onInstall).toHaveBeenCalledTimes(2)
+  })
+
+  it("invokes onConfigure with the previous config and the new snapshot", async () => {
+    const onConfigure = jest.fn()
+    registerWithHooks({ onConfigure })
+    const installed = await installBotFromCatalog({
+      entry: entry(),
+      scope: { kind: "account" },
+      config: { channel: "#old" },
+    })
+    await updateBotConfig(installed.id, { channel: "#new" })
+    expect(onConfigure).toHaveBeenCalledTimes(1)
+    const ctx = onConfigure.mock.calls[0][0]
+    expect(ctx.previousConfig).toEqual({ channel: "#old" })
+    expect(ctx.installation.config).toEqual({ channel: "#new" })
+  })
+
+  it("lets onConfigure veto: the stored config is untouched", async () => {
+    registerWithHooks({
+      onConfigure: jest.fn(() => Promise.reject(new Error("invalid for us"))),
+    })
+    const installed = await installBotFromCatalog({
+      entry: entry(),
+      scope: { kind: "account" },
+      config: { channel: "#old" },
+    })
+    await expect(updateBotConfig(installed.id, { channel: "#new" })).rejects.toMatchObject({
+      phase: "onConfigure",
+    })
+    expect((await getBotInstallation(installed.id))?.config).toEqual({ channel: "#old" })
+  })
+
+  it("invokes onUninstall before the row is deleted", async () => {
+    const onUninstall = jest.fn()
+    registerWithHooks({ onUninstall })
+    const installed = await installBotFromCatalog({
+      entry: entry(),
+      scope: { kind: "account" },
+    })
+    await uninstallBotInstallation(installed.id)
+    expect(onUninstall).toHaveBeenCalledTimes(1)
+    expect(onUninstall.mock.calls[0][0].installation.id).toBe(installed.id)
+    expect(await getBotInstallation(installed.id)).toBeUndefined()
+  })
+
+  it("cannot be blocked: a failing onUninstall still removes the row", async () => {
+    registerWithHooks({
+      onUninstall: jest.fn(() => Promise.reject(new Error("hook exploded"))),
+    })
+    const installed = await installBotFromCatalog({
+      entry: entry(),
+      scope: { kind: "account" },
+    })
+    await expect(uninstallBotInstallation(installed.id)).resolves.toBeUndefined()
+    expect(await getBotInstallation(installed.id)).toBeUndefined()
+  })
+
+  it("skips hooks for a local definition, which has no module", async () => {
+    const row = await installBotFromCatalog({
+      entry: entry({ definitionId: "local-1", source: "local" }),
+      scope: { kind: "account" },
+    })
+    // Reaching here means no registry lookup or hook ran — a local row
+    // installs with no plugin involvement at all.
+    expect(row.definitionSource).toBe("local")
+  })
+})

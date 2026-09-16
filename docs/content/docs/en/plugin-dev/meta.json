@@ -2,6 +2,7 @@
   "title": "Plugin development",
   "pages": [
     "author-sdk",
+    "bots",
     "extension-points-v2",
     "inter-plugin-communication",
     "native-anthropic-tools"

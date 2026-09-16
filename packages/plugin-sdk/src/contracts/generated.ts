@@ -416,6 +416,42 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.bots.recordMonitor": {
     kind: "none",
   },
+  "ctx.bots.stepBegin": {
+    kind: "none",
+  },
+  "ctx.bots.stepComplete": {
+    kind: "none",
+  },
+  "ctx.bots.stepFail": {
+    kind: "none",
+  },
+  "ctx.bots.waitForApproval": {
+    kind: "none",
+  },
+  "ctx.bots.waitForEvent": {
+    kind: "none",
+  },
+  "ctx.bots.log": {
+    kind: "none",
+  },
+  "ctx.bots.progress": {
+    kind: "none",
+  },
+  "ctx.bots.writeTriggerState": {
+    kind: "none",
+  },
+  "ctx.bots.setTriggerArmed": {
+    kind: "none",
+  },
+  "ctx.bots.listDeliveries": {
+    kind: "none",
+  },
+  "ctx.bots.getRunResult": {
+    kind: "none",
+  },
+  "ctx.bots.emit": {
+    kind: "none",
+  },
   "ctx.browser.isDomainAuthorized": {
     kind: "none",
   },
@@ -2488,5 +2524,262 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   },
   "ctx.workspace.walk": {
     kind: "none",
+  },
+} as const
+export const PLUGIN_API_WIRE_OPS = {
+  "db:beginTransaction": {
+    id: "db:beginTransaction",
+    idempotent: false,
+    resourceEffect: {
+      kind: "none",
+    },
+    scopeBinding: "plugin",
+    executionPlacement: "host-service",
+    introducedIn: "0.9.0",
+  },
+  "db:commit": {
+    id: "db:commit",
+    idempotent: false,
+    resourceEffect: {
+      kind: "none",
+    },
+    scopeBinding: "plugin",
+    executionPlacement: "host-service",
+    introducedIn: "0.9.0",
+  },
+  "db:rollback": {
+    id: "db:rollback",
+    idempotent: false,
+    resourceEffect: {
+      kind: "none",
+    },
+    scopeBinding: "plugin",
+    executionPlacement: "host-service",
+    introducedIn: "0.9.0",
+  },
+  "db:txExecute": {
+    id: "db:txExecute",
+    idempotent: false,
+    resourceEffect: {
+      kind: "none",
+    },
+    scopeBinding: "plugin",
+    executionPlacement: "host-service",
+    introducedIn: "0.9.0",
+  },
+  "db:txQuery": {
+    id: "db:txQuery",
+    idempotent: true,
+    resourceEffect: {
+      kind: "none",
+    },
+    scopeBinding: "plugin",
+    executionPlacement: "host-service",
+    introducedIn: "0.9.0",
+  },
+  "managedIdeState:get": {
+    id: "managedIdeState:get",
+    idempotent: true,
+    resourceEffect: {
+      kind: "none",
+    },
+    scopeBinding: "project",
+    executionPlacement: "host-service",
+    introducedIn: "0.9.0",
+  },
+  "managedIdeState:keys": {
+    id: "managedIdeState:keys",
+    idempotent: true,
+    resourceEffect: {
+      kind: "none",
+    },
+    scopeBinding: "project",
+    executionPlacement: "host-service",
+    introducedIn: "0.9.0",
+  },
+  "managedIdeState:set": {
+    id: "managedIdeState:set",
+    idempotent: false,
+    resourceEffect: {
+      kind: "none",
+    },
+    scopeBinding: "project",
+    executionPlacement: "host-service",
+    introducedIn: "0.9.0",
+  },
+  "managedIdeState:delete": {
+    id: "managedIdeState:delete",
+    idempotent: false,
+    resourceEffect: {
+      kind: "none",
+    },
+    scopeBinding: "project",
+    executionPlacement: "host-service",
+    introducedIn: "0.9.0",
+  },
+  "managedIdeState:watch": {
+    id: "managedIdeState:watch",
+    idempotent: false,
+    resourceEffect: {
+      kind: "host-owned",
+    },
+    scopeBinding: "project",
+    executionPlacement: "host-service",
+    introducedIn: "0.9.0",
+  },
+  "managedIdeSecrets:get": {
+    id: "managedIdeSecrets:get",
+    idempotent: true,
+    resourceEffect: {
+      kind: "none",
+    },
+    requiredPermissions: ["secrets:read"],
+    scopeBinding: "project",
+    executionPlacement: "host-service",
+    introducedIn: "0.9.0",
+  },
+  "managedIdeSecrets:keys": {
+    id: "managedIdeSecrets:keys",
+    idempotent: true,
+    resourceEffect: {
+      kind: "none",
+    },
+    requiredPermissions: ["secrets:read"],
+    scopeBinding: "project",
+    executionPlacement: "host-service",
+    introducedIn: "0.9.0",
+  },
+  "managedIdeSecrets:set": {
+    id: "managedIdeSecrets:set",
+    idempotent: false,
+    resourceEffect: {
+      kind: "none",
+    },
+    requiredPermissions: ["secrets:write"],
+    scopeBinding: "project",
+    executionPlacement: "host-service",
+    introducedIn: "0.9.0",
+  },
+  "managedIdeSecrets:delete": {
+    id: "managedIdeSecrets:delete",
+    idempotent: false,
+    resourceEffect: {
+      kind: "none",
+    },
+    requiredPermissions: ["secrets:write"],
+    scopeBinding: "project",
+    executionPlacement: "host-service",
+    introducedIn: "0.9.0",
+  },
+  "secrets:set": {
+    id: "secrets:set",
+    idempotent: false,
+    resourceEffect: {
+      kind: "none",
+    },
+    requiredPermissions: ["secrets:write"],
+    scopeBinding: "plugin",
+    executionPlacement: "host-service",
+    introducedIn: "0.9.0",
+  },
+  "window:getSize": {
+    id: "window:getSize",
+    idempotent: true,
+    resourceEffect: {
+      kind: "none",
+    },
+    scopeBinding: "plugin",
+    executionPlacement: "ui",
+    introducedIn: "0.9.0",
+  },
+  "window:getPosition": {
+    id: "window:getPosition",
+    idempotent: true,
+    resourceEffect: {
+      kind: "none",
+    },
+    scopeBinding: "plugin",
+    executionPlacement: "ui",
+    introducedIn: "0.9.0",
+  },
+  "window:isMaximized": {
+    id: "window:isMaximized",
+    idempotent: true,
+    resourceEffect: {
+      kind: "none",
+    },
+    scopeBinding: "plugin",
+    executionPlacement: "ui",
+    introducedIn: "0.9.0",
+  },
+  "window:center": {
+    id: "window:center",
+    idempotent: false,
+    resourceEffect: {
+      kind: "none",
+    },
+    scopeBinding: "plugin",
+    executionPlacement: "ui",
+    introducedIn: "0.9.0",
+  },
+  "window:close": {
+    id: "window:close",
+    idempotent: false,
+    resourceEffect: {
+      kind: "none",
+    },
+    scopeBinding: "plugin",
+    executionPlacement: "ui",
+    introducedIn: "0.9.0",
+  },
+  "window:hide": {
+    id: "window:hide",
+    idempotent: false,
+    resourceEffect: {
+      kind: "none",
+    },
+    scopeBinding: "plugin",
+    executionPlacement: "ui",
+    introducedIn: "0.9.0",
+  },
+  "window:show": {
+    id: "window:show",
+    idempotent: false,
+    resourceEffect: {
+      kind: "none",
+    },
+    scopeBinding: "plugin",
+    executionPlacement: "ui",
+    introducedIn: "0.9.0",
+  },
+  "window:setPosition": {
+    id: "window:setPosition",
+    idempotent: false,
+    resourceEffect: {
+      kind: "none",
+    },
+    scopeBinding: "plugin",
+    executionPlacement: "ui",
+    introducedIn: "0.9.0",
+  },
+  "window:setSize": {
+    id: "window:setSize",
+    idempotent: false,
+    resourceEffect: {
+      kind: "none",
+    },
+    scopeBinding: "plugin",
+    executionPlacement: "ui",
+    introducedIn: "0.9.0",
+  },
+  "window:setTitle": {
+    id: "window:setTitle",
+    idempotent: false,
+    resourceEffect: {
+      kind: "none",
+    },
+    scopeBinding: "plugin",
+    executionPlacement: "ui",
+    introducedIn: "0.9.0",
   },
 } as const

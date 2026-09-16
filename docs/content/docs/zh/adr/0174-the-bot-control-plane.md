@@ -9,6 +9,7 @@ description: "六种触发器乘四个执行器，共用一条持久投递队列
 **状态:** 已接受
 **日期:** 2026-09-07
 **修订:** ADR-0009（平台连接器）
+**修正:** 2026-09-15（Bot 插件 API 面，docs/plans/2026-09-15-bot-plugin-api-surface.md）
 **相关:** ADR-0026（插件扩展点）、ADR-0027（移动端同步）、ADR-0045（计划中枢）、ADR-0128（调度器宿主放置）、ADR-0131（IM 委派与中继）、ADR-0137（一次委派一张卡）、ADR-0155（插件作者边界）
 
 ## 背景
@@ -157,6 +158,86 @@ Bot 观察入站流的位置与工作流触发器相同，在同伴 bot 环路�
 现在，适配器声明的 `transportModes` 只要恰好命名一种传输就由它决定，
 行只在适配器真的是双模式时才起消歧作用。
 
+## 修正 2026-09-15：插件的门变大了，引擎没有
+
+Bot 平面此前只能从控制台触达，插件代码够不着——这意味着 TypeScript
+handler 拥有的 durable-step 表面，Python handler 只能看着。
+本次修正把平面开放给插件，但没有新增任何引擎：所有新东西要么是定义上的
+声明式字段，要么是 `ctx.bots` 上的纯值宿主调用。投递队列、停泊协议、
+以及记忆化的 step 表都没有变。
+
+### Step 对等以纯值跨进程，而不是闭包
+
+`BotRunContextV1` 带着 `AbortSignal`、`step` 对象和两个回调；
+这些都过不了 stdio。Python handler 拿到的是 `BotRunSnapshotV1`，
+通过以 `runId` 为键的 `ctx.bots.*` 宿主调用触达同一表面
+（`lib/plugin/api/bots-api.ts`、`plugin-sdk/python/src/cognia/bot.py` 的 `BotRun`）。
+
+宿主答不了的等待返回 `{ status: "parked", ... }` 而不是抛出，
+因为 `wrapFailure` 跨边界只保留 `message`——错误的身份过不去。
+宿主把停泊意图记进 `pendingParks`，`bots-bridge` 在 `run` 落定后
+重新抛出记录下来的 `BotRunParkedError`，于是记录下的意图同时压过
+正常结果和代理错误。SDK 抛出的 Python `BotRunParked` 只是礼貌性的。
+
+### 读取按提问的运行限定范围，emit 带命名空间
+
+每个 `ctx.bots` 方法都门控在 `agent:control` 与 `requireOwnedBotRun` 上，
+handler 只能看到自己安装的 `BotInstallationSnapshot`
+（由 `lib/bot/installation-snapshot.ts` 投影：槽位只有绑定与否的布尔值，
+绝不带出底下的 account/session/adapter id）、自己的投递
+（`listDeliveries`，有界，排除 `syncedFromHost`）、以及兄弟运行的结果
+（`getRunResult` 对「不存在」和「别人的」都答 `null`——
+存在性预言本身就是一种泄露）。
+
+`emit` 必须带 `<pluginId>.<type>` 命名空间；自由形态的类型可以伪造
+`run.completed` 这类宿主类型或别的插件的类型。
+`writeTriggerState` 只接受 `cursor`/`watermark`，因为宿主自有的键
+（边沿记忆、去抖、上次触发）正是把边沿触发器变成电平触发器的那几个。
+
+### 定义层说得更多，但依然是声明式的
+
+`conditions.match` 对以事件根为起点的点分路径做标量相等或成员判断
+（`lib/bot/events/conditions.ts`）：缺失或非标量的叶子永不匹配。
+这是路由，不是授权。
+
+`cronConfigKey`、`timezoneConfigKey`、`everyMsConfigKey` 让配置值
+覆盖声明的调度；值缺失或非法时，reconciler 用声明值并把原因记进
+trigger state 的 `configFallback`（`missing`、`invalid-cron`、
+`invalid-timezone`、`below-floor`），由控制台呈现出来，
+而不是与 manifest 默默地不一致。
+
+触发器的 `retry` 只会收窄队列策略、绝不放宽——`decideNextAttempt`
+以宿主上限为界（`lib/queue/retry-policy.ts`）。策略在入队时快照到
+`BotEventDeliveryRow.retry` 上，重试决策永远不需要再解析一次定义。
+
+`waitForApproval` 的 `risk` 经过校验、持久化为中断上的 `approvalRisk`
+（`types/execution/run.ts`），并并入内容漂移比较——控制台可以展示
+一个人即将批准的风险等级，重放也无法悄悄改掉它。
+
+### 生命周期钩子是解析出来的导出，不是事件
+
+`PluginBotLifecycleDef` 最多命名四个钩子。bridge 在注册时解析它们，
+方式和 handler 完全一样——JS 取 `lifecycle.entry ?? entry` 的具名导出，
+Python 取 contribution 对象上的同名方法
+（`lib/plugin/bridge/bots-bridge.ts`）——坏钩子让整个 Bot 注册失败，
+而不是留下半个注册好的定义。
+
+它们在拥有该安装的宿主上、于管理性变更内部执行
+（`lib/bot/control-writes/lifecycle-hooks.ts`），没有 `runId`，
+因为根本没有运行；并且必须在 `BOT_LIFECYCLE_HOOK_TIMEOUT_MS`（30 秒）
+内完成。`onInstall`、`onConfigure`、`onArm` 可以否决；
+`onUninstall` 是建议性的，失败只记日志——一个拦不住删除的钩子，
+也绝不能让它把删除搁浅。远程调用方经 `mutateBotInstallationOnHost`
+恰好触发一次，绝不会每个 peer 各触发一次。
+
+### 载荷上限长在信封里，不在调用方
+
+`BOT_EVENT_PAYLOAD_MAX_BYTES`（64 KiB）在
+`lib/bot/events/envelope.ts` 的 `enqueue` 与 `emit` 内部断言，
+按 JSON 的 UTF-8 字节数计量，`undefined` 记为零，
+于是每条生产路径以同一方式拒绝超大载荷，
+而不是各自长出自己的估算。
+
 ## 已知限制
 
 这些记在这里，而不是留给下一个人去发现。
@@ -169,10 +250,11 @@ Bot 观察入站流的位置与工作流触发器相同，在同伴 bot 环路�
    加索引意味着每个现存数据库都要重置，一个镜像不值这个价，
    所以跨端读取是按 `receivedAt` 开窗的有界扫描加内存过滤。
    它是整个同步集里最贵的一次读。
-3. **`bots:read` 与 `bots:execute` 目前仍只是一句文档注释。** 它们在
-   `types/plugin/plugin.ts` 里出现一次，全树再无第二处，
-   所以 `bot_run_manual` 复用 `workspace.write` 作为 capability。
-   把它们做成真权限是独立的一次改动，有它自己的词表门禁。
+3. **`bots:read` 与 `bots:execute` 按决定仍未实现。** 每个 `ctx.bots`
+   方法都门控在 `agent:control` 上；这两个更细的权限仍只在
+   `types/plugin/plugin.ts` 出现一次，全树再无第二处。
+   日后引入这套词表是增量式的：catalog 的 `requiredPermissions` 增长，
+   `agent:control` 再被接受一个小版本。
 4. **WeCom 与 DingTalk 有一条未建的第二传输。** 两个平台都提供 HTTP 回调，
    这里只实现了它们的 gateway 路径。`SINGLE_TRANSPORT_PLATFORMS` 把这记为
    `unbuilt` 而不是平台限制，因为它是一个有明确实现路径的 backlog 项，
@@ -192,3 +274,9 @@ Bot 平面可达了：`/bots` 可以安装、配置、绑定凭据、武装触�
 在连接器一侧，云端安装可以被告知自己的回调在哪里，
 插件连接器可以通过 webhook 接收，
 两个传输字段互相矛盾的适配器也不再静默地躺平。
+
+2026-09-15 的修正让插件 Bot 成为作者可以交付的一等物：
+TypeScript 与 Python handler 持有同一个 durable-step 表面，
+manifest 可以就「何时触发、频率几何、如何重试」说得更多，
+四个生命周期钩子让定义得以参与自己的安装、配置、武装与移除——
+同时永远不可能把一次移除搁浅。

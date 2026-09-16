@@ -26,6 +26,7 @@ import type {
   PluginBotExecutor,
   PluginBotPolicyV1,
   PluginBotRequirementsV1,
+  PluginBotRetryPolicy,
   PluginBotTriggerDef,
 } from "@/types/plugin/plugin-bot"
 
@@ -112,6 +113,13 @@ export interface BotTriggerRuntimeState {
   lastFiredAt?: number
   /** Deliveries are held until this instant by the trigger's `debounceMs`. */
   debounceUntil?: number
+  /**
+   * Why a config-driven schedule value fell back to the definition's. A code
+   * from a fixed set (`"missing"`, `"invalid-cron"`, `"invalid-timezone"`,
+   * `"below-floor"`), translated by the console — never a formatted sentence.
+   * Cleared when the configured value becomes valid again.
+   */
+  configFallback?: string
 }
 
 /**
@@ -242,6 +250,13 @@ export interface BotEventDeliveryRow {
   notBefore?: number
   /** The full envelope, so a delivery is independently replayable. */
   envelope: BotEventEnvelopeV1
+  /**
+   * Snapshot of the trigger's declared retry policy, taken at enqueue time.
+   * A retry decision must never depend on resolving the definition again:
+   * the plugin may be gone, or the author may have shipped a new version
+   * since the delivery was queued.
+   */
+  retry?: PluginBotRetryPolicy
   /** The ExecutionRun this delivery started, once it has one. */
   runId?: string
   lastError?: string

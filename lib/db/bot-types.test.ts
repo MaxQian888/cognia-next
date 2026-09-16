@@ -15,12 +15,38 @@
 
 import { isTerminalBotDelivery } from "./bot-event-deliveries"
 import type {
+  BotDeliveryStatus as ApiBotDeliveryStatus,
+  BotInstallationStatus as ApiBotInstallationStatus,
+  BotScopeKind as ApiBotScopeKind,
+} from "@/types/bot/api"
+import type {
+  BotDefinitionRow,
   BotDefinitionSource,
   BotDeliveryStatus,
   BotInstallationStatus,
   BotScopeKind,
   LocalBotExecutor,
 } from "./bot-types"
+
+// `types/bot/api.ts` re-declares three of these unions for the plugin API
+// surface (`types/` cannot import `lib/`). Mutual assignability fails to
+// compile the moment either side drifts.
+type MutuallyAssignable<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never
+
+const apiDeliveryStatusParity: MutuallyAssignable<BotDeliveryStatus, ApiBotDeliveryStatus> = true
+const apiInstallationStatusParity: MutuallyAssignable<
+  BotInstallationStatus,
+  ApiBotInstallationStatus
+> = true
+const apiScopeKindParity: MutuallyAssignable<BotScopeKind, ApiBotScopeKind> = true
+
+// A local definition has no module, so it can never own lifecycle hooks.
+// `BotDefinitionRow` must not grow a `lifecycle` field — hooks live on the
+// plugin registry entry, not the stored definition.
+const definitionRowHasNoLifecycle: MutuallyAssignable<
+  Extract<keyof BotDefinitionRow, "lifecycle">,
+  never
+> = true
 
 const DELIVERY_STATUSES = [
   "pending",
@@ -99,5 +125,16 @@ describe("LocalBotExecutor", () => {
     // A person who wants custom code writes a plugin.
     expect(LOCAL_EXECUTORS).not.toContain("handler")
     expect(LOCAL_EXECUTORS).toHaveLength(3)
+  })
+})
+
+describe("plugin API union mirrors", () => {
+  it("keeps the types/bot/api.ts re-declarations identical to these unions", () => {
+    // The compile-time pins above are the assertion; this only keeps the
+    // constants referenced.
+    expect(apiDeliveryStatusParity).toBe(true)
+    expect(apiInstallationStatusParity).toBe(true)
+    expect(apiScopeKindParity).toBe(true)
+    expect(definitionRowHasNoLifecycle).toBe(true)
   })
 })

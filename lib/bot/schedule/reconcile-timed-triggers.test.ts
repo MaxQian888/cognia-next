@@ -42,6 +42,9 @@ jest.mock("@/lib/bot/installed-bot", () => ({
   resolveInstalledBot: (...args: unknown[]) => resolveInstalledBot(...(args as [])),
 }))
 
+import { __resetDbForTesting, getDb } from "@/lib/db/schema"
+import { readBotTriggerState, writeBotTriggerState } from "@/lib/db/bot-installations"
+
 import {
   BOT_TRIGGER_TAG,
   botTriggerScheduleTag,
@@ -295,6 +298,164 @@ describe("reconcileAllBotSchedules", () => {
     resolveInstalledBot.mockResolvedValue(undefined)
 
     await expect(reconcileAllBotSchedules()).resolves.toBeUndefined()
+  })
+})
+
+describe("config-driven schedules", () => {
+  beforeEach(async () => {
+    __resetDbForTesting()
+    await getDb().botInstallations.clear()
+  })
+
+  async function seed(overrides: Partial<BotInstallationRow> = {}): Promise<InstalledBot> {
+    const row = installation(overrides)
+    await getDb().botInstallations.put(row)
+    return {
+      installation: row,
+      definition: {
+        id: "acme:digest",
+        name: "Digest",
+        version: "1.0.0",
+        executor: "handler",
+        source: "plugin",
+        configSchema: {
+          type: "object",
+          properties: {
+            schedule: { type: "string" },
+            zone: { type: "string" },
+            interval: { type: "number" },
+          },
+        },
+        triggers: [],
+      },
+      policy: {},
+    } as unknown as InstalledBot
+  }
+
+  function withTriggers(bot: InstalledBot, triggers: PluginBotTriggerDef[]): InstalledBot {
+    return { ...bot, definition: { ...bot.definition, triggers } }
+  }
+
+  it("uses a valid configured cron and timezone instead of the definition's", async () => {
+    const bot = await seed({ config: { schedule: "0 6 * * *", zone: "Asia/Tokyo" } })
+    await syncBotTriggerSchedules(
+      withTriggers(bot, [
+        {
+          id: "daily",
+          kind: "schedule",
+          cron: "0 9 * * *",
+          timezone: "UTC",
+          cronConfigKey: "schedule",
+          timezoneConfigKey: "zone",
+        },
+      ])
+    )
+
+    expect(schedulerApi.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        trigger: { type: "cron", cronExpression: "0 6 * * *", timezone: "Asia/Tokyo" },
+      })
+    )
+    expect((await readBotTriggerState("boti_1", "daily"))?.configFallback).toBeUndefined()
+  })
+
+  it("falls back per key and records why", async () => {
+    const bot = await seed({ config: { schedule: "not a cron", zone: "Mars/Olympus" } })
+    await syncBotTriggerSchedules(
+      withTriggers(bot, [
+        {
+          id: "daily",
+          kind: "schedule",
+          cron: "0 9 * * *",
+          cronConfigKey: "schedule",
+          timezoneConfigKey: "zone",
+        },
+      ])
+    )
+
+    expect(schedulerApi.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({ trigger: { type: "cron", cronExpression: "0 9 * * *" } })
+    )
+    expect((await readBotTriggerState("boti_1", "daily"))?.configFallback).toBe("invalid-cron")
+  })
+
+  it("reports a missing config value and an invalid timezone as their own codes", async () => {
+    const bot = await seed({ config: { zone: "Not/AZone" } })
+    await syncBotTriggerSchedules(
+      withTriggers(bot, [
+        {
+          id: "daily",
+          kind: "schedule",
+          cron: "0 9 * * *",
+          timezoneConfigKey: "zone",
+        },
+      ])
+    )
+    expect((await readBotTriggerState("boti_1", "daily"))?.configFallback).toBe("invalid-timezone")
+  })
+
+  it("uses a valid configured interval and rejects a sub-floor one", async () => {
+    const bot = await seed({ config: { interval: 120_000 } })
+    await syncBotTriggerSchedules(
+      withTriggers(bot, [{ id: "p", kind: "poll", everyMs: 60_000, everyMsConfigKey: "interval" }])
+    )
+    expect(schedulerApi.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({ trigger: { type: "interval", intervalMs: 120_000 } })
+    )
+
+    tasks.clear()
+    schedulerApi.createTask.mockClear()
+    const floored = await seed({ config: { interval: 1_000 } })
+    await syncBotTriggerSchedules(
+      withTriggers(floored, [
+        { id: "p", kind: "poll", everyMs: 60_000, everyMsConfigKey: "interval" },
+      ])
+    )
+    expect(schedulerApi.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({ trigger: { type: "interval", intervalMs: 60_000 } })
+    )
+    expect((await readBotTriggerState("boti_1", "p"))?.configFallback).toBe("below-floor")
+  })
+
+  it("clamps a sub-floor definition everyMs even without a config key", async () => {
+    const bot = await seed()
+    await syncBotTriggerSchedules(withTriggers(bot, [{ id: "p", kind: "poll", everyMs: 500 }]))
+
+    expect(schedulerApi.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({ trigger: { type: "interval", intervalMs: 15_000 } })
+    )
+  })
+
+  it("clears the recorded fallback once the config value becomes valid", async () => {
+    const bad = await seed({ config: { interval: 500 } })
+    const trigger: PluginBotTriggerDef = {
+      id: "p",
+      kind: "poll",
+      everyMs: 60_000,
+      everyMsConfigKey: "interval",
+    }
+    await syncBotTriggerSchedules(withTriggers(bad, [trigger]))
+    expect((await readBotTriggerState("boti_1", "p"))?.configFallback).toBe("below-floor")
+
+    // The row keeps its recorded fallback; only the config value changes.
+    const stored = (await getDb().botInstallations.get("boti_1"))!
+    const good: InstalledBot = {
+      ...bad,
+      installation: { ...stored, config: { interval: 120_000 } },
+    }
+    await getDb().botInstallations.put(good.installation)
+    await syncBotTriggerSchedules(withTriggers(good, [trigger]))
+    const state = await readBotTriggerState("boti_1", "p")
+    expect(state && "configFallback" in state).toBe(false)
+  })
+
+  it("leaves cursor and other state intact when recording a fallback", async () => {
+    const bot = await seed({ config: { interval: 500 } })
+    await writeBotTriggerState("boti_1", "p", { cursor: "page-2" })
+    await syncBotTriggerSchedules(
+      withTriggers(bot, [{ id: "p", kind: "poll", everyMs: 60_000, everyMsConfigKey: "interval" }])
+    )
+    expect((await readBotTriggerState("boti_1", "p"))?.cursor).toBe("page-2")
   })
 })
 

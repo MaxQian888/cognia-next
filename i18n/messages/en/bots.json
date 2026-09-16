@@ -65,7 +65,9 @@
   "description": "Installed Bots: what wakes each one up, what runs it, and what it is allowed to do.",
   "detail": {
     "noSelectionBody": "Pick a Bot from the list to see its triggers, credentials and policy.",
-    "noSelectionTitle": "No Bot selected"
+    "noSelectionTitle": "No Bot selected",
+    "notFoundTitle": "That Bot is not here",
+    "notFoundBody": "The link names an installation this device does not have. It may have been uninstalled, or it lives on another host."
   },
   "executor": {
     "agent-turn": "Agent turn",
@@ -125,6 +127,7 @@
     "filterAria": "Filter Bots by status",
     "label": "Bot list",
     "searchAria": "Search Bots",
+    "searchClearAria": "Clear Bot search",
     "searchPlaceholder": "Search Bots"
   },
   "never": "Never",
@@ -246,6 +249,12 @@
     "everyHours": "Every {value}h",
     "everyMinutes": "Every {value}m",
     "everySeconds": "Every {value}s",
+    "configFallback": {
+      "missing": "Using default: config value missing",
+      "invalid-cron": "Using default: invalid cron",
+      "invalid-timezone": "Using default: invalid timezone",
+      "below-floor": "Using default: below 15s floor"
+    },
     "kind": {
       "derivedState": "State change",
       "event": "Event",

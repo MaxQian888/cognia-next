@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 
 import type { BotConsoleRow } from "@/lib/bot/console/bot-rows"
 import { resolveBotPolicy } from "@/lib/bot/policy/ceilings"
@@ -51,6 +51,35 @@ describe("BotDetail", () => {
   it("explains an empty pane rather than rendering a blank one", () => {
     render(<BotDetail row={null} />)
     expect(screen.getByTestId("bot-detail-empty")).toBeInTheDocument()
+  })
+
+  it("skeletons while the first installations read is in flight", () => {
+    // A spinner says "nothing is known"; bars in the pane's own shape say the
+    // read is in flight, which is the difference between a console that
+    // opened and one that looks broken.
+    render(<BotDetail row={null} loading />)
+    expect(screen.getByTestId("bot-detail-loading")).toBeInTheDocument()
+    expect(screen.queryByTestId("bot-detail-empty")).not.toBeInTheDocument()
+  })
+
+  it("says a followed link missed rather than greeting it as a fresh visit", () => {
+    // `?bot=` naming an installation this device does not have used to fall
+    // through to the pick-one copy — the reader could not tell a broken link
+    // from a page that had not been asked for anything.
+    render(<BotDetail row={null} missing />)
+    expect(screen.getByText("That Bot is not here")).toBeInTheDocument()
+  })
+
+  it("keeps the identity card to facts the hero does not already print", () => {
+    render(<BotDetail row={row()} />)
+    const identity = screen.getByTestId("console-section-identity")
+    // Definition id appears once — here, not in the hero's meta line.
+    expect(within(identity).getByText("acme:review")).toBeInTheDocument()
+    expect(screen.getAllByText("acme:review")).toHaveLength(1)
+    // Source, executor and scope are the hero meta; printing them again here
+    // was the same three answers twice.
+    expect(within(identity).queryByText("Plugin")).not.toBeInTheDocument()
+    expect(within(identity).queryByText("Account-wide")).not.toBeInTheDocument()
   })
 
   it("renders the identity record and the triggers side by side", () => {

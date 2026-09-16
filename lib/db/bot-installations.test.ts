@@ -212,6 +212,16 @@ describe("bot trigger runtime state", () => {
     })
   })
 
+  it("treats a key patched to undefined as a delete", async () => {
+    const row = await installBot(input())
+    await writeBotTriggerState(row.id, "poll", { configFallback: "missing" })
+    await writeBotTriggerState(row.id, "poll", { configFallback: undefined })
+
+    const state = await readBotTriggerState(row.id, "poll")
+    expect(state).toBeDefined()
+    expect("configFallback" in state!).toBe(false)
+  })
+
   it("keeps triggers' state apart", async () => {
     const row = await installBot(input())
     await writeBotTriggerState(row.id, "a", { cursor: "a1" })

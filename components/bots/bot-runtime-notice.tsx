@@ -16,6 +16,7 @@
 
 import { useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
+import { MonitorOffIcon, MonitorSmartphoneIcon } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { resolveBotRuntimeReach, type BotRuntimeReach } from "@/lib/bot/console/runtime-reach"
@@ -47,13 +48,23 @@ export function BotRuntimeNotice() {
 
   return (
     <Alert
-      className="m-3 mb-0"
+      // `w-full` inside `m-3` is the pane's width PLUS the margins — the
+      // banner ends 24px too wide and its right edge is clipped by the pane.
+      // `w-auto` lets flex stretch subtract the margins back out.
+      className="m-3 mb-0 w-auto py-2"
       variant={reach === "none" ? "destructive" : "default"}
       data-testid="bot-runtime-notice"
       data-reach={reach}
     >
+      {reach === "none" ? (
+        <MonitorOffIcon className="size-4" />
+      ) : (
+        <MonitorSmartphoneIcon className="size-4" />
+      )}
       <AlertTitle>{t(`runtime.${reach}.title`)}</AlertTitle>
-      <AlertDescription>{t(`runtime.${reach}.body`)}</AlertDescription>
+      <AlertDescription className="line-clamp-2 text-xs">
+        {t(`runtime.${reach}.body`)}
+      </AlertDescription>
     </Alert>
   )
 }

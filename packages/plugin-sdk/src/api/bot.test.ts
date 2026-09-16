@@ -1,9 +1,12 @@
 import * as sdk from "./bot"
 import type {
   BotHandlerV1,
+  BotLifecycleContextV1,
+  BotLifecycleHookV1,
   BotRunContextV1,
   BotRunSnapshotV1,
   PluginBotDef,
+  PluginBotLifecycleDef,
   PluginBotTriggerDef,
 } from "./bot"
 
@@ -12,6 +15,12 @@ describe("plugin-sdk api/bot", () => {
     expect(typeof sdk.defineBot).toBe("function")
     expect(typeof sdk.defineBotHandler).toBe("function")
     expect(sdk.PLUGIN_BOT_EXECUTORS).toEqual(["workflow", "squad", "agent-turn", "handler"])
+    expect(sdk.PLUGIN_BOT_LIFECYCLE_HOOKS).toEqual([
+      "onInstall",
+      "onConfigure",
+      "onArm",
+      "onUninstall",
+    ])
     expect(sdk.PLUGIN_BOT_TRIGGER_KINDS).toEqual([
       "interaction",
       "event",
@@ -34,7 +43,14 @@ describe("plugin-sdk api/bot", () => {
   it("re-exports the manifest and runtime contract types", () => {
     const assertTypes = <
       _T extends
-        PluginBotDef | PluginBotTriggerDef | BotHandlerV1 | BotRunContextV1 | BotRunSnapshotV1,
+        | PluginBotDef
+        | PluginBotTriggerDef
+        | PluginBotLifecycleDef
+        | BotHandlerV1
+        | BotRunContextV1
+        | BotRunSnapshotV1
+        | BotLifecycleContextV1
+        | BotLifecycleHookV1,
     >(): void => undefined
     assertTypes<PluginBotDef>()
     expect(true).toBe(true)
