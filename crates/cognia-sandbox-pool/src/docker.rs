@@ -67,6 +67,8 @@ use serde_json::{json, Value};
 
 use crate::admission::{AdmittedSandbox, SandboxAdmission};
 use crate::command::{bundled_invocation, BundledInvocation};
+use crate::probe_cache::ProbeCacheEntry;
+use crate::status::SandboxDriverStatus;
 
 /// Label carrying the bundle digest a staged volume holds, so a sweep can tell
 /// a volume for a retired bundle from one still in use.
@@ -75,9 +77,7 @@ pub const BUNDLE_DIGEST_LABEL: &str = "cognia.bundle-digest";
 /// Label carrying which stage a volume holds (`core`, `glibc`, `musl`).
 pub const BUNDLE_STAGE_LABEL: &str = "cognia.bundle-stage";
 
-/// Bump when the shape of a cached probe entry changes; an older entry is then
-/// ignored rather than misread.
-pub const PROBE_CACHE_VERSION: u32 = 1;
+pub use crate::probe_cache::PROBE_CACHE_VERSION;
 
 /// The uid a plain-container sandbox runs as when nothing declares a user
 /// (ADR-0183 "Which user the agent runs as").
@@ -85,6 +85,9 @@ pub const CONTAINER_TIER_UID: u32 = 10001;
 
 /// The OCI runtime a gVisor sandbox asks the daemon for.
 pub const GVISOR_RUNTIME: &str = "runsc";
+
+/// How this driver names itself to a console.
+pub const DRIVER_NAME: &str = "docker";
 
 /// Staging copies a few hundred MiB between local filesystems.
 const STAGE_TIMEOUT: Duration = Duration::from_secs(300);
@@ -670,13 +673,7 @@ fn cache_entry(
     owner: Option<Ownership>,
     report: &ProbeReport,
 ) -> Value {
-    json!({
-        "version": PROBE_CACHE_VERSION,
-        "user": user.to_string(),
-        "matchWorkspaceOwner": match_owner,
-        "workspaceOwner": owner.map(|owner| json!({ "uid": owner.uid, "gid": owner.gid })),
-        "report": report,
-    })
+    ProbeCacheEntry::new(user, match_owner, owner, report.clone()).to_value()
 }
 
 fn cached_report(
@@ -685,18 +682,9 @@ fn cached_report(
     match_owner: bool,
     owner: Option<Ownership>,
 ) -> Option<ProbeReport> {
-    if entry.get("version").and_then(Value::as_u64) != Some(PROBE_CACHE_VERSION as u64)
-        || entry.get("user").and_then(Value::as_str) != Some(user.to_string().as_str())
-        || entry.get("matchWorkspaceOwner").and_then(Value::as_bool) != Some(match_owner)
-    {
-        return None;
-    }
-    let recorded = entry.get("workspaceOwner").filter(|value| !value.is_null());
-    let current = owner.map(|owner| json!({ "uid": owner.uid, "gid": owner.gid }));
-    if recorded != current.as_ref() {
-        return None;
-    }
-    serde_json::from_value(entry.get("report")?.clone()).ok()
+    ProbeCacheEntry::from_value(entry)?
+        .report_for(user, match_owner, owner)
+        .cloned()
 }
 
 /// The uid observed on the host. On Linux — every deployment that runs this in
@@ -814,6 +802,25 @@ fn sandbox_placement(
         },
         "credentials": { "mode": "spawn-env" },
     })
+}
+
+#[async_trait]
+impl SandboxDriverStatus for DockerSandboxBackend {
+    fn driver(&self) -> &'static str {
+        DRIVER_NAME
+    }
+
+    fn deployment_id(&self) -> &str {
+        &self.config.deployment_id
+    }
+
+    fn instance_id(&self) -> &str {
+        &self.config.instance_id
+    }
+
+    async fn available_tiers(&self) -> Result<Vec<IsolationTier>, SandboxSpawnError> {
+        DockerSandboxBackend::available_tiers(self).await
+    }
 }
 
 #[async_trait]

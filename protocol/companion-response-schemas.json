@@ -8824,6 +8824,617 @@
         "removed"
       ],
       "type": "string"
+    },
+    "ApprovalAuthority": {
+      "oneOf": [
+        {
+          "const": "workspace-maintainer",
+          "description": "`WorkspaceRole::Maintainer` of the project's collab workspace.",
+          "type": "string"
+        },
+        {
+          "const": "org-admin",
+          "description": "`OrgRole::Owner` or `OrgRole::Admin`.",
+          "type": "string"
+        },
+        {
+          "const": "host-owner",
+          "description": "The Host owner principal.",
+          "type": "string"
+        }
+      ]
+    },
+    "PinnedImage": {
+      "additionalProperties": false,
+      "description": "A digest-pinned image as it travels in specs and catalog entries.",
+      "properties": {
+        "digest": {
+          "description": "`sha256:<64 lowercase hex>`.",
+          "type": "string"
+        },
+        "registry": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        }
+      },
+      "required": ["digest", "registry", "repository"],
+      "type": "object"
+    },
+    "ApprovalRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "approvedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "approverUserId": {
+          "type": "string"
+        },
+        "buildKey": {
+          "type": ["string", "null"]
+        },
+        "declarationDigest": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "normalizedRemote": {
+          "description": "`normalize_remote_url` form: credentials stripped, lowercased host.",
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "resolvedImage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PinnedImage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The image the declaration resolved to when approved. Absent for a\ndeclaration that builds (ADR-0186), which carries `buildKey` instead."
+        },
+        "revokedAt": {
+          "format": "int64",
+          "type": ["integer", "null"]
+        },
+        "revokedBy": {
+          "type": ["string", "null"]
+        },
+        "runtimeFieldsDigest": {
+          "type": "string"
+        },
+        "via": {
+          "$ref": "#/$defs/ApprovalAuthority"
+        }
+      },
+      "required": [
+        "id",
+        "projectId",
+        "normalizedRemote",
+        "path",
+        "declarationDigest",
+        "runtimeFieldsDigest",
+        "approverUserId",
+        "via",
+        "approvedAt"
+      ],
+      "type": "object"
+    },
+    "CatalogEntrySource": {
+      "oneOf": [
+        {
+          "const": "manual",
+          "description": "Typed in by an admin.",
+          "type": "string"
+        },
+        {
+          "const": "build",
+          "description": "Produced by an environment build (ADR-0186).",
+          "type": "string"
+        },
+        {
+          "const": "legacy",
+          "description": "Derived at boot from `COGNIA_RUNNER_IMAGE`.",
+          "type": "string"
+        }
+      ]
+    },
+    "CatalogImage": {
+      "additionalProperties": false,
+      "description": "The image a catalog entry names. Pinned except for a legacy entry derived\nfrom a tag-only `COGNIA_RUNNER_IMAGE`, which admission refuses until the\ntag is resolved to a digest.",
+      "properties": {
+        "digest": {
+          "type": ["string", "null"]
+        },
+        "registry": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "tag": {
+          "description": "The tag a legacy entry was derived from; informational once pinned.",
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["registry", "repository"],
+      "type": "object"
+    },
+    "CatalogScope": {
+      "enum": ["baseline", "tenant"],
+      "type": "string"
+    },
+    "IsolationTier": {
+      "description": "Isolation tiers, weakest first. `Ord` is the strength order, so\n`max(a, b)` is the stricter of two requirements.",
+      "oneOf": [
+        {
+          "const": "container",
+          "description": "A plain container: shared kernel, seccomp/pids/no-new-privileges.",
+          "type": "string"
+        },
+        {
+          "const": "gvisor",
+          "description": "A user-space kernel (runsc).",
+          "type": "string"
+        },
+        {
+          "const": "vm",
+          "description": "A per-sandbox virtual machine (Kata, Firecracker, serverless pods).",
+          "type": "string"
+        }
+      ]
+    },
+    "CatalogEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "createdAt": {
+          "default": 0,
+          "description": "Server-owned, and defaulted rather than required: the Host stamps both\non every write, and an operator authoring a baseline file by hand has\nno timestamp to give. `0` reads as \"not recorded\", which is the honest\nanswer for a hand-written entry.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "description": {
+          "type": ["string", "null"]
+        },
+        "id": {
+          "type": "string"
+        },
+        "image": {
+          "$ref": "#/$defs/CatalogImage"
+        },
+        "imageUser": {
+          "description": "The image config's `USER`, read from the registry when the entry was\nadded. Absent means the image runs as root by default.",
+          "type": ["string", "null"]
+        },
+        "isolationFloor": {
+          "$ref": "#/$defs/IsolationTier",
+          "description": "The weakest tier this image may run at. The effective floor is the\nstrictest of this, the tenant floor and the baseline floor."
+        },
+        "label": {
+          "type": "string"
+        },
+        "provenance": {
+          "description": "Build key, commit and approval for a `build` entry."
+        },
+        "revokedAt": {
+          "format": "int64",
+          "type": ["integer", "null"]
+        },
+        "scope": {
+          "$ref": "#/$defs/CatalogScope"
+        },
+        "sizeClassIds": {
+          "description": "Size classes this entry may run with; the first is the default.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "source": {
+          "$ref": "#/$defs/CatalogEntrySource"
+        },
+        "updatedAt": {
+          "default": 0,
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": ["id", "scope", "label", "image", "isolationFloor", "sizeClassIds", "source"],
+      "type": "object"
+    },
+    "CatalogEntryView": {
+      "description": "A catalog entry as a console reads it.",
+      "properties": {
+        "defaultEntry": {
+          "description": "True for the entry a project that names none gets.",
+          "type": "boolean"
+        },
+        "effectiveFloor": {
+          "$ref": "#/$defs/IsolationTier",
+          "description": "`max(entry floor, baseline floor, tenant floor)` \u2014 never lower than\nwhat the entry itself declares."
+        },
+        "entry": {
+          "$ref": "#/$defs/CatalogEntry"
+        }
+      },
+      "required": ["entry", "effectiveFloor", "defaultEntry"],
+      "type": "object"
+    },
+    "BundlePolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "current": {
+          "$ref": "#/$defs/OfferedBundle",
+          "description": "The release's current agent bundle."
+        },
+        "retained": {
+          "description": "Older bundles a project may still pin, newest first.",
+          "items": {
+            "$ref": "#/$defs/OfferedBundle"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["current", "retained"],
+      "type": "object"
+    },
+    "CatalogRejection": {
+      "description": "Why a stored tenant entry is not in the merged catalog.\n\nA rejected entry stays stored and stays visible: an operator who added an\nimage the baseline allowlist later stopped permitting needs the reason,\nnot an entry that silently vanished.",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "code", "message"],
+      "type": "object"
+    },
+    "EgressPreset": {
+      "additionalProperties": false,
+      "properties": {
+        "domains": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": ["domains", "id", "label"],
+      "type": "object"
+    },
+    "GpuRequest": {
+      "additionalProperties": false,
+      "description": "Reserved for GPU sandboxes; never admitted today.",
+      "properties": {
+        "count": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "resourceName": {
+          "type": "string"
+        }
+      },
+      "required": ["count", "resourceName"],
+      "type": "object"
+    },
+    "OfferedBundle": {
+      "additionalProperties": false,
+      "description": "An agent bundle a deployment offers (ADR-0183): where a driver pulls it\nfrom, and the digest and release tag a spec records. The spec itself does\nnot carry the registry, so a bundle moving registries between releases does\nnot change any spec digest.",
+      "properties": {
+        "digest": {
+          "description": "`sha256:<64 lowercase hex>`.",
+          "type": "string"
+        },
+        "registry": {
+          "type": "string"
+        },
+        "releaseTag": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        }
+      },
+      "required": ["digest", "registry", "releaseTag", "repository"],
+      "type": "object"
+    },
+    "SizeClass": {
+      "additionalProperties": false,
+      "description": "A size class. `gpu` is reserved and dormant: the type accepts it so the\nmodel does not have to change when GPU sandboxes land, and admission\nrefuses any class that sets it (`gpu_not_supported`).",
+      "properties": {
+        "cpuMillis": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ephemeralStorageMib": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "gpu": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GpuRequest"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Reserved; dormant. See the type doc."
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "memoryMib": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "volumeMib": {
+          "description": "Persistent workspace volume size for persistent sandboxes.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": ["id", "label", "cpuMillis", "memoryMib", "ephemeralStorageMib", "volumeMib"],
+      "type": "object"
+    },
+    "DeclarationRead": {
+      "description": "One declaration file, as bytes plus the digest of those bytes.\n\nDeliberately *not* parsed here. The devcontainer and workspace-config\ngrammars, their closed-world refusals and the RFC 8785 declaration digest\nlive in one place \u2014 `lib/project-environment` \u2014 and a second\nimplementation in Rust would be a parity liability with nothing to gain:\nthis Host's job on this path is access to a checkout the approver's\nbrowser cannot reach. The digest over the raw bytes is what makes \"the\nfile changed since you looked at it\" answerable without parsing either\ngrammar.",
+      "properties": {
+        "bytesSha256": {
+          "description": "SHA-256 (lowercase hex) of the exact bytes above.",
+          "type": "string"
+        },
+        "contents": {
+          "type": "string"
+        },
+        "file": {
+          "description": "`workspace-config` or `devcontainer`.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Absolute path of the file that was read.",
+          "type": "string"
+        },
+        "relativePath": {
+          "description": "Repository-relative path, which is what an approval record stores.",
+          "type": "string"
+        }
+      },
+      "required": ["path", "relativePath", "file", "contents", "bytesSha256"],
+      "type": "object"
+    },
+    "OfferedBundleView": {
+      "description": "An offered agent bundle, for a console that must show which digest a\nsandbox would inject and which older ones a project may still pin.",
+      "properties": {
+        "current": {
+          "description": "True for the current bundle, false for a retained older one.",
+          "type": "boolean"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "registry": {
+          "type": "string"
+        },
+        "releaseTag": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        }
+      },
+      "required": ["registry", "repository", "digest", "releaseTag", "current"],
+      "type": "object"
+    },
+    "EgressTier": {
+      "description": "Egress posture. The wire value for \"open\" is `on`, the value\n`ProjectEnvironmentPolicy.network` already persists.",
+      "enum": ["off", "allowlist", "on"],
+      "type": "string"
+    },
+    "Platform": {
+      "additionalProperties": false,
+      "description": "A platform the environment plane can run. Only `linux` images run.",
+      "properties": {
+        "architecture": {
+          "type": "string"
+        },
+        "os": {
+          "type": "string"
+        },
+        "variant": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["os", "architecture"],
+      "type": "object"
+    },
+    "PlatformImage": {
+      "additionalProperties": false,
+      "properties": {
+        "configDigest": {
+          "type": "string"
+        },
+        "env": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "manifestDigest": {
+          "type": "string"
+        },
+        "platform": {
+          "$ref": "#/$defs/Platform"
+        },
+        "user": {
+          "description": "The config's `User`; absent means root.",
+          "type": ["string", "null"]
+        },
+        "workingDir": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["platform", "manifestDigest", "configDigest", "env"],
+      "type": "object"
+    },
+    "ProbeCacheView": {
+      "description": "The cached probe verdict for one (user image, bundle) pair.\n\nA view over what the driver stored, not a second source of truth: these\nare the fields a console shows. The entry is parsed by\n`cognia_sandbox_pool::probe_cache::ProbeCacheEntry`, the same type the\ndriver writes it with, so the two cannot disagree about its shape.",
+      "properties": {
+        "arch": {
+          "type": "string"
+        },
+        "libc": {
+          "type": ["string", "null"]
+        },
+        "matchWorkspaceOwner": {
+          "type": "boolean"
+        },
+        "problems": {
+          "description": "Empty when the probe accepted the image.",
+          "items": {
+            "$ref": "#/$defs/ProbeProblemView"
+          },
+          "type": "array"
+        },
+        "requestedUser": {
+          "description": "The user the probe was asked about: a name, a uid, or `uid:gid`.",
+          "type": "string"
+        },
+        "resolvedUser": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProbeUserView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The user the agent actually runs as, as the image resolved it. Absent\nwhen the requested user does not exist in the image."
+        },
+        "runtimes": {
+          "description": "Bundle runtimes this image's C library can run.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "shell": {
+          "type": ["string", "null"]
+        },
+        "version": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "workspaceOwner": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProbeOwnerView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Who owned the workspace when the probe ran."
+        }
+      },
+      "required": [
+        "version",
+        "requestedUser",
+        "matchWorkspaceOwner",
+        "arch",
+        "runtimes",
+        "problems"
+      ],
+      "type": "object"
+    },
+    "ProbeOwnerView": {
+      "properties": {
+        "gid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "uid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": ["uid", "gid"],
+      "type": "object"
+    },
+    "ProbeProblemView": {
+      "properties": {
+        "code": {
+          "description": "A `probe_*` code, or `bundle_arch_mismatch`.",
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": ["code", "message"],
+      "type": "object"
+    },
+    "ProbeUserView": {
+      "properties": {
+        "gid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "description": "Absent for a numeric uid the image has no passwd entry for.",
+          "type": ["string", "null"]
+        },
+        "remappedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProbeOwnerView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The declared user's own ids, when it was remapped onto the workspace\nowner."
+        },
+        "uid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": ["uid", "gid"],
+      "type": "object"
     }
   },
   "commands": {
@@ -11844,6 +12455,671 @@
       },
       "required": ["accountId", "login", "health"],
       "additionalProperties": false
+    },
+    "environment_approval_approve": {
+      "additionalProperties": false,
+      "properties": {
+        "approvedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "approverUserId": {
+          "type": "string"
+        },
+        "buildKey": {
+          "type": ["string", "null"]
+        },
+        "declarationDigest": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "normalizedRemote": {
+          "description": "`normalize_remote_url` form: credentials stripped, lowercased host.",
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "resolvedImage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PinnedImage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The image the declaration resolved to when approved. Absent for a\ndeclaration that builds (ADR-0186), which carries `buildKey` instead."
+        },
+        "revokedAt": {
+          "format": "int64",
+          "type": ["integer", "null"]
+        },
+        "revokedBy": {
+          "type": ["string", "null"]
+        },
+        "runtimeFieldsDigest": {
+          "type": "string"
+        },
+        "via": {
+          "$ref": "#/$defs/ApprovalAuthority"
+        }
+      },
+      "required": [
+        "id",
+        "projectId",
+        "normalizedRemote",
+        "path",
+        "declarationDigest",
+        "runtimeFieldsDigest",
+        "approverUserId",
+        "via",
+        "approvedAt"
+      ],
+      "title": "ApprovalRecord",
+      "type": "object"
+    },
+    "environment_approval_get": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ApprovalRecord"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Nullable_ApprovalRecord"
+    },
+    "environment_approval_list": {
+      "additionalProperties": false,
+      "description": "One page of a collection.\n\nSparse rather than closed: `nextPageToken` is absent on the last page, and\nthat absence is the signal a client reads.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ApprovalRecord"
+          },
+          "type": "array"
+        },
+        "nextPageToken": {
+          "description": "Present exactly when another page exists.",
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["items"],
+      "title": "Page_of_ApprovalRecord",
+      "type": "object"
+    },
+    "environment_approval_revoke": {
+      "additionalProperties": false,
+      "properties": {
+        "approvedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "approverUserId": {
+          "type": "string"
+        },
+        "buildKey": {
+          "type": ["string", "null"]
+        },
+        "declarationDigest": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "normalizedRemote": {
+          "description": "`normalize_remote_url` form: credentials stripped, lowercased host.",
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "resolvedImage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PinnedImage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The image the declaration resolved to when approved. Absent for a\ndeclaration that builds (ADR-0186), which carries `buildKey` instead."
+        },
+        "revokedAt": {
+          "format": "int64",
+          "type": ["integer", "null"]
+        },
+        "revokedBy": {
+          "type": ["string", "null"]
+        },
+        "runtimeFieldsDigest": {
+          "type": "string"
+        },
+        "via": {
+          "$ref": "#/$defs/ApprovalAuthority"
+        }
+      },
+      "required": [
+        "id",
+        "projectId",
+        "normalizedRemote",
+        "path",
+        "declarationDigest",
+        "runtimeFieldsDigest",
+        "approverUserId",
+        "via",
+        "approvedAt"
+      ],
+      "title": "ApprovalRecord",
+      "type": "object"
+    },
+    "environment_catalog_create": {
+      "additionalProperties": false,
+      "properties": {
+        "createdAt": {
+          "default": 0,
+          "description": "Server-owned, and defaulted rather than required: the Host stamps both\non every write, and an operator authoring a baseline file by hand has\nno timestamp to give. `0` reads as \"not recorded\", which is the honest\nanswer for a hand-written entry.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "description": {
+          "type": ["string", "null"]
+        },
+        "id": {
+          "type": "string"
+        },
+        "image": {
+          "$ref": "#/$defs/CatalogImage"
+        },
+        "imageUser": {
+          "description": "The image config's `USER`, read from the registry when the entry was\nadded. Absent means the image runs as root by default.",
+          "type": ["string", "null"]
+        },
+        "isolationFloor": {
+          "$ref": "#/$defs/IsolationTier",
+          "description": "The weakest tier this image may run at. The effective floor is the\nstrictest of this, the tenant floor and the baseline floor."
+        },
+        "label": {
+          "type": "string"
+        },
+        "provenance": {
+          "description": "Build key, commit and approval for a `build` entry."
+        },
+        "revokedAt": {
+          "format": "int64",
+          "type": ["integer", "null"]
+        },
+        "scope": {
+          "$ref": "#/$defs/CatalogScope"
+        },
+        "sizeClassIds": {
+          "description": "Size classes this entry may run with; the first is the default.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "source": {
+          "$ref": "#/$defs/CatalogEntrySource"
+        },
+        "updatedAt": {
+          "default": 0,
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": ["id", "scope", "label", "image", "isolationFloor", "sizeClassIds", "source"],
+      "title": "CatalogEntry",
+      "type": "object"
+    },
+    "environment_catalog_delete": {
+      "additionalProperties": false,
+      "properties": {
+        "createdAt": {
+          "default": 0,
+          "description": "Server-owned, and defaulted rather than required: the Host stamps both\non every write, and an operator authoring a baseline file by hand has\nno timestamp to give. `0` reads as \"not recorded\", which is the honest\nanswer for a hand-written entry.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "description": {
+          "type": ["string", "null"]
+        },
+        "id": {
+          "type": "string"
+        },
+        "image": {
+          "$ref": "#/$defs/CatalogImage"
+        },
+        "imageUser": {
+          "description": "The image config's `USER`, read from the registry when the entry was\nadded. Absent means the image runs as root by default.",
+          "type": ["string", "null"]
+        },
+        "isolationFloor": {
+          "$ref": "#/$defs/IsolationTier",
+          "description": "The weakest tier this image may run at. The effective floor is the\nstrictest of this, the tenant floor and the baseline floor."
+        },
+        "label": {
+          "type": "string"
+        },
+        "provenance": {
+          "description": "Build key, commit and approval for a `build` entry."
+        },
+        "revokedAt": {
+          "format": "int64",
+          "type": ["integer", "null"]
+        },
+        "scope": {
+          "$ref": "#/$defs/CatalogScope"
+        },
+        "sizeClassIds": {
+          "description": "Size classes this entry may run with; the first is the default.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "source": {
+          "$ref": "#/$defs/CatalogEntrySource"
+        },
+        "updatedAt": {
+          "default": 0,
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": ["id", "scope", "label", "image", "isolationFloor", "sizeClassIds", "source"],
+      "title": "CatalogEntry",
+      "type": "object"
+    },
+    "environment_catalog_get": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CatalogEntryView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Nullable_CatalogEntryView"
+    },
+    "environment_catalog_list": {
+      "properties": {
+        "bundle": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BundlePolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Absent: no agent bundle is configured and nothing can be admitted."
+        },
+        "defaultEntryId": {
+          "type": ["string", "null"]
+        },
+        "egressPresets": {
+          "description": "What an egress spec's `presetIds` refer to.",
+          "items": {
+            "$ref": "#/$defs/EgressPreset"
+          },
+          "type": "array"
+        },
+        "floor": {
+          "$ref": "#/$defs/IsolationTier",
+          "description": "The strictest of the baseline's and the tenant's floors."
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/CatalogEntryView"
+          },
+          "type": "array"
+        },
+        "multiTenant": {
+          "description": "True on a Host several tenants' work shares, where an infrastructure\nfault refuses instead of falling back.",
+          "type": "boolean"
+        },
+        "nextPageToken": {
+          "description": "Present exactly when another page exists.",
+          "type": ["string", "null"]
+        },
+        "poolEnabled": {
+          "description": "The deployment switch (Q39). False: nothing is admitted and every\nproject takes the existing execution path.",
+          "type": "boolean"
+        },
+        "rejected": {
+          "items": {
+            "$ref": "#/$defs/CatalogRejection"
+          },
+          "type": "array"
+        },
+        "sizeClasses": {
+          "description": "What an entry's `sizeClassIds` refer to.",
+          "items": {
+            "$ref": "#/$defs/SizeClass"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "items",
+        "rejected",
+        "poolEnabled",
+        "multiTenant",
+        "floor",
+        "sizeClasses",
+        "egressPresets"
+      ],
+      "title": "CatalogPage",
+      "type": "object"
+    },
+    "environment_catalog_update": {
+      "additionalProperties": false,
+      "properties": {
+        "createdAt": {
+          "default": 0,
+          "description": "Server-owned, and defaulted rather than required: the Host stamps both\non every write, and an operator authoring a baseline file by hand has\nno timestamp to give. `0` reads as \"not recorded\", which is the honest\nanswer for a hand-written entry.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "description": {
+          "type": ["string", "null"]
+        },
+        "id": {
+          "type": "string"
+        },
+        "image": {
+          "$ref": "#/$defs/CatalogImage"
+        },
+        "imageUser": {
+          "description": "The image config's `USER`, read from the registry when the entry was\nadded. Absent means the image runs as root by default.",
+          "type": ["string", "null"]
+        },
+        "isolationFloor": {
+          "$ref": "#/$defs/IsolationTier",
+          "description": "The weakest tier this image may run at. The effective floor is the\nstrictest of this, the tenant floor and the baseline floor."
+        },
+        "label": {
+          "type": "string"
+        },
+        "provenance": {
+          "description": "Build key, commit and approval for a `build` entry."
+        },
+        "revokedAt": {
+          "format": "int64",
+          "type": ["integer", "null"]
+        },
+        "scope": {
+          "$ref": "#/$defs/CatalogScope"
+        },
+        "sizeClassIds": {
+          "description": "Size classes this entry may run with; the first is the default.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "source": {
+          "$ref": "#/$defs/CatalogEntrySource"
+        },
+        "updatedAt": {
+          "default": 0,
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": ["id", "scope", "label", "image", "isolationFloor", "sizeClassIds", "source"],
+      "title": "CatalogEntry",
+      "type": "object"
+    },
+    "environment_declaration_read": {
+      "description": "Every declaration file a repository has, plus where the Host looked.\n\n**All** of them, not the first one that matched. Precedence between\n`.cognia/workspace.json` and a devcontainer file is decided by\n`lib/project-environment/read-environment-declaration.ts`, together with\nthe trust gate and the parse \u2014 and a Host that returned only its own first\nmatch would be a second, silent answer to the same question. Returning the\nset keeps that rule in one place and still costs one round trip.",
+      "properties": {
+        "files": {
+          "description": "In `DECLARATION_FILES` order; empty when the repository declares nothing,\nwhich is the common case and not an error.",
+          "items": {
+            "$ref": "#/$defs/DeclarationRead"
+          },
+          "type": "array"
+        },
+        "searched": {
+          "description": "Every path that was looked for, so a caller can say where it looked\ninstead of only \"not found\".",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["files", "searched"],
+      "title": "DeclarationReadResult",
+      "type": "object"
+    },
+    "environment_driver_status": {
+      "description": "The driver's own answer about itself.",
+      "properties": {
+        "availableTiers": {
+          "description": "Empty with `reachable: false`. An unreachable daemon attests no tier,\nwhich is not the same claim as attesting none.",
+          "items": {
+            "$ref": "#/$defs/IsolationTier"
+          },
+          "type": "array"
+        },
+        "bundles": {
+          "items": {
+            "$ref": "#/$defs/OfferedBundleView"
+          },
+          "type": "array"
+        },
+        "deploymentId": {
+          "type": "string"
+        },
+        "driver": {
+          "type": "string"
+        },
+        "instanceId": {
+          "type": "string"
+        },
+        "isolationFloor": {
+          "$ref": "#/$defs/IsolationTier"
+        },
+        "multiTenant": {
+          "type": "boolean"
+        },
+        "reachable": {
+          "type": "boolean"
+        },
+        "unreachableReason": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": [
+        "driver",
+        "deploymentId",
+        "instanceId",
+        "multiTenant",
+        "isolationFloor",
+        "availableTiers",
+        "reachable",
+        "bundles"
+      ],
+      "title": "DriverStatus",
+      "type": "object"
+    },
+    "environment_egress_grant_create": {
+      "additionalProperties": false,
+      "description": "A project's permission to use egress beyond the presets: extra domains on\nthe allowlist tier, or the open tier.",
+      "properties": {
+        "domains": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "grantedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "grantedBy": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "revokedAt": {
+          "format": "int64",
+          "type": ["integer", "null"]
+        },
+        "tier": {
+          "$ref": "#/$defs/EgressTier"
+        }
+      },
+      "required": ["id", "projectId", "tier", "domains", "grantedBy", "grantedAt"],
+      "title": "EgressGrant",
+      "type": "object"
+    },
+    "environment_egress_grant_delete": {
+      "additionalProperties": false,
+      "description": "A project's permission to use egress beyond the presets: extra domains on\nthe allowlist tier, or the open tier.",
+      "properties": {
+        "domains": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "grantedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "grantedBy": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "revokedAt": {
+          "format": "int64",
+          "type": ["integer", "null"]
+        },
+        "tier": {
+          "$ref": "#/$defs/EgressTier"
+        }
+      },
+      "required": ["id", "projectId", "tier", "domains", "grantedBy", "grantedAt"],
+      "title": "EgressGrant",
+      "type": "object"
+    },
+    "environment_image_inspect": {
+      "additionalProperties": false,
+      "description": "Everything read about one image; cached per digest (`probe_cache`) and\nshown in the catalog editor.",
+      "properties": {
+        "digest": {
+          "description": "What the reference resolved to: the index digest for a multi-platform\nimage, the manifest digest otherwise. This is what a catalog entry pins.",
+          "type": "string"
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "platforms": {
+          "description": "In the order the caller asked for them.",
+          "items": {
+            "$ref": "#/$defs/PlatformImage"
+          },
+          "type": "array"
+        },
+        "registry": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        }
+      },
+      "required": ["digest", "mediaType", "platforms", "registry", "repository"],
+      "title": "ImageMetadata",
+      "type": "object"
+    },
+    "environment_probe_get": {
+      "properties": {
+        "cached": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProbeCacheView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unreadable": {
+          "description": "True when an entry exists but this build cannot read its shape. \"No\nprobe yet\" and \"a probe I cannot read\" lead to different actions.",
+          "type": "boolean"
+        }
+      },
+      "required": ["unreadable"],
+      "title": "ProbeCacheResult",
+      "type": "object"
+    },
+    "environment_spec_resolve_preview": {
+      "description": "A dry run of admission: what this Host would give the spec, or why it\nwould refuse. Never starts anything.",
+      "properties": {
+        "actualTier": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IsolationTier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "admitted": {
+          "type": "boolean"
+        },
+        "availableTiers": {
+          "description": "The tiers the driver could attest when this ran.",
+          "items": {
+            "$ref": "#/$defs/IsolationTier"
+          },
+          "type": "array"
+        },
+        "bundleDigest": {
+          "type": ["string", "null"]
+        },
+        "fault": {
+          "description": "Whether the refusal was a fault (infrastructure) rather than an answer\nabout the spec. A fault falls back at spawn time unless isolation is\nmandatory, so a preview must not report one as a verdict on the spec.",
+          "type": "boolean"
+        },
+        "refusalCode": {
+          "type": ["string", "null"]
+        },
+        "refusalMessage": {
+          "type": ["string", "null"]
+        },
+        "sizeClassId": {
+          "type": ["string", "null"]
+        },
+        "specDigest": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["admitted", "availableTiers", "fault"],
+      "title": "SpecPreview",
+      "type": "object"
     }
   }
 }

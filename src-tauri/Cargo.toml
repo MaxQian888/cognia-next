@@ -144,6 +144,11 @@ cognia-external-agent = { path = "../crates/cognia-external-agent" }
 # never boot into a binary that silently ignores the switch. The Docker driver
 # itself needs the `docker` feature, forwarded from `container-exec` below.
 cognia-sandbox-pool = { path = "../crates/cognia-sandbox-pool" }
+# The companion API serves the tenant catalog, the approvals and the probe
+# cache out of the same store admission uses (ADR-0182).
+# `registry`: `environment_image_inspect` reads image metadata here, on the Host,
+# which is the metadata reader the sandbox-pool crate defers to.
+cognia-environment = { path = "../crates/cognia-environment", default-features = false, features = ["store", "registry"] }
 # ADR-0067 Phase 5 — Computer Use automation + execution sandbox cluster. Owns
 # uiautomation/enigo/xcap/accessibility/seccompiler; re-aliased as
 # crate::{automation,sandbox,cua_sandbox}. windows/core-graphics/core-foundation/

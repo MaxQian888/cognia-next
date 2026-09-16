@@ -71,6 +71,7 @@ export const DISPATCH_SOURCES = [
   "src-tauri/src/companion_api/rpc/plugins.rs",
   "src-tauri/src/companion_api/rpc/diagnostics.rs",
   "src-tauri/src/companion_api/rpc/host_admin.rs",
+  "src-tauri/src/companion_api/rpc/environment.rs",
   // Two families dispatch outside rpc/: the browser gateway keys its arms on
   // the same literals, and SFTP is served by its own service module.
   "src-tauri/src/companion_api/browser_gateway.rs",

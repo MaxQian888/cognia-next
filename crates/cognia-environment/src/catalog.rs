@@ -96,7 +96,13 @@ pub struct CatalogEntry {
     pub provenance: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revoked_at: Option<i64>,
+    /// Server-owned, and defaulted rather than required: the Host stamps both
+    /// on every write, and an operator authoring a baseline file by hand has
+    /// no timestamp to give. `0` reads as "not recorded", which is the honest
+    /// answer for a hand-written entry.
+    #[serde(default)]
     pub created_at: i64,
+    #[serde(default)]
     pub updated_at: i64,
 }
 

@@ -40,6 +40,9 @@ pub mod device_grants;
 pub mod device_lifecycle;
 pub mod dispatch_host;
 pub mod dispatchers;
+/// Runtime environments: the installed sandbox pool and what the companion
+/// API serves about it (ADR-0182).
+pub mod environment_pool;
 pub mod event_batcher;
 pub mod event_bus;
 pub mod event_channels;

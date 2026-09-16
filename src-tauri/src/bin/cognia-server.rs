@@ -1640,8 +1640,16 @@ async fn run_serve(
     // then it hands the same backend straight back; a deployment that DID
     // enable it and cannot get a sandbox is refused here rather than served by
     // the legacy runner it asked to stop using.
-    let exec = cognia_sandbox_pool::boot::wrap_exec_backend(exec, &data_dir, &deployment_id)
+    let pool = cognia_sandbox_pool::boot::install(exec, &data_dir, &deployment_id)
         .map_err(|e| format!("sandbox pool: {e}"))?;
+    let exec = pool.backend;
+    // The companion API serves the catalog, the approvals and the driver
+    // status out of what the pool installed, so `environment.*` answers
+    // `sandbox_pool_disabled` on a deployment that never opted in rather than
+    // opening a store of its own.
+    if let Some(services) = pool.services {
+        app_lib::companion_api::environment_pool::install(services);
+    }
     log::info!(
         "exec backend: {} (runtime environment sandboxes: {})",
         exec.kind(),

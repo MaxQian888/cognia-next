@@ -475,6 +475,18 @@
         "runtime_facts": {}
       }
     },
+    "environment": {
+      "children": {
+        "approval": {},
+        "catalog": {},
+        "declaration": {},
+        "driver": {},
+        "egress_grant": {},
+        "image": {},
+        "probe": {},
+        "spec": {}
+      }
+    },
     "execution": {
       "children": {
         "run": {}

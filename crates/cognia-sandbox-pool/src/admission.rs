@@ -123,6 +123,25 @@ impl EnvironmentSandboxAdmission {
     pub fn baseline(&self) -> &EnvironmentBaseline {
         &self.baseline
     }
+
+    /// Run `read` against the tenant store.
+    ///
+    /// The lock stays private: the companion API reads the catalog, the
+    /// approvals and the probe cache out of the same connection admission
+    /// uses, and two connections to one SQLite file would be two answers to
+    /// "what did this tenant approve". The closure shape also keeps the guard
+    /// off any `await`, which a returned guard could not promise.
+    pub fn with_store<R>(&self, read: impl FnOnce(&mut EnvironmentStore) -> R) -> R {
+        let mut store = self.store.lock();
+        read(&mut store)
+    }
+
+    /// Whether this Host trusts per-device approvals (the desktop) rather than
+    /// server-side ones. A shared Host answers `false`, and the approval
+    /// commands are its authority.
+    pub fn device_approvals(&self) -> bool {
+        self.device_approvals
+    }
 }
 
 fn now_secs() -> i64 {

@@ -46,6 +46,13 @@ import { detectPlatform, type Platform } from "./detect"
  *                         (ADR-0088). Coarse like its neighbours: listed for
  *                         desktop and headless hosts, while `codeserver_supported()`
  *                         still answers the per-OS/arch question at call time.
+ * - `sandbox-pool`      — the host can run the runtime-environment sandbox pool
+ *                         (ADR-0182): only the headless cognia-server installs
+ *                         one. Coarse in the same way: whether an operator
+ *                         turned the pool ON is the deployment switch, which
+ *                         the environment commands answer at call time with
+ *                         `sandbox_pool_disabled`. The desktop does not list
+ *                         it — local containers are dormant in Step ①.
  */
 export const CORE_CAPABILITY_IDS = [
   "shell",
@@ -70,6 +77,7 @@ export const CORE_CAPABILITY_IDS = [
   "pro-ide",
   "thread-handoff-v1",
   "media",
+  "sandbox-pool",
 ] as const
 
 export type CoreCapabilityId = (typeof CORE_CAPABILITY_IDS)[number]
@@ -97,6 +105,7 @@ const SERVER_BACKED: readonly CapabilityId[] = Object.freeze([
   "ocr",
   "pro-ide",
   "media",
+  "sandbox-pool",
 ] as const)
 
 /** True when `value` is a well-formed capability id (core or `plugin:<id>`). */

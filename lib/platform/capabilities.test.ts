@@ -68,8 +68,20 @@ describe("detectLocalCapabilities", () => {
       "ocr",
       "pro-ide",
       "media",
+      "sandbox-pool",
     ])
     expect(caps).toBe(serverBackedCapabilities("cloud-companion"))
+  })
+
+  // ADR-0182. Only cognia-server installs a sandbox pool; the desktop's local
+  // containers are dormant in Step ①, so offering the image catalog there
+  // would be a settings page for a feature that host cannot run.
+  it("lists the sandbox pool on server-backed hosts and nowhere local", () => {
+    expect(capabilitiesForPlatform("headless")).toContain("sandbox-pool")
+    expect(serverBackedCapabilities("cloud-companion")).toContain("sandbox-pool")
+    expect(capabilitiesForPlatform("tauri")).not.toContain("sandbox-pool")
+    expect(capabilitiesForPlatform("mobile")).not.toContain("sandbox-pool")
+    expect(capabilitiesForPlatform("web")).not.toContain("sandbox-pool")
   })
 
   it("returns the tauri baseline under the Tauri marker", () => {

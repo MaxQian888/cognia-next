@@ -857,6 +857,28 @@ mod tests {
         ("browser_set_zoom", OutputShape::Opaque(RootType::Any)),
         ("browser_find", OutputShape::Opaque(RootType::Any)),
         ("browser_find_clear", OutputShape::Opaque(RootType::Any)),
+        // ── runtime environments (rpc/environment.rs) ───────────────────────
+        //
+        // Every row is `Derived`: the wire types live in `environment_pool`
+        // and `cognia-environment`, they already carry `JsonSchema`, and the
+        // catalog a console renders is the same struct admission reads. There
+        // is no hand-written shape here for either side to drift from.
+        ("environment_catalog_list", OutputShape::Derived(DerivedOutput { rust_type: "crate::companion_api::environment_pool::CatalogPage", schema: schema_of::<crate::companion_api::environment_pool::CatalogPage> })),
+        ("environment_catalog_get", OutputShape::Derived(DerivedOutput { rust_type: "Option<crate::companion_api::environment_pool::CatalogEntryView>", schema: schema_of::<Option<crate::companion_api::environment_pool::CatalogEntryView>> })),
+        ("environment_catalog_create", OutputShape::Derived(DerivedOutput { rust_type: "cognia_environment::catalog::CatalogEntry", schema: schema_of::<cognia_environment::catalog::CatalogEntry> })),
+        ("environment_catalog_update", OutputShape::Derived(DerivedOutput { rust_type: "cognia_environment::catalog::CatalogEntry", schema: schema_of::<cognia_environment::catalog::CatalogEntry> })),
+        ("environment_catalog_delete", OutputShape::Derived(DerivedOutput { rust_type: "cognia_environment::catalog::CatalogEntry", schema: schema_of::<cognia_environment::catalog::CatalogEntry> })),
+        ("environment_declaration_read", OutputShape::Derived(DerivedOutput { rust_type: "crate::companion_api::environment_pool::DeclarationReadResult", schema: schema_of::<crate::companion_api::environment_pool::DeclarationReadResult> })),
+        ("environment_spec_resolve_preview", OutputShape::Derived(DerivedOutput { rust_type: "crate::companion_api::environment_pool::SpecPreview", schema: schema_of::<crate::companion_api::environment_pool::SpecPreview> })),
+        ("environment_approval_list", OutputShape::Derived(DerivedOutput { rust_type: "cognia_problem::paging::Page<cognia_environment::approval::ApprovalRecord>", schema: schema_of::<cognia_problem::paging::Page<cognia_environment::approval::ApprovalRecord>> })),
+        ("environment_approval_get", OutputShape::Derived(DerivedOutput { rust_type: "Option<cognia_environment::approval::ApprovalRecord>", schema: schema_of::<Option<cognia_environment::approval::ApprovalRecord>> })),
+        ("environment_approval_approve", OutputShape::Derived(DerivedOutput { rust_type: "cognia_environment::approval::ApprovalRecord", schema: schema_of::<cognia_environment::approval::ApprovalRecord> })),
+        ("environment_approval_revoke", OutputShape::Derived(DerivedOutput { rust_type: "cognia_environment::approval::ApprovalRecord", schema: schema_of::<cognia_environment::approval::ApprovalRecord> })),
+        ("environment_egress_grant_create", OutputShape::Derived(DerivedOutput { rust_type: "cognia_environment::approval::EgressGrant", schema: schema_of::<cognia_environment::approval::EgressGrant> })),
+        ("environment_egress_grant_delete", OutputShape::Derived(DerivedOutput { rust_type: "cognia_environment::approval::EgressGrant", schema: schema_of::<cognia_environment::approval::EgressGrant> })),
+        ("environment_probe_get", OutputShape::Derived(DerivedOutput { rust_type: "crate::companion_api::environment_pool::ProbeCacheResult", schema: schema_of::<crate::companion_api::environment_pool::ProbeCacheResult> })),
+        ("environment_driver_status", OutputShape::Derived(DerivedOutput { rust_type: "crate::companion_api::environment_pool::DriverStatus", schema: schema_of::<crate::companion_api::environment_pool::DriverStatus> })),
+        ("environment_image_inspect", OutputShape::Derived(DerivedOutput { rust_type: "cognia_environment::registry::ImageMetadata", schema: schema_of::<cognia_environment::registry::ImageMetadata> })),
     ];
 
     // ── The ledger ──────────────────────────────────────────────────────────

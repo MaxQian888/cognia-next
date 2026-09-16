@@ -24,9 +24,50 @@ use cognia_external_agent::exec_backend::ExecBackend;
 use cognia_external_agent::sandbox_routing_backend::{SandboxExecBackend, SandboxRoutingBackend};
 
 use crate::admission::EnvironmentSandboxAdmission;
+use crate::status::SandboxDriverStatus;
 
 /// The tenant environment store, beside the other Rust-owned databases.
 pub const STORE_FILE: &str = "environment.sqlite";
+
+/// What the pool put in place.
+///
+/// A Host needs two things out of this seam: the execution backend to hand to
+/// its process manager, and — only when the pool is actually on — the services
+/// its companion API serves the catalog, the approvals and the driver status
+/// from. Keeping them in one return value is what makes "the pool is off" a
+/// single `None` the API layer can answer uniformly instead of a flag every
+/// command re-derives.
+pub struct InstalledPool {
+    /// The caller's own backend when the pool is off, the router when it is on.
+    pub backend: Arc<dyn ExecBackend>,
+    /// `None` when this deployment did not turn the pool on.
+    pub services: Option<PoolServices>,
+}
+
+/// The read and write surfaces the companion API needs.
+#[derive(Clone)]
+pub struct PoolServices {
+    /// Baseline, tenant store and registry credentials — the same instance
+    /// admission uses, so the API can never disagree with a spawn.
+    pub admission: Arc<EnvironmentSandboxAdmission>,
+    /// The driver, narrowed to what a status read may ask.
+    pub status: Arc<dyn SandboxDriverStatus>,
+}
+
+/// Install the pool: wrap `existing` in the sandbox router when this
+/// deployment enabled it, or hand it straight back when it did not.
+pub fn install(
+    existing: Arc<dyn ExecBackend>,
+    data_dir: &Path,
+    default_deployment_id: &str,
+) -> Result<InstalledPool, String> {
+    install_with(
+        existing,
+        &BaselineInputs::from_process_env(),
+        data_dir,
+        default_deployment_id,
+    )
+}
 
 /// Wrap `existing` in the sandbox router when this deployment enabled the
 /// pool, or return it untouched when it did not.
@@ -51,6 +92,17 @@ pub fn wrap_exec_backend_with(
     data_dir: &Path,
     default_deployment_id: &str,
 ) -> Result<Arc<dyn ExecBackend>, String> {
+    install_with(existing, inputs, data_dir, default_deployment_id).map(|pool| pool.backend)
+}
+
+/// [`install`] against captured inputs, so the decision is testable without
+/// touching the process environment.
+pub fn install_with(
+    existing: Arc<dyn ExecBackend>,
+    inputs: &BaselineInputs,
+    data_dir: &Path,
+    default_deployment_id: &str,
+) -> Result<InstalledPool, String> {
     let loaded =
         load_baseline_from(inputs).map_err(|error| format!("{}: {error}", error.code()))?;
     for note in &loaded.notes {
@@ -61,7 +113,10 @@ pub fn wrap_exec_backend_with(
             "runtime environment sandboxes: off (baseline {})",
             loaded.origin.as_str()
         );
-        return Ok(existing);
+        return Ok(InstalledPool {
+            backend: existing,
+            services: None,
+        });
     }
 
     let store = EnvironmentStore::open(&data_dir.join(STORE_FILE))
@@ -77,33 +132,39 @@ pub fn wrap_exec_backend_with(
         false,
     ));
     let multi_tenant = admission.baseline().multi_tenant;
-    let sandbox = docker_driver(admission, default_deployment_id)?;
+    let (sandbox, status) = docker_driver(Arc::clone(&admission), default_deployment_id)?;
     log::info!(
         "runtime environment sandboxes: on (docker driver, baseline {}, multi-tenant {multi_tenant})",
         loaded.origin.as_str()
     );
-    Ok(SandboxRoutingBackend::new(existing, sandbox))
+    Ok(InstalledPool {
+        backend: SandboxRoutingBackend::new(existing, sandbox),
+        services: Some(PoolServices { admission, status }),
+    })
 }
+
+/// The driver, as both halves the Host needs: the one that starts agents and
+/// the one that answers what it can attest.
+type Driver = (Arc<dyn SandboxExecBackend>, Arc<dyn SandboxDriverStatus>);
 
 #[cfg(feature = "docker")]
 fn docker_driver(
     admission: Arc<EnvironmentSandboxAdmission>,
     default_deployment_id: &str,
-) -> Result<Arc<dyn SandboxExecBackend>, String> {
+) -> Result<Driver, String> {
     use cognia_external_agent::container_backend::bollard_api::BollardContainerApi;
 
     let api = BollardContainerApi::connect()?;
     let config = crate::docker::DockerSandboxConfig::from_env(default_deployment_id)?;
-    Ok(crate::docker::DockerSandboxBackend::new(
-        api, admission, config,
-    ))
+    let backend = crate::docker::DockerSandboxBackend::new(api, admission, config);
+    Ok((Arc::clone(&backend) as Arc<dyn SandboxExecBackend>, backend))
 }
 
 #[cfg(not(feature = "docker"))]
 fn docker_driver(
     _admission: Arc<EnvironmentSandboxAdmission>,
     _default_deployment_id: &str,
-) -> Result<Arc<dyn SandboxExecBackend>, String> {
+) -> Result<Driver, String> {
     Err("the sandbox pool is enabled but this binary was built without the `docker` feature".into())
 }
 
@@ -142,6 +203,22 @@ mod tests {
         assert!(!wrapped.routes_sandboxes());
         // Nothing was created beside it either.
         assert!(!dir.path().join(STORE_FILE).exists());
+    }
+
+    /// The companion API's "the pool is off" answer comes from this `None`,
+    /// not from a second reading of the switch — so an off deployment must
+    /// hand out no services at all, including no open store handle.
+    #[test]
+    fn an_off_deployment_exposes_no_pool_services() {
+        let dir = tempfile::tempdir().expect("a temp data dir");
+        let pool = install_with(
+            LocalProcessBackend::new(),
+            &inputs(None),
+            dir.path(),
+            "dep1",
+        )
+        .expect("an unconfigured deployment boots");
+        assert!(pool.services.is_none());
     }
 
     /// An explicit `off` is still the off path, and still refuses nothing.

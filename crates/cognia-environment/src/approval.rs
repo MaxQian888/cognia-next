@@ -91,6 +91,82 @@ impl EgressGrant {
     }
 }
 
+/// What a caller asks to have approved.
+///
+/// The approver, the moment and the authority are deliberately **not** on this
+/// type. They are the Host's to state: an approval whose `approverUserId`
+/// arrived from the client would be an audit trail of claims rather than of
+/// decisions, and a comment saying "the server overwrites this" is a weaker
+/// guarantee than a field that is not there to send.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(transform = cognia_problem::wire_schema::closed_sparse_object)]
+pub struct ApprovalRequest {
+    pub id: String,
+    pub project_id: String,
+    pub normalized_remote: String,
+    pub path: String,
+    pub declaration_digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_image: Option<PinnedImage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_key: Option<String>,
+    pub runtime_fields_digest: String,
+}
+
+impl ApprovalRequest {
+    /// Complete the record with the three facts only the Host may state.
+    pub fn into_record(
+        self,
+        approver_user_id: String,
+        via: ApprovalAuthority,
+        approved_at: i64,
+    ) -> ApprovalRecord {
+        ApprovalRecord {
+            id: self.id,
+            project_id: self.project_id,
+            normalized_remote: self.normalized_remote,
+            path: self.path,
+            declaration_digest: self.declaration_digest,
+            resolved_image: self.resolved_image,
+            build_key: self.build_key,
+            runtime_fields_digest: self.runtime_fields_digest,
+            approver_user_id,
+            via,
+            approved_at,
+            revoked_at: None,
+            revoked_by: None,
+        }
+    }
+}
+
+/// What a caller asks to be granted. `grantedBy` and `grantedAt` are the
+/// Host's, for the same reason as on [`ApprovalRequest`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(transform = cognia_problem::wire_schema::closed_sparse_object)]
+pub struct EgressGrantRequest {
+    pub id: String,
+    pub project_id: String,
+    pub tier: EgressTier,
+    #[serde(default)]
+    pub domains: Vec<String>,
+}
+
+impl EgressGrantRequest {
+    pub fn into_grant(self, granted_by: String, granted_at: i64) -> EgressGrant {
+        EgressGrant {
+            id: self.id,
+            project_id: self.project_id,
+            tier: self.tier,
+            domains: self.domains,
+            granted_by,
+            granted_at,
+            revoked_at: None,
+        }
+    }
+}
+
 /// SHA-256 (lowercase hex) over the RFC 8785 form of the runtime fields a
 /// declaration contributes (egress domains excluded, see the module doc).
 /// Mirrored by `environmentRuntimeFieldsDigest` in

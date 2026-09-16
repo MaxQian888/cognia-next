@@ -4216,6 +4216,307 @@
     "ensure_system_lsp_host": {
       "type": "object"
     },
+    "environment_approval_approve": {
+      "type": "object",
+      "required": [
+        "approval"
+      ],
+      "properties": {
+        "approval": {
+          "type": "object",
+          "required": [
+            "id",
+            "projectId",
+            "normalizedRemote",
+            "path",
+            "declarationDigest",
+            "runtimeFieldsDigest"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "projectId": {
+              "type": "string"
+            },
+            "normalizedRemote": {
+              "type": "string",
+              "description": "The repository remote, normalized the way ADR-0147 trust rows are."
+            },
+            "path": {
+              "type": "string",
+              "description": "Repository-relative path of the declaration file that was approved."
+            },
+            "declarationDigest": {
+              "type": "string",
+              "description": "RFC 8785 digest of the declaration as the approver saw it. A change requires a new approval."
+            },
+            "resolvedImage": {
+              "type": "object",
+              "required": [
+                "registry",
+                "repository",
+                "digest"
+              ],
+              "properties": {
+                "registry": {
+                  "type": "string"
+                },
+                "repository": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "buildKey": {
+              "type": "string",
+              "description": "Set only for a declaration that has to be built (ADR-0186)."
+            },
+            "runtimeFieldsDigest": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "description": "What to approve. The approver, the authority and the moment are absent on purpose: the Host states those, and a caller cannot claim them."
+        }
+      },
+      "additionalProperties": false
+    },
+    "environment_approval_get": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "environment_approval_list": {
+      "type": "object",
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "description": "Only approvals for this project. Absent means every project."
+        },
+        "includeRevoked": {
+          "type": "boolean",
+          "description": "Include revoked approvals. The ledger keeps them; the default answer is the active ones."
+        },
+        "pageSize": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "How many items to answer. Absent means the command's default."
+        },
+        "pageToken": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The nextPageToken of the previous page, handed back unchanged."
+        }
+      },
+      "additionalProperties": false
+    },
+    "environment_approval_revoke": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "environment_catalog_create": {
+      "type": "object",
+      "required": [
+        "entry"
+      ],
+      "properties": {
+        "entry": {
+          "type": "object",
+          "description": "A tenant catalog entry. The Host re-validates it and answers a typed refusal code rather than a schema error, so the shape is not mirrored here."
+        }
+      },
+      "additionalProperties": false
+    },
+    "environment_catalog_delete": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "environment_catalog_get": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "environment_catalog_list": {
+      "type": "object",
+      "properties": {
+        "pageSize": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "How many items to answer. Absent means the command's default."
+        },
+        "pageToken": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The nextPageToken of the previous page, handed back unchanged."
+        }
+      },
+      "additionalProperties": false
+    },
+    "environment_catalog_update": {
+      "type": "object",
+      "required": [
+        "entry"
+      ],
+      "properties": {
+        "entry": {
+          "type": "object",
+          "description": "A tenant catalog entry, by its existing id. The Host re-validates it and answers a typed refusal code rather than a schema error, so the shape is not mirrored here."
+        }
+      },
+      "additionalProperties": false
+    },
+    "environment_declaration_read": {
+      "type": "object",
+      "required": [
+        "workspaceRoot"
+      ],
+      "properties": {
+        "workspaceRoot": {
+          "type": "string",
+          "description": "Absolute path of a workspace this caller is authorized for. Refused when it is not a registered workspace root."
+        }
+      },
+      "additionalProperties": false
+    },
+    "environment_driver_status": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "environment_egress_grant_create": {
+      "type": "object",
+      "required": [
+        "grant"
+      ],
+      "properties": {
+        "grant": {
+          "type": "object",
+          "required": [
+            "id",
+            "projectId",
+            "tier"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "projectId": {
+              "type": "string"
+            },
+            "tier": {
+              "type": "string",
+              "enum": [
+                "off",
+                "allowlist",
+                "on"
+              ]
+            },
+            "domains": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Extra domains on the allowlist tier. Ignored on the other two."
+            }
+          },
+          "additionalProperties": false,
+          "description": "What to grant. `grantedBy` and `grantedAt` are the Host's, for the same reason as on an approval."
+        }
+      },
+      "additionalProperties": false
+    },
+    "environment_egress_grant_delete": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "environment_image_inspect": {
+      "type": "object",
+      "required": [
+        "reference"
+      ],
+      "properties": {
+        "reference": {
+          "type": "string",
+          "description": "An image reference: `name`, `name:tag` or `name@sha256:<hex>`. Only a registry on the deployment's allowlist is contacted."
+        }
+      },
+      "additionalProperties": false
+    },
+    "environment_probe_get": {
+      "type": "object",
+      "required": [
+        "userImageDigest",
+        "bundleDigest"
+      ],
+      "properties": {
+        "userImageDigest": {
+          "type": "string",
+          "description": "`sha256:…` of the project's own image."
+        },
+        "bundleDigest": {
+          "type": "string",
+          "description": "`sha256:…` of the agent bundle the probe ran against."
+        }
+      },
+      "additionalProperties": false
+    },
+    "environment_spec_resolve_preview": {
+      "type": "object",
+      "required": [
+        "spec"
+      ],
+      "properties": {
+        "spec": {
+          "type": "object",
+          "description": "An EnvironmentSpec the brain resolved. The Host re-validates it and answers a typed refusal code rather than a schema error, so the shape is not mirrored here."
+        }
+      },
+      "additionalProperties": false
+    },
     "execution_run_control": {
       "type": "object",
       "required": [

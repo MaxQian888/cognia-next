@@ -585,17 +585,23 @@ impl<T: RegistryTransport + Sync> Session<'_, T> {
 
         let response = match &self.credential {
             Some(RegistryCredential::IdentityToken(refresh)) => {
-                let mut form = url::form_urlencoded::Serializer::new(String::new());
-                form.append_pair("grant_type", "refresh_token");
-                if let Some(service) = &service {
-                    form.append_pair("service", service);
-                }
-                form.append_pair("scope", &scope)
-                    .append_pair("client_id", OAUTH_CLIENT_ID)
-                    .append_pair("refresh_token", refresh);
+                // Built in its own scope: the serializer holds a non-`Sync`
+                // encoder, and keeping it alive across the `.await` below makes
+                // this whole future non-`Send` — which no RPC arm can await.
+                let form = {
+                    let mut form = url::form_urlencoded::Serializer::new(String::new());
+                    form.append_pair("grant_type", "refresh_token");
+                    if let Some(service) = &service {
+                        form.append_pair("service", service);
+                    }
+                    form.append_pair("scope", &scope)
+                        .append_pair("client_id", OAUTH_CLIENT_ID)
+                        .append_pair("refresh_token", refresh);
+                    form.finish()
+                };
                 let body = (
                     "application/x-www-form-urlencoded".to_string(),
-                    form.finish().into_bytes(),
+                    form.into_bytes(),
                 );
                 self.follow(
                     HttpMethod::Post,
@@ -848,6 +854,22 @@ mod tests {
                 .collect(),
             body: Vec::new(),
         })
+    }
+
+    /// A server awaits this from a request handler, which must be `Send`. A
+    /// non-`Send` local held across an `.await` anywhere in the token dance
+    /// compiles here and fails only in the Host, far from the cause.
+    #[test]
+    fn fetching_metadata_is_a_send_future() {
+        fn assert_send<T: Send>(_: &T) {}
+        let transport = FakeTransport::new(|_| status(404, &[]));
+        let client = RegistryClient::new(transport, RegistryCredentials::empty());
+        let endpoint = hub();
+        let wanted = Platform::supported();
+        let target = reference("library/node:22");
+        let future = client.fetch_metadata(&endpoint, &target, &wanted);
+        assert_send(&future);
+        drop(future);
     }
 
     fn run<F: Future>(future: F) -> F::Output {

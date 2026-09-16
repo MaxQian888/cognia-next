@@ -46,6 +46,7 @@ const RPC_DISPATCH_SOURCE_PATHS = [
   "src-tauri/src/companion_api/rpc/plugins.rs",
   "src-tauri/src/companion_api/rpc/diagnostics.rs",
   "src-tauri/src/companion_api/rpc/host_admin.rs",
+  "src-tauri/src/companion_api/rpc/environment.rs",
 ]
 /**
  * Every file that registers a route on the companion listener.
@@ -627,10 +628,11 @@ const HOST_CATEGORIES = [
   {
     id: "development",
     title: "Development tools",
-    description: "Git, files, terminals, browsers, media processing, code-server, and language servers.",
+    description:
+      "Git, files, terminals, browsers, media processing, code-server, language servers, and the container image a project runs in.",
     skill: "cognia-host-development",
     pattern:
-      /^(browser_|codeserver_|fs_|git_|github_workspace_|plugin_media_|video_|project_environment_|sftp_|terminal_|lsp_|ensure_dir$|ensure_dir_confined$|ensure_system_lsp_host$|read_agent_config$|read_project_mcp_config$|write_agent_config$|read_text_file$|write_text_file$|write_text_file_confined$|default_export_dir$)/,
+      /^(browser_|codeserver_|environment_|fs_|git_|github_workspace_|plugin_media_|video_|project_environment_|sftp_|terminal_|lsp_|ensure_dir$|ensure_dir_confined$|ensure_system_lsp_host$|read_agent_config$|read_project_mcp_config$|write_agent_config$|read_text_file$|write_text_file$|write_text_file_confined$|default_export_dir$)/,
   },
   {
     id: "system",

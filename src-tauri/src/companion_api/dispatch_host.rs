@@ -687,11 +687,23 @@ impl DispatchHost {
     /// does the same); the headless container relies on the `ExecBackend` it
     /// was configured with (local / bollard / kube) for isolation, so there is
     /// nothing to wrap.
+    ///
+    /// # The two confinements are mutually exclusive
+    ///
+    /// A spawn that carries a runtime-environment placement (ADR-0182) runs
+    /// inside the project's own container, and the desktop sandbox host
+    /// rewrites `command` and `args` to its own launcher. Doing both would
+    /// hand the container a command the agent bundle has no entry for, so the
+    /// sandbox driver would refuse `sandbox_command_unavailable` — a spawn
+    /// that looks like a bundle problem and is really a double-wrap. The
+    /// container is the stronger confinement of the two, so it wins and the
+    /// desktop wrapper stands down.
     pub fn harden_spawn_config(
         &self,
         config: crate::external_agent::process::ExternalAgentSpawnConfig,
     ) -> Result<crate::external_agent::process::ExternalAgentSpawnConfig, String> {
         match self {
+            Self::Tauri(_) if !desktop_wrapper_applies(&config) => Ok(config),
             Self::Tauri(_) => crate::external_agent::sandbox::wrap_with_sandbox(
                 config,
                 &crate::external_agent::sandbox::DesktopSandboxHost,
@@ -700,6 +712,18 @@ impl DispatchHost {
             Self::Headless(_) => Ok(config),
         }
     }
+}
+
+/// Whether the desktop's OS sandbox wrapper applies to `config`.
+///
+/// Extracted from [`DispatchHost::harden_spawn_config`] so the rule is
+/// testable without an `AppHandle`: a `DispatchHost::Tauri` needs a live Tauri
+/// app, and the part worth pinning is not the wrapping, it is that the two
+/// confinements never both apply.
+fn desktop_wrapper_applies(
+    config: &crate::external_agent::process::ExternalAgentSpawnConfig,
+) -> bool {
+    config.sandbox.is_none()
 }
 
 #[cfg(test)]
@@ -719,6 +743,46 @@ mod tests {
         assert_eq!(err.0, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(err.1 .0.code, "headless_unsupported");
         assert!(err.1 .0.message.contains("claude_send"));
+    }
+
+    fn spawn_config(placed: bool) -> crate::external_agent::process::ExternalAgentSpawnConfig {
+        use cognia_external_agent::sandbox_routing_backend::SandboxPlacement;
+        crate::external_agent::process::ExternalAgentSpawnConfig {
+            id: "agent-1".into(),
+            command: "codex".into(),
+            args: vec!["acp".into()],
+            cwd: None,
+            env: Default::default(),
+            framing: Default::default(),
+            sandbox: placed.then(|| SandboxPlacement::Container {
+                spec: serde_json::json!({ "projectId": "prj1" }),
+                isolation_mandatory: false,
+            }),
+        }
+    }
+
+    /// ADR-0182. The desktop sandbox host rewrites `command`/`args` to its own
+    /// launcher, which the agent bundle has no entry for — so wrapping a
+    /// placed spawn would refuse `sandbox_command_unavailable` and look like a
+    /// bundle problem. The container is the stronger confinement and wins.
+    #[test]
+    fn the_desktop_wrapper_stands_down_for_a_spawn_that_runs_in_a_container() {
+        assert!(!desktop_wrapper_applies(&spawn_config(true)));
+        assert!(desktop_wrapper_applies(&spawn_config(false)));
+    }
+
+    /// The headless host confines through its `ExecBackend`, so a placed spawn
+    /// reaches it byte for byte — including the placement the router reads.
+    #[test]
+    fn a_headless_host_hardens_a_placed_spawn_by_leaving_it_alone() {
+        let host = headless_host();
+        let config = spawn_config(true);
+        let hardened = host
+            .harden_spawn_config(config.clone())
+            .expect("nothing to wrap");
+        assert_eq!(hardened.command, config.command);
+        assert_eq!(hardened.args, config.args);
+        assert!(hardened.sandbox.is_some());
     }
 
     #[test]

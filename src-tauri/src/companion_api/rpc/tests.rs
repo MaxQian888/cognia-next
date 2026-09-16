@@ -3591,6 +3591,7 @@ fn every_known_command_has_a_dispatch_arm() {
         include_str!("plugins.rs"),
         include_str!("diagnostics.rs"),
         include_str!("host_admin.rs"),
+        include_str!("environment.rs"),
     ]
     .join("\n");
 
@@ -4833,6 +4834,7 @@ fn command_families_cover_known_non_browser_commands_once() {
         super::plugins::COMMANDS,
         super::diagnostics::COMMANDS,
         super::host_admin::COMMANDS,
+        super::environment::COMMANDS,
     ];
     let routed: Vec<_> = families.into_iter().flatten().copied().collect();
     let unique: std::collections::HashSet<_> = routed.iter().copied().collect();
@@ -4889,7 +4891,10 @@ fn bot_lifecycle_commands_require_workspace_write_authority() {
         assert!(data_sync::COMMANDS.contains(&command));
         let descriptor = crate::companion_api::command_manifest::descriptor(command).unwrap();
         assert_eq!(descriptor.capability, "workspace.write");
-        assert_eq!(descriptor.target, crate::companion_api::command_manifest::CommandTarget::Execution);
+        assert_eq!(
+            descriptor.target,
+            crate::companion_api::command_manifest::CommandTarget::Execution
+        );
     }
     assert!(READ_ONLY_COMMANDS.contains(&"bot_console_read"));
     assert!(!READ_ONLY_COMMANDS.contains(&"bot_installation_mutate"));

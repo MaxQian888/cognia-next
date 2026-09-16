@@ -42,6 +42,7 @@ mod chat;
 mod codex_app;
 mod data_sync;
 mod diagnostics;
+mod environment;
 mod filesystem;
 mod gateway_plane;
 mod host_admin;
@@ -1339,6 +1340,26 @@ const KNOWN_COMMANDS: &[&str] = &[
     "lark_entry_issue",
     "lark_result_complete",
     "lark_metrics_record",
+    // Runtime environments (ADR-0182/0183). The catalog and the driver are
+    // deployment facts (`host.observe` / `host.admin`); the approvals and the
+    // egress grants are workspace-scoped and carry their own ADR-0149
+    // authority check on top of the capability.
+    "environment_catalog_list",
+    "environment_catalog_get",
+    "environment_catalog_create",
+    "environment_catalog_update",
+    "environment_catalog_delete",
+    "environment_declaration_read",
+    "environment_spec_resolve_preview",
+    "environment_approval_list",
+    "environment_approval_get",
+    "environment_approval_approve",
+    "environment_approval_revoke",
+    "environment_egress_grant_create",
+    "environment_egress_grant_delete",
+    "environment_probe_get",
+    "environment_driver_status",
+    "environment_image_inspect",
 ];
 
 /// Public read-only accessor for the dispatch allowlist. Used by the
@@ -1634,6 +1655,16 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "companion_browser_access_get",
     "companion_push_status",
     "companion_server_status",
+    // Runtime environments — every read is a projection of stored state.
+    "environment_catalog_list",
+    "environment_catalog_get",
+    "environment_declaration_read",
+    "environment_spec_resolve_preview",
+    "environment_approval_list",
+    "environment_approval_get",
+    "environment_probe_get",
+    "environment_driver_status",
+    "environment_image_inspect",
 ];
 
 // ---------------------------------------------------------------------------
@@ -1976,6 +2007,16 @@ const CONTROL_COMMANDS: &[&str] = &[
     "fleet_opencode_outbox_repair",
     "fleet_focus_terminal",
     "fleet_interrupt_session",
+    // Runtime environments — a catalog write widens what may run on this
+    // deployment, and an approval or an egress grant widens what one project
+    // may reach. All four need remote control on top of their capability.
+    "environment_catalog_create",
+    "environment_catalog_update",
+    "environment_catalog_delete",
+    "environment_approval_approve",
+    "environment_approval_revoke",
+    "environment_egress_grant_create",
+    "environment_egress_grant_delete",
 ];
 
 /// O(1) membership mirrors used on the request hot path. Command existence
@@ -3576,6 +3617,10 @@ pub(super) async fn dispatch(
 
     if terminal::COMMANDS.contains(&name) {
         return terminal::dispatch(name, args, state, host, device_id, account_id, scope).await;
+    }
+
+    if environment::COMMANDS.contains(&name) {
+        return environment::dispatch(name, args, state, host, device_id, account_id, scope).await;
     }
 
     if sftp::COMMANDS.contains(&name) {

@@ -2361,6 +2361,7 @@ dependencies = [
  "cognia-ccswitch",
  "cognia-connectors",
  "cognia-core",
+ "cognia-environment",
  "cognia-external-agent",
  "cognia-files",
  "cognia-gateway",

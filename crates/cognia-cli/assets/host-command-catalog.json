@@ -46,7 +46,7 @@
     {
       "id": "development",
       "title": "Development tools",
-      "description": "Git, files, terminals, browsers, media processing, code-server, and language servers.",
+      "description": "Git, files, terminals, browsers, media processing, code-server, language servers, and the container image a project runs in.",
       "skill": "cognia-host-development"
     },
     {
@@ -151,6 +151,11 @@
       "id": "device",
       "title": "Device",
       "category": "system"
+    },
+    {
+      "id": "environment",
+      "title": "Environment",
+      "category": "development"
     },
     {
       "id": "execution",
@@ -14312,6 +14317,2703 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "environment_approval_approve",
+      "category": "development",
+      "resource": "environment",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "critical",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "environment_approval_approve (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "approval"
+        ],
+        "properties": {
+          "approval": {
+            "type": "object",
+            "required": [
+              "id",
+              "projectId",
+              "normalizedRemote",
+              "path",
+              "declarationDigest",
+              "runtimeFieldsDigest"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "projectId": {
+                "type": "string"
+              },
+              "normalizedRemote": {
+                "type": "string",
+                "description": "The repository remote, normalized the way ADR-0147 trust rows are."
+              },
+              "path": {
+                "type": "string",
+                "description": "Repository-relative path of the declaration file that was approved."
+              },
+              "declarationDigest": {
+                "type": "string",
+                "description": "RFC 8785 digest of the declaration as the approver saw it. A change requires a new approval."
+              },
+              "resolvedImage": {
+                "type": "object",
+                "required": [
+                  "registry",
+                  "repository",
+                  "digest"
+                ],
+                "properties": {
+                  "registry": {
+                    "type": "string"
+                  },
+                  "repository": {
+                    "type": "string"
+                  },
+                  "digest": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "buildKey": {
+                "type": "string",
+                "description": "Set only for a declaration that has to be built (ADR-0186)."
+              },
+              "runtimeFieldsDigest": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false,
+            "description": "What to approve. The approver, the authority and the moment are absent on purpose: the Host states those, and a caller cannot claim them."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "approvedAt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "approverUserId": {
+            "type": "string"
+          },
+          "buildKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "declarationDigest": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "normalizedRemote": {
+            "description": "`normalize_remote_url` form: credentials stripped, lowercased host.",
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "resolvedImage": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "description": "A digest-pinned image as it travels in specs and catalog entries.",
+                "properties": {
+                  "digest": {
+                    "description": "`sha256:<64 lowercase hex>`.",
+                    "type": "string"
+                  },
+                  "registry": {
+                    "type": "string"
+                  },
+                  "repository": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "digest",
+                  "registry",
+                  "repository"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The image the declaration resolved to when approved. Absent for a\ndeclaration that builds (ADR-0186), which carries `buildKey` instead."
+          },
+          "revokedAt": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "revokedBy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "runtimeFieldsDigest": {
+            "type": "string"
+          },
+          "via": {
+            "oneOf": [
+              {
+                "const": "workspace-maintainer",
+                "description": "`WorkspaceRole::Maintainer` of the project's collab workspace.",
+                "type": "string"
+              },
+              {
+                "const": "org-admin",
+                "description": "`OrgRole::Owner` or `OrgRole::Admin`.",
+                "type": "string"
+              },
+              {
+                "const": "host-owner",
+                "description": "The Host owner principal.",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "normalizedRemote",
+          "path",
+          "declarationDigest",
+          "runtimeFieldsDigest",
+          "approverUserId",
+          "via",
+          "approvedAt"
+        ],
+        "title": "ApprovalRecord",
+        "type": "object"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "environment_approval_get",
+      "category": "development",
+      "resource": "environment",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "environment_approval_get (workspace.read)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "approvedAt": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "approverUserId": {
+                "type": "string"
+              },
+              "buildKey": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "declarationDigest": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "normalizedRemote": {
+                "description": "`normalize_remote_url` form: credentials stripped, lowercased host.",
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "projectId": {
+                "type": "string"
+              },
+              "resolvedImage": {
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "description": "A digest-pinned image as it travels in specs and catalog entries.",
+                    "properties": {
+                      "digest": {
+                        "description": "`sha256:<64 lowercase hex>`.",
+                        "type": "string"
+                      },
+                      "registry": {
+                        "type": "string"
+                      },
+                      "repository": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "digest",
+                      "registry",
+                      "repository"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The image the declaration resolved to when approved. Absent for a\ndeclaration that builds (ADR-0186), which carries `buildKey` instead."
+              },
+              "revokedAt": {
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "revokedBy": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "runtimeFieldsDigest": {
+                "type": "string"
+              },
+              "via": {
+                "oneOf": [
+                  {
+                    "const": "workspace-maintainer",
+                    "description": "`WorkspaceRole::Maintainer` of the project's collab workspace.",
+                    "type": "string"
+                  },
+                  {
+                    "const": "org-admin",
+                    "description": "`OrgRole::Owner` or `OrgRole::Admin`.",
+                    "type": "string"
+                  },
+                  {
+                    "const": "host-owner",
+                    "description": "The Host owner principal.",
+                    "type": "string"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "projectId",
+              "normalizedRemote",
+              "path",
+              "declarationDigest",
+              "runtimeFieldsDigest",
+              "approverUserId",
+              "via",
+              "approvedAt"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Nullable_ApprovalRecord"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "environment_approval_list",
+      "category": "development",
+      "resource": "environment",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "environment_approval_list (workspace.read)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "Only approvals for this project. Absent means every project."
+          },
+          "includeRevoked": {
+            "type": "boolean",
+            "description": "Include revoked approvals. The ledger keeps them; the default answer is the active ones."
+          },
+          "pageSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "How many items to answer. Absent means the command's default."
+          },
+          "pageToken": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The nextPageToken of the previous page, handed back unchanged."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "additionalProperties": false,
+        "description": "One page of a collection.\n\nSparse rather than closed: `nextPageToken` is absent on the last page, and\nthat absence is the signal a client reads.",
+        "properties": {
+          "items": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "approvedAt": {
+                  "format": "int64",
+                  "type": "integer"
+                },
+                "approverUserId": {
+                  "type": "string"
+                },
+                "buildKey": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "declarationDigest": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "normalizedRemote": {
+                  "description": "`normalize_remote_url` form: credentials stripped, lowercased host.",
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "projectId": {
+                  "type": "string"
+                },
+                "resolvedImage": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": false,
+                      "description": "A digest-pinned image as it travels in specs and catalog entries.",
+                      "properties": {
+                        "digest": {
+                          "description": "`sha256:<64 lowercase hex>`.",
+                          "type": "string"
+                        },
+                        "registry": {
+                          "type": "string"
+                        },
+                        "repository": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "digest",
+                        "registry",
+                        "repository"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The image the declaration resolved to when approved. Absent for a\ndeclaration that builds (ADR-0186), which carries `buildKey` instead."
+                },
+                "revokedAt": {
+                  "format": "int64",
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "revokedBy": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "runtimeFieldsDigest": {
+                  "type": "string"
+                },
+                "via": {
+                  "oneOf": [
+                    {
+                      "const": "workspace-maintainer",
+                      "description": "`WorkspaceRole::Maintainer` of the project's collab workspace.",
+                      "type": "string"
+                    },
+                    {
+                      "const": "org-admin",
+                      "description": "`OrgRole::Owner` or `OrgRole::Admin`.",
+                      "type": "string"
+                    },
+                    {
+                      "const": "host-owner",
+                      "description": "The Host owner principal.",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "projectId",
+                "normalizedRemote",
+                "path",
+                "declarationDigest",
+                "runtimeFieldsDigest",
+                "approverUserId",
+                "via",
+                "approvedAt"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "nextPageToken": {
+            "description": "Present exactly when another page exists.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "Page_of_ApprovalRecord",
+        "type": "object"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "environment_approval_revoke",
+      "category": "development",
+      "resource": "environment",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "environment_approval_revoke (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "approvedAt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "approverUserId": {
+            "type": "string"
+          },
+          "buildKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "declarationDigest": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "normalizedRemote": {
+            "description": "`normalize_remote_url` form: credentials stripped, lowercased host.",
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "resolvedImage": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "description": "A digest-pinned image as it travels in specs and catalog entries.",
+                "properties": {
+                  "digest": {
+                    "description": "`sha256:<64 lowercase hex>`.",
+                    "type": "string"
+                  },
+                  "registry": {
+                    "type": "string"
+                  },
+                  "repository": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "digest",
+                  "registry",
+                  "repository"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The image the declaration resolved to when approved. Absent for a\ndeclaration that builds (ADR-0186), which carries `buildKey` instead."
+          },
+          "revokedAt": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "revokedBy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "runtimeFieldsDigest": {
+            "type": "string"
+          },
+          "via": {
+            "oneOf": [
+              {
+                "const": "workspace-maintainer",
+                "description": "`WorkspaceRole::Maintainer` of the project's collab workspace.",
+                "type": "string"
+              },
+              {
+                "const": "org-admin",
+                "description": "`OrgRole::Owner` or `OrgRole::Admin`.",
+                "type": "string"
+              },
+              {
+                "const": "host-owner",
+                "description": "The Host owner principal.",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "normalizedRemote",
+          "path",
+          "declarationDigest",
+          "runtimeFieldsDigest",
+          "approverUserId",
+          "via",
+          "approvedAt"
+        ],
+        "title": "ApprovalRecord",
+        "type": "object"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "environment_catalog_create",
+      "category": "development",
+      "resource": "environment",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "environment_catalog_create (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "entry"
+        ],
+        "properties": {
+          "entry": {
+            "type": "object",
+            "description": "A tenant catalog entry. The Host re-validates it and answers a typed refusal code rather than a schema error, so the shape is not mirrored here."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "default": 0,
+            "description": "Server-owned, and defaulted rather than required: the Host stamps both\non every write, and an operator authoring a baseline file by hand has\nno timestamp to give. `0` reads as \"not recorded\", which is the honest\nanswer for a hand-written entry.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "image": {
+            "additionalProperties": false,
+            "description": "The image a catalog entry names. Pinned except for a legacy entry derived\nfrom a tag-only `COGNIA_RUNNER_IMAGE`, which admission refuses until the\ntag is resolved to a digest.",
+            "properties": {
+              "digest": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "registry": {
+                "type": "string"
+              },
+              "repository": {
+                "type": "string"
+              },
+              "tag": {
+                "description": "The tag a legacy entry was derived from; informational once pinned.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "registry",
+              "repository"
+            ],
+            "type": "object"
+          },
+          "imageUser": {
+            "description": "The image config's `USER`, read from the registry when the entry was\nadded. Absent means the image runs as root by default.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isolationFloor": {
+            "description": "The weakest tier this image may run at. The effective floor is the\nstrictest of this, the tenant floor and the baseline floor.",
+            "oneOf": [
+              {
+                "const": "container",
+                "description": "A plain container: shared kernel, seccomp/pids/no-new-privileges.",
+                "type": "string"
+              },
+              {
+                "const": "gvisor",
+                "description": "A user-space kernel (runsc).",
+                "type": "string"
+              },
+              {
+                "const": "vm",
+                "description": "A per-sandbox virtual machine (Kata, Firecracker, serverless pods).",
+                "type": "string"
+              }
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "provenance": {
+            "description": "Build key, commit and approval for a `build` entry."
+          },
+          "revokedAt": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "scope": {
+            "enum": [
+              "baseline",
+              "tenant"
+            ],
+            "type": "string"
+          },
+          "sizeClassIds": {
+            "description": "Size classes this entry may run with; the first is the default.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "source": {
+            "oneOf": [
+              {
+                "const": "manual",
+                "description": "Typed in by an admin.",
+                "type": "string"
+              },
+              {
+                "const": "build",
+                "description": "Produced by an environment build (ADR-0186).",
+                "type": "string"
+              },
+              {
+                "const": "legacy",
+                "description": "Derived at boot from `COGNIA_RUNNER_IMAGE`.",
+                "type": "string"
+              }
+            ]
+          },
+          "updatedAt": {
+            "default": 0,
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "scope",
+          "label",
+          "image",
+          "isolationFloor",
+          "sizeClassIds",
+          "source"
+        ],
+        "title": "CatalogEntry",
+        "type": "object"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "environment_catalog_delete",
+      "category": "development",
+      "resource": "environment",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "environment_catalog_delete (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "default": 0,
+            "description": "Server-owned, and defaulted rather than required: the Host stamps both\non every write, and an operator authoring a baseline file by hand has\nno timestamp to give. `0` reads as \"not recorded\", which is the honest\nanswer for a hand-written entry.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "image": {
+            "additionalProperties": false,
+            "description": "The image a catalog entry names. Pinned except for a legacy entry derived\nfrom a tag-only `COGNIA_RUNNER_IMAGE`, which admission refuses until the\ntag is resolved to a digest.",
+            "properties": {
+              "digest": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "registry": {
+                "type": "string"
+              },
+              "repository": {
+                "type": "string"
+              },
+              "tag": {
+                "description": "The tag a legacy entry was derived from; informational once pinned.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "registry",
+              "repository"
+            ],
+            "type": "object"
+          },
+          "imageUser": {
+            "description": "The image config's `USER`, read from the registry when the entry was\nadded. Absent means the image runs as root by default.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isolationFloor": {
+            "description": "The weakest tier this image may run at. The effective floor is the\nstrictest of this, the tenant floor and the baseline floor.",
+            "oneOf": [
+              {
+                "const": "container",
+                "description": "A plain container: shared kernel, seccomp/pids/no-new-privileges.",
+                "type": "string"
+              },
+              {
+                "const": "gvisor",
+                "description": "A user-space kernel (runsc).",
+                "type": "string"
+              },
+              {
+                "const": "vm",
+                "description": "A per-sandbox virtual machine (Kata, Firecracker, serverless pods).",
+                "type": "string"
+              }
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "provenance": {
+            "description": "Build key, commit and approval for a `build` entry."
+          },
+          "revokedAt": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "scope": {
+            "enum": [
+              "baseline",
+              "tenant"
+            ],
+            "type": "string"
+          },
+          "sizeClassIds": {
+            "description": "Size classes this entry may run with; the first is the default.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "source": {
+            "oneOf": [
+              {
+                "const": "manual",
+                "description": "Typed in by an admin.",
+                "type": "string"
+              },
+              {
+                "const": "build",
+                "description": "Produced by an environment build (ADR-0186).",
+                "type": "string"
+              },
+              {
+                "const": "legacy",
+                "description": "Derived at boot from `COGNIA_RUNNER_IMAGE`.",
+                "type": "string"
+              }
+            ]
+          },
+          "updatedAt": {
+            "default": 0,
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "scope",
+          "label",
+          "image",
+          "isolationFloor",
+          "sizeClassIds",
+          "source"
+        ],
+        "title": "CatalogEntry",
+        "type": "object"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "environment_catalog_get",
+      "category": "development",
+      "resource": "environment",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "environment_catalog_get (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "anyOf": [
+          {
+            "description": "A catalog entry as a console reads it.",
+            "properties": {
+              "defaultEntry": {
+                "description": "True for the entry a project that names none gets.",
+                "type": "boolean"
+              },
+              "effectiveFloor": {
+                "description": "`max(entry floor, baseline floor, tenant floor)` — never lower than\nwhat the entry itself declares.",
+                "oneOf": [
+                  {
+                    "const": "container",
+                    "description": "A plain container: shared kernel, seccomp/pids/no-new-privileges.",
+                    "type": "string"
+                  },
+                  {
+                    "const": "gvisor",
+                    "description": "A user-space kernel (runsc).",
+                    "type": "string"
+                  },
+                  {
+                    "const": "vm",
+                    "description": "A per-sandbox virtual machine (Kata, Firecracker, serverless pods).",
+                    "type": "string"
+                  }
+                ]
+              },
+              "entry": {
+                "additionalProperties": false,
+                "properties": {
+                  "createdAt": {
+                    "default": 0,
+                    "description": "Server-owned, and defaulted rather than required: the Host stamps both\non every write, and an operator authoring a baseline file by hand has\nno timestamp to give. `0` reads as \"not recorded\", which is the honest\nanswer for a hand-written entry.",
+                    "format": "int64",
+                    "type": "integer"
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "image": {
+                    "additionalProperties": false,
+                    "description": "The image a catalog entry names. Pinned except for a legacy entry derived\nfrom a tag-only `COGNIA_RUNNER_IMAGE`, which admission refuses until the\ntag is resolved to a digest.",
+                    "properties": {
+                      "digest": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "registry": {
+                        "type": "string"
+                      },
+                      "repository": {
+                        "type": "string"
+                      },
+                      "tag": {
+                        "description": "The tag a legacy entry was derived from; informational once pinned.",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "registry",
+                      "repository"
+                    ],
+                    "type": "object"
+                  },
+                  "imageUser": {
+                    "description": "The image config's `USER`, read from the registry when the entry was\nadded. Absent means the image runs as root by default.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "isolationFloor": {
+                    "description": "The weakest tier this image may run at. The effective floor is the\nstrictest of this, the tenant floor and the baseline floor.",
+                    "oneOf": [
+                      {
+                        "const": "container",
+                        "description": "A plain container: shared kernel, seccomp/pids/no-new-privileges.",
+                        "type": "string"
+                      },
+                      {
+                        "const": "gvisor",
+                        "description": "A user-space kernel (runsc).",
+                        "type": "string"
+                      },
+                      {
+                        "const": "vm",
+                        "description": "A per-sandbox virtual machine (Kata, Firecracker, serverless pods).",
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "provenance": {
+                    "description": "Build key, commit and approval for a `build` entry."
+                  },
+                  "revokedAt": {
+                    "format": "int64",
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "scope": {
+                    "enum": [
+                      "baseline",
+                      "tenant"
+                    ],
+                    "type": "string"
+                  },
+                  "sizeClassIds": {
+                    "description": "Size classes this entry may run with; the first is the default.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "source": {
+                    "oneOf": [
+                      {
+                        "const": "manual",
+                        "description": "Typed in by an admin.",
+                        "type": "string"
+                      },
+                      {
+                        "const": "build",
+                        "description": "Produced by an environment build (ADR-0186).",
+                        "type": "string"
+                      },
+                      {
+                        "const": "legacy",
+                        "description": "Derived at boot from `COGNIA_RUNNER_IMAGE`.",
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "updatedAt": {
+                    "default": 0,
+                    "format": "int64",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "id",
+                  "scope",
+                  "label",
+                  "image",
+                  "isolationFloor",
+                  "sizeClassIds",
+                  "source"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "entry",
+              "effectiveFloor",
+              "defaultEntry"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Nullable_CatalogEntryView"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "environment_catalog_list",
+      "category": "development",
+      "resource": "environment",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "environment_catalog_list (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pageSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "How many items to answer. Absent means the command's default."
+          },
+          "pageToken": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The nextPageToken of the previous page, handed back unchanged."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "properties": {
+          "bundle": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "current": {
+                    "additionalProperties": false,
+                    "description": "The release's current agent bundle.",
+                    "properties": {
+                      "digest": {
+                        "description": "`sha256:<64 lowercase hex>`.",
+                        "type": "string"
+                      },
+                      "registry": {
+                        "type": "string"
+                      },
+                      "releaseTag": {
+                        "type": "string"
+                      },
+                      "repository": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "digest",
+                      "registry",
+                      "releaseTag",
+                      "repository"
+                    ],
+                    "type": "object"
+                  },
+                  "retained": {
+                    "description": "Older bundles a project may still pin, newest first.",
+                    "items": {
+                      "additionalProperties": false,
+                      "description": "An agent bundle a deployment offers (ADR-0183): where a driver pulls it\nfrom, and the digest and release tag a spec records. The spec itself does\nnot carry the registry, so a bundle moving registries between releases does\nnot change any spec digest.",
+                      "properties": {
+                        "digest": {
+                          "description": "`sha256:<64 lowercase hex>`.",
+                          "type": "string"
+                        },
+                        "registry": {
+                          "type": "string"
+                        },
+                        "releaseTag": {
+                          "type": "string"
+                        },
+                        "repository": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "digest",
+                        "registry",
+                        "releaseTag",
+                        "repository"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "current",
+                  "retained"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Absent: no agent bundle is configured and nothing can be admitted."
+          },
+          "defaultEntryId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "egressPresets": {
+            "description": "What an egress spec's `presetIds` refer to.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "domains": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "domains",
+                "id",
+                "label"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "floor": {
+            "description": "The strictest of the baseline's and the tenant's floors.",
+            "oneOf": [
+              {
+                "const": "container",
+                "description": "A plain container: shared kernel, seccomp/pids/no-new-privileges.",
+                "type": "string"
+              },
+              {
+                "const": "gvisor",
+                "description": "A user-space kernel (runsc).",
+                "type": "string"
+              },
+              {
+                "const": "vm",
+                "description": "A per-sandbox virtual machine (Kata, Firecracker, serverless pods).",
+                "type": "string"
+              }
+            ]
+          },
+          "items": {
+            "items": {
+              "description": "A catalog entry as a console reads it.",
+              "properties": {
+                "defaultEntry": {
+                  "description": "True for the entry a project that names none gets.",
+                  "type": "boolean"
+                },
+                "effectiveFloor": {
+                  "description": "`max(entry floor, baseline floor, tenant floor)` — never lower than\nwhat the entry itself declares.",
+                  "oneOf": [
+                    {
+                      "const": "container",
+                      "description": "A plain container: shared kernel, seccomp/pids/no-new-privileges.",
+                      "type": "string"
+                    },
+                    {
+                      "const": "gvisor",
+                      "description": "A user-space kernel (runsc).",
+                      "type": "string"
+                    },
+                    {
+                      "const": "vm",
+                      "description": "A per-sandbox virtual machine (Kata, Firecracker, serverless pods).",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "entry": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "createdAt": {
+                      "default": 0,
+                      "description": "Server-owned, and defaulted rather than required: the Host stamps both\non every write, and an operator authoring a baseline file by hand has\nno timestamp to give. `0` reads as \"not recorded\", which is the honest\nanswer for a hand-written entry.",
+                      "format": "int64",
+                      "type": "integer"
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "image": {
+                      "additionalProperties": false,
+                      "description": "The image a catalog entry names. Pinned except for a legacy entry derived\nfrom a tag-only `COGNIA_RUNNER_IMAGE`, which admission refuses until the\ntag is resolved to a digest.",
+                      "properties": {
+                        "digest": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "registry": {
+                          "type": "string"
+                        },
+                        "repository": {
+                          "type": "string"
+                        },
+                        "tag": {
+                          "description": "The tag a legacy entry was derived from; informational once pinned.",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "registry",
+                        "repository"
+                      ],
+                      "type": "object"
+                    },
+                    "imageUser": {
+                      "description": "The image config's `USER`, read from the registry when the entry was\nadded. Absent means the image runs as root by default.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "isolationFloor": {
+                      "description": "The weakest tier this image may run at. The effective floor is the\nstrictest of this, the tenant floor and the baseline floor.",
+                      "oneOf": [
+                        {
+                          "const": "container",
+                          "description": "A plain container: shared kernel, seccomp/pids/no-new-privileges.",
+                          "type": "string"
+                        },
+                        {
+                          "const": "gvisor",
+                          "description": "A user-space kernel (runsc).",
+                          "type": "string"
+                        },
+                        {
+                          "const": "vm",
+                          "description": "A per-sandbox virtual machine (Kata, Firecracker, serverless pods).",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "provenance": {
+                      "description": "Build key, commit and approval for a `build` entry."
+                    },
+                    "revokedAt": {
+                      "format": "int64",
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "scope": {
+                      "enum": [
+                        "baseline",
+                        "tenant"
+                      ],
+                      "type": "string"
+                    },
+                    "sizeClassIds": {
+                      "description": "Size classes this entry may run with; the first is the default.",
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "source": {
+                      "oneOf": [
+                        {
+                          "const": "manual",
+                          "description": "Typed in by an admin.",
+                          "type": "string"
+                        },
+                        {
+                          "const": "build",
+                          "description": "Produced by an environment build (ADR-0186).",
+                          "type": "string"
+                        },
+                        {
+                          "const": "legacy",
+                          "description": "Derived at boot from `COGNIA_RUNNER_IMAGE`.",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "updatedAt": {
+                      "default": 0,
+                      "format": "int64",
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "scope",
+                    "label",
+                    "image",
+                    "isolationFloor",
+                    "sizeClassIds",
+                    "source"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "entry",
+                "effectiveFloor",
+                "defaultEntry"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "multiTenant": {
+            "description": "True on a Host several tenants' work shares, where an infrastructure\nfault refuses instead of falling back.",
+            "type": "boolean"
+          },
+          "nextPageToken": {
+            "description": "Present exactly when another page exists.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "poolEnabled": {
+            "description": "The deployment switch (Q39). False: nothing is admitted and every\nproject takes the existing execution path.",
+            "type": "boolean"
+          },
+          "rejected": {
+            "items": {
+              "description": "Why a stored tenant entry is not in the merged catalog.\n\nA rejected entry stays stored and stays visible: an operator who added an\nimage the baseline allowlist later stopped permitting needs the reason,\nnot an entry that silently vanished.",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "sizeClasses": {
+            "description": "What an entry's `sizeClassIds` refer to.",
+            "items": {
+              "additionalProperties": false,
+              "description": "A size class. `gpu` is reserved and dormant: the type accepts it so the\nmodel does not have to change when GPU sandboxes land, and admission\nrefuses any class that sets it (`gpu_not_supported`).",
+              "properties": {
+                "cpuMillis": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "ephemeralStorageMib": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "gpu": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": false,
+                      "description": "Reserved for GPU sandboxes; never admitted today.",
+                      "properties": {
+                        "count": {
+                          "format": "uint32",
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "resourceName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "count",
+                        "resourceName"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Reserved; dormant. See the type doc."
+                },
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "memoryMib": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "volumeMib": {
+                  "description": "Persistent workspace volume size for persistent sandboxes.",
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "cpuMillis",
+                "memoryMib",
+                "ephemeralStorageMib",
+                "volumeMib"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "rejected",
+          "poolEnabled",
+          "multiTenant",
+          "floor",
+          "sizeClasses",
+          "egressPresets"
+        ],
+        "title": "CatalogPage",
+        "type": "object"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "environment_catalog_update",
+      "category": "development",
+      "resource": "environment",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "environment_catalog_update (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "entry"
+        ],
+        "properties": {
+          "entry": {
+            "type": "object",
+            "description": "A tenant catalog entry, by its existing id. The Host re-validates it and answers a typed refusal code rather than a schema error, so the shape is not mirrored here."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "default": 0,
+            "description": "Server-owned, and defaulted rather than required: the Host stamps both\non every write, and an operator authoring a baseline file by hand has\nno timestamp to give. `0` reads as \"not recorded\", which is the honest\nanswer for a hand-written entry.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "image": {
+            "additionalProperties": false,
+            "description": "The image a catalog entry names. Pinned except for a legacy entry derived\nfrom a tag-only `COGNIA_RUNNER_IMAGE`, which admission refuses until the\ntag is resolved to a digest.",
+            "properties": {
+              "digest": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "registry": {
+                "type": "string"
+              },
+              "repository": {
+                "type": "string"
+              },
+              "tag": {
+                "description": "The tag a legacy entry was derived from; informational once pinned.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "registry",
+              "repository"
+            ],
+            "type": "object"
+          },
+          "imageUser": {
+            "description": "The image config's `USER`, read from the registry when the entry was\nadded. Absent means the image runs as root by default.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isolationFloor": {
+            "description": "The weakest tier this image may run at. The effective floor is the\nstrictest of this, the tenant floor and the baseline floor.",
+            "oneOf": [
+              {
+                "const": "container",
+                "description": "A plain container: shared kernel, seccomp/pids/no-new-privileges.",
+                "type": "string"
+              },
+              {
+                "const": "gvisor",
+                "description": "A user-space kernel (runsc).",
+                "type": "string"
+              },
+              {
+                "const": "vm",
+                "description": "A per-sandbox virtual machine (Kata, Firecracker, serverless pods).",
+                "type": "string"
+              }
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "provenance": {
+            "description": "Build key, commit and approval for a `build` entry."
+          },
+          "revokedAt": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "scope": {
+            "enum": [
+              "baseline",
+              "tenant"
+            ],
+            "type": "string"
+          },
+          "sizeClassIds": {
+            "description": "Size classes this entry may run with; the first is the default.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "source": {
+            "oneOf": [
+              {
+                "const": "manual",
+                "description": "Typed in by an admin.",
+                "type": "string"
+              },
+              {
+                "const": "build",
+                "description": "Produced by an environment build (ADR-0186).",
+                "type": "string"
+              },
+              {
+                "const": "legacy",
+                "description": "Derived at boot from `COGNIA_RUNNER_IMAGE`.",
+                "type": "string"
+              }
+            ]
+          },
+          "updatedAt": {
+            "default": 0,
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "scope",
+          "label",
+          "image",
+          "isolationFloor",
+          "sizeClassIds",
+          "source"
+        ],
+        "title": "CatalogEntry",
+        "type": "object"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "environment_declaration_read",
+      "category": "development",
+      "resource": "environment",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "environment_declaration_read (workspace.read)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "workspaceRoot"
+        ],
+        "properties": {
+          "workspaceRoot": {
+            "type": "string",
+            "description": "Absolute path of a workspace this caller is authorized for. Refused when it is not a registered workspace root."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "description": "Every declaration file a repository has, plus where the Host looked.\n\n**All** of them, not the first one that matched. Precedence between\n`.cognia/workspace.json` and a devcontainer file is decided by\n`lib/project-environment/read-environment-declaration.ts`, together with\nthe trust gate and the parse — and a Host that returned only its own first\nmatch would be a second, silent answer to the same question. Returning the\nset keeps that rule in one place and still costs one round trip.",
+        "properties": {
+          "files": {
+            "description": "In `DECLARATION_FILES` order; empty when the repository declares nothing,\nwhich is the common case and not an error.",
+            "items": {
+              "description": "One declaration file, as bytes plus the digest of those bytes.\n\nDeliberately *not* parsed here. The devcontainer and workspace-config\ngrammars, their closed-world refusals and the RFC 8785 declaration digest\nlive in one place — `lib/project-environment` — and a second\nimplementation in Rust would be a parity liability with nothing to gain:\nthis Host's job on this path is access to a checkout the approver's\nbrowser cannot reach. The digest over the raw bytes is what makes \"the\nfile changed since you looked at it\" answerable without parsing either\ngrammar.",
+              "properties": {
+                "bytesSha256": {
+                  "description": "SHA-256 (lowercase hex) of the exact bytes above.",
+                  "type": "string"
+                },
+                "contents": {
+                  "type": "string"
+                },
+                "file": {
+                  "description": "`workspace-config` or `devcontainer`.",
+                  "type": "string"
+                },
+                "path": {
+                  "description": "Absolute path of the file that was read.",
+                  "type": "string"
+                },
+                "relativePath": {
+                  "description": "Repository-relative path, which is what an approval record stores.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "relativePath",
+                "file",
+                "contents",
+                "bytesSha256"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "searched": {
+            "description": "Every path that was looked for, so a caller can say where it looked\ninstead of only \"not found\".",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "files",
+          "searched"
+        ],
+        "title": "DeclarationReadResult",
+        "type": "object"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "environment_driver_status",
+      "category": "development",
+      "resource": "environment",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "environment_driver_status (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "description": "The driver's own answer about itself.",
+        "properties": {
+          "availableTiers": {
+            "description": "Empty with `reachable: false`. An unreachable daemon attests no tier,\nwhich is not the same claim as attesting none.",
+            "items": {
+              "description": "Isolation tiers, weakest first. `Ord` is the strength order, so\n`max(a, b)` is the stricter of two requirements.",
+              "oneOf": [
+                {
+                  "const": "container",
+                  "description": "A plain container: shared kernel, seccomp/pids/no-new-privileges.",
+                  "type": "string"
+                },
+                {
+                  "const": "gvisor",
+                  "description": "A user-space kernel (runsc).",
+                  "type": "string"
+                },
+                {
+                  "const": "vm",
+                  "description": "A per-sandbox virtual machine (Kata, Firecracker, serverless pods).",
+                  "type": "string"
+                }
+              ]
+            },
+            "type": "array"
+          },
+          "bundles": {
+            "items": {
+              "description": "An offered agent bundle, for a console that must show which digest a\nsandbox would inject and which older ones a project may still pin.",
+              "properties": {
+                "current": {
+                  "description": "True for the current bundle, false for a retained older one.",
+                  "type": "boolean"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "registry": {
+                  "type": "string"
+                },
+                "releaseTag": {
+                  "type": "string"
+                },
+                "repository": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "registry",
+                "repository",
+                "digest",
+                "releaseTag",
+                "current"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "deploymentId": {
+            "type": "string"
+          },
+          "driver": {
+            "type": "string"
+          },
+          "instanceId": {
+            "type": "string"
+          },
+          "isolationFloor": {
+            "description": "Isolation tiers, weakest first. `Ord` is the strength order, so\n`max(a, b)` is the stricter of two requirements.",
+            "oneOf": [
+              {
+                "const": "container",
+                "description": "A plain container: shared kernel, seccomp/pids/no-new-privileges.",
+                "type": "string"
+              },
+              {
+                "const": "gvisor",
+                "description": "A user-space kernel (runsc).",
+                "type": "string"
+              },
+              {
+                "const": "vm",
+                "description": "A per-sandbox virtual machine (Kata, Firecracker, serverless pods).",
+                "type": "string"
+              }
+            ]
+          },
+          "multiTenant": {
+            "type": "boolean"
+          },
+          "reachable": {
+            "type": "boolean"
+          },
+          "unreachableReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "driver",
+          "deploymentId",
+          "instanceId",
+          "multiTenant",
+          "isolationFloor",
+          "availableTiers",
+          "reachable",
+          "bundles"
+        ],
+        "title": "DriverStatus",
+        "type": "object"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "environment_egress_grant_create",
+      "category": "development",
+      "resource": "environment",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "critical",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "environment_egress_grant_create (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "grant"
+        ],
+        "properties": {
+          "grant": {
+            "type": "object",
+            "required": [
+              "id",
+              "projectId",
+              "tier"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "projectId": {
+                "type": "string"
+              },
+              "tier": {
+                "type": "string",
+                "enum": [
+                  "off",
+                  "allowlist",
+                  "on"
+                ]
+              },
+              "domains": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Extra domains on the allowlist tier. Ignored on the other two."
+              }
+            },
+            "additionalProperties": false,
+            "description": "What to grant. `grantedBy` and `grantedAt` are the Host's, for the same reason as on an approval."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "additionalProperties": false,
+        "description": "A project's permission to use egress beyond the presets: extra domains on\nthe allowlist tier, or the open tier.",
+        "properties": {
+          "domains": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "grantedAt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "grantedBy": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "revokedAt": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tier": {
+            "description": "Egress posture. The wire value for \"open\" is `on`, the value\n`ProjectEnvironmentPolicy.network` already persists.",
+            "enum": [
+              "off",
+              "allowlist",
+              "on"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "tier",
+          "domains",
+          "grantedBy",
+          "grantedAt"
+        ],
+        "title": "EgressGrant",
+        "type": "object"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "environment_egress_grant_delete",
+      "category": "development",
+      "resource": "environment",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "environment_egress_grant_delete (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "additionalProperties": false,
+        "description": "A project's permission to use egress beyond the presets: extra domains on\nthe allowlist tier, or the open tier.",
+        "properties": {
+          "domains": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "grantedAt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "grantedBy": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "revokedAt": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tier": {
+            "description": "Egress posture. The wire value for \"open\" is `on`, the value\n`ProjectEnvironmentPolicy.network` already persists.",
+            "enum": [
+              "off",
+              "allowlist",
+              "on"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "tier",
+          "domains",
+          "grantedBy",
+          "grantedAt"
+        ],
+        "title": "EgressGrant",
+        "type": "object"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "environment_image_inspect",
+      "category": "development",
+      "resource": "environment",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "environment_image_inspect (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "reference"
+        ],
+        "properties": {
+          "reference": {
+            "type": "string",
+            "description": "An image reference: `name`, `name:tag` or `name@sha256:<hex>`. Only a registry on the deployment's allowlist is contacted."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "additionalProperties": false,
+        "description": "Everything read about one image; cached per digest (`probe_cache`) and\nshown in the catalog editor.",
+        "properties": {
+          "digest": {
+            "description": "What the reference resolved to: the index digest for a multi-platform\nimage, the manifest digest otherwise. This is what a catalog entry pins.",
+            "type": "string"
+          },
+          "mediaType": {
+            "type": "string"
+          },
+          "platforms": {
+            "description": "In the order the caller asked for them.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "configDigest": {
+                  "type": "string"
+                },
+                "env": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "manifestDigest": {
+                  "type": "string"
+                },
+                "platform": {
+                  "additionalProperties": false,
+                  "description": "A platform the environment plane can run. Only `linux` images run.",
+                  "properties": {
+                    "architecture": {
+                      "type": "string"
+                    },
+                    "os": {
+                      "type": "string"
+                    },
+                    "variant": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "os",
+                    "architecture"
+                  ],
+                  "type": "object"
+                },
+                "user": {
+                  "description": "The config's `User`; absent means root.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "workingDir": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "platform",
+                "manifestDigest",
+                "configDigest",
+                "env"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "registry": {
+            "type": "string"
+          },
+          "repository": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "digest",
+          "mediaType",
+          "platforms",
+          "registry",
+          "repository"
+        ],
+        "title": "ImageMetadata",
+        "type": "object"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "environment_probe_get",
+      "category": "development",
+      "resource": "environment",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "environment_probe_get (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "userImageDigest",
+          "bundleDigest"
+        ],
+        "properties": {
+          "userImageDigest": {
+            "type": "string",
+            "description": "`sha256:…` of the project's own image."
+          },
+          "bundleDigest": {
+            "type": "string",
+            "description": "`sha256:…` of the agent bundle the probe ran against."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "properties": {
+          "cached": {
+            "anyOf": [
+              {
+                "description": "The cached probe verdict for one (user image, bundle) pair.\n\nA view over what the driver stored, not a second source of truth: these\nare the fields a console shows. The entry is parsed by\n`cognia_sandbox_pool::probe_cache::ProbeCacheEntry`, the same type the\ndriver writes it with, so the two cannot disagree about its shape.",
+                "properties": {
+                  "arch": {
+                    "type": "string"
+                  },
+                  "libc": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "matchWorkspaceOwner": {
+                    "type": "boolean"
+                  },
+                  "problems": {
+                    "description": "Empty when the probe accepted the image.",
+                    "items": {
+                      "properties": {
+                        "code": {
+                          "description": "A `probe_*` code, or `bundle_arch_mismatch`.",
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "requestedUser": {
+                    "description": "The user the probe was asked about: a name, a uid, or `uid:gid`.",
+                    "type": "string"
+                  },
+                  "resolvedUser": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "gid": {
+                            "format": "uint32",
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "name": {
+                            "description": "Absent for a numeric uid the image has no passwd entry for.",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "remappedFrom": {
+                            "anyOf": [
+                              {
+                                "properties": {
+                                  "gid": {
+                                    "format": "uint32",
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  "uid": {
+                                    "format": "uint32",
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "uid",
+                                  "gid"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The declared user's own ids, when it was remapped onto the workspace\nowner."
+                          },
+                          "uid": {
+                            "format": "uint32",
+                            "minimum": 0,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "uid",
+                          "gid"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The user the agent actually runs as, as the image resolved it. Absent\nwhen the requested user does not exist in the image."
+                  },
+                  "runtimes": {
+                    "description": "Bundle runtimes this image's C library can run.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "shell": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "version": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "workspaceOwner": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "gid": {
+                            "format": "uint32",
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "uid": {
+                            "format": "uint32",
+                            "minimum": 0,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "uid",
+                          "gid"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Who owned the workspace when the probe ran."
+                  }
+                },
+                "required": [
+                  "version",
+                  "requestedUser",
+                  "matchWorkspaceOwner",
+                  "arch",
+                  "runtimes",
+                  "problems"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unreadable": {
+            "description": "True when an entry exists but this build cannot read its shape. \"No\nprobe yet\" and \"a probe I cannot read\" lead to different actions.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "unreadable"
+        ],
+        "title": "ProbeCacheResult",
+        "type": "object"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "environment_spec_resolve_preview",
+      "category": "development",
+      "resource": "environment",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "environment_spec_resolve_preview (workspace.read)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "spec"
+        ],
+        "properties": {
+          "spec": {
+            "type": "object",
+            "description": "An EnvironmentSpec the brain resolved. The Host re-validates it and answers a typed refusal code rather than a schema error, so the shape is not mirrored here."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "description": "A dry run of admission: what this Host would give the spec, or why it\nwould refuse. Never starts anything.",
+        "properties": {
+          "actualTier": {
+            "anyOf": [
+              {
+                "description": "Isolation tiers, weakest first. `Ord` is the strength order, so\n`max(a, b)` is the stricter of two requirements.",
+                "oneOf": [
+                  {
+                    "const": "container",
+                    "description": "A plain container: shared kernel, seccomp/pids/no-new-privileges.",
+                    "type": "string"
+                  },
+                  {
+                    "const": "gvisor",
+                    "description": "A user-space kernel (runsc).",
+                    "type": "string"
+                  },
+                  {
+                    "const": "vm",
+                    "description": "A per-sandbox virtual machine (Kata, Firecracker, serverless pods).",
+                    "type": "string"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "admitted": {
+            "type": "boolean"
+          },
+          "availableTiers": {
+            "description": "The tiers the driver could attest when this ran.",
+            "items": {
+              "description": "Isolation tiers, weakest first. `Ord` is the strength order, so\n`max(a, b)` is the stricter of two requirements.",
+              "oneOf": [
+                {
+                  "const": "container",
+                  "description": "A plain container: shared kernel, seccomp/pids/no-new-privileges.",
+                  "type": "string"
+                },
+                {
+                  "const": "gvisor",
+                  "description": "A user-space kernel (runsc).",
+                  "type": "string"
+                },
+                {
+                  "const": "vm",
+                  "description": "A per-sandbox virtual machine (Kata, Firecracker, serverless pods).",
+                  "type": "string"
+                }
+              ]
+            },
+            "type": "array"
+          },
+          "bundleDigest": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fault": {
+            "description": "Whether the refusal was a fault (infrastructure) rather than an answer\nabout the spec. A fault falls back at spawn time unless isolation is\nmandatory, so a preview must not report one as a verdict on the spec.",
+            "type": "boolean"
+          },
+          "refusalCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "refusalMessage": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sizeClassId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "specDigest": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "admitted",
+          "availableTiers",
+          "fault"
+        ],
+        "title": "SpecPreview",
+        "type": "object"
       },
       "outputTyped": true
     },
@@ -41532,6 +44234,34 @@
                   "raw"
                 ],
                 "description": "How stdout is delivered. `line` is the default every ACP, Codex and OpenCode adapter uses. `pi-rpc` is the only caller that sets `raw`, because Pi's JSONL frames are delimited by the newline BYTE and its adapter owns a strict codec with frame ceilings that pre-split lines would move out of reach. Omitting it here made this whole object `additionalProperties: false` against a struct that has the field, so every Pi session from a paired client was refused 422 while the desktop, which never validates, worked."
+              },
+              "sandbox": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "ADR-0182/0183 — run the agent in the project's runtime environment instead of this host's execution path. Absent (or null) is every caller before runtime environments, and takes today's path unchanged. `spec` is not described here on purpose: the host re-admits it against its own baseline, catalog and approvals and answers with a typed refusal code, which is far more useful than a 422 from a schema that would have to mirror `EnvironmentSpec` field by field.",
+                "required": [
+                  "kind",
+                  "spec",
+                  "isolationMandatory"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "container"
+                    ]
+                  },
+                  "spec": {
+                    "type": "object"
+                  },
+                  "isolationMandatory": {
+                    "type": "boolean",
+                    "description": "The client's half of the fault rule: the project set `requireSandbox` or named a minimum isolation tier, so an infrastructure fault must refuse rather than fall back. A client can only make its own run stricter with this; the host adds its own half from a multi-tenant baseline."
+                  }
+                },
+                "additionalProperties": false
               }
             },
             "additionalProperties": false
@@ -60506,5 +63236,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "1b8ce32da1ffb1a060831adcc0bf8ac211746abf819f76e766cebbb8b27ab8d5"
+  "catalogHash": "535876dc52010f58bd8603633d5f47bcd79376dde8a634d1d4fcf0144b22d508"
 }

@@ -419,6 +419,25 @@ impl EnvironmentStore {
             .transpose()
     }
 
+    /// One grant by id, revoked or not.
+    ///
+    /// Separate from [`Self::active_egress_grant`] because a caller that is
+    /// about to revoke has to know *which project* the grant belongs to
+    /// before it acts — the authority question is about the project, and a
+    /// revoke that ran first would already have acted by the time the caller
+    /// was refused.
+    pub fn get_egress_grant(&self, id: &str) -> Result<Option<EgressGrant>, StoreError> {
+        self.conn
+            .query_row(
+                "SELECT body FROM egress_grants WHERE id = ?1",
+                [id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .map(|body| from_json(&body))
+            .transpose()
+    }
+
     pub fn revoke_egress_grant(&self, id: &str, now: i64) -> Result<EgressGrant, StoreError> {
         let body: Option<String> = self
             .conn

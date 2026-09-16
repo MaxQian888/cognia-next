@@ -71,6 +71,15 @@ export const HOST_FEATURE_IDS = [
   // bottom of this file: transport, authorization and dispatch first, feature
   // second.
   "pro-ide",
+  // Runtime environments (ADR-0182). Its presence says this host HAS the
+  // catalog, approval and driver arms — not that the sandbox pool is on. The
+  // two are separate facts on purpose: the arms ship with the host, the pool
+  // is a deployment switch, and a client that conflated them would hide the
+  // settings page that is supposed to explain how to turn the pool on.
+  // `environment_driver_status` is the switch; it answers `sandbox_pool_disabled`
+  // while the pool is off, which is what the UI labels the surface inert
+  // from.
+  "environment.catalog",
 ] as const
 
 export type HostFeatureId = (typeof HOST_FEATURE_IDS)[number]
@@ -229,6 +238,33 @@ export const BOT_CONTROL_HOST_OPERATIONS = Object.freeze([
   "bot_trigger_set_armed",
   "bot_run_manual",
   "bot_delivery_replay",
+] as const)
+
+/**
+ * The runtime-environment arms (ADR-0182/0183).
+ *
+ * Named individually rather than derived from the `environment_` prefix
+ * because three of them are `host-admin` target: a device that holds
+ * `host.observe` can read the catalog and cannot write it, and a client has
+ * to be able to tell which half it may offer without calling and seeing.
+ */
+export const ENVIRONMENT_CATALOG_HOST_OPERATIONS = Object.freeze([
+  "environment_catalog_list",
+  "environment_catalog_get",
+  "environment_catalog_create",
+  "environment_catalog_update",
+  "environment_catalog_delete",
+  "environment_declaration_read",
+  "environment_spec_resolve_preview",
+  "environment_approval_list",
+  "environment_approval_get",
+  "environment_approval_approve",
+  "environment_approval_revoke",
+  "environment_egress_grant_create",
+  "environment_egress_grant_delete",
+  "environment_probe_get",
+  "environment_driver_status",
+  "environment_image_inspect",
 ] as const)
 
 /** Git operations implemented by the remote execution host (native watchers remain client-local). */
@@ -507,6 +543,15 @@ export function buildLocalHostFeatureManifest({
     features["bots.control"] = {
       version: 1,
       operations: [...BOT_CONTROL_HOST_OPERATIONS],
+    }
+    // Runtime environments. Advertised by every host that carries the arms;
+    // whether the pool is ON is `environment_driver_status`, and the arms say so
+    // themselves with `sandbox_pool_disabled` rather than disappearing from
+    // the manifest — a client needs to distinguish "this host is too old for
+    // runtime environments" from "this deployment has not enabled them".
+    features["environment.catalog"] = {
+      version: 1,
+      operations: [...ENVIRONMENT_CATALOG_HOST_OPERATIONS],
     }
     features["notifications.remote"] = {
       version: 1,

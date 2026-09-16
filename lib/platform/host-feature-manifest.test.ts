@@ -1,4 +1,5 @@
 import {
+  ENVIRONMENT_CATALOG_HOST_OPERATIONS,
   HOST_FEATURE_MANIFEST_SCHEMA_VERSION,
   INBOX_RELAY_HOST_OPERATIONS,
   buildLocalHostFeatureManifest,
@@ -647,6 +648,50 @@ describe("workspace.task-workspace", () => {
       "host_admin_lease_issue"
     )
     expect(parseHostFeatureManifest(JSON.parse(JSON.stringify(manifest)))).not.toBeNull()
+  })
+})
+
+describe("environment.catalog", () => {
+  // The arms ship with the host; the sandbox pool is a deployment switch. A
+  // manifest that only advertised the feature once the pool was on would make
+  // "this host is too old" and "this deployment has not enabled it"
+  // indistinguishable, and the settings page that explains how to turn it on
+  // is exactly what a client would then hide.
+  it("is advertised by both execution hosts whether or not the pool is on", () => {
+    for (const platform of ["tauri", "headless"] as const) {
+      const manifest = buildLocalHostFeatureManifest({ platform })
+      expect(manifest.features["environment.catalog"]?.operations).toEqual([
+        ...ENVIRONMENT_CATALOG_HOST_OPERATIONS,
+      ])
+    }
+    expect(
+      buildLocalHostFeatureManifest({ platform: "web" }).features["environment.catalog"]
+    ).toBeUndefined()
+  })
+
+  // The read half and the write half are different capabilities: a device with
+  // `host.observe` can list the catalog and cannot change it. Naming them
+  // together is what lets a client offer the half it actually holds.
+  it("names the driver status read and the catalog writes in one feature", () => {
+    const operations =
+      buildLocalHostFeatureManifest({ platform: "headless" }).features["environment.catalog"]
+        ?.operations ?? []
+
+    expect(operations).toContain("environment_driver_status")
+    expect(operations).toContain("environment_catalog_list")
+    expect(operations).toContain("environment_catalog_create")
+    expect(operations).toContain("environment_approval_approve")
+    // Pinning a tag to a digest: an approval and a catalog entry both need it,
+    // so a client that could not see it would offer neither.
+    expect(operations).toContain("environment_image_inspect")
+  })
+
+  it("stays a parseable manifest with the feature present", () => {
+    const manifest = buildLocalHostFeatureManifest({ platform: "headless" })
+    expect(parseHostFeatureManifest(JSON.parse(JSON.stringify(manifest)))).not.toBeNull()
+    expect(
+      supportsHostFeatureOperation(manifest, "environment.catalog", "environment_driver_status")
+    ).toBe(true)
   })
 })
 
