@@ -1,0 +1,25 @@
+# Runtime environment sandboxes (ADR-0182/0183), layered over the T2 overlay:
+#
+#   node scripts/smoke/compose-runtime-environment.mjs baseline \
+#     --bundle-image ghcr.io/<owner>/cognia-agent-bundle@sha256:<digest> \
+#     --out /tmp/environment-baseline.json
+#   COGNIA_ENVIRONMENT_BASELINE_HOST_FILE=/tmp/environment-baseline.json \
+#     docker compose -f docker-compose.yml -f docker-compose.t2.yml \
+#     -f docker-compose.runtime-environment.yml --profile server up -d --wait
+#
+# The baseline file is the whole deployment policy — the pool switch, the
+# registry allowlist, the isolation floor, the size classes and the agent
+# bundle — so this overlay only mounts it. Without this overlay the stack runs
+# exactly as before: the pool stays off unless `COGNIA_SANDBOX_POOL_ENABLED`
+# turns on the legacy mapping from `COGNIA_RUNNER_IMAGE` (see the T2 overlay).
+#
+# The file is read at boot and refused if it does not validate: a baseline may
+# be what declares `multiTenant`, and booting without it would run other
+# tenants' code without the isolation it asks for.
+
+services:
+  cognia-server:
+    environment:
+      COGNIA_ENVIRONMENT_BASELINE_FILE: /etc/cognia/environment-baseline.json
+    volumes:
+      - ${COGNIA_ENVIRONMENT_BASELINE_HOST_FILE:?set COGNIA_ENVIRONMENT_BASELINE_HOST_FILE to the environment baseline JSON}:/etc/cognia/environment-baseline.json:ro

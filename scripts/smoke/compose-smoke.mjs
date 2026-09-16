@@ -47,7 +47,7 @@ import { readFileSync } from "node:fs"
 import { execFile as execFileCb } from "node:child_process"
 import { promisify } from "node:util"
 import { setTimeout as delay } from "node:timers/promises"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import path from "node:path"
 
 const execFile = promisify(execFileCb)
@@ -1224,7 +1224,29 @@ async function main() {
   log("OK — all checks passed")
 }
 
-main().catch((err) => {
-  console.error("[smoke] FAIL (uncaught):", err)
-  process.exit(1)
-})
+/**
+ * The pairing and RPC helpers, for smokes that drive the same server tier
+ * (`compose-runtime-environment.mjs`). A check that fails inside one of them
+ * is counted here; {@link smokeFailureCount} lets the importer include it.
+ */
+export {
+  composeExec,
+  containerRpc,
+  containerRpcResponse,
+  deviceProof,
+  pairDevice,
+  rpc,
+  SERVER_URL,
+  waitForServerHealthz,
+}
+
+export function smokeFailureCount() {
+  return failures
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error("[smoke] FAIL (uncaught):", err)
+    process.exit(1)
+  })
+}

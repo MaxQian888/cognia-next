@@ -24,13 +24,17 @@ export type ImageReferenceErrorKind =
   | "invalid-tag"
   | "invalid-digest"
 
+// Plain fields rather than parameter properties: Node's type stripping has no
+// parameter properties, and the compose smoke imports this module directly.
 export class ImageReferenceError extends Error {
-  constructor(
-    readonly kind: ImageReferenceErrorKind,
-    readonly value: string
-  ) {
+  readonly kind: ImageReferenceErrorKind
+  readonly value: string
+
+  constructor(kind: ImageReferenceErrorKind, value: string) {
     super(`${kind}: ${value}`)
     this.name = "ImageReferenceError"
+    this.kind = kind
+    this.value = value
   }
 }
 

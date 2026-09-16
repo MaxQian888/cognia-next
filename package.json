@@ -348,6 +348,8 @@
     "lark:verify-entry": "tsx scripts/lark-entry-verify.mts",
     "provider-diagnostics:live": "node scripts/provider-diagnostics-live.mjs",
     "compose:smoke": "node scripts/smoke/compose-smoke.mjs",
+    "compose:smoke:runtime-environment": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/smoke/compose-runtime-environment.mjs",
+    "compose:smoke:runtime-environment:test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test scripts/smoke/compose-runtime-environment.test.mjs",
     "// 16 ─── Maintenance & cleanup ───": "",
     "clean:cache": "node scripts/build/clean-stale-turbopack-cache.mjs --all",
     "clean:cache:test": "node --test scripts/build/clean-stale-turbopack-cache.test.mjs",

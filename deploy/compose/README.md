@@ -150,9 +150,11 @@ docker compose -f docker-compose.yml -f docker-compose.t2.yml \
 What it adds:
 
 - **`docker-socket-proxy`** — the backend never touches the raw Docker
-  socket; the proxy allows container lifecycle + image pull only
-  (`CONTAINERS`/`IMAGES`/`POST`; `EXEC` stays denied — the backend runs one
-  container per agent with the agent as PID 1, it never uses the exec API).
+  socket; the proxy allows container lifecycle + image pull
+  (`CONTAINERS`/`IMAGES`/`POST`), plus the read-only `/info` and the named
+  volume API that runtime environment sandboxes use (`INFO`/`VOLUMES`, see
+  below). `EXEC` and `BUILD` stay denied — the backend runs one container per
+  agent with the agent as PID 1, it never uses the exec API.
 - **`cognia_workspaces` volume** — shared between cognia-server (mounted at
   `/workspaces`) and the runners (each gets a volume-subpath mount of ONLY
   its own workspace). `COGNIA_WORKSPACES_VOLUME` must name the volume
@@ -175,6 +177,53 @@ Optional per-runner knobs (read by `container_backend.rs`, all env on the
 Known limit: the fleet agent-monitor hook ingress is loopback-gated, so T2
 runner agents (separate containers, separate loopback) are not visible to
 fleet monitoring.
+
+### Runtime environments (`docker-compose.runtime-environment.yml`)
+
+Projects can run their agents in an approved, digest-pinned image of their own
+(ADR-0182), with the agent CLIs injected from the release's agent bundle
+(ADR-0183). It is off unless the operator turns it on; with it off, T2 runs
+exactly as described above.
+
+Two ways to turn it on:
+
+- **Baseline file (recommended).** The overlay mounts
+  `COGNIA_ENVIRONMENT_BASELINE_HOST_FILE` read-only and points
+  `COGNIA_ENVIRONMENT_BASELINE_FILE` at it. The file is the whole deployment
+  policy: the switch, the registry allowlist, the isolation floor, the size
+  classes, the catalog entries and the agent bundle. A file that does not
+  validate stops the server at boot rather than running without the isolation
+  it asks for.
+- **Legacy mapping.** Without a file, `COGNIA_SANDBOX_POOL_ENABLED=true`
+  derives a single `legacy-env` entry from `COGNIA_RUNNER_IMAGE`, with the
+  bundle from `COGNIA_AGENT_BUNDLE_IMAGE`. Only a digest-pinned bundle admits
+  sandboxes, and a tag-only runner image (the default `:latest`) is refused
+  with `image_digest_not_pinned` until it is pinned.
+
+```bash
+node scripts/smoke/compose-runtime-environment.mjs baseline \
+  --bundle-image ghcr.io/<owner>/cognia-agent-bundle@sha256:<digest> \
+  --out /tmp/environment-baseline.json
+COGNIA_ENVIRONMENT_BASELINE_HOST_FILE=/tmp/environment-baseline.json \
+  docker compose -f docker-compose.yml -f docker-compose.t2.yml \
+  -f docker-compose.runtime-environment.yml --profile server up -d --wait
+SHARE_UPLOAD_SECRET=... pnpm compose:smoke:runtime-environment --expect pool-on
+```
+
+The smoke pairs a device, checks the catalog and driver status, approves or
+catalogs a musl image (`node:22-alpine`) and a glibc image without git
+(`python:3.12-slim`), spawns `codex-acp` in each with a mandatory placement,
+and checks the ACP round trip, the probe cache and the user the sandbox
+actually ran as. `--expect pool-off` against a stack without the overlay
+checks the off path: the environment commands answer `sandbox_pool_disabled`,
+a spawn that requires isolation is refused, and one that does not runs on the
+runner path with a `sandbox_fallback_pool_disabled` placement (that last check
+needs `COGNIA_SMOKE_AGENT=1` on the server).
+
+The plain-container tier is single-tenant: a baseline that declares
+`multiTenant` needs the gVisor tier, which the server offers only when the
+daemon has `runsc` registered (read from `/info`). Desktop local containers
+stay dormant in this release.
 
 ### Experimental shared browser
 

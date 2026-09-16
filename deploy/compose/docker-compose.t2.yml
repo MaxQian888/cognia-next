@@ -52,6 +52,10 @@ services:
       # bundle admits sandboxes.
       COGNIA_AGENT_BUNDLE_IMAGE: ${COGNIA_AGENT_BUNDLE_IMAGE:-}
       COGNIA_AGENT_BUNDLE_RETAINED_IMAGES: ${COGNIA_AGENT_BUNDLE_RETAINED_IMAGES:-}
+      # The deployment switch for runtime environment sandboxes when no
+      # baseline file is mounted (docker-compose.runtime-environment.yml).
+      # Blank reads as unset, which is off: the runners above work unchanged.
+      COGNIA_SANDBOX_POOL_ENABLED: ${COGNIA_SANDBOX_POOL_ENABLED:-}
       DOCKER_HOST: tcp://docker-socket-proxy:2375
       # Workspaces live on a named volume shared with the runners. BOTH vars
       # matter: COGNIA_WORKSPACES_DIR is where cognia-server sees the tree;
