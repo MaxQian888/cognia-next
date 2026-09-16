@@ -21,7 +21,7 @@
  */
 import { formatHex, parse as parseCulori } from "culori"
 
-import { stripJsonComments } from "@/lib/appearance/vscode-theme/parse-json"
+import { tryParseJsonc } from "@/lib/jsonc"
 import { DEFAULT_FALLBACKS } from "@/lib/appearance/vscode-theme/token-mapping"
 import { VSCODE_CHROME_MAP } from "@/lib/codeserver/theme/vscode-chrome-map"
 import type { CanvasAccessibilitySettings, CanvasEditorSettings } from "@/types/canvas/settings"
@@ -324,8 +324,8 @@ export function buildCodeServerSettings(input: CodeServerSettingsInput): Record<
 /**
  * Fold `managed` into the user's existing `settings.json` text.
  *
- * Tolerates the JSONC that VS Code itself writes (comments, via the importer's
- * {@link stripJsonComments}) and an unparseable file, which is treated as empty
+ * Tolerates the JSONC that VS Code itself writes (comments, via
+ * {@link tryParseJsonc}) and an unparseable file, which is treated as empty
  * rather than aborting the sync. Comments do not survive the round-trip — we
  * re-serialize as plain JSON — but every unmanaged key does.
  *
@@ -343,14 +343,11 @@ export function mergeCodeServerSettings(
   let existing: Record<string, unknown> = {}
   const trimmed = existingRaw.trim()
   if (trimmed) {
-    try {
-      const parsed: unknown = JSON.parse(stripJsonComments(existingRaw))
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        existing = { ...(parsed as Record<string, unknown>) }
-      }
-    } catch {
-      // Corrupt or hand-broken file — better to rewrite it than to leave the
-      // editor unthemed forever.
+    // A corrupt or hand-broken file parses to undefined — better to rewrite
+    // it than to leave the editor unthemed forever.
+    const parsed = tryParseJsonc(existingRaw)
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      existing = { ...(parsed as Record<string, unknown>) }
     }
   }
   const preserved = new Set(options.preserve ?? [])

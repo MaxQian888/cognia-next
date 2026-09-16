@@ -15,6 +15,7 @@
  * still share all agent-specific projection rules.
  */
 
+import { parseJsonc } from "@/lib/jsonc"
 import { MCP_AGENT_ADAPTERS, type McpAgentAdapter } from "@/lib/claude/agents"
 import type { PluginMcpServerPresetDef } from "@/types/plugin/plugin-mcp-preset"
 import type { McpImportDraft } from "@/lib/db/mcp-servers"
@@ -24,60 +25,6 @@ import type { ConvertCandidate } from "./types"
 
 /** Every registered adapter is supported; format decoding happens below. */
 export const SUPPORTED_MCP_ADAPTERS: McpAgentAdapter[] = MCP_AGENT_ADAPTERS
-
-/** Strip `//` and `/* *\/` comments plus trailing commas from JSONC text. */
-export function stripJsonComments(text: string): string {
-  let out = ""
-  let inString = false
-  let inLine = false
-  let inBlock = false
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i]
-    const next = text[i + 1]
-    if (inLine) {
-      if (ch === "\n") {
-        inLine = false
-        out += ch
-      }
-      continue
-    }
-    if (inBlock) {
-      if (ch === "*" && next === "/") {
-        inBlock = false
-        i += 1
-      }
-      continue
-    }
-    if (inString) {
-      out += ch
-      if (ch === "\\") {
-        out += next ?? ""
-        i += 1
-      } else if (ch === '"') {
-        inString = false
-      }
-      continue
-    }
-    if (ch === '"') {
-      inString = true
-      out += ch
-      continue
-    }
-    if (ch === "/" && next === "/") {
-      inLine = true
-      i += 1
-      continue
-    }
-    if (ch === "/" && next === "*") {
-      inBlock = true
-      i += 1
-      continue
-    }
-    out += ch
-  }
-  // Trailing commas are legal in JSONC but not JSON.
-  return out.replace(/,(\s*[}\]])/g, "$1")
-}
 
 /**
  * Choose the adapter for a config file.
@@ -118,7 +65,7 @@ export function readMcpDrafts(
     }
   } else {
     try {
-      value = JSON.parse(stripJsonComments(text))
+      value = parseJsonc(text)
     } catch (err) {
       throw new Error(
         `could not parse "${sourceName ?? "input"}" as JSON/JSONC: ${err instanceof Error ? err.message : String(err)}`

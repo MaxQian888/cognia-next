@@ -33,6 +33,154 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
+// node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/umd/main.js
+var require_main = __commonJS({
+  "node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/umd/main.js"(exports2, module2) {
+    (function(factory) {
+      if (typeof module2 === "object" && typeof module2.exports === "object") {
+        var v = factory(require, exports2);
+        if (v !== void 0) module2.exports = v;
+      } else if (typeof define === "function" && define.amd) {
+        define(["require", "exports", "./impl/format", "./impl/edit", "./impl/scanner", "./impl/parser"], factory);
+      }
+    })(function(require2, exports3) {
+      "use strict";
+      Object.defineProperty(exports3, "__esModule", { value: true });
+      exports3.applyEdits = exports3.modify = exports3.format = exports3.printParseErrorCode = exports3.ParseErrorCode = exports3.stripComments = exports3.visit = exports3.getNodeValue = exports3.getNodePath = exports3.findNodeAtOffset = exports3.findNodeAtLocation = exports3.parseTree = exports3.parse = exports3.getLocation = exports3.SyntaxKind = exports3.ScanError = exports3.createScanner = void 0;
+      const formatter = require2("./impl/format");
+      const edit = require2("./impl/edit");
+      const scanner = require2("./impl/scanner");
+      const parser = require2("./impl/parser");
+      exports3.createScanner = scanner.createScanner;
+      var ScanError;
+      (function(ScanError2) {
+        ScanError2[ScanError2["None"] = 0] = "None";
+        ScanError2[ScanError2["UnexpectedEndOfComment"] = 1] = "UnexpectedEndOfComment";
+        ScanError2[ScanError2["UnexpectedEndOfString"] = 2] = "UnexpectedEndOfString";
+        ScanError2[ScanError2["UnexpectedEndOfNumber"] = 3] = "UnexpectedEndOfNumber";
+        ScanError2[ScanError2["InvalidUnicode"] = 4] = "InvalidUnicode";
+        ScanError2[ScanError2["InvalidEscapeCharacter"] = 5] = "InvalidEscapeCharacter";
+        ScanError2[ScanError2["InvalidCharacter"] = 6] = "InvalidCharacter";
+      })(ScanError || (exports3.ScanError = ScanError = {}));
+      var SyntaxKind;
+      (function(SyntaxKind2) {
+        SyntaxKind2[SyntaxKind2["OpenBraceToken"] = 1] = "OpenBraceToken";
+        SyntaxKind2[SyntaxKind2["CloseBraceToken"] = 2] = "CloseBraceToken";
+        SyntaxKind2[SyntaxKind2["OpenBracketToken"] = 3] = "OpenBracketToken";
+        SyntaxKind2[SyntaxKind2["CloseBracketToken"] = 4] = "CloseBracketToken";
+        SyntaxKind2[SyntaxKind2["CommaToken"] = 5] = "CommaToken";
+        SyntaxKind2[SyntaxKind2["ColonToken"] = 6] = "ColonToken";
+        SyntaxKind2[SyntaxKind2["NullKeyword"] = 7] = "NullKeyword";
+        SyntaxKind2[SyntaxKind2["TrueKeyword"] = 8] = "TrueKeyword";
+        SyntaxKind2[SyntaxKind2["FalseKeyword"] = 9] = "FalseKeyword";
+        SyntaxKind2[SyntaxKind2["StringLiteral"] = 10] = "StringLiteral";
+        SyntaxKind2[SyntaxKind2["NumericLiteral"] = 11] = "NumericLiteral";
+        SyntaxKind2[SyntaxKind2["LineCommentTrivia"] = 12] = "LineCommentTrivia";
+        SyntaxKind2[SyntaxKind2["BlockCommentTrivia"] = 13] = "BlockCommentTrivia";
+        SyntaxKind2[SyntaxKind2["LineBreakTrivia"] = 14] = "LineBreakTrivia";
+        SyntaxKind2[SyntaxKind2["Trivia"] = 15] = "Trivia";
+        SyntaxKind2[SyntaxKind2["Unknown"] = 16] = "Unknown";
+        SyntaxKind2[SyntaxKind2["EOF"] = 17] = "EOF";
+      })(SyntaxKind || (exports3.SyntaxKind = SyntaxKind = {}));
+      exports3.getLocation = parser.getLocation;
+      exports3.parse = parser.parse;
+      exports3.parseTree = parser.parseTree;
+      exports3.findNodeAtLocation = parser.findNodeAtLocation;
+      exports3.findNodeAtOffset = parser.findNodeAtOffset;
+      exports3.getNodePath = parser.getNodePath;
+      exports3.getNodeValue = parser.getNodeValue;
+      exports3.visit = parser.visit;
+      exports3.stripComments = parser.stripComments;
+      var ParseErrorCode;
+      (function(ParseErrorCode2) {
+        ParseErrorCode2[ParseErrorCode2["InvalidSymbol"] = 1] = "InvalidSymbol";
+        ParseErrorCode2[ParseErrorCode2["InvalidNumberFormat"] = 2] = "InvalidNumberFormat";
+        ParseErrorCode2[ParseErrorCode2["PropertyNameExpected"] = 3] = "PropertyNameExpected";
+        ParseErrorCode2[ParseErrorCode2["ValueExpected"] = 4] = "ValueExpected";
+        ParseErrorCode2[ParseErrorCode2["ColonExpected"] = 5] = "ColonExpected";
+        ParseErrorCode2[ParseErrorCode2["CommaExpected"] = 6] = "CommaExpected";
+        ParseErrorCode2[ParseErrorCode2["CloseBraceExpected"] = 7] = "CloseBraceExpected";
+        ParseErrorCode2[ParseErrorCode2["CloseBracketExpected"] = 8] = "CloseBracketExpected";
+        ParseErrorCode2[ParseErrorCode2["EndOfFileExpected"] = 9] = "EndOfFileExpected";
+        ParseErrorCode2[ParseErrorCode2["InvalidCommentToken"] = 10] = "InvalidCommentToken";
+        ParseErrorCode2[ParseErrorCode2["UnexpectedEndOfComment"] = 11] = "UnexpectedEndOfComment";
+        ParseErrorCode2[ParseErrorCode2["UnexpectedEndOfString"] = 12] = "UnexpectedEndOfString";
+        ParseErrorCode2[ParseErrorCode2["UnexpectedEndOfNumber"] = 13] = "UnexpectedEndOfNumber";
+        ParseErrorCode2[ParseErrorCode2["InvalidUnicode"] = 14] = "InvalidUnicode";
+        ParseErrorCode2[ParseErrorCode2["InvalidEscapeCharacter"] = 15] = "InvalidEscapeCharacter";
+        ParseErrorCode2[ParseErrorCode2["InvalidCharacter"] = 16] = "InvalidCharacter";
+      })(ParseErrorCode || (exports3.ParseErrorCode = ParseErrorCode = {}));
+      function printParseErrorCode2(code) {
+        switch (code) {
+          case 1:
+            return "InvalidSymbol";
+          case 2:
+            return "InvalidNumberFormat";
+          case 3:
+            return "PropertyNameExpected";
+          case 4:
+            return "ValueExpected";
+          case 5:
+            return "ColonExpected";
+          case 6:
+            return "CommaExpected";
+          case 7:
+            return "CloseBraceExpected";
+          case 8:
+            return "CloseBracketExpected";
+          case 9:
+            return "EndOfFileExpected";
+          case 10:
+            return "InvalidCommentToken";
+          case 11:
+            return "UnexpectedEndOfComment";
+          case 12:
+            return "UnexpectedEndOfString";
+          case 13:
+            return "UnexpectedEndOfNumber";
+          case 14:
+            return "InvalidUnicode";
+          case 15:
+            return "InvalidEscapeCharacter";
+          case 16:
+            return "InvalidCharacter";
+        }
+        return "<unknown ParseErrorCode>";
+      }
+      exports3.printParseErrorCode = printParseErrorCode2;
+      function format(documentText, range, options2) {
+        return formatter.format(documentText, range, options2);
+      }
+      exports3.format = format;
+      function modify(text, path, value, options2) {
+        return edit.setProperty(text, path, value, options2);
+      }
+      exports3.modify = modify;
+      function applyEdits(text, edits) {
+        let sortedEdits = edits.slice(0).sort((a, b) => {
+          const diff = a.offset - b.offset;
+          if (diff === 0) {
+            return a.length - b.length;
+          }
+          return diff;
+        });
+        let lastModifiedOffset = text.length;
+        for (let i = sortedEdits.length - 1; i >= 0; i--) {
+          let e = sortedEdits[i];
+          if (e.offset + e.length <= lastModifiedOffset) {
+            text = edit.applyEdit(text, e);
+          } else {
+            throw new Error("Overlapping edit");
+          }
+          lastModifiedOffset = e.offset;
+        }
+        return text;
+      }
+      exports3.applyEdits = applyEdits;
+    });
+  }
+});
+
 // node_modules/.pnpm/kind-of@6.0.3/node_modules/kind-of/index.js
 var require_kind_of = __commonJS({
   "node_modules/.pnpm/kind-of@6.0.3/node_modules/kind-of/index.js"(exports2, module2) {
@@ -3416,7 +3564,7 @@ var require_gray_matter = __commonJS({
     var excerpt = require_excerpt();
     var engines2 = require_engines();
     var toFile = require_to_file();
-    var parse17 = require_parse();
+    var parse18 = require_parse();
     var utils = require_utils();
     function matter3(input, options2) {
       if (input === "") {
@@ -3468,7 +3616,7 @@ var require_gray_matter = __commonJS({
         file.empty = file.content;
         file.data = {};
       } else {
-        file.data = parse17(file.language, file.matter, opts);
+        file.data = parse18(file.language, file.matter, opts);
       }
       if (closeIndex === len) {
         file.content = "";
@@ -3638,6 +3786,18 @@ function serializeManifest(manifest) {
 `;
 }
 
+// lib/jsonc/index.ts
+var import_jsonc_parser = __toESM(require_main());
+function parseJsonc(text) {
+  const errors = [];
+  const value = (0, import_jsonc_parser.parse)(text, errors, { allowTrailingComma: true });
+  if (errors.length > 0) {
+    const first = errors[0];
+    throw new SyntaxError(`${(0, import_jsonc_parser.printParseErrorCode)(first.error)} at offset ${first.offset}`);
+  }
+  return value;
+}
+
 // lib/claude/agents/shared.ts
 function normalizeMcpEntry(raw, opts = {}) {
   if (!raw || typeof raw !== "object") return null;
@@ -3717,7 +3877,7 @@ function entriesFromMap(map) {
   }
   return out;
 }
-function parse2(value) {
+function parse3(value) {
   const root = asRoot(value);
   if (!root) return [];
   const seen = /* @__PURE__ */ new Map();
@@ -3760,7 +3920,7 @@ var CLAUDE_CODE_AGENT = {
   description: "~/.claude.json \u2014 root mcpServers + projects[].mcpServers",
   writable: true,
   format: "json",
-  parse: parse2,
+  parse: parse3,
   project
 };
 
@@ -3769,7 +3929,7 @@ function asRoot2(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value;
 }
-function parse3(value) {
+function parse4(value) {
   const root = asRoot2(value);
   if (!root?.mcpServers || typeof root.mcpServers !== "object") return [];
   const out = [];
@@ -3805,7 +3965,7 @@ var CLAUDE_DESKTOP_AGENT = {
   description: "claude_desktop_config.json \u2014 stdio servers only",
   writable: true,
   format: "json",
-  parse: parse3,
+  parse: parse4,
   project: project2
 };
 
@@ -3814,7 +3974,7 @@ function asRoot3(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value;
 }
-function parse4(value) {
+function parse5(value) {
   const root = asRoot3(value);
   if (!root?.mcpServers || typeof root.mcpServers !== "object") return [];
   const out = [];
@@ -3836,7 +3996,7 @@ var CLINE_AGENT = {
   description: "VS Code extension \u2014 read-only (path varies)",
   writable: false,
   format: "json",
-  parse: parse4,
+  parse: parse5,
   project: project3
 };
 
@@ -3852,7 +4012,7 @@ function pickServerMap(root) {
   if (b && typeof b === "object") return b;
   return {};
 }
-function parse5(value) {
+function parse6(value) {
   const root = asRoot4(value);
   if (!root) return [];
   const map = pickServerMap(root);
@@ -3886,7 +4046,7 @@ var CODEX_AGENT = {
   description: "~/.codex/config.toml \u2014 TOML, [mcp_servers.NAME] tables",
   writable: true,
   format: "toml",
-  parse: parse5,
+  parse: parse6,
   project: project4
 };
 
@@ -3895,7 +4055,7 @@ function asRoot5(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value;
 }
-function parse6(value) {
+function parse7(value) {
   const root = asRoot5(value);
   if (!root?.mcpServers || typeof root.mcpServers !== "object") return [];
   const out = [];
@@ -3928,7 +4088,7 @@ var COGNIA_AGENT = {
   description: "~/.cognia/mcp.json \u2014 the standalone cognia-agent CLI",
   writable: true,
   format: "json",
-  parse: parse6,
+  parse: parse7,
   project: project5
 };
 
@@ -3937,7 +4097,7 @@ function asRoot6(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value;
 }
-function parse7(value) {
+function parse8(value) {
   const root = asRoot6(value);
   if (!root?.mcpServers || typeof root.mcpServers !== "object") return [];
   const out = [];
@@ -3970,7 +4130,7 @@ var CURSOR_AGENT = {
   description: "~/.cursor/mcp.json \u2014 global Cursor MCP config",
   writable: true,
   format: "json",
-  parse: parse7,
+  parse: parse8,
   project: project6
 };
 
@@ -3979,7 +4139,7 @@ function asRoot7(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value;
 }
-function parse8(value) {
+function parse9(value) {
   const root = asRoot7(value);
   if (!root?.mcpServers || typeof root.mcpServers !== "object") return [];
   const out = [];
@@ -4035,7 +4195,7 @@ var GEMINI_AGENT = {
   description: "~/.gemini/settings.json \u2014 url=SSE, httpUrl=HTTP",
   writable: true,
   format: "json",
-  parse: parse8,
+  parse: parse9,
   project: project7
 };
 
@@ -4045,7 +4205,7 @@ function asRoot8(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value;
 }
-function parse9(value) {
+function parse10(value) {
   const root = asRoot8(value);
   if (!root?.mcpServers || typeof root.mcpServers !== "object") return [];
   const out = [];
@@ -4090,7 +4250,7 @@ var KIRO_AGENT = {
   description: "~/.kiro/settings/mcp.json \u2014 no `type` key, local vs remote inferred",
   writable: true,
   format: "json",
-  parse: parse9,
+  parse: parse10,
   project: project8
 };
 
@@ -4099,7 +4259,7 @@ function asRoot9(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value;
 }
-function parse10(value) {
+function parse11(value) {
   const root = asRoot9(value);
   if (!root?.mcp || typeof root.mcp !== "object") return [];
   const out = [];
@@ -4172,7 +4332,7 @@ var OPENCODE_AGENT = {
   description: "~/.config/opencode/opencode.json \u2014 `mcp` key, command is one array",
   writable: true,
   format: "json",
-  parse: parse10,
+  parse: parse11,
   project: project9
 };
 
@@ -4195,7 +4355,7 @@ function serversOf(root) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   return raw;
 }
-function parse11(value) {
+function parse12(value) {
   const servers = serversOf(asRoot10(value));
   if (!servers) return [];
   const out = [];
@@ -4231,7 +4391,7 @@ var PI_MCP_ADAPTER_AGENT = {
   description: "~/.pi/agent/mcp.json \u2014 requires the pi-mcp-adapter package",
   writable: true,
   format: "json",
-  parse: parse11,
+  parse: parse12,
   project: project10
 };
 
@@ -4240,7 +4400,7 @@ function asRoot11(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value;
 }
-function parse12(value) {
+function parse13(value) {
   const root = asRoot11(value);
   if (!root?.mcpServers || typeof root.mcpServers !== "object") return [];
   const out = [];
@@ -4262,7 +4422,7 @@ var ROO_CODE_AGENT = {
   description: "VS Code extension \u2014 read-only (path varies)",
   writable: false,
   format: "json",
-  parse: parse12,
+  parse: parse13,
   project: project11
 };
 
@@ -4271,7 +4431,7 @@ function asRoot12(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value;
 }
-function parse13(value) {
+function parse14(value) {
   const root = asRoot12(value);
   if (!root?.servers || typeof root.servers !== "object") return [];
   const out = [];
@@ -4304,7 +4464,7 @@ var VSCODE_AGENT = {
   description: "User mcp.json \u2014 top-level key `servers`, JSONC",
   writable: true,
   format: "jsonc",
-  parse: parse13,
+  parse: parse14,
   project: project12
 };
 
@@ -4313,7 +4473,7 @@ function asRoot13(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value;
 }
-function parse14(value) {
+function parse15(value) {
   const root = asRoot13(value);
   if (!root?.mcpServers || typeof root.mcpServers !== "object") return [];
   const out = [];
@@ -4349,7 +4509,7 @@ var WINDSURF_AGENT = {
   description: "~/.codeium/windsurf/mcp_config.json \u2014 uses `serverUrl`",
   writable: true,
   format: "json",
-  parse: parse14,
+  parse: parse15,
   project: project13
 };
 
@@ -4362,7 +4522,7 @@ function asRoot14(value) {
 function isExtensionEntry(entry) {
   return "settings" in entry && !("command" in entry) && !("url" in entry);
 }
-function parse15(value) {
+function parse16(value) {
   const root = asRoot14(value);
   if (!root?.context_servers || typeof root.context_servers !== "object") return [];
   const out = [];
@@ -4404,7 +4564,7 @@ var ZED_AGENT = {
   description: "settings.json `context_servers` \u2014 no `type` key, JSONC",
   writable: true,
   format: "jsonc",
-  parse: parse15,
+  parse: parse16,
   project: project14
 };
 
@@ -5008,7 +5168,7 @@ function peekTable(key, table, meta, type) {
   }
   return [k, t, state.c];
 }
-function parse16(toml, { maxDepth = 1e3, integersAsBigInt } = {}) {
+function parse17(toml, { maxDepth = 1e3, integersAsBigInt } = {}) {
   let ctx = { s: toml, p: 0, d: maxDepth };
   let res = {};
   let meta = {};
@@ -5351,57 +5511,6 @@ function sanitizeMcpConfig(transport, config) {
 
 // lib/plugin/convert/mcp-source.ts
 var SUPPORTED_MCP_ADAPTERS = MCP_AGENT_ADAPTERS;
-function stripJsonComments(text) {
-  let out = "";
-  let inString = false;
-  let inLine = false;
-  let inBlock = false;
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i];
-    const next = text[i + 1];
-    if (inLine) {
-      if (ch === "\n") {
-        inLine = false;
-        out += ch;
-      }
-      continue;
-    }
-    if (inBlock) {
-      if (ch === "*" && next === "/") {
-        inBlock = false;
-        i += 1;
-      }
-      continue;
-    }
-    if (inString) {
-      out += ch;
-      if (ch === "\\") {
-        out += next ?? "";
-        i += 1;
-      } else if (ch === '"') {
-        inString = false;
-      }
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-      out += ch;
-      continue;
-    }
-    if (ch === "/" && next === "/") {
-      inLine = true;
-      i += 1;
-      continue;
-    }
-    if (ch === "/" && next === "*") {
-      inBlock = true;
-      i += 1;
-      continue;
-    }
-    out += ch;
-  }
-  return out.replace(/,(\s*[}\]])/g, "$1");
-}
 function selectMcpAdapter(sourceName, value) {
   const lower = (sourceName ?? "").toLowerCase();
   const byName = SUPPORTED_MCP_ADAPTERS.find((adapter) => lower.includes(adapter.id));
@@ -5417,7 +5526,7 @@ function readMcpDrafts(text, sourceName) {
   const toml = /\.toml$/i.test(sourceName ?? "");
   if (toml) {
     try {
-      value = parse16(text);
+      value = parse17(text);
     } catch (err) {
       throw new Error(
         `could not parse "${sourceName ?? "input"}" as TOML: ${err instanceof Error ? err.message : String(err)}`
@@ -5425,7 +5534,7 @@ function readMcpDrafts(text, sourceName) {
     }
   } else {
     try {
-      value = JSON.parse(stripJsonComments(text));
+      value = parseJsonc(text);
     } catch (err) {
       throw new Error(
         `could not parse "${sourceName ?? "input"}" as JSON/JSONC: ${err instanceof Error ? err.message : String(err)}`
@@ -7007,7 +7116,7 @@ function convertCodexPlugin(files, options2) {
 function parseGeminiCommand(path, text, report) {
   let parsed;
   try {
-    parsed = parse16(text);
+    parsed = parse17(text);
   } catch (error) {
     report.blocking.push({
       capability: "commands",

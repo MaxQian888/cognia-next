@@ -9,9 +9,10 @@
 //     bg/fg pair so the UI doesn't end up with `#undefined` strings.
 //
 // VSCode color theme files often use JSONC (with comments + trailing
-// commas) — we strip those before `JSON.parse` so authoring with the
-// standard VSCode tooling roundtrips.
+// commas) — parsing goes through jsonc-parser (`@/lib/jsonc`) so authoring
+// with the standard VSCode tooling roundtrips.
 
+import { tryParseJsonc } from "@/lib/jsonc"
 import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin"
 import { darken, lighten, parseHex, readableForeground, stripAlpha } from "./color-utils"
 import { DEFAULT_FALLBACKS, THEME_COLOR_KEYS, VSCODE_COLOR_MAP } from "./token-mapping"
@@ -47,66 +48,11 @@ export interface ParsedTheme {
   matchedCount: number
 }
 
-/**
- * Strip JSONC artifacts (line + block comments + trailing commas). Returns
- * the cleaned text — `JSON.parse` is left to the caller so they can hold
- * onto the original error object.
- */
-export function stripJsonComments(input: string): string {
-  let out = ""
-  let i = 0
-  const n = input.length
-  while (i < n) {
-    const ch = input[i]
-    const next = input[i + 1]
-    if (ch === '"' || ch === "'") {
-      // Walk past the entire string, respecting backslash escapes.
-      const quote = ch
-      out += ch
-      i += 1
-      while (i < n) {
-        const c = input[i]
-        out += c
-        if (c === "\\" && i + 1 < n) {
-          out += input[i + 1]
-          i += 2
-          continue
-        }
-        i += 1
-        if (c === quote) break
-      }
-      continue
-    }
-    if (ch === "/" && next === "/") {
-      // Line comment — skip to end of line, preserve the newline.
-      i += 2
-      while (i < n && input[i] !== "\n") i += 1
-      continue
-    }
-    if (ch === "/" && next === "*") {
-      i += 2
-      while (i < n && !(input[i] === "*" && input[i + 1] === "/")) i += 1
-      i += 2 // skip the closing `*/`
-      continue
-    }
-    out += ch
-    i += 1
-  }
-  // Trailing commas: `,}` or `,]`. Iterating once is enough because the
-  // pattern can only appear after the strip-comments pass.
-  return out.replace(/,\s*([}\]])/g, "$1")
-}
-
-/** Parse a VSCode color theme JSON file. Returns null if the input isn't valid JSON. */
+/** Parse a VSCode color theme JSON file. Returns null if the input isn't valid JSONC. */
 export function parseVscodeJson(text: string): VscodeThemeJson | null {
-  try {
-    const cleaned = stripJsonComments(text)
-    const obj = JSON.parse(cleaned) as VscodeThemeJson
-    if (typeof obj !== "object" || obj === null) return null
-    return obj
-  } catch {
-    return null
-  }
+  const obj = tryParseJsonc<VscodeThemeJson>(text)
+  if (typeof obj !== "object" || obj === null) return null
+  return obj
 }
 
 /**

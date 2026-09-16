@@ -1,42 +1,10 @@
 import fs from "node:fs"
 import path from "node:path"
-import {
-  importVscodeThemeJson,
-  parseVscodeJson,
-  stripJsonComments,
-  vscodeThemeToCustomTheme,
-} from "./parse-json"
+import { importVscodeThemeJson, parseVscodeJson, vscodeThemeToCustomTheme } from "./parse-json"
 import { BASE_THEME_COLOR_KEYS, normalizeThemeColors } from "../theme-token-catalog"
 import { THEME_COLOR_KEYS } from "./token-mapping"
 
 const fixtureDir = path.join(__dirname, "__fixtures__")
-
-describe("stripJsonComments", () => {
-  it("strips line and block comments", () => {
-    const text = `// header\n{\n  /* block */\n  "a": 1, // trailing\n  "b": 2\n}`
-    const cleaned = stripJsonComments(text)
-    expect(cleaned).not.toContain("//")
-    expect(cleaned).not.toContain("/*")
-    expect(JSON.parse(cleaned)).toEqual({ a: 1, b: 2 })
-  })
-
-  it("preserves comment markers inside strings", () => {
-    const text = `{"a": "// not a comment", "b": "/* nope */"}`
-    const cleaned = stripJsonComments(text)
-    expect(JSON.parse(cleaned)).toEqual({ a: "// not a comment", b: "/* nope */" })
-  })
-
-  it("handles escaped quotes in strings", () => {
-    const text = `{"a": "she said \\"hi\\"" }`
-    const cleaned = stripJsonComments(text)
-    expect(JSON.parse(cleaned).a).toBe('she said "hi"')
-  })
-
-  it("removes trailing commas in objects and arrays", () => {
-    const cleaned = stripJsonComments(`{ "a": 1, "b": [1,2,3,], }`)
-    expect(JSON.parse(cleaned)).toEqual({ a: 1, b: [1, 2, 3] })
-  })
-})
 
 describe("parseVscodeJson", () => {
   it("returns null for invalid JSON", () => {
@@ -55,6 +23,14 @@ describe("parseVscodeJson", () => {
     const parsed = parseVscodeJson(text)
     expect(parsed?.name).toBe("X")
     expect(parsed?.colors?.["editor.background"]).toBe("#000")
+  })
+
+  it("does not rewrite comma-brace sequences inside string values", () => {
+    // The hand-rolled stripper applied its trailing-comma regex to the whole
+    // output, silently rewriting `"a,}b"` to `"a}b"`. jsonc-parser keeps
+    // string contents verbatim.
+    const parsed = parseVscodeJson(`{ "name": "a,}b", "colors": {} }`)
+    expect(parsed?.name).toBe("a,}b")
   })
 })
 

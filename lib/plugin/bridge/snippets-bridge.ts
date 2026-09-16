@@ -22,7 +22,7 @@
  * Per-plugin tracking + idempotent unregister, mirrors themes-bridge.
  */
 
-import { stripJsonComments } from "@/lib/appearance/vscode-theme/parse-json"
+import { parseJsonc } from "@/lib/jsonc"
 
 export interface VsCodeSnippetBody {
   prefix: string | string[]
@@ -83,7 +83,7 @@ export function registerSnippetFile(
 ): SnippetContribution[] {
   let parsed: Record<string, VsCodeSnippetBody>
   try {
-    parsed = JSON.parse(stripJsonComments(source)) as Record<string, VsCodeSnippetBody>
+    parsed = parseJsonc<Record<string, VsCodeSnippetBody>>(source)
   } catch (err) {
     console.warn(
       `[snippets-bridge] plugin ${pluginId} ${language} snippet file failed to parse: ${(err as Error).message}`

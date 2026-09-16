@@ -4,7 +4,6 @@ import {
   listMcpCandidates,
   readMcpDrafts,
   selectMcpAdapter,
-  stripJsonComments,
   SUPPORTED_MCP_ADAPTERS,
 } from "./mcp-source"
 
@@ -18,33 +17,6 @@ const CURSOR_CONFIG = JSON.stringify({
     },
     deepwiki: { type: "http", url: "https://mcp.deepwiki.com/mcp" },
   },
-})
-
-describe("stripJsonComments", () => {
-  it("removes line and block comments", () => {
-    expect(
-      stripJsonComments(`{
-        // a line comment
-        "a": 1, /* inline */
-        "b": 2
-      }`)
-    ).toContain('"a": 1')
-    expect(stripJsonComments('{ // x\n "a": 1 }')).not.toContain("//")
-  })
-
-  it("leaves comment-like text inside strings alone", () => {
-    const out = stripJsonComments('{ "url": "https://x.dev/a" }')
-    expect(JSON.parse(out)).toEqual({ url: "https://x.dev/a" })
-  })
-
-  it("handles escaped quotes inside strings", () => {
-    const out = stripJsonComments('{ "a": "he said \\"hi\\"" }')
-    expect(JSON.parse(out)).toEqual({ a: 'he said "hi"' })
-  })
-
-  it("drops trailing commas", () => {
-    expect(JSON.parse(stripJsonComments('{ "a": 1, }'))).toEqual({ a: 1 })
-  })
 })
 
 describe("SUPPORTED_MCP_ADAPTERS", () => {
@@ -84,6 +56,16 @@ describe("readMcpDrafts", () => {
       "mcp.json"
     )
     expect(drafts.map((d) => d.name)).toEqual(["a"])
+  })
+
+  it("does not rewrite comma-brace sequences inside string values", () => {
+    // The hand-rolled stripper ran its trailing-comma regex over the whole
+    // output, so an arg like "echo a,}" was silently rewritten to "echo a}".
+    const { drafts } = readMcpDrafts(
+      `{ "mcpServers": { "a": { "command": "sh", "args": ["-c", "echo a,}"] } } }`,
+      "mcp.json"
+    )
+    expect(drafts[0].config.args).toEqual(["-c", "echo a,}"])
   })
 
   it("accepts Codex config.toml through the existing Codex adapter", () => {
@@ -198,10 +180,8 @@ describe("describeConfig — degenerate configs", () => {
 })
 
 describe("mcp-source — remaining edge paths", () => {
-  it("keeps a trailing backslash inside a string from swallowing the terminator", () => {
-    // The escape branch consumes the next character; at end-of-input there
-    // is none, so it must not read past the buffer.
-    expect(() => stripJsonComments('{ "a": "x\\')).not.toThrow()
+  it("rejects an unterminated string as a parse failure", () => {
+    expect(() => readMcpDrafts('{ "a": "x\\', "mcp.json")).toThrow(/could not parse "mcp\.json"/)
   })
 
   it("names the input generically when no source name was supplied", () => {

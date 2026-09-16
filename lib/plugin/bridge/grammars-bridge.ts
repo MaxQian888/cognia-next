@@ -19,7 +19,7 @@
  * dependency on either renderer.
  */
 
-import { stripJsonComments } from "@/lib/appearance/vscode-theme/parse-json"
+import { parseJsonc } from "@/lib/jsonc"
 
 export interface VsCodeGrammarRule {
   match?: string
@@ -130,7 +130,7 @@ export function registerGrammar(input: {
   let data: VsCodeGrammarData
   if (isJsonPayload(input.payload)) {
     try {
-      data = JSON.parse(stripJsonComments(input.payload)) as VsCodeGrammarData
+      data = parseJsonc<VsCodeGrammarData>(input.payload)
     } catch (err) {
       throw new Error(
         `Invalid grammar JSON for scope "${input.scopeName}" (${input.grammarPath}): ${(err as Error).message}`

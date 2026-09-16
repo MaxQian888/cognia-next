@@ -16,7 +16,7 @@
  * reads the registered list on next theme apply.
  */
 
-import { stripJsonComments } from "@/lib/appearance/vscode-theme/parse-json"
+import { parseJsonc } from "@/lib/jsonc"
 import type { VsCodeLanguage } from "@/types/plugin/plugin-vscode"
 
 export interface VsCodeLanguageContribution {
@@ -99,9 +99,7 @@ export function registerLanguage(input: {
   let configuration: VsCodeLanguageConfiguration | undefined = input.language.configuration
   if (input.configurationText && !configuration) {
     try {
-      configuration = JSON.parse(
-        stripJsonComments(input.configurationText)
-      ) as VsCodeLanguageConfiguration
+      configuration = parseJsonc<VsCodeLanguageConfiguration>(input.configurationText)
     } catch (err) {
       throw new Error(`Invalid language-configuration JSON for "${id}": ${(err as Error).message}`)
     }

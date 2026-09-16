@@ -29,8 +29,8 @@ import {
 } from "@/lib/theme/theme-registry"
 import { registerThemePack, unregisterThemePacksByPlugin } from "@/lib/theme/theme-pack-registry"
 import { isUnsafeRelativePath, readContainedPluginFile } from "./plugin-file-path"
+import { parseJsonc } from "@/lib/jsonc"
 import {
-  stripJsonComments,
   vscodeThemeToCustomTheme,
   type VscodeThemeJson,
 } from "@/lib/appearance/vscode-theme/parse-json"
@@ -186,10 +186,9 @@ async function resolveContribution(
       baseDir,
       contribution.vscodeJsonPath
     )
-    const cleaned = stripJsonComments(text)
     let parsed: VscodeThemeJson
     try {
-      parsed = JSON.parse(cleaned) as VscodeThemeJson
+      parsed = parseJsonc<VscodeThemeJson>(text)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       throw new Error(`Invalid JSON in ${contribution.vscodeJsonPath}: ${message}`)

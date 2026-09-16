@@ -31,7 +31,7 @@
  * walk it without re-parsing.
  */
 
-import { stripJsonComments } from "@/lib/appearance/vscode-theme/parse-json"
+import { parseJsonc } from "@/lib/jsonc"
 
 export interface VsCodeIconDefinition {
   iconPath?: string
@@ -121,7 +121,7 @@ export function registerIconTheme(input: {
 }): IconThemeContribution {
   let data: VsCodeIconThemeData
   try {
-    data = JSON.parse(stripJsonComments(input.jsonText)) as VsCodeIconThemeData
+    data = parseJsonc<VsCodeIconThemeData>(input.jsonText)
   } catch (err) {
     throw new Error(
       `Invalid JSON in icon theme "${input.themeId}" (${input.jsonPath}): ${(err as Error).message}`

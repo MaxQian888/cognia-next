@@ -16,7 +16,7 @@
  */
 import type { AppLanguage } from "@cognia/agent-config-types"
 
-import { stripJsonComments } from "@/lib/appearance/vscode-theme/parse-json"
+import { tryParseJsonc } from "@/lib/jsonc"
 
 /**
  * The app's language tag → VS Code's locale spelling.
@@ -43,15 +43,11 @@ export function vscodeLocaleForAppLanguage(language: AppLanguage | undefined): s
 export function readRuntimeArgsLocale(raw: string): string | null {
   const trimmed = raw.trim()
   if (!trimmed) return null
-  try {
-    const parsed: unknown = JSON.parse(stripJsonComments(raw))
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null
-    const locale = (parsed as Record<string, unknown>).locale
-    if (typeof locale !== "string") return null
-    return locale.trim() || null
-  } catch {
-    return null
-  }
+  const parsed = tryParseJsonc<Record<string, unknown>>(raw)
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null
+  const locale = parsed.locale
+  if (typeof locale !== "string") return null
+  return locale.trim() || null
 }
 
 /**
@@ -66,14 +62,11 @@ export function withRuntimeArgsLocale(raw: string, locale: string): string {
   let existing: Record<string, unknown> = {}
   const trimmed = raw.trim()
   if (trimmed) {
-    try {
-      const parsed: unknown = JSON.parse(stripJsonComments(raw))
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        existing = parsed as Record<string, unknown>
-      }
-    } catch {
-      // Corrupt file — rewriting it is better than leaving the editor stuck in a
-      // language the user changed away from.
+    // A corrupt file parses to undefined — rewriting it is better than
+    // leaving the editor stuck in a language the user changed away from.
+    const parsed = tryParseJsonc(raw)
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      existing = parsed as Record<string, unknown>
     }
   }
   return `${JSON.stringify({ ...existing, locale }, null, 2)}\n`
