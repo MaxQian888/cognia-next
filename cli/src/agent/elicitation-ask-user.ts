@@ -97,6 +97,13 @@ export function askUserAnswerToValue(
   if (schema.type === "array") {
     return answer.selected
   }
+  if (schema.type === "integer" || schema.type === "number") {
+    const raw = answer.selected[0] ?? answer.text.trim()
+    if (raw === "") return typeof schema.default === "number" ? schema.default : undefined
+    const value = Number(raw)
+    if (schema.type === "integer") return Number.isInteger(value) ? value : undefined
+    return Number.isFinite(value) ? value : undefined
+  }
   if (answer.selected.length > 0) return answer.selected[0]
   const text = answer.text.trim()
   if (text.length > 0) return text

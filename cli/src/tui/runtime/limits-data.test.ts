@@ -7,8 +7,12 @@ import {
   buildCliLimits,
   codexStatusLimits,
   loadCodexLimits,
+  loadExternalAgentLimits,
   mapCliProvider,
   nodeAuthedGet,
+  nodeAuthedRequest,
+  parseDevinCredentialsToml,
+  resolveDevinCredential,
 } from "./limits-data"
 import { getExternalAgentManager } from "@/lib/ai/agent/external/manager"
 import {
@@ -36,6 +40,7 @@ describe("mapCliProvider", () => {
     expect(mapCliProvider("openai")).toBe("codex")
     expect(mapCliProvider("chatgpt")).toBe("codex")
     expect(mapCliProvider("moonshot")).toBe("opencode")
+    expect(mapCliProvider("devin")).toBe("devin")
   })
 })
 
@@ -497,4 +502,203 @@ it("retains the latest native quota report time when reopening the panel", () =>
   expect(initial.notice).toContain("Latest quota reported")
   expect(reopened.notice).toContain("最近报告")
   expect(agentStatusLimits("anthropic", { legacy: events.legacy }, NOW)[0].fetchedAt).toBe(NOW)
+})
+
+describe("nodeAuthedRequest", () => {
+  it("sends method/body and returns status + text", async () => {
+    const original = globalThis.fetch
+    globalThis.fetch = jest.fn(async () => ({ status: 201, text: async () => "ok-body" })) as never
+    try {
+      const res = await nodeAuthedRequest({
+        url: "https://x.test/rpc",
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      })
+      expect(res).toEqual({ status: 201, body: "ok-body" })
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "https://x.test/rpc",
+        expect.objectContaining({ method: "POST", body: "{}" })
+      )
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+})
+
+describe("parseDevinCredentialsToml", () => {
+  it("extracts the quota fields and tolerates missing ones", () => {
+    expect(
+      parseDevinCredentialsToml(
+        'windsurf_api_key = "wk-abc"\napi_server_url = "https://server.codeium.com"\ndevin_api_url = "https://api.devin.ai"\n'
+      )
+    ).toEqual({ apiKey: "wk-abc", apiServerUrl: "https://server.codeium.com" })
+    expect(parseDevinCredentialsToml('windsurf_api_key = "wk-only"\n')).toEqual({
+      apiKey: "wk-only",
+      apiServerUrl: undefined,
+    })
+    expect(parseDevinCredentialsToml("not valid = = toml [")).toEqual({})
+    expect(parseDevinCredentialsToml('other = "x"\n')).toEqual({})
+  })
+})
+
+describe("resolveDevinCredential", () => {
+  it("prefers DEVIN_API_KEY env over the credentials file", async () => {
+    const readFile = jest.fn(async () => 'windsurf_api_key = "wk-file"\n')
+    const cred = await resolveDevinCredential({
+      env: { DEVIN_API_KEY: "wk-env", DEVIN_BASE_URL: "https://mirror.codeium.com" },
+      readFile,
+    })
+    expect(cred).toEqual({ token: "wk-env", baseUrl: "https://mirror.codeium.com" })
+    expect(readFile).not.toHaveBeenCalled()
+  })
+
+  it("falls back to DEVIN_TOKEN then the credentials file", async () => {
+    const cred = await resolveDevinCredential({
+      env: { DEVIN_TOKEN: "wk-tok" },
+      readFile: async () => null,
+    })
+    expect(cred).toEqual({ token: "wk-tok", baseUrl: undefined })
+    const fromFile = await resolveDevinCredential({
+      env: {},
+      readFile: async () =>
+        'windsurf_api_key = "wk-file"\napi_server_url = "https://server.codeium.com"\n',
+    })
+    expect(fromFile).toEqual({ token: "wk-file", baseUrl: "https://server.codeium.com" })
+  })
+
+  it("returns null when neither env nor file yields a token", async () => {
+    expect(await resolveDevinCredential({ env: {}, readFile: async () => null })).toBeNull()
+    expect(await resolveDevinCredential({ env: {}, readFile: async () => "garbage [[" })).toBeNull()
+  })
+})
+
+describe("loadExternalAgentLimits", () => {
+  const devinBody = JSON.stringify({
+    userStatus: {
+      email: "fan@example.com",
+      planStatus: {
+        weeklyQuotaRemainingPercent: 48,
+        weeklyQuotaResetAtUnix: "1789891200",
+        planInfo: { planName: "Pro" },
+      },
+    },
+  })
+
+  it("queries Devin quota via the source registry using the agent's own credential", async () => {
+    const authedRequest = jest.fn(async (_req: { url: string; body?: string }) => ({
+      status: 200,
+      body: devinBody,
+    }))
+    const out = await loadExternalAgentLimits(
+      config({}),
+      NOW,
+      "devin",
+      "devin",
+      "agentLimits.unavailable",
+      {
+        authedGet: async () => "{}",
+        authedRequest,
+        credentialDeps: { env: { DEVIN_API_KEY: "wk-x" }, readFile: async () => null },
+      }
+    )
+    expect(authedRequest).toHaveBeenCalledTimes(1)
+    expect(authedRequest.mock.calls[0][0].url).toBe(
+      "https://server.codeium.com/exa.seat_management_pb.SeatManagementService/GetUserStatus"
+    )
+    expect(JSON.parse(authedRequest.mock.calls[0][0].body!).metadata.apiKey).toBe("wk-x")
+    expect(out[0]).toMatchObject({ provider: "devin", accountId: "devin" })
+    expect(out[0].meters[0]).toMatchObject({ id: "devin/weekly", usedPct: 52 })
+    expect(out[0].accountLabel).toBe("Devin · fan@example.com · Pro")
+  })
+
+  it("uses a user-configured providers.devin entry without touching the agent store", async () => {
+    const readFile = jest.fn(async (_path: string) => null)
+    const authedRequest = jest.fn(async (_req: { url: string; body?: string }) => ({
+      status: 200,
+      body: devinBody,
+    }))
+    const out = await loadExternalAgentLimits(
+      config({ devin: { authToken: "wk-cfg", baseURL: "https://server.codeium.com" } }),
+      NOW,
+      "devin",
+      "devin",
+      "agentLimits.unavailable",
+      { authedGet: async () => "{}", authedRequest, credentialDeps: { env: {}, readFile } }
+    )
+    expect(readFile).not.toHaveBeenCalled()
+    expect(JSON.parse(authedRequest.mock.calls[0][0].body!).metadata.apiKey).toBe("wk-cfg")
+    expect(out[0].meters.length).toBeGreaterThan(0)
+  })
+
+  it("shows the devin missing-credential notice when nothing resolves", async () => {
+    const authedRequest = jest.fn(async () => ({ status: 200, body: "{}" }))
+    const out = await loadExternalAgentLimits(
+      config({}),
+      NOW,
+      "devin",
+      "devin",
+      "agentLimits.unavailable",
+      {
+        authedGet: async () => "{}",
+        authedRequest,
+        credentialDeps: { env: {}, readFile: async () => null },
+      }
+    )
+    expect(authedRequest).not.toHaveBeenCalled()
+    expect(out[0]).toMatchObject({ provider: "devin", accountId: "devin" })
+    expect(out[0].notice).toContain("devin auth login")
+  })
+
+  it("keeps the generic unavailable notice for agents with no linked provider", async () => {
+    const out = await loadExternalAgentLimits(
+      config({}),
+      NOW,
+      "gemini-cli",
+      "gemini-cli",
+      "agentLimits.unavailable",
+      { authedGet: async () => "{}" }
+    )
+    expect(out[0]).toMatchObject({ accountId: "gemini-cli", meters: [] })
+    expect(out[0].notice).toContain("does not support querying")
+  })
+
+  it("surfaces a devin API failure as an error snapshot, not a fake empty state", async () => {
+    const authedRequest = async () => ({ status: 429, body: "slow down" })
+    const out = await loadExternalAgentLimits(
+      config({}),
+      NOW,
+      "devin",
+      "devin",
+      "agentLimits.unavailable",
+      {
+        authedGet: async () => "{}",
+        authedRequest,
+        credentialDeps: { env: { DEVIN_API_KEY: "wk-x" }, readFile: async () => null },
+      }
+    )
+    expect(out[0].error).toContain("429")
+  })
+
+  it("leaves the placeholder bare when a query ran but reported no plan data", async () => {
+    const authedRequest = async () => ({
+      status: 200,
+      body: JSON.stringify({ userStatus: { email: "a@b.c" } }),
+    })
+    const out = await loadExternalAgentLimits(
+      config({}),
+      NOW,
+      "devin",
+      "devin",
+      "agentLimits.unavailable",
+      {
+        authedGet: async () => "{}",
+        authedRequest,
+        credentialDeps: { env: { DEVIN_API_KEY: "wk-x" }, readFile: async () => null },
+      }
+    )
+    const devin = out.find((s) => s.accountId === "devin")
+    expect(devin).toBeDefined()
+    expect(devin!.notice).toBeUndefined()
+  })
 })

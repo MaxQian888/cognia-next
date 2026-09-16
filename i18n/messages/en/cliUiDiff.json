@@ -31,5 +31,22 @@
   "directory": "Directory",
   "directoryDetails": "Untracked directory (Git may report an embedded repository this way). Its contents belong to a separate review and are not expanded here. Switch the workspace to this directory and run /diff to inspect its changes.",
   "loading": "Loading changes…",
-  "failed": "Changes could not be loaded. Press r to retry."
+  "failed": "Changes could not be loaded. Press r to retry.",
+  "hunkPosition": "hunk {current}/{total}",
+  "hunkNav": "[/] hunks",
+  "splitView": "s split view",
+  "unifiedView": "s unified view",
+  "viewedCount": "{count} viewed",
+  "markViewed": "x mark viewed",
+  "hideViewed": "X hide viewed",
+  "showViewed": "X show viewed",
+  "sectionStaged": "staged",
+  "sectionUnstaged": "unstaged",
+  "sectionUntracked": "new files",
+  "statusNew": "new file",
+  "statusDeleted": "deleted",
+  "statusRenamed": "renamed",
+  "statusRenamedFrom": "renamed from {from}",
+  "modeChange": "mode {from} → {to}",
+  "binaryData": "{count} binary payload lines"
 }

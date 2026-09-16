@@ -31,5 +31,22 @@
   "directory": "目录",
   "directoryDetails": "未跟踪的目录（Git 会以这种方式列出嵌套仓库）。此处不展开其中的文件。请将工作区切换到此目录，再运行 /diff 查看内部变更。",
   "loading": "正在读取变更…",
-  "failed": "未能读取变更，按 r 重试。"
+  "failed": "未能读取变更，按 r 重试。",
+  "hunkPosition": "块 {current}/{total}",
+  "hunkNav": "[/] 变更块",
+  "splitView": "s 分屏视图",
+  "unifiedView": "s 统一视图",
+  "viewedCount": "已看 {count}",
+  "markViewed": "x 标记已看",
+  "hideViewed": "X 隐藏已看",
+  "showViewed": "X 显示已看",
+  "sectionStaged": "已暂存",
+  "sectionUnstaged": "未暂存",
+  "sectionUntracked": "新文件",
+  "statusNew": "新文件",
+  "statusDeleted": "已删除",
+  "statusRenamed": "重命名",
+  "statusRenamedFrom": "重命名自 {from}",
+  "modeChange": "模式 {from} → {to}",
+  "binaryData": "{count} 行二进制数据"
 }

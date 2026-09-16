@@ -14,7 +14,12 @@
  * Ink overlay's off-checkbox + track index from the persisted level.
  */
 import { modelSupportsEffort } from "@/lib/ai/reasoning-capability"
-import { thinkingLevelToEffort, type Effort } from "@/lib/ai/thinking-level"
+import {
+  clampThinkingLevel,
+  thinkingLevelToEffort,
+  type Effort,
+  type EffortTier,
+} from "@/lib/ai/thinking-level"
 
 import { EFFORT_SLIDER_LEVELS, type ThinkingLevel } from "./schema"
 
@@ -22,15 +27,25 @@ export { modelSupportsEffort, thinkingLevelToEffort, type Effort }
 
 /**
  * Seed state for the effort-slider overlay from the persisted thinking level.
- * `"off"`/unset → the off checkbox is checked and the slider parks at `low`
- * (index 0); any other level → off unchecked and the slider points at that
- * level's index in {@link EFFORT_SLIDER_LEVELS}.
+ * `"off"`/unset → the off checkbox is checked and the slider parks at the first
+ * rung; any other level → off unchecked and the slider points at that level's
+ * index in the offered ladder.
+ *
+ * `levels` is what the overlay will offer — the full app ladder by default, or
+ * the live session's published rungs on an external agent. A persisted pick
+ * the ladder does not carry (say `ultracode` on a Devin `swe-2-*` family)
+ * folds down to the nearest offered rung, the same direction the write path
+ * folds, instead of silently landing on the lowest tier.
  */
-export function deriveEffortSliderState(level: ThinkingLevel | undefined): {
+export function deriveEffortSliderState(
+  level: ThinkingLevel | undefined,
+  levels: readonly EffortTier[] = EFFORT_SLIDER_LEVELS
+): {
   off: boolean
   index: number
 } {
-  if (!level || level === "off") return { off: true, index: 0 }
-  const index = EFFORT_SLIDER_LEVELS.indexOf(level)
+  if (!level || level === "off" || levels.length === 0) return { off: true, index: 0 }
+  const folded = clampThinkingLevel(level, levels)
+  const index = folded === "off" ? -1 : levels.indexOf(folded as EffortTier)
   return { off: false, index: index >= 0 ? index : 0 }
 }

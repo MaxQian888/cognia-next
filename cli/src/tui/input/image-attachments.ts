@@ -197,3 +197,148 @@ export function atomicImageEdit(
   lines[buffer.cursorRow] = line.slice(0, start) + line.slice(Math.max(col, end))
   return { ...buffer, lines, cursorCol: start }
 }
+
+/** A live `[Image N]` attachment in the draft, in reading order. */
+export interface ImageAttachment {
+  /** The `[Image N]` placeholder label (also the paste-map key). */
+  label: string
+  /** Resolved image path from the paste map. */
+  path: string
+  /** Logical buffer row of the label's first occurrence. */
+  row: number
+}
+
+/**
+ * List every live image attachment in the draft — labels that appear in the
+ * buffer AND resolve (via the paste map) to a single image ref. A label typed
+ * by hand, or one whose paste-map entry is gone, is plain text rather than an
+ * attachment. Duplicate label occurrences collapse to the first.
+ */
+export function listImageAttachments(
+  lines: string[],
+  pastes: Record<string, string>
+): ImageAttachment[] {
+  const seen = new Set<string>()
+  const out: ImageAttachment[] = []
+  lines.forEach((line, row) => {
+    for (const match of line.matchAll(/\[Image \d+\]/g)) {
+      const label = match[0]
+      if (seen.has(label)) continue
+      const stored = pastes[label]
+      if (!stored) continue
+      const refs = extractFileRefs(stored)
+      if (refs.length !== 1 || classifyRef(refs[0]) !== "image") continue
+      seen.add(label)
+      out.push({ label, path: refs[0], row })
+    }
+  })
+  return out
+}
+
+/** Removed label span within one line, in the line's original columns. */
+interface RemovedSpan {
+  start: number
+  end: number
+}
+
+/**
+ * Strip the matching labels (plus one adjoining space) from a single line.
+ * A trailing space is preferred ("a [Image 1] b" → "a b"); a leading space is
+ * eaten only when the label is at end-of-line ("x [Image 1]" → "x").
+ */
+function stripImageLabels(line: string, pattern: RegExp): { text: string; removed: RemovedSpan[] } {
+  const removed: RemovedSpan[] = []
+  let out = ""
+  let last = 0
+  for (const m of line.matchAll(pattern)) {
+    const start = m.index
+    let end = start + m[0].length
+    let head = start
+    if (line[end] === " ") {
+      end += 1
+    } else if (start > last && line[start - 1] === " ") {
+      head = start - 1
+    }
+    out += line.slice(last, head)
+    removed.push({ start: head, end })
+    last = end
+  }
+  out += line.slice(last)
+  return { text: out, removed }
+}
+
+/** Map a cursor column onto the stripped line, clamped to its new length. */
+function colAfterRemoval(col: number, removed: RemovedSpan[], lineLength: number): number {
+  let shift = 0
+  for (const r of removed) {
+    if (r.end <= col) {
+      shift += r.end - r.start
+      continue
+    }
+    // Inside a removed span → land where the label started.
+    if (r.start < col) return Math.max(0, Math.min(lineLength, r.start - shift))
+    break
+  }
+  return Math.max(0, Math.min(lineLength, col - shift))
+}
+
+/**
+ * Remove whole `[Image N]` placeholders from the draft — the bulk remove
+ * behind the `/images` panel. Lines left holding nothing but whitespace
+ * collapse entirely; the cursor is remapped onto the shortened line. The
+ * paste map is intentionally untouched: the reducer pushes the previous
+ * buffer onto the undo stack first, and a restore still resolves the labels
+ * because their entries were never dropped. Returns undefined when none of
+ * `labels` resolves to a live image attachment.
+ */
+export function removeImagePlaceholders(
+  buffer: InputBuffer,
+  labels: string[],
+  pastes: Record<string, string>
+): InputBuffer | undefined {
+  const targets = new Set(
+    labels.filter((label) => {
+      const stored = pastes[label]
+      if (!stored) return false
+      const refs = extractFileRefs(stored)
+      return refs.length === 1 && classifyRef(refs[0]) === "image"
+    })
+  )
+  if (!targets.size) return undefined
+  const pattern = new RegExp(
+    [...targets].map((l) => l.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"),
+    "g"
+  )
+
+  const lines: string[] = []
+  const droppedRows: number[] = []
+  let cursorSpans: RemovedSpan[] = []
+  let changed = false
+  buffer.lines.forEach((line, row) => {
+    const { text, removed } = stripImageLabels(line, pattern)
+    if (!removed.length) {
+      lines.push(text)
+      return
+    }
+    changed = true
+    if (text.trim() === "" && buffer.lines.length - droppedRows.length > 1) {
+      droppedRows.push(row)
+      return
+    }
+    if (row === buffer.cursorRow) cursorSpans = removed
+    lines.push(text)
+  })
+  if (!changed) return undefined
+
+  let cursorRow = buffer.cursorRow
+  let cursorCol = buffer.cursorCol
+  if (droppedRows.includes(cursorRow)) {
+    // Land at the start of whatever row slid into the dropped position.
+    cursorRow = Math.min(cursorRow, lines.length - 1)
+    cursorCol = 0
+  } else {
+    cursorRow -= droppedRows.filter((r) => r < cursorRow).length
+    cursorCol = colAfterRemoval(cursorCol, cursorSpans, lines[cursorRow].length)
+  }
+  return { ...buffer, lines, cursorRow, cursorCol }
+}

@@ -495,8 +495,18 @@ function errorActions(event: ExternalAgentErrorEvent): TuiAction[] {
 
 function usageActions(event: ExternalAgentDoneEvent): TuiAction[] {
   // Shared with the GUI chat lane so the two mappings cannot drift.
+  // `durationMs` rides alongside the token map — the output-rate readout needs
+  // both halves, and the wire carries them on different fields.
   return event.tokenUsage
-    ? [{ type: "SET_USAGE", usage: externalTokenUsageToUsageInfo(event.tokenUsage) }]
+    ? [
+        {
+          type: "SET_USAGE",
+          usage: {
+            ...externalTokenUsageToUsageInfo(event.tokenUsage),
+            ...(event.durationMs === undefined ? {} : { durationMs: event.durationMs }),
+          },
+        },
+      ]
     : []
 }
 

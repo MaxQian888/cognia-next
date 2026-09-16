@@ -16,6 +16,7 @@ import { stringWidth } from "../markdown/width"
 import { osc8Link, supportsHyperlinks } from "../markdown/hyperlink"
 import {
   imagePlaceholderAt,
+  listImageAttachments,
   pastedImagePaths,
   collapseImageRefs,
   expandComposerPastes,
@@ -31,6 +32,7 @@ import { moveIndex } from "./select-list-state"
 import { bufferFromText, bufferText, moveTo, onFirstLine, onLastLine } from "../input/buffer"
 import { historyDown, historyUp } from "../input/history"
 import { interpretKey, type KeyFlags } from "../input/keymap"
+import { formatKeySpec } from "../input/keybindings"
 import { parseMouseEvent } from "../input/mouse"
 import { screenColToBufferCol } from "../input/mouse-cursor"
 import { composerPopupRowAtClick } from "../input/composer-popup-click"
@@ -198,6 +200,7 @@ function InputImpl({
   popupRows,
   composerRows,
   keybindings,
+  clipboardImageReady = false,
   mode,
   enabledSkillIds,
   onToggleSkill,
@@ -230,6 +233,9 @@ function InputImpl({
   /** Resolved editor key bindings (line-home/end, word-delete). Optional — the
    * defaults are used when omitted. */
   keybindings?: Record<string, string>
+  /** True while the OS clipboard holds an image — shows the paste-chord hint
+   * under the composer. Driven by the App's clipboard poll; default off. */
+  clipboardImageReady?: boolean
   /** Active permission mode — tints the composer border (loud warning for
    * `bypassPermissions`) so the dangerous mode is unmistakable. Optional. */
   mode?: string
@@ -904,6 +910,26 @@ function InputImpl({
         ? "-- NORMAL -- · i insert · dd/cw edit · Enter send"
         : null
   const showPlaceholder = !disabled && !popupOpen && text.length === 0
+  // Live attachment count — labels that resolve through the paste map to an
+  // image. Drives the "N attached · /images to manage" hint; the panel itself
+  // opens via the `/images` command or the attachments keybinding.
+  const attachmentCount = useMemo(
+    () => listImageAttachments(buffer.lines, input.pastes).length,
+    [buffer.lines, input.pastes]
+  )
+  // Advertise the configured paste chord, not a hardcoded Ctrl+V — a rebind via
+  // `/keybind` shows up here.
+  const attachmentsHint =
+    !disabled && !popupOpen && (clipboardImageReady || attachmentCount > 0)
+      ? [
+          clipboardImageReady
+            ? t("clipboardImageReady", { key: formatKeySpec(keybindings?.pasteImage ?? "ctrl+v") })
+            : null,
+          attachmentCount > 0 ? t("imagesAttached", { count: attachmentCount }) : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : null
 
   return (
     <Box flexDirection="column" width={width} flexShrink={0}>
@@ -986,6 +1012,12 @@ function InputImpl({
         <Text color={theme.muted} dimColor>
           {"  "}
           {commandHint}
+        </Text>
+      ) : null}
+      {attachmentsHint ? (
+        <Text color={theme.muted} dimColor>
+          {"  "}
+          {attachmentsHint}
         </Text>
       ) : null}
     </Box>

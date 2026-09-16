@@ -95,6 +95,8 @@ function harness(
   const send = jest.fn(sendImpl)
   const close = jest.fn(async () => {})
   const setPermissionMode = jest.fn(async () => {})
+  const listThinkingLevels = jest.fn(async () => ["medium", "high", "max"])
+  const setThinkingLevel = jest.fn(async (_level: unknown) => "swe-2-high" as string | undefined)
   const create: CreateSession = jest.fn((params) => {
     if (opts.createError) throw opts.createError
     resolveExecution = params.onResolvedExecutionSpec
@@ -103,6 +105,8 @@ function harness(
       send,
       close,
       setPermissionMode,
+      listThinkingLevels,
+      setThinkingLevel,
       isLive: () => opts.isLive ?? false,
     }
   }) as unknown as CreateSession
@@ -147,6 +151,8 @@ function harness(
     send,
     close,
     setPermissionMode,
+    listThinkingLevels,
+    setThinkingLevel,
     create,
     subscribeSidecar,
     requestCompact,
@@ -673,6 +679,41 @@ describe("useAgentSession", () => {
     expect(h.close).toHaveBeenCalled()
   })
 
+  it("listThinkingLevels may create a session to read the live ladder", async () => {
+    const h = harness()
+    // No turn yet — reading the ladder is what materializes the ACP session
+    // (Devin only answers thought_level once a session exists), so `create`
+    // running here is the contract, not a leak.
+    let levels: unknown
+    await act(async () => {
+      levels = await h.api().listThinkingLevels()
+    })
+    expect(h.create).toHaveBeenCalledTimes(1)
+    expect(h.listThinkingLevels).toHaveBeenCalled()
+    expect(levels).toEqual(["medium", "high", "max"])
+  })
+
+  it("applyThinkingLevel never spawns a session just to write to it", async () => {
+    const h = harness()
+    let landed: unknown
+    await act(async () => {
+      landed = await h.api().applyThinkingLevel("high")
+    })
+    // Nothing live yet → undefined; the pick rides the next turn instead.
+    expect(h.create).not.toHaveBeenCalled()
+    expect(h.setThinkingLevel).not.toHaveBeenCalled()
+    expect(landed).toBeUndefined()
+
+    await act(async () => {
+      await h.api().send("hi")
+    })
+    await act(async () => {
+      landed = await h.api().applyThinkingLevel("high")
+    })
+    expect(h.setThinkingLevel).toHaveBeenCalledWith("high")
+    expect(landed).toBe("swe-2-high")
+  })
+
   it("waits for teardown and creates the next session in the new directory", async () => {
     const h = harness()
     await act(async () => {
@@ -697,6 +738,71 @@ describe("useAgentSession", () => {
     expect(h.create).toHaveBeenLastCalledWith(
       expect.objectContaining({ config: expect.objectContaining({ cwd: "/new/dir" }) })
     )
+  })
+
+  it("serializes overlapping sends so the second turn waits for the first", async () => {
+    let releaseFirst!: () => void
+    const gate = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    const prompts: string[] = []
+    const h = harness({
+      sendImpl: async (prompt) => {
+        prompts.push(prompt)
+        if (prompt === "first") await gate
+        return result()
+      },
+    })
+    let first!: Promise<unknown>
+    let second!: Promise<unknown>
+    await act(async () => {
+      first = h.api().send("first")
+      await Promise.resolve()
+    })
+    // A send fired while the first is still in flight must not reach the
+    // session — before the chain, it opened a second concurrent turn.
+    await act(async () => {
+      second = h.api().send("second")
+      await Promise.resolve()
+    })
+    expect(h.send).toHaveBeenCalledTimes(1)
+    expect(prompts).toEqual(["first"])
+    expect(h.api().sendInFlight()).toBe(true)
+    await act(async () => {
+      releaseFirst()
+      await first
+      await second
+    })
+    expect(h.send).toHaveBeenCalledTimes(2)
+    expect(prompts).toEqual(["first", "second"])
+    expect(h.api().sendInFlight()).toBe(false)
+  })
+
+  it("does not wedge queued sends behind a failed turn", async () => {
+    const prompts: string[] = []
+    const h = harness({
+      sendImpl: async (prompt) => {
+        prompts.push(prompt)
+        if (prompt === "first") throw new Error("provider blew up")
+        return result()
+      },
+    })
+    let first!: Promise<unknown>
+    let second!: Promise<unknown>
+    await act(async () => {
+      first = h.api().send("first")
+      await Promise.resolve()
+    })
+    await act(async () => {
+      second = h.api().send("second")
+      await Promise.resolve()
+    })
+    await act(async () => {
+      await first
+      await second
+    })
+    expect(prompts).toEqual(["first", "second"])
+    expect(h.api().sendInFlight()).toBe(false)
   })
 
   it("reports a send waiting on a failed workspace switch through the normal turn error path", async () => {

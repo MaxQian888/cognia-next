@@ -7,7 +7,10 @@ import { EventEmitter } from "node:events"
 
 import {
   clipboardImageCommand,
+  clipboardImageProbeCommand,
+  hasClipboardImage,
   imageWritesToStdout,
+  probeOutputHasImage,
   readClipboardImage,
   type ReadClipboardImageOpts,
 } from "./clipboard-image"
@@ -303,4 +306,127 @@ it("waits for the streamed PNG to finish before checking the file", async () => 
   finish?.()
   expect(await result).not.toBeNull()
   expect(fileReady).toHaveBeenCalledTimes(1)
+})
+
+describe("clipboardImageProbeCommand", () => {
+  it("uses powershell ContainsImage on win32", () => {
+    const c = clipboardImageProbeCommand("win32")
+    expect(c?.cmd.toLowerCase()).toContain("powershell")
+    expect(c?.args.join(" ")).toContain("ContainsImage")
+    // The probe writes nothing to disk — only a 1/0 answer on stdout.
+    expect(c?.args.join(" ")).not.toContain(".Save(")
+  })
+  it("uses osascript pasteboard types on darwin", () => {
+    const c = clipboardImageProbeCommand("darwin")
+    expect(c?.cmd).toBe("osascript")
+    expect(c?.args.join(" ")).toContain("generalPasteboard")
+  })
+  it("lists advertised types on linux (wl-paste on Wayland, xclip on X11)", () => {
+    const wayland = { WAYLAND_DISPLAY: "wayland-0" } as unknown as NodeJS.ProcessEnv
+    const x11 = {} as unknown as NodeJS.ProcessEnv
+    expect(clipboardImageProbeCommand("linux", wayland)).toEqual({
+      cmd: "wl-paste",
+      args: ["--list-types"],
+    })
+    expect(clipboardImageProbeCommand("linux", x11)?.cmd).toBe("xclip")
+    expect(clipboardImageProbeCommand("linux", x11)?.args).toContain("TARGETS")
+  })
+  it("returns null on unsupported platforms", () => {
+    expect(clipboardImageProbeCommand("freebsd" as NodeJS.Platform)).toBeNull()
+  })
+})
+
+describe("probeOutputHasImage", () => {
+  it("linux: true when the advertised list contains an image MIME type", () => {
+    expect(probeOutputHasImage("linux", "TIMESTAMP\nTARGETS\nimage/png\nUTF8_STRING\n")).toBe(true)
+    expect(probeOutputHasImage("linux", "image/jpeg")).toBe(true)
+  })
+  it("linux: false for text-only clipboards (substring inside a type does not count)", () => {
+    expect(probeOutputHasImage("linux", "UTF8_STRING\ntext/plain;charset=utf-8")).toBe(false)
+  })
+  it("win32/darwin: only the literal 1 counts", () => {
+    expect(probeOutputHasImage("win32", "1")).toBe(true)
+    expect(probeOutputHasImage("darwin", "1\n")).toBe(true)
+    expect(probeOutputHasImage("win32", "0")).toBe(false)
+    expect(probeOutputHasImage("darwin", "")).toBe(false)
+  })
+})
+
+describe("hasClipboardImage", () => {
+  it("returns false on unsupported platforms without spawning", async () => {
+    const spawn = jest.fn()
+    await expect(
+      hasClipboardImage({ platform: "freebsd" as NodeJS.Platform, spawn })
+    ).resolves.toBe(false)
+    expect(spawn).not.toHaveBeenCalled()
+  })
+  it("linux: true when the helper lists an image type", async () => {
+    const { spawn } = fakeSpawn({ code: 0, stdoutChunks: [Buffer.from("image/png\n")] })
+    await expect(hasClipboardImage({ platform: "linux", spawn })).resolves.toBe(true)
+  })
+  it("win32: false when the clipboard holds no image", async () => {
+    const { spawn } = fakeSpawn({ code: 0, stdoutChunks: [Buffer.from("0")] })
+    await expect(hasClipboardImage({ platform: "win32", spawn })).resolves.toBe(false)
+  })
+  it("returns false on non-zero exit even when stdout says 1", async () => {
+    const { spawn } = fakeSpawn({ code: 1, stdoutChunks: [Buffer.from("1")] })
+    await expect(hasClipboardImage({ platform: "win32", spawn })).resolves.toBe(false)
+  })
+  it("returns false when the helper is missing (spawn error)", async () => {
+    const { spawn } = fakeSpawn({ code: 0, error: new Error("ENOENT") })
+    await expect(hasClipboardImage({ platform: "linux", spawn })).resolves.toBe(false)
+  })
+  it("returns false when spawn throws synchronously", async () => {
+    const spawn = (() => {
+      throw new Error("boom")
+    }) as unknown as NonNullable<ReadClipboardImageOpts["spawn"]>
+    await expect(hasClipboardImage({ platform: "win32", spawn })).resolves.toBe(false)
+  })
+})
+
+const nativeMacProbe = process.platform === "darwin" ? describe : describe.skip
+nativeMacProbe("native macOS clipboard image probe", () => {
+  it("reports 1 for an image pasteboard and 0 for an empty one", () => {
+    const name = `cognia-probe-${process.pid}-${Date.now()}`
+    const command = clipboardImageProbeCommand("darwin")!
+    const seed = `ObjC.import('AppKit');
+      const board=$.NSPasteboard.pasteboardWithName(${JSON.stringify(name)});
+      const data=$.NSData.alloc.initWithBase64EncodedStringOptions('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4z8AARAwQCgAf7gP9i18U1AAAAABJRU5ErkJggg==',0);
+      board.clearContents;
+      board.setDataForType(data,'public.png');`
+    try {
+      execFileSync("osascript", ["-l", "JavaScript", "-e", seed], { timeout: 10000 })
+      const yes = execFileSync(command.cmd, [...command.args, name], {
+        timeout: 10000,
+        encoding: "utf8",
+      })
+      expect(yes.trim()).toBe("1")
+      execFileSync(
+        "osascript",
+        [
+          "-l",
+          "JavaScript",
+          "-e",
+          `ObjC.import('AppKit');$.NSPasteboard.pasteboardWithName(${JSON.stringify(name)}).clearContents;`,
+        ],
+        { timeout: 10000 }
+      )
+      const no = execFileSync(command.cmd, [...command.args, name], {
+        timeout: 10000,
+        encoding: "utf8",
+      })
+      expect(no.trim()).toBe("0")
+    } finally {
+      execFileSync(
+        "osascript",
+        [
+          "-l",
+          "JavaScript",
+          "-e",
+          `ObjC.import('AppKit');$.NSPasteboard.pasteboardWithName(${JSON.stringify(name)}).releaseGlobally;`,
+        ],
+        { timeout: 10000 }
+      )
+    }
+  })
 })

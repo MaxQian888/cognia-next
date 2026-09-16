@@ -81,6 +81,38 @@ describe("prepareDocumentLines", () => {
     )
     expect(stripped).toEqual(["const x = 1", "const y = 2"])
   })
+
+  it("renders diff bodies as numbered rows and reports hunk positions", () => {
+    const patch = `diff --git a/f.ts b/f.ts\n@@ -1 +1,2 @@\n-old\n+new\n+more\n`
+    const prepared = prepareDocumentLines(patch, "diff", "typescript", "f.ts", {
+      width: 60,
+      translate: (key) => key,
+    })
+    expect(prepared.kind).toBe("diff")
+    if (prepared.kind === "diff") {
+      expect(prepared.hunkRows).toEqual([0])
+      expect(prepared.lines[0].plain).toContain("@@ -1 +1,2 @@")
+      expect(prepared.lines[1].plain).toBe(" 1    - old")
+      expect(prepared.lines[2].plain).toBe("    1 + new")
+    }
+  })
+
+  it("honours labelled sections and the split layout option", () => {
+    const patch = `diff --git a/f.ts b/f.ts\n@@ -1 +1 @@\n-old\n+new\n`
+    const prepared = prepareDocumentLines(patch, "diff", undefined, "f.ts", {
+      width: 60,
+      layout: "split",
+      sections: [
+        { label: "staged", body: patch },
+        { label: "unstaged", body: patch },
+      ],
+      translate: (key) => key,
+    })
+    if (prepared.kind !== "diff") throw new Error("expected diff")
+    expect(prepared.lines[0].plain).toContain("staged")
+    expect(prepared.lines.some((line) => line.plain.includes("│"))).toBe(true)
+    expect(prepared.hunkRows).toHaveLength(2)
+  })
 })
 
 describe("scroll math", () => {

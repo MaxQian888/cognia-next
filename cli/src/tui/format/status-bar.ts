@@ -26,6 +26,7 @@ import {
   contextPercent,
   contextTokens,
   formatCost,
+  formatProviderCost,
   formatTokens,
   outputTokensPerSecond,
   hasCacheTelemetry,
@@ -221,11 +222,17 @@ function segmentText(
           : ""
       }`
     case "cost":
-      // Same reason as `ctx`: the cost would be this session's tokens priced
-      // with the built-in model's rate card, which is not what ran.
-      return isBuiltinBackend(config.agentBackend)
-        ? formatCost(totals ? totals.costUsd : usage?.totalCostUsd)
-        : null
+      // The built-in rate card only applies to the built-in backend — for
+      // external agents, show what the provider itself reported in its own
+      // unit (Devin: "12 ACU"), never a re-priced dollar figure.
+      if (isBuiltinBackend(config.agentBackend))
+        return formatCost(totals ? totals.costUsd : usage?.totalCostUsd)
+      {
+        const session = totals?.providerCosts ? Object.entries(totals.providerCosts)[0] : undefined
+        if (session) return formatProviderCost(session[1], session[0])
+        const turn = usage?.providerCost
+        return turn?.currency ? formatProviderCost(turn.amount, turn.currency) : null
+      }
     case "cwd":
       return shortenCwd(config.cwd)
     case "git":

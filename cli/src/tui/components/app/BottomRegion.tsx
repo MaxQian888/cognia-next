@@ -34,6 +34,9 @@ export interface BottomRegionProps {
   dispatch: Dispatch<TuiAction>
   cursor: TranscriptCursor
   overlayOpen: boolean
+  /** True while the OS clipboard holds an image — the composer shows the
+   * paste-chord hint. */
+  clipboardImageReady?: boolean
   columns: number
   popupRows: number
   composerRows: number
@@ -81,6 +84,7 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
     dispatch,
     cursor,
     overlayOpen,
+    clipboardImageReady = false,
     columns,
     popupRows,
     composerRows,
@@ -217,6 +221,7 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
             popupRows={popupRows}
             composerRows={composerRows}
             keybindings={keybindings}
+            clipboardImageReady={clipboardImageReady}
             mode={state.config.permissionMode}
             vimEnabled={state.config.vim === true}
             enabledSkillIds={enabledSkillIds}

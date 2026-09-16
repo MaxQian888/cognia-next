@@ -11,7 +11,9 @@ import {
   createImagePaste,
   expandComposerPastes,
   imagePlaceholderAt,
+  listImageAttachments,
   pastedImagePaths,
+  removeImagePlaceholders,
 } from "./image-attachments"
 
 describe("image attachment paste recognition", () => {
@@ -204,5 +206,99 @@ describe("atomic image editing", () => {
     expect(atomicImageEdit(buffer(1), { op: "insert", text: "hello" }, pastes)).toBeUndefined()
     expect(atomicImageEdit(buffer(5), { op: "backspace" }, {})).toBeUndefined()
     expect(atomicImageEdit(buffer(0), { op: "delete-word" }, pastes)).toBeUndefined()
+  })
+})
+
+describe("listImageAttachments", () => {
+  const pastes = {
+    "[Image 1]": '@"/a.png"',
+    "[Image 2]": '@"/b.png"',
+    "[Pasted 3 lines #0]": "body [Image 9]",
+  }
+  it("lists live labels in reading order with resolved paths and rows", () => {
+    expect(listImageAttachments(["first [Image 1]", "second [Image 2] last"], pastes)).toEqual([
+      { label: "[Image 1]", path: "/a.png", row: 0 },
+      { label: "[Image 2]", path: "/b.png", row: 1 },
+    ])
+  })
+  it("ignores labels without a mapping, non-image mappings, and duplicates", () => {
+    const lines = ["[Image 1] [Image 3] [Image 1] [Pasted 3 lines #0]"]
+    expect(listImageAttachments(lines, pastes)).toEqual([
+      { label: "[Image 1]", path: "/a.png", row: 0 },
+    ])
+    expect(listImageAttachments(lines, {})).toEqual([])
+    expect(listImageAttachments(["[Image 1]"], { "[Image 1]": "@note.txt" })).toEqual([])
+  })
+})
+
+describe("removeImagePlaceholders", () => {
+  const pastes = {
+    "[Image 1]": '@"/a.png"',
+    "[Image 2]": '@"/b.png"',
+    "[Image 3]": '@"/c.png"',
+  }
+  const buf = (lines: string[], cursorRow = 0, cursorCol = 0) => ({
+    lines,
+    cursorRow,
+    cursorCol,
+  })
+
+  it("removes one label mid-line and joins the surrounding words", () => {
+    expect(removeImagePlaceholders(buf(["a [Image 1] b"], 0, 13), ["[Image 1]"], pastes)).toEqual({
+      lines: ["a b"],
+      cursorRow: 0,
+      cursorCol: 3,
+    })
+  })
+  it("eats the leading space when the label ends the line", () => {
+    expect(removeImagePlaceholders(buf(["x [Image 1]"]), ["[Image 1]"], pastes)?.lines).toEqual([
+      "x",
+    ])
+  })
+  it("removes several labels across lines, keeping unrelated text", () => {
+    const result = removeImagePlaceholders(
+      buf(["[Image 1] keep [Image 2]", "tail [Image 3]"], 1, 6),
+      ["[Image 1]", "[Image 2]", "[Image 3]"],
+      pastes
+    )
+    expect(result?.lines).toEqual(["keep", "tail"])
+    expect(result?.cursorRow).toBe(1)
+    expect(result?.cursorCol).toBe(4)
+  })
+  it("collapses lines that held only labels and keeps the buffer non-empty", () => {
+    const result = removeImagePlaceholders(
+      buf(["intro", "[Image 1]", "outro"], 1, 4),
+      ["[Image 1]"],
+      pastes
+    )
+    expect(result?.lines).toEqual(["intro", "outro"])
+    expect(result?.cursorRow).toBe(1)
+    expect(result?.cursorCol).toBe(0)
+    const single = removeImagePlaceholders(buf(["[Image 1]"]), ["[Image 1]"], pastes)
+    expect(single?.lines).toEqual([""])
+  })
+  it("moves the cursor to the label start when it sat inside the removed span", () => {
+    expect(
+      removeImagePlaceholders(buf(["a [Image 1] b"], 0, 7), ["[Image 1]"], pastes)?.cursorCol
+    ).toBe(2)
+  })
+  it("shifts a cursor that sat after the removed label", () => {
+    expect(removeImagePlaceholders(buf(["[Image 1] tail"], 0, 14), ["[Image 1]"], pastes)).toEqual({
+      lines: ["tail"],
+      cursorRow: 0,
+      cursorCol: 4,
+    })
+  })
+  it("returns undefined for unmapped, non-image or absent labels — buffer untouched", () => {
+    const b = buf(["a [Image 1] b"], 0, 5)
+    expect(removeImagePlaceholders(b, ["[Image 9]"], pastes)).toBeUndefined()
+    expect(removeImagePlaceholders(b, ["[Image 1]"], {})).toBeUndefined()
+    expect(removeImagePlaceholders(b, ["[Image 1]"], { "[Image 1]": "@note.txt" })).toBeUndefined()
+    expect(removeImagePlaceholders(b, [], pastes)).toBeUndefined()
+    expect(b.lines).toEqual(["a [Image 1] b"])
+  })
+  it("keeps the paste map intact so undo still resolves the label", () => {
+    removeImagePlaceholders(buf(["[Image 1]"]), ["[Image 1]"], pastes)
+    expect(pastes["[Image 1]"]).toBe('@"/a.png"')
   })
 })

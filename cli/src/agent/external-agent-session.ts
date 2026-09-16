@@ -49,6 +49,9 @@ import {
   type AgentCapabilityResult,
   type ExternalAgentManager,
 } from "@/lib/ai/agent/external/manager"
+import { resolveExternalAgentThinking } from "@/lib/ai/agent/external/session-models"
+import { clampThinkingLevel } from "@/lib/ai/agent/external/pi-rpc-client"
+import { projectAgentLevels, type EffortTier } from "@/lib/ai/thinking-level"
 import { createAcpDynamicMcpHostController } from "@/lib/ai/agent/external/acp-dynamic-mcp-controller"
 import { setAcpDynamicMcpHostController } from "@/lib/ai/agent/external/acp-client"
 import {
@@ -75,6 +78,7 @@ import {
   toAcpMcpServers,
   toCodexReasoningEffort,
 } from "../tui/runtime/backend-bridge"
+import { thinkingLevelToEffort } from "../config/thinking"
 import type { ResolvedConfig } from "../config/schema"
 import {
   externalAgentEventToActions,
@@ -300,6 +304,28 @@ function readLiveModelOptions(
   }))
 }
 
+/**
+ * The session's thinking ladder, projected onto the app's tier vocabulary.
+ *
+ * `[]` is a REAL answer: the session's config options were read and publish no
+ * usable depth axis (Devin's `adaptive`, or a ladder made entirely of tiers the
+ * app cannot represent). `null` means the read itself could not run — the
+ * adapter has no config-options surface, or it errored — so the caller falls
+ * back to the full ladder rather than inventing an absence.
+ */
+function readLiveThinkingLevels(
+  manager: ExternalAgentSessionManager,
+  agentId: string,
+  sessionId: string
+): EffortTier[] | null {
+  const configResult = manager.getConfigOptions?.(agentId, sessionId)
+  if (!configResult || configResult.status === "error") return null
+  if (configResult.status === "unsupported") return []
+  const surface = resolveExternalAgentThinking({ configOptions: configResult.data })
+  if (surface.write.kind !== "config-option") return []
+  return projectAgentLevels(surface.levels)
+}
+
 export interface ExternalAgentSessionParams {
   config: ResolvedConfig
   sessionId?: string
@@ -484,6 +510,9 @@ function usageFromResult(result: ExternalAgentResult) {
     ...(result.tokenUsage.cacheWriteTokens === undefined
       ? {}
       : { cacheCreationInputTokens: result.tokenUsage.cacheWriteTokens }),
+    ...(result.tokenUsage.providerCost === undefined
+      ? {}
+      : { providerCost: result.tokenUsage.providerCost }),
     durationMs: result.duration,
   }
 }
@@ -1087,6 +1116,13 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
                 "Codex model default reasoning effort is unavailable; refresh the model list and retry"
               )
           }
+        } else {
+          // Every other external rail takes its depth through the same metadata
+          // channel: the manager resolves the level against the agent's own
+          // published ladder — a `thought_level` config option, which the Devin
+          // adapter synthesizes out of its model variants — and applies it
+          // after the model. An agent with no axis never sees a write.
+          reasoningEffort = thinkingLevelToEffort(params.config.thinkingLevel)
         }
         const { session, restarted } = await reconcile()
         const turnNumber = turnSequence++
@@ -1514,6 +1550,70 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       const resolved = await assembler.resolveSession()
       const created = await createMcpSession(resolved)
       return readLiveModelOptions(manager, agentId, created.id)
+    },
+    /**
+     * The thinking tiers the live session's model actually offers.
+     *
+     * Devin has no `thought_level` wire option — the adapter synthesizes one
+     * from the model's own effort-encoded variants, which is why this must read
+     * the LIVE surface: `swe-2-*` publishes `medium | high | max` while a
+     * Claude family publishes five, and a static app ladder would offer tiers
+     * the write path would only fold away. `[]` means "read it — no axis";
+     * `null` means "couldn't read — offer the generic ladder".
+     */
+    async listThinkingLevels() {
+      if (closed) return null
+      if (!initialized) await ensureAgent()
+      if (externalSessionId) return readLiveThinkingLevels(manager, agentId, externalSessionId)
+      if (resolvedPresetId === "codex-app-server" || !manager.createSession) {
+        // Same line listModels draws: Codex's effort ladder is model-scoped,
+        // not thread-scoped, and discovering it must not create one.
+        return null
+      }
+      const resolved = await assembler.resolveSession()
+      const created = await createMcpSession(resolved)
+      return readLiveThinkingLevels(manager, agentId, created.id)
+    },
+    /**
+     * Write a thinking-level pick to the LIVE session right now.
+     *
+     * `/think` used to only persist the pick and let the next turn forward it
+     * as `reasoningEffort`, which left the visible session on the old variant
+     * until then — and on Devin, where the level IS a model-variant switch,
+     * meant the footer's model name lagged what the session actually ran. This
+     * applies the pick immediately through the same `thought_level` config
+     * write the manager uses, and answers the model id the session landed on so
+     * the caller can persist (and display) the real variant.
+     */
+    async setThinkingLevel(level) {
+      if (!initialized || !externalSessionId) return undefined
+      const effort = thinkingLevelToEffort(level)
+      // "off" forwards nothing: the model keeps whatever depth it already runs.
+      if (!effort) return undefined
+      const configResult = manager.getConfigOptions?.(agentId, externalSessionId)
+      const liveOptions = configResult?.status === "ok" ? configResult.data : undefined
+      const surface = liveOptions
+        ? resolveExternalAgentThinking({ configOptions: liveOptions })
+        : undefined
+      if (!surface || surface.write.kind !== "config-option" || !manager.setConfigOption) {
+        return undefined
+      }
+      const resolved = clampThinkingLevel(effort, surface.levels)
+      if (!resolved) return undefined
+      const currentModel = () => modelConfigOption(liveOptions)?.currentValue
+      if (surface.currentLevel === resolved) return currentModel()
+      const updated = await manager.setConfigOption(
+        agentId,
+        externalSessionId,
+        surface.write.optionId,
+        resolved
+      )
+      const landed = modelConfigOption(updated)?.currentValue
+      // The pick may have moved the model itself (Devin). Track the landed id
+      // as the requested model, or the next turn's applyModel would pin the
+      // pre-write variant and immediately undo the user's choice.
+      if (landed) requestedModel = landed
+      return landed ?? currentModel()
     },
     /**
      * Apply a `/model` pick to the live session so the thread survives it.

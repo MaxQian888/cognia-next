@@ -61,6 +61,7 @@ function buildDeps(over: Partial<GlobalKeysDeps> = {}): GlobalKeysDeps {
     copyClipboard: jest.fn(async () => ({ ok: true }) as never),
     runCommandLine: jest.fn(),
     openModelPicker: jest.fn(),
+    openEffortPicker: jest.fn(),
     pasteClipboardImage: jest.fn(async () => {}),
     scrollReset: jest.fn(),
     disarmBacktrack: jest.fn(),
@@ -427,6 +428,43 @@ describe("running-agents tree clicks", () => {
   })
 })
 
+describe("footer segment clicks", () => {
+  const footerDeps = () =>
+    buildDeps({
+      fullscreen: true,
+      footerRowRef: { current: {} as never },
+      footerSegmentsRef: { current: [{ id: "thinking", text: "think" }] },
+    })
+
+  beforeEach(() => mockPos.mockReturnValue({ top: 5, left: 0 }))
+  afterEach(() => mockPos.mockReturnValue(null))
+
+  it("routes the thinking segment through the effort picker, not a static overlay", () => {
+    const deps = footerDeps()
+    render(<Harness deps={deps} />)
+    // Footer at 0-based row 5 → SGR row 6; "think" spans cols 0-4 → SGR col 3.
+    act(() => __fireInput("[<0;3;6M"))
+    // The picker's ladder comes from the live session on external backends, so
+    // the App owns the open — a direct OVERLAY_OPEN here would freeze it to the
+    // global six-rung ladder.
+    expect(deps.openEffortPicker).toHaveBeenCalled()
+    expect(deps.dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "OVERLAY_OPEN" })
+    )
+  })
+
+  it("leaves other segments to their report commands", () => {
+    const deps = buildDeps({
+      fullscreen: true,
+      footerRowRef: { current: {} as never },
+      footerSegmentsRef: { current: [{ id: "cwd", text: "/work" }] },
+    })
+    render(<Harness deps={deps} />)
+    act(() => __fireInput("[<0;3;6M"))
+    expect(deps.openEffortPicker).not.toHaveBeenCalled()
+  })
+})
+
 /** A stub selection controller that records what the key handler asked it to do. */
 function fakeSelection(over: Partial<SelectionController> = {}) {
   return {
@@ -665,5 +703,13 @@ describe("useGlobalKeys — copy family and mode chords", () => {
     act(() => __fireInput("x", { ctrl: true }))
     act(() => __fireInput("s", { ctrl: true }))
     expect(last.runCommandLine).toHaveBeenCalledWith("/select off")
+  })
+
+  it("Ctrl+X Ctrl+I opens the image-attachment manager via /images", () => {
+    const deps = buildDeps()
+    render(<Harness deps={deps} />)
+    act(() => __fireInput("x", { ctrl: true }))
+    act(() => __fireInput("i", { ctrl: true }))
+    expect(deps.runCommandLine).toHaveBeenCalledWith("/images")
   })
 })

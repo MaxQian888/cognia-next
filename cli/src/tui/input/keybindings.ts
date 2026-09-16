@@ -21,6 +21,7 @@ export const KEYBINDABLE_ACTIONS = [
   "find",
   "historySearch",
   "pasteImage",
+  "attachmentsPanel",
   "workflowInspect",
   "lineHome",
   "lineEnd",
@@ -51,6 +52,9 @@ export const DEFAULT_KEYBINDINGS: Record<KeybindableAction, string> = {
   find: "ctrl+f",
   historySearch: "ctrl+r",
   pasteImage: "ctrl+v",
+  // Image-attachment manager. Shares the `Ctrl+X` leader with the copy family —
+  // the single ctrl-chords are all claimed (see the copy block below).
+  attachmentsPanel: "ctrl+x ctrl+i",
   workflowInspect: "ctrl+i",
   lineHome: "ctrl+a",
   lineEnd: "ctrl+e",
@@ -83,6 +87,7 @@ export const KEYBINDING_LABELS: Record<KeybindableAction, string> = {
   find: "Find in transcript",
   historySearch: "Search composer history",
   pasteImage: "Paste image from clipboard",
+  attachmentsPanel: "Manage image attachments",
   workflowInspect: "Inspect workflow step",
   lineHome: "Move to line start",
   lineEnd: "Move to line end",

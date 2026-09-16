@@ -62,6 +62,57 @@ it("opens a selected file, searches/copies its entire patch and returns to files
   expect(onClose).toHaveBeenCalledTimes(1)
 })
 
+it("marks files viewed with x, walks the review queue, and hides them with X", () => {
+  const { container } = render(
+    <TuiInputProvider>
+      <GitDiffOverlay review={review} columns={60} viewportRows={20} onClose={() => {}} />
+    </TuiInputProvider>
+  )
+  // a.ts is selected; x marks it and advances to the next unviewed file.
+  fire("x")
+  expect(container.textContent).toContain("1 viewed")
+  expect(container.textContent).toContain("✓ a.ts")
+  fire("x")
+  expect(container.textContent).toContain("2 viewed")
+  // Everything is viewed now: X hides the whole list, X again restores it.
+  fire("X")
+  expect(container.textContent).not.toContain("✓")
+  fire("X")
+  // Back to full view: a.ts is selected (shows ›), new.ts keeps its ✓.
+  expect(container.textContent).toContain("✓ new.ts")
+  // x on a viewed file unmarks it.
+  fire("", { upArrow: true })
+  fire("x")
+  expect(container.textContent).toContain("1 viewed")
+})
+
+it("renders the patch pane as a numbered GitHub-style diff", () => {
+  const file = {
+    path: "file.ts",
+    staged:
+      "diff --git a/file.ts b/file.ts\nindex 1111111..2222222 100644\n--- a/file.ts\n+++ b/file.ts\n@@ -1,2 +1,2 @@\n keep\n-old code\n+new code\n",
+    unstaged: "",
+    untracked: "",
+  }
+  const { container } = render(
+    <TuiInputProvider>
+      <GitDiffOverlay
+        review={{ files: [file] }}
+        columns={60}
+        viewportRows={20}
+        onClose={() => {}}
+      />
+    </TuiInputProvider>
+  )
+  fire("", { return: true })
+  const text = container.textContent ?? ""
+  expect(text).toContain("@@ -1,2 +1,2 @@")
+  expect(text).toContain("- old code")
+  expect(text).toContain("+ new code")
+  expect(text).not.toContain("index 1111111")
+  expect(text).toContain("hunk 1/1")
+})
+
 it("switches staged/unstaged/untracked scope and handles an empty scope", () => {
   const { container } = render(
     <TuiInputProvider>

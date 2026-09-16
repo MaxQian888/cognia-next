@@ -111,7 +111,7 @@ describe("BottomStatus", () => {
     expect(text).toContain("cmd4")
   })
 
-  it("shows the visible steer queue and a btw count chip", () => {
+  it("shows the visible steer queue and a queued count chip", () => {
     const { container } = render(
       <BottomStatus
         turnStatus="streaming"
@@ -120,8 +120,8 @@ describe("BottomStatus", () => {
       />
     )
     const text = container.textContent ?? ""
-    expect(text).toContain("btw×2")
-    expect(text).toContain("also update the docs")
+    expect(text).toContain("queued ×2")
+    expect(text).toContain("⏵ also update the docs")
   })
 
   it("shows the run-state chips (sub-agent, background, interrupted, copilot, verbose)", () => {

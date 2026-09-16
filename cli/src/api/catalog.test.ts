@@ -34,8 +34,8 @@ describe("generated command index", () => {
   it("agrees with the OpenAPI specs on how many commands each wire carries", () => {
     const internal = API_COMMANDS.filter((entry) => entry.wires.includes("internal"))
     const http = API_COMMANDS.filter((entry) => entry.wires.includes("http"))
-    expect(internal).toHaveLength(656)
-    expect(http).toHaveLength(527)
+    expect(internal).toHaveLength(700)
+    expect(http).toHaveLength(555)
   })
 
   it("keeps the manifest's authority metadata verbatim", () => {

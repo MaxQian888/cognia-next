@@ -31,6 +31,8 @@
   "copyFailed": "无法将文档复制到剪贴板。",
   "stopping": "正在停止",
   "composerPlaceholder": "输入问题、运行 /commands、用 @ 引用文件或用 ! 执行命令",
+  "clipboardImageReady": "剪贴板中有图片 · {key} 粘贴",
+  "imagesAttached": "已附加 {count} 张图片 · /images 管理",
   "welcomeHint": "/settings 配置 · /inspect 展开输出 · /help 帮助 · @ 文件 · ! 命令",
   "contextUsage": "{percent}% 上下文",
   "tokenUsage": "{count} 词元",
@@ -140,6 +142,9 @@
     "spendingLimitReached": "已达到消费限额",
     "ordinaryUsageBlocked": "常规模型使用已被阻止",
     "notConnected": "Codex app server 未连接"
+  },
+  "devinLimits": {
+    "noCredential": "未找到 Devin 凭证——请运行 `devin auth login`，或设置 DEVIN_API_KEY。"
   },
   "toolsBrowser": {
     "navigation": "↑/↓ 选择 · ←/→ / PgUp/PgDn 翻页 · Enter 详情 · Esc 返回",

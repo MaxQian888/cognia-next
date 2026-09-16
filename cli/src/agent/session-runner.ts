@@ -37,7 +37,8 @@ import type { McpServer } from "@cognia/agent-config-types"
 
 import { type BuiltAttachmentContent } from "./attachments/build"
 import { resolveHome } from "../config/load"
-import { type ResolvedConfig } from "../config/schema"
+import { type ResolvedConfig, type ThinkingLevel } from "../config/schema"
+import type { EffortTier } from "@/lib/ai/thinking-level"
 import type { TuiAction } from "../tui/state/types"
 import { loadMcpServers } from "../mcp/load-mcp-config"
 import { applyDisabled, readDisabled, readDisabledTools } from "../mcp/mcp-state"
@@ -266,6 +267,22 @@ export interface AgentSession {
   setModel?(model: string): Promise<boolean>
   /** Return model options advertised by the live external session. */
   listModels?(): Promise<AgentModelOption[]>
+  /**
+   * The thinking levels the live session's model actually publishes, projected
+   * onto the app's tier vocabulary. `[]` means the surface was read and the
+   * model declares no usable depth axis; `null` means the surface could not be
+   * read at all (nothing live on a non-ACP preset, or a read failure), where the
+   * caller falls back to the full ladder rather than claiming a model has no
+   * control it merely hasn't described yet.
+   */
+  listThinkingLevels?(): Promise<EffortTier[] | null>
+  /**
+   * Apply a thinking-level pick to the LIVE session now — on Devin the level IS
+   * a model variant, so the write lands as a model switch. Resolves the model
+   * id the session reports afterwards, or `undefined` for "off" (forward
+   * nothing), an agent with no depth axis, or no live session to write.
+   */
+  setThinkingLevel?(level: ThinkingLevel): Promise<string | undefined>
   close(): Promise<void>
 }
 

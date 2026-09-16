@@ -98,6 +98,12 @@ export type CommandEffect =
    * catalog. Routing both entry points through one effect keeps `/model` and the
    * keyboard shortcut from drifting apart. */
   | { kind: "modelPicker" }
+  /** Open the `/think` effort slider. An effect for the same reason as
+   * `modelPicker`: on an external agent the ladder is a property of the live
+   * session's model (Devin derives it from the model's effort-encoded
+   * variants), so the App must ask the session before the overlay can be
+   * seeded. The built-in path still opens its overlay directly. */
+  | { kind: "effortPicker" }
   | { kind: "resumeLast" }
   /** Resume a specific past session by id (`/resume <id>` / `--resume <id>`). */
   | { kind: "resumeSession"; id: string }

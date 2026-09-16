@@ -92,13 +92,13 @@ const npm = (label: string, pkg: string): InstallMethod => ({
   requires: ["npm"],
 })
 
-const brew = (formula: string): InstallMethod => ({
+const brew = (formula: string, opts?: { cask?: boolean }): InstallMethod => ({
   kind: "brew",
   ownership: "user-managed",
   label: "Homebrew",
-  display: `brew install ${formula}`,
+  display: `brew install ${opts?.cask ? "--cask " : ""}${formula}`,
   command: "brew",
-  args: ["install", formula],
+  args: ["install", ...(opts?.cask ? ["--cask"] : []), formula],
   requires: ["brew"],
 })
 
@@ -156,6 +156,13 @@ export const INSTALL_PLANS: Record<string, InstallPlan> = {
     name: "Pi",
     methods: [npm("npm", "@earendil-works/pi-coding-agent")],
     docsUrl: "https://pi.dev/docs/latest/rpc",
+  },
+  devin: {
+    command: "devin",
+    runtimeId: "devin",
+    name: "Devin CLI",
+    methods: [curl("https://cli.devin.ai/install.sh", "bash"), brew("devin-cli", { cask: true })],
+    docsUrl: "https://docs.devin.ai/cli/index",
   },
   opencode: {
     command: "opencode",

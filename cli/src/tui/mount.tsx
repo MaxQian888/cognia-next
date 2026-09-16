@@ -7,6 +7,7 @@ import React from "react"
 import { render as inkRender } from "ink"
 
 import { App } from "./components/App"
+import { hasClipboardImage } from "./clipboard-image"
 import { AppErrorBoundary } from "./components/AppErrorBoundary"
 import { defaultCrashLogger } from "./crash-log"
 import { installProcessCrashGuards } from "./process-guards"
@@ -127,6 +128,9 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
           initialHistory={initialHistory}
           initialCommand={deps.initialCommand}
           sessionOnlyPermissionMode={deps.sessionOnlyPermissionMode}
+          // The composer's "image in clipboard" hint. Wired here, not defaulted
+          // inside App, so test renders never spawn clipboard helpers.
+          probeClipboardImage={() => hasClipboardImage()}
           altScreenPreEntered={fullscreen}
           frames={frames}
         />

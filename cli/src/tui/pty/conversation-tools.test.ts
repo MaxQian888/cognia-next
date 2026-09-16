@@ -137,7 +137,9 @@ maybe("conversation: tools and approvals", () => {
           config: {
             render: {
               ...RENDER_DEFAULTS,
-              toolResultMaxLines: 12,
+              // The expanded result block must overflow the 24-row viewport or
+              // the pageUp scroll below is a no-op and `screen()` never moves.
+              toolResultMaxLines: 40,
               fileLineNumbers: false,
               syntaxHighlightInline: false,
             },
@@ -173,7 +175,7 @@ maybe("conversation: tools and approvals", () => {
                     exit_code: 0,
                     stdout:
                       "preview start\n" +
-                      Array.from({ length: 30 }, (_, i) => `result row ${i + 1}`).join("\n"),
+                      Array.from({ length: 60 }, (_, i) => `result row ${i + 1}`).join("\n"),
                   },
                 },
                 { kind: "hold" },
@@ -213,7 +215,16 @@ maybe("conversation: tools and approvals", () => {
         expect(session.flat()).toContain("Stdout: preview start")
         expect(session.flat()).not.toContain('"exit_code"')
         expect(session.screen()).not.toBe(tail)
-        await session.press("pageDown")
+        // Mirror the pageUp loop: the block is taller than a page, so scroll
+        // back down until the expanded cell's tail (and its /expand hint) is
+        // visible again — a single PgDn only restores one page.
+        for (let page = 0; page < 4 && !session.flat().includes("/expand"); page++) {
+          const before = session.screen()
+          await session.press("pageDown")
+          await session.waitFor((screen) => screen !== before, {
+            describe: "scroll back to the expanded output's tail",
+          })
+        }
         await session.waitForText("/expand")
       }
     )

@@ -19,6 +19,7 @@ import { parseMouseEvent } from "../../input/mouse"
 import { useScreenReader } from "../../render/context"
 import { useTheme } from "../../theme/context"
 import { clampScroll, maxScroll, positionLabel, prepareDocumentLines } from "../document-view"
+import type { PatchLayout, PatchSectionInput } from "../patch-view"
 import type { DocumentFormat } from "../../state/types"
 import { contentRows } from "../../layout/terminal-layout"
 
@@ -35,6 +36,8 @@ export interface DocumentViewerProps {
   columns?: number
   /** Whether this pane owns keyboard navigation in a split view. */
   focused?: boolean
+  /** `format: "diff"` only: labelled patch bodies (e.g. staged vs unstaged). */
+  diffSections?: PatchSectionInput[]
 }
 
 /** Rows reserved for the border, title, and footer chrome. */
@@ -53,21 +56,38 @@ export function DocumentViewer({
   viewportRows,
   columns = 80,
   focused,
+  diffSections,
 }: DocumentViewerProps) {
   const theme = useTheme()
   const screenReader = useScreenReader()
   const t = useCliTranslations("cliUiDiff")
+  const isDiff = format === "diff" && !screenReader
   const [scroll, setScroll] = React.useState(0)
+  // The hunk the user last jumped to with [/]. Null means "derive the position
+  // from the scroll offset" — needed because a short last hunk can never reach
+  // the top row, so scroll alone cannot tell it apart from the previous one.
+  const [hunkIndex, setHunkIndex] = React.useState<number | null>(null)
+  const [layout, setLayout] = React.useState<PatchLayout>("unified")
   const [searchDraft, setSearchDraft] = React.useState<string | null>(null)
   const [search, setSearch] = React.useState({ query: "", matches: [] as number[], index: 0 })
 
-  const prepared = React.useMemo(
-    () => prepareDocumentLines(body, format, lang, title),
-    [body, format, lang, title]
-  )
   const width = Math.max(5, Math.floor(columns) - 1)
   const bodyWidth = Math.max(1, width - 4)
+  const prepared = React.useMemo(
+    () =>
+      isDiff
+        ? prepareDocumentLines(body, "diff", lang, title, {
+            sections: diffSections,
+            layout,
+            width: bodyWidth,
+            palette: theme,
+            translate: t,
+          })
+        : prepareDocumentLines(body, format === "diff" ? "text" : format, lang, title),
+    [body, format, lang, title, isDiff, diffSections, layout, bodyWidth, theme, t]
+  )
   const lines = React.useMemo(() => {
+    if (prepared.kind === "diff") return prepared.lines
     const spans = prepared.lines.flatMap((line, index) => [
       ...(index > 0 ? [{ text: "\n", style: "plain" as const }] : []),
       ...(typeof line === "string"
@@ -76,11 +96,25 @@ export function DocumentViewer({
     ])
     return wrapTerminalSpans(spans, bodyWidth)
   }, [prepared, theme, bodyWidth])
+  const hunkRows = React.useMemo(
+    () => (prepared.kind === "diff" ? prepared.hunkRows : []),
+    [prepared]
+  )
   const total = lines.length
   const viewport = Math.max(1, contentRows(viewportRows ?? 24, CHROME_ROWS))
 
+  // Any scroll that isn't a [/] hunk jump drops the remembered hunk index so
+  // the position falls back to the top-anchored derivation.
+  const scrollTo = React.useCallback((next: number) => {
+    setHunkIndex(null)
+    setScroll(next)
+  }, [])
+
   const move = React.useCallback(
-    (delta: number) => setScroll((s) => clampScroll(s + delta, total, viewport)),
+    (delta: number) => {
+      setHunkIndex(null)
+      setScroll((s) => clampScroll(s + delta, total, viewport))
+    },
     [total, viewport]
   )
 
@@ -96,9 +130,9 @@ export function DocumentViewer({
         : []
       setSearch({ query: query.trim(), matches, index: 0 })
       setSearchDraft(null)
-      if (matches[0] !== undefined) setScroll(clampScroll(matches[0], total, viewport))
+      if (matches[0] !== undefined) scrollTo(clampScroll(matches[0], total, viewport))
     },
-    [searchableLines, total, viewport]
+    [searchableLines, scrollTo, total, viewport]
   )
 
   const moveMatch = React.useCallback(
@@ -106,10 +140,56 @@ export function DocumentViewer({
       if (search.matches.length === 0) return
       const index = (search.index + delta + search.matches.length) % search.matches.length
       setSearch({ ...search, index })
-      setScroll(clampScroll(search.matches[index], total, viewport))
+      scrollTo(clampScroll(search.matches[index], total, viewport))
     },
-    [search, total, viewport]
+    [search, scrollTo, total, viewport]
   )
+
+  const jumpHunk = React.useCallback(
+    (delta: number) => {
+      if (hunkRows.length === 0) return
+      const current = hunkIndex ?? hunkRows.reduce((acc, row, i) => (row <= scroll ? i : acc), -1)
+      const target = Math.max(0, Math.min(hunkRows.length - 1, current + delta))
+      setHunkIndex(target)
+      setScroll(clampScroll(hunkRows[target], total, viewport))
+    },
+    [hunkIndex, hunkRows, scroll, total, viewport]
+  )
+
+  // Switching unified/split re-flows every row, so the current scroll offset
+  // would point at unrelated lines. Prepare the target layout synchronously
+  // (the renderer is pure) and re-anchor on the hunk under review.
+  const toggleLayout = React.useCallback(() => {
+    const nextLayout = layout === "unified" ? "split" : "unified"
+    const anchor = hunkIndex ?? hunkRows.reduce((acc, row, i) => (row <= scroll ? i : acc), -1)
+    setLayout(nextLayout)
+    if (!isDiff || anchor < 0) return
+    const next = prepareDocumentLines(body, "diff", lang, title, {
+      sections: diffSections,
+      layout: nextLayout,
+      width: bodyWidth,
+      palette: theme,
+      translate: t,
+    })
+    if (next.kind !== "diff" || next.hunkRows.length === 0) return
+    const target = Math.min(anchor, next.hunkRows.length - 1)
+    setHunkIndex(target)
+    setScroll(clampScroll(next.hunkRows[target], next.lines.length, viewport))
+  }, [
+    layout,
+    isDiff,
+    hunkIndex,
+    hunkRows,
+    scroll,
+    body,
+    lang,
+    title,
+    diffSections,
+    bodyWidth,
+    theme,
+    t,
+    viewport,
+  ])
 
   useModalInput((input, key) => {
     if (searchDraft !== null) {
@@ -126,11 +206,14 @@ export function DocumentViewer({
     if (key.pageDown || input === " ") return move(viewport)
     if (key.ctrl && input === "u") return move(-Math.max(1, Math.floor(viewport / 2)))
     if (key.ctrl && input === "d") return move(Math.max(1, Math.floor(viewport / 2)))
-    if (input === "g") return setScroll(0)
-    if (input === "G") return setScroll(maxScroll(total, viewport))
+    if (input === "g") return scrollTo(0)
+    if (input === "G") return scrollTo(maxScroll(total, viewport))
     if (input === "/") return setSearchDraft("")
     if (input === "n") return moveMatch(1)
     if (input === "N") return moveMatch(-1)
+    if (isDiff && input === "[") return jumpHunk(-1)
+    if (isDiff && input === "]") return jumpHunk(1)
+    if (isDiff && input === "s") return toggleLayout()
     if (input === "y" && onCopy) return onCopy(body)
     // Mouse wheel (SGR tracking is on in fullscreen): scroll a few lines per
     // notch; other mouse events are swallowed so they don't fall through.
@@ -177,6 +260,7 @@ export function DocumentViewer({
                   <Text
                     key={j}
                     color={screenReader ? undefined : (span.color ?? colors[span.style])}
+                    backgroundColor={screenReader ? undefined : span.background}
                     bold={span.bold}
                     italic={span.italic}
                     underline={span.underline}
@@ -199,7 +283,18 @@ export function DocumentViewer({
                     total: search.matches.length,
                   })
                 : "",
+              isDiff && hunkRows.length > 0
+                ? t("hunkPosition", {
+                    // The jumped-to hunk wins; otherwise the top-anchored one.
+                    current:
+                      (hunkIndex ??
+                        hunkRows.reduce((acc, row, i) => (row <= start ? i : acc), -1)) + 1 || 1,
+                    total: hunkRows.length,
+                  })
+                : "",
               t("viewerNavigation"),
+              isDiff ? t("hunkNav") : "",
+              isDiff ? t(layout === "unified" ? "splitView" : "unifiedView") : "",
               onCopy ? t("copy") : "",
               t("close"),
             ]

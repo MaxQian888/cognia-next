@@ -6,8 +6,8 @@
  *
  *   ⠋ working · 47s · esc to interrupt        ← spinner + verb + elapsed timer
  *     └ bash: npm test                         ← live tool detail (≤ 3 lines)
- *     💬 btw ×2 · ◆ reviewer · ⧗ 1 bg          ← run-state chips
- *     • follow-up steer message…               ← visible steer queue
+ *     💬 queued ×2 · ◆ reviewer · ⧗ 1 bg       ← run-state chips
+ *     ⏵ follow-up steer message…               ← visible steer queue
  *
  * Pure presenter except for the elapsed-time ticker, which — like {@link
  * WorkingIndicator} / {@link Mascot} — owns the only timer here and runs solely
@@ -232,7 +232,7 @@ function BottomStatusImpl({
   if (steerQueue.length > 0)
     chips.push(
       <Text key="steer" color={theme.secondary}>
-        💬 btw×{steerQueue.length}
+        💬 queued ×{steerQueue.length}
       </Text>
     )
   if (copilot)
@@ -393,8 +393,10 @@ function BottomStatusImpl({
       ) : null}
 
       {queuePreview.map((entry, i) => (
-        <Text key={`q-${i}`} color={theme.muted} dimColor>
-          {"  • "}
+        // ⏵ marks these as "will run next" — deliberately not the transcript's
+        // `•` bullet, which a queued-but-unsent message used to be mistaken for.
+        <Text key={`q-${i}`} color={theme.secondary}>
+          {"  ⏵ "}
           {truncate(entry.replace(/\s+/g, " ").trim(), Math.max(8, columns - 4))}
         </Text>
       ))}

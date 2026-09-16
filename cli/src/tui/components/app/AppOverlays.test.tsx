@@ -21,6 +21,7 @@ import { RenderPrefsProvider } from "../../render/context"
 import { BUILTIN_THEMES } from "../../theme/builtins"
 import { resolveRenderConfig } from "../../../config/schema"
 import { createInitialState } from "../../state/initial"
+import { bufferFromText } from "../../input/buffer"
 import { DEFAULT_RESOLVED_CONFIG } from "../../../config/schema"
 import type { ResolvedConfig } from "../../../config/schema"
 import type { TuiState } from "../../state/types"
@@ -177,6 +178,45 @@ describe("AppOverlays", () => {
     expect(text).toContain("hello body")
   })
 
+  it("lists live image attachments from the draft and dispatches removal", () => {
+    const base = createInitialState(config, "s1", true, [])
+    const props = propsFor(
+      { kind: "attachments" },
+      {
+        state: {
+          ...base,
+          overlay: { kind: "attachments" },
+          input: {
+            ...base.input,
+            buffer: bufferFromText("look [Image 1] and [Image 2]"),
+            pastes: {
+              "[Image 1]": '@"/tmp/one.png"',
+              "[Image 2]": '@"/tmp/two.png"',
+            },
+          },
+        },
+      }
+    )
+    const { container } = wrap(<AppOverlays {...props} />)
+    const text = container.textContent ?? ""
+    expect(text).toContain("[Image 1]")
+    expect(text).toContain("/tmp/one.png")
+    expect(text).toContain("/tmp/two.png")
+    // `d` drops the highlighted row through the undoable reducer action.
+    act(() => __fireInput("d", {}))
+    expect(props.dispatch).toHaveBeenCalledWith({
+      type: "INPUT_REMOVE_IMAGES",
+      labels: ["[Image 1]"],
+    })
+    act(() => __fireInput("c", {}))
+    expect(props.dispatch).toHaveBeenCalledWith({
+      type: "INPUT_REMOVE_IMAGES",
+      labels: ["[Image 1]", "[Image 2]"],
+    })
+    act(() => __fireInput("", { escape: true }))
+    expect(props.dispatch).toHaveBeenCalledWith({ type: "OVERLAY_CLOSE" })
+  })
+
   it("renders the model picker with the filtered options", () => {
     const { container } = wrap(
       <AppOverlays
@@ -243,6 +283,90 @@ describe("AppOverlays", () => {
       )
     }
   )
+
+  it("offers only the session's own rungs and lands the picked variant on Devin", async () => {
+    // swe-2-* publishes `medium | high | max` — the slider must neither show
+    // nor resolve a `low`/`xhigh` rung the family does not have.
+    const overlay: TuiState["overlay"] = {
+      kind: "effortSlider",
+      off: false,
+      index: 1,
+      levels: ["medium", "high", "max"],
+    }
+    const caps = externalCapabilities({ backend: "devin", presetId: "devin" })
+    const applyThinkingLevel = jest.fn(async () => "swe-2-high")
+    const devinAgent = { ...agent, applyThinkingLevel } as unknown as AgentSessionApi
+    const props = propsFor(overlay, {
+      agent: devinAgent,
+      columns: 100,
+      state: {
+        ...createInitialState({ ...config, agentBackend: "devin" }, "s1", true, []),
+        overlay,
+        backendCapabilities: caps,
+      },
+      activeModel: "swe-2-max",
+    })
+    const { container } = wrap(<AppOverlays {...props} />)
+    const text = container.textContent ?? ""
+    // The wide scale renders exactly the family's rungs — nothing the model
+    // does not publish (no `xhigh`, no `ultracode`, no phantom `low` rung on a
+    // swe-2-* ladder that starts at medium).
+    expect(text).toContain("medium")
+    expect(text).toContain("high")
+    expect(text).toContain("max")
+    expect(text).not.toContain("xhigh")
+    expect(text).not.toContain("ultracode")
+
+    act(() => __fireInput("", { return: true }))
+    // Index 1 into the OFFERED ladder → "high", not position 1 of the global
+    // ladder (which would be "medium"… and would be a different model family).
+    expect(props.persist).toHaveBeenCalledWith("thinkingLevel", "high")
+
+    // The live write runs BEFORE switchThinking drops the session, and the
+    // landed variant is persisted + dispatched so the footer names the truth.
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(applyThinkingLevel).toHaveBeenCalledWith("high")
+    expect(props.persistBackendModelFn).toHaveBeenCalledWith("devin", "swe-2-high")
+    expect(props.dispatch).toHaveBeenCalledWith({ type: "SET_MODEL", model: "swe-2-high" })
+    expect(devinAgent.switchThinking).toHaveBeenCalledWith("high", false)
+    // A per-session write already landed — restarting the whole backend would
+    // only kill the conversation the write applied to.
+    expect(props.dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "BACKEND_CONNECT_RETRY" })
+    )
+  })
+
+  it("still reconnects Codex, which reads effort at registration", async () => {
+    const overlay = { kind: "effortSlider", off: false, index: 2 } as const
+    const caps = externalCapabilities({ backend: "codex", presetId: "codex-app-server" })
+    const applyThinkingLevel = jest.fn(async () => undefined)
+    const codexAgent = { ...agent, applyThinkingLevel } as unknown as AgentSessionApi
+    const props = propsFor(overlay, {
+      agent: codexAgent,
+      state: {
+        ...createInitialState({ ...config, agentBackend: "codex" }, "s1", true, []),
+        overlay,
+        backendCapabilities: caps,
+      },
+      activeModel: "gpt-5.6-codex",
+    })
+    wrap(<AppOverlays {...props} />)
+    act(() => __fireInput("", { return: true }))
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    // Codex's variant-less surface answers undefined — nothing to persist.
+    expect(props.persistBackendModelFn).not.toHaveBeenCalled()
+    expect(props.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "BACKEND_CONNECT_RETRY" })
+    )
+  })
 
   it("copies documents with the configured clipboard strategy", async () => {
     const overlay = {

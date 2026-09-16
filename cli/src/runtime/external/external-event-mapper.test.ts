@@ -465,6 +465,77 @@ describe("externalAgentEventToActions", () => {
     expect(externalAgentEventToActions(event({ type: "done", success: true }))).toEqual([])
   })
 
+  it("carries a done event's durationMs into the usage it maps", () => {
+    // The tok/s readout needs outputTokens AND durationMs on the same UsageInfo
+    // — the wire puts them on different done fields, so the mapper joins them.
+    expect(
+      externalAgentEventToActions(
+        event({
+          type: "done",
+          success: true,
+          durationMs: 4000,
+          tokenUsage: { promptTokens: 12, completionTokens: 5, totalTokens: 17 },
+        })
+      )
+    ).toEqual([
+      {
+        type: "SET_USAGE",
+        usage: { inputTokens: 12, outputTokens: 5, durationMs: 4000 },
+      },
+    ])
+  })
+
+  it("carries a provider-denominated cost through verbatim, USD only into totalCostUsd", () => {
+    expect(
+      externalAgentEventToActions(
+        event({
+          type: "done",
+          success: true,
+          tokenUsage: {
+            promptTokens: 12,
+            completionTokens: 5,
+            totalTokens: 17,
+            providerCost: { amount: 1.6, currency: "ACU" },
+          },
+        })
+      )
+    ).toEqual([
+      {
+        type: "SET_USAGE",
+        usage: {
+          inputTokens: 12,
+          outputTokens: 5,
+          providerCost: { amount: 1.6, currency: "ACU" },
+        },
+      },
+    ])
+    // A USD-labelled provider cost lands in totalCostUsd instead.
+    expect(
+      externalAgentEventToActions(
+        event({
+          type: "done",
+          success: true,
+          tokenUsage: {
+            promptTokens: 12,
+            completionTokens: 5,
+            totalTokens: 17,
+            providerCost: { amount: 0.25, currency: "USD" },
+          },
+        })
+      )
+    ).toEqual([
+      {
+        type: "SET_USAGE",
+        usage: {
+          inputTokens: 12,
+          outputTokens: 5,
+          totalCostUsd: 0.25,
+          providerCost: { amount: 0.25, currency: "USD" },
+        },
+      },
+    ])
+  })
+
   it("preserves ACP context occupancy without fabricating billable usage", () => {
     const canonical = externalAgentEventToCanonicalFallback(
       event({ type: "usage_update", used: 24_000, size: 1_000_000 })

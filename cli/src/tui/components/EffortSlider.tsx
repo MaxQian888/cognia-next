@@ -29,6 +29,7 @@ import { useModalInput } from "../input/input-router"
 
 import { useTheme } from "../theme/context"
 import { EFFORT_SLIDER_LEVELS } from "../../config/schema"
+import type { EffortTier } from "@/lib/ai/thinking-level"
 import { parseMouseEvent } from "../input/mouse"
 import { absoluteTopLeft } from "../input/element-position"
 import {
@@ -51,9 +52,6 @@ export interface EffortSliderResult {
 
 type Focus = "off" | "slider"
 
-const LEVELS = EFFORT_SLIDER_LEVELS
-const LAST = LEVELS.length - 1
-
 /** Glyph for one gauge cell. */
 const GAUGE_GLYPH = { filled: "█", marker: "◉", empty: "░" } as const
 
@@ -63,6 +61,7 @@ export function EffortSlider({
   width,
   supported = true,
   modelLabel,
+  levels,
   onConfirm,
   onCancel,
   isActive = true,
@@ -74,11 +73,21 @@ export function EffortSlider({
   supported?: boolean
   /** Active model id, for the unsupported-model hint. */
   modelLabel?: string
+  /**
+   * The ladder this slider actually offers, in ascending order. Defaults to the
+   * full app ladder; an external session passes only the rungs its model
+   * publishes so tiers the agent would just fold away are never shown.
+   */
+  levels?: readonly EffortTier[]
   onConfirm: (result: EffortSliderResult) => void
   onCancel: () => void
   isActive?: boolean
 }) {
   const theme = useTheme()
+  // An empty ladder is not a renderable state — the caller shows a notice
+  // instead — so fall back rather than dividing by zero.
+  const LEVELS = levels && levels.length > 0 ? levels : EFFORT_SLIDER_LEVELS
+  const LAST = LEVELS.length - 1
   const [off, setOff] = useState(seedOff)
   const [index, setIndex] = useState(() => Math.min(Math.max(seedIndex, 0), LAST))
   const [focus, setFocus] = useState<Focus>(seedOff ? "off" : "slider")
@@ -142,7 +151,7 @@ export function EffortSlider({
         setFocus("off")
         return
       }
-      const tier = effortKeyToIndex(input)
+      const tier = effortKeyToIndex(input, LEVELS)
       if (tier !== null) return jump(tier)
       // Space toggles off only while the checkbox has focus (so an accidental
       // Space on the slider can't silently disable thinking).
@@ -194,7 +203,7 @@ export function EffortSlider({
 
       {layout === "wide" ? (
         <Box marginLeft={EFFORT_GAUGE_PREFIX} width={gaugeWidth} flexShrink={0}>
-          {effortScaleLabels(gaugeWidth).map(({ level, start }, i, labels) => {
+          {effortScaleLabels(gaugeWidth, LEVELS).map(({ level, start }, i, labels) => {
             const previousEnd = i === 0 ? 0 : labels[i - 1].start + labels[i - 1].level.length
             const isActiveTier = !off && i === index
             return (
@@ -211,7 +220,7 @@ export function EffortSlider({
         <Text color={theme.muted}>
           {"  "}Tier{" "}
           <Text color={off ? theme.muted : theme.accent} bold={!off}>
-            {effortPositionLabel(index, off)}
+            {effortPositionLabel(index, off, LEVELS)}
           </Text>
         </Text>
       )}

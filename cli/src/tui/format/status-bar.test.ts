@@ -86,6 +86,35 @@ describe("buildStatusBar", () => {
     expect(byId.cost).toBeUndefined()
   })
 
+  it("shows the provider's own cost unit when an external agent reported one", () => {
+    const byId = Object.fromEntries(
+      buildStatusBar({
+        config: { ...base, agentBackend: "codex" },
+        usage: { inputTokens: 10, providerCost: { amount: 0.4, currency: "ACU" } },
+      }).map((s) => [s.id, s])
+    )
+    expect(byId.cost.text).toBe("0.4 ACU")
+  })
+
+  it("prefers the accumulated session figure over the latest turn's", () => {
+    const byId = Object.fromEntries(
+      buildStatusBar({
+        config: { ...base, agentBackend: "codex" },
+        usage: { inputTokens: 10, providerCost: { amount: 0.4, currency: "ACU" } },
+        totals: {
+          costUsd: 0,
+          inputTokens: 100,
+          outputTokens: 50,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+          durationMs: 0,
+          providerCosts: { ACU: 12.5 },
+        },
+      }).map((s) => [s.id, s])
+    )
+    expect(byId.cost.text).toBe("12.5 ACU")
+  })
+
   it("hides the model rather than naming the built-in one while an agent hosts", () => {
     // Same rule as `ctx`/`cost`: the built-in provider's resolved model is not
     // what the external agent runs, so naming it in the footer is a fabrication.

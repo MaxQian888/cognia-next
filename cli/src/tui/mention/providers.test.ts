@@ -246,7 +246,7 @@ describe("createMentionProviders.agents", () => {
       listSkills: async () => [],
     })
     const agents = await p.agents("")
-    expect(agents.map((a) => a.id)).toEqual(["general-purpose", "Explore", "Plan"])
+    expect(agents.map((a) => a.id)).toEqual(["general-purpose", "Explore", "Plan", "code-reviewer"])
   })
 })
 

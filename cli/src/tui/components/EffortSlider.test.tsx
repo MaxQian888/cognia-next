@@ -221,4 +221,52 @@ describe("EffortSlider", () => {
     expect(text).toContain("Faster")
     expect(text).toContain("Smarter")
   })
+
+  describe("a sparse session ladder", () => {
+    // Devin's `swe-2-*` family publishes `low | high | max` — three rungs where
+    // the app ladder has six. The slider must scale to exactly those rungs:
+    // nothing it offers may name a tier the model would fold away.
+    const swe = ["low", "high", "max"] as const
+
+    it("renders only the offered rungs on the wide scale", () => {
+      const { container } = wrap(<EffortSlider {...props({ index: 1 })} levels={swe} width={100} />)
+      const text = container.textContent ?? ""
+      expect(text).toContain("max")
+      expect(text).toContain("1-3 jump") // footer counts the offered rungs
+      for (const absent of ["medium", "xhigh", "ultracode"]) {
+        expect(text).not.toContain(absent)
+      }
+    })
+
+    it("clamps arrows at the top of the offered ladder", () => {
+      const onConfirm = jest.fn()
+      wrap(<EffortSlider {...props({ index: 2, onConfirm })} levels={swe} />)
+      press("", { rightArrow: true }) // already at max → stays
+      press("", { return: true })
+      expect(onConfirm).toHaveBeenCalledWith({ off: false, index: 2 })
+    })
+
+    it("ignores a digit past the offered ladder and honours one inside it", () => {
+      const onConfirm = jest.fn()
+      wrap(<EffortSlider {...props({ index: 0, onConfirm })} levels={swe} />)
+      press("4") // only 3 rungs → no-op
+      press("3") // → max
+      press("", { return: true })
+      expect(onConfirm).toHaveBeenCalledWith({ off: false, index: 2 })
+    })
+
+    it("reads the position out of three on a narrow terminal", () => {
+      const { container } = wrap(<EffortSlider {...props({ index: 2 })} levels={swe} width={40} />)
+      expect(container.textContent ?? "").toContain("3/3")
+    })
+
+    it("clamps a seed index past the ladder's end", () => {
+      // A stale overlay index (say seeded before the session answered) must
+      // never park the marker off the end of a shorter ladder.
+      const onConfirm = jest.fn()
+      wrap(<EffortSlider {...props({ index: 5, onConfirm })} levels={swe} />)
+      press("", { return: true })
+      expect(onConfirm).toHaveBeenCalledWith({ off: false, index: 2 })
+    })
+  })
 })

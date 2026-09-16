@@ -182,6 +182,18 @@ function submit() {
   act(() => __fireInput("", { return: true }))
 }
 
+/**
+ * Submit a bare `/<cmd>` whose command owns subcommands. Enter on the palette
+ * row drills into the verb list ("opens subcommands before running") instead
+ * of running the root handler, so the palette is dismissed first — the next
+ * Enter then submits the line itself.
+ */
+function runBareCommand(line: string) {
+  type(line)
+  act(() => __fireInput("", { escape: true }))
+  submit()
+}
+
 describe("App", () => {
   let isolatedHome: string
   let previousHome: string | undefined
@@ -903,15 +915,11 @@ describe("App", () => {
       submit()
       await Promise.resolve()
     })
-    // /clear is destructive → it opens a confirm overlay first. Confirm with Enter.
-    await waitFor(() => expect(container.textContent).toContain("Start a fresh session?"))
-    await act(async () => {
-      __fireInput("", { return: true })
-      await Promise.resolve()
-    })
+    // /clear archives the session on disk (resumable via /sessions) → it resets
+    // immediately, no confirm overlay.
+    await waitFor(() => expect(container.textContent).not.toContain("answer one"))
     // The terminal is wiped (Static scrollback won't clear itself) AND state reset.
     expect(clearScreen).toHaveBeenCalledTimes(1)
-    await waitFor(() => expect(container.textContent).not.toContain("answer one"))
   })
 
   it("runs /handoff and shows a notice", async () => {
@@ -1218,8 +1226,7 @@ describe("App", () => {
     submit()
     expect(container.textContent).toContain("Switch model")
     act(() => __fireInput("", { escape: true }))
-    type("/provider")
-    submit()
+    runBareCommand("/provider")
     type("openai")
     submit()
     // The provider picker opens credential management even for a saved key.
@@ -1716,8 +1723,7 @@ describe("App", () => {
     const { container } = render(
       <App config={config} sessionId="s1" createSession={create} persistConfig={persistConfig} />
     )
-    type("/provider")
-    submit()
+    runBareCommand("/provider")
     expect(container.textContent).toContain("Switch provider")
     // anthropic is active + first; move down once to "openai" and select it.
     act(() => __fireInput("", { downArrow: true }))
@@ -1748,8 +1754,7 @@ describe("App", () => {
       />
     )
 
-    type("/provider")
-    submit()
+    runBareCommand("/provider")
     act(() => __fireInput("", { return: true }))
 
     expect(container.textContent).toContain("Manage API key for DeepSeek")
@@ -1776,8 +1781,7 @@ describe("App", () => {
     }
     const { container } = render(<App config={configured} sessionId="s1" createSession={create} />)
 
-    type("/provider")
-    submit()
+    runBareCommand("/provider")
     act(() => __fireInput("", { return: true }))
     expect(container.textContent).toContain("Manage API key for DeepSeek")
     act(() => __fireInput("", { escape: true }))
@@ -1797,8 +1801,7 @@ describe("App", () => {
         persistCredential={persistCredential}
       />
     )
-    type("/provider")
-    submit()
+    runBareCommand("/provider")
     act(() => __fireInput("", { downArrow: true })) // → openai
     act(() => __fireInput("", { return: true })) // opens the key prompt
     expect(container.textContent).toContain("Add API key for OpenAI")
@@ -1827,8 +1830,7 @@ describe("App", () => {
         persistCredential={persistCredential}
       />
     )
-    type("/provider")
-    submit()
+    runBareCommand("/provider")
     act(() => __fireInput("", { downArrow: true }))
     act(() => __fireInput("", { return: true }))
     type("sk-bad")
@@ -1843,8 +1845,7 @@ describe("App", () => {
     const { container } = render(
       <App config={config} sessionId="s1" createSession={create} persistConfig={persistConfig} />
     )
-    type("/provider")
-    submit()
+    runBareCommand("/provider")
     // Narrow the shared catalog to Ollama by typing into the search row, then
     // select it: a key-less provider switches straight away — no key prompt.
     type("ollama")
@@ -2054,9 +2055,8 @@ describe("App", () => {
     const { container } = render(
       <App config={config} sessionId="s1" createSession={create} persistDb={() => {}} />
     )
-    type("/goal")
+    runBareCommand("/goal")
     await act(async () => {
-      submit()
       await Promise.resolve()
     })
     await waitFor(() => expect(container.textContent).toContain("Usage: /goal"))
@@ -2073,9 +2073,8 @@ describe("App", () => {
         home="/nonexistent-home"
       />
     )
-    type("/mcp")
+    runBareCommand("/mcp")
     await act(async () => {
-      submit()
       await Promise.resolve()
     })
     await waitFor(() => expect(container.textContent).toContain("No MCP servers"))
@@ -2736,7 +2735,7 @@ describe("App", () => {
       await Promise.resolve()
     })
     expect(prompts).not.toContain("check the logs")
-    await waitFor(() => expect(container.textContent).toContain("btw×1"))
+    await waitFor(() => expect(container.textContent).toContain("queued ×1"))
 
     await act(async () => {
       release()
@@ -3151,6 +3150,20 @@ describe("App", () => {
   })
 
   describe("Ctrl+V clipboard image", () => {
+    // These tests assert that the composed text hides the real file path. On
+    // hyperlink-capable terminals the `[Image N]` label is wrapped in an OSC-8
+    // escape whose target embeds that path, so pin hyperlinks off — the ambient
+    // terminal env (Ghostty/kitty/iTerm/…) must not decide what renders.
+    let prevForceHyperlink: string | undefined
+    beforeEach(() => {
+      prevForceHyperlink = process.env.FORCE_HYPERLINK
+      process.env.FORCE_HYPERLINK = "0"
+    })
+    afterEach(() => {
+      if (prevForceHyperlink === undefined) delete process.env.FORCE_HYPERLINK
+      else process.env.FORCE_HYPERLINK = prevForceHyperlink
+    })
+
     it("inserts a compact image attachment on a successful read", async () => {
       const { create } = fakeSession()
       const readClipboardImage = jest.fn(async () => ({ path: "/tmp/clip.png" }))
@@ -3216,6 +3229,48 @@ describe("App", () => {
         await Promise.resolve()
       })
       expect(container.textContent).toContain("No image in clipboard")
+    })
+
+    it("advertises the paste chord while the probe reports a clipboard image", async () => {
+      const { create } = fakeSession()
+      const probeClipboardImage = jest.fn(async () => true)
+      const { container } = render(
+        <App
+          config={config}
+          sessionId="s1"
+          createSession={create}
+          probeClipboardImage={probeClipboardImage}
+        />
+      )
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(probeClipboardImage).toHaveBeenCalled()
+      expect(container.textContent).toContain("image in clipboard · Ctrl+V to paste")
+    })
+
+    it("shows no clipboard hint when the probe reports no image (or none is wired)", async () => {
+      const { create } = fakeSession()
+      const probeClipboardImage = jest.fn(async () => false)
+      const { container } = render(
+        <App
+          config={config}
+          sessionId="s1"
+          createSession={create}
+          probeClipboardImage={probeClipboardImage}
+        />
+      )
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(probeClipboardImage).toHaveBeenCalled()
+      expect(container.textContent ?? "").not.toContain("image in clipboard")
+
+      const bare = render(<App config={config} sessionId="s2" createSession={create} />)
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(bare.container.textContent ?? "").not.toContain("image in clipboard")
     })
   })
 })

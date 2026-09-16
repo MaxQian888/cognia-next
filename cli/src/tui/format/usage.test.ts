@@ -453,6 +453,70 @@ describe("session totals", () => {
     )
     expect(totals.costUsd).toBeCloseTo(0.5, 6)
   })
+
+  it("accumulates provider-denominated costs under their own currency, never USD", () => {
+    let totals = emptySessionTotals()
+    totals = accumulateUsage(totals, {
+      inputTokens: 10,
+      outputTokens: 5,
+      providerCost: { amount: 1.5, currency: "ACU" },
+    })
+    totals = accumulateUsage(totals, {
+      outputTokens: 5,
+      providerCost: { amount: 0.5, currency: "ACU" },
+    })
+    expect(totals.costUsd).toBe(0)
+    expect(totals.providerCosts).toEqual({ ACU: 2 })
+  })
+
+  it("skips a provider cost that named no unit", () => {
+    const totals = accumulateUsage(emptySessionTotals(), {
+      outputTokens: 5,
+      providerCost: { amount: 3 },
+    })
+    expect(totals.providerCosts).toBeUndefined()
+  })
+})
+
+describe("provider-denominated cost display", () => {
+  it("shows the provider's own unit for a turn cost when USD is unknown", () => {
+    const rows = usagePanelRows(
+      { inputTokens: 10, providerCost: { amount: 0.4, currency: "ACU" } },
+      "external-model"
+    )
+    expect(rows.find((r) => r.label === "Cost")?.value).toBe("0.4 ACU")
+  })
+
+  it("prefers a real USD figure over the provider unit", () => {
+    const rows = usagePanelRows(
+      { inputTokens: 10, totalCostUsd: 0.25, providerCost: { amount: 0.4, currency: "ACU" } },
+      "external-model"
+    )
+    expect(rows.find((r) => r.label === "Cost")?.value).toBe("$0.250")
+  })
+
+  it("shows the provider's own unit for the session cost when USD is unknown", () => {
+    const rows = usagePanelRows({ inputTokens: 10 }, "external-model", {
+      ...emptySessionTotals(),
+      inputTokens: 100,
+      outputTokens: 50,
+      providerCosts: { ACU: 12.5 },
+    })
+    expect(rows.find((r) => r.label === "Session cost")?.value).toBe("12.5 ACU")
+  })
+
+  it("joins multiple provider units instead of converting them", () => {
+    const rows = usagePanelRows({ inputTokens: 10 }, "external-model", {
+      ...emptySessionTotals(),
+      providerCosts: { ACU: 12, CREDIT: 3 },
+    })
+    expect(rows.find((r) => r.label === "Session cost")?.value).toBe("12 ACU + 3 CREDIT")
+  })
+
+  it("keeps the em dash when neither USD nor a provider cost exists", () => {
+    const rows = usagePanelRows({ inputTokens: 10 }, "external-model", emptySessionTotals())
+    expect(rows.find((r) => r.label === "Session cost")?.value).toBe("—")
+  })
 })
 
 describe("formatFooter with totals", () => {

@@ -6,24 +6,54 @@
 import { highlightCode } from "../markdown/highlight"
 import { tokenizeMarkdown } from "../markdown/tokenize"
 import type { MdLine } from "../markdown/types"
+import type { TerminalLine } from "../render/terminal-block"
 import type { DocumentFormat } from "../state/types"
+import { preparePatchLines, type PatchLayout, type PatchSectionInput } from "./patch-view"
+import type { ThemePalette } from "../theme/palette"
 
 /** Markdown bodies tokenize to structured lines; text bodies stay as strings. */
 export type PreparedLines =
-  { kind: "markdown"; lines: MdLine[] } | { kind: "text"; lines: string[] }
+  | { kind: "markdown"; lines: MdLine[] }
+  | { kind: "text"; lines: string[] }
+  // Diff bodies arrive pre-rendered as styled, width-fitted rows (the renderer
+  // owns gutters, wrapping and split layout); `hunkRows` powers [/] navigation.
+  | { kind: "diff"; lines: TerminalLine[]; hunkRows: number[] }
+
+/** Extra inputs the `diff` format needs that the text/markdown formats don't. */
+export interface DiffDocumentOptions {
+  /** Labelled patch bodies; defaults to a single unlabelled `body` section. */
+  sections?: PatchSectionInput[]
+  layout?: PatchLayout
+  /** Cells available inside the viewer chrome (gutter + wrap math needs it). */
+  width?: number
+  palette?: ThemePalette
+  translate?: (key: string, params?: Record<string, string | number>) => string
+}
 
 /**
  * Turn a raw document body into renderable lines. `markdown` runs the markdown
  * tokenizer; `text` is highlighted as a whole (so multi-line constructs colour
  * correctly) then split — highlight.js closes its spans at line boundaries, so
- * each split line is self-contained ANSI.
+ * each split line is self-contained ANSI. `diff` parses the patch into
+ * hunks/rows and renders numbered, word-highlighted terminal lines.
  */
 export function prepareDocumentLines(
   body: string,
   format: DocumentFormat,
   lang?: string,
-  panelTitle?: string
+  panelTitle?: string,
+  diff?: DiffDocumentOptions
 ): PreparedLines {
+  if (format === "diff") {
+    const prepared = preparePatchLines(diff?.sections?.length ? diff.sections : [{ body }], {
+      width: diff?.width ?? 76,
+      layout: diff?.layout ?? "unified",
+      lang,
+      palette: diff?.palette,
+      translate: diff?.translate ?? ((key) => key),
+    })
+    return { kind: "diff", lines: prepared.lines, hunkRows: prepared.hunkRows }
+  }
   if (format === "markdown") {
     const lines = tokenizeMarkdown(body)
     // The panel already labels the document. Only elide its matching opening

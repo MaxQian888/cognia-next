@@ -49,6 +49,7 @@ import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claud
 import { resolveCliLoggingConfig } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
 import type { ThinkingLevel } from "../../config/schema"
+import type { EffortTier } from "@/lib/ai/thinking-level"
 import type { Cell, LogInput, PermissionMode, TuiAction } from "../state/types"
 import { sidecarExitedLog, turnErrorLog, turnLifecycleLog } from "../runtime/log-ingest"
 
@@ -77,6 +78,11 @@ export interface AgentSessionApi {
    * usage) on success, or `null` when the turn errored. Plain chat ignores the
    * return; `/goal` + `/loop` feed it to their turn-drivers. */
   send(prompt: string, preparePrompt?: () => Promise<string>): Promise<RunAndCaptureResult | null>
+  /** True while a send is running OR queued behind the in-flight one. Reads the
+   * synchronous send chain rather than reducer state, so a submit landing before
+   * React repaints `TURN_START` still sees the turn as busy and queues instead
+   * of racing it. */
+  sendInFlight(): boolean
   abort(): void
   resolvePermission(decision: CapturePermissionDecision): void
   /**
@@ -98,6 +104,21 @@ export interface AgentSessionApi {
   switchModel(model: string): Promise<void>
   /** List models advertised by the live external session; empty for built-in or pre-session. */
   listModels(): Promise<AgentModelOption[]>
+  /**
+   * The thinking tiers the live external session's model publishes, projected
+   * onto the app ladder. `[]` = the session answers and has no depth axis;
+   * `null` = the surface could not be read (no live session where asking one
+   * would spawn a thread, or a read failure) — the caller offers the generic
+   * ladder instead. Built-in sessions never answer; their ladder is config-side.
+   */
+  listThinkingLevels(): Promise<EffortTier[] | null>
+  /**
+   * Apply a thinking pick to the live external session now, returning the model
+   * id it reports afterwards (Devin encodes effort in the model id, so the pick
+   * lands as a variant switch). `undefined` = nothing live / no axis / "off" —
+   * the pick then rides the next turn's reasoningEffort as before.
+   */
+  applyThinkingLevel(level: ThinkingLevel): Promise<string | undefined>
   switchMode(mode: PermissionMode): Promise<void>
   switchThinking(level: ThinkingLevel, pluginTools?: boolean): Promise<void>
   switchProvider(provider: string, model?: string): Promise<void>
@@ -259,6 +280,13 @@ export function useAgentSession({
   const checkpointCellCountRef = useRef(0)
   const abortRef = useRef<AbortController | null>(null)
   const cwdChangeRef = useRef<Promise<void> | null>(null)
+  // Serialize `send`s. Several callers can overlap otherwise — a busy-window
+  // submit that slips past the render-stale `busy` check, a background-result
+  // delivery racing the steer drain, fire-and-forget sends from overlays —
+  // and two live turns on one session fan every notification out to both
+  // prompt listeners, which is how transcript rows render twice.
+  const sendChainRef = useRef<Promise<unknown>>(Promise.resolve())
+  const sendInFlightCountRef = useRef(0)
   // Session-only grants (for example when persistence fails). Persisted rules
   // are reread at each request so external revocations take effect live.
   const approvedToolsRef = useRef<Set<string>>(new Set())
@@ -597,7 +625,7 @@ export function useAgentSession({
     await dropCopilotSession()
   }, [dropCopilotSession])
 
-  const send = useCallback(
+  const sendInner = useCallback(
     async (prompt: string, preparePrompt?: () => Promise<string>) => {
       const controller = new AbortController()
       abortRef.current = controller
@@ -731,6 +759,26 @@ export function useAgentSession({
     ]
   )
 
+  const sendInFlight = useCallback(() => sendInFlightCountRef.current > 0, [])
+
+  const send = useCallback(
+    (prompt: string, preparePrompt?: () => Promise<string>) => {
+      sendInFlightCountRef.current += 1
+      const chained =
+        sendInFlightCountRef.current === 1
+          ? // Idle: call `sendInner` directly so TURN_START still dispatches
+            // synchronously in this tick, exactly as an unchained send did.
+            sendInner(prompt, preparePrompt)
+          : sendChainRef.current.then(() => sendInner(prompt, preparePrompt))
+      // A failed turn must not wedge every send chained behind it.
+      sendChainRef.current = chained.catch(() => undefined)
+      return chained.finally(() => {
+        sendInFlightCountRef.current -= 1
+      })
+    },
+    [sendInner]
+  )
+
   const abort = useCallback(() => {
     abortRef.current?.abort()
   }, [])
@@ -844,6 +892,22 @@ export function useAgentSession({
     const session = ensureSession()
     return (await session.listModels?.()) ?? []
   }, [ensureSession])
+
+  const listThinkingLevels = useCallback(async (): Promise<EffortTier[] | null> => {
+    // ensureSession, not sessionRef: an ACP agent can only answer once a
+    // session exists, and creating it is the same contract listModels follows.
+    const session = ensureSession()
+    return (await session.listThinkingLevels?.()) ?? null
+  }, [ensureSession])
+
+  const applyThinkingLevel = useCallback(
+    async (level: ThinkingLevel): Promise<string | undefined> => {
+      // sessionRef, deliberately: a pick with nothing live still applies on the
+      // next turn, so this must not spawn a session just to write to it.
+      return sessionRef.current?.setThinkingLevel?.(level)
+    },
+    []
+  )
 
   const changeCwd = useCallback(
     async (dir: string) => {
@@ -1116,6 +1180,7 @@ export function useAgentSession({
 
   return {
     send,
+    sendInFlight,
     abort,
     resolvePermission,
     denyPendingPermissions,
@@ -1124,6 +1189,8 @@ export function useAgentSession({
     resume,
     switchModel,
     listModels,
+    listThinkingLevels,
+    applyThinkingLevel,
     switchMode,
     switchThinking,
     switchProvider,

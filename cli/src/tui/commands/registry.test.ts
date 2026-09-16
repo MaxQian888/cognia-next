@@ -71,6 +71,13 @@ describe("command registry", () => {
     }
   })
 
+  it("routes /images (and its /attachments alias) to the attachment manager overlay", () => {
+    const expected = { kind: "openOverlay", overlay: { kind: "attachments" } }
+    expect(getCommand("images")!.handler!({ args: "" } as never)).toEqual(expected)
+    expect(getCommand("attachments")).toBe(getCommand("images"))
+    expect(getCommand("attachments")!.handler!({ args: "" } as never)).toEqual(expected)
+  })
+
   it("includes the core commands in their declared order", () => {
     const names = listCommands().map((c) => c.name)
     expect(names).toEqual(
@@ -310,8 +317,20 @@ describe("command registry", () => {
     const builtinCtx = () =>
       ({ state: {}, config: { agentBackend: "builtin" }, version: "0", args: "" }) as never
 
-    it("/think opens the slider on a backend that forwards reasoning effort", () => {
-      expect(getCommand("think")?.handler?.(ctxWith("codex", "codex-app-server"))).toMatchObject({
+    it("/think defers to the App on a backend that forwards reasoning effort", () => {
+      // The ladder is a property of the live session's model (Devin derives it
+      // from the model's own effort variants), so — like /model — the handler
+      // names an effect and the App asks the session before opening anything.
+      expect(getCommand("think")?.handler?.(ctxWith("codex", "codex-app-server"))).toEqual({
+        kind: "effortPicker",
+      })
+      expect(getCommand("think")?.handler?.(ctxWith("devin", "devin"))).toEqual({
+        kind: "effortPicker",
+      })
+    })
+
+    it("/think opens the slider directly on the built-in backend", () => {
+      expect(getCommand("think")?.handler?.(builtinCtx())).toMatchObject({
         kind: "openOverlay",
         overlay: { kind: "effortSlider" },
       })
@@ -338,13 +357,10 @@ describe("command registry", () => {
     })
   })
 
-  it("/clear confirms before wiping, and `--yes` performs the reset", () => {
+  it("/clear starts a fresh session immediately — the transcript stays resumable", () => {
     const clear = getCommand("clear")
     const ctx = (args: string) => ({ state: {}, config: {}, version: "0", args }) as never
-    expect(clear?.handler?.(ctx(""))).toMatchObject({
-      kind: "openOverlay",
-      overlay: { kind: "confirm", onConfirmCommand: "clear --yes" },
-    })
+    expect(clear?.handler?.(ctx(""))).toEqual({ kind: "clear" })
     expect(clear?.handler?.(ctx("--yes"))).toEqual({ kind: "clear" })
   })
 

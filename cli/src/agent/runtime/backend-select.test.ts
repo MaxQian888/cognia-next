@@ -189,13 +189,14 @@ describe("capabilitiesForProtocol", () => {
   })
 
   it("does not claim MCP for protocols that cannot carry a server", () => {
-    // Only ACP forwards MCP servers at `session/new`; Codex reaches the same
-    // outcome through a per-thread config override. OpenCode and Pi have no
-    // per-session channel at all.
+    // ACP forwards MCP servers at `session/new`; Codex reaches the same
+    // outcome through a per-thread config override, and Pi mounts them through
+    // its tool-host extension channel (`COGNIA_TOOLHOST_PI_MCP_SERVERS`).
+    // OpenCode has no per-session channel at all.
     expect(capabilitiesForProtocol("acp")).toContain("mcp")
     expect(capabilitiesForProtocol("codex-app-server")).toContain("mcp")
+    expect(capabilitiesForProtocol("pi-rpc")).toContain("mcp")
     expect(capabilitiesForProtocol("opencode")).not.toContain("mcp")
-    expect(capabilitiesForProtocol("pi-rpc")).not.toContain("mcp")
   })
 
   it("does not duplicate a capability", () => {

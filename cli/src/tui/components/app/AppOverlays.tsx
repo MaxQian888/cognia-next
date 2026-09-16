@@ -44,6 +44,7 @@ import { DocumentViewer } from "../overlays/DocumentViewer"
 import { A2UISurfaceOverlay } from "../overlays/A2UISurfaceOverlay"
 import { createUserAction, formatActionForAI } from "@/lib/a2ui/events"
 import { InspectOverlay } from "../overlays/InspectOverlay"
+import { AttachmentsPanel } from "../overlays/AttachmentsPanel"
 import { AgentsPanel } from "../overlays/AgentsPanel"
 import { AgentStatsPanel } from "../overlays/AgentStatsPanel"
 import { AgentStatsDetailPanel } from "../overlays/AgentStatsDetailPanel"
@@ -99,6 +100,9 @@ import { cycleEnum, applyTargetDefault, settingsSections } from "../../runtime/s
 import { EFFORT_SLIDER_LEVELS, PERMISSION_MODES } from "../../../config/schema"
 import { modelSupportsEffort } from "../../../config/thinking"
 import { bufferFromText } from "../../input/buffer"
+import { listImageAttachments } from "../../input/image-attachments"
+import { openBrowser } from "../../../mcp/open-browser"
+import { pathToFileURL } from "node:url"
 import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import type { ThinkingLevel, SubagentModelOverride } from "../../../config/schema"
 import type { TuiState, TuiAction } from "../../state/types"
@@ -353,50 +357,88 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
         />
       )}
-      {state.overlay.kind === "effortSlider" && (
-        <EffortSlider
-          off={state.overlay.off}
-          index={state.overlay.index}
-          width={columns}
-          supported={effortSupported}
-          modelLabel={activeModel}
-          onConfirm={({ off, index }) => {
-            // Resolve the picked level: off → "off", else the slider tier.
-            const lvl: ThinkingLevel = off ? "off" : EFFORT_SLIDER_LEVELS[index]
-            // `ultracode` couples to the dynamic-workflow plugin tools; every
-            // other tier turns the gate back off (per the slider's contract).
-            const pluginTools = lvl === "ultracode"
-            persist("thinkingLevel", lvl)
-            persistPluginTools(home, pluginTools)
-            // switchThinking dispatches SET_THINKING (with pluginTools) AND
-            // drops the session so the new effort + gate apply next turn.
-            void agent.switchThinking(lvl, pluginTools)
-            // Codex reads reasoning effort when the AGENT is registered, not per
-            // turn, so dropping the session is not enough on an external backend
-            // — the process would keep running at the old effort while the
-            // footer showed the new one. Re-enter the connect flow to
-            // re-register it. (See CONTEXT_FIELD_LIFECYCLE: "connect" layer.)
-            if (
-              requiresReconnect("Thinking level") &&
-              !isBuiltinBackend(state.config.agentBackend)
-            ) {
-              dispatch({
-                type: "BACKEND_CONNECT_RETRY",
-                backend: state.config.agentBackend ?? "builtin",
-              })
-            }
-            // Warn (but still save) when the active model won't honour effort —
-            // the preference re-applies once a reasoning-capable model is active.
-            if (lvl !== "off" && !effortSupported) {
-              dispatch({
-                type: "NOTICE",
-                message: `Saved. Note: ${activeModel ?? "the current model"} doesn't support thinking levels — it applies when you switch to a reasoning model (Opus 4.5+, Sonnet 4.6, o-series, …).`,
-              })
-            }
-          }}
-          onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
-        />
-      )}
+      {state.overlay.kind === "effortSlider" &&
+        (() => {
+          const effortOverlay = state.overlay
+          return (
+            <EffortSlider
+              off={effortOverlay.off}
+              index={effortOverlay.index}
+              width={columns}
+              supported={effortSupported}
+              modelLabel={activeModel}
+              levels={effortOverlay.levels}
+              onConfirm={({ off, index }) => {
+                // Resolve the picked level against the ladder the overlay actually
+                // offered — an external session's rungs, not the app-wide list.
+                const offered = effortOverlay.levels ?? EFFORT_SLIDER_LEVELS
+                const picked = off ? "off" : offered[index]
+                if (!picked) {
+                  dispatch({ type: "OVERLAY_CLOSE" })
+                  return
+                }
+                const lvl: ThinkingLevel = picked
+                // `ultracode` couples to the dynamic-workflow plugin tools; every
+                // other tier turns the gate back off (per the slider's contract).
+                const pluginTools = lvl === "ultracode"
+                persist("thinkingLevel", lvl)
+                persistPluginTools(home, pluginTools)
+                const caps = state.backendCapabilities
+                const external = Boolean(caps && !caps.builtin)
+                if (external && lvl !== "off") {
+                  // Apply to the live session BEFORE switchThinking drops it — on
+                  // Devin the level is a model variant, so the write lands as a
+                  // model switch and answers the variant id. Persisting + SET_MODEL
+                  // that id is what makes the footer (and the next turn's model
+                  // pin) name the variant the session actually runs. Failures are
+                  // fine: the pick still rides the next turn's reasoningEffort.
+                  void (async () => {
+                    try {
+                      const landed = await agent.applyThinkingLevel(lvl)
+                      if (landed && caps) {
+                        persistBackendModelFn(caps.presetId ?? caps.backend, landed)
+                        dispatch({ type: "SET_MODEL", model: landed })
+                      }
+                    } catch {
+                      // The pick persists regardless; the next turn re-derives it.
+                    }
+                    await agent.switchThinking(lvl, pluginTools)
+                  })()
+                } else {
+                  // switchThinking dispatches SET_THINKING (with pluginTools) AND
+                  // drops the session so the new effort + gate apply next turn.
+                  void agent.switchThinking(lvl, pluginTools)
+                }
+                // Codex reads reasoning effort when the AGENT is registered, not per
+                // turn, so dropping the session is not enough — the process would
+                // keep running at the old effort while the footer showed the new
+                // one. Re-enter the connect flow to re-register it. Other external
+                // presets take depth per session (the write above already landed),
+                // so a whole-backend reconnect would only kill the conversation.
+                // (See CONTEXT_FIELD_LIFECYCLE: "connect" layer.)
+                if (
+                  requiresReconnect("Thinking level") &&
+                  !isBuiltinBackend(state.config.agentBackend) &&
+                  caps?.presetId === "codex-app-server"
+                ) {
+                  dispatch({
+                    type: "BACKEND_CONNECT_RETRY",
+                    backend: state.config.agentBackend ?? "builtin",
+                  })
+                }
+                // Warn (but still save) when the active model won't honour effort —
+                // the preference re-applies once a reasoning-capable model is active.
+                if (lvl !== "off" && !effortSupported) {
+                  dispatch({
+                    type: "NOTICE",
+                    message: `Saved. Note: ${activeModel ?? "the current model"} doesn't support thinking levels — it applies when you switch to a reasoning model (Opus 4.5+, Sonnet 4.6, o-series, …).`,
+                  })
+                }
+              }}
+              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            />
+          )
+        })()}
       {state.overlay.kind === "provider" &&
         (() => {
           const providerOverlay = state.overlay
@@ -1022,6 +1064,28 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
               })
             }
           }}
+          onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+        />
+      )}
+      {state.overlay.kind === "attachments" && (
+        // Rows are derived live from the draft — removing the last one leaves
+        // the panel open on its empty state, ready for the next paste.
+        <AttachmentsPanel
+          rows={listImageAttachments(state.input.buffer.lines, state.input.pastes).map((a) => ({
+            label: a.label,
+            path: a.path,
+            exists: (() => {
+              try {
+                return fs.statSync(a.path).isFile()
+              } catch {
+                return false
+              }
+            })(),
+          }))}
+          width={columns}
+          maxRows={itemRows}
+          onRemove={(labels) => dispatch({ type: "INPUT_REMOVE_IMAGES", labels })}
+          onOpen={(p) => void openBrowser(pathToFileURL(p).href)}
           onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
         />
       )}

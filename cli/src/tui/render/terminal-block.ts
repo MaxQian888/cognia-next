@@ -8,6 +8,9 @@ export interface TerminalSpan {
   /** An explicit colour that wins over `style`, for runs whose colour comes from
    * a syntax highlighter rather than from the theme's semantic tokens. */
   color?: string
+  /** An explicit background colour (Ink `backgroundColor`), for the few rows —
+   * like tinted diff lines — where a background is the actual signal. */
+  background?: string
   bold?: boolean
   italic?: boolean
   underline?: boolean
@@ -148,11 +151,43 @@ function sameStyle(a: TerminalSpan, b: TerminalSpan): boolean {
   return (
     a.style === b.style &&
     a.color === b.color &&
+    a.background === b.background &&
     a.attachmentPath === b.attachmentPath &&
     Boolean(a.bold) === Boolean(b.bold) &&
     Boolean(a.italic) === Boolean(b.italic) &&
     Boolean(a.underline) === Boolean(b.underline)
   )
+}
+
+/**
+ * Clip a styled run to `width` terminal cells without splitting a grapheme.
+ * Returns the (possibly shortened) span list plus whether anything was cut —
+ * callers that fill the freed cell with an ellipsis need the flag. Span order
+ * and styling are preserved; the last surviving span may hold partial text.
+ */
+export function truncateTerminalSpans(
+  spans: TerminalSpan[],
+  width: number
+): { spans: TerminalSpan[]; truncated: boolean } {
+  const columns = Math.max(0, Math.floor(width))
+  const out: TerminalSpan[] = []
+  let used = 0
+  let truncated = false
+  for (const span of spans) {
+    if (truncated) break
+    let text = ""
+    for (const grapheme of graphemes(sanitizeTerminalText(span.text))) {
+      const cellWidth = graphemeWidth(grapheme)
+      if (used + cellWidth > columns) {
+        truncated = true
+        break
+      }
+      text += grapheme
+      used += cellWidth
+    }
+    if (text || !truncated) out.push({ ...span, text })
+  }
+  return { spans: out, truncated }
 }
 
 /**

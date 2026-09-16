@@ -5,6 +5,7 @@ import React from "react"
 import { Box, Text, type DOMElement } from "ink"
 import { useCriticalInput } from "../../input/input-router"
 import { useCliLocale, useCliTranslations } from "../../i18n"
+import { langFromPath } from "../../markdown/highlight"
 import {
   gitDiffFileStats,
   gitDiffFileBody,
@@ -48,6 +49,9 @@ export function GitDiffOverlay({
   const [searchDraft, setSearchDraft] = React.useState<string | null>(null)
   const [selectedPath, setSelectedPath] = React.useState<string | null>(null)
   const [focus, setFocus] = React.useState<"files" | "patch">("files")
+  /** Review aid: files the user marked as inspected (in-memory, per session). */
+  const [viewedPaths, setViewedPaths] = React.useState<ReadonlySet<string>>(new Set())
+  const [hideViewed, setHideViewed] = React.useState(false)
   const scopes: GitDiffScope[] = [
     "all",
     "staged",
@@ -56,8 +60,10 @@ export function GitDiffOverlay({
     ...(review.baseRef ? ["branch" as const] : []),
   ]
   const scopedFiles = review.files.filter((file) => gitDiffFileBody(file, scope).trim())
-  const files = scopedFiles.filter((file) =>
-    file.path.toLocaleLowerCase().includes(query.toLocaleLowerCase())
+  const files = scopedFiles.filter(
+    (file) =>
+      (!hideViewed || !viewedPaths.has(file.path)) &&
+      file.path.toLocaleLowerCase().includes(query.toLocaleLowerCase())
   )
   const index = Math.max(
     0,
@@ -109,6 +115,29 @@ export function GitDiffOverlay({
       }
       if (key.ctrl && input === "r") return onRefresh?.()
       if (focus === "files" && input === "/") return setSearchDraft(query)
+      if (focus === "files" && input === "x" && file) {
+        const next = new Set(viewedPaths)
+        const marking = !next.has(file.path)
+        if (marking) next.add(file.path)
+        else next.delete(file.path)
+        setViewedPaths(next)
+        if (marking) {
+          // Advance to the next unviewed file so `x` walks a review queue.
+          const remaining = files.filter((f) => f.path !== file.path && !next.has(f.path))
+          const after = remaining.find((f) => files.indexOf(f) > index)
+          setSelectedPath((after ?? remaining[0])?.path ?? null)
+        } else if (hideViewed && files.length <= 1) {
+          setSelectedPath(null)
+        }
+        return
+      }
+      if (focus === "files" && input === "X") {
+        setHideViewed((value) => !value)
+        if (!hideViewed && file && viewedPaths.has(file.path)) {
+          setSelectedPath(files.find((f) => !viewedPaths.has(f.path))?.path ?? null)
+        }
+        return
+      }
       if (focus === "files" && key.escape && query) {
         setQuery("")
         setSelectedPath(null)
@@ -169,6 +198,7 @@ export function GitDiffOverlay({
         {stats
           ? ` · ${t("selectedFile")} +${stats.additions} −${stats.deletions} · ${file?.untrackedDirectory ? t("directory") : stats.binary ? t("binary") : t("hunks", { count: stats.hunks })}`
           : ""}
+        {viewedPaths.size > 0 ? ` · ${t("viewedCount", { count: viewedPaths.size })}` : ""}
       </Text>
       <Box flexDirection={wide ? "row" : "column"} height={Math.max(1, viewportRows - 2)}>
         {showList && (
@@ -190,19 +220,24 @@ export function GitDiffOverlay({
                 {t(status && !review.files.length ? status : query ? "noMatches" : "empty")}
               </Text>
             )}
-            {files.slice(start, start + listRows).map((entry, offset) => (
-              <Text
-                key={entry.path}
-                color={start + offset === index ? theme.accent : undefined}
-                wrap="truncate-middle"
-              >
-                {start + offset === index ? "› " : "  "}
-                {displayPath(entry.path)}
-                {entry.untrackedDirectory
-                  ? `  ${t("directory")}`
-                  : `  +${statsByPath.get(entry.path)!.additions} −${statsByPath.get(entry.path)!.deletions}`}
-              </Text>
-            ))}
+            {files.slice(start, start + listRows).map((entry, offset) => {
+              const isSelected = start + offset === index
+              const isViewed = viewedPaths.has(entry.path)
+              return (
+                <Text
+                  key={entry.path}
+                  color={isSelected ? theme.accent : undefined}
+                  dimColor={isViewed && !isSelected}
+                  wrap="truncate-middle"
+                >
+                  {isSelected ? "› " : isViewed ? "✓ " : "  "}
+                  {displayPath(entry.path)}
+                  {entry.untrackedDirectory
+                    ? `  ${t("directory")}`
+                    : `  +${statsByPath.get(entry.path)!.additions} −${statsByPath.get(entry.path)!.deletions}`}
+                </Text>
+              )
+            })}
             {(!status || review.files.length > 0) && (
               <Text color={theme.muted} wrap="truncate-end">
                 {t("pages", {
@@ -220,8 +255,17 @@ export function GitDiffOverlay({
             key={`${scope}:${file.path}`}
             title={displayPath(file.path)}
             body={gitDiffFileBody(file, scope, locale)}
-            format="text"
-            lang="diff"
+            format={screenReader ? "text" : "diff"}
+            lang={screenReader ? "diff" : langFromPath(file.path)}
+            diffSections={
+              !screenReader && scope === "all" && !file.untrackedDirectory
+                ? [
+                    { label: t("sectionStaged"), body: file.staged },
+                    { label: t("sectionUnstaged"), body: file.unstaged },
+                    { label: t("sectionUntracked"), body: file.untracked },
+                  ].filter((section) => section.body.trim())
+                : undefined
+            }
             columns={wide ? width - listWidth : width}
             viewportRows={Math.max(1, viewportRows - 2)}
             onCopy={onCopy}
@@ -232,6 +276,9 @@ export function GitDiffOverlay({
       <Text color={theme.muted} wrap="truncate-end">
         {t(focus === "files" ? "navigation" : "detailNavigation")}
         {focus === "files" && onRefresh ? ` · ${t("refresh")}` : ""}
+        {focus === "files" && file
+          ? ` · ${t("markViewed")} · ${t(hideViewed ? "showViewed" : "hideViewed")}`
+          : ""}
       </Text>
     </Box>
   )

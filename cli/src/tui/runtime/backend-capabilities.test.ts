@@ -88,14 +88,21 @@ describe("externalCapabilities", () => {
     }
   })
 
-  it("keeps reasoning effort on the Codex metadata channel only", () => {
+  it("keeps reasoning effort to channels an agent actually carries it on", () => {
     const codex = externalCapabilities({ backend: "codex", presetId: "codex-app-server" })
     const acp = externalCapabilities({ backend: "claude-code" })
+    const devin = externalCapabilities({ backend: "devin", presetId: "devin" })
 
-    // Reasoning effort rides Codex's metadata channel; ACP has no counterpart,
-    // so claiming it there would be a lie.
+    // Reasoning effort rides Codex's metadata channel natively. Generic ACP
+    // leaves it unverified — the `thought_level` config-option category exists
+    // in the protocol, but whether an agent publishes one is a per-session fact
+    // no handshake field answers.
     expect(supportsFeature(codex, "thinking")).toBe(true)
-    expect(featureBlockedReason(acp, "thinking")).toMatch(/no equivalent/)
+    expect(supportsFeature(acp, "thinking")).toBe(false)
+    // Devin folds the ladder into its model ids (`…-low`, `…-max`), and the
+    // DevinAcpAdapter synthesizes the `thought_level` axis over the current
+    // model family — an `equivalent` the preset refinement declares.
+    expect(supportsFeature(devin, "thinking")).toBe(true)
   })
 
   it("reports skills on every backend that can host the Cognia bridge", () => {

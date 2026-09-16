@@ -45,6 +45,31 @@ describe("deriveEffortSliderState", () => {
     // otherwise seed the overlay's marker off the end of the track.
     expect(deriveEffortSliderState("turbo" as ThinkingLevel)).toEqual({ off: false, index: 0 })
   })
+
+  it("seeds the marker inside a sparse external ladder", () => {
+    // Devin's `swe-2-*` family publishes `low | high | max` — no medium rung.
+    const swe = ["low", "high", "max"] as const
+    expect(deriveEffortSliderState("high", swe)).toEqual({ off: false, index: 1 })
+    expect(deriveEffortSliderState("max", swe)).toEqual({ off: false, index: 2 })
+    expect(deriveEffortSliderState("off", swe)).toEqual({ off: true, index: 0 })
+  })
+
+  it("folds a persisted pick the ladder lacks down, not to the floor", () => {
+    const swe = ["low", "high", "max"] as const
+    // ultracode has no swe-2 rung → lands on max. xhigh folds to high — max
+    // sits ABOVE xhigh in the app ladder, and folding never climbs.
+    expect(deriveEffortSliderState("ultracode", swe)).toEqual({ off: false, index: 2 })
+    expect(deriveEffortSliderState("xhigh", swe)).toEqual({ off: false, index: 1 })
+    // medium folds down to low — the write path folds the same direction.
+    expect(deriveEffortSliderState("medium", swe)).toEqual({ off: false, index: 0 })
+  })
+
+  it("parks a request below the whole ladder at the shallowest rung", () => {
+    // claude-family ladders start at medium; a persisted `low` cannot fold
+    // down into nothing, so it rests on `medium` (matching clampThinkingLevel).
+    const claude = ["medium", "high", "max"] as const
+    expect(deriveEffortSliderState("low", claude)).toEqual({ off: false, index: 0 })
+  })
 })
 
 // The per-model matrix lives with the capability itself

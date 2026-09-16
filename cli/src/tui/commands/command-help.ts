@@ -48,7 +48,7 @@ export function buildCommandHelpDocument(
   lines.push("", localizedCommandDescription(desc, t))
   if (desc.argumentHint) lines.push("", `**${t("usage")}** \`/${desc.name} ${desc.argumentHint}\``)
   if (desc.args && desc.args.length > 0) {
-    lines.push("", `## ${t("arguments")}`)
+    lines.push("", `## ${t("argsTitle")}`)
     for (const a of desc.args) lines.push(renderArg(a, t, desc.name))
   }
   if (desc.subcommands && desc.subcommands.length > 0) {

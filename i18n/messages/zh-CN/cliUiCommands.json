@@ -71,6 +71,7 @@
     "retry": "重新发送上一条消息",
     "transcript": "打开完整且可搜索的对话记录",
     "copy": "复制回复、代码块、工具结果或你的上一条消息",
+    "images": "管理已粘贴的图片附件",
     "tools": "浏览内置工具目录",
     "cwd": "浏览或切换工作目录",
     "about": "查看版本和提供商信息",
@@ -307,7 +308,7 @@
   "helpTitle": "帮助：/{command}",
   "aliases": "别名：",
   "usage": "用法：",
-  "arguments": "参数",
+  "argsTitle": "参数",
   "subcommandsTitle": "子命令",
   "optional": "可选",
   "oneOf": "可选值：{choices}",
@@ -421,6 +422,10 @@
   "inspectNavigation": "↑/↓ 选择 · Enter 查看完整输出 · Esc 关闭",
   "inspectShell": "终端命令",
   "inspectSubagent": "子 Agent",
+  "imagesTitle": "图片附件",
+  "imagesEmpty": "暂无图片附件 — 剪贴板有图片时用快捷键粘贴",
+  "imagesMissing": "文件不存在",
+  "imagesFooter": "↑/↓ 选择 · d 移除 · c 清空 · Enter 打开 · Esc 关闭",
   "viewOutsideSkill": "文件位于技能目录之外",
   "expandStatus_cancelled": "已取消"
 }

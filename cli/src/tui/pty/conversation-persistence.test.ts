@@ -49,21 +49,20 @@ describe("across a restart", () => {
         await session.press("enter")
         await session.waitForText("SAVED_SESSION_REPLY")
         await command(session, "/transcript")
-        await session.waitForText("q/esc close")
+        // The footer's tail ("q/esc close") truncates off at 100 columns, so
+        // assert on a fragment that renders reliably at this width.
+        await session.waitForText("copy all")
         await session.waitForText("SAVED_SESSION_REPLY")
         await session.press("escape")
-        await session.waitForNoText("q/esc close")
+        await session.waitForNoText("copy all")
         await command(session, "/export json")
         await session.waitForText("Exported 2 entries")
         expect(
           JSON.parse(fs.readFileSync(path.join(home, "cognia-export-saved.json"), "utf8"))
         ).toEqual(entries)
+        // /clear resets immediately (no confirm) — the archived transcript on
+        // disk is untouched, so the session stays resumable.
         await command(session, "/clear")
-        await session.waitForText("Enter confirm")
-        await session.press("escape")
-        await session.waitForNoText("Enter confirm")
-        await session.waitForText("SAVED_SESSION_REPLY")
-        await command(session, "/new --yes")
         await session.waitForNoText("SAVED_SESSION_REPLY")
         await command(session, "/retry")
         await session.waitForText("Nothing to re-send yet")

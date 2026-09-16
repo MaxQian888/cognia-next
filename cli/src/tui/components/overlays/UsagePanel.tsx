@@ -17,6 +17,7 @@ import {
   usePanelScroll,
 } from "../../hooks/usePanelScroll"
 import {
+  cacheSummary,
   contextComposition,
   formatCost,
   formatTokens,
@@ -45,9 +46,9 @@ const COMPOSITION_LEGEND: {
   { key: "output", color: "muted" },
 ]
 const COMPOSITION_LABEL: Record<string, string> = {
-  cacheRead: "reused",
-  cacheCreation: "new",
-  fresh: "fresh",
+  cacheRead: "cached",
+  cacheCreation: "cache write",
+  fresh: "input",
   output: "output",
 }
 
@@ -96,13 +97,23 @@ function Composition({ usage }: { usage?: UsageInfo }) {
   const comp = contextComposition(usage)
   const total = comp.cacheRead + comp.cacheCreation + comp.fresh + comp.output
   if (total === 0) return null
+  const cache = cacheSummary(usage)
   const runs = stackedBar(
     COMPOSITION_LEGEND.map((seg) => ({ value: comp[seg.key], color: theme[seg.color] })),
     30
   )
   return (
     <Box flexDirection="column" marginTop={1}>
-      <Text color={theme.muted}>Composition</Text>
+      <Text color={theme.muted}>
+        Turn composition
+        {comp.cacheRead > 0
+          ? ` · ${Math.round(cache.hitRate * 100)}% cached`
+          : comp.cacheCreation > 0
+            ? " · cache primed"
+            : hasCacheTelemetry(usage)
+              ? " · no cache reuse"
+              : ""}
+      </Text>
       <Text>
         {runs.map((run, i) => (
           <Text key={i} color={run.color}>
@@ -142,7 +153,7 @@ function SessionCache({ totals, reported }: { totals?: SessionTotals; reported: 
         <Text color={theme.success}>{Math.round(cache.hitRate * 100)}% hit</Text>
         <Text dimColor>
           {" · "}
-          {formatTokens(cache.reusedTokens)} reused / {formatTokens(cache.promptTokens)} prompt
+          {formatTokens(cache.reusedTokens)} cached / {formatTokens(cache.promptTokens)} prompt
         </Text>
       </Text>
       <Text>
@@ -153,9 +164,9 @@ function SessionCache({ totals, reported }: { totals?: SessionTotals; reported: 
         ))}
       </Text>
       <Text dimColor>
-        <Text color={theme.success}>{formatTokens(cache.reusedTokens)} reused</Text>
-        <Text color={theme.warning}> {formatTokens(cache.createdTokens)} new</Text>
-        <Text color={theme.info}> {formatTokens(cache.freshTokens)} fresh</Text>
+        <Text color={theme.success}>{formatTokens(cache.reusedTokens)} cached</Text>
+        <Text color={theme.warning}> {formatTokens(cache.createdTokens)} cache write</Text>
+        <Text color={theme.info}> {formatTokens(cache.freshTokens)} input</Text>
       </Text>
     </Box>
   )

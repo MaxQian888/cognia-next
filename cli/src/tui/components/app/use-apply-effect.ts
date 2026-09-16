@@ -96,6 +96,9 @@ export interface ApplyEffectDeps {
   /** Open the `/model` switcher — backend-aware, so it may query the external
    * agent for its own catalog before the overlay can be built. */
   openModelPicker: () => void
+  /** Open the `/think` slider — on an external backend it first reads the live
+   * session's thinking ladder, since each model publishes its own rungs. */
+  openEffortPicker: () => void
   resumeMostRecent: () => void
   /** Resume a specific past session by id (`/resume <id>`); the App validates
    * the id against the session store and notices when it's unknown. */
@@ -185,6 +188,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
     hostSyncStatus,
     openSessions,
     openModelPicker,
+    openEffortPicker,
     resumeMostRecent,
     resumeSession,
     runBash,
@@ -574,6 +578,9 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
           break
         case "modelPicker":
           openModelPicker()
+          break
+        case "effortPicker":
+          openEffortPicker()
           break
         case "openSessions":
           openSessions()
@@ -1269,6 +1276,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
       mintId,
       openSessions,
       openModelPicker,
+      openEffortPicker,
       persist,
       persistDb,
       persistStatusBar,

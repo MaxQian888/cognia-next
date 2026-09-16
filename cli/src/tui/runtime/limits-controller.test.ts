@@ -85,7 +85,7 @@ describe("runLimits", () => {
       loadLimits,
     })
     runLimits(d)
-    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
     expect(openedLimits(d.actions)?.activeProvider).toBe("codex")
     expect(loadLimits).not.toHaveBeenCalled()
     expect(loadedLimits(d.actions)?.snapshots).toEqual([
@@ -165,6 +165,46 @@ describe("runLimits", () => {
   })
 })
 
+it("routes the devin backend through the uniform external limits loader", async () => {
+  const loadExternalLimits = jest.fn(async () => [snap("devin")])
+  const loadLimits = jest.fn(async () => [])
+  const d = deps({
+    config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "devin" },
+    presetId: "devin",
+    loadExternalLimits,
+    loadLimits,
+  })
+  runLimits(d)
+  await Promise.resolve()
+  expect(openedLimits(d.actions)).toMatchObject({ activeProvider: "devin", loading: true })
+  expect(loadExternalLimits).toHaveBeenCalledWith(
+    d.config,
+    NOW,
+    "devin",
+    "devin",
+    "agentLimits.unavailable"
+  )
+  expect(loadLimits).not.toHaveBeenCalled()
+  expect(loadedLimits(d.actions)?.snapshots).toEqual([snap("devin")])
+})
+
+it("passes the notConnected notice key when the codex app server is not connected", async () => {
+  const loadExternalLimits = jest.fn(async () => [])
+  const d = deps({
+    config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "codex-app-server" },
+    loadExternalLimits,
+  })
+  runLimits(d)
+  await Promise.resolve()
+  expect(loadExternalLimits).toHaveBeenCalledWith(
+    d.config,
+    NOW,
+    "codex",
+    "codex-app-server",
+    "codexLimits.notConnected"
+  )
+})
+
 it.each(["codex-acp", "pi", "opencode-server"])(
   "%s never queries Codex or configured credential providers",
   async (backend) => {
@@ -178,7 +218,7 @@ it.each(["codex-acp", "pi", "opencode-server"])(
       loadLimits,
     })
     runLimits(d)
-    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
     expect(loadCodexLimits).not.toHaveBeenCalled()
     expect(loadLimits).not.toHaveBeenCalled()
     expect(loadedLimits(d.actions)?.snapshots[0]).toMatchObject({
@@ -203,7 +243,7 @@ it("renders pushed native quotas for Claude and reports when none have arrived",
   expect(loadedLimits(d.actions)?.snapshots[0].meters[0].usedPct).toBe(42)
   const empty = deps({ config: d.config })
   runLimits(empty)
-  await Promise.resolve()
+  await new Promise((resolve) => setTimeout(resolve, 0))
   expect(loadedLimits(empty.actions)?.snapshots[0].notice).toContain("尚未")
 })
 

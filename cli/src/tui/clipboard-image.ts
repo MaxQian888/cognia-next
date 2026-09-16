@@ -184,3 +184,113 @@ export function readClipboardImage(
     }
   })
 }
+
+// ---------------------------------------------------------------------------
+// Presence probe
+//
+// `readClipboardImage` above answers "give me the image"; the probe answers
+// "is there an image" without writing a file, so a poll loop can run it every
+// couple of seconds without leaking temp PNGs. Each platform's command prints
+// "1"/"0" (macOS, Windows) or the clipboard's advertised MIME list (Linux).
+// ---------------------------------------------------------------------------
+
+/** Native image UTIs the macOS pasteboard advertises. */
+const MAC_IMAGE_UTI =
+  /^(public\.(png|tiff|jpeg|gif|webp|heic|heif|heics|bmp|pict|avif)|com\.(compuserve\.gif|apple\.pict)|NeXT TIFF)/i
+
+/** Extension check for clipboard *file* drops (an image path, not pixels). */
+const IMAGE_FILE_EXT = /\.(png|jpe?g|gif|webp|bmp|tiff?|heic|heif|heics|svg|avif)(\?|#|$)/i
+
+/**
+ * Command that reports whether the clipboard CURRENTLY holds an image —
+ * either image pixels or a file drop pointing at an image. Prints "1"/"0" on
+ * macOS/Windows; on Linux it prints the advertised type list for the caller
+ * to scan ({@link probeOutputHasImage}). Returns null on unsupported
+ * platforms. Exported for tests.
+ */
+export function clipboardImageProbeCommand(
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv = process.env
+): ClipboardImageCmd | null {
+  if (platform === "win32") {
+    const script =
+      "Add-Type -AssemblyName System.Windows.Forms; " +
+      "$c=[System.Windows.Forms.Clipboard]; " +
+      "if($c.ContainsImage()){ '1' } " +
+      "elseif($c.ContainsFileDropList() -and " +
+      "@($c.GetFileDropList() | Where-Object { $_ -match '\\.(png|jpe?g|gif|webp|bmp|tiff?|heic|heif|heics|svg|avif)$' }).Count -gt 0){ '1' } " +
+      "else { '0' }"
+    return {
+      cmd: "powershell",
+      args: ["-NoProfile", "-NonInteractive", "-STA", "-Command", script],
+    }
+  }
+  if (platform === "darwin") {
+    // Optional argv[0] = a named pasteboard (tests). Same surface as the
+    // reader script, but it only inspects `types` — no decode, no file.
+    const script = `ObjC.import('AppKit');
+function run(argv) {
+  const board = argv[0] ? $.NSPasteboard.pasteboardWithName(argv[0]) : $.NSPasteboard.generalPasteboard;
+  const types = ObjC.deepUnwrap(board.types) || [];
+  const imageUti = ${String(MAC_IMAGE_UTI)};
+  const imageFile = ${String(IMAGE_FILE_EXT)};
+  for (const t of types) {
+    if (imageUti.test(String(t))) return '1';
+  }
+  const file = board.stringForType('public.file-url');
+  if (file && !file.isNil() && imageFile.test(String(ObjC.unwrap(file)))) return '1';
+  return '0';
+}`
+    return { cmd: "osascript", args: ["-l", "JavaScript", "-e", script] }
+  }
+  if (platform === "linux") {
+    if (env.WAYLAND_DISPLAY) return { cmd: "wl-paste", args: ["--list-types"] }
+    return { cmd: "xclip", args: ["-selection", "clipboard", "-t", "TARGETS", "-o"] }
+  }
+  return null
+}
+
+/**
+ * Interpret a probe command's stdout: `true` when the clipboard advertises
+ * image content. Linux helpers list MIME types — any `image/*` line counts;
+ * Windows/macOS probes print a literal "1".
+ */
+export function probeOutputHasImage(platform: NodeJS.Platform, stdout: string): boolean {
+  if (platform === "linux") return /^image\//im.test(stdout)
+  return stdout.trim() === "1"
+}
+
+/** Options for {@link hasClipboardImage}; everything is injectable for tests. */
+export interface HasClipboardImageOpts {
+  platform?: NodeJS.Platform
+  env?: NodeJS.ProcessEnv
+  spawn?: Spawn
+}
+
+/**
+ * Check whether the system clipboard currently holds an image. Cheap and
+ * side-effect free — reads only the advertised type list, so it is safe to
+ * call on a poll loop. Returns false for unsupported platforms, missing
+ * helper tools, and helper failures (never throws).
+ */
+export function hasClipboardImage(opts: HasClipboardImageOpts = {}): Promise<boolean> {
+  const platform = opts.platform ?? process.platform
+  const spawn = opts.spawn ?? nodeSpawn
+  const command = clipboardImageProbeCommand(platform, opts.env)
+  if (!command) return Promise.resolve(false)
+  return new Promise<boolean>((resolve) => {
+    try {
+      const child = spawn(command.cmd, command.args, { stdio: ["ignore", "pipe", "ignore"] })
+      let out = ""
+      child.stdout?.on("data", (chunk: Buffer) => {
+        out += chunk.toString("utf8")
+      })
+      child.on("error", () => resolve(false))
+      child.on("close", (code) => {
+        resolve(code === 0 && probeOutputHasImage(platform, out))
+      })
+    } catch {
+      resolve(false)
+    }
+  })
+}

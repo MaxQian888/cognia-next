@@ -348,6 +348,7 @@
     "find": "Find in transcript",
     "historySearch": "Search composer history",
     "pasteImage": "Paste image from clipboard",
+    "attachmentsPanel": "Manage image attachments",
     "workflowInspect": "Inspect workflow step",
     "lineHome": "Move to line start",
     "lineEnd": "Move to line end",

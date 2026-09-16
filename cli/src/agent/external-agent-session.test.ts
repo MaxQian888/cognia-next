@@ -1027,6 +1027,197 @@ describe("createExternalAgentSession", () => {
     })
   })
 
+  describe("thinking levels", () => {
+    const newSession = (manager: ReturnType<typeof fakeManager>["manager"]) =>
+      createExternalAgentSession({
+        disableToolHost: true,
+        config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "devin" },
+        sessionId: "cli-session",
+        manager,
+        transcriptFs: memoryTranscript().fs,
+      })
+
+    // A Devin `swe-2-*`-shaped surface: three rungs, no `low`/`xhigh` in between.
+    const sweThoughtOption = (current: string) => ({
+      id: "devin.thought_level",
+      name: "Thinking",
+      category: "thought_level",
+      type: "select" as const,
+      currentValue: current,
+      options: [
+        { value: "medium", name: "medium" },
+        { value: "high", name: "high" },
+        { value: "max", name: "max" },
+      ],
+    })
+
+    it("offers only the rungs the live session's model publishes", async () => {
+      const { manager } = fakeManager()
+      ;(manager.getConfigOptions as jest.Mock).mockReturnValue({
+        status: "ok",
+        data: [sweThoughtOption("max")],
+      })
+      const session = newSession(manager)
+      await session.send("go", { gate: async () => ({ decision: "allow" }) })
+
+      await expect(session.listThinkingLevels?.()).resolves.toEqual(["medium", "high", "max"])
+    })
+
+    it("answers [] — a real no-axis — when the session publishes no thought_level", async () => {
+      const { manager } = fakeManager()
+      ;(manager.getConfigOptions as jest.Mock).mockReturnValue({
+        status: "ok",
+        data: [
+          {
+            id: "mode",
+            name: "Mode",
+            category: "mode",
+            type: "select" as const,
+            currentValue: "code",
+            options: [{ value: "code", name: "Code" }],
+          },
+        ],
+      })
+      const session = newSession(manager)
+      await session.send("go", { gate: async () => ({ decision: "allow" }) })
+
+      await expect(session.listThinkingLevels?.()).resolves.toEqual([])
+    })
+
+    it("creates and retains the real ACP session when the ladder is asked before the first turn", async () => {
+      const { manager } = fakeManager()
+      const createSession = jest.fn(async () => ({ id: "acp-think-probe" }))
+      manager.createSession = createSession
+      ;(manager.getConfigOptions as jest.Mock).mockReturnValue({
+        status: "ok",
+        data: [sweThoughtOption("max")],
+      })
+      const session = newSession(manager)
+
+      await expect(session.listThinkingLevels?.()).resolves.toEqual(["medium", "high", "max"])
+      expect(createSession).toHaveBeenCalledWith(
+        "cli-external-cli-session",
+        expect.objectContaining({ cwd: "/work" })
+      )
+      // The probe session is the conversation's real one — a later turn reuses it.
+      await session.send("go", { gate: async () => ({ decision: "allow" }) })
+      expect(manager.execute).toHaveBeenCalledWith(
+        "cli-external-cli-session",
+        expect.any(String),
+        expect.objectContaining({ sessionId: "acp-think-probe" })
+      )
+    })
+
+    it("writes the pick through the session's thought_level option and tracks the landed model", async () => {
+      const { manager } = fakeManager()
+      ;(manager.getConfigOptions as jest.Mock).mockReturnValue({
+        status: "ok",
+        data: [sweThoughtOption("max")],
+      })
+      ;(manager.setConfigOption as jest.Mock).mockResolvedValue([
+        {
+          id: "model",
+          name: "Model",
+          category: "model",
+          type: "select" as const,
+          currentValue: "swe-2-high",
+          options: [
+            { value: "swe-2-max", name: "SWE-2 max" },
+            { value: "swe-2-high", name: "SWE-2 high" },
+          ],
+        },
+      ])
+      const session = newSession(manager)
+      await session.send("go", { gate: async () => ({ decision: "allow" }) })
+
+      await expect(session.setThinkingLevel?.("high")).resolves.toBe("swe-2-high")
+      expect(manager.setConfigOption).toHaveBeenCalledWith(
+        "cli-external-cli-session",
+        "acp-session-1",
+        "devin.thought_level",
+        "high"
+      )
+      // The landed variant becomes the requested model — otherwise the next
+      // turn would pin `swe-2-max` again and undo the pick.
+      await session.send("continue", { gate: async () => ({ decision: "allow" }) })
+      expect(manager.execute).toHaveBeenLastCalledWith(
+        expect.any(String),
+        expect.any(String),
+        expect.objectContaining({ model: "swe-2-high" })
+      )
+    })
+
+    it("folds an unsupported pick down onto the published ladder", async () => {
+      const { manager } = fakeManager()
+      ;(manager.getConfigOptions as jest.Mock).mockReturnValue({
+        status: "ok",
+        data: [sweThoughtOption("max")],
+      })
+      const session = newSession(manager)
+      await session.send("go", { gate: async () => ({ decision: "allow" }) })
+
+      // `xhigh` is not a swe-2-* rung — the write must carry `high`, not the
+      // app-level token the agent would silently clamp.
+      await session.setThinkingLevel?.("xhigh")
+      expect(manager.setConfigOption).toHaveBeenCalledWith(
+        expect.any(String),
+        "acp-session-1",
+        "devin.thought_level",
+        "high"
+      )
+    })
+
+    it("answers null on Codex app-server — its ladder is model-scoped, never a thread's", async () => {
+      // mockResolvedValueOnce, not spyOn+mockRestore: the module mock wraps the
+      // real impl in a jest.fn, and restoring a spy over a mock strips that
+      // impl for every later test.
+      jest
+        .mocked(externalPresets.resolvePreferredCodexExecutablePresetId)
+        .mockResolvedValueOnce("codex-app-server")
+      const { manager } = fakeManager()
+      const createSession = jest.fn(async () => ({ id: "never" }))
+      manager.createSession = createSession
+      const session = createExternalAgentSession({
+        disableToolHost: true,
+        config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "codex" },
+        sessionId: "cli-session",
+        manager,
+        transcriptFs: memoryTranscript().fs,
+      })
+      try {
+        await expect(session.listThinkingLevels?.()).resolves.toBeNull()
+        // Codex reads effort at registration — probing must not mint a thread.
+        expect(createSession).not.toHaveBeenCalled()
+      } finally {
+        await session.close()
+      }
+    })
+
+    it("writes nothing for `off`, for a missing axis, and before the first turn", async () => {
+      const { manager } = fakeManager()
+      ;(manager.getConfigOptions as jest.Mock).mockReturnValue({
+        status: "ok",
+        data: [sweThoughtOption("max")],
+      })
+      const session = newSession(manager)
+      // No session yet — nothing to write; the pick rides the next turn.
+      await expect(session.setThinkingLevel?.("high")).resolves.toBeUndefined()
+
+      await session.send("go", { gate: async () => ({ decision: "allow" }) })
+      // `off` forwards nothing — the model keeps whatever depth it already runs.
+      await expect(session.setThinkingLevel?.("off")).resolves.toBeUndefined()
+      expect(manager.setConfigOption).not.toHaveBeenCalled()
+
+      // No thought_level option → no write channel → nothing happens.
+      ;(manager.getConfigOptions as jest.Mock).mockReturnValue({
+        status: "ok",
+        data: [],
+      })
+      await expect(session.setThinkingLevel?.("high")).resolves.toBeUndefined()
+      expect(manager.setConfigOption).not.toHaveBeenCalled()
+    })
+  })
+
   it("rejects builtin/unknown backends and unsuccessful external results", async () => {
     expect(() =>
       createExternalAgentSession({
@@ -1509,6 +1700,49 @@ describe("external-agent turn bounds", () => {
       }
     }
   )
+
+  it.each([
+    ["low", "low"],
+    ["max", "max"],
+    ["ultracode", "xhigh"],
+  ] as const)(
+    "forwards %s effort on the shared metadata channel for non-Codex presets",
+    async (level, effort) => {
+      const { manager, getExecuteOptions } = fakeManager()
+      const session = createExternalAgentSession({
+        disableToolHost: true,
+        config: { ...baseConfig, agentBackend: "devin", thinkingLevel: level },
+        manager,
+        connection: { agentId: "connected-devin", presetId: "devin" },
+        transcriptFs: memoryTranscript().fs,
+      })
+      try {
+        await session.send("go", { gate: async () => ({ decision: "allow" }) })
+        // The manager resolves this against the agent's own thought_level
+        // option — which the Devin adapter synthesizes out of its model ids.
+        expect(getExecuteOptions()?.reasoningEffort).toBe(effort)
+      } finally {
+        await session.close()
+      }
+    }
+  )
+
+  it("forwards nothing for thinkingLevel off on a non-Codex preset", async () => {
+    const { manager, getExecuteOptions } = fakeManager()
+    const session = createExternalAgentSession({
+      disableToolHost: true,
+      config: { ...baseConfig, agentBackend: "devin", thinkingLevel: "off" },
+      manager,
+      connection: { agentId: "connected-devin", presetId: "devin" },
+      transcriptFs: memoryTranscript().fs,
+    })
+    try {
+      await session.send("go", { gate: async () => ({ decision: "allow" }) })
+      expect(getExecuteOptions()?.reasoningEffort).toBeUndefined()
+    } finally {
+      await session.close()
+    }
+  })
 
   it.each([false, true])(
     "resets Codex effort to its model default with precreated=%s",

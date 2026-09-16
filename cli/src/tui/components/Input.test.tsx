@@ -98,6 +98,8 @@ function Harness({
   onPopupOpenChange,
   vimEnabled,
   width,
+  keybindings,
+  clipboardImageReady,
 }: {
   onSubmit: (t: string) => void
   disabled?: boolean
@@ -110,6 +112,8 @@ function Harness({
   onPopupOpenChange?: (open: boolean) => void
   vimEnabled?: boolean
   width?: number
+  keybindings?: Record<string, string>
+  clipboardImageReady?: boolean
 }) {
   const [state, dispatch] = useReducer(tuiReducer, undefined, () => createInitialState(config, "s"))
   const ld = listDirProp ?? listDir
@@ -129,6 +133,8 @@ function Harness({
       onToggleSkill={onToggleSkill}
       onPopupOpenChange={onPopupOpenChange}
       vimEnabled={vimEnabled}
+      keybindings={keybindings}
+      clipboardImageReady={clipboardImageReady}
     />
   )
 }
@@ -961,9 +967,17 @@ describe("Input mouse selection and manual completion", () => {
 describe("image attachments in the composer", () => {
   let dir: string
   let image: string
+  let prevForceHyperlink: string | undefined
   beforeEach(() => {
     __resetInk()
     jest.mocked(openBrowser).mockClear()
+    // These tests assert on the composed TEXT ("before[Image 1]", "the real
+    // path is hidden"). On hyperlink-capable terminals the label is wrapped in
+    // an OSC-8 escape whose target embeds the file path — decoration these
+    // assertions are not about. Force hyperlinks off so the suite does not
+    // depend on the developer's terminal env (Ghostty/kitty/iTerm/…).
+    prevForceHyperlink = process.env.FORCE_HYPERLINK
+    process.env.FORCE_HYPERLINK = "0"
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-images-"))
     image = path.join(dir, "屏幕 shot.png")
     fs.writeFileSync(
@@ -974,7 +988,11 @@ describe("image attachments in the composer", () => {
       )
     )
   })
-  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }))
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true })
+    if (prevForceHyperlink === undefined) delete process.env.FORCE_HYPERLINK
+    else process.env.FORCE_HYPERLINK = prevForceHyperlink
+  })
 
   it("pastes at the cursor, numbers multiple images and sends their actual paths", () => {
     const onSubmit = jest.fn()
@@ -1040,6 +1058,40 @@ describe("image attachments in the composer", () => {
     expect(global).not.toHaveBeenCalledWith("[<0;8;12M", expect.anything())
     key("[<0;8;30M")
     expect(openBrowser).toHaveBeenCalledTimes(1)
+  })
+
+  it("advertises the configured paste chord while the clipboard holds an image", () => {
+    const { container } = render(<Harness onSubmit={jest.fn()} clipboardImageReady />)
+    expect(container.textContent).toContain("image in clipboard · Ctrl+V to paste")
+  })
+
+  it("renders a rebound paste chord in the hint", () => {
+    const { container } = render(
+      <Harness onSubmit={jest.fn()} clipboardImageReady keybindings={{ pasteImage: "ctrl+g" }} />
+    )
+    expect(container.textContent).toContain("Ctrl+G to paste")
+  })
+
+  it("counts pasted images and points at /images for management", () => {
+    const { container } = render(<Harness onSubmit={jest.fn()} />)
+    key(`"${image}"`)
+    expect(container.textContent).toContain("1 attached · /images to manage")
+    key(`"${image}"`)
+    expect(container.textContent).toContain("2 attached · /images to manage")
+  })
+
+  it("joins the clipboard hint with the attachment count", () => {
+    const { container } = render(<Harness onSubmit={jest.fn()} clipboardImageReady />)
+    key(`"${image}"`)
+    const text = container.textContent ?? ""
+    expect(text).toContain("image in clipboard · Ctrl+V to paste")
+    expect(text).toContain("1 attached · /images to manage")
+  })
+
+  it("hides both hints while the composer is disabled", () => {
+    const { container } = render(<Harness onSubmit={jest.fn()} disabled clipboardImageReady />)
+    expect(container.textContent ?? "").not.toContain("image in clipboard")
+    expect(container.textContent ?? "").not.toContain("to manage")
   })
 })
 

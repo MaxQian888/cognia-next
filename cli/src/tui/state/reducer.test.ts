@@ -231,6 +231,34 @@ describe("tuiReducer — startup", () => {
     expect(s.input.redo).toHaveLength(0)
   })
 
+  it("INPUT_REMOVE_IMAGES strips labels, joins the text, and stays undoable", () => {
+    let s = reduce(base(), {
+      type: "INPUT_ADD_IMAGES",
+      paths: ["/a.png", "/b.png"],
+    })
+    s = reduce(s, {
+      type: "INPUT_SET",
+      buffer: { lines: ["see [Image 1] and [Image 2]"], cursorRow: 0, cursorCol: 0 },
+    })
+    s = reduce(s, { type: "INPUT_REMOVE_IMAGES", labels: ["[Image 1]"] })
+    expect(s.input.buffer.lines).toEqual(["see and [Image 2]"])
+    // The paste map keeps the removed entry so undo can re-resolve the label.
+    expect(s.input.pastes["[Image 1]"]).toBe('@"/a.png"')
+    s = reduce(s, { type: "INPUT_UNDO" })
+    expect(s.input.buffer.lines).toEqual(["see [Image 1] and [Image 2]"])
+    s = reduce(s, { type: "INPUT_REDO" })
+    expect(s.input.buffer.lines).toEqual(["see and [Image 2]"])
+  })
+
+  it("INPUT_REMOVE_IMAGES is a no-op for unknown labels", () => {
+    let s = reduce(base(), { type: "INPUT_ADD_IMAGES", paths: ["/a.png"] })
+    const before = s
+    s = reduce(s, { type: "INPUT_REMOVE_IMAGES", labels: ["[Image 9]"] })
+    expect(s).toBe(before)
+    s = reduce(s, { type: "INPUT_REMOVE_IMAGES", labels: ["[Image 1]"] })
+    expect(s.input.buffer.lines).toEqual([""])
+  })
+
   it("SET_STATUS_BAR merges the patch into config.statusBar", () => {
     const a = reduce(base(), { type: "SET_STATUS_BAR", statusBar: { theme: "dim" } })
     expect(a.config.statusBar).toEqual({ theme: "dim" })
@@ -2336,6 +2364,45 @@ describe("tuiReducer", () => {
       { type: "TURN_COMMIT", result: r({ totalCostUsd: 0.4 }) }
     )
     expect(b.sessionTotals.costUsd).toBeCloseTo(0.4)
+  })
+
+  it("TURN_COMMIT backfills a missing durationMs onto streamed usage", () => {
+    // External adapters (codex, opencode, …) report done{tokenUsage} without a
+    // duration. The resolved result measured the same wall-clock window — the
+    // commit joins them so the tok/s readout and session-duration total work.
+    const r: RunAndCaptureResult = {
+      text: "x",
+      messageId: "m",
+      a2uiSurfaces: {},
+      a2uiSurfaceOrder: [],
+      usage: { inputTokens: 10, outputTokens: 5, durationMs: 4000 },
+    }
+    const s = reduce(
+      base(),
+      { type: "SET_USAGE", usage: { inputTokens: 10, outputTokens: 5 } },
+      { type: "TURN_COMMIT", result: r }
+    )
+    expect(s.usage).toEqual({ inputTokens: 10, outputTokens: 5, durationMs: 4000 })
+    expect(s.sessionTotals.durationMs).toBe(4000)
+  })
+
+  it("TURN_COMMIT never overwrites a streamed durationMs", () => {
+    const r: RunAndCaptureResult = {
+      text: "x",
+      messageId: "m",
+      a2uiSurfaces: {},
+      a2uiSurfaceOrder: [],
+      usage: { inputTokens: 10, outputTokens: 5, durationMs: 9999 },
+    }
+    const s = reduce(
+      base(),
+      { type: "SET_USAGE", usage: { inputTokens: 10, outputTokens: 5, durationMs: 4000 } },
+      { type: "TURN_COMMIT", result: r }
+    )
+    expect(s.usage?.durationMs).toBe(4000)
+    // The streamed SET_USAGE already added its duration once — adding the
+    // result's on top would double-count the same window.
+    expect(s.sessionTotals.durationMs).toBe(4000)
   })
 
   it("RESET clears usage, session totals, trend history and tool stats", () => {

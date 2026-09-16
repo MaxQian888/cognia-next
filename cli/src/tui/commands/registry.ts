@@ -171,6 +171,11 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
       if (!supportsFeature(caps, "thinking")) {
         return { kind: "notice", message: unsupportedFeatureMessage(caps, "thinking") }
       }
+      // An external agent's ladder lives in its live session — Devin derives it
+      // from the model's own effort variants, so `swe-2-*` offers three rungs
+      // where the built-in ladder has six. The App must ask the session before
+      // the slider can be seeded, the same reason `/model` is an effect.
+      if (caps && !caps.builtin) return { kind: "effortPicker" }
       return {
         kind: "openOverlay",
         // Seed the slider from the persisted level so it opens on the current pick.
@@ -279,6 +284,15 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
     },
   },
   {
+    name: "images",
+    aliases: ["attachments"],
+    description: "manage pasted image attachments",
+    category: "chat",
+    // The overlay carries no rows — AttachmentsPanel derives them live from
+    // `state.input` so removals and new pastes re-render the open panel.
+    handler: () => ({ kind: "openOverlay", overlay: { kind: "attachments" } }),
+  },
+  {
     name: "tools",
     description: "browse the built-in tool catalog",
     category: "system",
@@ -367,22 +381,11 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
     aliases: ["new"],
     description: "start a fresh session",
     category: "session",
-    // Destructive: confirm before wiping the conversation. The confirm overlay
-    // re-runs `/clear --yes`, which performs the actual reset (reuses the
-    // ConfirmOverlay that previously only `/init` used).
-    handler: (ctx) => {
-      if (ctx.args.trim() === "--yes") return { kind: "clear" }
-      return {
-        kind: "openOverlay",
-        overlay: {
-          kind: "confirm",
-          title: "Start a fresh session?",
-          body: "This archives the current conversation and starts a new one. It can't be undone.",
-          format: "text",
-          onConfirmCommand: "clear --yes",
-        },
-      }
-    },
+    // Not actually destructive: the transcript is appended per turn to
+    // ~/.cognia/sessions/<id>.jsonl, so the cleared session stays listed in
+    // /sessions and resumable via /resume. Matches Claude Code / Codex /
+    // Gemini `/clear` — reset immediately, no confirmation gate.
+    handler: () => ({ kind: "clear" }),
   },
   {
     name: "help",

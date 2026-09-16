@@ -2,6 +2,7 @@
 import {
   buildTerminalBlock,
   terminalStringWidth,
+  truncateTerminalSpans,
   wrapTerminalSpans,
   wrapTerminalText,
 } from "./terminal-block"
@@ -105,5 +106,61 @@ describe("TerminalBlock", () => {
     expect(
       buildTerminalBlock({ id: "file-1", text: "report", width: 40, target: "open:file-1" })
     ).toMatchObject({ id: "file-1", rowCount: 1, target: "open:file-1" })
+  })
+
+  it("keeps a background colour distinct from a same-styled neighbour", () => {
+    const lines = wrapTerminalSpans(
+      [
+        { text: "ab", style: "muted" as const },
+        { text: "cd", style: "muted" as const, background: "#112233" },
+        { text: "ef", style: "muted" as const },
+      ],
+      80
+    )
+    expect(lines[0].spans).toHaveLength(3)
+    expect(lines[0].spans[1].background).toBe("#112233")
+  })
+})
+
+describe("truncateTerminalSpans", () => {
+  it("returns the input untouched when it fits", () => {
+    const spans = [{ text: "abc", style: "plain" as const }]
+    expect(truncateTerminalSpans(spans, 10)).toEqual({ spans, truncated: false })
+  })
+
+  it("clips mid-span and keeps the part that fits", () => {
+    const { spans, truncated } = truncateTerminalSpans(
+      [
+        { text: "ab", style: "plain" as const },
+        { text: "cdef", style: "success" as const, bold: true },
+      ],
+      4
+    )
+    expect(truncated).toBe(true)
+    expect(spans).toEqual([
+      { text: "ab", style: "plain" },
+      { text: "cd", style: "success", bold: true },
+    ])
+  })
+
+  it("never splits a wide grapheme or exceeds the width", () => {
+    const { spans, truncated } = truncateTerminalSpans(
+      [{ text: "ab你好cd", style: "plain" as const }],
+      4
+    )
+    expect(truncated).toBe(true)
+    expect(spans.map((s) => s.text).join("")).toBe("ab你")
+    expect(terminalStringWidth(spans.map((s) => s.text).join(""))).toBeLessThanOrEqual(4)
+  })
+
+  it("drops a span entirely when its first grapheme does not fit", () => {
+    const { spans } = truncateTerminalSpans(
+      [
+        { text: "abc", style: "plain" as const },
+        { text: "def", style: "plain" as const },
+      ],
+      2
+    )
+    expect(spans).toEqual([{ text: "ab", style: "plain" }])
   })
 })

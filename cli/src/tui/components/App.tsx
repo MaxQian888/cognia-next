@@ -69,6 +69,7 @@ import { trustFolder as defaultTrustFolder } from "../../config/trusted-folders"
 import { listSessions, type ReadDir } from "./sessions-list"
 import { recomputeSubagentModelRows } from "../runtime/subagent-models-model"
 import { useAskUserOverlay } from "../hooks/use-ask-user-overlay"
+import { useClipboardImageMonitor } from "../hooks/use-clipboard-image-monitor"
 import { savePlan } from "../runtime/plan-store"
 import {
   planFileName,
@@ -165,11 +166,13 @@ import { collectProviderOptions } from "../commands/provider-options"
 import {
   DEFAULT_MOUSE_MODE,
   DEFAULT_SELECTION_MODE,
+  EFFORT_SLIDER_LEVELS,
   resolveGitWorkflowConfig,
   resolveRenderConfig,
   resolveNotices,
   type SubagentModelOverride,
 } from "../../config/schema"
+import { deriveEffortSliderState } from "../../config/thinking"
 import { VERSION } from "../../version"
 import {
   settingsSections,
@@ -434,6 +437,11 @@ export interface AppProps {
    * clipboard. Resolves the temp file path, or null when the clipboard holds no
    * image. */
   readClipboardImage?: () => Promise<{ path: string } | null>
+  /** Cheap "is there an image in the clipboard" check for the composer's
+   * paste hint; polled on a short interval while the chat is live. Deliberately
+   * NOT defaulted — only `mount.tsx` wires the real probe, so tests that render
+   * App directly never spawn clipboard helpers. */
+  probeClipboardImage?: () => Promise<boolean>
   /** Terminal capability snapshot that gates the fullscreen layout; defaults to
    * the live process (non-TTY ⇒ scrollback). Injected by tests to exercise the
    * fixed-region tree without a real TTY. */
@@ -528,6 +536,7 @@ export function App({
   mentionProviders: mentionProvidersProp,
   persistSkillEnabled,
   readClipboardImage = defaultReadClipboardImage,
+  probeClipboardImage,
   layoutCapability,
   screenOut,
   frames,
@@ -539,6 +548,7 @@ export function App({
   const [screenReader] = useState(config.screenReader ?? false)
   const { exit, suspendTerminal, waitUntilRenderFlush } = useApp()
   const externalModelRequestRef = useRef(0)
+  const effortRequestRef = useRef(0)
   const [state, reducerDispatch] = useReducer(tuiReducer, undefined, () =>
     createInitialState(config, sessionId, trusted, initialHistory)
   )
@@ -926,6 +936,14 @@ export function App({
   )
   const busy = isBusy(state)
   const overlayOpen = state.overlay.kind !== "none"
+  // Poll the OS clipboard so the composer can advertise the paste-image chord
+  // exactly when it would do something. Off while a modal owns input — the hint
+  // can't be acted on anyway — and entirely absent when no probe was wired
+  // (tests/embedders that render App directly).
+  const clipboardImageReady = useClipboardImageMonitor({
+    probe: probeClipboardImage,
+    active: state.phase === "chat" && !overlayOpen,
+  })
   const [interruptedBackgroundSubagents, setInterruptedBackgroundSubagents] = useState(0)
 
   // Session-enabled skill ids — drives the ●/○ badge in the `@` mention popup and
@@ -1487,6 +1505,72 @@ export function App({
     agent,
   ])
 
+  // Open the `/think` slider. The ladder it offers is not a constant: an
+  // external agent's session publishes the rungs its CURRENT model honours —
+  // Devin's `swe-2-*` family has three where the built-in ladder has six — so
+  // the overlay is seeded from the live surface, not the app-wide list.
+  const openEffortPicker = useCallback(() => {
+    const caps = state.backendCapabilities
+    if (caps && !caps.builtin) {
+      if (!supportsFeature(caps, "thinking")) {
+        dispatch({ type: "NOTICE", message: unsupportedFeatureMessage(caps, "thinking") })
+        return
+      }
+      const agentId = connectionRef.current?.agentId
+      if (!agentId) {
+        dispatch({ type: "NOTICE", message: "The agent is not connected yet." })
+        return
+      }
+      const requestId = ++effortRequestRef.current
+      const context = modelContextRef.current
+      const isCurrentRequest = () =>
+        effortRequestRef.current === requestId &&
+        modelContextRef.current === context &&
+        connectionRef.current?.agentId === agentId
+      void agent.listThinkingLevels().then(
+        (levels) => {
+          if (!isCurrentRequest()) return
+          // `[]` is a real answer — the session read fine and the model simply
+          // has no depth axis (Devin's `adaptive`, …): say so instead of
+          // opening a slider whose every rung is a silent no-op. `null` means
+          // the read never ran, where the generic ladder is the honest
+          // fallback rather than a claim of absence.
+          if (levels !== null && levels.length === 0) {
+            dispatch({
+              type: "NOTICE",
+              message: `${activeModel ?? "The current model"} does not offer thinking levels on ${caps.backend}.`,
+            })
+            return
+          }
+          const ladder = levels ?? EFFORT_SLIDER_LEVELS
+          dispatch({
+            type: "OVERLAY_OPEN",
+            overlay: {
+              kind: "effortSlider",
+              levels: [...ladder],
+              ...deriveEffortSliderState(state.config.thinkingLevel, ladder),
+            },
+          })
+        },
+        () => {
+          if (!isCurrentRequest()) return
+          dispatch({
+            type: "NOTICE",
+            message: `Could not read ${caps.backend}'s thinking levels.`,
+          })
+        }
+      )
+      return
+    }
+    dispatch({
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "effortSlider",
+        ...deriveEffortSliderState(state.config.thinkingLevel),
+      },
+    })
+  }, [state.backendCapabilities, state.config.thinkingLevel, activeModel, dispatch, agent])
+
   // When a plan-mode turn proposes a plan (the reducer captured it as
   // `lastPlan`), persist it to `~/.cognia/plans` and open the approval prompt —
   // the OpenCode `plan_exit` flow. The ref guards against re-firing for the same
@@ -1994,6 +2078,7 @@ export function App({
     hostSyncStatus,
     openSessions,
     openModelPicker,
+    openEffortPicker,
     resumeMostRecent,
     resumeSession,
     runBash,
@@ -2341,12 +2426,16 @@ export function App({
       if (!text.startsWith("/")) {
         // A message typed while a turn or a goal/loop run is in flight becomes a
         // `btw` steer: queued and delivered at the next turn boundary so it never
-        // interrupts the running turn.
-        if (busy || runtimeAbort.current !== null) {
+        // interrupts the running turn. `sendInFlight` is checked alongside the
+        // render-derived `busy` because a submit can land between the previous
+        // send's TURN_START dispatch and the repaint that would flag it busy —
+        // without the synchronous check that message would open a second
+        // concurrent turn instead of queueing.
+        if (busy || agent.sendInFlight() || runtimeAbort.current !== null) {
           dispatch({ type: "STEER_ENQUEUE", text })
           dispatch({
             type: "NOTICE",
-            message: "💬 Queued (btw) — will steer the run at the next turn boundary.",
+            message: "💬 Queued — will steer the run at the next turn boundary.",
           })
           return
         }
@@ -2804,6 +2893,7 @@ export function App({
     copyClipboard,
     runCommandLine,
     openModelPicker,
+    openEffortPicker,
     pasteClipboardImage,
     scrollReset,
     disarmBacktrack,
@@ -3036,6 +3126,7 @@ export function App({
                 dispatch={dispatch}
                 cursor={cursor}
                 overlayOpen={overlayOpen}
+                clipboardImageReady={clipboardImageReady}
                 columns={columns}
                 popupRows={popupRows}
                 composerRows={layoutBudget.composerRows}

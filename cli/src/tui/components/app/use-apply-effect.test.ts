@@ -65,6 +65,7 @@ function buildDeps(over: Partial<ApplyEffectDeps> = {}): ApplyEffectDeps {
     pushHandoff: jest.fn(),
     openSessions: jest.fn(),
     openModelPicker: jest.fn(),
+    openEffortPicker: jest.fn(),
     resumeMostRecent: jest.fn(),
     resumeSession: jest.fn(),
     runBash: jest.fn(),
@@ -136,6 +137,18 @@ describe("useApplyEffect", () => {
     const deps = buildDeps()
     run(deps)({ kind: "none" })
     expect(deps.dispatch).not.toHaveBeenCalled()
+  })
+
+  it("hands the effortPicker effect to the App-owned opener", () => {
+    // The slider's ladder may need a live-session read first (external agents
+    // publish per-model rungs), so the effect delegates rather than opening an
+    // overlay itself.
+    const deps = buildDeps()
+    run(deps)({ kind: "effortPicker" })
+    expect(deps.openEffortPicker).toHaveBeenCalled()
+    expect(deps.dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "OVERLAY_OPEN" })
+    )
   })
 
   describe("backend switch", () => {

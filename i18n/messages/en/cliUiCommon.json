@@ -31,6 +31,8 @@
   "copyFailed": "Couldn't copy the document to the clipboard.",
   "stopping": "stopping",
   "composerPlaceholder": "Ask, run /commands, @ files, or ! shell",
+  "clipboardImageReady": "image in clipboard · {key} to paste",
+  "imagesAttached": "{count} attached · /images to manage",
   "welcomeHint": "/settings to configure · /inspect to expand output · /help · @ files · ! shell",
   "contextUsage": "{percent}% ctx",
   "tokenUsage": "{count} tok",
@@ -140,6 +142,9 @@
     "spendingLimitReached": "Spending limit reached",
     "ordinaryUsageBlocked": "Ordinary usage blocked",
     "notConnected": "Codex app server is not connected"
+  },
+  "devinLimits": {
+    "noCredential": "No Devin credential found — run `devin auth login`, or set DEVIN_API_KEY."
   },
   "toolsBrowser": {
     "navigation": "↑/↓ select · ←/→ / PgUp/PgDn page · Enter details · Esc back",

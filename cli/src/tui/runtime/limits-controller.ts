@@ -8,8 +8,13 @@
  * analysis, and opens the themed `limits` bar panel. Never throws — a failed or
  * absent provider degrades to "no limit data" for that account.
  */
-import { agentStatusLimits, buildCliLimits, loadCodexLimits, nodeAuthedGet } from "./limits-data"
-import { createCliTranslator } from "../i18n"
+import {
+  agentStatusLimits,
+  buildCliLimits,
+  loadCodexLimits,
+  loadExternalAgentLimits,
+  nodeAuthedGet,
+} from "./limits-data"
 import { backendModelMetaTarget } from "./backend-identity"
 import { isBuiltinBackend } from "./backend-capabilities"
 import { analyzeSession } from "../format/usage-analysis"
@@ -35,6 +40,8 @@ export interface LimitsDeps {
   now?: () => number
   /** Limits-fetch seam (tests); defaults to the multi-provider CLI enumerator. */
   loadLimits?: (config: ResolvedConfig, now: number) => Promise<ProviderLimits[]>
+  /** External-backend limits seam (tests); defaults to the uniform enumerator. */
+  loadExternalLimits?: typeof loadExternalAgentLimits
 }
 
 // `buildCliLimits` is exhaustively guarded (every source.fetch is wrapped), so
@@ -85,7 +92,6 @@ export function runLimits(deps: LimitsDeps): void {
   const preset = deps.presetId ?? deps.config.agentBackend
   const nativeCodex = preset === "codex-app-server"
   const hasNativeLimits = deps.agentRateLimits && Object.keys(deps.agentRateLimits).length > 0
-  const t = createCliTranslator(deps.config.locale, "cliUiCommon")
   const load =
     nativeCodex && deps.backendAgentId
       ? (deps.loadCodexLimits ?? loadCodexLimits)(deps.backendAgentId, now, deps.config.locale)
@@ -94,16 +100,13 @@ export function runLimits(deps: LimitsDeps): void {
             agentStatusLimits(activeProvider, deps.agentRateLimits!, now, deps.config.locale)
           )
         : external
-          ? Promise.resolve([
-              {
-                provider: activeProvider,
-                accountId: activeProvider,
-                accountLabel: preset,
-                fetchedAt: now,
-                meters: [],
-                notice: t(nativeCodex ? "codexLimits.notConnected" : "agentLimits.unavailable"),
-              },
-            ])
+          ? (deps.loadExternalLimits ?? loadExternalAgentLimits)(
+              deps.config,
+              now,
+              activeProvider,
+              preset,
+              nativeCodex ? "codexLimits.notConnected" : "agentLimits.unavailable"
+            )
           : (deps.loadLimits ?? defaultLoad)(deps.config, now)
   void load
     .then((snapshots) => deps.dispatch({ type: "LIMITS_LOADED", requestId, snapshots }))

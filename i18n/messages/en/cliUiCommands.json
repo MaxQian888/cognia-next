@@ -71,6 +71,7 @@
     "retry": "re-send the last message",
     "transcript": "open the complete searchable transcript pager",
     "copy": "copy a reply, code block, tool result, or your last message",
+    "images": "manage pasted image attachments",
     "tools": "browse the built-in tool catalog",
     "cwd": "browse or change the working directory",
     "about": "show version and provider info",
@@ -307,7 +308,7 @@
   "helpTitle": "Help: /{command}",
   "aliases": "Aliases:",
   "usage": "Usage:",
-  "arguments": "Arguments",
+  "argsTitle": "Arguments",
   "subcommandsTitle": "Subcommands",
   "optional": "optional",
   "oneOf": "one of: {choices}",
@@ -421,6 +422,10 @@
   "inspectNavigation": "↑/↓ select · Enter view full output · Esc close",
   "inspectShell": "shell",
   "inspectSubagent": "subagent",
+  "imagesTitle": "Image attachments",
+  "imagesEmpty": "no image attachments — paste with the clipboard-image chord",
+  "imagesMissing": "missing",
+  "imagesFooter": "↑/↓ select · d remove · c clear all · Enter open · Esc close",
   "viewOutsideSkill": "File is outside the skill directory",
   "expandStatus_cancelled": "cancelled"
 }

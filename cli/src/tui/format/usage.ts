@@ -66,6 +66,15 @@ export function accumulateUsage(
   pricing?: Partial<ModelPricing>
 ): SessionTotals {
   const turnCost = turnCostUsd(usage, pricing)
+  const providerCost = usage.providerCost
+  const providerCosts =
+    providerCost && providerCost.currency
+      ? {
+          ...totals.providerCosts,
+          [providerCost.currency]:
+            (totals.providerCosts?.[providerCost.currency] ?? 0) + providerCost.amount,
+        }
+      : totals.providerCosts
   return {
     costUsd: totals.costUsd + turnCost,
     inputTokens: totals.inputTokens + (usage.inputTokens ?? 0),
@@ -73,6 +82,7 @@ export function accumulateUsage(
     cacheReadTokens: totals.cacheReadTokens + (usage.cacheReadInputTokens ?? 0),
     cacheCreationTokens: totals.cacheCreationTokens + (usage.cacheCreationInputTokens ?? 0),
     durationMs: totals.durationMs + (usage.durationMs ?? 0),
+    ...(providerCosts === undefined ? {} : { providerCosts }),
   }
 }
 
@@ -263,6 +273,24 @@ export function formatCostKnown(usd: number | undefined, known: boolean): string
   return "—"
 }
 
+/** Humanize a provider-denominated cost (Devin's ACU, plan credits, …). */
+export function formatProviderCost(amount: number, currency: string): string {
+  return `${Number(amount.toFixed(2))} ${currency}`
+}
+
+/**
+ * Session-cost display: USD when a dollar figure is known, otherwise the
+ * provider's own units ("1.2 ACU"), otherwise "—". Never relabels.
+ */
+export function formatSessionCost(totals: SessionTotals, known: boolean): string {
+  const usd = formatCostKnown(totals.costUsd, known)
+  if (usd !== "—") return usd
+  const parts = Object.entries(totals.providerCosts ?? {}).map(([currency, amount]) =>
+    formatProviderCost(amount, currency)
+  )
+  return parts.length > 0 ? parts.join(" + ") : "—"
+}
+
 export interface FooterModel {
   model: string
   provider: string
@@ -392,7 +420,7 @@ export function usagePanelRows(
           ]
         : []),
       { label: "Session tokens", value: formatTokens(totals.inputTokens + totals.outputTokens) },
-      { label: "Session cost", value: formatCostKnown(totals.costUsd, costKnown) },
+      { label: "Session cost", value: formatSessionCost(totals, costKnown) },
       {
         label: "Duration",
         value: totals.durationMs ? `${(totals.durationMs / 1000).toFixed(1)}s` : "—",
@@ -400,7 +428,15 @@ export function usagePanelRows(
     )
   } else {
     rows.push(
-      { label: "Cost", value: formatCostKnown(u.totalCostUsd, costKnown) },
+      {
+        label: "Cost",
+        value:
+          formatCostKnown(u.totalCostUsd, costKnown) !== "—"
+            ? formatCostKnown(u.totalCostUsd, costKnown)
+            : u.providerCost?.currency
+              ? formatProviderCost(u.providerCost.amount, u.providerCost.currency)
+              : "—",
+      },
       { label: "Duration", value: u.durationMs ? `${(u.durationMs / 1000).toFixed(1)}s` : "—" }
     )
   }
@@ -444,7 +480,12 @@ export function modelUsageRows(modelTotals: Record<string, SessionTotals>): Mode
           t.cacheReadTokens > 0 || t.cacheCreationTokens > 0
             ? `${Math.round(cache.hitRate * 100)}%`
             : "—",
-        cost: formatCost(t.costUsd),
+        cost:
+          t.costUsd > 0
+            ? formatCost(t.costUsd)
+            : Object.entries(t.providerCosts ?? {})
+                .map(([currency, amount]) => formatProviderCost(amount, currency))
+                .join(" + ") || formatCost(0),
         costUsd: t.costUsd,
         totalTokens: t.inputTokens + t.outputTokens + t.cacheReadTokens + t.cacheCreationTokens,
       }

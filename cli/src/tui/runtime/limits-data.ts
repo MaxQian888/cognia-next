@@ -8,7 +8,22 @@
  * Each configured provider with a credential is mapped to a `LimitsSourceContext`
  * and run through `resolveLimitsSources` (Anthropic windows, Codex windows, or a
  * credit-balance meter). The active provider's snapshot is pinned first.
+ *
+ * External agents join the same enumeration: `providerIdForPreset` links an
+ * agent preset to its subscription provider, and a provider-scoped credential
+ * resolver (`EXTERNAL_CREDENTIAL_PROVIDERS`) seeds a synthetic provider entry
+ * from the agent's own credential store (e.g. the Devin CLI's
+ * `credentials.toml`). Adding quota support for another external agent is
+ * data-only: a `providerIdForPreset` case, a credential resolver, and a limits
+ * source — no new branches in the controller.
  */
+import { readFile } from "node:fs/promises"
+import { homedir } from "node:os"
+import { join } from "node:path"
+
+import { parse as parseToml } from "smol-toml"
+
+import { providerIdForPreset } from "@/lib/ai/agent/external/preset-provider"
 import { resolveLimitsSources } from "@/lib/subscription/limits/registry"
 import { runCustomLimitsSources } from "@/lib/subscription/limits/custom/runner"
 import { balanceMeter, windowMeter } from "@/lib/subscription/limits/meters"
@@ -229,12 +244,14 @@ const DEFAULT_BASE_URLS: Record<string, string> = {
   stepfun: "https://api.stepfun.com/v1",
   glm: "https://api.z.ai",
   minimax: "https://api.minimaxi.com",
+  devin: "https://server.codeium.com",
 }
 
 /** Map a CLI provider id onto the vault `ProviderId` the windowed sources match. */
 export function mapCliProvider(id: string): ProviderId {
   if (id === "anthropic") return "anthropic"
   if (id === "openai" || id === "codex" || id === "chatgpt") return "codex"
+  if (id === "devin") return "devin"
   // Other providers resolve through the declarative catalog (Coding Plan window
   // sources like glm/minimax/kimi-coding) or the balance fallthrough, both of
   // which match on `providerKey`/`baseUrl` and ignore this field — "opencode" is
@@ -246,6 +263,8 @@ export interface CliLimitsDeps {
   config: ResolvedConfig
   now: number
   authedGet: (url: string, headers?: Record<string, string>) => Promise<string>
+  /** POST-capable seam for Connect-RPC sources; defaults to `nodeAuthedRequest`. */
+  authedRequest?: NonNullable<LimitsSourceContext["authedRequest"]>
   /** CLI active provider id (`config.provider`) — pinned first. */
   activeProvider?: string
 }
@@ -276,6 +295,7 @@ export async function buildCliLimits(deps: CliLimitsDeps): Promise<ProviderLimit
       baseUrl,
       providerKey,
       authedGet: deps.authedGet,
+      authedRequest: deps.authedRequest ?? nodeAuthedRequest,
       now: deps.now,
     }
 
@@ -341,4 +361,189 @@ export async function nodeAuthedGet(
 ): Promise<string> {
   const res = await fetch(url, { headers })
   return await res.text()
+}
+
+/** node-`fetch` counterpart of `subscription_authed_request` (status + body). */
+export async function nodeAuthedRequest(request: {
+  url: string
+  method?: "GET" | "POST"
+  headers?: Record<string, string>
+  body?: string
+  timeoutMs?: number
+}): Promise<{ status: number; body: string }> {
+  const res = await fetch(request.url, {
+    method: request.method ?? "GET",
+    headers: request.headers,
+    body: request.body,
+    signal: AbortSignal.timeout(request.timeoutMs ?? 15_000),
+  })
+  return { status: res.status, body: await res.text() }
+}
+
+// ---------------------------------------------------------------------------
+// External-agent credentials. An agent preset is linked to its subscription
+// provider via `providerIdForPreset`; a resolver here knows how to read that
+// provider's token out of the agent's own store (env first, native CLI files
+// as fallback) so the SAME source registry answers its quota. A resolver entry
+// + a limits source is the whole cost of supporting another agent.
+// ---------------------------------------------------------------------------
+
+/** A credential recovered from an external agent's own store. */
+export interface ExternalAgentCredential {
+  token: string
+  baseUrl?: string
+}
+
+export interface ExternalCredentialDeps {
+  env?: Record<string, string | undefined>
+  /** Override the credentials file path (tests). */
+  credentialsPath?: string
+  /** File-read seam (tests); returns `null` when the file is absent/unreadable. */
+  readFile?: (path: string) => Promise<string | null>
+}
+
+const DEVIN_CREDENTIALS_RELATIVE_PATH = ".local/share/devin/credentials.toml"
+
+const defaultReadFile = async (path: string): Promise<string | null> => {
+  try {
+    return await readFile(path, "utf8")
+  } catch {
+    return null
+  }
+}
+
+/** Extract the quota-relevant fields from Devin's `credentials.toml`. */
+export function parseDevinCredentialsToml(text: string): {
+  apiKey?: string
+  apiServerUrl?: string
+} {
+  try {
+    const parsed = parseToml(text) as Record<string, unknown>
+    const str = (v: unknown) => (typeof v === "string" && v.trim() ? v : undefined)
+    return {
+      apiKey: str(parsed.windsurf_api_key),
+      apiServerUrl: str(parsed.api_server_url),
+    }
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * Devin's quota credential: `DEVIN_API_KEY`/`DEVIN_TOKEN` (+ `DEVIN_BASE_URL`)
+ * from the environment first — the same keys the spawned `devin acp` process
+ * is fed — then the Devin CLI's own `credentials.toml` (`windsurf_api_key`,
+ * `api_server_url`). `null` when neither source yields a token.
+ */
+export async function resolveDevinCredential(
+  deps: ExternalCredentialDeps = {}
+): Promise<ExternalAgentCredential | null> {
+  const env = deps.env ?? process.env
+  let token = env.DEVIN_API_KEY?.trim() || env.DEVIN_TOKEN?.trim() || undefined
+  let baseUrl = env.DEVIN_BASE_URL?.trim() || undefined
+  if (!token || !baseUrl) {
+    const reader = deps.readFile ?? defaultReadFile
+    const path = deps.credentialsPath ?? join(homedir(), DEVIN_CREDENTIALS_RELATIVE_PATH)
+    const text = await reader(path)
+    if (text) {
+      const parsed = parseDevinCredentialsToml(text)
+      token ??= parsed.apiKey
+      baseUrl ??= parsed.apiServerUrl
+    }
+  }
+  if (!token) return null
+  return { token, baseUrl }
+}
+
+interface ExternalCredentialProvider {
+  /** Read the agent-linked provider's token out of its own credential store. */
+  resolve: (deps: ExternalCredentialDeps) => Promise<ExternalAgentCredential | null>
+  /** `cliUiCommon` notice key shown when no credential resolves. */
+  missingNoticeKey: string
+}
+
+/** Provider → its external-agent credential resolver. Extend per agent. */
+const EXTERNAL_CREDENTIAL_PROVIDERS: Record<string, ExternalCredentialProvider> = {
+  devin: { resolve: resolveDevinCredential, missingNoticeKey: "devinLimits.noCredential" },
+}
+
+const hasCredential = (p: { apiKey?: string; authToken?: string } | undefined) =>
+  Boolean(p?.authToken ?? p?.apiKey)
+
+/**
+ * Limits for an external-agent backend. The agent's linked subscription
+ * provider is queried through the SAME source registry as configured
+ * providers: when `config.providers` lacks an entry for it, the agent's own
+ * credential store seeds a synthetic one; when nothing resolves, the
+ * placeholder keeps the historical "unavailable" notice (or the agent's more
+ * specific `missingNoticeKey`). Configured providers are enumerated alongside
+ * so the panel still shows "all configured providers".
+ */
+export async function loadExternalAgentLimits(
+  config: ResolvedConfig,
+  now: number,
+  activeProvider: string,
+  preset: string | undefined,
+  /** `cliUiCommon` notice key for the placeholder when nothing was queried. */
+  emptyNoticeKey: string,
+  deps: {
+    authedGet?: CliLimitsDeps["authedGet"]
+    authedRequest?: CliLimitsDeps["authedRequest"]
+    credentialDeps?: ExternalCredentialDeps
+  } = {}
+): Promise<ProviderLimits[]> {
+  const t = createCliTranslator(config.locale, "cliUiCommon")
+  const providers: ResolvedConfig["providers"] = { ...config.providers }
+  const extras: ProviderLimits[] = []
+  let queried = false
+
+  const linked = providerIdForPreset(preset)
+  if (linked) {
+    if (hasCredential(providers[linked])) {
+      queried = true
+    } else {
+      const resolver = EXTERNAL_CREDENTIAL_PROVIDERS[linked]
+      const cred = resolver ? await resolver.resolve(deps.credentialDeps ?? {}) : null
+      if (cred) {
+        queried = true
+        providers[linked] = cred.baseUrl
+          ? { authToken: cred.token, baseURL: cred.baseUrl }
+          : { authToken: cred.token }
+      } else if (resolver) {
+        extras.push({
+          provider: linked,
+          accountId: linked,
+          accountLabel: preset,
+          fetchedAt: now,
+          meters: [],
+          notice: t(resolver.missingNoticeKey),
+        })
+      }
+    }
+  }
+
+  const results = await buildCliLimits({
+    config: { ...config, providers },
+    now,
+    authedGet: deps.authedGet ?? nodeAuthedGet,
+    authedRequest: deps.authedRequest,
+    activeProvider,
+  })
+  const snapshots = [...extras, ...results]
+  const sawData = snapshots.some((s) => s.meters.length > 0 || s.error || s.notice)
+  if (!sawData && !queried) {
+    // Nothing was queryable — keep the historical external-agent notice.
+    const placeholder = snapshots.find((s) => s.accountId === activeProvider)
+    if (placeholder) placeholder.notice = t(emptyNoticeKey)
+    else
+      snapshots.unshift({
+        provider: activeProvider,
+        accountId: activeProvider,
+        accountLabel: preset,
+        fetchedAt: now,
+        meters: [],
+        notice: t(emptyNoticeKey),
+      })
+  }
+  return snapshots
 }

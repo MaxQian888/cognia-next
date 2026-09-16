@@ -137,6 +137,19 @@ describe("askUserAnswerToValue", () => {
     expect(askUserAnswerToValue({ type: "string" }, answer())).toBeUndefined()
     expect(askUserAnswerToValue({ type: "string" }, answer({ text: "   " }))).toBeUndefined()
   })
+
+  /**
+   * Integer/number fields must answer with numbers — a string answer fails
+   * the response-side schema check and orphans the agent's pending call.
+   */
+  it("coerces numeric fields to numbers the schema validator accepts", () => {
+    expect(askUserAnswerToValue({ type: "integer" }, answer({ text: "42" }))).toBe(42)
+    expect(askUserAnswerToValue({ type: "number" }, answer({ text: "4.5" }))).toBe(4.5)
+    expect(askUserAnswerToValue({ type: "integer" }, answer({ selected: ["7"] }))).toBe(7)
+    expect(askUserAnswerToValue({ type: "integer" }, answer({ text: "4.5" }))).toBeUndefined()
+    expect(askUserAnswerToValue({ type: "number" }, answer({ text: "abc" }))).toBeUndefined()
+    expect(askUserAnswerToValue({ type: "integer", default: 3 }, answer())).toBe(3)
+  })
 })
 
 describe("answerElicitationThroughAskUser", () => {

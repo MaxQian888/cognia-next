@@ -87,6 +87,13 @@ describe("effortKeyToIndex", () => {
     expect(effortKeyToIndex("x")).toBeNull()
     expect(effortKeyToIndex("")).toBeNull()
   })
+
+  it("bounds digits by the caller's ladder, not the app's", () => {
+    // A three-rung external ladder (swe-2-*) accepts "3" but refuses "4".
+    const swe = ["low", "high", "max"] as const
+    expect(effortKeyToIndex("3", swe)).toBe(2)
+    expect(effortKeyToIndex("4", swe)).toBeNull()
+  })
 })
 
 describe("effortPositionLabel", () => {
@@ -102,6 +109,11 @@ describe("effortPositionLabel", () => {
     expect(effortPositionLabel(99, false)).toBe(
       `${EFFORT_SLIDER_LEVELS.length}/${EFFORT_SLIDER_LEVELS.length} · ultracode`
     )
+  })
+
+  it("counts against the caller's ladder", () => {
+    const swe = ["low", "high", "max"] as const
+    expect(effortPositionLabel(2, false, swe)).toBe("3/3 · max")
   })
 })
 
@@ -187,5 +199,11 @@ describe("effortScaleLabels", () => {
       else expect(start + Math.floor(level.length / 2)).toBe(marker)
       if (i > 0) expect(start).toBeGreaterThan(labels[i - 1].start + labels[i - 1].level.length)
     })
+  })
+
+  it("labels exactly the caller's rungs and no more", () => {
+    const swe = ["low", "high", "max"] as const
+    const labels = effortScaleLabels(60, swe)
+    expect(labels.map((l) => l.level)).toEqual(["low", "high", "max"])
   })
 })

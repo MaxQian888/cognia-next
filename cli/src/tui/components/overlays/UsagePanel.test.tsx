@@ -36,8 +36,8 @@ describe("UsagePanel", () => {
     const text = container.textContent ?? ""
     expect(text).toContain("Token trend")
     expect(text).toContain("/turn")
-    expect(text).toContain("Composition")
-    expect(text).toContain("reused")
+    expect(text).toContain("Turn composition")
+    expect(text).toContain("cached")
     expect(text).toContain("Top tools")
     expect(text).toContain("read ×12")
     expect(text).toContain("bash ×4 (1✗)")
@@ -98,9 +98,9 @@ describe("UsagePanel", () => {
     const text = container.textContent ?? ""
     expect(text).toContain("Session cache")
     expect(text).toContain("60% hit")
-    expect(text).toContain("300 reused")
-    expect(text).toContain("100 new")
-    expect(text).toContain("100 fresh")
+    expect(text).toContain("300 cached")
+    expect(text).toContain("100 cache write")
+    expect(text).toContain("100 input")
     expect(text).toContain("500 prompt")
   })
 
@@ -149,6 +149,38 @@ describe("UsagePanel", () => {
     expect(text).not.toContain("Cost trend")
     expect(text).not.toContain("Composition")
     expect(text).not.toContain("Top tools")
+  })
+
+  it("labels a cache-less turn's composition plainly instead of showing cache jargon", () => {
+    // No cache counters at all: the block reads as input/output and claims
+    // nothing about cache reuse the provider never reported.
+    const plain = render(
+      <UsagePanel
+        usage={{ inputTokens: 32_000, outputTokens: 111 }}
+        model="devin"
+        onClose={() => {}}
+      />
+    )
+    const text = plain.container.textContent ?? ""
+    expect(text).toContain("Turn composition")
+    expect(text).not.toContain("no cache reuse")
+    expect(text).toContain("input 32k")
+    expect(text).toContain("output 111")
+
+    // Counters reported at zero: "no cache reuse" is now a true claim.
+    const reportedZero = render(
+      <UsagePanel
+        usage={{
+          inputTokens: 32_000,
+          outputTokens: 111,
+          cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 0,
+        }}
+        model="devin"
+        onClose={() => {}}
+      />
+    )
+    expect(reportedZero.container.textContent).toContain("no cache reuse")
   })
 
   it("closes on Escape", () => {

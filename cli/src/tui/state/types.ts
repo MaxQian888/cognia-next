@@ -34,6 +34,7 @@ import type { SubagentModelRow } from "../runtime/subagent-models-model"
 import type { BackendCapabilities } from "../runtime/backend-capabilities"
 import type { BackendConnectFailure, BackendConnectStage } from "../runtime/backend-controller"
 import type { InstallMethod } from "../runtime/backend-install"
+import type { EffortTier } from "@/lib/ai/thinking-level"
 
 import type {
   ResolvedConfig,
@@ -315,6 +316,12 @@ export interface SessionTotals {
   cacheReadTokens: number
   cacheCreationTokens: number
   durationMs: number
+  /**
+   * Cumulative provider-reported costs keyed by the provider's own currency
+   * label (Devin reports `ACU`, plan credits report `CREDIT`). Kept out of
+   * `costUsd`, which stays USD-only — never converted or merged.
+   */
+  providerCosts?: Record<string, number>
 }
 
 /** Per-tool call/error tally for the usage panel's "top tools" breakdown. */
@@ -606,11 +613,14 @@ export type Overlay =
     }
   | { kind: "mode"; options: PermissionMode[]; index: number }
   // Reasoning-effort slider (replaces the old vertical `thinking` list). `off`
-  // mirrors the "use model default" checkbox; `index` points into the non-off
-  // levels (`EFFORT_SLIDER_LEVELS`). Seed values are derived from the persisted
-  // `thinkingLevel` via `deriveEffortSliderState`; the live state during editing
-  // lives in the `EffortSlider` component, not here.
-  | { kind: "effortSlider"; off: boolean; index: number }
+  // mirrors the "use model default" checkbox; `index` points into `levels`.
+  // `levels` is the ladder the ACTIVE model actually offers: absent ⇒ the full
+  // app ladder (built-in and unanswerable external surfaces); on a Devin
+  // session it is that model family's own rungs, so e.g. `swe-2-*` offers
+  // `medium | high | max` and nothing in between. Seed values are derived from
+  // the persisted `thinkingLevel` via `deriveEffortSliderState`; the live state
+  // during editing lives in the `EffortSlider` component, not here.
+  | { kind: "effortSlider"; off: boolean; index: number; levels?: EffortTier[] }
   // `/provider` switcher. `query` is the live typeahead filter (the shared
   // catalog runs to dozens of ids), and `index` points into the FILTERED view —
   // same contract as `model`, so navigation always tracks what's on screen.
@@ -810,6 +820,11 @@ export type Overlay =
   // live-output store by `liveId`; the title/task are the static identity). Esc
   // returns to the agents panel / chat.
   | { kind: "agentRun"; liveId: string; name: string; task: string }
+  // Image attachment manager (`/images`, attachments keybinding). Carries no
+  // rows: the panel derives them live from `state.input` (buffer labels + the
+  // paste map), so removals and new pastes re-render an open panel without a
+  // refresh action. Selection index lives in the component.
+  | { kind: "attachments" }
   // `/agents models` panel — assign a provider/model to each dispatchable
   // subagent. A controlled master list (cursor `index` in the overlay, like
   // `settings`): ←/→ cycles the model, `p` the provider, `r` resets to inherit;
@@ -843,7 +858,7 @@ export interface QuickActionRow {
 }
 
 /** How a {@link Overlay} `document` body should be rendered. */
-export type DocumentFormat = "markdown" | "text"
+export type DocumentFormat = "markdown" | "text" | "diff"
 
 // ── Input editor state ────────────────────────────────────────────────────────
 
@@ -1367,6 +1382,9 @@ export type TuiAction =
   | { type: "INPUT_HISTORY"; history: HistoryState }
   | { type: "INPUT_ADD_PASTE"; id: string; text: string }
   | { type: "INPUT_ADD_IMAGES"; paths: string[] }
+  /** Remove `[Image N]` placeholders (and one adjoining space) from the draft.
+   * Undoable: the paste map keeps its entries so an undo restores live labels. */
+  | { type: "INPUT_REMOVE_IMAGES"; labels: string[] }
   | { type: "INPUT_CLEAR" }
   | { type: "INPUT_PUSH_HISTORY"; entry: string }
   | { type: "INPUT_UNDO" }

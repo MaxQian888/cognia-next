@@ -271,6 +271,135 @@ describe("DocumentViewer", () => {
     fire("x")
   })
 
+  it("renders a diff body as a GitHub-style numbered patch", () => {
+    const patch = `diff --git a/f.ts b/f.ts\nindex 1111111..2222222 100644\n--- a/f.ts\n+++ b/f.ts\n@@ -1,2 +1,3 @@\n keep\n-old\n+new\n+more\n`
+    const { container } = render(
+      <DocumentViewer
+        title="f.ts"
+        body={patch}
+        format="diff"
+        lang="typescript"
+        onClose={() => {}}
+        viewportRows={16}
+      />
+    )
+    const text = container.textContent ?? ""
+    // Numbered gutters + signs replace the raw +/- dump, and the raw patch
+    // headers (index/---/+++) are folded away.
+    expect(text).toContain("@@ -1,2 +1,3 @@")
+    expect(text).toContain("- old")
+    expect(text).toContain("+ new")
+    expect(text).not.toContain("index 1111111")
+    expect(text).not.toContain("--- a/f.ts")
+    expect(text).toContain("hunk 1/1")
+    expect(text).toContain("s split view")
+  })
+
+  it("jumps between hunks with [ and ] and reports the hunk position", () => {
+    const hunks = Array.from(
+      { length: 6 },
+      (_, i) => `@@ -${i * 10},1 +${i * 10},1 @@\n-old${i}\n+new${i}\n`
+    ).join("")
+    const patch = `diff --git a/f.ts b/f.ts\n${hunks}`
+    const { container } = render(
+      <DocumentViewer
+        title="f.ts"
+        body={patch}
+        format="diff"
+        onClose={() => {}}
+        viewportRows={12}
+      />
+    )
+    expect(container.textContent).toContain("hunk 1/6")
+    fire("]")
+    expect(container.textContent).toContain("hunk 2/6")
+    fire("]")
+    fire("]")
+    fire("]")
+    fire("]")
+    expect(container.textContent).toContain("hunk 6/6")
+    expect(container.textContent).toContain("new5")
+    // Layout toggles re-anchor on the current hunk instead of losing position.
+    fire("s")
+    expect(container.textContent).toContain("hunk 6/6")
+    fire("s")
+    expect(container.textContent).toContain("hunk 6/6")
+    fire("[")
+    expect(container.textContent).toContain("hunk 5/6")
+    fire("[")
+    fire("[")
+    fire("[")
+    fire("[")
+    fire("[")
+    expect(container.textContent).toContain("hunk 1/6")
+  })
+
+  it("toggles between unified and split layouts on s", () => {
+    const patch = `diff --git a/f.ts b/f.ts\n@@ -1,2 +1,2 @@\n ctx\n-old code\n+new code\n`
+    const { container } = render(
+      <DocumentViewer
+        title="f.ts"
+        body={patch}
+        format="diff"
+        onClose={() => {}}
+        viewportRows={16}
+        columns={90}
+      />
+    )
+    expect(container.textContent).toContain("s split view")
+    expect(container.textContent).not.toContain("│")
+    fire("s")
+    expect(container.textContent).toContain("s unified view")
+    expect(container.textContent).toContain("│")
+    const text = container.textContent ?? ""
+    const paired = text.split("\n").find((line) => line.includes("old code"))
+    expect(paired).toContain("new code")
+    fire("s")
+    expect(container.textContent).not.toContain("│")
+  })
+
+  it("labels staged/unstaged sections inside one file body", () => {
+    const staged = `diff --git a/f.ts b/f.ts\n@@ -1 +1 @@\n-oldS\n+newS\n`
+    const unstaged = `diff --git a/f.ts b/f.ts\n@@ -1 +1 @@\n-oldU\n+newU\n`
+    const { container } = render(
+      <DocumentViewer
+        title="f.ts"
+        body={`${staged}\n${unstaged}`}
+        format="diff"
+        diffSections={[
+          { label: "staged", body: staged },
+          { label: "unstaged", body: unstaged },
+        ]}
+        onClose={() => {}}
+        viewportRows={20}
+      />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("staged")
+    expect(text).toContain("unstaged")
+  })
+
+  it("keeps the plain text rendering for diff bodies in screen-reader mode", () => {
+    const patch = `diff --git a/f.ts b/f.ts\n@@ -1 +1 @@\n-old\n+new\n`
+    const { container } = render(
+      <RenderPrefsProvider prefs={RENDER_DEFAULTS} screenReader>
+        <DocumentViewer
+          title="f.ts"
+          body={patch}
+          format="diff"
+          lang="diff"
+          onClose={() => {}}
+          viewportRows={16}
+        />
+      </RenderPrefsProvider>
+    )
+    const text = container.textContent ?? ""
+    // Raw patch lines stay verbatim for the reader — no gutters or hunk bars.
+    expect(text).toContain("@@ -1 +1 @@")
+    expect(text).toContain("-old")
+    expect(text).not.toContain("hunk 1/1")
+  })
+
   it("closes on Escape, q, and Enter", () => {
     const onClose = jest.fn()
     render(

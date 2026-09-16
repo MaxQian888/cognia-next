@@ -12,7 +12,6 @@ import { absoluteTopLeft } from "../../input/element-position"
 import { segmentAtColumn } from "../../format/status-bar-hit"
 import { footerSegmentCommand } from "../../format/footer-action"
 import { cyclePermissionMode } from "../../input/mode-cycle"
-import { deriveEffortSliderState } from "../../../config/thinking"
 import {
   LEADER_TIMEOUT_MS,
   resolveChordEvent,
@@ -92,6 +91,7 @@ export interface GlobalKeysDeps {
   copyClipboard: (text: string) => Promise<CopyResult>
   runCommandLine: (line: string) => void
   openModelPicker: () => void
+  openEffortPicker: () => void
   pasteClipboardImage: () => Promise<void>
   scrollReset: () => void
   disarmBacktrack: () => void
@@ -285,6 +285,7 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
         copyClipboard,
         runCommandLine,
         openModelPicker,
+        openEffortPicker,
         pasteClipboardImage,
         scrollReset,
         disarmBacktrack,
@@ -576,13 +577,9 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
                 } else if (id === "mode") {
                   runCommandLine(`/mode ${cyclePermissionMode(state.config.permissionMode)}`)
                 } else if (id === "thinking") {
-                  dispatch({
-                    type: "OVERLAY_OPEN",
-                    overlay: {
-                      kind: "effortSlider",
-                      ...deriveEffortSliderState(state.config.thinkingLevel),
-                    },
-                  })
+                  // Same entry contract as `/think`: on an external backend the
+                  // ladder is read from the live session first.
+                  openEffortPicker()
                 } else if (id) {
                   // The remaining segments (cwd/ctx/git/tokens/cost/cache/ratelimit)
                   // are a click-shortcut to the matching report command.
@@ -748,6 +745,12 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
       // through the attachment pipeline.
       if (chord === "pasteImage") {
         void pasteClipboardImage()
+        return
+      }
+      // Open the image-attachment manager — routed through `/images` so the
+      // command and the chord share one entry point.
+      if (chord === "attachmentsPanel") {
+        runCommandLine("/images")
         return
       }
       // Inspect the current step of a live `/workflow run` — input/output/logs/usage

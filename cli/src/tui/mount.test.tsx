@@ -179,6 +179,30 @@ describe("renderTui", () => {
     expect(typeof preEntered).toBe("boolean")
   })
 
+  it("injects the real clipboard-image probe for the composer hint", async () => {
+    // Only production mounting wires the probe — App tests that render the
+    // component directly leave it undefined and never spawn clipboard helpers.
+    let probe: unknown
+    const render = jest.fn(
+      (element: {
+        props: {
+          children: { props: { children: { props: { probeClipboardImage?: unknown } } } }
+        }
+      }) => {
+        probe = element.props.children.props.children.props.probeClipboardImage
+        return {
+          unmount: jest.fn(),
+          waitUntilExit: () => Promise.resolve(),
+          rerender: jest.fn(),
+          clear: jest.fn(),
+          cleanup: jest.fn(),
+        }
+      }
+    ) as never
+    await renderTui({ config, render })
+    expect(typeof probe).toBe("function")
+  })
+
   it("wraps the app in a crash boundary with a render-crash logger", async () => {
     let onCrash: unknown
     const render = jest.fn((element: { props: { children: { props: { onCrash?: unknown } } } }) => {

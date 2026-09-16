@@ -1,7 +1,11 @@
 import { settingsSections } from "../runtime/settings-sections"
 import { agentStatusLimits } from "../runtime/limits-data"
 import { backendModelMetaTarget } from "../runtime/backend-identity"
-import { createImagePaste, atomicImageEdit } from "../input/image-attachments"
+import {
+  createImagePaste,
+  atomicImageEdit,
+  removeImagePlaceholders,
+} from "../input/image-attachments"
 /**
  * The TUI reducer — the single source of truth for the chat app's screen state.
  *
@@ -945,6 +949,20 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
       // so a turn's tokens/cost are never counted twice.
       const fallbackUsage =
         !state.usageSeenThisTurn && action.result.usage ? action.result.usage : undefined
+      // Most external adapters emit done{tokenUsage} without a duration — the
+      // SET_USAGE that landed therefore can't feed the tok/s readout or the
+      // session-duration total. The resolved result measured the same
+      // wall-clock window, so backfill it (never overwriting a duration the
+      // stream did carry).
+      const missingDurationMs =
+        !fallbackUsage &&
+        state.usage?.durationMs === undefined &&
+        typeof action.result.usage?.durationMs === "number" &&
+        action.result.usage.durationMs > 0
+          ? action.result.usage.durationMs
+          : undefined
+      const turnModel =
+        resolveBackendModel(state.config, state.backendCapabilities?.presetId) ?? "default"
       return {
         ...state,
         cells: finalCells,
@@ -954,6 +972,24 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         turnStatus: "idle",
         lastPlan,
         lastCompletion: { kind: "turn", status: "done", label: "Response ready" },
+        ...(missingDurationMs !== undefined && state.usage
+          ? {
+              usage: { ...state.usage, durationMs: missingDurationMs },
+              sessionTotals: {
+                ...state.sessionTotals,
+                durationMs: state.sessionTotals.durationMs + missingDurationMs,
+              },
+              modelTotals: state.modelTotals[turnModel]
+                ? {
+                    ...state.modelTotals,
+                    [turnModel]: {
+                      ...state.modelTotals[turnModel],
+                      durationMs: state.modelTotals[turnModel].durationMs + missingDurationMs,
+                    },
+                  }
+                : state.modelTotals,
+            }
+          : {}),
         ...(fallbackUsage
           ? {
               usage: fallbackUsage,
@@ -964,7 +1000,7 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
               ),
               modelTotals: accumulateModelTotals(
                 state.modelTotals,
-                resolveBackendModel(state.config, state.backendCapabilities?.presetId) ?? "default",
+                turnModel,
                 fallbackUsage,
                 state.modelMeta?.pricing
               ),
@@ -1880,6 +1916,22 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         ...state,
         input: { ...state.input, pastes: { ...state.input.pastes, [action.id]: action.text } },
       }
+    case "INPUT_REMOVE_IMAGES": {
+      const prev = state.input.buffer
+      const next = removeImagePlaceholders(prev, action.labels, state.input.pastes)
+      if (!next) return state
+      return {
+        ...state,
+        input: {
+          ...state.input,
+          buffer: next,
+          // Keep `pastes` untouched: undo restores the previous buffer and the
+          // labels it brings back still resolve through the same entries.
+          undo: pushBounded(state.input.undo, prev),
+          redo: [],
+        },
+      }
+    }
     case "INPUT_CLEAR":
       // Clear the live draft (after a popup accept or turn start) but preserve
       // the accumulated composer history so ↑ keeps recalling past lines.

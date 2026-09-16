@@ -5,6 +5,7 @@
  * Ink render. The component imports these and only does the drawing.
  */
 import { EFFORT_SLIDER_LEVELS, type ThinkingLevel } from "../../config/schema"
+import type { EffortTier } from "@/lib/ai/thinking-level"
 
 /** One-line description of what each tier does, keyed by level. */
 export const EFFORT_LEVEL_DESCRIPTIONS: Record<Exclude<ThinkingLevel, "off">, string> = {
@@ -45,10 +46,15 @@ export function effortGaugeWidth(width: number | undefined): number {
 }
 
 /** Label starts anchored to the same terminal cells as the gauge markers.
- * Endpoint labels stay inside the track; interior labels are centered. */
-export function effortScaleLabels(cells: number) {
-  return EFFORT_SLIDER_LEVELS.map((level, index) => {
-    const marker = effortGaugeCells(index, EFFORT_SLIDER_LEVELS.length - 1, cells).indexOf("marker")
+ * Endpoint labels stay inside the track; interior labels are centered. The
+ * `levels` ladder is the caller's — an external session offers only the rungs
+ * its model publishes (Devin's `swe-2-*` has three, not six). */
+export function effortScaleLabels(
+  cells: number,
+  levels: readonly EffortTier[] = EFFORT_SLIDER_LEVELS
+) {
+  return levels.map((level, index) => {
+    const marker = effortGaugeCells(index, levels.length - 1, cells).indexOf("marker")
     return {
       level,
       start: Math.max(0, Math.min(cells - level.length, marker - Math.floor(level.length / 2))),
@@ -80,18 +86,25 @@ export function effortGaugeCells(index: number, last: number, cells: number): Ga
  * the caller's own handling — `0` toggles "off"). 1-based so the labels read
  * naturally ("press 4 for xhigh").
  */
-export function effortKeyToIndex(input: string): number | null {
+export function effortKeyToIndex(
+  input: string,
+  levels: readonly EffortTier[] = EFFORT_SLIDER_LEVELS
+): number | null {
   if (!/^[1-9]$/.test(input)) return null
   const n = Number(input) - 1
-  return n < EFFORT_SLIDER_LEVELS.length ? n : null
+  return n < levels.length ? n : null
 }
 
 /** Position readout for the compact layout: `4/6 · xhigh`. */
-export function effortPositionLabel(index: number, off: boolean): string {
+export function effortPositionLabel(
+  index: number,
+  off: boolean,
+  levels: readonly EffortTier[] = EFFORT_SLIDER_LEVELS
+): string {
   if (off) return "off · model default"
-  const total = EFFORT_SLIDER_LEVELS.length
+  const total = levels.length
   const i = Math.min(Math.max(index, 0), total - 1)
-  return `${i + 1}/${total} · ${EFFORT_SLIDER_LEVELS[i]}`
+  return `${i + 1}/${total} · ${levels[i]}`
 }
 
 /**

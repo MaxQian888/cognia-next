@@ -23,6 +23,7 @@ const METER_LABELS: Record<string, string> = {
   weekly: "Current week (all models)",
   weekly_sonnet: "Current week (Sonnet only)",
   credit: "Credit balance",
+  overage: "Overage balance",
 }
 
 export function meterLabel(m: LimitsMeter): string {
