@@ -66,13 +66,21 @@ describe("restoreSnapshot", () => {
     expect(goals.rows).toEqual([{ id: "g" }])
   })
 
-  it("refuses to restore a snapshot from a different schema version", async () => {
+  it("restores an older snapshot as an ordinary forward move", async () => {
+    const goals = new FakeTable("goals", [{ id: "seed" }])
+    const db = fakeDb([goals], 82)
+
+    await restoreSnapshot(db, { version: 81, tables: { goals: [{ id: "old" }] } })
+    expect(goals.rows).toEqual([{ id: "old" }])
+  })
+
+  it("refuses to restore a snapshot written by a newer schema version", async () => {
     const goals = new FakeTable("goals", [{ id: "seed" }])
     const db = fakeDb([goals], 82)
 
     await expect(
-      restoreSnapshot(db, { version: 81, tables: { goals: [{ id: "old" }] } })
-    ).rejects.toThrow("schema version 81 does not match database schema version 82")
+      restoreSnapshot(db, { version: 83, tables: { goals: [{ id: "old" }] } })
+    ).rejects.toThrow("schema version 83 is newer than database schema version 82")
     expect(goals.rows).toEqual([{ id: "seed" }])
   })
 })
@@ -168,7 +176,7 @@ describe("restoreMultiSnapshot", () => {
     await expect(
       restoreMultiSnapshot([{ name: "CogniaSchedulerDB", db: fakeDb([tasks], 2) }], {
         snapshotFormat: 2,
-        dbs: { CogniaSchedulerDB: { version: 1, tables: { tasks: [] } } },
+        dbs: { CogniaSchedulerDB: { version: 3, tables: { tasks: [] } } },
       })
     ).rejects.toThrow("database CogniaSchedulerDB")
   })

@@ -179,24 +179,31 @@ describe("startDurability", () => {
       memoryUsage: () => ({ rss: 1 }) as NodeJS.MemoryUsage,
     } as unknown as Pick<NodeJS.Process, "on" | "off" | "memoryUsage">
 
+    let durability: Awaited<ReturnType<typeof startDurability>> | undefined
     try {
-      const durability = await startDurability({ home, accountId: "acct_signal", proc })
+      durability = await startDurability({ home, accountId: "acct_signal", proc })
       const manifestPath = path.join(home, "db-acct_signal.json.tables", "manifest.json")
 
-      // beforeExit flushes without tearing the handle down.
+      // beforeExit flushes without tearing the handle down. A full flush
+      // serializes every account-db table to disk (seconds, not ms), so await
+      // the flush chain itself rather than polling the file for a fixed window.
       listeners.get("beforeExit")!()
-      for (let attempt = 0; attempt < 40 && !fs.existsSync(manifestPath); attempt++) {
-        await new Promise((resolve) => setTimeout(resolve, 25))
-      }
+      await durability.db.flush()
       expect(fs.existsSync(manifestPath)).toBe(true)
       expect(durability.rss().lastFlushAt).toBeGreaterThan(0)
 
-      // SIGTERM disposes: final flush, then every hook detaches.
+      // SIGTERM disposes: final flush, then every hook detaches. The detach
+      // runs after the flush completes, so wait for it rather than a sleep.
       listeners.get("SIGTERM")!()
-      await new Promise((r) => setTimeout(r, 50))
+      for (let attempt = 0; attempt < 400 && listeners.has("SIGTERM"); attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 25))
+      }
       expect(listeners.has("SIGTERM")).toBe(false)
       expect(listeners.has("beforeExit")).toBe(false)
     } finally {
+      // Quiesce the handle before the home dir goes away: an in-flight flush
+      // writing into a deleted directory fails on the tmp→final rename.
+      await durability?.dispose().catch(() => {})
       __resetCliDbForTesting()
       fs.rmSync(home, { recursive: true, force: true })
     }
@@ -230,6 +237,7 @@ describe("startDurability", () => {
       updatedAt: now,
     }
 
+    let second: Awaited<ReturnType<typeof startDurability>> | undefined
     try {
       const first = await startDurability({ home, accountId: "acct_sched" })
       await schedulerDb.createTask(task as never)
@@ -270,7 +278,7 @@ describe("startDurability", () => {
       await db.scheduledTaskRuns.clear()
       __resetCliDbForTesting()
 
-      const second = await startDurability({ home, accountId: "acct_sched" })
+      second = await startDurability({ home, accountId: "acct_sched" })
       expect(await schedulerDb.getTask(task.id)).not.toBeNull()
       expect(await getDb().scheduledTaskRuns.count()).toBe(0)
       await second.dispose()
@@ -278,6 +286,9 @@ describe("startDurability", () => {
       await getDb()
         .scheduledTasks.clear()
         .catch(() => {})
+      // The clear() above schedules a debounced write into `home`; settle it
+      // through the still-open handle before removing the directory.
+      await second?.db.flush().catch(() => {})
       __resetCliDbForTesting()
       fs.rmSync(home, { recursive: true, force: true })
     }

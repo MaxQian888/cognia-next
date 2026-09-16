@@ -72,7 +72,7 @@ export class SnapshotVersionMismatchError extends Error {
 
   constructor(snapshotVersion: number, databaseVersion: number, databaseName?: string) {
     super(
-      `Snapshot schema version ${snapshotVersion} does not match database schema version ${databaseVersion}${
+      `Snapshot schema version ${snapshotVersion} is newer than database schema version ${databaseVersion}${
         databaseName ? ` (database ${databaseName})` : ""
       }.`
     )
@@ -118,7 +118,11 @@ export async function restoreSnapshot(
   snapshot: DbSnapshot,
   databaseName?: string
 ): Promise<void> {
-  if (snapshot.version !== db.verno) {
+  // A LOWER snapshot version is an ordinary forward move within the storage
+  // layout (same rule as `lib/db/storage-layout.ts`): restored rows go through
+  // the table middleware, so stamping happens on write. Only a snapshot written
+  // by a NEWER build is unsafe, because this build cannot know what changed.
+  if (snapshot.version > db.verno) {
     throw new SnapshotVersionMismatchError(snapshot.version, db.verno, databaseName)
   }
   for (const table of db.tables) {

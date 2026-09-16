@@ -21,6 +21,14 @@ import { createLogger } from "@/packages/logging/src/core"
 import { installFakeIndexedDb } from "@/lib/headless/node-indexeddb"
 
 import { resolveHome } from "../config/load"
+import { VERSION } from "../version"
+import {
+  acquireStoreLock,
+  readStoreLock,
+  releaseStoreLock,
+  startStoreLockHeartbeat,
+  type StoreLock,
+} from "./store-lock"
 import {
   parseMultiSnapshot,
   restoreMultiSnapshot,
@@ -72,6 +80,22 @@ export interface CliDbHandle {
   /** Resolves once globals are installed, the db is open + seeded, and any
    * snapshot has been restored. */
   ready: Promise<void>
+  /**
+   * Whether this process persists the store. `"writer"` holds the
+   * `${file}.lock` store lock (or runs an injected-seam store, which has no
+   * lock). `"read-only"` is a deliberate dormant mode (Working Rule 7): a
+   * follower restores the snapshot and serves reads, but `scheduleFlush`,
+   * `scheduleTableFlush` and `flush` are no-ops and it NEVER renames,
+   * quarantines, adopts, or deletes a file. Surfaced once via `log.warn`;
+   * pinned in `bootstrap.test.ts`.
+   */
+  readonly mode: "writer" | "read-only"
+  /**
+   * The store-lock holder when `mode` is `"read-only"` because another live
+   * process owns the store; `null` for a writer (or when the holder's lock
+   * record could not be parsed).
+   */
+  readonly heldBy: StoreLock | null
   /** Schedule a debounced persist (call after a mutation). */
   scheduleFlush(): void
   /** Schedule a debounced persist for one mutated database table. */
@@ -209,11 +233,26 @@ function nextPreservedPath(file: string, label: "corrupt" | "incompatible"): str
   return candidate
 }
 
+function formatStoreLockOwner(heldBy: StoreLock | null): string {
+  if (!heldBy) return "another cognia process"
+  return `cognia ${heldBy.cliVersion} (pid ${heldBy.pid} on ${heldBy.host}, started ${heldBy.startedAt})`
+}
+
 function preserveUnsafeSnapshot(
   file: string,
   label: "corrupt" | "incompatible",
-  problem: string
+  problem: string,
+  readOnlyOwner?: StoreLock | null
 ): CliDbSnapshotError {
+  if (readOnlyOwner !== undefined) {
+    // Read-only follower: the file belongs to the lock holder. Refuse without
+    // touching it — a follower never renames or quarantines.
+    return new CliDbSnapshotError(
+      `Database snapshot is ${problem}. The store at ${file} belongs to ${formatStoreLockOwner(readOnlyOwner)}; this process runs read-only, so the snapshot was left untouched.`,
+      file,
+      null
+    )
+  }
   const preservedPath = nextPreservedPath(file, label)
   try {
     fs.renameSync(file, preservedPath)
@@ -232,11 +271,12 @@ function preserveUnsafeSnapshot(
   }
 }
 
-function assertNoPendingSnapshotRecovery(file: string): void {
-  if (fs.existsSync(file) || !fs.existsSync(path.dirname(file))) return
+/** Preserved quarantine generations for `file`, newest first (mtime, then numeric suffix). */
+function preservedSnapshotGenerations(file: string): string[] {
+  if (fs.existsSync(file) || !fs.existsSync(path.dirname(file))) return []
   const name = path.basename(file)
   const directory = path.dirname(file)
-  const preserved = fs
+  return fs
     .readdirSync(directory)
     .filter((entry) =>
       ["corrupt", "incompatible"].some((label) => {
@@ -249,9 +289,13 @@ function assertNoPendingSnapshotRecovery(file: string): void {
         fs.statSync(path.join(directory, b)).mtimeMs -
           fs.statSync(path.join(directory, a)).mtimeMs ||
         b.localeCompare(a, undefined, { numeric: true })
-    )[0]
-  if (!preserved) return
-  const preservedPath = path.join(path.dirname(file), preserved)
+    )
+    .map((entry) => path.join(directory, entry))
+}
+
+function assertNoPendingSnapshotRecovery(file: string): void {
+  const preservedPath = preservedSnapshotGenerations(file)[0]
+  if (!preservedPath) return
   throw new CliDbSnapshotError(
     `Database snapshot requires recovery. A snapshot was preserved at ${preservedPath}; restore a compatible snapshot at ${file} before restarting. No data was overwritten.`,
     file,
@@ -259,9 +303,24 @@ function assertNoPendingSnapshotRecovery(file: string): void {
   )
 }
 
+interface TableStoreWriter {
+  pid: number
+  host: string
+  cliVersion: string
+  writtenAt: number
+}
+
 interface TableStoreManifest {
   snapshotFormat: 3
   dbs: Record<string, { version: number; tables: string[] }>
+  /** Diagnostics about the process that last flushed. Never load-bearing. */
+  writer?: TableStoreWriter
+}
+
+/** Human-readable writer provenance for error messages; empty when absent. */
+function describeWriter(writer: TableStoreWriter | undefined): string {
+  if (!writer) return ""
+  return `; written by cognia ${writer.cliVersion} pid ${writer.pid} on ${writer.host} at ${new Date(writer.writtenAt).toISOString()}`
 }
 
 function tableKey(databaseName: string, tableName: string): string {
@@ -317,28 +376,67 @@ function parseTableStoreManifest(text: string): TableStoreManifest | null {
       tables: [...(entry.tables as string[])],
     }
   }
-  return { snapshotFormat: 3, dbs }
+  // `writer` is diagnostics, not data: a malformed record is dropped, never a
+  // reason to refuse the store.
+  let writer: TableStoreWriter | undefined
+  if (root.writer && typeof root.writer === "object" && !Array.isArray(root.writer)) {
+    const candidate = root.writer as Record<string, unknown>
+    if (
+      typeof candidate.pid === "number" &&
+      typeof candidate.host === "string" &&
+      typeof candidate.cliVersion === "string" &&
+      typeof candidate.writtenAt === "number"
+    ) {
+      writer = {
+        pid: candidate.pid,
+        host: candidate.host,
+        cliVersion: candidate.cliVersion,
+        writtenAt: candidate.writtenAt,
+      }
+    }
+  }
+  return { snapshotFormat: 3, dbs, writer }
+}
+
+interface TableStoreRestore {
+  /** Tables whose snapshot rows were overlaid onto the live database. */
+  restored: Set<string>
+  /**
+   * Every included table of a source whose snapshot sat at a LOWER schema
+   * version — an ordinary forward move. The next flush must rewrite these
+   * table files and the manifest at the live version so the on-disk store
+   * converges instead of being re-adopted on every boot.
+   */
+  forwardMoved: Set<string>
 }
 
 async function restoreTableStore(
   sources: readonly SnapshotSource[],
   manifestFile: string,
-  tableDirectory: string
-): Promise<Set<string>> {
+  tableDirectory: string,
+  preserve: (label: "corrupt" | "incompatible", problem: string) => CliDbSnapshotError = (
+    label,
+    problem
+  ) => preserveUnsafeSnapshot(manifestFile, label, problem)
+): Promise<TableStoreRestore> {
   const rawManifest = fs.readFileSync(manifestFile, "utf8")
   const manifest = parseTableStoreManifest(rawManifest)
   if (!manifest) {
-    throw preserveUnsafeSnapshot(manifestFile, "corrupt", "corrupt (invalid table manifest)")
+    throw preserve("corrupt", "corrupt (invalid table manifest)")
   }
   const restored = new Set<string>()
+  const forwardMoved = new Set<string>()
   for (const source of sources) {
     const entry = manifest.dbs[source.name]
     if (!entry) continue
-    if (entry.version !== source.db.verno) {
-      throw preserveUnsafeSnapshot(
-        manifestFile,
+    // Same rule as `lib/db/storage-layout.ts`: a LOWER snapshot version is an
+    // ordinary forward move — restored rows go back through the table
+    // middleware, so stamping happens. Only a snapshot written by a NEWER
+    // build is unsafe to open.
+    if (entry.version > source.db.verno) {
+      throw preserve(
         "incompatible",
-        `incompatible: snapshot schema version ${entry.version} does not match database schema version ${source.db.verno} for database ${source.name}`
+        `incompatible: snapshot schema version ${entry.version} is newer than database schema version ${source.db.verno} for database ${source.name}; it was written by a newer build${describeWriter(manifest.writer)}`
       )
     }
     const tablesByName = new Map(source.db.tables.map((table) => [table.name, table]))
@@ -350,15 +448,13 @@ async function restoreTableStore(
       try {
         rows = JSON.parse(fs.readFileSync(tableFile, "utf8"))
       } catch {
-        throw preserveUnsafeSnapshot(
-          manifestFile,
+        throw preserve(
           "corrupt",
           `corrupt (missing or invalid table file for ${source.name}.${tableName})`
         )
       }
       if (!Array.isArray(rows)) {
-        throw preserveUnsafeSnapshot(
-          manifestFile,
+        throw preserve(
           "corrupt",
           `corrupt (table file for ${source.name}.${tableName} is not an array)`
         )
@@ -367,8 +463,13 @@ async function restoreTableStore(
       if (rows.length > 0) await table.bulkPut(rows)
       restored.add(tableKey(source.name, tableName))
     }
+    if (entry.version < source.db.verno) {
+      for (const tableName of includedTableNames(source)) {
+        forwardMoved.add(tableKey(source.name, tableName))
+      }
+    }
   }
-  return restored
+  return { restored, forwardMoved }
 }
 
 async function flushDirtyTables(
@@ -405,7 +506,16 @@ async function flushDirtyTables(
   }
   await writeSnapshotAtomicallyAsync(
     manifestFile,
-    JSON.stringify({ snapshotFormat: 3, dbs } satisfies TableStoreManifest)
+    JSON.stringify({
+      snapshotFormat: 3,
+      dbs,
+      writer: {
+        pid: process.pid,
+        host: os.hostname(),
+        cliVersion: VERSION,
+        writtenAt: Date.now(),
+      },
+    } satisfies TableStoreManifest)
   )
 }
 
@@ -492,15 +602,80 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
   const tableDirectory = `${file}.tables`
   const manifestFile = path.join(tableDirectory, "manifest.json")
 
+  // ── Single-writer store lock (production table store only) ────────────────
+  // Injected-seam stores keep their historical lock-free behaviour. A process
+  // that loses the race runs read-only: it restores the snapshot for reads but
+  // never mutates a file, so two concurrently running builds cannot fight over
+  // the manifest.
+  let mode: "writer" | "read-only" = "writer"
+  let heldBy: StoreLock | null = null
+  let storeLock: StoreLock | null = null
+  let stopLockHeartbeat: (() => void) | null = null
+  let lockLost = false
+  let readOnlyWarned = false
+
+  function releaseStoreLockIfHeld(): void {
+    stopLockHeartbeat?.()
+    stopLockHeartbeat = null
+    if (storeLock) {
+      releaseStoreLock(storeLock, file)
+      storeLock = null
+    }
+  }
+
+  if (useTableStore) {
+    const acquisition = acquireStoreLock(file)
+    if (acquisition.ok) {
+      storeLock = acquisition.lock
+      stopLockHeartbeat = startStoreLockHeartbeat(storeLock, file, {}, () => {
+        if (mode !== "writer") return
+        mode = "read-only"
+        lockLost = true
+        heldBy = readStoreLock(file)
+        // Never fight another writer: the rest of this handle's life is
+        // read-only, and this is the single surfaced notice.
+        log.error(
+          `Lost the database store lock at ${file}; this process switches to read-only and will not persist further database changes.`
+        )
+      })
+    } else {
+      mode = "read-only"
+      heldBy = acquisition.heldBy
+    }
+  }
+
+  function warnReadOnly(): void {
+    if (readOnlyWarned) return
+    readOnlyWarned = true
+    log.warn(
+      `${formatStoreLockOwner(heldBy)} owns ${file}; this process runs read-only and will not persist database changes. Set COGNIA_HOME to use a separate store.`
+    )
+  }
+
   let sources: readonly SnapshotSource[] = []
   let cancelTimer: (() => void) | null = null
   let disposed = false
   const dirtyTables = new Set<string>()
   let flushTail: Promise<void> = Promise.resolve()
 
+  function preserve(fileToPreserve: string) {
+    return (label: "corrupt" | "incompatible", problem: string) =>
+      preserveUnsafeSnapshot(
+        fileToPreserve,
+        label,
+        problem,
+        mode === "read-only" ? heldBy : undefined
+      )
+  }
+
   const ready = (async () => {
-    if (useTableStore) assertNoPendingSnapshotRecovery(manifestFile)
-    if (opts.readSnapshot === undefined && !(useTableStore && fs.existsSync(manifestFile))) {
+    if (useTableStore && mode === "read-only") {
+      // A follower never mutates the store, so there is no adoption to try:
+      // pending recovery still refuses the boot, exactly as it does for a
+      // writer, but nothing is renamed or deleted here.
+      assertNoPendingSnapshotRecovery(manifestFile)
+      if (!fs.existsSync(manifestFile)) assertNoPendingSnapshotRecovery(file)
+    } else if (!useTableStore) {
       assertNoPendingSnapshotRecovery(file)
     }
     await installGlobals()
@@ -510,36 +685,110 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
     // their `tables` are live before restore/serialize touch them, and so an
     // open failure surfaces here rather than inside the first debounced flush.
     for (const source of sources) await source.db.open?.()
-    if (useTableStore && fs.existsSync(manifestFile)) {
-      const manifest = parseTableStoreManifest(fs.readFileSync(manifestFile, "utf8"))
-      if (manifest) {
-        await prepareDynamicSchema(
-          sources,
-          Object.fromEntries(
-            Object.entries(manifest.dbs).map(([name, entry]) => [name, entry.version])
-          )
+
+    let dynamicSchemaPrepared = false
+    const prepareForManifest = async (manifest: TableStoreManifest) => {
+      if (dynamicSchemaPrepared) return
+      await prepareDynamicSchema(
+        sources,
+        Object.fromEntries(
+          Object.entries(manifest.dbs).map(([name, entry]) => [name, entry.version])
         )
+      )
+      dynamicSchemaPrepared = true
+    }
+
+    if (useTableStore && mode === "writer" && !fs.existsSync(manifestFile)) {
+      // The canonical manifest is gone but a quarantine generation remains.
+      // Before refusing forever, try to adopt the NEWEST generation — the
+      // only one that can be coherent with the shared table files.
+      const candidatePath = preservedSnapshotGenerations(manifestFile)[0]
+      if (candidatePath) {
+        const candidateText = fs.readFileSync(candidatePath, "utf8")
+        const candidate = parseTableStoreManifest(candidateText)
+        const writerSuffix = describeWriter(candidate?.writer)
+        const refuse = (reason: string): never => {
+          throw new CliDbSnapshotError(
+            `Database snapshot requires recovery. The newest preserved snapshot at ${candidatePath} ${reason}${writerSuffix}. Restore a compatible snapshot at ${manifestFile} before restarting. No data was overwritten.`,
+            manifestFile,
+            candidatePath
+          )
+        }
+        if (!candidate) {
+          refuse("is not a valid table manifest")
+        } else {
+          await prepareForManifest(candidate)
+          const tablesBySource = new Map(
+            sources.map(
+              (source) =>
+                [source.name, new Set(source.db.tables.map((table) => table.name))] as const
+            )
+          )
+          for (const source of sources) {
+            const entry = candidate.dbs[source.name]
+            if (!entry) continue
+            if (entry.version > source.db.verno) {
+              refuse(
+                `was written by a newer build (schema ${entry.version} > ${source.db.verno} for database ${source.name})`
+              )
+            }
+            const schemaTables = tablesBySource.get(source.name) ?? new Set<string>()
+            for (const tableName of entry.tables) {
+              if (!schemaTables.has(tableName)) continue
+              const tableFile = path.join(tableDirectory, tableFileName(source.name, tableName))
+              let readable = false
+              try {
+                readable = Array.isArray(JSON.parse(fs.readFileSync(tableFile, "utf8")))
+              } catch {
+                readable = false
+              }
+              if (!readable) {
+                refuse(`is missing a readable table file for ${source.name}.${tableName}`)
+              }
+            }
+          }
+          writeSnapshotAtomically(manifestFile, candidateText)
+          const primaryVersion = candidate.dbs[sources[0]?.name ?? ""]?.version
+          log.warn(
+            `Recovered database snapshot manifest from ${candidatePath} (schema ${primaryVersion ?? "?"} → ${sources[0]?.db.verno ?? "?"}).`
+          )
+          // It is the canonical manifest now; older generations are left alone.
+          fs.rmSync(candidatePath, { force: true })
+        }
+      }
+      if (!fs.existsSync(manifestFile)) {
+        // No usable generation: keep the legacy-file pending check, which a
+        // table-store manifest would have suppressed had one existed.
+        assertNoPendingSnapshotRecovery(file)
       }
     }
-    const restoredTableKeys =
-      useTableStore && fs.existsSync(manifestFile)
-        ? await restoreTableStore(sources, manifestFile, tableDirectory)
-        : null
-    if (!restoredTableKeys) {
+
+    let restore: TableStoreRestore | null = null
+    if (useTableStore && fs.existsSync(manifestFile)) {
+      const manifest = parseTableStoreManifest(fs.readFileSync(manifestFile, "utf8"))
+      if (manifest) await prepareForManifest(manifest)
+      restore = await restoreTableStore(
+        sources,
+        manifestFile,
+        tableDirectory,
+        preserve(manifestFile)
+      )
+    }
+    if (!restore) {
       const parsed = parseMultiSnapshot(read(file), sources[0]?.name ?? "CogniaDB")
       if (parsed.kind === "corrupt") {
-        throw preserveUnsafeSnapshot(file, "corrupt", `corrupt (${parsed.reason})`)
+        throw preserve(file)("corrupt", `corrupt (${parsed.reason})`)
       }
       if (parsed.kind === "valid") {
         try {
           await restoreMultiSnapshot(sources, parsed.snapshot)
         } catch (error) {
           if (error instanceof SnapshotVersionMismatchError) {
-            throw preserveUnsafeSnapshot(
-              file,
+            throw preserve(file)(
               "incompatible",
-              `incompatible: snapshot schema version ${error.snapshotVersion} does not match database schema version ${error.databaseVersion}` +
-                (error.databaseName ? ` for database ${error.databaseName}` : "")
+              `incompatible: snapshot schema version ${error.snapshotVersion} is newer than database schema version ${error.databaseVersion}` +
+                (error.databaseName ? ` for database ${error.databaseName}` : "") +
+                "; it was written by a newer build"
             )
           }
           throw error
@@ -550,11 +799,16 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
       for (const source of sources) {
         for (const tableName of includedTableNames(source)) {
           const key = tableKey(source.name, tableName)
-          if (!restoredTableKeys?.has(key)) dirtyTables.add(key)
+          if (!restore?.restored.has(key)) dirtyTables.add(key)
         }
       }
+      for (const key of restore?.forwardMoved ?? []) dirtyTables.add(key)
     }
   })()
+
+  // A boot that fails must not keep the store lock: the next process (or the
+  // repaired retry) would otherwise follow forever behind a dead writer.
+  void ready.catch(() => releaseStoreLockIfHeld())
 
   async function flushOnce(): Promise<void> {
     if (cancelTimer) {
@@ -562,6 +816,10 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
       cancelTimer = null
     }
     await ready
+    if (useTableStore && mode !== "writer") {
+      if (!lockLost) warnReadOnly()
+      return
+    }
     if (!useTableStore) {
       const snapshot = await serializeSources(sources)
       write(file, serializeSnapshot(snapshot))
@@ -588,11 +846,19 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
   }
 
   function scheduleFlush(): void {
+    if (useTableStore && mode !== "writer") {
+      if (!lockLost) warnReadOnly()
+      return
+    }
     if (useTableStore) markAllTablesDirty(sources, dirtyTables)
     scheduleDebouncedFlush()
   }
 
   function scheduleTableFlush(databaseName: string, tableName: string): void {
+    if (useTableStore && mode !== "writer") {
+      if (!lockLost) warnReadOnly()
+      return
+    }
     if (!useTableStore) {
       scheduleDebouncedFlush()
       return
@@ -622,9 +888,24 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
     if (disposed) return
     await flush()
     disposed = true
+    // Final flush has settled; release the store lock so a later process can
+    // take over as writer.
+    releaseStoreLockIfHeld()
   }
 
-  return { ready, scheduleFlush, scheduleTableFlush, flush, dispose }
+  return {
+    ready,
+    get mode() {
+      return mode
+    },
+    get heldBy() {
+      return heldBy
+    },
+    scheduleFlush,
+    scheduleTableFlush,
+    flush,
+    dispose,
+  }
 }
 
 /**
@@ -640,7 +921,17 @@ export async function ensureCliDb(opts: EnsureCliDbOptions = {}): Promise<CliDbH
   }
   const handle = create(opts)
   const wrapped: CliDbHandle = {
-    ...handle,
+    ready: handle.ready,
+    get mode() {
+      return handle.mode
+    },
+    get heldBy() {
+      return handle.heldBy
+    },
+    scheduleFlush: () => handle.scheduleFlush(),
+    scheduleTableFlush: (databaseName, tableName) =>
+      handle.scheduleTableFlush(databaseName, tableName),
+    flush: () => handle.flush(),
     dispose: async () => {
       await handle.dispose()
       if (cached === wrapped) cached = null
