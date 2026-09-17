@@ -13,6 +13,12 @@
 // Lives inside the FeaturePageHeader controls slot. Primary and page-level
 // actions are hosted by the header's fixed action tier so they remain visible
 // when this dense controls row scrolls horizontally.
+//
+// The active-filter chips + result count deliberately do NOT use the
+// toolbar's `status` line: appearing there resized the header band and
+// shifted all three panes (including the capability rail the user just
+// clicked). They render inside `PluginLibraryPane`'s list column instead —
+// see `plugin-library-status-bar.tsx`.
 
 import { useTranslations } from "next-intl"
 import { ArrowDownUpIcon, FilterIcon } from "lucide-react"
@@ -27,7 +33,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { PluginSectionToolbar, type PluginSectionToolbarProps } from "../plugin-section-toolbar"
-import { PluginActiveFilters } from "./plugin-active-filters"
 import { useLibrarySubFilterSegments } from "./plugin-library-sub-filter"
 import { PluginLibraryViewToggle } from "./plugin-library-view-toggle"
 
@@ -70,15 +75,11 @@ export function PluginLibraryHeader({ layout }: PluginLibraryHeaderProps = {}) {
   const setQuery = usePluginsStore((s) => s.setQuery)
   const setFilters = usePluginsStore((s) => s.setFilters)
   const setFilterSheetOpen = usePluginsStore((s) => s.setFilterSheetOpen)
-  const { all, filtered, totals, loading } = usePlugins()
+  const { all } = usePlugins()
   // Library's status axis rides the toolbar's segments slot — the same
   // control Governance's view picker uses, and no longer a second copy of
   // the left rail's old sub-items.
   const segments = useLibrarySubFilterSegments()
-  // Only surface the count when the visible set is narrower than the total
-  // (or when a search query is active). Hides on the unfiltered "All" view
-  // so the header stays tidy when there's nothing to communicate.
-  const showCount = !loading && totals.total > 0 && filtered.length !== totals.total
 
   return (
     <PluginSectionToolbar
@@ -123,23 +124,6 @@ export function PluginLibraryHeader({ layout }: PluginLibraryHeaderProps = {}) {
             </SelectContent>
           </Select>
           <PluginLibraryViewToggle />
-        </>
-      }
-      status={
-        <>
-          <PluginActiveFilters />
-          {showCount && (
-            <p
-              className="text-xs text-muted-foreground"
-              role="status"
-              aria-live="polite"
-              data-testid="plugin-library-result-count"
-            >
-              {filtered.length === 0
-                ? t("resultsCountEmpty", { total: totals.total })
-                : t("resultsCount", { count: filtered.length, total: totals.total })}
-            </p>
-          )}
         </>
       }
     />

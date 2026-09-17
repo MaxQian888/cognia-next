@@ -22,6 +22,7 @@ import { PLUGIN_RAIL_WIDTH_CLASS } from "../plugin-rail-width"
 import { PluginCategorySheet } from "../dialogs/plugin-category-sheet"
 import { PluginCategorySidebar } from "../plugin-category-sidebar"
 import { PluginLibraryList } from "./plugin-library-list"
+import { PluginLibraryStatusBar } from "./plugin-library-status-bar"
 
 export function PluginLibraryPane() {
   const t = useTranslations("plugins.panel")
@@ -53,6 +54,11 @@ export function PluginLibraryPane() {
         <div className="@xl/plugin-pane:hidden shrink-0 border-b px-2 py-1.5">
           <PluginCategorySheet />
         </div>
+        {/* Filter chips + result count. Inside the list column — NOT the
+            page header — so a filter change never resizes the header band
+            and shifts the rails (or the capability row just clicked) out
+            from under the cursor. */}
+        <PluginLibraryStatusBar />
         <div className="min-h-0 flex-1 overflow-y-auto">
           <PluginLibraryList />
         </div>

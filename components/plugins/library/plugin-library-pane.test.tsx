@@ -16,6 +16,10 @@ jest.mock("../dialogs/plugin-category-sheet", () => ({
   PluginCategorySheet: () => <div data-testid="plugin-category-sheet-stub" />,
 }))
 
+jest.mock("./plugin-library-status-bar", () => ({
+  PluginLibraryStatusBar: () => <div data-testid="plugin-library-status-bar-stub" />,
+}))
+
 import { PluginLibraryPane } from "./plugin-library-pane"
 import { PLUGIN_RAIL_WIDTH_CLASS } from "../plugin-rail-width"
 
@@ -62,6 +66,22 @@ describe("PluginLibraryPane", () => {
     expect(rail.className).toContain(PLUGIN_RAIL_WIDTH_CLASS)
     expect(rail.className).not.toMatch(/\bw-40\b/)
     expect(rail.className).not.toMatch(/\bw-52\b/)
+  })
+
+  // The filter/status strip lives inside the LIST column — between the sheet
+  // fallback and the scroller — so it can appear without resizing the page
+  // header or shifting the rails under the cursor.
+  it("mounts the status strip inside the list column, not at pane level", () => {
+    render(<PluginLibraryPane />)
+    const strip = screen.getByTestId("plugin-library-status-bar-stub")
+    const listColumn = screen
+      .getByTestId("plugin-library-list-stub")
+      .closest(".\\@container\\/plugin-list")
+    expect(listColumn).not.toBeNull()
+    expect(listColumn!.contains(strip)).toBe(true)
+    // And it sits above the scroller, so the chips stay put while rows scroll.
+    const scroller = screen.getByTestId("plugin-library-list-stub").parentElement!
+    expect(strip.compareDocumentPosition(scroller) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it("scopes the list body to its own container so cards/rows size to the pane", () => {
