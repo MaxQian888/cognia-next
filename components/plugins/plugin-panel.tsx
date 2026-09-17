@@ -37,6 +37,8 @@ import { toast } from "sonner"
 import { PlugIcon } from "lucide-react"
 
 import { PLUGIN_RAIL_WIDTH } from "./plugin-rail-width"
+import { PLUGIN_NAV_SECTIONS } from "./plugin-nav-config"
+import { Badge } from "@/components/ui/badge"
 
 // Dialog hosts — all driven by store targets, mounted once at the panel root.
 import { PluginBatchActionsBar } from "./plugin-batch-actions-bar"
@@ -257,6 +259,11 @@ function NewShellLayout({ onCheckUpdates, onSyncRegistry, syncing }: NewShellLay
   const tPage = useTranslations("plugins")
   const activeSection = usePluginsStore((s) => s.activeSection)
   const visibleSection = useVisiblePluginSection(activeSection)
+  // The active section rides beside the title as a badge (the `status` slot),
+  // not as `context` text after the description — a trailing "· Library" read
+  // as a stray fragment whenever the description truncated. The rail icon is
+  // mirrored so the badge and the selected nav row share one glyph.
+  const SectionIcon = PLUGIN_NAV_SECTIONS.find((item) => item.section === visibleSection)?.icon
 
   // Second header tier — one control vocabulary for every section. Each
   // section supplies its own segments/tools through `PluginSectionToolbar`
@@ -275,7 +282,16 @@ function NewShellLayout({ onCheckUpdates, onSyncRegistry, syncing }: NewShellLay
           icon={<PlugIcon />}
           title={tPage("title")}
           description={tPage("description")}
-          context={t(visibleSection)}
+          status={
+            <Badge
+              variant="secondary"
+              className="h-5 gap-1 px-1.5 text-[10px] font-normal"
+              data-testid="plugin-section-badge"
+            >
+              {SectionIcon ? <SectionIcon aria-hidden /> : null}
+              {t(visibleSection)}
+            </Badge>
+          }
           controls={controls}
           actions={
             visibleSection === "library" ? (

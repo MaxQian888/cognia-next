@@ -24722,7 +24722,7 @@
       "unresolved": "Unresolved",
       "warningsTitle": "{count} warnings"
     },
-    "description": "Browse, install, configure, and govern the plugins running inside Cognia. Inspect their permissions, scheduled jobs, analytics, and devtools — full marketplace search and installation flows are available here.",
+    "description": "Browse, install, and govern the plugins running inside Cognia.",
     "detail": {
       "activation": "Activation events",
       "capabilitiesTitle": "Capabilities",

@@ -146,6 +146,10 @@ describe("PluginPanelToolbar", () => {
     expect(screen.getByText("install")).toBeInTheDocument()
     expect(screen.getByText("checkUpdates")).toBeInTheDocument()
     expect(screen.getByText("syncRegistry")).toBeInTheDocument()
+    // One primary + two equal-weight secondaries: the sync button shares the
+    // outline variant with checkUpdates rather than dropping to ghost.
+    const sync = screen.getAllByRole("button").find((b) => b.textContent?.includes("syncRegistry"))!
+    expect(sync).toHaveAttribute("data-variant", "outline")
   })
 
   it("clicking checkUpdates invokes onCheckUpdates", () => {

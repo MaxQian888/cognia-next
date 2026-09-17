@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
 jest.mock("next-intl", () => ({
@@ -227,6 +227,22 @@ describe("PluginPanel (3-pane shell)", () => {
     usePluginsStore.setState({ activeSection: "discover" })
     render(<PluginPanel />)
     expect(screen.getByTestId("plugin-discover-pane")).toBeInTheDocument()
+  })
+
+  // The active section rides beside the title as a badge (`status` slot), not
+  // as `context` text after the description — a trailing "· Library" read as
+  // a stray fragment whenever the description truncated.
+  it("shows the active section as a badge inside the page header", () => {
+    render(<PluginPanel />)
+    const header = screen.getByTestId("shell-header")
+    expect(within(header).getByTestId("plugin-section-badge")).toHaveTextContent("library")
+  })
+
+  it("follows the active section when the section changes", () => {
+    usePluginsStore.setState({ activeSection: "governance" })
+    render(<PluginPanel />)
+    const header = screen.getByTestId("shell-header")
+    expect(within(header).getByTestId("plugin-section-badge")).toHaveTextContent("governance")
   })
 
   // Library / Discover / Governance are all 3-pane, so moving between them

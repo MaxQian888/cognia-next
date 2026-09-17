@@ -236,7 +236,7 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
         </Button>
         <Button
           size="sm"
-          variant="ghost"
+          variant="outline"
           onClick={() => void onSyncRegistry?.()}
           disabled={syncing || !onSyncRegistry}
           aria-label={t("syncRegistryAria")}
