@@ -1568,6 +1568,17 @@ export interface CodexAgentOptions {
   defaultReasoningEffort?: string
   /** Reasoning summary verbosity: "auto" | "concise" | "detailed" | "none". */
   reasoningSummary?: "auto" | "concise" | "detailed" | "none"
+  /**
+   * Sticky service tier for the thread (`serviceTier` on `thread/start`,
+   * `thread/resume`, `thread/fork`, `turn/start`; e.g. "fast" / "flex").
+   * Requires Codex CLI ≥ 0.151 — older servers omit the field.
+   */
+  serviceTier?: string
+  /**
+   * Client-supplied analytics source classification (`threadSource` on
+   * `thread/start` / `thread/fork`). Requires Codex CLI ≥ 0.151.
+   */
+  threadSource?: string
 }
 
 // ============================================================================
@@ -1874,6 +1885,7 @@ export type ExternalAgentEventType =
   | "elicitation_request"
   | "elicitation_complete"
   | "commentary_delta"
+  | "async_questions"
   | "thinking"
   | "plan_update"
   | "commands_update"
@@ -2085,6 +2097,41 @@ export interface ExternalAgentCommentaryDeltaEvent extends ExternalAgentEventBas
 }
 
 /**
+ * One non-blocking question an agent asked mid-turn (Codex
+ * `AsyncUserInputQuestion`: a `title` plus optional suggested `options`).
+ */
+export interface ExternalAgentAsyncQuestion {
+  /**
+   * Wire question id. Present only when the question backs a pending server
+   * request (`requestId` on the event) — it keys the answers map the RPC
+   * reply expects.
+   */
+  id?: string
+  title: string
+  options?: string[]
+  /** The answer is sensitive: mask it in the UI and never persist it. */
+  secret?: boolean
+}
+
+/**
+ * Non-blocking questions delivered on an agent message (Codex `delivery:
+ * "async"` items) or a `requestUserInput` server request flagged
+ * `isBlocking: false`. Unlike `elicitation_request` nothing blocks the turn —
+ * the user answers later. `text` carries the item's prose when it never
+ * streamed as deltas. `requestId`, when set, means the answer must resolve
+ * that pending request (structured `{answers}` reply) rather than arrive as
+ * an ordinary user message.
+ */
+export interface ExternalAgentAsyncQuestionsEvent extends ExternalAgentEventBase {
+  type: "async_questions"
+  messageId?: string
+  text?: string
+  questions: ExternalAgentAsyncQuestion[]
+  /** Pending server request these questions resolve — the adapter's waiter key. */
+  requestId?: string
+}
+
+/**
  * Plan update event
  */
 export interface ExternalAgentPlanUpdateEvent extends ExternalAgentEventBase {
@@ -2277,6 +2324,7 @@ export type ExternalAgentEvent =
   | ExternalAgentElicitationRequestEvent
   | ExternalAgentElicitationCompleteEvent
   | ExternalAgentCommentaryDeltaEvent
+  | ExternalAgentAsyncQuestionsEvent
   | ExternalAgentThinkingEvent
   | ExternalAgentPlanUpdateEvent
   | ExternalAgentCommandsUpdateEvent
@@ -2441,6 +2489,28 @@ export interface ExternalAgentExecutionOptions {
   onProgress?: (progress: number, message?: string) => void
   /** Abort signal */
   signal?: AbortSignal
+  /**
+   * One-turn service tier override (Codex `serviceTierForTurn` on `turn/start`;
+   * SDK `turn_service_tier`). Applies only when this request starts a new turn
+   * and never changes the thread's sticky tier. Requires Codex CLI ≥ 0.151 —
+   * older servers omit the field.
+   */
+  serviceTier?: string
+  /**
+   * Source classification for the caller starting this turn (Codex
+   * `turnTrigger`; ignored when the request steers an active turn). Requires
+   * Codex CLI ≥ 0.151.
+   */
+  turnTrigger?: string
+  /**
+   * Ephemeral context fragments keyed by an opaque source id (Codex
+   * `additionalContext` on `turn/start` / `turn/steer`). The map is the
+   * complete current set — omitted keys are dropped server-side. Entries are
+   * injected as hidden context items, never as visible user messages.
+   * `untrusted` rides the user role, `application` the developer role.
+   * Requires Codex CLI ≥ 0.151.
+   */
+  additionalContext?: Record<string, { kind: "untrusted" | "application"; value: string }>
   /** Agent trace context for event correlation */
   traceContext?: {
     sessionId?: string

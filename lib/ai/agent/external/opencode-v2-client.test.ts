@@ -5,9 +5,19 @@ import type {
 } from "@/types/agent/external-agent"
 
 jest.mock("@opencode/client", () => ({ OpenCode: { make: jest.fn() } }), { virtual: true })
-jest.mock("@/lib/claude/feature-call", () => ({ discoverOpenCodeV2ViaSidecar: jest.fn() }))
+jest.mock(
+  "@opencode/client/service",
+  () => ({ Service: { discover: jest.fn(), headers: jest.fn() } }),
+  { virtual: true }
+)
+jest.mock("@/lib/claude/feature-call", () => ({
+  discoverOpenCodeV2ViaSidecar: jest.fn(),
+  validateOpenCodeV2Discovery: jest.requireActual("@/lib/claude/feature-call")
+    .validateOpenCodeV2Discovery,
+}))
 jest.mock("@/lib/network/platform-streaming-fetch", () => ({ platformStreamingFetch: jest.fn() }))
 import { OpenCode } from "@opencode/client"
+import { Service } from "@opencode/client/service"
 import { platformStreamingFetch } from "@/lib/network/platform-streaming-fetch"
 import { discoverOpenCodeV2ViaSidecar } from "@/lib/claude/feature-call"
 import { OpenCodeV2ClientAdapter } from "./opencode-v2-client"
@@ -317,6 +327,35 @@ describe("current OpenCode V2 adapter", () => {
     client.server.status.mockResolvedValue({ version: "2.0.0-beta.1", pid: 12, urls: [] })
     await expect(adapter.connect(config)).rejects.toThrow(/current OpenCode V2/)
     expect(adapter.connectionStatus).toBe("error")
+  })
+
+  it("discovers the local service in-process when running as the CLI host", async () => {
+    ;(globalThis as Record<string, unknown>).__COGNIA_CLI__ = true
+    try {
+      jest.mocked(Service.discover).mockResolvedValue({
+        url: "http://127.0.0.1:5566",
+        auth: { type: "basic", username: "opencode", password: "pw" },
+      } as never)
+      jest.mocked(Service.headers).mockReturnValue({
+        authorization: "Basic b3BlbmNvZGU6cHc=",
+      } as never)
+      jest.mocked(platformStreamingFetch).mockResolvedValueOnce(
+        new Response(JSON.stringify({ version: "2.0.5", pid: 42, urls: [] }), {
+          status: 200,
+        })
+      )
+      await adapter.connect({ ...config, network: undefined })
+      expect(discoverOpenCodeV2ViaSidecar).not.toHaveBeenCalled()
+      expect(Service.discover).toHaveBeenCalledTimes(1)
+      expect(OpenCode.make).toHaveBeenCalledWith(
+        expect.objectContaining({
+          baseUrl: "http://127.0.0.1:5566",
+          headers: expect.objectContaining({ authorization: "Basic b3BlbmNvZGU6cHc=" }),
+        })
+      )
+    } finally {
+      delete (globalThis as Record<string, unknown>).__COGNIA_CLI__
+    }
   })
   afterEach(async () => {
     await adapter.disconnect().catch(() => undefined)

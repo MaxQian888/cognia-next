@@ -266,6 +266,8 @@ describe("resolveModelMeta", () => {
     const settings = {
       "plugin:code": {
         providerId: "plugin:code",
+        enabled: true,
+        defaultModel: "model",
         discoveredModels: [
           {
             id: "model",
@@ -308,7 +310,7 @@ describe("resolveModelMeta", () => {
         model: { id: "model", maxOutputTokens: 64000, supportsReasoning: true },
       },
       discoveredModels: [{ id: "model", maxOutputTokens: 8000, supportsReasoning: false }],
-    } as CustomProviderSettings
+    } as unknown as CustomProviderSettings
     expect(resolveModelMaxOutputTokens("model", "custom", {}, [custom])).toBe(64000)
     custom.subscription = {}
     expect(resolveModelMaxOutputTokens("model", "custom", {}, [custom])).toBe(8000)

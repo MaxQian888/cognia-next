@@ -37,7 +37,7 @@ function validateProperty(name: string, value: unknown): AcpElicitationPropertyS
           ? "array"
           : undefined
   if (type === undefined || !ALLOWED_PROPERTY_TYPES.has(type)) return undefined
-  const property = { ...value, type }
+  const property: Record<string, unknown> & { type: string } = { ...value, type }
   if (SECRET_FIELD.test(name) || property.format === "password" || property.writeOnly === true) {
     throw new Error("unsafe_secret")
   }

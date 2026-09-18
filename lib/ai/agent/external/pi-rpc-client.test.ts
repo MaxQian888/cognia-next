@@ -950,7 +950,7 @@ describe("PiRpcClientAdapter — sessions", () => {
     await iterator.return?.()
     await adapter.disconnect()
   })
-  it.each(["plan", "dontAsk"])(
+  it.each(["plan", "dontAsk"] as const)(
     "keeps projected tools visible under %s without allowing native writes",
     async (permissionMode) => {
       const host = createFakeHost()

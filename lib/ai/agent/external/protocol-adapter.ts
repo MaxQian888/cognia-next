@@ -389,6 +389,14 @@ export interface SessionCreateOptions {
   briefMode?: boolean
   /** Session timeout (ms) */
   timeout?: number
+  /**
+   * Whether resume/fork should hydrate session history into
+   * `ExternalAgentSession.messages` (default true). `false` maps to Codex's
+   * `excludeTurns` (SDK `include_turns`) — the thread keeps full model
+   * context; only the returned response carries no turns. Requires Codex CLI
+   * ≥ 0.151; ignored by adapters without a history-selection concept.
+   */
+  includeHistory?: boolean
   /** Session metadata */
   metadata?: Record<string, unknown>
 }

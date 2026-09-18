@@ -7,7 +7,12 @@ import type {
   PermissionRuleset,
 } from "@opencode/client"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
-import { discoverOpenCodeV2ViaSidecar } from "@/lib/claude/feature-call"
+import {
+  discoverOpenCodeV2ViaSidecar,
+  validateOpenCodeV2Discovery,
+  type OpenCodeV2Discovery,
+} from "@/lib/claude/feature-call"
+import { isCliHost } from "@/lib/platform/detect"
 import { platformStreamingFetch } from "@/lib/network/platform-streaming-fetch"
 import type {
   AcpAvailableCommand,
@@ -181,7 +186,7 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
       }
       const discovery =
         this.connectionService ??
-        (explicitEndpoint ? undefined : await discoverOpenCodeV2ViaSidecar(this.connection.signal))
+        (explicitEndpoint ? undefined : await this.discoverService(this.connection.signal))
       const endpoint = this.connectionService?.endpoint ?? explicitEndpoint ?? discovery!.endpoint
       const url = new URL(endpoint)
       if (!["http:", "https:"].includes(url.protocol))
@@ -287,6 +292,57 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
     if (sessionId && this.owned.has(sessionId)) return this.owned.get(sessionId)!.client
     if (!this.client) throw new Error("Not connected to OpenCode V2 service")
     return this.client
+  }
+
+  /**
+   * Locate the local OpenCode V2 service.
+   *
+   * The desktop delegates discovery to its sidecar because the renderer has no
+   * process table; the standalone CLI owns one and has no feature-call bridge,
+   * so it runs the identical `Service.discover` + `/api/status` probe
+   * in-process (the same contract `sidecar/dispatch/feature-call.mjs` serves).
+   */
+  private async discoverService(signal: AbortSignal): Promise<OpenCodeV2Discovery> {
+    if (!isCliHost()) return discoverOpenCodeV2ViaSidecar(signal)
+    const { Service } = await import("@opencode/client/service")
+    signal.throwIfAborted()
+    const endpoint = await Service.discover({
+      version: (version) => CURRENT_VERSION.test(version),
+    })
+    signal.throwIfAborted()
+    if (!endpoint)
+      throw new Error(
+        "No compatible OpenCode V2 service was discovered. Start one with `opencode service start`."
+      )
+    const url = new URL(endpoint.url)
+    if (!["http:", "https:"].includes(url.protocol))
+      throw new Error("OpenCode V2 discovery returned a non-HTTP endpoint")
+    const headers = Object.fromEntries(
+      Object.entries(Service.headers(endpoint) ?? {}).filter(
+        ([name, value]) => name.trim() && typeof value === "string"
+      )
+    )
+    const probe = await platformStreamingFetch(new URL("/api/status", url), {
+      headers,
+      signal: AbortSignal.any([signal, AbortSignal.timeout(2_000)]),
+    })
+    const status = (await probe.json().catch(() => undefined)) as
+      { version?: string; pid?: number } | undefined
+    signal.throwIfAborted()
+    if (!probe.ok) throw new Error("OpenCode V2 discovery health probe failed")
+    if (
+      !status?.version ||
+      !CURRENT_VERSION.test(status.version) ||
+      typeof status.pid !== "number" ||
+      !Number.isInteger(status.pid) ||
+      status.pid <= 0
+    )
+      throw new Error("OpenCode V2 discovery returned an incompatible health contract")
+    return validateOpenCodeV2Discovery({
+      endpoint: url.toString().replace(/\/$/, ""),
+      version: status.version,
+      headers,
+    })
   }
 
   private sessionMcpServers(options?: SessionCreateOptions) {
