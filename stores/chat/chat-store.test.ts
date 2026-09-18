@@ -1479,6 +1479,21 @@ describe("selectVisibleMessages", () => {
     const stray = owned("stray", "gone-forever")
     expect(selectVisibleMessages([stray], {}).map((m) => m.id)).toEqual(["stray"])
   })
+
+  it("falls back to the newest variant when the recorded selection is stale", () => {
+    // `activeBranchByGroup` persists to the sessions table: deleting the
+    // selected variant (or a sync peer removing it) leaves the pick pointing
+    // at a message that no longer exists. Honour the stale id and the group
+    // slot emits nothing — every member hides and the whole question vanishes
+    // even though its siblings remain. Fall back to the highest-index member.
+    const q0 = userVariant("q0", "e1", 0)
+    const q1 = userVariant("q1", "e1", 1)
+    const r1 = owned("r1", "q1")
+    expect(selectVisibleMessages([q0, q1, r1], { e1: "deleted-q2" }).map((m) => m.id)).toEqual([
+      "q1",
+      "r1",
+    ])
+  })
 })
 
 describe("selectBranchSiblings", () => {

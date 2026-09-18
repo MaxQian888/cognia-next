@@ -1724,21 +1724,33 @@ function resolveBranchWinners(
   messages: readonly UIMessage[],
   activeBranchByGroup: Record<string, string>
 ): Map<string, string> {
-  const winners = new Map<string, string>()
-  const bestIndex = new Map<string, number>()
-
+  // Per group: its member ids plus the highest-index member — the fallback
+  // when there is no explicit selection, or the selection is stale. A stale
+  // pick is real: `activeBranchByGroup` persists to the sessions table, so a
+  // variant deleted on this device (or removed by a sync peer) can leave the
+  // recorded choice pointing at a message that no longer exists. Honouring it
+  // would emit a group slot with no winner — the whole group would vanish.
+  const members = new Map<string, { ids: Set<string>; bestId: string; bestIndex: number }>()
   for (const m of messages) {
     const { branchGroupId, branchIndex } = branchMeta(m)
     if (!branchGroupId) continue
-    if (activeBranchByGroup[branchGroupId]) {
-      winners.set(branchGroupId, activeBranchByGroup[branchGroupId])
-      continue
+    let g = members.get(branchGroupId)
+    if (!g) {
+      g = { ids: new Set(), bestId: m.id, bestIndex: -1 }
+      members.set(branchGroupId, g)
     }
+    g.ids.add(m.id)
     const idx = branchIndex ?? 0
-    if (!winners.has(branchGroupId) || idx > (bestIndex.get(branchGroupId) ?? -1)) {
-      winners.set(branchGroupId, m.id)
-      bestIndex.set(branchGroupId, idx)
+    if (idx > g.bestIndex) {
+      g.bestIndex = idx
+      g.bestId = m.id
     }
+  }
+
+  const winners = new Map<string, string>()
+  for (const [groupId, g] of members) {
+    const active = activeBranchByGroup[groupId]
+    winners.set(groupId, active !== undefined && g.ids.has(active) ? active : g.bestId)
   }
   return winners
 }
