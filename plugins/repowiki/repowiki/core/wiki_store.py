@@ -23,6 +23,7 @@ from pathlib import Path
 
 import aiosqlite
 
+from repowiki.core.graph import DependencyGraph
 from repowiki.core.wiki_builder import Wiki, WikiPage
 from repowiki.host import PATHS, WorkspaceHandle
 from repowiki.pipeline import ScanResult
@@ -33,6 +34,32 @@ logger = logging.getLogger(__name__)
 # a different version rather than misinterpreting them — the same contract
 # ``RagStore`` keeps.
 SCHEMA_VERSION = 1
+
+
+def _graph_snapshot(graph: DependencyGraph | None) -> dict | None:
+    """Nodes with their attrs plus the edge list — everything the graph's
+    readers need that survives losing the file contents it was built from."""
+    if graph is None:
+        return None
+    return {
+        "nodes": {n: dict(a) for n, a in graph.graph.nodes(data=True)},
+        "edges": [[s, d] for s, d in graph.graph.edges],
+    }
+
+
+def _graph_from_snapshot(data) -> DependencyGraph | None:
+    if not isinstance(data, dict):
+        return None
+    graph = DependencyGraph()
+    nodes = data.get("nodes")
+    if isinstance(nodes, dict):
+        for path, attrs in nodes.items():
+            graph.graph.add_node(str(path), **(attrs if isinstance(attrs, dict) else {}))
+    for edge in data.get("edges") or []:
+        if isinstance(edge, (list, tuple)) and len(edge) == 2:
+            graph.graph.add_edge(str(edge[0]), str(edge[1]))
+    graph._file_paths = set(graph.graph.nodes)
+    return graph if graph.graph.nodes else None
 
 
 def _snapshot_of(result: ScanResult) -> dict:
@@ -61,6 +88,10 @@ def _snapshot_of(result: ScanResult) -> dict:
             for page in result.wiki.pages
         ],
         "mapEntries": result.map_entries,
+        # The import edges the dependency graph was built from. File contents
+        # die with the scan; the edges are small enough to keep so a
+        # rehydrated project still answers "what imports X".
+        "graph": _graph_snapshot(result.graph),
         "skippedModules": result.skipped_modules,
         "errors": result.errors,
         "warnings": result.warnings,
@@ -108,6 +139,7 @@ def _result_from_snapshot(project_id: str, data: dict) -> ScanResult:
         project=None,
         source=str(data.get("source") or ""),
         map_entries=[e for e in data.get("mapEntries") or [] if isinstance(e, dict)],
+        graph=_graph_from_snapshot(data.get("graph")),
         file_count=int(data.get("fileCount") or 0),
         skipped_modules=[str(m) for m in data.get("skippedModules") or []],
         errors=[str(e) for e in data.get("errors") or []],

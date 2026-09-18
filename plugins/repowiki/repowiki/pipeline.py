@@ -12,6 +12,7 @@ Everything host-facing goes through :mod:`repowiki.host`; nothing here imports
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import Callable
@@ -32,6 +33,7 @@ from repowiki.host import (
     acquire_workspace,
     changed_since,
     get_host,
+    release_workspace,
 )
 from repowiki.ingest.git_diff import changed_paths_since
 from repowiki.ingest.local import ingest_handle
@@ -60,6 +62,11 @@ class ScanResult:
     #: field existed, ``reading_order`` rebuilt the dependency graph on every
     #: call to re-rank it.
     map_entries: list[dict[str, Any]] = field(default_factory=list)
+    #: The dependency graph built for the scan — import edges between files.
+    #: Rehydrated scans rebuild it from the persisted snapshot; a snapshot
+    #: written before graphs were persisted leaves it ``None``, and tools
+    #: that need edges must say so rather than silently answer from nothing.
+    graph: DependencyGraph | None = None
     file_count: int = 0
     scanned_at: float = 0.0
     rankings: list[tuple[str, float]] = field(default_factory=list)
@@ -171,6 +178,33 @@ async def scan(
     handle = await acquire_workspace(
         spec_for(source), max_files=cfg.max_files, max_file_size=cfg.max_file_size
     )
+    try:
+        return await _scan_acquired(
+            source, handle, cfg=cfg, since=since, report=report,
+            path_filter=path_filter,
+        )
+    except BaseException:
+        # A failed scan never reaches _SCANS, so the shutdown sweep cannot
+        # see this handle — release an ephemeral clone here or it leaks for
+        # the life of the process.
+        if handle.ephemeral:
+            try:
+                await release_workspace(handle)
+            except Exception as exc:  # noqa: BLE001 — keep the original error
+                logger.info("release_workspace failed for %s: %s", source, exc)
+        raise
+
+
+async def _scan_acquired(
+    source: str,
+    handle: WorkspaceHandle,
+    *,
+    cfg: Config,
+    since: str,
+    report: ProgressFn,
+    path_filter: Callable[[str], bool] | None,
+) -> ScanResult:
+    """Everything after acquire: ingest, analyse, build."""
     warnings: list[str] = []
     if handle.truncated:
         warnings.append(f"Only the first {cfg.max_files} files were listed")
@@ -190,10 +224,17 @@ async def scan(
             warnings.append(f"Include/exclude rules filtered out {dropped} file(s)")
 
     report("Reading files")
-    project = ingest_handle(handle, max_file_size=cfg.max_file_size, max_files=cfg.max_files)
+    # Up to max_files of synchronous disk IO / regex passes — run it off the
+    # event loop so the host can keep answering other calls while a scan runs.
+    project = await asyncio.to_thread(
+        ingest_handle,
+        handle,
+        max_file_size=cfg.max_file_size,
+        max_files=cfg.max_files,
+    )
 
     report("Building the dependency graph")
-    graph = DependencyGraph.build_from_project(project)
+    graph = await asyncio.to_thread(DependencyGraph.build_from_project, project)
     rankings = graph.rank_files()
 
     changed: set[str] | None = None
@@ -237,8 +278,17 @@ async def scan(
         # store persists it so a rehydrated scan answers without the files.
         map_entries=[
             entry.to_dict()
-            for entry in repo_map(project.files, root=handle.root, top=max(1, len(project.files)))
+            for entry in repo_map(
+                project.files,
+                root=handle.root,
+                top=max(1, len(project.files)),
+                ranked=rankings,
+            )
         ],
+        # Kept for the deps tool and persisted through the wiki snapshot —
+        # the file contents the graph was built from die with the scan, but
+        # the edges do not have to.
+        graph=graph,
         file_count=len(project.files),
         scanned_at=time.time(),
         rankings=rankings,
@@ -270,7 +320,9 @@ async def build_index(
     await store.init()
     try:
         rag = await store.load(result.project_id) if reuse else None
-        if rag is None:
+        fresh = rag is None
+        saved_sha: dict[str, str] | None = None
+        if fresh:
             if result.project is None:
                 # A rehydrated scan has no file contents to chunk. The index
                 # is built at scan time and persisted, so reaching here means
@@ -286,16 +338,22 @@ async def build_index(
                 soft_chunk_lines=cfg.rag_chunk_soft_lines,
                 overlap_lines=cfg.rag_chunk_overlap_lines,
             )
-            rag.index(result.project)
-        elif result.project is not None:
-            # Never run this on a rehydrated scan: content-less files would
-            # hash to nothing and `sync_project` would read that as "every
-            # file was deleted" and wipe the persisted index.
-            rag.sync_project(result.project)
+            await asyncio.to_thread(rag.index, result.project)
+        else:
+            # The content hashes we saved are the baseline: if nothing moved
+            # after sync + wiki re-index, re-saving writes the identical
+            # snapshot back to disk.
+            saved_sha = dict(rag._file_sha)
+            if result.project is not None:
+                # Never run this on a rehydrated scan: content-less files would
+                # hash to nothing and `sync_project` would read that as "every
+                # file was deleted" and wipe the persisted index.
+                await asyncio.to_thread(rag.sync_project, result.project)
 
         if cfg.rag_index_wiki:
-            rag.index_wiki_pages(result.wiki.pages)
+            await asyncio.to_thread(rag.index_wiki_pages, result.wiki.pages)
 
+        embedded = 0
         if cfg.rag_semantic:
             embedded = await _embed_missing(rag, on_progress=on_progress)
             if embedded:
@@ -303,7 +361,8 @@ async def build_index(
                     "embedded %d chunk(s) for %s", embedded, result.project_id
                 )
 
-        await store.save(result.project_id, rag)
+        if fresh or embedded or rag._file_sha != saved_sha:
+            await store.save(result.project_id, rag)
     finally:
         await store.close()
     return rag

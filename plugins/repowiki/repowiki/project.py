@@ -67,8 +67,19 @@ class RepoMapEntry:
         }
 
 
-def repo_map(files: list[FileInfo], *, root: str = "", top: int = 50) -> list[RepoMapEntry]:
+def repo_map(
+    files: list[FileInfo],
+    *,
+    root: str = "",
+    top: int = 50,
+    ranked: list[tuple[str, float]] | None = None,
+) -> list[RepoMapEntry]:
     """Rank files by dependency PageRank. No model calls.
+
+    ``ranked`` lets a caller that already built the graph (the scan pipeline
+    builds it once for the analyzer, the wiki, and this list) reuse its
+    PageRank output instead of re-running every import regex over every file
+    body a second time.
 
     Paths are published in forward-slash form regardless of platform: the
     output is destined for prompts and for the panel, and a backslash there
@@ -77,8 +88,9 @@ def repo_map(files: list[FileInfo], *, root: str = "", top: int = 50) -> list[Re
     if top <= 0:
         raise ValueError("top must be greater than zero")
 
-    project = ProjectContext(name=root or "project", root=root, files=files)
-    ranked = DependencyGraph.build_from_project(project).rank_files()
+    if ranked is None:
+        project = ProjectContext(name=root or "project", root=root, files=files)
+        ranked = DependencyGraph.build_from_project(project).rank_files()
     by_path = {f.path: f for f in files}
 
     entries: list[RepoMapEntry] = []

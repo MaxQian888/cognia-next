@@ -161,7 +161,7 @@ class Analyzer:
 
         # 1. prepare context
         progress("Preparing file context...")
-        key_files_text = self._build_key_files_context(project)
+        key_files_text = self._build_key_files_context(project, rankings=rankings)
         # structure_hash captures only the project shape (paths + sizes), so
         # editing the body of a single source file doesn't invalidate the
         # arch / guide passes. overview_hash also folds in README / pyproject
@@ -222,7 +222,11 @@ class Analyzer:
         material = structure_hash + "|" + "|".join(f"{p}:{c}" for p, c in bodies)
         return content_hash(material)
 
-    def _build_key_files_context(self, project: ProjectContext) -> str:
+    def _build_key_files_context(
+        self,
+        project: ProjectContext,
+        rankings: list[tuple[str, float]] | None = None,
+    ) -> str:
         """collect config files and entrypoints for the overview prompt.
 
         Files are added in priority order (config > entrypoint > pagerank
@@ -233,7 +237,7 @@ class Analyzer:
         projects with many config/entrypoint files.
         """
         candidates = [f for f in project.files if f.is_config or f.is_entrypoint]
-        ordered = self._order_by_importance(candidates, project)
+        ordered = self._order_by_importance(candidates, project, rankings)
 
         # Build every block up front, then token-count them in one batch.
         blocks: list[str] = []
@@ -263,17 +267,22 @@ class Analyzer:
 
     @staticmethod
     def _order_by_importance(
-        candidates: list[FileInfo], project: ProjectContext
+        candidates: list[FileInfo],
+        project: ProjectContext,
+        rankings: list[tuple[str, float]] | None = None,
     ) -> list[FileInfo]:
         """sort: config files first, then entrypoints, then by PageRank."""
-        # lazy import: graph depends on networkx, only need it here
-        from repowiki.core.graph import DependencyGraph
+        if rankings is not None:
+            pagerank = dict(rankings)
+        else:
+            # lazy import: graph depends on networkx, only need it here
+            from repowiki.core.graph import DependencyGraph
 
-        try:
-            graph = DependencyGraph.build_from_project(project)
-            pagerank = dict(graph.rank_files())
-        except Exception:
-            pagerank = {}
+            try:
+                graph = DependencyGraph.build_from_project(project)
+                pagerank = dict(graph.rank_files())
+            except Exception:
+                pagerank = {}
 
         def key(f: FileInfo) -> tuple:
             tier = 0 if f.is_config else (1 if f.is_entrypoint else 2)

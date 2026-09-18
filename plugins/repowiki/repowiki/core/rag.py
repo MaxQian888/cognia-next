@@ -23,7 +23,9 @@ from __future__ import annotations
 
 import math
 import re
+from array import array
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from repowiki.core.models import ProjectContext
@@ -126,6 +128,18 @@ class SimpleRAG:
         self.chunks: list[Chunk] = []
         self._idf: dict[str, float] = {}
         self._tf_vectors: list[Counter] = []
+        # Per-chunk TF-IDF norm, index-aligned with ``chunks`` and valid for
+        # the current ``_idf``. Retrieval used to recompute every one of
+        # these per query — O(corpus tokens) each search — so they are kept
+        # up alongside the tf vectors and recomputed in ``rebuild_global``.
+        self._tfidf_norms: list[float] = []
+        # Inverted index token -> sorted chunk ids. Chunks sharing no token
+        # with the query score zero on both lexical channels, so scoring
+        # only the union of the query's postings is exact — and turns a
+        # query from O(corpus chunks) into O(matching chunks). ``None``
+        # marks the index stale (any chunk mutation invalidates it); it is
+        # rebuilt lazily in ``retrieve`` and eagerly in ``rebuild_global``.
+        self._postings: dict[str, array] | None = None
         # BM25 needs per-chunk lengths and the corpus mean.
         self._chunk_lens: list[int] = []
         self._avgdl: float = 0.0
@@ -161,6 +175,10 @@ class SimpleRAG:
         """
         self.chunks = []
         self._vectors = []
+        self._tf_vectors = []
+        self._tfidf_norms = []
+        self._chunk_lens = []
+        self._postings = None
         self.vector_dims = 0
         self._file_to_chunks = {}
         self._file_sha = {}
@@ -199,8 +217,7 @@ class SimpleRAG:
                     kind="code",
                     rebuild=False,
                 )
-        for stale in prior_code_paths - seen:
-            self.remove_file(stale, rebuild=False)
+        self.remove_files(prior_code_paths - seen, rebuild=False)
         self.rebuild_global()
 
     def upsert_file(
@@ -242,9 +259,13 @@ class SimpleRAG:
             self.chunks.append(chunk)
             tokens = _tokenize(chunk.content)
             self._tf_vectors.append(Counter(tokens))
+            self._tfidf_norms.append(_tfidf_norm(self._tf_vectors[-1], self._idf))
             self._chunk_lens.append(max(1, len(tokens)))
             self._vectors.append(None)
             indices.append(idx)
+        # New chunks aren't in the postings yet — invalidate so the next
+        # retrieve rebuilds rather than silently missing them.
+        self._postings = None
 
         self._file_to_chunks[path] = indices
         self._file_sha[path] = sha
@@ -253,20 +274,37 @@ class SimpleRAG:
             self.rebuild_global()
 
     def remove_file(self, path: str, *, rebuild: bool = True) -> None:
-        """drop every chunk that belongs to ``path``.
+        """drop every chunk that belongs to ``path``."""
+        self.remove_files([path], rebuild=rebuild)
+
+    def remove_files(self, paths, *, rebuild: bool = True) -> None:
+        """drop every chunk that belongs to any of ``paths`` in one pass.
+
+        Removing one path at a time rebuilds the whole chunk array per
+        file — O(paths × total chunks) — which is what a wiki re-index or a
+        mass deletion used to pay. Here the drop set is gathered first so
+        the arrays are rebuilt once.
 
         We rebuild the chunk array rather than punching holes, because the
         BM25 / TF-IDF passes both need ``self.chunks`` and
         ``self._tf_vectors`` to stay index-aligned.
         """
-        indices = self._file_to_chunks.pop(path, None)
-        self._file_sha.pop(path, None)
-        if not indices:
-            return
+        drop: set[int] = set()
+        for path in paths:
+            indices = self._file_to_chunks.pop(path, None)
+            self._file_sha.pop(path, None)
+            if indices:
+                drop.update(indices)
+        if drop:
+            self._rebuild_after_removal(drop)
+        if rebuild:
+            self.rebuild_global()
 
-        drop = set(indices)
+    def _rebuild_after_removal(self, drop: set[int]) -> None:
+        """compact every index-aligned array minus the ``drop`` chunk ids."""
         kept_chunks: list[Chunk] = []
         kept_tf: list[Counter] = []
+        kept_norms: list[float] = []
         kept_lens: list[int] = []
         kept_vectors: list[list[float] | None] = []
         # Map old chunk index -> new index so we can rewrite the
@@ -278,6 +316,11 @@ class SimpleRAG:
             remap[old_idx] = len(kept_chunks)
             kept_chunks.append(chunk)
             kept_tf.append(self._tf_vectors[old_idx])
+            kept_norms.append(
+                self._tfidf_norms[old_idx]
+                if old_idx < len(self._tfidf_norms)
+                else _tfidf_norm(self._tf_vectors[old_idx], self._idf)
+            )
             kept_lens.append(self._chunk_lens[old_idx])
             kept_vectors.append(
                 self._vectors[old_idx] if old_idx < len(self._vectors) else None
@@ -285,27 +328,32 @@ class SimpleRAG:
 
         self.chunks = kept_chunks
         self._tf_vectors = kept_tf
+        self._tfidf_norms = kept_norms
         self._chunk_lens = kept_lens
         self._vectors = kept_vectors
+        # Postings reference pre-remap chunk ids — stale, not just stale-
+        # valued. Rebuild lazily rather than remap every posting list.
+        self._postings = None
         # Rewire surviving files' chunk-index lists.
         for other_path, idxs in self._file_to_chunks.items():
             self._file_to_chunks[other_path] = [remap[i] for i in idxs if i in remap]
 
-        if rebuild:
-            self.rebuild_global()
-
     def rebuild_global(self) -> None:
-        """recompute IDF and avgdl after a batch of upserts/removes."""
+        """recompute IDF, avgdl and per-chunk norms after a batch of mutations."""
         doc_count = len(self.chunks)
         if doc_count == 0:
             self._idf = {}
             self._avgdl = 0.0
+            self._tfidf_norms = []
+            self._postings = {}
             return
 
         df: Counter = Counter()
-        for tf in self._tf_vectors:
+        postings: dict[str, array] = {}
+        for i, tf in enumerate(self._tf_vectors):
             for token in tf:
                 df[token] += 1
+                postings.setdefault(token, array("I")).append(i)
 
         # Smoothed IDF (sklearn-style): always > 0 even when a term appears
         # in every document, and remains finite on tiny corpora.
@@ -314,6 +362,31 @@ class SimpleRAG:
             for token, count in df.items()
         }
         self._avgdl = sum(self._chunk_lens) / doc_count
+        self._postings = postings
+        self.recompute_norms()
+
+    def _ensure_postings(self) -> dict[str, array]:
+        """Materialise the inverted index, rebuilding it when a mutation
+        left it stale. ``rebuild_global`` fills it eagerly; this is the
+        fallback for callers that query between mutation and rebuild."""
+        if self._postings is None:
+            postings: dict[str, array] = {}
+            for i, tf in enumerate(self._tf_vectors):
+                for token in tf:
+                    postings.setdefault(token, array("I")).append(i)
+            self._postings = postings
+        return self._postings
+
+    def recompute_norms(self) -> None:
+        """refresh ``_tfidf_norms`` against the current ``_idf``.
+
+        Called by ``rebuild_global`` after the idf pass, and by the store's
+        ``load`` — which restores idf from the snapshot rather than
+        recomputing it — so a rehydrated index never pays per-query norms.
+        """
+        self._tfidf_norms = [
+            _tfidf_norm(tf, self._idf) for tf in self._tf_vectors
+        ]
 
     # ---------- semantic layer ----------
 
@@ -345,6 +418,7 @@ class SimpleRAG:
         *,
         min_score: float = 0.0,
         query_vector: list[float] | None = None,
+        include: Callable[[Chunk], bool] | None = None,
     ) -> list[Chunk]:
         """find top-k chunks most relevant to ``query``.
 
@@ -353,6 +427,11 @@ class SimpleRAG:
         across the corpus — plus a third normalised cosine term when both a
         ``query_vector`` and stored chunk vectors exist. The single-score
         view makes ``min_score`` meaningful regardless of corpus size.
+
+        ``include`` scopes the retrieval universe: only chunks it accepts
+        are scored or ranked, so a scoped search's normalisation happens
+        within the scope — the same answer an index of just those chunks
+        would give.
         """
         if not self.chunks:
             return []
@@ -363,44 +442,88 @@ class SimpleRAG:
         query_tf = Counter(query_tokens)
 
         n = len(self.chunks)
-        tfidf_scores = [0.0] * n
-        bm25_scores = [0.0] * n
-        for i in range(n):
+        idf = self._idf
+        norms = self._tfidf_norms
+        query_norm = _tfidf_norm(query_tf, idf)
+
+        # Only chunks sharing a token with the query can score on either
+        # lexical channel — everyone else is exactly 0, so the postings
+        # union is the whole candidate set. Exactness, not approximation.
+        postings = self._ensure_postings()
+        candidates: set[int] = set()
+        for token in query_tf:
+            idxs = postings.get(token)
+            if idxs is not None:
+                candidates.update(idxs)
+        if include is not None:
+            candidates = {i for i in candidates if include(self.chunks[i])}
+
+        tfidf_scores: dict[int, float] = {}
+        bm25_scores: dict[int, float] = {}
+        for i in candidates:
             tf_vec = self._tf_vectors[i]
-            tfidf_scores[i] = _cosine_similarity(query_tf, tf_vec, self._idf)
+            # Same cosine as _cosine_similarity with both norms hoisted:
+            # the query's once per call, each chunk's once per rebuild.
+            common = set(query_tf) & set(tf_vec)
+            if common:
+                dot = sum(
+                    query_tf[t] * idf.get(t, 0) * tf_vec[t] * idf.get(t, 0)
+                    for t in common
+                )
+                norm_b = (
+                    norms[i]
+                    if i < len(norms)
+                    else _tfidf_norm(tf_vec, idf)
+                )
+                tfidf_scores[i] = (
+                    dot / (query_norm * norm_b) if query_norm and norm_b else 0.0
+                )
+            else:
+                tfidf_scores[i] = 0.0
             bm25_scores[i] = _bm25(
                 query_tokens, tf_vec, self._chunk_lens[i],
-                self._idf, self._avgdl, self._k1, self._b,
+                idf, self._avgdl, self._k1, self._b,
             )
 
         # The vector pass only runs when the index actually carries vectors
         # of the same width — a mismatched model's scores would be noise, not
         # a signal, and a lexical-only index must not pay the divide-by-three.
-        vec_scores: list[float] | None = None
+        vec_scores: dict[int, float] | None = None
         if (
             query_vector
             and self.vector_dims
             and len(query_vector) == self.vector_dims
             and any(v is not None for v in self._vectors)
         ):
-            vec_scores = [0.0] * n
+            vec_scores = {}
             for i in range(n):
                 vec = self._vectors[i] if i < len(self._vectors) else None
                 if vec is not None:
                     vec_scores[i] = max(0.0, _dense_cosine(query_vector, vec))
 
-        max_tfidf = max(tfidf_scores) if tfidf_scores else 0.0
-        max_bm25 = max(bm25_scores) if bm25_scores else 0.0
-        max_vec = max(vec_scores) if vec_scores else 0.0
+        max_tfidf = max(tfidf_scores.values()) if tfidf_scores else 0.0
+        max_bm25 = max(bm25_scores.values()) if bm25_scores else 0.0
+        max_vec = max(vec_scores.values()) if vec_scores else 0.0
+
+        # Chunks outside the candidate set score 0 lexically; when the
+        # vector pass ran, a vectorized chunk can still rank on that signal
+        # alone (a paraphrase may share no vocabulary with the code).
+        scored = candidates
+        if vec_scores is not None:
+            scored = candidates | {
+                i
+                for i, s in vec_scores.items()
+                if s > 0 and (include is None or include(self.chunks[i]))
+            }
 
         fused: list[tuple[float, int]] = []
         terms = 3 if vec_scores is not None else 2
-        for i in range(n):
-            tfidf_n = tfidf_scores[i] / max_tfidf if max_tfidf > 0 else 0.0
-            bm25_n = bm25_scores[i] / max_bm25 if max_bm25 > 0 else 0.0
+        for i in scored:
+            tfidf_n = tfidf_scores.get(i, 0.0) / max_tfidf if max_tfidf > 0 else 0.0
+            bm25_n = bm25_scores.get(i, 0.0) / max_bm25 if max_bm25 > 0 else 0.0
             total = tfidf_n + bm25_n
             if vec_scores is not None:
-                total += vec_scores[i] / max_vec if max_vec > 0 else 0.0
+                total += vec_scores.get(i, 0.0) / max_vec if max_vec > 0 else 0.0
             fused.append((total / terms, i))
 
         fused.sort(reverse=True)
@@ -419,30 +542,47 @@ class SimpleRAG:
         """slice generated wiki markdown into chunks and add them.
 
         ``pages`` is a list of objects with ``id`` and ``content`` (a
-        :class:`repowiki.core.wiki_builder.WikiPage` works). Existing wiki
-        chunks are dropped first so re-running ``scan`` doesn't double-index
-        the same page.
+        :class:`repowiki.core.wiki_builder.WikiPage` works). Wiki paths that
+        no longer appear are dropped in one pass, and a page whose content
+        hash is unchanged keeps its existing chunks — re-adding identical
+        content would throw away its persisted embedding vectors and force
+        a redundant embed pass on every restart.
         """
-        # Wipe any prior wiki chunks (keyed by their virtual paths).
-        to_remove = [p for p in list(self._file_to_chunks) if p.startswith("wiki/")]
-        for p in to_remove:
-            self.remove_file(p, rebuild=False)
-
+        wanted: dict[str, tuple[str, str]] = {}
         for page in pages:
             content = getattr(page, "content", "") or ""
             page_id = getattr(page, "id", "") or "page"
             if not content.strip():
                 continue
-            virtual_path = f"wiki/{page_id}.md"
+            wanted[f"wiki/{page_id}.md"] = (content, _fast_sha(content))
+
+        stale = [
+            path
+            for path in self._file_sha
+            if path.startswith("wiki/") and path not in wanted
+        ]
+        if stale:
+            self.remove_files(stale, rebuild=False)
+
+        dirty = bool(stale)
+        for virtual_path, (content, sha) in wanted.items():
+            if self._file_sha.get(virtual_path) == sha:
+                continue
             self.upsert_file(
                 virtual_path,
-                sha=_fast_sha(content),
+                sha=sha,
                 language="markdown",
                 text=content,
                 kind="wiki",
                 rebuild=False,
             )
-        self.rebuild_global()
+            dirty = True
+        # Nothing changed -> the rebuilt idf/norms would be identical to the
+        # ones already in memory, so skip the O(corpus) pass. The second
+        # clause heals a caller that fed rebuild=False upserts and never
+        # rebuilt: chunks without an idf still get their globals.
+        if dirty or (self.chunks and not self._idf):
+            self.rebuild_global()
 
 
 # ----- helpers (token / chunking / scoring) ---------------------------
@@ -539,6 +679,12 @@ def _dense_cosine(a: list[float], b: list[float]) -> float:
     if na == 0.0 or nb == 0.0:
         return 0.0
     return dot / math.sqrt(na * nb)
+
+
+def _tfidf_norm(tf_vec: Counter, idf: dict[str, float]) -> float:
+    """The TF-IDF vector's length — the cosine denominator ``retrieve``
+    precomputes once per rebuild instead of once per chunk per query."""
+    return math.sqrt(sum((tf_vec[t] * idf.get(t, 0)) ** 2 for t in tf_vec))
 
 
 def _cosine_similarity(vec_a: Counter, vec_b: Counter, idf: dict[str, float]) -> float:

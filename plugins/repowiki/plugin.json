@@ -44,6 +44,10 @@
       "tools": [
         "repowiki_search",
         "repowiki_get_page",
+        "repowiki_pages",
+        "repowiki_status",
+        "repowiki_deps",
+        "repowiki_file_chunks",
         "repowiki_map",
         "repowiki_list",
         "repowiki_ask",
@@ -55,7 +59,7 @@
     }
   ],
   "pythonVenv": "isolated",
-  "pythonDependencies": ["pydantic>=2.0", "aiosqlite>=0.20.0", "networkx>=3.0"],
+  "pythonDependencies": ["pydantic>=2.0", "aiosqlite>=0.20.0", "networkx>=3.0", "tiktoken>=0.7"],
   "author": "cognia-next",
   "license": "MIT",
   "minAppVersion": "0.1.0",

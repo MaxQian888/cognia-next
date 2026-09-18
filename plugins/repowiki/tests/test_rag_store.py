@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import aiosqlite
 import pytest
 
 from repowiki.core.models import FileInfo, ProjectContext
@@ -58,6 +59,44 @@ async def test_save_then_load_round_trips(tmp_path):
         # Retrieval still works on the reloaded index.
         hits = loaded.retrieve("authenticate", top_k=5)
         assert hits and hits[0].file_path == "src/auth.py"
+    finally:
+        await s.close()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_save_keeps_the_prior_snapshot(tmp_path, monkeypatch):
+    """A crash between dropping the old rows and writing the new ones must
+    leave the *old* index loadable — delete and replace are one transaction,
+    so the failure rolls back instead of landing in an empty project."""
+    s = RagStore(db_path=tmp_path / "indexes.db")
+    await s.init()
+    try:
+        rag = SimpleRAG()
+        rag.index(_proj())
+        await s.save("proj-A", rag)
+
+        real_executemany = aiosqlite.Connection.executemany
+
+        async def fail_on_chunks(self, sql, seq_of_parameters):
+            if "INSERT INTO rag_chunks" in sql:
+                raise RuntimeError("simulated mid-save crash")
+            return await real_executemany(self, sql, seq_of_parameters)
+
+        monkeypatch.setattr(aiosqlite.Connection, "executemany", fail_on_chunks)
+
+        small = SimpleRAG()
+        small.upsert_file(
+            "tiny.py", sha=_fast_sha("x"), language="python",
+            text="def only_one(): pass\n",
+        )
+        with pytest.raises(RuntimeError, match="mid-save crash"):
+            await s.save("proj-A", small)
+
+        loaded = await s.load("proj-A")
+        assert loaded is not None, "the failed save destroyed the prior index"
+        # The pre-crash snapshot — not the half-written new one.
+        assert set(loaded._file_sha.keys()) == {"src/auth.py", "src/view.py"}
+        assert len(loaded.chunks) == len(rag.chunks)
     finally:
         await s.close()
 

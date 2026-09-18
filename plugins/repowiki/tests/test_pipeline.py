@@ -14,6 +14,7 @@ import json
 import pytest
 
 from repowiki.config import Config
+from repowiki.core.rag_store import RagStore
 from repowiki.host import HostBridge, configure_paths, set_host
 from repowiki.pipeline import build_index, reading_order, scan, spec_for, staleness
 
@@ -41,6 +42,7 @@ class FakeHost(HostBridge):
         skipped=0,
         head_ref="c0ffee",
         diff_raises=None,
+        ephemeral=False,
     ):
         self.root = str(root)
         self._head_ref = head_ref
@@ -50,6 +52,8 @@ class FakeHost(HostBridge):
         self._changed = changed or []
         self._truncated = truncated
         self._skipped = skipped
+        self._ephemeral = ephemeral
+        self.releases: list[dict] = []
         self.prompts: list[str] = []
         self.specs: list[dict] = []
 
@@ -76,10 +80,18 @@ class FakeHost(HostBridge):
 
     async def workspace_acquire(self, spec):
         self.specs.append(spec)
-        acquired = {"root": self.root, "origin": "local-path", "ephemeral": False}
+        acquired = {
+            "root": self.root,
+            "origin": "local-path",
+            "ephemeral": self._ephemeral,
+        }
         if self._head_ref:
             acquired["headRef"] = self._head_ref
         return acquired
+
+    async def workspace_release(self, handle):
+        self.releases.append(handle)
+        return True
 
     async def workspace_walk(self, handle, options):
         entries = self._entries
@@ -205,6 +217,93 @@ async def test_index_reuse_can_be_refused(repo):
     await build_index(result, config=Config())
     rebuilt = await build_index(result, config=Config(), reuse=False)
     assert rebuilt.chunks
+
+
+async def test_a_failed_scan_releases_an_ephemeral_clone(repo):
+    """A scan that raises after acquire never lands in _SCANS, so the
+    shutdown sweep cannot see the handle — without a release here, a
+    cloned repo leaks for the life of the process."""
+    host = FakeHost(repo, ephemeral=True)
+    set_host(host)
+
+    with pytest.raises(ValueError, match="filtered out every file"):
+        await scan(str(repo), config=Config(), path_filter=lambda _p: False)
+
+    assert len(host.releases) == 1
+    assert host.releases[0]["root"] == str(repo)
+
+
+async def test_a_failed_scan_never_releases_the_users_own_checkout(repo):
+    """Only ephemeral clones get released on failure — a local-path
+    checkout belongs to the user even when the scan dies."""
+    host = FakeHost(repo, ephemeral=False)
+    set_host(host)
+
+    with pytest.raises(ValueError, match="filtered out every file"):
+        await scan(str(repo), config=Config(), path_filter=lambda _p: False)
+
+    assert host.releases == []
+
+
+async def test_an_unchanged_index_is_not_rewritten_to_disk(repo, monkeypatch):
+    """Reloading a persisted index and finding nothing changed must not
+    re-save the identical snapshot — the file is tens of MB and the write
+    buys nothing."""
+    set_host(FakeHost(repo))
+    result = await scan(str(repo), config=Config())
+    await build_index(result, config=Config())
+
+    saves = 0
+    real_save = RagStore.save
+
+    async def counting_save(self, project_id, rag):
+        nonlocal saves
+        saves += 1
+        return await real_save(self, project_id, rag)
+
+    monkeypatch.setattr(RagStore, "save", counting_save)
+
+    again = await build_index(result, config=Config())
+    assert saves == 0, "a no-change reload rewrote the whole index"
+    assert again.chunks
+
+    # A changed file, though, must flush the new snapshot through.
+    (repo / "core" / "extra.py").write_text("def extra(): return 3\n")
+    set_host(
+        FakeHost(
+            repo,
+            entries=["core/engine.py", "core/store.py", "core/extra.py", "README.md"],
+        )
+    )
+    result2 = await scan(str(repo), config=Config())
+    await build_index(result2, config=Config())
+    assert saves == 1
+
+
+async def test_a_scan_builds_the_dependency_graph_once(repo, monkeypatch):
+    """The graph used to be built three times per scan: once for rankings,
+    again inside repo_map for the reading order, and a third time inside
+    the analyzer's key-files ordering. All three consume the same ranking,
+    so one build must serve them."""
+    from repowiki.core.graph import DependencyGraph
+
+    builds = 0
+    real_build = DependencyGraph.build_from_project
+
+    def counting_build(cls, project):
+        nonlocal builds
+        builds += 1
+        return real_build(project)
+
+    monkeypatch.setattr(
+        DependencyGraph, "build_from_project", classmethod(counting_build)
+    )
+    set_host(FakeHost(repo))
+
+    result = await scan(str(repo), config=Config())
+
+    assert builds == 1
+    assert result.map_entries, "the reading order still needs the ranking"
 
 
 # ---------------------------------------------------------------------------

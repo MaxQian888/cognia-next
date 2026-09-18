@@ -58,6 +58,25 @@ def test_a_semantic_hit_surfaces_without_any_shared_tokens():
     assert hits and hits[0].file_path == "src/view.py"
 
 
+def test_a_scope_predicate_also_gates_semantic_only_hits():
+    """A paraphrase hit sharing no vocabulary still must respect the scope —
+    the vector lane is not a backdoor around a filtered search."""
+    rag = _rag()
+    vectors = [None] * len(rag.chunks)
+    view_idx = next(
+        i for i, c in enumerate(rag.chunks) if c.file_path == "src/view.py"
+    )
+    vectors[view_idx] = [1.0, 0.0, 0.0]
+    rag.set_vectors(vectors, dims=3)
+
+    hits = rag.retrieve(
+        "zzz-nothing-matches-this",
+        query_vector=[0.9, 0.1, 0.0],
+        include=lambda c: c.file_path == "src/auth.py",
+    )
+    assert hits == [], "the vector-only hit was scoped out and still ranked"
+
+
 def test_a_wrong_width_query_vector_is_refused_not_scored():
     rag = _rag()
     rag.set_vectors([[0.1] * 8] * len(rag.chunks), dims=8)
@@ -179,6 +198,50 @@ async def test_build_index_embeds_and_search_uses_the_vector(tmp_path):
     main._INDEXES["deadbeef"] = rag
     out = await main.repowiki_search("deadbeef", "auth")
     assert out["citations"]
+
+
+async def test_a_rehydrated_index_does_not_re_embed_unchanged_wiki_pages(tmp_path):
+    """Restart path: the persisted index reloads, then ``index_wiki_pages``
+    runs over the stored wiki. A sha-identical page must keep its chunks and
+    vectors — otherwise every cold start pays a redundant embed pass."""
+    from repowiki.core.wiki_builder import Wiki, WikiPage
+
+    host = FakeEmbedHost()
+    set_host(host)
+    wiki = Wiki(
+        project_name="demo",
+        pages=[
+            WikiPage(id="index", title="Overview", content="# Overview\nauth stuff here"),
+            WikiPage(id="guide", title="Guide", content="# Guide\nrender stuff here"),
+        ],
+    )
+    handle = WorkspaceHandle(root="/repo", origin="local-path", head_ref="abc")
+    live = ScanResult(
+        project_id="deadbeef",
+        wiki=wiki,
+        handle=handle,
+        project=ProjectContext(
+            name="demo", root="/repo",
+            files=[
+                FileInfo(path="src/auth.py", size=10, language="python", lines=1,
+                         content="def authenticate_user(): pass"),
+            ],
+        ),
+        source="/repo",
+    )
+    await build_index(live)
+    assert host.calls, "the first index embedded nothing"
+    calls_after_scan = len(host.calls)
+
+    rehydrated = ScanResult(
+        project_id="deadbeef", wiki=wiki, handle=handle, project=None, source="/repo"
+    )
+    rag = await build_index(rehydrated)
+
+    assert len(host.calls) == calls_after_scan, (
+        "unchanged wiki pages lost their vectors and were re-embedded"
+    )
+    assert all(v is not None for v in rag._vectors)
 
 
 async def test_build_index_survives_an_embed_that_fails(tmp_path):

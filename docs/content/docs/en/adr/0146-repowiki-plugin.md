@@ -162,7 +162,7 @@ model calls, and the RAG snapshot reloads in milliseconds. Projecting the pages
 into Dexie would need `ctx.dexie` opened to Python, and `ctx.dexie` hands back a
 live handle — see ADR-0145.
 
-**The dependency set is heavy** (pydantic, networkx, aiosqlite), so the manifest
+**The dependency set is heavy** (pydantic, networkx, aiosqlite, tiktoken), so the manifest
 asks for `pythonVenv: "isolated"`. Putting that solve in the shared bucket would
 constrain every other Python plugin, which is the rule ADR-0145 set: a new
 plugin never makes an installed one worse.

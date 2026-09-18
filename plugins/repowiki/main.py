@@ -18,6 +18,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+from fnmatch import fnmatch
+from pathlib import PurePosixPath
 
 from repowiki.config import Config
 from repowiki.core.rag import format_context, format_context_grouped
@@ -529,6 +531,34 @@ def repowiki_get_page(projectId: str, pageId: str) -> dict:
     }
 
 
+def _scope_filter(scope: str, path_glob: str):
+    """A chunk predicate for a scoped search, or ``None`` when nothing was
+    asked for — the default path must not pay a function call per chunk.
+
+    ``scope`` selects the chunk kind; ``path_glob`` matches like the scan's
+    own include/exclude filters: the full repo-relative path or the bare
+    basename, so ``*.py`` and ``plugins/**`` both do what they read like.
+    """
+    scope = (scope or "all").strip().lower()
+    if scope not in ("all", "code", "wiki"):
+        raise ValueError(f"Unknown scope '{scope}'. Use all, code, or wiki.")
+    glob = (path_glob or "").strip()
+    if scope == "all" and not glob:
+        return None
+
+    def include(chunk) -> bool:
+        if scope != "all" and chunk.kind != scope:
+            return False
+        if glob and not (
+            fnmatch(chunk.file_path, glob)
+            or fnmatch(PurePosixPath(chunk.file_path).name, glob)
+        ):
+            return False
+        return True
+
+    return include
+
+
 @tool(
     name="repowiki_search",
     description=(
@@ -544,9 +574,25 @@ def repowiki_get_page(projectId: str, pageId: str) -> dict:
         },
         "query": {"type": "string", "required": True},
         "topK": {"type": "number", "required": False},
+        "scope": {
+            "type": "string",
+            "required": False,
+            "description": "all (default), code, or wiki",
+        },
+        "pathGlob": {
+            "type": "string",
+            "required": False,
+            "description": "Only chunks under a path glob, e.g. plugins/** or *.py",
+        },
     },
 )
-async def repowiki_search(projectId: str = "", query: str = "", topK: float = 0) -> dict:
+async def repowiki_search(
+    projectId: str = "",
+    query: str = "",
+    topK: float = 0,
+    scope: str = "",
+    pathGlob: str = "",
+) -> dict:
     projectId = _resolve_project_id(projectId)
     result = _require_scan(projectId)
     cfg = _config()
@@ -557,6 +603,7 @@ async def repowiki_search(projectId: str = "", query: str = "", topK: float = 0)
         top_k=int(topK) or cfg.rag_top_k,
         min_score=cfg.rag_min_score,
         query_vector=await _embed_query(query, cfg),
+        include=_scope_filter(scope, pathGlob),
     )
     return {
         "projectId": projectId,
@@ -943,6 +990,234 @@ async def repowiki_delete(projectId: str) -> dict:
 )
 def repowiki_project_id(source: str) -> dict:
     return {"source": source, "projectId": project_id_for(source)}
+
+
+@tool(
+    name="repowiki_pages",
+    description=(
+        "List a scanned wiki's pages — id, title, and parent — the outline "
+        "repowiki_get_page reads from. The page ids also work after a restart, "
+        "when the scan summary is long gone."
+    ),
+    parameters={
+        "projectId": {
+            "type": "string",
+            "required": False,
+            "description": "Defaults to the only scanned repository",
+        },
+    },
+)
+def repowiki_pages(projectId: str = "") -> dict:
+    projectId = _resolve_project_id(projectId)
+    result = _require_scan(projectId)
+    return {
+        "projectId": projectId,
+        "pages": [
+            {
+                "id": page.id,
+                "title": page.title,
+                "parentId": page.parent_id,
+                "order": page.order,
+            }
+            for page in result.wiki.pages
+        ],
+    }
+
+
+@tool(
+    name="repowiki_status",
+    description=(
+        "Report what state a scanned repository is in: live or rehydrated, "
+        "page and file counts, whether a search index is loaded / persisted "
+        "/ absent, and whether the wiki is still current against git. The "
+        "probe for 'can I search this' — it never builds an index to answer."
+    ),
+    parameters={
+        "projectId": {
+            "type": "string",
+            "required": False,
+            "description": "Defaults to the only scanned repository",
+        },
+    },
+)
+async def repowiki_status(projectId: str = "") -> dict:
+    projectId = _resolve_project_id(projectId)
+    result = _require_scan(projectId)
+
+    rag = _INDEXES.get(projectId)
+    index: dict = {"state": "none", "chunkCount": None, "embeddedChunkCount": None}
+    if rag is not None:
+        index = {
+            "state": "ready",
+            "chunkCount": len(rag.chunks),
+            "embeddedChunkCount": sum(1 for v in rag._vectors if v is not None),
+            "vectorDims": rag.vector_dims,
+        }
+    else:
+        store = RagStore()
+        await store.init()
+        try:
+            persisted = await store.project_stats(projectId)
+        finally:
+            await store.close()
+        if persisted:
+            index = {
+                # The snapshot loads on the first query — search works, it
+                # just has not been asked yet. The embed count is not in the
+                # meta row; say so instead of guessing.
+                "state": "persisted",
+                "chunkCount": persisted["docCount"],
+                "embeddedChunkCount": None,
+                "vectorDims": persisted["vectorDims"],
+            }
+
+    return {
+        "projectId": projectId,
+        "projectName": result.wiki.project_name,
+        "root": result.handle.root,
+        "live": result.project is not None,
+        "fileCount": (
+            len(result.project.files)
+            if result.project is not None
+            else result.file_count
+        ),
+        "pageCount": len(result.wiki.pages),
+        "scannedAt": result.scanned_at,
+        "index": index,
+        "freshness": await _refresh_freshness(projectId),
+    }
+
+
+def _norm_repo_path(path: str) -> str:
+    """Caller-typed path → the repo-relative form the index keys on.
+
+    Strips one ``./`` or leading ``/`` but nothing more — ``.github/x`` is a
+    legitimate repo path and must survive.
+    """
+    p = (path or "").strip()
+    if p.startswith("./"):
+        p = p[2:]
+    return p.lstrip("/")
+
+
+def _known_paths_with_name(result: ScanResult, basename: str) -> list[str]:
+    """Paths in the project whose basename matches — the 'did you mean' list
+    for a path the caller got slightly wrong."""
+    names: list[str] = []
+    sources = (
+        list(result.graph.graph.nodes)
+        if result.graph is not None
+        else [e.get("path", "") for e in result.map_entries]
+    )
+    for path in sources:
+        if PurePosixPath(str(path)).name == basename:
+            names.append(str(path))
+    return sorted(names)[:10]
+
+
+@tool(
+    name="repowiki_deps",
+    description=(
+        "Inspect the import graph a scan built. With a path: what the file "
+        "imports and what imports it — the blast-radius question. Without: "
+        "the graph's shape — entry points, isolated files, import cycles."
+    ),
+    parameters={
+        "projectId": {
+            "type": "string",
+            "required": False,
+            "description": "Defaults to the only scanned repository",
+        },
+        "path": {
+            "type": "string",
+            "required": False,
+            "description": "Repo-relative file path, e.g. lib/utils/index.ts",
+        },
+    },
+)
+def repowiki_deps(projectId: str = "", path: str = "") -> dict:
+    projectId = _resolve_project_id(projectId)
+    result = _require_scan(projectId)
+    graph = result.graph
+    if graph is None:
+        raise ValueError(
+            f"No dependency graph for '{projectId}' — its snapshot predates "
+            "graph persistence. Run repowiki_scan to rebuild it."
+        )
+
+    path = _norm_repo_path(path)
+    if path:
+        if path not in graph.graph:
+            near = _known_paths_with_name(result, PurePosixPath(path).name)
+            hint = f" Did you mean: {', '.join(near)}?" if near else ""
+            raise ValueError(f"'{path}' is not in the dependency graph.{hint}")
+        return {
+            "projectId": projectId,
+            "path": path,
+            "imports": sorted(graph.graph.successors(path)),
+            "importedBy": sorted(graph.graph.predecessors(path)),
+        }
+
+    entries = graph.get_entry_points()
+    isolated = graph.find_isolated_files()
+    return {
+        "projectId": projectId,
+        "fileCount": graph.graph.number_of_nodes(),
+        "edgeCount": graph.graph.number_of_edges(),
+        # Long tails get counted, not shipped — a 400-entry list answers
+        # nothing a caller could not get from the per-path form anyway.
+        "entryPoints": {"count": len(entries), "paths": entries[:100]},
+        "isolatedFiles": {"count": len(isolated), "paths": isolated[:100]},
+        "cycles": graph.find_circular_dependencies(),
+    }
+
+
+@tool(
+    name="repowiki_file_chunks",
+    description=(
+        "Read the indexed excerpts of one file — what the search index "
+        "actually holds for it, verbatim, with line ranges. The answer for "
+        "'what does the wiki know about path X', and the only verbatim code "
+        "access a rehydrated project has."
+    ),
+    parameters={
+        "projectId": {
+            "type": "string",
+            "required": False,
+            "description": "Defaults to the only scanned repository",
+        },
+        "path": {
+            "type": "string",
+            "required": True,
+            "description": "Repo-relative file path, e.g. lib/utils/index.ts",
+        },
+    },
+)
+async def repowiki_file_chunks(projectId: str = "", path: str = "") -> dict:
+    projectId = _resolve_project_id(projectId)
+    result = _require_scan(projectId)
+    cfg = _config()
+    rag = await _ensure_index(result, cfg)
+
+    path = _norm_repo_path(path)
+    indices = rag._file_to_chunks.get(path)
+    if not indices:
+        near = _known_paths_with_name(result, PurePosixPath(path).name)
+        hint = f" Did you mean: {', '.join(near)}?" if near else ""
+        raise ValueError(f"'{path}' is not in the search index.{hint}")
+    return {
+        "projectId": projectId,
+        "path": path,
+        "chunks": [
+            {
+                "startLine": chunk.line_start,
+                "endLine": chunk.line_end,
+                "kind": chunk.kind,
+                "content": chunk.content,
+            }
+            for chunk in (rag.chunks[i] for i in indices)
+        ],
+    }
 
 
 # ---------------------------------------------------------------------------

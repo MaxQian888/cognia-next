@@ -137,13 +137,40 @@ class RagStore:
         rows = await cur.fetchall()
         return {row[0]: row[1] for row in rows}
 
-    async def delete_project(self, project_id: str) -> None:
+    async def project_stats(self, project_id: str) -> dict | None:
+        """Index size metadata without loading the index itself.
+
+        The status tool asks "is there an index for this project" — answering
+        that by deserialising 10k chunks would make the probe the heaviest
+        call in the surface. ``None`` means no snapshot exists.
+        """
         if not self._db:
-            return
+            return None
+        cur = await self._db.execute(
+            "SELECT doc_count, vector_dims FROM rag_meta WHERE project_id = ?",
+            (project_id,),
+        )
+        row = await cur.fetchone()
+        if row is None:
+            return None
+        return {"docCount": int(row[0]), "vectorDims": int(row[1] or 0)}
+
+    async def _delete_project_rows(self, project_id: str) -> None:
+        """Drop every index row for a project without committing.
+
+        The caller owns the transaction, so a crash cannot land between the
+        delete and whatever replaces it.
+        """
+        assert self._db is not None
         for table in ("rag_files", "rag_chunks", "rag_meta"):
             await self._db.execute(
                 f"DELETE FROM {table} WHERE project_id = ?", (project_id,)
             )
+
+    async def delete_project(self, project_id: str) -> None:
+        if not self._db:
+            return
+        await self._delete_project_rows(project_id)
         await self._db.commit()
 
     # ---------- whole-RAG save / load ----------
@@ -161,74 +188,82 @@ class RagStore:
         if not self._db:
             return
 
-        await self.delete_project(project_id)
+        # One transaction for the whole snapshot: a crash between dropping
+        # the old rows and writing the new ones must leave the *old* index
+        # intact, not an empty project. sqlite auto-opens the transaction on
+        # the first DELETE and holds it until the final commit.
+        try:
+            await self._delete_project_rows(project_id)
 
-        # Files table: one row per indexed file with its content hash.
-        # We reconstruct (path, kind) from the chunks themselves -- the
-        # rag instance only stores the sha map.
-        path_kind: dict[str, str] = {}
-        for chunk in rag.chunks:
-            path_kind.setdefault(chunk.file_path, chunk.kind)
-        await self._db.executemany(
-            "INSERT INTO rag_files (project_id, path, sha, kind) VALUES (?, ?, ?, ?)",
-            [
-                (project_id, path, rag._file_sha.get(path, ""), path_kind.get(path, "code"))
-                for path in rag._file_to_chunks
-            ],
-        )
+            # Files table: one row per indexed file with its content hash.
+            # We reconstruct (path, kind) from the chunks themselves -- the
+            # rag instance only stores the sha map.
+            path_kind: dict[str, str] = {}
+            for chunk in rag.chunks:
+                path_kind.setdefault(chunk.file_path, chunk.kind)
+            await self._db.executemany(
+                "INSERT INTO rag_files (project_id, path, sha, kind) VALUES (?, ?, ?, ?)",
+                [
+                    (project_id, path, rag._file_sha.get(path, ""), path_kind.get(path, "code"))
+                    for path in rag._file_to_chunks
+                ],
+            )
 
-        # Chunks + TF vectors (one row per chunk; tf serialized as JSON) and,
-        # when the semantic pass ran, the embedding as a float32 blob.
-        chunk_rows = []
-        for idx, chunk in enumerate(rag.chunks):
-            tf = rag._tf_vectors[idx]
-            length = rag._chunk_lens[idx]
-            vector = rag._vectors[idx] if idx < len(rag._vectors) else None
-            chunk_rows.append(
+            # Chunks + TF vectors (one row per chunk; tf serialized as JSON) and,
+            # when the semantic pass ran, the embedding as a float32 blob.
+            chunk_rows = []
+            for idx, chunk in enumerate(rag.chunks):
+                tf = rag._tf_vectors[idx]
+                length = rag._chunk_lens[idx]
+                vector = rag._vectors[idx] if idx < len(rag._vectors) else None
+                chunk_rows.append(
+                    (
+                        project_id,
+                        idx,
+                        chunk.file_path,
+                        chunk.line_start,
+                        chunk.line_end,
+                        chunk.content,
+                        chunk.kind,
+                        length,
+                        json.dumps(dict(tf), ensure_ascii=False),
+                        array("f", vector).tobytes() if vector else None,
+                    )
+                )
+            if chunk_rows:
+                await self._db.executemany(
+                    "INSERT INTO rag_chunks "
+                    "(project_id, chunk_id, path, line_start, line_end, content, kind, length, tf_blob, vector) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    chunk_rows,
+                )
+
+            # Meta row: global IDF + tuning knobs. JSON, not pickle: the saving
+            # on a large vocabulary is real but it is not worth making a row on
+            # disk into an arbitrary-code-execution vector.
+            idf_blob = json.dumps(rag._idf, ensure_ascii=False)
+            await self._db.execute(
+                "INSERT INTO rag_meta "
+                "(project_id, schema_version, doc_count, avgdl, k1, b, "
+                " max_chunk_lines, soft_chunk_lines, overlap_lines, idf_blob, vector_dims) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     project_id,
-                    idx,
-                    chunk.file_path,
-                    chunk.line_start,
-                    chunk.line_end,
-                    chunk.content,
-                    chunk.kind,
-                    length,
-                    json.dumps(dict(tf), ensure_ascii=False),
-                    array("f", vector).tobytes() if vector else None,
-                )
+                    SCHEMA_VERSION,
+                    len(rag.chunks),
+                    rag._avgdl,
+                    rag._k1,
+                    rag._b,
+                    rag.max_chunk_lines,
+                    rag.soft_chunk_lines,
+                    rag.overlap_lines,
+                    idf_blob,
+                    rag.vector_dims,
+                ),
             )
-        if chunk_rows:
-            await self._db.executemany(
-                "INSERT INTO rag_chunks "
-                "(project_id, chunk_id, path, line_start, line_end, content, kind, length, tf_blob, vector) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                chunk_rows,
-            )
-
-        # Meta row: global IDF + tuning knobs. JSON, not pickle: the saving
-        # on a large vocabulary is real but it is not worth making a row on
-        # disk into an arbitrary-code-execution vector.
-        idf_blob = json.dumps(rag._idf, ensure_ascii=False)
-        await self._db.execute(
-            "INSERT INTO rag_meta "
-            "(project_id, schema_version, doc_count, avgdl, k1, b, "
-            " max_chunk_lines, soft_chunk_lines, overlap_lines, idf_blob, vector_dims) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                project_id,
-                SCHEMA_VERSION,
-                len(rag.chunks),
-                rag._avgdl,
-                rag._k1,
-                rag._b,
-                rag.max_chunk_lines,
-                rag.soft_chunk_lines,
-                rag.overlap_lines,
-                idf_blob,
-                rag.vector_dims,
-            ),
-        )
+        except BaseException:
+            await self._db.rollback()
+            raise
         await self._db.commit()
 
     async def load(self, project_id: str) -> SimpleRAG | None:
@@ -309,5 +344,9 @@ class RagStore:
             (project_id,),
         )
         rag._file_sha = {row[0]: row[1] for row in await cur.fetchall()}
+
+        # Norms are derived from tf + idf, both of which we just restored —
+        # recompute once here rather than letting every query pay per chunk.
+        rag.recompute_norms()
 
         return rag
