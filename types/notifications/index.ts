@@ -141,6 +141,49 @@ export interface NotificationInput {
   /** Opt into BACKOFF coalescing (window extends on each new event). */
   coalesceBackoff?: boolean
   meta?: Record<string, unknown>
+  // ── V2 (opt-in; absent = legacy behavior) ────────────────────────────────
+  /**
+   * The fact's stable identity — `{kind}:{id}` namespaced by the producer
+   * (e.g. `run:01J…`, `task:xyz:complete:exec-42`). Distinct from `dedupeKey`:
+   * dedupe coalesces a WINDOW, logicalKey names the FACT. When set, it
+   * participates in the publication/delivery-slot identity and survives
+   * coalescing intact.
+   */
+  logicalKey?: string
+  /**
+   * The fact's category — subscriptions match on it. When absent the planner
+   * derives one from `source`; producers that know better (run progress,
+   * approval request) set it explicitly.
+   */
+  category?: import("./decision").NotificationCategory
+  /**
+   * Render hint for the center + external surfaces. `full` = normal card;
+   * `badge` = count-only (a "+3" rollup); `silent` = durable record, no
+   * obtrusive chrome anywhere (still queryable). Independent of `level` —
+   * a `critical` fact may still render `silent` when a subscription says so.
+   */
+  presentation?: "full" | "badge" | "silent"
+  /**
+   * Optional explicit scope hint — the planner resolves the full
+   * `NotificationScope` from it. Producers that already know their
+   * authorization domain (a bound IM session's account, a scheduler's
+   * workspace) pass it; the center derives the rest.
+   */
+  scopeHint?: {
+    accountId?: string
+    workspaceId?: string
+    businessProjectId?: string
+    runtimeId?: string
+    executionHostId?: string
+  }
+  /**
+   * Idempotency key for the WHOLE notify() call — retries of the same
+   * operation key collapse to one durable record + one fan-out plan.
+   * Distinct from `logicalKey` (the fact) and `dedupeKey` (the window).
+   */
+  operationKey?: string
+  /** Absolute validity deadline — an expired fact never delivers. */
+  validUntil?: number
 }
 
 /** Durable stored record (Dexie `notifications` table). */
@@ -191,6 +234,25 @@ export interface NotificationRecord {
   /** When set, the record auto-expires at this epoch-ms (from `ttlMs`). */
   expiresAt?: number
   meta?: Record<string, unknown>
+  // ── V2 (optional; absent on legacy rows) ─────────────────────────────────
+  /** The fact's stable identity — survives coalescing, joins publications. */
+  logicalKey?: string
+  /** The fact's category — subscriptions match on it. */
+  category?: import("./decision").NotificationCategory
+  /** Render hint — `full` | `badge` | `silent`. */
+  presentation?: "full" | "badge" | "silent"
+  /** Canonical encoding of the fact's stable scope — `notificationScopeKey`. */
+  scopeKey?: string
+  /**
+   * Monotonic per-fact revision — bumps on each commit-first write that
+   * materially changes the fact (coalesce count, presentation flip). Delivery
+   * intents CAS on it so a stale plan can't overwrite a newer fact.
+   */
+  notificationRevision?: number
+  /** Correlation id tying a fact to its producer operation (trace/debug). */
+  correlationId?: string
+  /** The policy-state row id holding this fact's latest committed decision. */
+  policyStateId?: string
 }
 
 /** Per-source override — an exception to the global default. */
@@ -247,3 +309,15 @@ export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
   connectorFocusAware: true,
   snoozeAutoWakeOnActivity: true,
 }
+
+// ── V2 re-exports ──────────────────────────────────────────────────────────
+// Consumers can keep importing from `@/types/notifications` and pick up the
+// V2 contracts alongside the V1 record/preferences. The modules are split so
+// each carries one cohesive contract (scope, target, subscription, decision,
+// delivery rows, result summaries).
+export * from "./scope"
+export * from "./target"
+export * from "./subscription"
+export * from "./decision"
+export * from "./delivery"
+export * from "./result"

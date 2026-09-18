@@ -266,6 +266,7 @@ export async function acceptWorkSubmission(
         db.executionContextBundles,
         db.executionRuns,
         db.executionRunEvents,
+        db.notificationProjectionWork,
       ],
       async (): Promise<WorkSubmissionRow> => {
         // Re-check inside the transaction: two concurrent accepts of the same
@@ -398,6 +399,7 @@ export async function markWorkSubmissionStarted(submissionId: string, now: numbe
       db.workSubmissions,
       db.executionRuns,
       db.executionRunEvents,
+      db.notificationProjectionWork,
       async () => {
         const row = await db.workSubmissions.get(submissionId)
         if (!row || row.dispatchState === "settled") return
@@ -457,6 +459,7 @@ export async function settleWorkSubmission(
         db.workSubmissions,
         db.executionRuns,
         db.executionRunEvents,
+        db.notificationProjectionWork,
       ],
       async (): Promise<boolean> => {
         const row = await db.workSubmissions.get(input.submissionId)

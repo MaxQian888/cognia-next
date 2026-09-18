@@ -64,6 +64,7 @@ export async function createSquadRunRecords(seed: SquadRunSeed): Promise<SquadRu
     db.agentTeamRuns,
     db.executionRuns,
     db.executionRunEvents,
+    db.notificationProjectionWork,
     async () => {
       const [existingRun, existingExecution] = await Promise.all([
         db.agentTeamRuns.get(seed.runId),

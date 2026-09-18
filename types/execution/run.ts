@@ -98,6 +98,19 @@ export type ExecutionRunStatus =
   | "failed"
   | "cancelled"
 
+/** The statuses a run never leaves — `run.completed|failed|cancelled`. */
+export type ExecutionTerminalStatus = "completed" | "failed" | "cancelled"
+
+export const EXECUTION_TERMINAL_STATUSES: readonly ExecutionTerminalStatus[] = [
+  "completed",
+  "failed",
+  "cancelled",
+] as const
+
+export function isTerminalRunStatus(status: ExecutionRunStatus): status is ExecutionTerminalStatus {
+  return status === "completed" || status === "failed" || status === "cancelled"
+}
+
 export type RunEventVisibility = "summary" | "detail" | "private"
 
 export type RunEventType =

@@ -183,6 +183,7 @@
     "0182-a-project-names-the-image-it-runs-in",
     "0183-the-agent-is-brought-to-the-image",
     "0188-a-routed-turn-spends-only-what-its-ledger-reserved",
-    "0189-a-plugin-says-which-of-four-things-it-is-doing"
+    "0189-a-plugin-says-which-of-four-things-it-is-doing",
+    "0190-notifications-leave-the-app-as-durable-work"
   ]
 }

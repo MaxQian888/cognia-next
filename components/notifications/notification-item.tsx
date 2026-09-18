@@ -37,6 +37,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { SNOOZE_PRESETS_MS, type SnoozePreset } from "@/lib/notifications/snooze"
+import { NotificationDeliveryBadge } from "./notification-delivery-badge"
 import type {
   NotificationRecord,
   NotificationSource,
@@ -147,6 +148,14 @@ export function NotificationItem({
               {record.count > 1 && (
                 <span className="mt-0.5 shrink-0 rounded-pill bg-muted px-1.5 text-[10px] leading-4 text-muted-foreground">
                   {t("center.groupCount", { count: record.count - 1 })}
+                </span>
+              )}
+              {/* V2 external delivery: when the fact left the app, surface the
+                  aggregate per-target outcome. Nothing renders for center-only
+                  records (no logicalKey, or no intents yet). */}
+              {record.logicalKey && (
+                <span className="mt-0.5 shrink-0">
+                  <NotificationDeliveryBadge logicalKey={record.logicalKey} />
                 </span>
               )}
             </div>

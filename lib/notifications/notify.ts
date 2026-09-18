@@ -12,6 +12,7 @@ import type {
 } from "@/types/notifications"
 import { resolveChannels, type RoutingDecision } from "./routing"
 import { coalesceSince, decideCoalesce, buildBumpPatch } from "./dedup"
+import { cachedNotificationScopeKey } from "./scope"
 
 export interface NotifyDbPort {
   findByDedupeKey(dedupeKey: string, sinceMs: number): Promise<NotificationRecord | undefined>
@@ -140,6 +141,20 @@ export async function notify(input: NotificationInput, deps: NotifyDeps): Promis
       deliveredVia: ["center"],
       expiresAt: input.ttlMs ? now + input.ttlMs : undefined,
       meta: input.meta,
+      // ── V2 fields — the fact's stable identity + classification, stamped so
+      // the record joins to delivery intents / subscriptions / diagnostics.
+      logicalKey: input.logicalKey,
+      category: input.category,
+      presentation: input.presentation,
+      correlationId: input.operationKey,
+      // The fact's authorization domain — scopeHint wins (a bound session's
+      // account/workspace), else the source workspace maps to `workspaceId`
+      // (legacy `projectId` semantics) and the primed account+namespace fill
+      // the rest. Always stamped so the record joins its scope.
+      scopeKey: cachedNotificationScopeKey(
+        input.scopeHint?.workspaceId ?? projectId,
+        input.scopeHint?.businessProjectId
+      ),
     }
   }
 

@@ -91,6 +91,51 @@ describe("execution run journal", () => {
     )
   })
 
+  it("touches the notification projection work row in the same commit", async () => {
+    // Commit-first: every journal append must raise the durable
+    // `notificationProjectionWork` dirty-marker atomically — the projector
+    // never learns of an event that isn't committed, and never misses one
+    // that is.
+    await createExecutionRun({
+      id: "run-notify",
+      kind: "agent-turn",
+      sourceId: "session-1:turn-1",
+      title: "Notify",
+      status: "running",
+      startedAt: 1_000,
+      updatedAt: 1_000,
+      currentRevision: 0,
+    })
+
+    await runEventJournal.append("run-notify", {
+      type: "step.added",
+      ts: 1_001,
+      visibility: "summary",
+      payload: { stepId: "s1" },
+    })
+    let work = await getDb()
+      .notificationProjectionWork.where("subjectKey")
+      .equals("run:run-notify")
+      .first()
+    expect(work?.desiredRunSeq).toBe(1)
+    expect(work?.state).toBe("pending")
+
+    // A second append raises the desired seq — a single touch per commit,
+    // not one row per event.
+    await runEventJournal.append("run-notify", {
+      type: "step.started",
+      ts: 1_002,
+      visibility: "summary",
+      payload: { stepId: "s1" },
+    })
+    work = await getDb()
+      .notificationProjectionWork.where("subjectKey")
+      .equals("run:run-notify")
+      .first()
+    expect(work?.desiredRunSeq).toBe(2)
+    expect(await getDb().notificationProjectionWork.count()).toBe(1)
+  })
+
   it("deduplicates a source event without consuming another sequence", async () => {
     await createExecutionRun({
       id: "run-dedupe",

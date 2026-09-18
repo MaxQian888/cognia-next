@@ -140,7 +140,7 @@ describe("notification-integration", () => {
           level: "info",
           title: "Task Started: Test Task",
           channels: ["center", "os"],
-          dedupeKey: "task:task-1:start",
+          dedupeKey: "task:task-1:start:exec-1",
           groupKey: "task:task-1",
         })
       )

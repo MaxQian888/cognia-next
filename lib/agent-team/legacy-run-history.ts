@@ -102,6 +102,7 @@ export async function backfillLegacyTeamRun(
     db.agentTeamRuns,
     db.executionRuns,
     db.executionRunEvents,
+    db.notificationProjectionWork,
     async () => {
       if (await db.executionRuns.get(executionRunId)) return "skipped"
 

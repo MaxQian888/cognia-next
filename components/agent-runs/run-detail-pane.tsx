@@ -41,6 +41,7 @@ import { cn } from "@/lib/utils"
 import { isSquadRun, RunCoordinationTab } from "./run-coordination-tab"
 import { RunReportTab } from "./run-report-tab"
 import { RunOperationsTab } from "./run-operations-tab"
+import { RunNotificationsTab } from "./run-notifications-tab"
 import { useExecutionRunDetail } from "@/hooks/agent-runs/use-execution-run-detail"
 import { changeKindLabelKey, changesAreComplete } from "@/lib/execution/run-detail-model"
 import { runKindLabelKey } from "@/lib/execution/cockpit-model"
@@ -290,6 +291,9 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
             {t("tabs.approvals")}
             <SectionCount value={interrupts.length} />
           </TabsTrigger>
+          {/* External notification deliveries for this run — the V2 ledger.
+              Always offered: any run kind can fan out to a configured target. */}
+          <TabsTrigger value="notifications">{t("tabs.notifications")}</TabsTrigger>
           {/*
             Only a Squad run has coordination. Offering the tab on a direct-chat
             or workflow run would be a permanently empty section rather than a
@@ -558,6 +562,10 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
               </ul>
             </EmptyOr>
           </Unavailable>
+        </TabsContent>
+
+        <TabsContent value="notifications" className="pt-2">
+          <RunNotificationsTab row={row} />
         </TabsContent>
       </Tabs>
     </div>

@@ -52,6 +52,29 @@ describe("notify — insert", () => {
     expect(row.count).toBe(1)
   })
 
+  it("stamps the V2 fact fields onto the record so it joins delivery intents", async () => {
+    const deps = baseDeps()
+    await notify(
+      {
+        source: "agent-team",
+        level: "info",
+        title: "Run done",
+        logicalKey: "run:r1:terminal",
+        category: "run.terminal",
+        presentation: "full",
+        operationKey: "op-123",
+        scopeHint: { workspaceId: "ws-1", businessProjectId: "bp-1" },
+      },
+      deps
+    )
+    const row = deps.db.rows.get("fixed-id")!
+    expect(row.logicalKey).toBe("run:r1:terminal")
+    expect(row.category).toBe("run.terminal")
+    expect(row.presentation).toBe("full")
+    expect(row.correlationId).toBe("op-123") // operationKey → correlationId join
+    expect(row.scopeKey).toBeTruthy() // the fact's authorization domain is stamped
+  })
+
   it("fans out to toast/os/push and records deliveredVia", async () => {
     const toast = jest.fn()
     const osNotify = jest.fn()

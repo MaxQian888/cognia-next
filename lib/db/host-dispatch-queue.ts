@@ -126,7 +126,7 @@ export async function claimDueHostDispatch(
   accountId: string,
   now: number = Date.now(),
   limit = 20,
-  leaseOwner = crypto.randomUUID(),
+  leaseOwner: string = crypto.randomUUID(),
   leaseMs = HOST_DISPATCH_LEASE_MS,
   jobId?: string
 ): Promise<HostDispatchJobRow[]> {

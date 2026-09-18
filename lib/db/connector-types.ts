@@ -647,7 +647,20 @@ export type OutboundJobStatus =
  * only path that existed when they were created.
  */
 export type OutboundJobSource =
-  "ai-run" | "manual" | "workflow" | "draft-approved" | "skill" | "plugin"
+  | "ai-run"
+  | "manual"
+  | "workflow"
+  | "draft-approved"
+  | "skill"
+  | "plugin"
+  /**
+   * A governed Notification V2 delivery (Dexie v227). The job is owned by a
+   * `NotificationDeliveryIntent` — the runner still does the send, but the
+   * receipt projects back onto the intent rather than a run presentation.
+   * Distinct from `"ai-run"` so inbox filters and retry ownership can tell a
+   * notification op apart from a run's live card.
+   */
+  | "notification"
 
 /**
  * Cross-reference back to the Visual Workflow node that produced a
@@ -741,6 +754,19 @@ export interface OutboundJobRow {
   reroutedToJobId?: string
   /** How the reroute happened, set alongside {@link reroutedToJobId}. */
   reroutedMechanism?: "failover" | "balanced"
+  /**
+   * Notification V2 operation-authority key (Dexie v227, unique index).
+   *
+   * Set only on jobs persisted through
+   * `persistGovernedNotificationInsideTransaction` — it is the SAME value as
+   * the owning `NotificationDeliveryIntent.operationKey`, so the outbound
+   * row and the intent share one dedupe/authority identity. Two jobs with
+   * the same key are the same operation: the unique index makes a double-
+   * persist a constraint violation instead of a duplicate send. Absent on
+   * every legacy / non-notification job (the unique index simply does not
+   * index rows that lack the field, so they cannot collide).
+   */
+  notificationOperationKey?: string
 }
 
 /**

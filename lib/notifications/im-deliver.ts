@@ -133,13 +133,36 @@ function gatedText(rec: NotificationRecord): string {
 }
 
 /**
- * Build the `imDeliver` fn the Notification Center calls. Never throws — every
- * skip / block path audits and returns so a failed IM push can't break the
- * notification persist or the other channels.
+ * The structured outcome of one IM delivery attempt — what the durable
+ * diagnostics and the V2 reconciler read. A `pushed` outcome means the record
+ * reached the outbound queue; every other outcome names WHY it didn't (the
+ * route exists only where an existing table already holds the link — nothing
+ * here guesses a destination).
  */
-export function createImDeliver(
+export type ImDeliverOutcome =
+  | { status: "pushed"; conversationKey: string }
+  | {
+      status: "skipped"
+      reason:
+        | "no-conversation" // belongs in no IM conversation
+        | "no-session" // conversation resolved but no bound session
+        | "delivery-target-missing" // bound session lacks a delivery target
+        | "opt-in-off" // proactivePush not enabled (fail-closed default)
+        | "pii-blocked" // gated content failed the PII scan
+      conversationKey?: string
+    }
+  | { status: "error" } // transport/persist fault — evidence is in the audit log
+
+/**
+ * Deliver one center record to its resolved IM conversation. Returns the
+ * structured outcome; never throws — every skip / block path audits and
+ * returns so a failed IM push can't break the notification persist or the
+ * other channels.
+ */
+export async function deliverRecordToIM(
+  rec: NotificationRecord,
   deps: ImDeliverDeps = {}
-): (rec: NotificationRecord) => Promise<void> {
+): Promise<ImDeliverOutcome> {
   const findSession = deps.findSession ?? findSessionByConversationKey
   const readOverride = deps.readOverride ?? readForResolution
   const enqueue = deps.enqueue ?? enqueueOutbound
@@ -148,90 +171,101 @@ export function createImDeliver(
   const getSession = deps.getSession ?? defaultGetSession
   const listRunBindings = deps.listRunBindings ?? listExecutionRunBindings
 
-  return async (rec: NotificationRecord): Promise<void> => {
-    try {
-      const conversationKey = await resolveConversationKey(rec, { getSession, listRunBindings })
-      if (!conversationKey) return // belongs in no IM conversation — nothing to do
+  try {
+    const conversationKey = await resolveConversationKey(rec, { getSession, listRunBindings })
+    if (!conversationKey) return { status: "skipped", reason: "no-conversation" }
 
-      const session = await findSession(conversationKey)
-      const binding = session?.platformBinding
-      if (!binding) {
-        // No bound session → we can't reliably target the platform; skip
-        // silently (no adapterId to audit against).
-        return
-      }
-      if (!binding.deliveryTarget) {
-        await audit({
-          adapterId: binding.adapterId,
-          kind: "notify.im_skipped",
-          at: Date.now(),
-          conversationKey,
-          reason: "delivery_target_missing",
-          fields: { notificationId: rec.id },
-        })
-        return
-      }
-
-      const override = await readOverride(conversationKey).catch(() => undefined)
-      if (override?.proactivePush !== true) {
-        await audit({
-          adapterId: binding.adapterId,
-          kind: "notify.im_skipped",
-          at: Date.now(),
-          conversationKey,
-          reason: "opt_in_off",
-          fields: { notificationId: rec.id },
-        })
-        return
-      }
-
-      const text = bodyText(rec)
-      if (!isPiiSafe(gatedText(rec))) {
-        await audit({
-          adapterId: binding.adapterId,
-          kind: "notify.im_pii_blocked",
-          at: Date.now(),
-          conversationKey,
-          reason: "pii_blocked",
-          fields: { notificationId: rec.id },
-        })
-        return
-      }
-
-      // A record with actions is a question, and a question needs its answers
-      // attached. One without is a statement, and the plain-text path renders
-      // it better on every platform, so the card is not forced on it.
-      const segment =
-        (rec.actions?.length ?? 0) > 0
-          ? buildA2UISegment(
-              `notification:${rec.id}`,
-              buildNotificationCardSurface({ record: rec })
-            )
-          : { type: "text" as const, text: text || rec.title }
-
-      await enqueue({
-        adapterId: binding.adapterId,
-        conversationKey,
-        request: {
-          conversationRef: binding.conversationRef,
-          deliveryTarget: binding.deliveryTarget,
-          segments: [segment],
-          // Idempotency keyed on the record id → a coalesce bump re-delivering
-          // the same record is deduped by the outbound runner.
-          metadata: { idempotencyKey: `notify:${rec.id}` },
-        },
-        source: "ai-run",
-      })
+    const session = await findSession(conversationKey)
+    const binding = session?.platformBinding
+    if (!binding) {
+      // No bound session → we can't reliably target the platform; skip
+      // silently (no adapterId to audit against).
+      return { status: "skipped", reason: "no-session", conversationKey }
+    }
+    if (!binding.deliveryTarget) {
       await audit({
         adapterId: binding.adapterId,
-        kind: "notify.im_pushed",
+        kind: "notify.im_skipped",
         at: Date.now(),
         conversationKey,
-        fields: { notificationId: rec.id, level: rec.level },
+        reason: "delivery_target_missing",
+        fields: { notificationId: rec.id },
       })
-    } catch {
-      // Fail-closed: a delivery error must never propagate into notify()'s
-      // persist / other channels.
+      return { status: "skipped", reason: "delivery-target-missing", conversationKey }
     }
+
+    const override = await readOverride(conversationKey).catch(() => undefined)
+    if (override?.proactivePush !== true) {
+      await audit({
+        adapterId: binding.adapterId,
+        kind: "notify.im_skipped",
+        at: Date.now(),
+        conversationKey,
+        reason: "opt_in_off",
+        fields: { notificationId: rec.id },
+      })
+      return { status: "skipped", reason: "opt-in-off", conversationKey }
+    }
+
+    const text = bodyText(rec)
+    if (!isPiiSafe(gatedText(rec))) {
+      await audit({
+        adapterId: binding.adapterId,
+        kind: "notify.im_pii_blocked",
+        at: Date.now(),
+        conversationKey,
+        reason: "pii_blocked",
+        fields: { notificationId: rec.id },
+      })
+      return { status: "skipped", reason: "pii-blocked", conversationKey }
+    }
+
+    // A record with actions is a question, and a question needs its answers
+    // attached. One without is a statement, and the plain-text path renders
+    // it better on every platform, so the card is not forced on it.
+    const segment =
+      (rec.actions?.length ?? 0) > 0
+        ? buildA2UISegment(`notification:${rec.id}`, buildNotificationCardSurface({ record: rec }))
+        : { type: "text" as const, text: text || rec.title }
+
+    await enqueue({
+      adapterId: binding.adapterId,
+      conversationKey,
+      request: {
+        conversationRef: binding.conversationRef,
+        deliveryTarget: binding.deliveryTarget,
+        segments: [segment],
+        // Idempotency keyed on the record id → a coalesce bump re-delivering
+        // the same record is deduped by the outbound runner.
+        metadata: { idempotencyKey: `notify:${rec.id}` },
+      },
+      source: "ai-run",
+    })
+    await audit({
+      adapterId: binding.adapterId,
+      kind: "notify.im_pushed",
+      at: Date.now(),
+      conversationKey,
+      fields: { notificationId: rec.id, level: rec.level },
+    })
+    return { status: "pushed", conversationKey }
+  } catch {
+    // Fail-closed: a delivery error must never propagate into notify()'s
+    // persist / other channels.
+    return { status: "error" }
+  }
+}
+
+/**
+ * Build the `imDeliver` fn the Notification Center calls — the compatibility
+ * bridge over {@link deliverRecordToIM}. The notify() channel signature stays
+ * `Promise<void>`; callers that want the structured outcome call
+ * `deliverRecordToIM` directly.
+ */
+export function createImDeliver(
+  deps: ImDeliverDeps = {}
+): (rec: NotificationRecord) => Promise<void> {
+  return async (rec: NotificationRecord): Promise<void> => {
+    await deliverRecordToIM(rec, deps)
   }
 }

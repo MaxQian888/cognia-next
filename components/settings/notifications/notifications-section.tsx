@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useSettingsStore } from "@/stores/settings"
+import { NotificationDeliveryPanel } from "./notification-delivery-panel"
 import { useNotificationPermission } from "@/hooks/notifications/use-notification-permission"
 import { resolvePreferences } from "@/lib/notifications/preferences"
 import {
@@ -273,6 +274,11 @@ export function NotificationsSection() {
           value={[prefs.retentionMaxItems]}
           onValueChange={(v) => update({ retentionMaxItems: v[0] ?? 500 })}
         />
+      </div>
+
+      {/* External delivery — V2 targets & subscriptions */}
+      <div className="border-t pt-4">
+        <NotificationDeliveryPanel />
       </div>
 
       <div className="border-t pt-4">

@@ -61,7 +61,11 @@ export async function notifyTaskEvent(
   const wantsDesktop = channels.includes("desktop")
   const wantsIm = channels.includes("im")
   const imConversationKey = wantsIm ? await resolveImConversationKey(task) : undefined
-  if (wantsToast || wantsDesktop || imConversationKey) {
+  // A center-eligible channel was requested (toast/desktop/im). The `im` arm
+  // only lands a push when a conversation resolved — but an IM-only request
+  // with no configured target must STILL write the center record, or the
+  // event is lost silently (the missing-target diagnostic is the record).
+  if (wantsToast || wantsDesktop || wantsIm) {
     const coreChannels: CenterChannel[] = ["center"]
     if (wantsToast) coreChannels.push("toast")
     if (wantsDesktop) coreChannels.push("os")
@@ -73,7 +77,10 @@ export async function notifyTaskEvent(
         title,
         body,
         channels: coreChannels,
-        dedupeKey: `task:${task.id}:${eventType}`,
+        // `execution.id` gives single-execution identity — two runs of the
+        // same task produce distinct records rather than coalescing into
+        // one, while a retry of the SAME execution still collapses.
+        dedupeKey: `task:${task.id}:${eventType}:${execution.id}`,
         groupKey: `task:${task.id}`,
         // `im-deliver.ts` resolves its destination from a `"conversation"`
         // sourceRef and nothing else, so an IM-bound notification has to carry

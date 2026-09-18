@@ -17,6 +17,12 @@ jest.mock("@/hooks/notifications/use-notification-permission", () => ({
   useNotificationPermission: () => permission,
 }))
 
+// The delivery panel owns its own Dexie-backed test; here it's a stub so the
+// section's preference-form assertions stay focused on AppSettings.
+jest.mock("./notification-delivery-panel", () => ({
+  NotificationDeliveryPanel: () => <div data-testid="delivery-panel-stub" />,
+}))
+
 import { NotificationsSection } from "./notifications-section"
 
 beforeEach(() => {

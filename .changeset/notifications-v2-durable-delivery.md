@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Notifications V2: a durable, policy-driven external-delivery layer behind the existing notification center. Adds governed delivery targets (Feishu application bot via connector conversations, one-way Feishu webhooks via credential-store secret refs) and scope/source/run subscriptions with minimum-level and per-target disclosure ceilings; a commit-first coordinator projects run events into facts, applies quiet-hours/do-not-disturb, aggregation-and-digest buckets, incident inhibition, and suppress-if-unchanged materiality, then mints durable delivery intents + append-only attempts through the governed outbound queue. A host-owned worker reconciles lost wakes, stale `sending` claims (recovered from job evidence, never blindly re-sent), receipt drift, and due timers after a crash. Ships a settings panel to manage targets and subscriptions, a per-notification delivery-status badge, and a run-detail Notifications tab with per-target outcomes — all in English and Chinese.

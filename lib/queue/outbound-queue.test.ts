@@ -491,7 +491,7 @@ describe("createOutboundRunner", () => {
       scope,
     })
     const row = await enqueue({
-      command: "collab_issue_update",
+      command: "collab_issue_patch",
       payload: {},
       protocol: "collab-v1",
     })

@@ -12,6 +12,8 @@ import type {
 } from "@/types/execution/run"
 import { getDb, withDbReopenRetry } from "./schema"
 import { redactText } from "@cognia/redact"
+import { touchNotificationProjectionInTransaction } from "./notification-projection-work"
+import { cachedNotificationScopeKey } from "@/lib/notifications/scope"
 
 export type AppendRunEventInput = Omit<RunEvent, "id" | "runId" | "seq" | "projectId"> & {
   id?: string
@@ -188,8 +190,11 @@ export async function getExecutionRunSnapshot(
  * writes — the work-submission acceptance transaction, for one — take this
  * entry point instead and supply the `db` bound to their transaction.
  *
- * The caller's transaction scope must already include `executionRuns` and
- * `executionRunEvents`.
+ * The caller's transaction scope must already include `executionRuns`,
+ * `executionRunEvents`, AND `notificationProjectionWork` (Dexie v227 — the
+ * commit-time notification touch writes the dirty marker into the same
+ * transaction). Callers on older scopes get a "table not in transaction"
+ * error, which is the intended loud signal to widen their scope.
  */
 export function appendRunEventInsideTransaction(
   db: ReturnType<typeof getDb>,
@@ -242,7 +247,20 @@ function appendInsideTransaction(
               updatedAt: snapshot.updatedAt,
               ...(snapshot.endedAt !== undefined ? { endedAt: snapshot.endedAt } : {}),
             })
-            .then(() => event)
+            .then(() =>
+              // V2 (Dexie v227): mark notification projection work dirty in
+              // the SAME commit as the event. The projector consumes the row;
+              // a missed wake is recovered by the reconciler sweep. The
+              // scopeKey derives from the run's workspace via the primed
+              // identity cache — synchronous, so it never abandons this
+              // transaction. Callers whose outer transaction predates v227
+              // must include `notificationProjectionWork` in its scope.
+              touchNotificationProjectionInTransaction(db, {
+                runId,
+                scopeKey: cachedNotificationScopeKey(run.projectId),
+                desiredRunSeq: event.seq,
+              }).then(() => event)
+            )
         })
     })
   })
@@ -264,8 +282,12 @@ export const runEventJournal: RunEventJournal = {
     const idempotentInput = input.id ? input : { ...input, id: eventId(runId, input) }
     return withDbReopenRetry(() => {
       const db = getDb()
-      return db.transaction("rw", db.executionRuns, db.executionRunEvents, () =>
-        appendInsideTransaction(db, runId, idempotentInput)
+      return db.transaction(
+        "rw",
+        db.executionRuns,
+        db.executionRunEvents,
+        db.notificationProjectionWork,
+        () => appendInsideTransaction(db, runId, idempotentInput)
       )
     })
   },
@@ -276,19 +298,25 @@ export const runEventJournal: RunEventJournal = {
     )
     return withDbReopenRetry(() => {
       const db = getDb()
-      return db.transaction("rw", db.executionRuns, db.executionRunEvents, () => {
-        const initial = db.executionRuns.get(runId).then(() => [] as RunEvent[])
-        return idempotentInputs.reduce<Promise<RunEvent[]>>(
-          (pending, input) =>
-            pending.then((out) =>
-              appendInsideTransaction(db, runId, input).then((event) => {
-                out.push(event)
-                return out
-              })
-            ),
-          initial
-        )
-      })
+      return db.transaction(
+        "rw",
+        db.executionRuns,
+        db.executionRunEvents,
+        db.notificationProjectionWork,
+        () => {
+          const initial = db.executionRuns.get(runId).then(() => [] as RunEvent[])
+          return idempotentInputs.reduce<Promise<RunEvent[]>>(
+            (pending, input) =>
+              pending.then((out) =>
+                appendInsideTransaction(db, runId, input).then((event) => {
+                  out.push(event)
+                  return out
+                })
+              ),
+            initial
+          )
+        }
+      )
     })
   },
 
