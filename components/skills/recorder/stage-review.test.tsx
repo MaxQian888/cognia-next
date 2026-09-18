@@ -63,7 +63,7 @@ function reachReview(steps: RecordedStep[], ignoredCount = 0) {
   })
   store().setCapturedSteps(steps)
   store().dispatch({ type: "STOP_REQUESTED" })
-  store().dispatch({ type: "STOPPED", steps, ignoredCount, bundleId: RECORDING })
+  store().dispatch({ type: "STOPPED", steps, ignoredCount, bundleId: RECORDING, bundleBytes: 0 })
 }
 
 beforeEach(() => {

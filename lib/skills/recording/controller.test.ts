@@ -211,7 +211,7 @@ beforeEach(() => {
   __resetControllerForTesting()
   useRecorderStore.getState().reset()
   client.recordPreflight.mockResolvedValue(preflight())
-  client.recordStart.mockResolvedValue(undefined)
+  client.recordStart.mockResolvedValue({ recording: true, stepCount: 0, usage: [] })
   client.recordStop.mockResolvedValue(bundle())
   client.recordLoadBundle.mockResolvedValue(bundle())
   client.recordStatus.mockResolvedValue({ recording: false, stepCount: 0, usage: [] })
@@ -815,9 +815,10 @@ describe("recoverOnStartup", () => {
     })
   })
 
-  it("loads a stranded bundle into review rather than resuming it", async () => {
+  it("restores a stranded bundle's draft rather than resuming it", async () => {
     // Silently rejoining a recording the user thought had ended would be worse
-    // than asking; the bundle is loaded, the capture is not restarted.
+    // than asking; the bundle is loaded, the capture is not restarted. A row
+    // carrying a draft resumes at the draft it left behind.
     dbRecordings.listUnfinishedRecordings.mockResolvedValue([
       { id: RECORDING, status: "captured", updatedAt: 1 },
     ] as never)
@@ -835,7 +836,7 @@ describe("recoverOnStartup", () => {
 
     await recoverOnStartup()
 
-    expect(store().phase).toBe("review")
+    expect(store().phase).toBe("draft")
     expect(store().capturedSteps).toHaveLength(2)
     expect(store().ignoredCount).toBe(3)
     expect(store().draft?.name).toBe("Prior")

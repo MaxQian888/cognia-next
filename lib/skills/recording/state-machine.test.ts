@@ -78,6 +78,7 @@ describe("reduceRecorder — the happy path", () => {
       steps: [],
       ignoredCount: 3,
       bundleId: started.recordingId,
+      bundleBytes: 0,
     })!
     expect(state.phase).toBe("review")
     expect(state.ignoredCount).toBe(3)

@@ -64,7 +64,13 @@ function reachGenerate() {
   })
   store().setCapturedSteps([step(1)])
   store().dispatch({ type: "STOP_REQUESTED" })
-  store().dispatch({ type: "STOPPED", steps: [step(1)], ignoredCount: 0, bundleId: RECORDING })
+  store().dispatch({
+    type: "STOPPED",
+    steps: [step(1)],
+    ignoredCount: 0,
+    bundleId: RECORDING,
+    bundleBytes: 0,
+  })
 }
 
 function applyDraft(next = draft(), asCandidate = false) {

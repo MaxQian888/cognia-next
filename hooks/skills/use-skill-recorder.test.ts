@@ -164,7 +164,13 @@ describe("review and draft selectors", () => {
       },
     })
     store().dispatch({ type: "STOP_REQUESTED" })
-    store().dispatch({ type: "STOPPED", steps: [step(1)], ignoredCount: 0, bundleId: RECORDING })
+    store().dispatch({
+      type: "STOPPED",
+      steps: [step(1)],
+      ignoredCount: 0,
+      bundleId: RECORDING,
+      bundleBytes: 0,
+    })
   }
 
   it("exposes variables, usage and options", () => {
@@ -271,7 +277,13 @@ describe("useRecorderUnconfirmedVariables", () => {
         limits: { maxDurationMs: 1, maxSteps: 1, maxBundleBytes: 1, maxGlobalBytes: 1 },
       })
       store().dispatch({ type: "STOP_REQUESTED" })
-      store().dispatch({ type: "STOPPED", steps: [], ignoredCount: 0, bundleId: RECORDING })
+      store().dispatch({
+        type: "STOPPED",
+        steps: [],
+        ignoredCount: 0,
+        bundleId: RECORDING,
+        bundleBytes: 0,
+      })
       store().dispatch({
         type: "SET_VARIABLES",
         variables: [suggestion(1, false), suggestion(2, true), suggestion(3, false)],

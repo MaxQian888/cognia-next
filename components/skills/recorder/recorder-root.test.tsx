@@ -158,7 +158,13 @@ function reachReview() {
   live()
   store().setCapturedSteps([step(1)])
   store().dispatch({ type: "STOP_REQUESTED" })
-  store().dispatch({ type: "STOPPED", steps: [step(1)], ignoredCount: 0, bundleId: RECORDING })
+  store().dispatch({
+    type: "STOPPED",
+    steps: [step(1)],
+    ignoredCount: 0,
+    bundleId: RECORDING,
+    bundleBytes: 0,
+  })
 }
 
 /** Reach review and switch the visible stage to Generate. */
@@ -423,7 +429,13 @@ describe("the Sheet", () => {
     act(() => {
       store().setCapturedSteps([step(1)])
       store().dispatch({ type: "STOP_REQUESTED" })
-      store().dispatch({ type: "STOPPED", steps: [step(1)], ignoredCount: 0, bundleId: RECORDING })
+      store().dispatch({
+        type: "STOPPED",
+        steps: [step(1)],
+        ignoredCount: 0,
+        bundleId: RECORDING,
+        bundleBytes: 0,
+      })
     })
     render(<SkillRecorderRoot />)
     await userEvent.click(await screen.findByRole("button", { name: "review.continue" }))
@@ -555,7 +567,13 @@ describe("generation", () => {
       ]
       store().setCapturedSteps(steps)
       store().dispatch({ type: "STOP_REQUESTED" })
-      store().dispatch({ type: "STOPPED", steps, ignoredCount: 0, bundleId: RECORDING })
+      store().dispatch({
+        type: "STOPPED",
+        steps,
+        ignoredCount: 0,
+        bundleId: RECORDING,
+        bundleBytes: 0,
+      })
       store().setUi({ stageOverride: "generate" })
     })
     render(<SkillRecorderRoot />)

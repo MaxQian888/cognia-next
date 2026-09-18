@@ -777,9 +777,8 @@ export async function resumeRecoverable(recordingId: RecordingId): Promise<boole
         await checkpointRecording(created.id, {
           stepCount: bundle.steps.length + bundle.ignoredCount,
           includedCount: bundle.steps.length,
-          ignoredCount: bundle.ignoredCount,
           bundleBytes: bundle.totalBytes,
-          ...(bundle.interrupted
+          ...(bundle.outcome === "interrupted"
             ? {
                 interrupt: {
                   reason: bundle.interruptReason ?? "nativeFailure",

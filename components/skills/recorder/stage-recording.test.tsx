@@ -167,7 +167,13 @@ describe("out-of-scope actions", () => {
   it("reports only a count — never what was ignored", () => {
     live()
     store().dispatch({ type: "STOP_REQUESTED" })
-    store().dispatch({ type: "STOPPED", steps: [], ignoredCount: 4, bundleId: RECORDING })
+    store().dispatch({
+      type: "STOPPED",
+      steps: [],
+      ignoredCount: 4,
+      bundleId: RECORDING,
+      bundleBytes: 0,
+    })
     renderStage()
     expect(screen.getByText(/recording\.ignored.*"count":4/)).toBeInTheDocument()
   })
