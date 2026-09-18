@@ -38,6 +38,8 @@ function describeRule(rule: TriggerRule, t: Translator): string {
       return t("rules.slash-command", { names: rule.prefixes.join(", ") })
     case "keyword":
       return t("rules.keyword", { names: rule.words.join(", ") })
+    case "regex":
+      return t("rules.regex", { pattern: rule.pattern })
     case "user-allowlist":
       return t("rules.user-allowlist", { names: rule.userIds.join(", ") })
     case "channel-allowlist":

@@ -27,14 +27,16 @@
  * would have (a merged rate limit names one bucket where two limits might have
  * named either), but never a different decision.
  *
- * The one shape with no equivalent single-rule form is two `keyword` rules that
- * disagree on `caseInsensitive`: merging them either widens the case-sensitive
- * words or narrows the case-insensitive ones. Those extra rules are kept
- * verbatim in {@link TriggerPolicyDraft.residualRules}, survive a round trip
- * untouched, and are surfaced in the editor rather than silently discarded.
+ * The one shape with no equivalent single-rule form is two `keyword`/`regex`
+ * rules that disagree on `caseInsensitive`: merging them either widens the
+ * case-sensitive words/patterns or narrows the case-insensitive ones. Those
+ * extra rules are kept verbatim in {@link TriggerPolicyDraft.residualRules},
+ * survive a round trip untouched, and are surfaced in the editor rather than
+ * silently discarded.
  */
 
 import type { TriggerBlocker, TriggerPolicy, TriggerRule } from "@/types/connectors/policy"
+import { validateSafePattern } from "./safe-pattern"
 
 export interface TriggerRuleDraft {
   /** Every message in a chat the platform reports as private. */
@@ -45,6 +47,13 @@ export interface TriggerRuleDraft {
   replyToBot: boolean
   slashCommand: { enabled: boolean; prefixes: string[] }
   keyword: { enabled: boolean; words: string[]; caseInsensitive: boolean }
+  /**
+   * One regular expression over the message text. Duplicates of this kind
+   * merge by alternation (`p1|p2` is exactly "p1 OR p2" in regex semantics);
+   * a second rule disagreeing on `caseInsensitive` cannot merge and is kept
+   * verbatim in {@link TriggerPolicyDraft.residualRules}, same as `keyword`.
+   */
+  regex: { enabled: boolean; pattern: string; caseInsensitive: boolean }
   userAllowlist: { enabled: boolean; userIds: string[] }
   channelAllowlist: { enabled: boolean; channelIds: string[] }
 }
@@ -69,8 +78,8 @@ export interface TriggerPolicyDraft {
   storeUnmatchedInDraftMode: boolean
   /**
    * Rules the per-kind slots cannot represent exactly — today only the second
-   * `caseInsensitive` variant of a `keyword` rule. Preserved verbatim so
-   * editing anything else never destroys them.
+   * `caseInsensitive` variant of a `keyword` or `regex` rule. Preserved
+   * verbatim so editing anything else never destroys them.
    */
   residualRules: TriggerRule[]
 }
@@ -84,6 +93,7 @@ export function emptyTriggerPolicyDraft(): TriggerPolicyDraft {
       replyToBot: false,
       slashCommand: { enabled: false, prefixes: [] },
       keyword: { enabled: false, words: [], caseInsensitive: true },
+      regex: { enabled: false, pattern: "", caseInsensitive: true },
       userAllowlist: { enabled: false, userIds: [] },
       channelAllowlist: { enabled: false, channelIds: [] },
     },
@@ -154,6 +164,36 @@ export function toTriggerPolicyDraft(policy: TriggerPolicy | undefined): Trigger
           draft.residualRules.push(rule)
         }
         break
+      case "regex": {
+        // Same case mode merges by alternation — `a|b` is exactly "a OR b" —
+        // with an empty slot absorbing the first pattern rather than
+        // producing a leading `|`. A disagreeing one has no single-rule
+        // equivalent and is kept aside rather than widened or narrowed.
+        // An RE2-unsafe stored pattern bypasses the slot to residual verbatim:
+        // the evaluator fails it closed either way, but slotting it would let
+        // an alternation merge silently take a working safe rule down with it
+        // when `fromTriggerPolicyDraft` rejects the unsafe composite.
+        if (validateSafePattern(rule.pattern) !== null) {
+          draft.residualRules.push(rule)
+          break
+        }
+        const slot = draft.rules.regex
+        if (!slot.enabled) {
+          draft.rules.regex = {
+            enabled: true,
+            pattern: rule.pattern,
+            caseInsensitive: rule.caseInsensitive,
+          }
+        } else if (slot.caseInsensitive === rule.caseInsensitive) {
+          const patterns = slot.pattern === "" ? [] : slot.pattern.split("|")
+          slot.pattern = patterns.includes(rule.pattern)
+            ? slot.pattern
+            : [...patterns, rule.pattern].join("|")
+        } else {
+          draft.residualRules.push(rule)
+        }
+        break
+      }
       case "user-allowlist":
         draft.rules.userAllowlist = {
           enabled: true,
@@ -255,6 +295,23 @@ export function fromTriggerPolicyDraft(draft: TriggerPolicyDraft): TriggerPolicy
       caseInsensitive: draft.rules.keyword.caseInsensitive,
     })
   }
+  // Rejected at draft, never at eval: an enabled-but-empty pattern would
+  // compile to a match-everything rule, and an RE2-unsafe pattern would only
+  // fail closed downstream — both stay out of the persisted policy and the
+  // draft warnings (`regex-empty` / `regex-unsafe`) tell the operator why the
+  // slot did not save. Rules already stored outside the draft flow ride in
+  // `residualRules` verbatim — dropping a saved rule would be silent data loss.
+  if (
+    draft.rules.regex.enabled &&
+    draft.rules.regex.pattern !== "" &&
+    validateSafePattern(draft.rules.regex.pattern) === null
+  ) {
+    rules.push({
+      kind: "regex",
+      pattern: draft.rules.regex.pattern,
+      caseInsensitive: draft.rules.regex.caseInsensitive,
+    })
+  }
   if (draft.rules.userAllowlist.enabled) {
     rules.push({ kind: "user-allowlist", userIds: [...draft.rules.userAllowlist.userIds] })
   }
@@ -338,6 +395,8 @@ export function triggerCoverageGaps(policy: TriggerPolicy | undefined): TriggerC
 export type TriggerDraftWarning =
   | "slash-command-empty"
   | "keyword-empty"
+  | "regex-empty"
+  | "regex-unsafe"
   | "user-allowlist-empty"
   | "channel-allowlist-empty"
   | "user-blocklist-empty"
@@ -352,6 +411,16 @@ export function triggerDraftWarnings(draft: TriggerPolicyDraft): TriggerDraftWar
     warnings.push("slash-command-empty")
   }
   if (rules.keyword.enabled && rules.keyword.words.length === 0) warnings.push("keyword-empty")
+  if (rules.regex.enabled) {
+    if (rules.regex.pattern === "") {
+      warnings.push("regex-empty")
+    } else if (validateSafePattern(rules.regex.pattern) !== null) {
+      // Reported, not silently dropped: `fromTriggerPolicyDraft` refuses to
+      // emit the rule, so this warning is the only signal explaining why the
+      // enabled slot did not save.
+      warnings.push("regex-unsafe")
+    }
+  }
   if (rules.userAllowlist.enabled && rules.userAllowlist.userIds.length === 0) {
     warnings.push("user-allowlist-empty")
   }

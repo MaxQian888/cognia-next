@@ -6,6 +6,14 @@ export type TriggerRule =
   | { kind: "reply-to-bot" }
   | { kind: "slash-command"; prefixes: string[] }
   | { kind: "keyword"; words: string[]; caseInsensitive: boolean }
+  /**
+   * RE2-subset regular expression over the message text. `pattern` must pass
+   * `validateSafePattern` (`lib/connectors/safe-pattern.ts`) to be evaluated —
+   * the subset excludes lookarounds, backreferences and nested unbounded
+   * quantifiers so a user-supplied pattern cannot hang the dispatch loop.
+   * A pattern that fails validation simply never matches.
+   */
+  | { kind: "regex"; pattern: string; caseInsensitive: boolean }
   | { kind: "user-allowlist"; userIds: string[] }
   | { kind: "channel-allowlist"; channelIds: string[] }
 

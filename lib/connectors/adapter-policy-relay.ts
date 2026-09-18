@@ -134,6 +134,15 @@ function parseTriggerRule(raw: unknown, field: string): TriggerRule {
         caseInsensitive: raw.caseInsensitive,
       }
     }
+    case "regex": {
+      if (typeof raw.pattern !== "string") fail(`${field}.pattern`, "a string")
+      if (typeof raw.caseInsensitive !== "boolean") fail(`${field}.caseInsensitive`, "a boolean")
+      return {
+        kind: "regex",
+        pattern: raw.pattern,
+        caseInsensitive: raw.caseInsensitive,
+      }
+    }
     case "user-allowlist":
       return { kind: "user-allowlist", userIds: stringList(raw.userIds, `${field}.userIds`) }
     case "channel-allowlist":
@@ -144,7 +153,7 @@ function parseTriggerRule(raw: unknown, field: string): TriggerRule {
     default:
       return fail(
         `${field}.kind`,
-        "one of private-default | self-mention | reply-to-bot | slash-command | keyword | user-allowlist | channel-allowlist"
+        "one of private-default | self-mention | reply-to-bot | slash-command | keyword | regex | user-allowlist | channel-allowlist"
       )
   }
 }

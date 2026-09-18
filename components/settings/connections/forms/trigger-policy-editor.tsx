@@ -7,11 +7,11 @@
  * Presentational and scope-agnostic: it renders a {@link TriggerPolicyDraft}
  * and reports edits. `AdapterTriggerPolicy` owns the bot-wide row and the
  * conversation override form owns the per-chat one, so the two scopes cannot
- * drift into different vocabularies for the same seven conditions and five
+ * drift into different vocabularies for the same eight conditions and five
  * blockers.
  *
- * The evaluator (`lib/connectors/policy-eval.ts`) has implemented all twelve
- * since Task 26, but nothing wrote them: `AdapterInstanceRow.trigger` was
+ * The evaluator (`lib/connectors/policy-eval.ts`) implements every kind the
+ * draft holds, but nothing wrote them until this form: `AdapterInstanceRow.trigger` was
  * stamped once at create time and `ConversationOverrideRow.trigger` had no
  * writer at all, so inbound rate limits, keyword triggers and user
  * allow/blocklists were unreachable in the product.
@@ -284,6 +284,46 @@ export function TriggerPolicyEditor({
                 />
                 <Label htmlFor={`${idPrefix}-rule-keyword-case`} className="text-xs font-normal">
                   {t("rules.keyword.caseInsensitive")}
+                </Label>
+              </div>
+            </div>
+          </ToggleRow>
+
+          <ToggleRow
+            id={`${idPrefix}-rule-regex`}
+            label={t("rules.regex.label")}
+            help={t("rules.regex.help")}
+            checked={value.rules.regex.enabled}
+            disabled={disabled}
+            onCheckedChange={(checked) =>
+              patchRules({ regex: { ...value.rules.regex, enabled: checked } })
+            }
+          >
+            <div className="space-y-2">
+              <Input
+                id={`${idPrefix}-rule-regex-pattern`}
+                value={value.rules.regex.pattern}
+                disabled={disabled}
+                onChange={(event) =>
+                  patchRules({ regex: { ...value.rules.regex, pattern: event.target.value } })
+                }
+                placeholder={t("rules.regex.placeholder")}
+                aria-label={t("rules.regex.patternAria")}
+                data-testid={`${idPrefix}-rule-regex-pattern`}
+                className="font-mono"
+              />
+              <div className="flex items-center gap-2">
+                <Switch
+                  id={`${idPrefix}-rule-regex-case`}
+                  checked={value.rules.regex.caseInsensitive}
+                  disabled={disabled}
+                  onCheckedChange={(caseInsensitive) =>
+                    patchRules({ regex: { ...value.rules.regex, caseInsensitive } })
+                  }
+                  data-testid={`${idPrefix}-rule-regex-case-switch`}
+                />
+                <Label htmlFor={`${idPrefix}-rule-regex-case`} className="text-xs font-normal">
+                  {t("rules.regex.caseInsensitive")}
                 </Label>
               </div>
             </div>

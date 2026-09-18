@@ -127,6 +127,7 @@ describe("parseAdapterPolicyRelay", () => {
         { kind: "reply-to-bot" },
         { kind: "slash-command", prefixes: ["/ask"] },
         { kind: "keyword", words: ["deploy"], caseInsensitive: true },
+        { kind: "regex", pattern: "p[012]", caseInsensitive: true },
         { kind: "user-allowlist", userIds: ["u1"] },
         { kind: "channel-allowlist", channelIds: ["c1"] },
       ],
@@ -161,6 +162,8 @@ describe("parseAdapterPolicyRelay", () => {
       [{ kind: "slash-command" }, /trigger\.rules\[0\]\.prefixes/],
       [{ kind: "keyword", words: ["x"] }, /trigger\.rules\[0\]\.caseInsensitive/],
       [{ kind: "keyword", words: [1], caseInsensitive: true }, /trigger\.rules\[0\]\.words/],
+      [{ kind: "regex", caseInsensitive: true }, /trigger\.rules\[0\]\.pattern/],
+      [{ kind: "regex", pattern: "x" }, /trigger\.rules\[0\]\.caseInsensitive/],
       [{ kind: "user-allowlist" }, /trigger\.rules\[0\]\.userIds/],
       ["private-default", /trigger\.rules\[0\] must be an object/],
     ])("refuses the malformed rule %p", (rule, message) => {

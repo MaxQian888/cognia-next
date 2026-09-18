@@ -65,6 +65,7 @@ describe("draft round trip", () => {
         { kind: "reply-to-bot" },
         { kind: "slash-command", prefixes: ["/ask"] },
         { kind: "keyword", words: ["deploy"], caseInsensitive: false },
+        { kind: "regex", pattern: "p[012]", caseInsensitive: true },
         { kind: "user-allowlist", userIds: ["u1"] },
         { kind: "channel-allowlist", channelIds: ["c1"] },
       ],
@@ -103,6 +104,24 @@ describe("draft round trip", () => {
     const policy = fromTriggerPolicyDraft(draft)
     expect(policy.rules).toEqual([{ kind: "slash-command", prefixes: [] }])
     expect(toTriggerPolicyDraft(policy).rules.slashCommand).toEqual({ enabled: true, prefixes: [] })
+  })
+
+  it("rejects an unsafe regex at draft so it never reaches the evaluator", () => {
+    const draft = emptyTriggerPolicyDraft()
+    draft.rules.regex = { enabled: true, pattern: "(a+)+$", caseInsensitive: true }
+    const policy = fromTriggerPolicyDraft(draft)
+    expect(policy.rules).toEqual([])
+    expect(triggerDraftWarnings(draft)).toEqual(["regex-unsafe"])
+  })
+
+  it("rejects an enabled-but-empty regex rather than emitting a match-everything rule", () => {
+    // `new RegExp("")` matches every message — an enabled empty slot saved as
+    // a rule would trigger the bot on all traffic, so the draft refuses to
+    // emit it (the `regex-empty` warning explains why the slot did not save).
+    const draft = emptyTriggerPolicyDraft()
+    draft.rules.regex = { enabled: true, pattern: "", caseInsensitive: true }
+    expect(fromTriggerPolicyDraft(draft).rules).toEqual([])
+    expect(triggerDraftWarnings(draft)).toEqual(["regex-empty"])
   })
 })
 
@@ -184,6 +203,64 @@ describe("duplicate merging", () => {
     })
     expect(draft.residualRules).toEqual([
       { kind: "keyword", words: ["DEPLOY"], caseInsensitive: false },
+    ])
+    expectSameVerdicts(original, fromTriggerPolicyDraft(draft))
+  })
+
+  it("merges same-case regex rules by alternation and keeps a disagreeing one verbatim", () => {
+    const original: TriggerPolicy = {
+      rules: [
+        { kind: "regex", pattern: "deploy", caseInsensitive: true },
+        { kind: "regex", pattern: "p[012]", caseInsensitive: true },
+        { kind: "regex", pattern: "DEPLOY", caseInsensitive: false },
+      ],
+      blockers: [],
+      storeUnmatchedInDraftMode: false,
+    }
+    const draft = toTriggerPolicyDraft(original)
+    expect(draft.rules.regex).toEqual({
+      enabled: true,
+      pattern: "deploy|p[012]",
+      caseInsensitive: true,
+    })
+    expect(draft.residualRules).toEqual([
+      { kind: "regex", pattern: "DEPLOY", caseInsensitive: false },
+    ])
+    expectSameVerdicts(original, fromTriggerPolicyDraft(draft))
+  })
+
+  it("does not double-list an identical regex rule", () => {
+    const original: TriggerPolicy = {
+      rules: [
+        { kind: "regex", pattern: "deploy", caseInsensitive: true },
+        { kind: "regex", pattern: "deploy", caseInsensitive: true },
+      ],
+      blockers: [],
+      storeUnmatchedInDraftMode: false,
+    }
+    const draft = toTriggerPolicyDraft(original)
+    expect(draft.rules.regex.pattern).toBe("deploy")
+  })
+
+  it("keeps a stored unsafe regex verbatim in residual rather than letting it contaminate the slot", () => {
+    const original: TriggerPolicy = {
+      rules: [
+        { kind: "regex", pattern: "(a+)+$", caseInsensitive: true },
+        { kind: "regex", pattern: "deploy", caseInsensitive: true },
+      ],
+      blockers: [],
+      storeUnmatchedInDraftMode: false,
+    }
+    const draft = toTriggerPolicyDraft(original)
+    // The unsafe rule fails closed at eval regardless; keeping it out of the
+    // slot stops an alternation merge from dropping `deploy` with it on save.
+    expect(draft.rules.regex).toEqual({
+      enabled: true,
+      pattern: "deploy",
+      caseInsensitive: true,
+    })
+    expect(draft.residualRules).toEqual([
+      { kind: "regex", pattern: "(a+)+$", caseInsensitive: true },
     ])
     expectSameVerdicts(original, fromTriggerPolicyDraft(draft))
   })
@@ -300,6 +377,7 @@ describe("triggerDraftWarnings", () => {
     const draft = emptyTriggerPolicyDraft()
     draft.rules.slashCommand.enabled = true
     draft.rules.keyword.enabled = true
+    draft.rules.regex.enabled = true
     draft.rules.userAllowlist.enabled = true
     draft.rules.channelAllowlist.enabled = true
     draft.blockers.userBlocklist.enabled = true
@@ -308,12 +386,24 @@ describe("triggerDraftWarnings", () => {
     expect(triggerDraftWarnings(draft)).toEqual([
       "slash-command-empty",
       "keyword-empty",
+      "regex-empty",
       "user-allowlist-empty",
       "channel-allowlist-empty",
       "user-blocklist-empty",
       "channel-blocklist-empty",
       "keyword-blocklist-empty",
     ])
+  })
+
+  it("flags an unsafe regex rather than letting it silently never match", () => {
+    const draft = emptyTriggerPolicyDraft()
+    draft.rules.regex = { enabled: true, pattern: "(a+)+$", caseInsensitive: true }
+    expect(triggerDraftWarnings(draft)).toEqual(["regex-unsafe"])
+    // …and the evaluator really does fail it closed.
+    const event_ = event({ plainText: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaab" })
+    expect(evaluatePolicy(fromTriggerPolicyDraft(draft), event_, emptyState(), 1_000).matched).toBe(
+      false
+    )
   })
 
   it("catches a rate limit of zero, which silences the bot entirely", () => {
@@ -343,6 +433,8 @@ describe("localisation catalogue", () => {
   const WARNINGS: TriggerDraftWarning[] = [
     "slash-command-empty",
     "keyword-empty",
+    "regex-empty",
+    "regex-unsafe",
     "user-allowlist-empty",
     "channel-allowlist-empty",
     "user-blocklist-empty",
@@ -371,6 +463,9 @@ describe("localisation catalogue", () => {
     const everySlotOn = emptyTriggerPolicyDraft()
     everySlotOn.rules.slashCommand.enabled = true
     everySlotOn.rules.keyword.enabled = true
+    // The regex slot has two warning states and one draft can only show one;
+    // the unsafe variant is unioned in from a second draft below.
+    everySlotOn.rules.regex.enabled = true
     everySlotOn.rules.userAllowlist.enabled = true
     everySlotOn.rules.channelAllowlist.enabled = true
     everySlotOn.blockers.userBlocklist.enabled = true
@@ -382,7 +477,11 @@ describe("localisation catalogue", () => {
       perChannelPerMin: 0,
       perTenantPerMin: undefined,
     }
-    expect(new Set(triggerDraftWarnings(everySlotOn))).toEqual(new Set(WARNINGS))
+    const unsafeRegex = emptyTriggerPolicyDraft()
+    unsafeRegex.rules.regex = { enabled: true, pattern: "(a+)+", caseInsensitive: true }
+    expect(
+      new Set([...triggerDraftWarnings(everySlotOn), ...triggerDraftWarnings(unsafeRegex)])
+    ).toEqual(new Set(WARNINGS))
     expect(
       new Set([
         ...triggerCoverageGaps({ rules: [], blockers: [], storeUnmatchedInDraftMode: false }),

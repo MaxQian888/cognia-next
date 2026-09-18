@@ -129,6 +129,11 @@ pub enum IntegrationVerification {
         signature_header: String,
         encoding: String,
         prefix: Option<String>,
+        /// When set, the signature header is a list of prefixed signatures
+        /// separated by this string — e.g. PagerDuty's
+        /// `X-PagerDuty-Signature: v1=<hex>,v1=<hex>` during key rotation.
+        /// Each item is an independent candidate; any one verifying passes.
+        signature_list_separator: Option<String>,
         signed_payload: Option<Vec<SignedPayloadPart>>,
         timestamp_header: Option<String>,
         max_skew_seconds: Option<i64>,
@@ -570,6 +575,7 @@ fn verify_integration_request(
             signature_header,
             encoding,
             prefix,
+            signature_list_separator,
             signed_payload,
             timestamp_header,
             max_skew_seconds,
@@ -578,24 +584,40 @@ fn verify_integration_request(
             let Some(raw_signature) = header_value(headers, signature_header) else {
                 return false;
             };
-            let signature = match prefix {
-                Some(prefix) => match raw_signature.strip_prefix(prefix) {
-                    Some(value) => value,
-                    None => return false,
-                },
-                None => raw_signature,
+            // Collect decodable candidates. Without a list separator this is
+            // exactly the single-value behaviour below; with one, items that
+            // do not carry the expected prefix or do not decode are simply not
+            // candidates — an empty candidate set fails closed on `any`.
+            let mut provided_candidates: Vec<Vec<u8>> = Vec::new();
+            let items: Vec<&str> = match signature_list_separator {
+                Some(sep) => raw_signature.split(sep.as_str()).collect(),
+                None => vec![raw_signature],
             };
-            let provided = if encoding.eq_ignore_ascii_case("base64") {
-                match base64::engine::general_purpose::STANDARD.decode(signature) {
-                    Ok(value) => value,
-                    Err(_) => return false,
-                }
-            } else {
-                match decode_hex(signature) {
-                    Ok(value) => value,
-                    Err(_) => return false,
-                }
-            };
+            for item in items {
+                let item = item.trim();
+                let signature = match prefix {
+                    Some(prefix) => match item.strip_prefix(prefix) {
+                        Some(value) => value,
+                        None => continue,
+                    },
+                    None => item,
+                };
+                let decoded = if encoding.eq_ignore_ascii_case("base64") {
+                    match base64::engine::general_purpose::STANDARD.decode(signature) {
+                        Ok(value) => value,
+                        Err(_) => continue,
+                    }
+                } else {
+                    match decode_hex(signature) {
+                        Ok(value) => value,
+                        Err(_) => continue,
+                    }
+                };
+                provided_candidates.push(decoded);
+            }
+            if provided_candidates.is_empty() {
+                return false;
+            }
             if let Some(timestamp_header) = timestamp_header {
                 let Some(timestamp) = header_value(headers, timestamp_header) else {
                     return false;
@@ -631,7 +653,13 @@ fn verify_integration_request(
                 Err(_) => return false,
             };
             mac.update(&signed);
-            mac.verify_slice(&provided).is_ok()
+            // `verify_slice` consumes the MAC, so finalize once and compare
+            // each candidate in constant time — equivalent to `verify_slice`
+            // (which is itself a constant-time tag comparison) but N-way.
+            let expected = mac.finalize().into_bytes();
+            provided_candidates
+                .iter()
+                .any(|provided| constant_time_equal(expected.as_slice(), provided))
         }
     }
 }
@@ -1399,6 +1427,7 @@ mod tests {
                 signature_header: "x-signature".into(),
                 encoding: "base64".into(),
                 prefix: Some("v1=".into()),
+                signature_list_separator: None,
                 signed_payload: Some(vec![
                     SignedPayloadPart::Header {
                         name: "x-time".into(),
@@ -1423,6 +1452,70 @@ mod tests {
             &body,
             &headers,
         ));
+        keyring_secrets::clear(INGRESS_SECRET_NAMESPACE, &secret_handle).unwrap();
+    }
+
+    /// PagerDuty-style key rotation: `X-PagerDuty-Signature: v1=<old>,v1=<new>`.
+    /// The verifier accepts when ANY candidate matches and fails closed when
+    /// none decodes or verifies.
+    #[test]
+    fn generic_verification_accepts_any_candidate_in_signature_list() {
+        let secret_handle = format!("test-{}", uuid::Uuid::new_v4());
+        keyring_secrets::set(INGRESS_SECRET_NAMESPACE, &secret_handle, "whsec").unwrap();
+        let body = Bytes::from_static(br#"{"event":{"id":"ev1"}}"#);
+        let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(b"whsec").unwrap();
+        mac.update(&body);
+        let good: String = mac
+            .finalize()
+            .into_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+
+        let verification = IntegrationVerification::HmacSha256 {
+            signature_header: "x-pagerduty-signature".into(),
+            encoding: "hex".into(),
+            prefix: Some("v1=".into()),
+            signature_list_separator: Some(",".into()),
+            signed_payload: Some(vec![SignedPayloadPart::Body]),
+            timestamp_header: None,
+            max_skew_seconds: None,
+            secret_handle: secret_handle.clone(),
+        };
+
+        // Rotated key: first candidate stale, second live.
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-pagerduty-signature",
+            format!(
+                "v1={},v1={good}",
+                "00".repeat(32)
+            )
+            .parse()
+            .unwrap(),
+        );
+        assert!(verify_integration_request(&verification, &body, &headers));
+
+        // Malformed entries are skipped, not fatal.
+        headers.insert(
+            "x-pagerduty-signature",
+            format!("v1=not-hex,v2=ignored,v1={good}").parse().unwrap(),
+        );
+        assert!(verify_integration_request(&verification, &body, &headers));
+
+        // No decodable candidate fails closed.
+        headers.insert("x-pagerduty-signature", "v1=zzz,v2=abc".parse().unwrap());
+        assert!(!verify_integration_request(&verification, &body, &headers));
+
+        // All candidates well-formed but wrong fail closed.
+        headers.insert(
+            "x-pagerduty-signature",
+            format!("v1={},v1={}", "11".repeat(32), "22".repeat(32))
+                .parse()
+                .unwrap(),
+        );
+        assert!(!verify_integration_request(&verification, &body, &headers));
+
         keyring_secrets::clear(INGRESS_SECRET_NAMESPACE, &secret_handle).unwrap();
     }
 

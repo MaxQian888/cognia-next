@@ -96,6 +96,11 @@ import { startSlaEscalationSweep } from "@/lib/connectors/escalation/schedule"
 import { startWorkflowExecutionBridge } from "@/lib/execution/workflow-bridge"
 import { startJobExecutionBridge } from "@/lib/execution/job-bridge"
 import { startExecutionRunPresentationRunner } from "@/lib/connectors/run-presentation/runner"
+import { startNotificationDeliveryWorker } from "@/lib/notifications/delivery/worker"
+import { primeNotificationScope, cachedNotificationAccountPrefix } from "@/lib/notifications/scope"
+import { getDeviceId } from "@/lib/device/device-identity"
+import { resolvePreferences } from "@/lib/notifications/preferences"
+import { useSettingsStore } from "@/stores/settings"
 import { installExecutionControlPlane } from "@/lib/execution/install-execution-control"
 import { installDelegationBridge } from "@/lib/execution/delegation-bridge"
 import { recoverPendingRunInterrupts } from "@/lib/execution/run-control"
@@ -326,6 +331,7 @@ export function installConnectorRuntime(
   let stopJobExecutionBridge: (() => void) | null = null
   let stopDelegationBridge: (() => void) | null = null
   let stopExecutionRunPresentationRunner: (() => void) | null = null
+  let stopNotificationWorker: (() => void) | null = null
   let disposeExecutionRunControlHandlers: (() => void) | null = null
   let teardownPromise: Promise<void> | null = null
 
@@ -470,6 +476,8 @@ export function installConnectorRuntime(
       stopDelegationBridge = null
       stopExecutionRunPresentationRunner?.()
       stopExecutionRunPresentationRunner = null
+      stopNotificationWorker?.()
+      stopNotificationWorker = null
       disposeExecutionRunControlHandlers?.()
       disposeExecutionRunControlHandlers = null
       // A window that never acquired the singleton runtime owns none of the
@@ -806,6 +814,33 @@ export function installConnectorRuntime(
         onError: (error) => console.error("[delegation] reconciliation failed", error),
       })
       stopExecutionRunPresentationRunner = startExecutionRunPresentationRunner()
+      // Notification V2 delivery worker — the governed external-delivery
+      // engine. It claims projection work under THIS host's lease identity and
+      // reconciles it (crash-safe), drains webhook intents, projects receipts,
+      // and fires timers — the durable path the outbound queue alone can't
+      // give a notification. Starts only on the host that owns the runtime
+      // (the same lease the outbound runner holds), never on a thin client.
+      void (async () => {
+        try {
+          await primeNotificationScope()
+          const deviceId = (await getDeviceId()) ?? "unknown-host"
+          if (cancelled) return
+          stopNotificationWorker = startNotificationDeliveryWorker({
+            scopeKey: cachedNotificationAccountPrefix(),
+            leaseOwner: `notification:${deviceId}`,
+            loadPrefs: () =>
+              resolvePreferences(useSettingsStore.getState().settings?.notificationPreferences),
+            log,
+          })
+        } catch (error) {
+          log(
+            "warn",
+            `[notification-worker] install failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          )
+        }
+      })()
       // Refcounted: the renderer's ExecutionControlInitializer holds its own
       // reference, so losing this runtime's lease (or deferring to a remote
       // host) no longer takes the run-control dispatch table with it. The

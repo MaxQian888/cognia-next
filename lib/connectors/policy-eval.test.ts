@@ -151,6 +151,36 @@ describe("evaluatePolicy — rules", () => {
     expect(result.matched).toBe(true)
   })
 
+  it("regex matches when the pattern hits plainText", () => {
+    const policy = noBlockPolicy([
+      { kind: "regex", pattern: "\\bp[01]\\b.*disk", caseInsensitive: false },
+    ])
+    const event = baseEvent({ plainText: "P1: disk almost full" })
+    expect(evaluatePolicy(policy, event, emptyState()).matched).toBe(false)
+    const hit = baseEvent({ plainText: "p1: disk almost full" })
+    expect(evaluatePolicy(policy, hit, emptyState()).matched).toBe(true)
+  })
+
+  it("regex honours caseInsensitive", () => {
+    const policy = noBlockPolicy([{ kind: "regex", pattern: "^urgent", caseInsensitive: true }])
+    const event = baseEvent({ plainText: "URGENT: site down" })
+    expect(evaluatePolicy(policy, event, emptyState()).matched).toBe(true)
+  })
+
+  it("regex never matches when the pattern is outside the safe subset", () => {
+    // `(a+)+` is the classic catastrophic pattern — rejected, so the rule is
+    // inert rather than hanging the dispatch loop.
+    const policy = noBlockPolicy([{ kind: "regex", pattern: "(a+)+$", caseInsensitive: true }])
+    const event = baseEvent({ plainText: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaab" })
+    expect(evaluatePolicy(policy, event, emptyState()).matched).toBe(false)
+  })
+
+  it("regex never matches when the pattern does not compile", () => {
+    const policy = noBlockPolicy([{ kind: "regex", pattern: "(", caseInsensitive: true }])
+    const event = baseEvent({ plainText: "(" })
+    expect(evaluatePolicy(policy, event, emptyState()).matched).toBe(false)
+  })
+
   it("user-allowlist matches when sender.id is in the list", () => {
     const policy = noBlockPolicy([{ kind: "user-allowlist", userIds: ["u_alice", "u_bob"] }])
     const event = baseEvent({

@@ -8,6 +8,7 @@
 
 import { isReplyToSelf, type NormalizedInboundEvent } from "@/types/connectors/event"
 import type { TriggerBlocker, TriggerPolicy, TriggerRule } from "@/types/connectors/policy"
+import { safePatternTest } from "./safe-pattern"
 
 /**
  * Snapshot of the rate-limit / cooldown counters at dispatch time.
@@ -82,6 +83,12 @@ function matchRule(rule: TriggerRule, event: NormalizedInboundEvent): boolean {
         return haystack.includes(needle)
       })
     }
+
+    case "regex":
+      // The pattern is a user-supplied string evaluated per inbound message,
+      // so it goes through the RE2-subset gate: rejected or uncompilable
+      // patterns fail closed — the rule never matches, it never throws.
+      return safePatternTest(rule.pattern, rule.caseInsensitive, event.plainText)
 
     case "user-allowlist":
       return rule.userIds.includes(event.sender.id)

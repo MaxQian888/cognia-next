@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { useState } from "react"
 
@@ -40,7 +40,7 @@ function Harness({
   )
 }
 
-it("renders a slot for all seven conditions and all five blockers", () => {
+it("renders a slot for all eight conditions and all five blockers", () => {
   render(<Harness initial={toTriggerPolicyDraft(defaultGroupChatPolicy())} />)
   for (const id of [
     "trigger-rule-private-default",
@@ -48,6 +48,7 @@ it("renders a slot for all seven conditions and all five blockers", () => {
     "trigger-rule-reply-to-bot",
     "trigger-rule-slash-command",
     "trigger-rule-keyword",
+    "trigger-rule-regex",
     "trigger-rule-user-allowlist",
     "trigger-rule-channel-allowlist",
     "trigger-blocker-user-blocklist",
@@ -90,6 +91,21 @@ it("turns an edited slot into the rule the evaluator reads", async () => {
   expect(seen.at(-1)?.rules).toEqual([
     { kind: "keyword", words: ["deploy"], caseInsensitive: true },
   ])
+})
+
+it("turns an edited regex slot into the rule the evaluator reads", async () => {
+  const user = userEvent.setup()
+  const seen: TriggerPolicy[] = []
+  render(<Harness initial={emptyTriggerPolicyDraft()} onPolicy={(p) => seen.push(p)} />)
+
+  await user.click(screen.getByTestId("trigger-rule-regex-switch"))
+  // `fireEvent.change`, not `user.type` — `[`/`]` are key-descriptor syntax to
+  // userEvent, not literal text.
+  fireEvent.change(screen.getByTestId("trigger-rule-regex-pattern"), {
+    target: { value: "p[012]" },
+  })
+
+  expect(seen.at(-1)?.rules).toEqual([{ kind: "regex", pattern: "p[012]", caseInsensitive: true }])
 })
 
 it("keeps an unset workspace ceiling out of the saved blocker", async () => {
@@ -139,6 +155,18 @@ describe("diagnostics", () => {
 
     await user.type(screen.getByLabelText("rules.slashCommand.listAria"), "/ask{Enter}")
     expect(screen.queryByTestId("trigger-warning-slash-command-empty")).not.toBeInTheDocument()
+  })
+
+  it("flags a regex outside the safe subset instead of saving a rule that never matches", async () => {
+    const user = userEvent.setup()
+    render(<Harness initial={emptyTriggerPolicyDraft()} />)
+
+    await user.click(screen.getByTestId("trigger-rule-regex-switch"))
+    expect(screen.getByTestId("trigger-warning-regex-empty")).toBeInTheDocument()
+
+    await user.type(screen.getByTestId("trigger-rule-regex-pattern"), "(a+)+$")
+    expect(screen.queryByTestId("trigger-warning-regex-empty")).not.toBeInTheDocument()
+    expect(screen.getByTestId("trigger-warning-regex-unsafe")).toBeInTheDocument()
   })
 
   it("flags a rate limit that would silence the bot entirely", async () => {

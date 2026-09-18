@@ -23,7 +23,7 @@ use axum::{
     body::Body,
     extract::{DefaultBodyLimit, Path, RawQuery, State},
     http::{header, HeaderMap, Method, StatusCode},
-    response::Response,
+    response::{IntoResponse, Response},
     routing::{any, get, post},
     Extension, Json, Router,
 };
