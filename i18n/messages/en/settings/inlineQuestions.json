@@ -1,0 +1,8 @@
+{
+  "title": "Inline questions",
+  "description": "How questions from external agents appear while a turn keeps running.",
+  "enabled": {
+    "label": "Inline answer cards",
+    "hint": "When an agent asks a non-blocking question mid-turn, show an answer card in the transcript (suggested options + free text). Off, the question appears as plain text and you answer with a normal message."
+  }
+}

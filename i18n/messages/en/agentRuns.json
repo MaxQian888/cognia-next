@@ -234,12 +234,44 @@
     "running": "Running",
     "waiting": "Waiting"
   },
+  "notifications": {
+    "empty": "No external notifications for this run — it stayed in the app.",
+    "kind": {
+      "connector": "Connector",
+      "feishu-webhook": "Feishu webhook"
+    },
+    "loading": "Loading deliveries…",
+    "purpose": {
+      "approval-request": "Approval request",
+      "digest": "Digest",
+      "incident-alert": "Incident alert",
+      "live-progress": "Progress",
+      "manual": "Manual",
+      "reminder": "Reminder",
+      "result-summary": "Result summary",
+      "terminal-ping": "Terminal ping",
+      "terminal-state": "Terminal state"
+    },
+    "status": {
+      "accepted": "Accepted",
+      "cancelled": "Cancelled",
+      "delivery-unknown": "Unknown",
+      "expired": "Expired",
+      "failed": "Failed",
+      "prepared": "Prepared",
+      "queued": "Queued",
+      "rejected": "Rejected",
+      "sending": "Sending",
+      "superseded": "Superseded"
+    }
+  },
   "tabs": {
     "activity": "Activity",
     "approvals": "Approvals",
     "artifacts": "Artifacts",
     "changes": "Changes",
     "coordination": "Coordination",
+    "notifications": "Notifications",
     "operations": "Operations",
     "overview": "Overview",
     "report": "Report",

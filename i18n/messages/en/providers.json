@@ -626,6 +626,7 @@
   "hostNotice": {
     "companionBody": "Keys and endpoints entered here stay on this device and are never sent to the paired host. The host uses its own provider configuration.",
     "companionTitle": "Device-local provider settings",
+    "dismiss": "Dismiss",
     "mobileLocalBody": "On a phone, \"localhost\" is the phone itself. Point the base URL at a machine on your network that runs the engine, or configure local engines on the paired desktop.",
     "mobileLocalTitle": "Local engines run on this device"
   },

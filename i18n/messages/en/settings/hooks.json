@@ -22,6 +22,10 @@
       "pii-safety-guard-tool": {
         "desc": "Block a tool call whose input carries obvious PII or credentials.",
         "label": "PII guard (tool)"
+      },
+      "tool-provenance-guard": {
+        "desc": "Deny a tool call by which surface declared it — selectors come from COGNIA_DENY_TOOL_PROVENANCE.",
+        "label": "Tool provenance guard"
       }
     },
     "off": "Off",

@@ -1,5 +1,8 @@
 {
   "agent": {
     "noDescription": "No description"
+  },
+  "terminal": {
+    "clipboardUnavailable": "Clipboard API not available"
   }
 }

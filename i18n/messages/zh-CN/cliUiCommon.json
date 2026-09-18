@@ -30,6 +30,7 @@
   "copied": "已将完整文档复制到剪贴板。",
   "copyFailed": "无法将文档复制到剪贴板。",
   "stopping": "正在停止",
+  "compacting": "正在压缩上下文",
   "composerPlaceholder": "输入问题、运行 /commands、用 @ 引用文件或用 ! 执行命令",
   "clipboardImageReady": "剪贴板中有图片 · {key} 粘贴",
   "imagesAttached": "已附加 {count} 张图片 · /images 管理",

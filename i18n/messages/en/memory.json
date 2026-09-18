@@ -157,12 +157,14 @@
   },
   "errors": {
     "disabled": "Memory is disabled in settings",
+    "idempotency_key_reused": "That operation ID was already used for a different request",
     "mutation_failed": "The memory operation failed — please try again",
     "not_found": "This memory no longer exists",
     "pii_blocked": "Blocked: the text contains personal information",
     "policy_denied": "A memory policy blocked this change",
     "scope_denied": "That scope isn't allowed for this memory",
-    "temporary": "Memory is in temporary mode"
+    "temporary": "Memory is in temporary mode",
+    "unauthorized_namespace": "This caller isn't allowed to access that memory namespace"
   },
   "external": {
     "agents": {

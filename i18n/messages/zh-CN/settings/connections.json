@@ -1688,6 +1688,13 @@
         "help": "一对一会话里的每条消息，无需被点名。",
         "label": "任何私聊消息"
       },
+      "regex": {
+        "caseInsensitive": "忽略大小写",
+        "help": "对消息文本做正则匹配。仅支持 RE2 安全子集 —— 环视、反向引用与嵌套重复会被拒绝。",
+        "label": "消息匹配某个正则",
+        "patternAria": "正则表达式",
+        "placeholder": "deploy.*(failed|succeeded)"
+      },
       "replyToBot": {
         "help": "回复机器人发出的消息，等同于向它说话。",
         "label": "有人回复了机器人"
@@ -1723,6 +1730,8 @@
       "keyword-blocklist-empty": "屏蔽词名单已开启但为空，因此不会拦截任何消息。",
       "keyword-empty": "关键词条件已开启但没有关键词，因此永远不会命中。",
       "rate-limit-blocks-everything": "上限小于 1 会拦截每分钟的第一条消息，机器人将完全静默。",
+      "regex-empty": "正则条件已开启但表达式为空，因此永远不会命中。",
+      "regex-unsafe": "该表达式超出支持的正则子集 —— 不支持环视、反向引用或嵌套重复 —— 因此永远不会命中。",
       "slash-command-empty": "命令条件已开启但没有前缀，因此永远不会命中。",
       "user-allowlist-empty": "发送者名单已开启但为空，因此永远不会命中。",
       "user-blocklist-empty": "屏蔽发送者名单已开启但为空，因此不会拦截任何消息。"

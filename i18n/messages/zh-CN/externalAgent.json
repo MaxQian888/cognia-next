@@ -269,6 +269,8 @@
     "serverPort": "服务器端口",
     "serverUsername": "服务器用户名",
     "sessions": "会话",
+    "showAllSessions": "显示全部 {count} 个会话",
+    "showFewerSessions": "收起会话列表",
     "stdioNeedsAProcess": "stdio 需要启动一个本地进程。",
     "transportHttp": "HTTP",
     "transportSse": "Server-Sent Events",

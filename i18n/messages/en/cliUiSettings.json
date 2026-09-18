@@ -197,6 +197,10 @@
       "label": "Allowed tools allowlist…",
       "description": "Restrict the agent to an allow-list of tools (empty = all tools allowed)."
     },
+    "disabledTools": {
+      "label": "Disabled tools denylist…",
+      "description": "Tool names withheld from every turn (space-separated; empty = nothing disabled)."
+    },
     "gitProtectedBranches": {
       "label": "Protected branches…",
       "description": "Branches /commit refuses to commit to directly (space-separated)."
@@ -334,6 +338,9 @@
     },
     "hook:pii-safety-guard-tool": {
       "description": "Block a tool call whose input carries obvious PII / credentials."
+    },
+    "hook:tool-provenance-guard": {
+      "description": "Deny a tool call by which surface declared it — selectors come from COGNIA_DENY_TOOL_PROVENANCE."
     },
     "hooksPanel": {
       "label": "Hooks…",

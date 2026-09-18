@@ -234,12 +234,44 @@
     "running": "进行中",
     "waiting": "等待中"
   },
+  "notifications": {
+    "empty": "本次运行没有外发通知——它只留在了应用内。",
+    "kind": {
+      "connector": "连接器",
+      "feishu-webhook": "飞书 webhook"
+    },
+    "loading": "正在加载投递…",
+    "purpose": {
+      "approval-request": "审批请求",
+      "digest": "摘要",
+      "incident-alert": "事件告警",
+      "live-progress": "进度",
+      "manual": "手动",
+      "reminder": "提醒",
+      "result-summary": "结果摘要",
+      "terminal-ping": "终态提醒",
+      "terminal-state": "终态"
+    },
+    "status": {
+      "accepted": "已接受",
+      "cancelled": "已取消",
+      "delivery-unknown": "未知",
+      "expired": "已过期",
+      "failed": "失败",
+      "prepared": "已就绪",
+      "queued": "排队中",
+      "rejected": "被拒绝",
+      "sending": "发送中",
+      "superseded": "已取代"
+    }
+  },
   "tabs": {
     "activity": "活动",
     "approvals": "审批",
     "artifacts": "产物",
     "changes": "文件变更",
     "coordination": "协同",
+    "notifications": "通知",
     "operations": "操作",
     "overview": "概览",
     "report": "报告",

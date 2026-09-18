@@ -40,6 +40,20 @@
     "unreadCount": "{count} unread",
     "unsnooze": "Unsnooze"
   },
+  "delivery": {
+    "short": {
+      "accepted": "Sent · {count}",
+      "failed": "Failed · {count}",
+      "mixed": "Partial · {count}",
+      "pending": "Sending · {count}"
+    },
+    "status": {
+      "accepted": "{count} external deliver(ies) accepted",
+      "failed": "{count} external deliver(ies) failed",
+      "mixed": "{count} external deliveries — some pending, some failed",
+      "pending": "{count} external deliver(ies) in flight"
+    }
+  },
   "levels": {
     "critical": "Critical",
     "error": "Error",

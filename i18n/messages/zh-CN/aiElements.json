@@ -1,5 +1,8 @@
 {
   "agent": {
     "noDescription": "暂无描述"
+  },
+  "terminal": {
+    "clipboardUnavailable": "剪贴板 API 不可用"
   }
 }

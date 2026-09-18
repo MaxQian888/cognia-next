@@ -197,6 +197,10 @@
       "label": "工具允许列表…",
       "description": "将智能体限制为只使用列表内的工具；留空表示允许全部工具。"
     },
+    "disabledTools": {
+      "label": "禁用工具列表…",
+      "description": "每个回合都不向模型提供的工具名（空格分隔；留空表示不禁用任何工具）。"
+    },
     "gitProtectedBranches": {
       "label": "受保护分支…",
       "description": "禁止 /commit 直接提交的分支，以空格分隔。"
@@ -334,6 +338,9 @@
     },
     "hook:pii-safety-guard-tool": {
       "description": "阻止输入中包含明显个人敏感信息或凭据的工具调用。"
+    },
+    "hook:tool-provenance-guard": {
+      "description": "按声明该工具的来源面拒绝调用 — 选择器由 COGNIA_DENY_TOOL_PROVENANCE 配置。"
     },
     "hooksPanel": {
       "label": "钩子管理…",

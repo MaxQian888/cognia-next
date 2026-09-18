@@ -22,6 +22,10 @@
       "pii-safety-guard-tool": {
         "desc": "拦截输入中携带明显 PII 或凭据的工具调用。",
         "label": "PII 守卫(工具)"
+      },
+      "tool-provenance-guard": {
+        "desc": "按声明该工具的来源面拒绝调用 — 选择器由 COGNIA_DENY_TOOL_PROVENANCE 配置。",
+        "label": "工具来源守卫"
       }
     },
     "off": "关",

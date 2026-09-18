@@ -20,6 +20,7 @@
     },
     "result": {
       "diff": "+{added} −{removed}",
+      "edits": "{count, plural, =1 {1 edit} other {# edits}}",
       "entries": "{count, plural, =1 {1 entry} other {# entries}}",
       "files": "{count, plural, =1 {1 file} other {# files}}",
       "lines": "{count, plural, =1 {1 line} other {# lines}}",
@@ -76,6 +77,14 @@
     "submitHint": "⌘/Ctrl + Enter to submit",
     "textPlaceholder": "Type your answer…",
     "title": "The agent has a question"
+  },
+  "asyncQuestions": {
+    "answerPlaceholder": "Type an answer…",
+    "answered": "Answered: {answer}",
+    "eyebrow": "Agent question",
+    "sendAnswer": "Send answer",
+    "sendFailed": "Could not send the answer — the chat runtime is unavailable.",
+    "unanswered": "Closed without an answer"
   },
   "backgroundRuns": {
     "count": "{count, plural, one {# conversation running in the background} other {# conversations running in the background}}"
@@ -1618,6 +1627,9 @@
     "read": {
       "title": "Read"
     },
+    "runtimeQuery": {
+      "noneFound": "No matching entries"
+    },
     "spawnTask": {
       "aside": "aside",
       "caveats": "Caveats",
@@ -1633,6 +1645,11 @@
     },
     "webSearch": {
       "noResults": "No results"
+    },
+    "wikiRead": {
+      "hideBody": "Hide body",
+      "showBody": "Show body",
+      "noContent": "No content"
     },
     "wikiSearch": {
       "noResults": "No results"
@@ -1757,6 +1774,7 @@
     "reasoning": {
       "completed": "Thought for a few seconds",
       "completedSeconds": "Thought for {duration, plural, =1 {1 second} other {# seconds}}",
+      "copy": "Copy thinking",
       "streaming": "Thinking…"
     },
     "regenerateLabel": "Regenerate",
@@ -1919,6 +1937,26 @@
   "planMode": {
     "banner": "Plan mode — read-only research; the agent will propose a plan before making changes.",
     "hint": "Shift+Tab"
+  },
+  "promptPreamble": {
+    "combinedTitle": "{title} ({count} messages)",
+    "generic": "Attached context",
+    "hideText": "Hide the text the model received",
+    "kinds": {
+      "artifact": "Artifact",
+      "comment": "Comment",
+      "entity": "Record",
+      "external": "Selection",
+      "file": "File",
+      "plugin": "Plugin",
+      "web": "Web page"
+    },
+    "references": "{count, plural, =1 {1 reference attached} other {# references attached}}",
+    "sections": {
+      "reviewReceipts": "Review outcomes",
+      "webSearch": "Web results"
+    },
+    "showText": "Show the text the model received"
   },
   "reactions": {
     "add": "Add a reaction",
@@ -2348,7 +2386,6 @@
     "transcriptMissing": "This subagent's transcript isn't in this copy of the conversation."
   },
   "terminalTool": {
-    "bashLabel": "Bash",
     "runInDock": {
       "empty": "No tabs match.",
       "existingTabs": "Existing tabs",
@@ -2356,8 +2393,7 @@
       "newTab": "New tab",
       "searchPlaceholder": "Find a tab",
       "trustedBadge": "trusted"
-    },
-    "runningStatus": "running"
+    }
   },
   "timeline": {
     "collapse": "Collapse timeline",
@@ -2383,23 +2419,23 @@
     "inputLabel": "Input",
     "interruptedNotice": "This request was interrupted — the tool was already denied. Resend the message to retry.",
     "observeRedacted": "This device is watching only — the arguments are withheld and it cannot answer.",
+    "supersededNotice": "Superseded by a new instruction — the tool was already denied.",
     "titleFallback": "Allow {tool}?",
     "toolLabel": "Tool"
   },
   "toolCards": {
     "webSearch": {
-      "title": "Web search",
       "via": "via {provider}",
       "failed": "Search failed.",
       "noResults": "No results."
     },
     "webFetch": {
       "empty": "No content returned.",
-      "title": "Web fetch",
-      "status": "HTTP {status}",
       "failed": "Fetch failed.",
-      "showMore": "Show all ({chars} characters)",
-      "showLess": "Show less"
+      "content": "Content",
+      "redirectedTo": "→ redirected to {url}",
+      "truncatedChars": "Showing the first {shown, number} of {total, number} characters.",
+      "chars": "{count, plural, =1 {# character} other {# characters}}"
     },
     "screenshot": {
       "title": "Screenshot",
@@ -2412,6 +2448,51 @@
       "copy": "Copy entry",
       "showAll": "Show all {count}",
       "showLess": "Show less"
+    }
+  },
+  "toolRow": {
+    "verb": {
+      "read": "Read",
+      "write": "Write",
+      "edit": "Edit",
+      "grep": "Grep",
+      "glob": "Glob",
+      "ls": "LS",
+      "notebook": "NotebookEdit",
+      "fetch": "Fetch",
+      "search": "Search",
+      "plan": "Plan",
+      "task": "Task",
+      "wiki": "Wiki",
+      "recall": "Recall",
+      "query": "Query",
+      "computer": "Computer",
+      "workflow": "Workflow",
+      "think": "Think"
+    },
+    "copyTarget": "Copy target",
+    "copyCommand": "Copy command",
+    "copyInput": "Copy input",
+    "copyOutput": "Copy output",
+    "errorLabel": "Error",
+    "input": "Input",
+    "output": "Output",
+    "proposedChange": "Proposed change",
+    "rowAria": "{verb} {target} — {status}",
+    "bashRowAria": "Bash command {command}",
+    "stdout": "stdout",
+    "stderr": "stderr",
+    "exitCode": "exit {code}",
+    "outputLines": "{count} lines",
+    "moreLines": "+{count} lines",
+    "meta": {
+      "httpStatus": "HTTP {status}",
+      "ops": "{count, plural, =1 {1 op} other {# ops}}",
+      "unchanged": "unchanged"
+    },
+    "preview": {
+      "truncated": "Showing the first {shown, number} of {total, number}.",
+      "showAll": "Show all"
     }
   },
   "transcript": {
@@ -2523,25 +2604,5 @@
     "title": "Trust this workspace?",
     "trust": "Trust workspace",
     "workspaceLabel": "Workspace"
-  },
-  "promptPreamble": {
-    "combinedTitle": "{title} ({count} messages)",
-    "generic": "Attached context",
-    "hideText": "Hide the text the model received",
-    "kinds": {
-      "artifact": "Artifact",
-      "comment": "Comment",
-      "entity": "Record",
-      "external": "Selection",
-      "file": "File",
-      "plugin": "Plugin",
-      "web": "Web page"
-    },
-    "references": "{count, plural, =1 {1 reference attached} other {# references attached}}",
-    "sections": {
-      "reviewReceipts": "Review outcomes",
-      "webSearch": "Web results"
-    },
-    "showText": "Show the text the model received"
   }
 }

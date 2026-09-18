@@ -30,6 +30,7 @@
   "copied": "Copied the complete document to the clipboard.",
   "copyFailed": "Couldn't copy the document to the clipboard.",
   "stopping": "stopping",
+  "compacting": "compacting context",
   "composerPlaceholder": "Ask, run /commands, @ files, or ! shell",
   "clipboardImageReady": "image in clipboard · {key} to paste",
   "imagesAttached": "{count} attached · /images to manage",

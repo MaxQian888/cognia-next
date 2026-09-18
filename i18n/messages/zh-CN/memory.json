@@ -157,12 +157,14 @@
   },
   "errors": {
     "disabled": "记忆功能已在设置中关闭",
+    "idempotency_key_reused": "该操作 ID 已被用于不同的请求",
     "mutation_failed": "记忆操作失败，请重试",
     "not_found": "这条记忆已不存在",
     "pii_blocked": "已拦截：文本包含个人隐私信息",
     "policy_denied": "记忆策略拦截了本次改动",
     "scope_denied": "该记忆不允许使用这个作用域",
-    "temporary": "记忆当前处于临时模式"
+    "temporary": "记忆当前处于临时模式",
+    "unauthorized_namespace": "调用方无权访问该记忆命名空间"
   },
   "external": {
     "agents": {

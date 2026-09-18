@@ -132,6 +132,7 @@
     "resourcesCount": "{count} 个资源",
     "scan": "运行扫描",
     "scanCodex": "扫描 ~/.agents/skills/",
+    "scanCursor": "扫描 ~/.cursor/skills/",
     "scanCustom": "扫描指定目录…",
     "scanHome": "扫描 ~/.claude/skills/",
     "scanOpencode": "扫描 OpenCode skills",

@@ -2340,6 +2340,37 @@
     },
     "live": "进行中",
     "loadMore": "加载更多",
+    "notifications": {
+      "empty": "本次运行没有外发通知——它只留在了应用内。",
+      "kind": {
+        "connector": "连接器",
+        "feishu-webhook": "飞书 webhook"
+      },
+      "loading": "正在加载投递…",
+      "purpose": {
+        "approval-request": "审批请求",
+        "digest": "摘要",
+        "incident-alert": "事件告警",
+        "live-progress": "进度",
+        "manual": "手动",
+        "reminder": "提醒",
+        "result-summary": "结果摘要",
+        "terminal-ping": "终态提醒",
+        "terminal-state": "终态"
+      },
+      "status": {
+        "accepted": "已接受",
+        "cancelled": "已取消",
+        "delivery-unknown": "未知",
+        "expired": "已过期",
+        "failed": "失败",
+        "prepared": "已就绪",
+        "queued": "排队中",
+        "rejected": "被拒绝",
+        "sending": "发送中",
+        "superseded": "已取代"
+      }
+    },
     "operations": {
       "unavailable": "本设备没有这次小队运行的记录。"
     },
@@ -2466,6 +2497,7 @@
       "artifacts": "产物",
       "changes": "文件变更",
       "coordination": "协同",
+      "notifications": "通知",
       "operations": "操作",
       "overview": "概览",
       "report": "报告",
@@ -3801,6 +3833,9 @@
   "aiElements": {
     "agent": {
       "noDescription": "暂无描述"
+    },
+    "terminal": {
+      "clipboardUnavailable": "剪贴板 API 不可用"
     }
   },
   "annotations": {
@@ -5901,6 +5936,7 @@
       },
       "result": {
         "diff": "+{added} −{removed}",
+        "edits": "{count} 处编辑",
         "entries": "{count} 项",
         "files": "{count} 个文件",
         "lines": "{count} 行",
@@ -5957,6 +5993,14 @@
       "submitHint": "⌘/Ctrl + Enter 提交",
       "textPlaceholder": "输入你的回答…",
       "title": "智能体有个问题"
+    },
+    "asyncQuestions": {
+      "answerPlaceholder": "输入回答…",
+      "answered": "已回答:{answer}",
+      "eyebrow": "Agent 提问",
+      "sendAnswer": "发送回答",
+      "sendFailed": "回答发送失败——聊天运行时不可用。",
+      "unanswered": "未作答已关闭"
     },
     "backgroundRuns": {
       "count": "{count, plural, other {后台还有 # 个会话在运行}}"
@@ -7499,6 +7543,9 @@
       "read": {
         "title": "读取"
       },
+      "runtimeQuery": {
+        "noneFound": "没有匹配的条目"
+      },
       "spawnTask": {
         "aside": "独立侧聊",
         "caveats": "注意事项",
@@ -7514,6 +7561,11 @@
       },
       "webSearch": {
         "noResults": "无结果"
+      },
+      "wikiRead": {
+        "hideBody": "收起正文",
+        "noContent": "无内容",
+        "showBody": "展开正文"
       },
       "wikiSearch": {
         "noResults": "无结果"
@@ -7638,6 +7690,7 @@
       "reasoning": {
         "completed": "思考了几秒",
         "completedSeconds": "思考了 {duration, number} 秒",
+        "copy": "复制思考过程",
         "streaming": "正在思考…"
       },
       "regenerateLabel": "重新生成",
@@ -8249,7 +8302,6 @@
       "transcriptMissing": "这份对话副本中没有该子代理的完整记录。"
     },
     "terminalTool": {
-      "bashLabel": "Bash",
       "runInDock": {
         "empty": "没有匹配的 tab。",
         "existingTabs": "已有 tab",
@@ -8257,8 +8309,7 @@
         "newTab": "新建 tab",
         "searchPlaceholder": "搜索 tab",
         "trustedBadge": "已信任"
-      },
-      "runningStatus": "运行中"
+      }
     },
     "timeline": {
       "collapse": "收起时间线",
@@ -8284,6 +8335,7 @@
       "inputLabel": "输入",
       "interruptedNotice": "该请求已被中断——工具调用已被拒绝。重新发送消息可重试。",
       "observeRedacted": "此设备仅在观察——参数已隐藏，且无法作答。",
+      "supersededNotice": "已被新指令取代——工具调用已被拒绝。",
       "titleFallback": "允许执行 {tool}？",
       "toolLabel": "工具"
     },
@@ -8301,18 +8353,62 @@
         "title": "截图"
       },
       "webFetch": {
+        "chars": "{count} 个字符",
+        "content": "正文",
         "empty": "无返回内容。",
         "failed": "抓取失败。",
-        "showLess": "收起",
-        "showMore": "展开全部（{chars} 字符）",
-        "status": "HTTP {status}",
-        "title": "网页抓取"
+        "redirectedTo": "→ 跳转至 {url}",
+        "truncatedChars": "仅显示前 {shown} 个字符，共 {total} 个字符。"
       },
       "webSearch": {
         "failed": "搜索失败。",
         "noResults": "没有结果。",
-        "title": "网页搜索",
         "via": "来自 {provider}"
+      }
+    },
+    "toolRow": {
+      "bashRowAria": "Bash 命令 {command}",
+      "copyCommand": "复制命令",
+      "copyInput": "复制输入",
+      "copyOutput": "复制输出",
+      "copyTarget": "复制目标",
+      "errorLabel": "错误",
+      "exitCode": "exit {code}",
+      "input": "输入",
+      "meta": {
+        "httpStatus": "HTTP {status}",
+        "ops": "{count} 个操作",
+        "unchanged": "无变化"
+      },
+      "moreLines": "+{count} 行",
+      "output": "输出",
+      "outputLines": "{count} 行",
+      "preview": {
+        "showAll": "显示全部",
+        "truncated": "仅显示前 {shown} 条，共 {total} 条。"
+      },
+      "proposedChange": "变更预览",
+      "rowAria": "{verb} {target} — {status}",
+      "stderr": "stderr",
+      "stdout": "stdout",
+      "verb": {
+        "computer": "界面操作",
+        "edit": "编辑",
+        "fetch": "抓取",
+        "glob": "匹配",
+        "grep": "搜索",
+        "ls": "列目录",
+        "notebook": "编辑笔记本",
+        "plan": "计划",
+        "query": "查询",
+        "read": "读取",
+        "recall": "检索",
+        "search": "搜索",
+        "task": "子任务",
+        "think": "思考",
+        "wiki": "百科",
+        "workflow": "工作流",
+        "write": "写入"
       }
     },
     "transcript": {
@@ -8509,6 +8605,12 @@
     "runCoordination": "Agent 运行",
     "runHost": "正在 {user} 的设备上运行",
     "running": "运行中",
+    "shareReferencesCancel": "取消",
+    "shareReferencesConfirm": "仍然分享",
+    "shareReferencesLiveToast": "此消息嵌入了其他对话的快照——这里的所有成员都能读到。",
+    "shareReferencesTitle": "此对话引用了其他对话",
+    "shareReferencesWarning": "此历史记录中嵌入了 {count} 条来自其他对话的快照。所有被邀请的成员都能读到被引用的原文，包括无法打开来源对话的成员。",
+    "shareReferencesWarningUnknown": "无法检查此历史记录中是否嵌入了其他对话的快照。如有嵌入内容，所有被邀请的成员都能读到被引用的原文，包括无法打开来源对话的成员。",
     "shared": "共享",
     "sharedDescription": "成员、消息、运行、审批和附件均以服务器权限为准。",
     "sharedTitle": "共享会话",
@@ -9109,6 +9211,7 @@
     },
     "commandCenter": "命令中心",
     "commandHint": "输入搜索 · ↑/↓ 选择 · Enter / 点击执行 · Esc 关闭",
+    "compacting": "正在压缩上下文",
     "composerPlaceholder": "输入问题、运行 /commands、用 @ 引用文件或用 ! 执行命令",
     "contextUsage": "{percent}% 上下文",
     "copied": "已将完整文档复制到剪贴板。",
@@ -9524,6 +9627,10 @@
         "description": "完成时同时发送系统桌面通知，仅在启用响铃时生效。",
         "label": "桌面通知"
       },
+      "disabledTools": {
+        "description": "每个回合都不向模型提供的工具名（空格分隔；留空表示不禁用任何工具）。",
+        "label": "禁用工具列表…"
+      },
       "editor": {
         "description": "/open 和可点击文件路径使用的编辑器；留空时自动检测。",
         "label": "外部编辑器"
@@ -9566,6 +9673,9 @@
       },
       "hook:pii-safety-guard-tool": {
         "description": "阻止输入中包含明显个人敏感信息或凭据的工具调用。"
+      },
+      "hook:tool-provenance-guard": {
+        "description": "按声明该工具的来源面拒绝调用 — 选择器由 COGNIA_DENY_TOOL_PROVENANCE 配置。"
       },
       "hooksPanel": {
         "description": "浏览钩子来源、查看详情、编辑并重新加载配置。",
@@ -14241,6 +14351,8 @@
       "serverPort": "服务器端口",
       "serverUsername": "服务器用户名",
       "sessions": "会话",
+      "showAllSessions": "显示全部 {count} 个会话",
+      "showFewerSessions": "收起会话列表",
       "stdioNeedsAProcess": "stdio 需要启动一个本地进程。",
       "transportHttp": "HTTP",
       "transportSse": "Server-Sent Events",
@@ -16204,6 +16316,7 @@
         "channel-allowlist": "频道：{names}",
         "keyword": "关键词：{names}",
         "private-default": "全部私聊消息",
+        "regex": "正则：{pattern}",
         "reply-to-bot": "回复机器人",
         "self-mention": "@ 提及",
         "slash-command": "命令：{names}",
@@ -18976,12 +19089,14 @@
     },
     "errors": {
       "disabled": "记忆功能已在设置中关闭",
+      "idempotency_key_reused": "该操作 ID 已被用于不同的请求",
       "mutation_failed": "记忆操作失败，请重试",
       "not_found": "这条记忆已不存在",
       "pii_blocked": "已拦截：文本包含个人隐私信息",
       "policy_denied": "记忆策略拦截了本次改动",
       "scope_denied": "该记忆不允许使用这个作用域",
-      "temporary": "记忆当前处于临时模式"
+      "temporary": "记忆当前处于临时模式",
+      "unauthorized_namespace": "调用方无权访问该记忆命名空间"
     },
     "external": {
       "agents": {
@@ -21881,6 +21996,20 @@
       "title": "通知",
       "unreadCount": "{count} 条未读",
       "unsnooze": "取消暂停"
+    },
+    "delivery": {
+      "short": {
+        "accepted": "已送达 · {count}",
+        "failed": "失败 · {count}",
+        "mixed": "部分 · {count}",
+        "pending": "发送中 · {count}"
+      },
+      "status": {
+        "accepted": "{count} 条外发已被接受",
+        "failed": "{count} 条外发失败",
+        "mixed": "{count} 条外发——部分进行中、部分失败",
+        "pending": "{count} 条外发进行中"
+      }
     },
     "levels": {
       "critical": "严重",
@@ -26081,6 +26210,7 @@
     "emptyEditor": "从文件树打开一个文件开始编辑。",
     "externallyChanged": "磁盘已变更",
     "filesTab": "文件",
+    "loadingFile": "正在加载 {name}…",
     "newFile": "新建文件",
     "newFolder": "新建文件夹",
     "pinTab": "固定 {name}",
@@ -27326,6 +27456,7 @@
     "hostNotice": {
       "companionBody": "此处填写的密钥与端点只保存在当前设备，不会发送到已配对的主机；主机使用它自己的提供商配置。",
       "companionTitle": "仅保存在本设备的提供商设置",
+      "dismiss": "关闭",
       "mobileLocalBody": "在手机上，\"localhost\" 指的是手机本身。请把 Base URL 指向局域网内运行该引擎的机器，或在已配对的桌面端配置本地引擎。",
       "mobileLocalTitle": "本地引擎运行在本设备上"
     },
@@ -35503,6 +35634,13 @@
             "help": "一对一会话里的每条消息，无需被点名。",
             "label": "任何私聊消息"
           },
+          "regex": {
+            "caseInsensitive": "忽略大小写",
+            "help": "对消息文本做正则匹配。仅支持 RE2 安全子集 —— 环视、反向引用与嵌套重复会被拒绝。",
+            "label": "消息匹配某个正则",
+            "patternAria": "正则表达式",
+            "placeholder": "deploy.*(failed|succeeded)"
+          },
           "replyToBot": {
             "help": "回复机器人发出的消息，等同于向它说话。",
             "label": "有人回复了机器人"
@@ -35538,6 +35676,8 @@
           "keyword-blocklist-empty": "屏蔽词名单已开启但为空，因此不会拦截任何消息。",
           "keyword-empty": "关键词条件已开启但没有关键词，因此永远不会命中。",
           "rate-limit-blocks-everything": "上限小于 1 会拦截每分钟的第一条消息，机器人将完全静默。",
+          "regex-empty": "正则条件已开启但表达式为空，因此永远不会命中。",
+          "regex-unsafe": "该表达式超出支持的正则子集 —— 不支持环视、反向引用或嵌套重复 —— 因此永远不会命中。",
           "slash-command-empty": "命令条件已开启但没有前缀，因此永远不会命中。",
           "user-allowlist-empty": "发送者名单已开启但为空，因此永远不会命中。",
           "user-blocklist-empty": "屏蔽发送者名单已开启但为空，因此不会拦截任何消息。"
@@ -38231,6 +38371,10 @@
           "pii-safety-guard-tool": {
             "desc": "拦截输入中携带明显 PII 或凭据的工具调用。",
             "label": "PII 守卫(工具)"
+          },
+          "tool-provenance-guard": {
+            "desc": "按声明该工具的来源面拒绝调用 — 选择器由 COGNIA_DENY_TOOL_PROVENANCE 配置。",
+            "label": "工具来源守卫"
           }
         },
         "off": "关",
@@ -38477,6 +38621,14 @@
         "title": "规格"
       },
       "title": "镜像目录"
+    },
+    "inlineQuestions": {
+      "description": "外部 agent 在 turn 继续运行时提出的非阻塞问题如何展示。",
+      "enabled": {
+        "hint": "开启后,agent 在 turn 中途提出的非阻塞问题会以卡片形式出现在消息流中(建议选项 + 自由输入)。关闭时问题以纯文本展示,用普通消息回复即可。",
+        "label": "行内回答卡片"
+      },
+      "title": "行内提问"
     },
     "instructions": {
       "description": "将活动工作区的磁盘指令文件（CLAUDE.md / AGENTS.md / AGENT.md）加载进 Agent 的系统提示，支持嵌套目录发现与 @import 展开。",
@@ -39053,6 +39205,52 @@
       },
       "channelsHint": "通知默认出现的位置。应用内中心始终记录。",
       "channelsLabel": "默认渠道",
+      "delivery": {
+        "addSubscription": "添加订阅",
+        "addTarget": "添加目标",
+        "bindingLabel": "作用于",
+        "bindingRun": "某次运行",
+        "bindingScope": "整个范围",
+        "bindingSource": "某来源",
+        "cancel": "取消",
+        "deleteSubscription": "删除订阅",
+        "deleteTarget": "删除目标",
+        "disclosure": {
+          "confidential": "机密",
+          "internal": "内部",
+          "public": "公开",
+          "restricted": "受限"
+        },
+        "disclosureLabel": "披露上限",
+        "endpointSecretRefHint": "凭据库引用，如 `feishu:my-webhook`——不是原始 webhook URL。",
+        "endpointSecretRefLabel": "Webhook 凭据引用",
+        "endpointSecretRefPlaceholder": "feishu:my-webhook",
+        "kind": {
+          "connector": "连接器",
+          "feishu-webhook": "飞书 webhook"
+        },
+        "minLevelLabel": "最低级别",
+        "noSubscriptions": "还没有订阅——在绑定之前不会有内容外发。",
+        "noTargets": "还没有投递目标。",
+        "pickTargetsLabel": "目标",
+        "regionLabel": "区域",
+        "runIdLabel": "运行 ID",
+        "runIdPlaceholder": "run-…",
+        "saveSubscription": "保存订阅",
+        "saveTarget": "保存目标",
+        "signingSecretRefLabel": "签名密钥引用（可选）",
+        "signingSecretRefPlaceholder": "feishu:my-signing-key",
+        "sourceLabel": "来源",
+        "subMeta": "{count} 个目标 · 自 {level} 起",
+        "subscriptionsHint": "哪些事件到达你的目标。范围订阅覆盖所有事件；来源和运行会收窄范围。",
+        "subscriptionsLabel": "订阅",
+        "targetNameLabel": "名称",
+        "targetNamePlaceholder": "例如：值班 webhook",
+        "targetsHint": "接收通知的外部端点——飞书 webhook 和已绑定的会话。",
+        "targetsLabel": "投递目标",
+        "toggleSubscription": "切换订阅",
+        "toggleTarget": "切换目标"
+      },
       "description": "控制通知中心如何投递与保留提醒。",
       "dndEnd": "结束时间",
       "dndHint": "在这些时段内静音 toast/桌面/推送（中心仍记录；严重提醒始终送达）。",
@@ -42611,6 +42809,7 @@
       "resourcesCount": "{count} 个资源",
       "scan": "运行扫描",
       "scanCodex": "扫描 ~/.agents/skills/",
+      "scanCursor": "扫描 ~/.cursor/skills/",
       "scanCustom": "扫描指定目录…",
       "scanHome": "扫描 ~/.claude/skills/",
       "scanOpencode": "扫描 OpenCode skills",

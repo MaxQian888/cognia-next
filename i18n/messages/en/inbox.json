@@ -647,6 +647,7 @@
       "channel-allowlist": "Channels: {names}",
       "keyword": "Keywords: {names}",
       "private-default": "All private messages",
+      "regex": "Pattern: {pattern}",
       "reply-to-bot": "Reply-to-bot",
       "self-mention": "@mention",
       "slash-command": "Commands: {names}",

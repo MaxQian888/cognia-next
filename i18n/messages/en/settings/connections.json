@@ -1688,6 +1688,13 @@
         "help": "Every message in a one-to-one chat, without needing to be addressed.",
         "label": "Any direct message"
       },
+      "regex": {
+        "caseInsensitive": "Ignore capitalisation",
+        "help": "A regular expression over the message text. The RE2-safe subset only — lookarounds, backreferences and nested repetitions are rejected.",
+        "label": "The message matches a pattern",
+        "patternAria": "regular expression",
+        "placeholder": "deploy.*(failed|succeeded)"
+      },
       "replyToBot": {
         "help": "A reply to a message this bot sent counts as addressing it.",
         "label": "Someone replies to the bot"
@@ -1723,6 +1730,8 @@
       "keyword-blocklist-empty": "The blocked-word list is on but empty, so it blocks nothing.",
       "keyword-empty": "The keyword condition is on but has no keywords, so it never matches.",
       "rate-limit-blocks-everything": "A limit below 1 blocks the first message of every minute, so the bot goes silent.",
+      "regex-empty": "The pattern condition is on but empty, so it never matches.",
+      "regex-unsafe": "This pattern is outside the supported regex subset — no lookarounds, backreferences or nested repetitions — so it never matches.",
       "slash-command-empty": "The command condition is on but has no prefixes, so it never matches.",
       "user-allowlist-empty": "The sender list is on but empty, so it never matches.",
       "user-blocklist-empty": "The blocked-sender list is on but empty, so it blocks nothing."

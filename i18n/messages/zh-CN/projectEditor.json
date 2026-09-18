@@ -14,6 +14,7 @@
   "emptyEditor": "从文件树打开一个文件开始编辑。",
   "externallyChanged": "磁盘已变更",
   "filesTab": "文件",
+  "loadingFile": "正在加载 {name}…",
   "newFile": "新建文件",
   "newFolder": "新建文件夹",
   "pinTab": "固定 {name}",

@@ -40,6 +40,20 @@
     "unreadCount": "{count} 条未读",
     "unsnooze": "取消暂停"
   },
+  "delivery": {
+    "short": {
+      "accepted": "已送达 · {count}",
+      "failed": "失败 · {count}",
+      "mixed": "部分 · {count}",
+      "pending": "发送中 · {count}"
+    },
+    "status": {
+      "accepted": "{count} 条外发已被接受",
+      "failed": "{count} 条外发失败",
+      "mixed": "{count} 条外发——部分进行中、部分失败",
+      "pending": "{count} 条外发进行中"
+    }
+  },
   "levels": {
     "critical": "严重",
     "error": "错误",

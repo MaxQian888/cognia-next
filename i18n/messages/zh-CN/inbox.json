@@ -647,6 +647,7 @@
       "channel-allowlist": "频道：{names}",
       "keyword": "关键词：{names}",
       "private-default": "全部私聊消息",
+      "regex": "正则：{pattern}",
       "reply-to-bot": "回复机器人",
       "self-mention": "@ 提及",
       "slash-command": "命令：{names}",

@@ -93,5 +93,11 @@
   "teamRoomConversion": "A team conversation cannot be shared yet: its replies are produced locally, and a shared session's come from the server.",
   "switchLabel": "Shared conversations",
   "switchHelp": "Let this machine open conversations that several people share, with the server deciding roles, event order and approvals. Turning it off hides the sharing controls and stops this app pulling shared sessions. Nothing is deleted.",
-  "switchBuildDisabled": "This build was not compiled with shared conversations, so the switch cannot be turned on here."
+  "switchBuildDisabled": "This build was not compiled with shared conversations, so the switch cannot be turned on here.",
+  "shareReferencesCancel": "Cancel",
+  "shareReferencesConfirm": "Share anyway",
+  "shareReferencesTitle": "This conversation quotes other conversations",
+  "shareReferencesWarning": "{count, plural, one {A snapshot of another conversation is embedded in this history} other {# snapshots of other conversations are embedded in this history}}. Everyone invited will be able to read the quoted text, including members who cannot open the source conversation.",
+  "shareReferencesLiveToast": "This message embeds a snapshot of another conversation — everyone here can read it.",
+  "shareReferencesWarningUnknown": "The history could not be checked for embedded snapshots of other conversations. If any are present, everyone invited will be able to read the quoted text, including members who cannot open the source conversation."
 }

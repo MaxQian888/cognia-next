@@ -132,6 +132,7 @@
     "resourcesCount": "{count, plural, =0 {0 resources} =1 {1 resource} other {# resources}}",
     "scan": "Run scan",
     "scanCodex": "Scan ~/.agents/skills/",
+    "scanCursor": "Scan ~/.cursor/skills/",
     "scanCustom": "Scan a directory…",
     "scanHome": "Scan ~/.claude/skills/",
     "scanOpencode": "Scan OpenCode skills",

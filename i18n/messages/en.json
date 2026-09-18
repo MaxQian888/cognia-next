@@ -2340,6 +2340,37 @@
     },
     "live": "Live",
     "loadMore": "Load more",
+    "notifications": {
+      "empty": "No external notifications for this run — it stayed in the app.",
+      "kind": {
+        "connector": "Connector",
+        "feishu-webhook": "Feishu webhook"
+      },
+      "loading": "Loading deliveries…",
+      "purpose": {
+        "approval-request": "Approval request",
+        "digest": "Digest",
+        "incident-alert": "Incident alert",
+        "live-progress": "Progress",
+        "manual": "Manual",
+        "reminder": "Reminder",
+        "result-summary": "Result summary",
+        "terminal-ping": "Terminal ping",
+        "terminal-state": "Terminal state"
+      },
+      "status": {
+        "accepted": "Accepted",
+        "cancelled": "Cancelled",
+        "delivery-unknown": "Unknown",
+        "expired": "Expired",
+        "failed": "Failed",
+        "prepared": "Prepared",
+        "queued": "Queued",
+        "rejected": "Rejected",
+        "sending": "Sending",
+        "superseded": "Superseded"
+      }
+    },
     "operations": {
       "unavailable": "This device does not carry this Squad run's record."
     },
@@ -2466,6 +2497,7 @@
       "artifacts": "Artifacts",
       "changes": "Changes",
       "coordination": "Coordination",
+      "notifications": "Notifications",
       "operations": "Operations",
       "overview": "Overview",
       "report": "Report",
@@ -3801,6 +3833,9 @@
   "aiElements": {
     "agent": {
       "noDescription": "No description"
+    },
+    "terminal": {
+      "clipboardUnavailable": "Clipboard API not available"
     }
   },
   "annotations": {
@@ -5901,6 +5936,7 @@
       },
       "result": {
         "diff": "+{added} −{removed}",
+        "edits": "{count, plural, =1 {1 edit} other {# edits}}",
         "entries": "{count, plural, =1 {1 entry} other {# entries}}",
         "files": "{count, plural, =1 {1 file} other {# files}}",
         "lines": "{count, plural, =1 {1 line} other {# lines}}",
@@ -5957,6 +5993,14 @@
       "submitHint": "⌘/Ctrl + Enter to submit",
       "textPlaceholder": "Type your answer…",
       "title": "The agent has a question"
+    },
+    "asyncQuestions": {
+      "answerPlaceholder": "Type an answer…",
+      "answered": "Answered: {answer}",
+      "eyebrow": "Agent question",
+      "sendAnswer": "Send answer",
+      "sendFailed": "Could not send the answer — the chat runtime is unavailable.",
+      "unanswered": "Closed without an answer"
     },
     "backgroundRuns": {
       "count": "{count, plural, one {# conversation running in the background} other {# conversations running in the background}}"
@@ -7499,6 +7543,9 @@
       "read": {
         "title": "Read"
       },
+      "runtimeQuery": {
+        "noneFound": "No matching entries"
+      },
       "spawnTask": {
         "aside": "aside",
         "caveats": "Caveats",
@@ -7514,6 +7561,11 @@
       },
       "webSearch": {
         "noResults": "No results"
+      },
+      "wikiRead": {
+        "hideBody": "Hide body",
+        "noContent": "No content",
+        "showBody": "Show body"
       },
       "wikiSearch": {
         "noResults": "No results"
@@ -7638,6 +7690,7 @@
       "reasoning": {
         "completed": "Thought for a few seconds",
         "completedSeconds": "Thought for {duration, plural, =1 {1 second} other {# seconds}}",
+        "copy": "Copy thinking",
         "streaming": "Thinking…"
       },
       "regenerateLabel": "Regenerate",
@@ -8249,7 +8302,6 @@
       "transcriptMissing": "This subagent's transcript isn't in this copy of the conversation."
     },
     "terminalTool": {
-      "bashLabel": "Bash",
       "runInDock": {
         "empty": "No tabs match.",
         "existingTabs": "Existing tabs",
@@ -8257,8 +8309,7 @@
         "newTab": "New tab",
         "searchPlaceholder": "Find a tab",
         "trustedBadge": "trusted"
-      },
-      "runningStatus": "running"
+      }
     },
     "timeline": {
       "collapse": "Collapse timeline",
@@ -8284,6 +8335,7 @@
       "inputLabel": "Input",
       "interruptedNotice": "This request was interrupted — the tool was already denied. Resend the message to retry.",
       "observeRedacted": "This device is watching only — the arguments are withheld and it cannot answer.",
+      "supersededNotice": "Superseded by a new instruction — the tool was already denied.",
       "titleFallback": "Allow {tool}?",
       "toolLabel": "Tool"
     },
@@ -8301,18 +8353,62 @@
         "title": "Screenshot"
       },
       "webFetch": {
+        "chars": "{count, plural, =1 {# character} other {# characters}}",
+        "content": "Content",
         "empty": "No content returned.",
         "failed": "Fetch failed.",
-        "showLess": "Show less",
-        "showMore": "Show all ({chars} characters)",
-        "status": "HTTP {status}",
-        "title": "Web fetch"
+        "redirectedTo": "→ redirected to {url}",
+        "truncatedChars": "Showing the first {shown, number} of {total, number} characters."
       },
       "webSearch": {
         "failed": "Search failed.",
         "noResults": "No results.",
-        "title": "Web search",
         "via": "via {provider}"
+      }
+    },
+    "toolRow": {
+      "bashRowAria": "Bash command {command}",
+      "copyCommand": "Copy command",
+      "copyInput": "Copy input",
+      "copyOutput": "Copy output",
+      "copyTarget": "Copy target",
+      "errorLabel": "Error",
+      "exitCode": "exit {code}",
+      "input": "Input",
+      "meta": {
+        "httpStatus": "HTTP {status}",
+        "ops": "{count, plural, =1 {1 op} other {# ops}}",
+        "unchanged": "unchanged"
+      },
+      "moreLines": "+{count} lines",
+      "output": "Output",
+      "outputLines": "{count} lines",
+      "preview": {
+        "showAll": "Show all",
+        "truncated": "Showing the first {shown, number} of {total, number}."
+      },
+      "proposedChange": "Proposed change",
+      "rowAria": "{verb} {target} — {status}",
+      "stderr": "stderr",
+      "stdout": "stdout",
+      "verb": {
+        "computer": "Computer",
+        "edit": "Edit",
+        "fetch": "Fetch",
+        "glob": "Glob",
+        "grep": "Grep",
+        "ls": "LS",
+        "notebook": "NotebookEdit",
+        "plan": "Plan",
+        "query": "Query",
+        "read": "Read",
+        "recall": "Recall",
+        "search": "Search",
+        "task": "Task",
+        "think": "Think",
+        "wiki": "Wiki",
+        "workflow": "Workflow",
+        "write": "Write"
       }
     },
     "transcript": {
@@ -8509,6 +8605,12 @@
     "runCoordination": "Agent run",
     "runHost": "Running on {user}'s device",
     "running": "Running",
+    "shareReferencesCancel": "Cancel",
+    "shareReferencesConfirm": "Share anyway",
+    "shareReferencesLiveToast": "This message embeds a snapshot of another conversation — everyone here can read it.",
+    "shareReferencesTitle": "This conversation quotes other conversations",
+    "shareReferencesWarning": "{count, plural, one {A snapshot of another conversation is embedded in this history} other {# snapshots of other conversations are embedded in this history}}. Everyone invited will be able to read the quoted text, including members who cannot open the source conversation.",
+    "shareReferencesWarningUnknown": "The history could not be checked for embedded snapshots of other conversations. If any are present, everyone invited will be able to read the quoted text, including members who cannot open the source conversation.",
     "shared": "Shared",
     "sharedDescription": "The server is authoritative for membership, messages, runs, approvals, and attachments.",
     "sharedTitle": "Shared conversation",
@@ -9109,6 +9211,7 @@
     },
     "commandCenter": "Command center",
     "commandHint": "type to search · ↑/↓ navigate · Enter / click run · Esc close",
+    "compacting": "compacting context",
     "composerPlaceholder": "Ask, run /commands, @ files, or ! shell",
     "contextUsage": "{percent}% ctx",
     "copied": "Copied the complete document to the clipboard.",
@@ -9524,6 +9627,10 @@
         "description": "Also fire an OS desktop notification on completion (only when the bell is on).",
         "label": "Desktop notifications"
       },
+      "disabledTools": {
+        "description": "Tool names withheld from every turn (space-separated; empty = nothing disabled).",
+        "label": "Disabled tools denylist…"
+      },
       "editor": {
         "description": "Preferred editor for /open and clickable file paths (blank = auto-detect).",
         "label": "External editor"
@@ -9566,6 +9673,9 @@
       },
       "hook:pii-safety-guard-tool": {
         "description": "Block a tool call whose input carries obvious PII / credentials."
+      },
+      "hook:tool-provenance-guard": {
+        "description": "Deny a tool call by which surface declared it — selectors come from COGNIA_DENY_TOOL_PROVENANCE."
       },
       "hooksPanel": {
         "description": "Browse hook sources, inspect details, edit and reload configuration.",
@@ -14241,6 +14351,8 @@
       "serverPort": "Server port",
       "serverUsername": "Server username",
       "sessions": "Sessions",
+      "showAllSessions": "Show all {count} sessions",
+      "showFewerSessions": "Show fewer sessions",
       "stdioNeedsAProcess": "Stdio starts a local process.",
       "transportHttp": "HTTP",
       "transportSse": "Server-Sent Events",
@@ -16204,6 +16316,7 @@
         "channel-allowlist": "Channels: {names}",
         "keyword": "Keywords: {names}",
         "private-default": "All private messages",
+        "regex": "Pattern: {pattern}",
         "reply-to-bot": "Reply-to-bot",
         "self-mention": "@mention",
         "slash-command": "Commands: {names}",
@@ -18976,12 +19089,14 @@
     },
     "errors": {
       "disabled": "Memory is disabled in settings",
+      "idempotency_key_reused": "That operation ID was already used for a different request",
       "mutation_failed": "The memory operation failed — please try again",
       "not_found": "This memory no longer exists",
       "pii_blocked": "Blocked: the text contains personal information",
       "policy_denied": "A memory policy blocked this change",
       "scope_denied": "That scope isn't allowed for this memory",
-      "temporary": "Memory is in temporary mode"
+      "temporary": "Memory is in temporary mode",
+      "unauthorized_namespace": "This caller isn't allowed to access that memory namespace"
     },
     "external": {
       "agents": {
@@ -21881,6 +21996,20 @@
       "title": "Notifications",
       "unreadCount": "{count} unread",
       "unsnooze": "Unsnooze"
+    },
+    "delivery": {
+      "short": {
+        "accepted": "Sent · {count}",
+        "failed": "Failed · {count}",
+        "mixed": "Partial · {count}",
+        "pending": "Sending · {count}"
+      },
+      "status": {
+        "accepted": "{count} external deliver(ies) accepted",
+        "failed": "{count} external deliver(ies) failed",
+        "mixed": "{count} external deliveries — some pending, some failed",
+        "pending": "{count} external deliver(ies) in flight"
+      }
     },
     "levels": {
       "critical": "Critical",
@@ -26081,6 +26210,7 @@
     "emptyEditor": "Open a file from the tree to start editing.",
     "externallyChanged": "Changed on disk",
     "filesTab": "Files",
+    "loadingFile": "Loading {name}…",
     "newFile": "New File",
     "newFolder": "New Folder",
     "pinTab": "Keep {name} open",
@@ -27326,6 +27456,7 @@
     "hostNotice": {
       "companionBody": "Keys and endpoints entered here stay on this device and are never sent to the paired host. The host uses its own provider configuration.",
       "companionTitle": "Device-local provider settings",
+      "dismiss": "Dismiss",
       "mobileLocalBody": "On a phone, \"localhost\" is the phone itself. Point the base URL at a machine on your network that runs the engine, or configure local engines on the paired desktop.",
       "mobileLocalTitle": "Local engines run on this device"
     },
@@ -35503,6 +35634,13 @@
             "help": "Every message in a one-to-one chat, without needing to be addressed.",
             "label": "Any direct message"
           },
+          "regex": {
+            "caseInsensitive": "Ignore capitalisation",
+            "help": "A regular expression over the message text. The RE2-safe subset only — lookarounds, backreferences and nested repetitions are rejected.",
+            "label": "The message matches a pattern",
+            "patternAria": "regular expression",
+            "placeholder": "deploy.*(failed|succeeded)"
+          },
           "replyToBot": {
             "help": "A reply to a message this bot sent counts as addressing it.",
             "label": "Someone replies to the bot"
@@ -35538,6 +35676,8 @@
           "keyword-blocklist-empty": "The blocked-word list is on but empty, so it blocks nothing.",
           "keyword-empty": "The keyword condition is on but has no keywords, so it never matches.",
           "rate-limit-blocks-everything": "A limit below 1 blocks the first message of every minute, so the bot goes silent.",
+          "regex-empty": "The pattern condition is on but empty, so it never matches.",
+          "regex-unsafe": "This pattern is outside the supported regex subset — no lookarounds, backreferences or nested repetitions — so it never matches.",
           "slash-command-empty": "The command condition is on but has no prefixes, so it never matches.",
           "user-allowlist-empty": "The sender list is on but empty, so it never matches.",
           "user-blocklist-empty": "The blocked-sender list is on but empty, so it blocks nothing."
@@ -38231,6 +38371,10 @@
           "pii-safety-guard-tool": {
             "desc": "Block a tool call whose input carries obvious PII or credentials.",
             "label": "PII guard (tool)"
+          },
+          "tool-provenance-guard": {
+            "desc": "Deny a tool call by which surface declared it — selectors come from COGNIA_DENY_TOOL_PROVENANCE.",
+            "label": "Tool provenance guard"
           }
         },
         "off": "Off",
@@ -38477,6 +38621,14 @@
         "title": "Size classes"
       },
       "title": "Image catalog"
+    },
+    "inlineQuestions": {
+      "description": "How questions from external agents appear while a turn keeps running.",
+      "enabled": {
+        "hint": "When an agent asks a non-blocking question mid-turn, show an answer card in the transcript (suggested options + free text). Off, the question appears as plain text and you answer with a normal message.",
+        "label": "Inline answer cards"
+      },
+      "title": "Inline questions"
     },
     "instructions": {
       "description": "Load on-disk instruction files (CLAUDE.md / AGENTS.md / AGENT.md) from the active workspace into the agent's system prompt, with nested directory discovery and @import expansion.",
@@ -39053,6 +39205,52 @@
       },
       "channelsHint": "Where notifications appear by default. The in-app center always records them.",
       "channelsLabel": "Default channels",
+      "delivery": {
+        "addSubscription": "Add subscription",
+        "addTarget": "Add target",
+        "bindingLabel": "Applies to",
+        "bindingRun": "A run",
+        "bindingScope": "Entire scope",
+        "bindingSource": "A source",
+        "cancel": "Cancel",
+        "deleteSubscription": "Delete subscription",
+        "deleteTarget": "Delete target",
+        "disclosure": {
+          "confidential": "Confidential",
+          "internal": "Internal",
+          "public": "Public",
+          "restricted": "Restricted"
+        },
+        "disclosureLabel": "Disclosure ceiling",
+        "endpointSecretRefHint": "A credential-store reference like `feishu:my-webhook` — never the raw webhook URL.",
+        "endpointSecretRefLabel": "Webhook credential ref",
+        "endpointSecretRefPlaceholder": "feishu:my-webhook",
+        "kind": {
+          "connector": "Connector",
+          "feishu-webhook": "Feishu webhook"
+        },
+        "minLevelLabel": "Minimum level",
+        "noSubscriptions": "No subscriptions yet — nothing leaves the app until one is bound.",
+        "noTargets": "No delivery targets yet.",
+        "pickTargetsLabel": "Targets",
+        "regionLabel": "Region",
+        "runIdLabel": "Run ID",
+        "runIdPlaceholder": "run-…",
+        "saveSubscription": "Save subscription",
+        "saveTarget": "Save target",
+        "signingSecretRefLabel": "Signing secret ref (optional)",
+        "signingSecretRefPlaceholder": "feishu:my-signing-key",
+        "sourceLabel": "Source",
+        "subMeta": "{count} target(s) · from {level}",
+        "subscriptionsHint": "Which events reach your targets. A scope subscription covers every event; source and run narrow it.",
+        "subscriptionsLabel": "Subscriptions",
+        "targetNameLabel": "Name",
+        "targetNamePlaceholder": "e.g. On-call webhook",
+        "targetsHint": "External endpoints that receive notifications — Feishu webhooks and bound conversations.",
+        "targetsLabel": "Delivery targets",
+        "toggleSubscription": "Toggle subscription",
+        "toggleTarget": "Toggle target"
+      },
       "description": "Control how the notification center delivers and retains alerts.",
       "dndEnd": "End time",
       "dndHint": "Mute toast/desktop/push during these hours (the center still records; critical alerts always come through).",
@@ -42611,6 +42809,7 @@
       "resourcesCount": "{count, plural, =0 {0 resources} =1 {1 resource} other {# resources}}",
       "scan": "Run scan",
       "scanCodex": "Scan ~/.agents/skills/",
+      "scanCursor": "Scan ~/.cursor/skills/",
       "scanCustom": "Scan a directory…",
       "scanHome": "Scan ~/.claude/skills/",
       "scanOpencode": "Scan OpenCode skills",

@@ -14,6 +14,7 @@
   "emptyEditor": "Open a file from the tree to start editing.",
   "externallyChanged": "Changed on disk",
   "filesTab": "Files",
+  "loadingFile": "Loading {name}…",
   "newFile": "New File",
   "newFolder": "New Folder",
   "pinTab": "Keep {name} open",

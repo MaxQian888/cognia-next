@@ -269,6 +269,8 @@
     "serverPort": "Server port",
     "serverUsername": "Server username",
     "sessions": "Sessions",
+    "showAllSessions": "Show all {count} sessions",
+    "showFewerSessions": "Show fewer sessions",
     "stdioNeedsAProcess": "Stdio starts a local process.",
     "transportHttp": "HTTP",
     "transportSse": "Server-Sent Events",

@@ -626,6 +626,7 @@
   "hostNotice": {
     "companionBody": "此处填写的密钥与端点只保存在当前设备，不会发送到已配对的主机；主机使用它自己的提供商配置。",
     "companionTitle": "仅保存在本设备的提供商设置",
+    "dismiss": "关闭",
     "mobileLocalBody": "在手机上，\"localhost\" 指的是手机本身。请把 Base URL 指向局域网内运行该引擎的机器，或在已配对的桌面端配置本地引擎。",
     "mobileLocalTitle": "本地引擎运行在本设备上"
   },

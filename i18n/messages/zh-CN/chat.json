@@ -20,6 +20,7 @@
     },
     "result": {
       "diff": "+{added} −{removed}",
+      "edits": "{count} 处编辑",
       "entries": "{count} 项",
       "files": "{count} 个文件",
       "lines": "{count} 行",
@@ -76,6 +77,14 @@
     "submitHint": "⌘/Ctrl + Enter 提交",
     "textPlaceholder": "输入你的回答…",
     "title": "智能体有个问题"
+  },
+  "asyncQuestions": {
+    "answerPlaceholder": "输入回答…",
+    "answered": "已回答:{answer}",
+    "eyebrow": "Agent 提问",
+    "sendAnswer": "发送回答",
+    "sendFailed": "回答发送失败——聊天运行时不可用。",
+    "unanswered": "未作答已关闭"
   },
   "backgroundRuns": {
     "count": "{count, plural, other {后台还有 # 个会话在运行}}"
@@ -1618,6 +1627,9 @@
     "read": {
       "title": "读取"
     },
+    "runtimeQuery": {
+      "noneFound": "没有匹配的条目"
+    },
     "spawnTask": {
       "aside": "独立侧聊",
       "caveats": "注意事项",
@@ -1633,6 +1645,11 @@
     },
     "webSearch": {
       "noResults": "无结果"
+    },
+    "wikiRead": {
+      "hideBody": "收起正文",
+      "showBody": "展开正文",
+      "noContent": "无内容"
     },
     "wikiSearch": {
       "noResults": "无结果"
@@ -1757,6 +1774,7 @@
     "reasoning": {
       "completed": "思考了几秒",
       "completedSeconds": "思考了 {duration, number} 秒",
+      "copy": "复制思考过程",
       "streaming": "正在思考…"
     },
     "regenerateLabel": "重新生成",
@@ -1919,6 +1937,26 @@
   "planMode": {
     "banner": "计划模式——只读调研；智能体将在修改前先提出计划。",
     "hint": "Shift+Tab"
+  },
+  "promptPreamble": {
+    "combinedTitle": "{title}（{count} 条消息）",
+    "generic": "附加的上下文",
+    "hideText": "收起发给模型的原文",
+    "kinds": {
+      "artifact": "Artifact",
+      "comment": "评论",
+      "entity": "记录",
+      "external": "选中内容",
+      "file": "文件",
+      "plugin": "插件",
+      "web": "网页"
+    },
+    "references": "{count, plural, =1 {附加了 1 项引用} other {附加了 # 项引用}}",
+    "sections": {
+      "reviewReceipts": "评审结果",
+      "webSearch": "联网搜索结果"
+    },
+    "showText": "查看发给模型的原文"
   },
   "reactions": {
     "add": "添加表情回应",
@@ -2348,7 +2386,6 @@
     "transcriptMissing": "这份对话副本中没有该子代理的完整记录。"
   },
   "terminalTool": {
-    "bashLabel": "Bash",
     "runInDock": {
       "empty": "没有匹配的 tab。",
       "existingTabs": "已有 tab",
@@ -2356,8 +2393,7 @@
       "newTab": "新建 tab",
       "searchPlaceholder": "搜索 tab",
       "trustedBadge": "已信任"
-    },
-    "runningStatus": "运行中"
+    }
   },
   "timeline": {
     "collapse": "收起时间线",
@@ -2383,23 +2419,23 @@
     "inputLabel": "输入",
     "interruptedNotice": "该请求已被中断——工具调用已被拒绝。重新发送消息可重试。",
     "observeRedacted": "此设备仅在观察——参数已隐藏，且无法作答。",
+    "supersededNotice": "已被新指令取代——工具调用已被拒绝。",
     "titleFallback": "允许执行 {tool}？",
     "toolLabel": "工具"
   },
   "toolCards": {
     "webSearch": {
-      "title": "网页搜索",
       "via": "来自 {provider}",
       "failed": "搜索失败。",
       "noResults": "没有结果。"
     },
     "webFetch": {
       "empty": "无返回内容。",
-      "title": "网页抓取",
-      "status": "HTTP {status}",
       "failed": "抓取失败。",
-      "showMore": "展开全部（{chars} 字符）",
-      "showLess": "收起"
+      "content": "正文",
+      "redirectedTo": "→ 跳转至 {url}",
+      "truncatedChars": "仅显示前 {shown} 个字符，共 {total} 个字符。",
+      "chars": "{count} 个字符"
     },
     "screenshot": {
       "title": "截图",
@@ -2412,6 +2448,51 @@
       "copy": "复制该条",
       "showAll": "显示全部 {count} 条",
       "showLess": "收起"
+    }
+  },
+  "toolRow": {
+    "verb": {
+      "read": "读取",
+      "write": "写入",
+      "edit": "编辑",
+      "grep": "搜索",
+      "glob": "匹配",
+      "ls": "列目录",
+      "notebook": "编辑笔记本",
+      "fetch": "抓取",
+      "search": "搜索",
+      "plan": "计划",
+      "task": "子任务",
+      "wiki": "百科",
+      "recall": "检索",
+      "query": "查询",
+      "computer": "界面操作",
+      "workflow": "工作流",
+      "think": "思考"
+    },
+    "copyTarget": "复制目标",
+    "copyCommand": "复制命令",
+    "copyInput": "复制输入",
+    "copyOutput": "复制输出",
+    "errorLabel": "错误",
+    "input": "输入",
+    "output": "输出",
+    "proposedChange": "变更预览",
+    "rowAria": "{verb} {target} — {status}",
+    "bashRowAria": "Bash 命令 {command}",
+    "stdout": "stdout",
+    "stderr": "stderr",
+    "exitCode": "exit {code}",
+    "outputLines": "{count} 行",
+    "moreLines": "+{count} 行",
+    "meta": {
+      "httpStatus": "HTTP {status}",
+      "ops": "{count} 个操作",
+      "unchanged": "无变化"
+    },
+    "preview": {
+      "truncated": "仅显示前 {shown} 条，共 {total} 条。",
+      "showAll": "显示全部"
     }
   },
   "transcript": {
@@ -2523,25 +2604,5 @@
     "title": "信任此工作区？",
     "trust": "信任工作区",
     "workspaceLabel": "工作区"
-  },
-  "promptPreamble": {
-    "combinedTitle": "{title}（{count} 条消息）",
-    "generic": "附加的上下文",
-    "hideText": "收起发给模型的原文",
-    "kinds": {
-      "artifact": "Artifact",
-      "comment": "评论",
-      "entity": "记录",
-      "external": "选中内容",
-      "file": "文件",
-      "plugin": "插件",
-      "web": "网页"
-    },
-    "references": "{count, plural, =1 {附加了 1 项引用} other {附加了 # 项引用}}",
-    "sections": {
-      "reviewReceipts": "评审结果",
-      "webSearch": "联网搜索结果"
-    },
-    "showText": "查看发给模型的原文"
   }
 }

@@ -93,5 +93,11 @@
   "teamRoomConversion": "团队会话暂时无法共享：它的回复在本机生成，而共享会话的回复来自服务端。",
   "switchLabel": "共享会话",
   "switchHelp": "允许本机打开多人共享的会话，角色、事件顺序和审批由服务端决定。关闭后会隐藏共享入口，并停止本应用拉取共享会话，不会删除任何数据。",
-  "switchBuildDisabled": "当前构建未启用共享会话，因此无法在这里打开。"
+  "switchBuildDisabled": "当前构建未启用共享会话，因此无法在这里打开。",
+  "shareReferencesCancel": "取消",
+  "shareReferencesConfirm": "仍然分享",
+  "shareReferencesTitle": "此对话引用了其他对话",
+  "shareReferencesWarning": "此历史记录中嵌入了 {count} 条来自其他对话的快照。所有被邀请的成员都能读到被引用的原文，包括无法打开来源对话的成员。",
+  "shareReferencesLiveToast": "此消息嵌入了其他对话的快照——这里的所有成员都能读到。",
+  "shareReferencesWarningUnknown": "无法检查此历史记录中是否嵌入了其他对话的快照。如有嵌入内容，所有被邀请的成员都能读到被引用的原文，包括无法打开来源对话的成员。"
 }
