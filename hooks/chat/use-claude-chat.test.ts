@@ -2860,6 +2860,29 @@ describe("useClaudeChat — actions", () => {
     expect(sendPromptMock).not.toHaveBeenCalled()
   })
 
+  it("editAndResend is a no-op while the session is mid-turn", async () => {
+    // Drafts can outlive the idle moment they were opened in: a send now
+    // would land as a steer, and a steer never consumes `branchTag` — the
+    // group `tagEditSibling` persists would have no replacement variant.
+    chatState.status = "streaming"
+    chatState.messages = [
+      { id: "u-1", role: "user", parts: [{ type: "text", text: "original" }] },
+      { id: "a-1", role: "assistant", parts: [{ type: "text", text: "reply" }] },
+    ]
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    persistMessagesMock.mockClear()
+    await act(async () => {
+      await result.current.editAndResend("u-1", "edited")
+    })
+    expect(persistMessagesMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    // Nothing was tagged into a sibling group either.
+    expect(
+      (chatState.messages as Array<{ metadata?: unknown }>).every((m) => m.metadata === undefined)
+    ).toBe(true)
+  })
+
   it("regenerate is a no-op when there is no user message", async () => {
     chatState.messages = []
     const { result } = renderHook(() => useClaudeChat())
@@ -2868,6 +2891,25 @@ describe("useClaudeChat — actions", () => {
       await result.current.regenerate()
     })
     expect(truncateAfterMock).not.toHaveBeenCalled()
+  })
+
+  it("regenerate is a no-op while the session is mid-turn", async () => {
+    // `skipUserAppend` bypasses the steer gate, so a regenerate here would
+    // re-enter the normal send path and restart the sidecar under the live
+    // turn — silently dropping its context. Guard before any tagging.
+    chatState.status = "awaiting_approval"
+    chatState.messages = [
+      { id: "u-1", role: "user", parts: [{ type: "text", text: "hello" }] },
+      { id: "a-1", role: "assistant", parts: [{ type: "text", text: "hi" }] },
+    ]
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    persistMessagesMock.mockClear()
+    await act(async () => {
+      await result.current.regenerate()
+    })
+    expect(persistMessagesMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).not.toHaveBeenCalled()
   })
 
   it("regenerate tags the existing assistant siblings and re-sends without re-appending the user turn", async () => {

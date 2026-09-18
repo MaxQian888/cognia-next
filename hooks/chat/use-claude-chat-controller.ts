@@ -4148,6 +4148,12 @@ export function useClaudeChat() {
     ) => {
       const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
       if (!sessionId) return
+      // Mid-turn this send would land as a steer — and a steer never consumes
+      // `branchTag`, leaving the group `tagEditSibling` is about to persist
+      // with no replacement variant. Surfaces disable the affordance; this is
+      // the backstop for draft submits racing a turn start.
+      const st = sessionStatusOf(sessionId)
+      if (st === "streaming" || st === "awaiting_approval") return
       // Rebuilding the branch base invalidates this session's streaming mirror;
       // drop it (and pending coalescing work) so the rebuilt base wins.
       registry.release(sessionId)
@@ -4190,6 +4196,13 @@ export function useClaudeChat() {
     async (targetSessionId?: string, resourceContext?: string) => {
       const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
       if (!sessionId) return
+
+      // Regenerate bypasses the steer gate via `skipUserAppend`, so mid-turn
+      // it would re-enter the normal send path — restarting the sidecar and
+      // silently dropping the live turn's context (see the send-gate comment).
+      // Surfaces disable the affordance; this is the backstop.
+      const st = sessionStatusOf(sessionId)
+      if (st === "streaming" || st === "awaiting_approval") return
 
       // Rebuilding the branch base invalidates this session's streaming mirror;
       // drop it (and pending coalescing work).
