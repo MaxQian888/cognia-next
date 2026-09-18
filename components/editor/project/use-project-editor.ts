@@ -180,6 +180,12 @@ export function useProjectEditor({
   const [rootsReady, setRootsReady] = useState(false)
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([])
   const [activePath, setActivePath] = useState<string | null>(null)
+  // Committed mirror of `activePath` — `openFile` needs the *previous* path
+  // synchronously so a failed read can put the selection back where it was.
+  const activePathRef = useRef<string | null>(null)
+  useEffect(() => {
+    activePathRef.current = activePath
+  }, [activePath])
   // Guards the one-shot session restore so re-renders don't re-open files.
   const restoredRef = useRef(false)
   // Synchronous mirror of the open relPaths so rapid sequential `openFile`
@@ -367,9 +373,14 @@ export function useProjectEditor({
       // the agent bridge, "new file") means "keep this open".
       const mode = options?.mode ?? "pinned"
       const isOpen = openPathsRef.current.has(relPath)
+      // Captured before the selection moves: a failed read reverts to it.
+      const previousActivePath = activePathRef.current
       const transition = resolveTabIntent(tabStateRef.current, { relPath, mode, isOpen })
       setTabState(transition.state)
       setActivePath(relPath)
+      // Sync the mirror now — a second openFile in the same commit must see
+      // this path as "previous", not the one the last effect committed.
+      activePathRef.current = relPath
       if (transition.evicted) evictTab(transition.evicted)
       if (isOpen) return
       openPathsRef.current.add(relPath)
@@ -412,6 +423,15 @@ export function useProjectEditor({
         if (stillOurs()) {
           openPathsRef.current.delete(relPath) // allow a later retry
           releaseFileModel(joinRootRel(rootPath, relPath))
+          // The click already moved the selection — leaving it on a file that
+          // never opened parked `activePath` on a phantom tab forever.
+          setTabState(forgetTab(tabStateRef.current, relPath))
+          const restored =
+            previousActivePath !== null && openPathsRef.current.has(previousActivePath)
+              ? previousActivePath
+              : null
+          setActivePath((current) => (current === relPath ? restored : current))
+          if (activePathRef.current === relPath) activePathRef.current = restored
         }
         editorLogger.warn("open file failed", { relPath, err: String(err) })
       }
@@ -433,11 +453,9 @@ export function useProjectEditor({
       releaseFileModel(joinRootRel(rootPath, relPath))
       setTabState(forgetTab(tabStateRef.current, relPath))
       setOpenFiles(remaining)
-      setActivePath((cur) => {
-        if (cur !== relPath) return cur
-        const fallback = remaining[Math.min(idx, remaining.length - 1)]
-        return fallback?.relPath ?? null
-      })
+      const fallback = remaining[Math.min(idx, remaining.length - 1)]?.relPath ?? null
+      setActivePath((cur) => (cur !== relPath ? cur : fallback))
+      if (activePathRef.current === relPath) activePathRef.current = fallback
     },
     [openFiles, rootPath, releaseFileModel, setTabState]
   )

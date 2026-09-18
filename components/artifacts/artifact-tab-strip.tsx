@@ -99,7 +99,10 @@ export function ArtifactTabStrip({
       role="tablist"
       aria-label={t("dock.openArtifacts")}
       data-testid="artifact-tab-strip"
-      className={cn("flex min-w-0 items-center gap-0.5 overflow-x-auto", className)}
+      className={cn(
+        "flex min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+        className
+      )}
     >
       {tabs.map((id, index) => {
         const artifact = artifacts[id]

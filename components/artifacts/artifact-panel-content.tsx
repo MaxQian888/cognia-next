@@ -167,8 +167,8 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
     previewVisible,
     // Reuses the browser surface's delivery path — it already knows not to
     // interrupt a live turn for a text-only send.
-    sendNow: (element, artifact) =>
-      sendText(
+    sendNow: async (element, artifact) => {
+      await sendText(
         formatContextSelectionsForLLM([
           {
             kind: "artifact",
@@ -180,7 +180,8 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
             element,
           },
         ])
-      ),
+      )
+    },
   })
 
   // Workbench wiring for the VS Code reuse layer: when the artifact's Monaco

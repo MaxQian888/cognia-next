@@ -887,6 +887,7 @@ export function ContextWorkbench({
   const activeGroup = activePanel
     ? (activityGroups.find(([activity]) => activity === activePanel.activity)?.[1] ?? [])
     : []
+  const ActivePanelIcon = activePanel?.icon ?? PanelRightIcon
 
   // --- Vertical split ---
   //
@@ -1444,7 +1445,9 @@ export function ContextWorkbench({
             aria-label={t("contextWorkbench.navigation.tabs")}
             data-testid="context-workbench-panel-tabs"
             ref={panelTabsRef}
-            className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
+            // Scrolls when the tabs outgrow the header, but never paints a
+            // scrollbar — a bar under a tab strip reads as a broken layout.
+            className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             onKeyDown={handleGroupTabKeyDown}
           >
             {openPanels.map((panel) => {
@@ -1611,7 +1614,7 @@ export function ContextWorkbench({
           // unaffected: `handleGroupTabKeyDown` queries the data
           // attribute, not the role.
           role={splitActive ? "group" : "tablist"}
-          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
+          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           onKeyDown={handleGroupTabKeyDown}
         >
           {activeGroup.map((panel) => (
@@ -1641,7 +1644,21 @@ export function ContextWorkbench({
           ))}
         </div>
       ) : null}
-      {useTabs || headerLeading || activeGroup.length > 1 ? null : <div className="flex-1" />}
+      {useTabs || headerLeading || activeGroup.length > 1 ? null : activePanel ? (
+        // Neither the artifact strip nor a group tab row occupies the middle
+        // here, so a bare spacer would sit between the nav toggle and the
+        // width controls as unexplained dead space — name the panel that is
+        // actually on screen instead.
+        <div
+          data-testid="context-workbench-active-panel-title"
+          className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-xs text-muted-foreground"
+        >
+          <ActivePanelIcon className="size-3.5 shrink-0" />
+          <span className="truncate">{getPanelLabel(activePanel)}</span>
+        </div>
+      ) : (
+        <div className="flex-1" />
+      )}
       <PluginExtensionSlot
         point="panel.header"
         className="flex shrink-0 items-center gap-1"
@@ -1894,7 +1911,7 @@ export function ContextWorkbench({
                 railIsHorizontal
                   ? // Tall enough to hold a 44px touch target with breathing room;
                     // `h-12` clipped the padded buttons.
-                    "h-14 w-full overflow-x-auto border-b px-2"
+                    "h-14 w-full overflow-x-auto border-b px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                   : "flex-col border-r py-2"
               )}
               // Inline width rather than `w-12`: the rail is now also what a

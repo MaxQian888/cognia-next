@@ -29,6 +29,8 @@ import { RoomParticipantsChip } from "@/components/chat/room-participants-chip"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useChatStore, useSessionMessages } from "@/stores/chat"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
+import { useEdgePanelTransition } from "@/hooks/shell/use-edge-panel-transition"
+import { SHELL_DOCK_TIMING_CLASS } from "@/lib/ui/shell-dock-motion"
 import { SessionCapabilitiesSection } from "./session-capabilities-section"
 import { SessionResultsSection } from "./session-results-section"
 import { SessionOpenItems } from "./session-open-items"
@@ -54,6 +56,12 @@ export function SessionSummaryPopover({ session, onManage }: Props) {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const desktop = breakpoint === "desktop" && host !== null
+  // The host aside clips while its width animates back to zero, so the card
+  // has to stay mounted for the length of that transition — unmounting on the
+  // same commit left an empty column shrinking over ~300ms. Same clock and
+  // token as the aside itself (`useEdgePanelTransition`), and only on the
+  // desktop path: the Sheet fallback owns its own exit animation.
+  const dockMoving = useEdgePanelTransition(open, { element: contentRef, enabled: desktop })
   const close = () => {
     closeSummary()
     triggerRef.current?.focus()
@@ -94,7 +102,7 @@ export function SessionSummaryPopover({ session, onManage }: Props) {
         desktop
           ? // The aside around this clips while it grows, so the card slides out
             // from the window edge on its own; only the fade is added here.
-            "max-h-full w-full overflow-y-auto rounded-2xl border border-border/60 bg-popover p-2.5 shadow-lg animate-in fade-in-0 duration-[calc(280ms*var(--motion-duration-scale,1))]"
+            `max-h-full w-full overflow-y-auto rounded-2xl border border-border/60 bg-popover p-2.5 shadow-lg animate-in fade-in-0 ${SHELL_DOCK_TIMING_CLASS}`
           : "h-full overflow-y-auto p-2.5"
       )}
     >
@@ -124,7 +132,7 @@ export function SessionSummaryPopover({ session, onManage }: Props) {
         <ListTodoIcon className="size-4" aria-hidden />
       </Button>
       {desktop ? (
-        open && createPortal(content, host)
+        (open || dockMoving) && createPortal(content, host)
       ) : (
         <Sheet
           open={open}
@@ -150,8 +158,8 @@ export function SessionSummaryPopover({ session, onManage }: Props) {
 /**
  * One labelled control in the card's definition list.
  *
- * The label column used to be a hard `4.5rem`. At the dock aside's 280px, minus
- * its padding and the card's own, that left roughly 118px for the control —
+ * The label column used to be a hard `4.5rem`. At the dock aside's 320px, minus
+ * its padding and the card's own, that left roughly 160px for the control —
  * enough to truncate every composition name and model id the card exists to
  * show. `max-content` sizes the column to the widest label across the whole
  * grid instead, so the labels still line up while the control keeps whatever is

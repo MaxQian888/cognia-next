@@ -64,7 +64,7 @@ export function SessionOpenItems({
             </span>
           ) : null}
         </h3>
-        {/* At the summary column's 280px the heading plus its count already
+        {/* At the summary column's 320px the heading plus its count already
             fills the row, so the route to the run context is an affordance
             rather than a second line of prose. The label survives as the
             accessible name. */}

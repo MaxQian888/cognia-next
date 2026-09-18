@@ -23,7 +23,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
 import type { PanelImperativeHandle } from "react-resizable-panels"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { onBrowserUrlReveal } from "@/lib/browser/open-url-request"
-import { isProIdePanePinnedWithin } from "@/lib/codeserver/pane-manager"
+import { runShellViewTransition } from "@/lib/ui/shell-view-transition"
+import { useShellColumnsStore } from "@/stores/ui/shell-columns-store"
 import {
   SHELL_DOCK_CLEANUP_SLACK_MS,
   SHELL_DOCK_DURATION_MS,
@@ -78,17 +79,18 @@ const RELEASE_SNAP_EPSILON_PERCENT = 0.01
  * snapshots on the compositor. A live flex-grow tween makes the conversation
  * and dock reflow every frame; that is the page shake this boundary must avoid.
  *
+ * The title bar's center and end outlets sit directly above this row and are
+ * captured with it — they are live elements that would otherwise snap to the
+ * post-commit geometry on the first frame while the panels below still slid.
+ * The outlets' DOM already reads the gesture's resting width because `apply`
+ * publishes it through `useShellColumnsStore`'s `targets` before the new
+ * snapshot is taken; `onDone` clears that target when the motion settles.
+ *
  * View Transitions are progressive enhancement. Unsupported engines resize in
  * one stable frame, and a native Pro IDE child webview always takes that path
  * because a DOM snapshot cannot capture or clip it.
  */
 function animateDockResize(panel: HTMLDivElement, apply: () => void): () => void {
-  const startViewTransition = document.startViewTransition?.bind(document)
-  if (isProIdePanePinnedWithin(panel) || !startViewTransition) {
-    apply()
-    return () => {}
-  }
-
   const group = panel.parentElement
   const siblings = group ? Array.from(group.children) : []
   const chat = siblings.find(
@@ -104,54 +106,46 @@ function animateDockResize(panel: HTMLDivElement, apply: () => void): () => void
     return () => {}
   }
 
-  const root = document.documentElement
-  const previousNames = {
-    root: root.style.viewTransitionName,
-    chat: chat.style.viewTransitionName,
-    divider: divider.style.viewTransitionName,
-    panel: panel.style.viewTransitionName,
-  }
-  root.style.viewTransitionName = "none"
-  chat.style.viewTransitionName = "cognia-dock-chat"
-  divider.style.viewTransitionName = "cognia-dock-divider"
-  panel.style.viewTransitionName = "cognia-dock-panel"
+  return runShellViewTransition({
+    scope: panel,
+    captures: [
+      { element: chat, name: "cognia-dock-chat" },
+      { element: divider, name: "cognia-dock-divider" },
+      { element: panel, name: "cognia-dock-panel" },
+      {
+        element: document.querySelector<HTMLElement>('[data-title-bar-outlet="center"]'),
+        name: "cognia-dock-outlet-center",
+      },
+      {
+        element: document.querySelector<HTMLElement>('[data-title-bar-outlet="end"]'),
+        name: "cognia-dock-outlet-end",
+      },
+    ],
+    apply,
+    onDone: () => useShellColumnsStore.getState().setColumnTarget("dock", null),
+  })
+}
 
-  const reset = () => {
-    root.style.viewTransitionName = previousNames.root
-    chat.style.viewTransitionName = previousNames.chat
-    divider.style.viewTransitionName = previousNames.divider
-    panel.style.viewTransitionName = previousNames.panel
-  }
-
-  let applied = false
-  const applyOnce = () => {
-    if (applied) return
-    applied = true
-    apply()
-  }
-  let transition: ViewTransition
-  try {
-    transition = startViewTransition(applyOnce)
-  } catch {
-    reset()
-    applyOnce()
-    return () => {}
-  }
-
-  let active = true
-  void transition.finished
-    .catch(() => undefined)
-    .finally(() => {
-      if (!active) return
-      active = false
-      reset()
-    })
-  return () => {
-    if (!active) return
-    active = false
-    transition.skipTransition()
-    reset()
-  }
+/**
+ * The dock column's resting width once this gesture lands, published inside
+ * the transition's DOM update so the title bar's end outlet reaches the same
+ * final width in the new snapshot. While the summary aside owns the column the
+ * resting width is its fixed one — reading it mid-transition would capture ~0.
+ *
+ * A plain store write, not `flushSync`: this runs inside a passive effect on
+ * the bail-out path, where `flushSync` is illegal. It still lands before the
+ * browser's new-state capture — `useSyncExternalStore` commits external-store
+ * writes before the next paint, and a View Transition captures no earlier
+ * than the first rendering step after the update callback returns.
+ */
+function publishDockColumnTarget(
+  panel: HTMLElement,
+  summaryOpen: boolean,
+  summaryPanel: HTMLElement | null
+): void {
+  const px =
+    summaryOpen && summaryPanel ? SUMMARY_DOCK_WIDTH_PX : panel.getBoundingClientRect().width
+  useShellColumnsStore.getState().setColumnTarget("dock", px)
 }
 
 /**
@@ -353,11 +347,11 @@ function ArtifactWorkspaceDockNarrow({ children }: { children: ReactNode }) {
 /**
  * Width of the reserved summary column.
  *
- * The Tailwind literal `w-[280px]` on the `<aside>` cannot interpolate a
+ * The Tailwind literal `w-[320px]` on the `<aside>` cannot interpolate a
  * TypeScript constant, so the number appears twice; `artifact-workspace-dock.test.tsx`
  * pins the pair the same way `shell-dock-motion.test.ts` pins its timing class.
  */
-export const SUMMARY_DOCK_WIDTH_PX = 280
+export const SUMMARY_DOCK_WIDTH_PX = 320
 
 function ArtifactWorkspaceDockDesktop({
   children,
@@ -530,6 +524,7 @@ function ArtifactWorkspaceDockDesktop({
     return animateDockResize(element, () => {
       if (dockCollapsed) panel.collapse()
       else panel.resize(`${target}%`)
+      publishDockColumnTarget(element, summaryOpen, summaryPanelRef.current)
     })
   }, [dockCollapsed, summaryOpen])
 
@@ -546,8 +541,11 @@ function ArtifactWorkspaceDockDesktop({
     if (!panel || !element || dockCollapsed) return
 
     const target = dockSizeRef.current
-    return animateDockResize(element, () => panel.resize(`${target}%`))
-  }, [dockCollapsed, dockSizeRequest])
+    return animateDockResize(element, () => {
+      panel.resize(`${target}%`)
+      publishDockColumnTarget(element, summaryOpen, summaryPanelRef.current)
+    })
+  }, [dockCollapsed, dockSizeRequest, summaryOpen])
 
   // Auto-expanding on a fresh artifact lives in `useDockAttentionSignal` on the
   // shared layer, so the mobile Sheet gets the identical rule.
@@ -712,13 +710,13 @@ function ArtifactWorkspaceDockDesktop({
         ref={attachSummaryPanel}
         className={cn(
           "h-full shrink-0 overflow-hidden",
-          summaryOpen ? "w-[280px]" : "w-0",
+          summaryOpen ? "w-[320px]" : "w-0",
           summaryMoving && `transition-[width] ${SHELL_DOCK_TIMING_CLASS}`
         )}
       >
         <div
           ref={summaryFits ? attachSummaryHost : undefined}
-          className="h-full w-[280px] p-3"
+          className="h-full w-[320px] p-3"
           data-testid="session-summary-dock-inner"
         />
       </aside>

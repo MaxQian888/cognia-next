@@ -73,6 +73,15 @@ describe("ArtifactTabStrip", () => {
     expect(container.firstChild).toBeNull()
   })
 
+  it("scrolls horizontally without ever painting a scrollbar", () => {
+    seed(["First", "Second"])
+    render(<ArtifactTabStrip />)
+    const strip = screen.getByTestId("artifact-tab-strip")
+    expect(strip.className).toContain("overflow-x-auto")
+    expect(strip.className).toContain("[scrollbar-width:none]")
+    expect(strip.className).toContain("[&::-webkit-scrollbar]:hidden")
+  })
+
   it("lists open artifacts and marks the active one", () => {
     const [first, second] = seed(["First", "Second"])
     render(<ArtifactTabStrip />)

@@ -263,6 +263,46 @@ describe("useProjectEditor", () => {
     expect((deps.readFile as jest.Mock).mock.calls.length).toBe(2)
   })
 
+  it("reverts the selection to the previous file when the open read fails", async () => {
+    const deps = makeDeps({
+      readFile: jest.fn(async (_root: string, rel: string) => {
+        if (rel === "src/b.ts") throw new Error("EACCES")
+        return "export const x = 1\n"
+      }),
+    })
+    const { result } = renderHook(() =>
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+    )
+    await act(async () => {
+      await result.current.openFile("src/a.ts")
+    })
+    expect(result.current.activePath).toBe("src/a.ts")
+
+    await act(async () => {
+      await result.current.openFile("src/b.ts")
+    })
+    // The click moved `activePath` before the read settled; leaving it on a
+    // file that never opened parked the selection on a phantom tab.
+    expect(result.current.openFiles.map((f) => f.relPath)).toEqual(["src/a.ts"])
+    expect(result.current.activePath).toBe("src/a.ts")
+  })
+
+  it("clears the selection and the preview tab when nothing else is open", async () => {
+    const deps = makeDeps({
+      readFile: jest.fn(async () => {
+        throw new Error("EACCES")
+      }),
+    })
+    const { result } = renderHook(() =>
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+    )
+    await act(async () => {
+      await result.current.openFile("src/a.ts", { mode: "preview" })
+    })
+    expect(result.current.activePath).toBeNull()
+    expect(result.current.previewPath).toBeNull()
+  })
+
   it("saveFile is a no-op for an unopened file", async () => {
     const deps = makeDeps()
     const { result } = renderHook(() =>

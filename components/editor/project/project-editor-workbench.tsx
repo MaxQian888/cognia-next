@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { LightCodeEditor } from "@/components/editor/light-code-editor"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import type { EditorActionDef } from "@/lib/editor-workbench/register-editor-actions"
 import type { EditorTabMode } from "@/lib/editor-workbench/editor-tab-model"
@@ -28,7 +29,7 @@ import type { FileTreeFailure, FileTreeOperation } from "@/lib/files/file-tree-f
 import { ProjectFileTree } from "./project-file-tree"
 import { ProjectMonaco } from "./project-monaco"
 import { ProjectSearchPanel } from "./project-search-panel"
-import { useProjectEditor, type UseProjectEditorArgs } from "./use-project-editor"
+import { useProjectEditor, type OpenFile, type UseProjectEditorArgs } from "./use-project-editor"
 import { ProjectContextWorkbench, ProjectContextWorkbenchMobile } from "./project-context-workbench"
 import type { TextSelectionCoordinates } from "@/types/context-workbench"
 import type { EditorLike, MonacoLike } from "@/hooks/use-monaco-markers"
@@ -321,12 +322,56 @@ export function ProjectEditorFileWorkbench({
     setDraft,
     treeRefreshToken,
   } = editor
+
+  // A cold open moves `activePath` synchronously but the file only exists in
+  // `openFiles` once the async read lands — rendering the empty state in
+  // between unmounted Monaco and painted "Open a file" over the pane for a
+  // frame, which was the file-switch flicker. Keep the editor mounted under a
+  // delayed veil until the new file arrives. The stand-in has to be a file
+  // whose model is still retained: an evicted preview tab's model is already
+  // disposed, and attaching one blanks the editor.
+  const fileLoading = activePath !== null && activeFile === null
+  const [lastShownFile, setLastShownFile] = useState<OpenFile | null>(null)
+  // Render-adjust (the same pattern `useEdgePanelTransition` relies on): the
+  // standby has to be known *during* the render where `activeFile` drops out,
+  // so neither a ref read nor an effect can supply it.
+  if (activeFile && activeFile.relPath !== lastShownFile?.relPath) {
+    setLastShownFile(activeFile)
+  }
+  const standbyFile =
+    openFiles.find((f) => f.relPath === lastShownFile?.relPath) ?? openFiles.at(-1) ?? null
+  const shownFile = activeFile ?? (fileLoading ? standbyFile : null)
+
+  const loadingLabel = t("loadingFile", { name: activePath ?? "" })
+  // The veil's entrance is delayed ~120ms so a fast read never paints it —
+  // otherwise the indicator would itself become the flash it replaced.
+  const loadingVeil = fileLoading ? (
+    <div
+      data-testid="editor-loading"
+      role="status"
+      className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center gap-2 bg-background/60 animate-in fade-in-0 fill-mode-backwards duration-200 [animation-delay:120ms]"
+    >
+      <Spinner />
+      <span className="text-xs text-muted-foreground">{loadingLabel}</span>
+    </div>
+  ) : null
+  const loadingPane = fileLoading ? (
+    <div
+      data-testid="editor-loading"
+      role="status"
+      className="flex h-full flex-1 items-center justify-center gap-2 p-6 text-sm text-muted-foreground"
+    >
+      <Spinner />
+      {loadingLabel}
+    </div>
+  ) : null
+
   const editorSelection =
-    activeFile && editorSelectionState?.relPath === activeFile.relPath
+    shownFile && editorSelectionState?.relPath === shownFile.relPath
       ? editorSelectionState.selection
       : undefined
   const diagnostics =
-    activeFile && diagnosticsState?.relPath === activeFile.relPath
+    shownFile && diagnosticsState?.relPath === shownFile.relPath
       ? diagnosticsState.diagnostics
       : null
   const handleDiagnosticsReady = useCallback(
@@ -399,21 +444,26 @@ export function ProjectEditorFileWorkbench({
         fileTree
       ) : mobilePane === "search" ? (
         searchPanel
-      ) : activeFile ? (
-        <LightCodeEditor
-          key={activeFile.absolutePath}
-          value={activeFile.draftContent}
-          language={activeFile.language}
-          onChange={(value) => setDraft(activeFile.relPath, value)}
-          aria-label={activeFile.relPath}
-        />
-      ) : (
-        <div
-          className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground"
-          data-testid={emptyTestId}
-        >
-          {t("emptyEditor")}
+      ) : shownFile ? (
+        <div className="relative h-full">
+          <LightCodeEditor
+            key={shownFile.absolutePath}
+            value={shownFile.draftContent}
+            language={shownFile.language}
+            onChange={(value) => setDraft(shownFile.relPath, value)}
+            aria-label={shownFile.relPath}
+          />
+          {loadingVeil}
         </div>
+      ) : (
+        (loadingPane ?? (
+          <div
+            className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground"
+            data-testid={emptyTestId}
+          >
+            {t("emptyEditor")}
+          </div>
+        ))
       )
 
     return (
@@ -498,12 +548,12 @@ export function ProjectEditorFileWorkbench({
             </div>
           ) : null}
         </div>
-        {contextWorkbenchVisible && activeFile ? (
+        {contextWorkbenchVisible && shownFile ? (
           <ProjectContextWorkbenchMobile
             scopeKey={editor.scopeKey}
             rootPath={rootPath}
-            file={activeFile}
-            onDraftChange={(content) => setDraft(activeFile.relPath, content)}
+            file={shownFile}
+            onDraftChange={(content) => setDraft(shownFile.relPath, content)}
             selection={editorSelection}
             diagnostics={diagnostics}
             open={mobileWorkbenchOpen}
@@ -574,21 +624,21 @@ export function ProjectEditorFileWorkbench({
           />
         ) : null}
         <div className="flex min-h-0 flex-1">
-          {activeFile ? (
+          {shownFile ? (
             <>
-              <div className="min-w-0 flex-1">
+              <div className="relative min-w-0 flex-1">
                 {/* No `key` — one editor serves every tab. Remounting per file
                     destroyed the Monaco model and its undo stack; the model is
                     swapped through `path` instead. */}
                 <ProjectMonaco
-                  file={activeFile}
+                  file={shownFile}
                   projectRoot={rootPath}
-                  onChange={(value) => setDraft(activeFile.relPath, value)}
+                  onChange={(value) => setDraft(shownFile.relPath, value)}
                   actions={actions}
                   actionLabels={actionLabels}
                   bindings={bindings}
                   onSelectionChange={(selection) => {
-                    setEditorSelectionState({ relPath: activeFile.relPath, selection })
+                    setEditorSelectionState({ relPath: shownFile.relPath, selection })
                     // Caret/selection moves are the other half of "the active
                     // editor changed" — the ref-based read above only covers
                     // which file is open, not where the user is inside it.
@@ -596,25 +646,28 @@ export function ProjectEditorFileWorkbench({
                   }}
                   onDiagnosticsReady={handleDiagnosticsReady}
                 />
+                {loadingVeil}
               </div>
               {contextWorkbenchVisible ? (
                 <ProjectContextWorkbench
                   scopeKey={editor.scopeKey}
                   rootPath={rootPath}
-                  file={activeFile}
-                  onDraftChange={(content) => setDraft(activeFile.relPath, content)}
+                  file={shownFile}
+                  onDraftChange={(content) => setDraft(shownFile.relPath, content)}
                   selection={editorSelection}
                   diagnostics={diagnostics}
                 />
               ) : null}
             </>
           ) : (
-            <div
-              className="flex h-full flex-1 items-center justify-center p-6 text-center text-sm text-muted-foreground"
-              data-testid={emptyTestId}
-            >
-              {t("emptyEditor")}
-            </div>
+            (loadingPane ?? (
+              <div
+                className="flex h-full flex-1 items-center justify-center p-6 text-center text-sm text-muted-foreground"
+                data-testid={emptyTestId}
+              >
+                {t("emptyEditor")}
+              </div>
+            ))
           )}
         </div>
       </div>

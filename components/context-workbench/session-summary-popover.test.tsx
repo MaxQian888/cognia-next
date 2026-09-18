@@ -6,6 +6,7 @@ import { useBreakpoint } from "@/hooks/ui"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { SessionSummaryDockContext, SessionSummaryPopover } from "./session-summary-popover"
 import { useSessionOverviewState } from "./session-overview-panel"
+import { SHELL_DOCK_CLEANUP_SLACK_MS, SHELL_DOCK_DURATION_MS } from "@/lib/ui/shell-dock-motion"
 import { useSessionMessages } from "@/stores/chat"
 import { useCharacter } from "@/lib/data-hooks/context"
 
@@ -106,6 +107,11 @@ beforeEach(() => {
     .mocked(useSessionOverviewState)
     .mockReturnValue({ status: "idle", displayStatus: "idle", busy: false, error: null })
 })
+afterEach(() => jest.useRealTimers())
+/** Let the dock's collapse animation finish so the kept-alive card unmounts. */
+function settleClose() {
+  act(() => jest.advanceTimersByTime(SHELL_DOCK_DURATION_MS + SHELL_DOCK_CLEANUP_SLACK_MS))
+}
 it("mounts into the reserved region on demand without changing the full dock width", () => {
   render(<Host>{view()}</Host>)
   expect(useSessionMessages).not.toHaveBeenCalled()
@@ -130,7 +136,12 @@ it("mounts into the reserved region on demand without changing the full dock wid
     dockSize: 42,
   })
   expect(useSessionMessages).toHaveBeenCalledWith("one")
+  jest.useFakeTimers()
   fireEvent.keyDown(document.body, { key: "Escape" })
+  // The card outlives `open` for one collapse animation — the aside clips it
+  // out over ~280ms rather than the column shrinking empty.
+  expect(screen.getByTestId("session-summary")).toBeInTheDocument()
+  settleClose()
   expect(screen.queryByTestId("session-summary")).not.toBeInTheDocument()
   expect(useArtifactDockLayoutStore.getState().dockSize).toBe(42)
 })
@@ -155,19 +166,23 @@ it("delegates management and displays scoped errors", () => {
     busy: false,
     error: "Disconnected",
   })
+  jest.useFakeTimers()
   render(<Host>{view()}</Host>)
   fireEvent.click(screen.getByRole("button", { name: "summaryTitle" }))
   expect(screen.getByRole("alert")).toHaveTextContent("Disconnected")
   fireEvent.click(screen.getByRole("button", { name: "capabilities:true" }))
   expect(manage).toHaveBeenCalledTimes(1)
+  settleClose()
   expect(screen.queryByTestId("session-summary")).not.toBeInTheDocument()
 })
 it("keeps updates open but never renders another session's content", () => {
+  jest.useFakeTimers()
   const rendered = render(<Host>{view()}</Host>)
   fireEvent.click(screen.getByRole("button", { name: "summaryTitle" }))
   rendered.rerender(<Host>{view({ ...session, title: "Updated" })}</Host>)
   expect(screen.getByTestId("session-summary")).toBeVisible()
   act(() => useArtifactDockLayoutStore.getState().clearSessionScopedReveals())
+  settleClose()
   rendered.rerender(
     <Host>
       {view({
@@ -201,6 +216,7 @@ it("uses a responsive Sheet on narrow screens and closes through its existing Es
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
 })
 it("has no close button and closes from the trigger, while a nested menu owns its own Escape", () => {
+  jest.useFakeTimers()
   render(<Host>{view()}</Host>)
   const trigger = screen.getByRole("button", { name: "summaryTitle" })
   fireEvent.click(trigger)
@@ -215,6 +231,7 @@ it("has no close button and closes from the trigger, while a nested menu owns it
   expect(document.activeElement).toBe(trigger)
   fireEvent.click(trigger)
   fireEvent.click(trigger)
+  settleClose()
   expect(screen.queryByTestId("session-summary")).not.toBeInTheDocument()
 })
 
@@ -235,6 +252,7 @@ it("groups reused controls into labeled definition rows", () => {
 })
 
 it("names its own subject, because the card is portalled away from the header", () => {
+  jest.useFakeTimers()
   jest.mocked(useCharacter).mockReturnValue({ id: "c1", name: "Rex" } as never)
   render(<Host>{view()}</Host>)
   fireEvent.click(screen.getByRole("button", { name: "summaryTitle" }))
@@ -243,6 +261,7 @@ it("names its own subject, because the card is portalled away from the header", 
   expect(screen.getByText("Rex")).toBeVisible()
   fireEvent.click(screen.getByRole("button", { name: "manage" }))
   expect(manage).toHaveBeenCalledTimes(1)
+  settleClose()
   expect(screen.queryByTestId("session-summary")).not.toBeInTheDocument()
 })
 

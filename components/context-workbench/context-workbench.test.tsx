@@ -222,6 +222,30 @@ describe("ContextWorkbench", () => {
     expect(screen.getByText("comments:true")).toBeInTheDocument()
   })
 
+  it("names the active panel when the header has no tabs or artifact strip to show", () => {
+    // Rail mode + a single-panel group + no artifact tabs used to leave a bare
+    // spacer between the nav toggle and the width controls — dead space that
+    // read as a rendering bug. The header now names the panel it is showing.
+    renderWorkbench([
+      {
+        id: "comments",
+        activity: "comments",
+        labelKey: "contextWorkbench.panels.comments",
+        label: "Comments",
+        icon: RadarIcon,
+        appliesTo: () => true,
+        renderer: () => <div>comments</div>,
+        retention: "stateful",
+      },
+    ])
+    const title = screen.getByTestId("context-workbench-active-panel-title")
+    // Same resolver the rail button uses — whatever it names the panel is what
+    // the header must say.
+    const railButton = screen.getByTestId("workbench-activity-comments")
+    expect(title).toHaveTextContent(railButton.getAttribute("aria-label") ?? "")
+    expect(title.querySelector("svg")).toBeInTheDocument()
+  })
+
   it("throws when panel code reads context outside its provider", () => {
     const consoleError = jest.spyOn(console, "error").mockImplementation(() => undefined)
     const Consumer = () => {
@@ -2316,7 +2340,13 @@ describe("Workbench labeled tabs", () => {
   it("opens, closes and reopens labeled panels through the existing navigation store", () => {
     renderWorkbench(panels)
     expect(screen.queryByTestId("context-workbench-activity-rail")).not.toBeInTheDocument()
-    expect(screen.getByTestId("context-workbench-panel-tabs")).toBeInTheDocument()
+    const strip = screen.getByTestId("context-workbench-panel-tabs")
+    expect(strip).toBeInTheDocument()
+    // Overflowing tabs still scroll (wheel, drag, scrollIntoView), but a bare
+    // scrollbar under the strip reads as a broken layout — suppressed here.
+    expect(strip.className).toContain("overflow-x-auto")
+    expect(strip.className).toContain("[scrollbar-width:none]")
+    expect(strip.className).toContain("[&::-webkit-scrollbar]:hidden")
     fireEvent.pointerDown(screen.getByRole("button", { name: "Open panel" }), {
       button: 0,
       ctrlKey: false,

@@ -37,6 +37,25 @@ describe("ProjectEditorTabs", () => {
     expect(container.firstChild).toBeNull()
   })
 
+  it("scrolls the tab row without ever painting a scrollbar", () => {
+    render(
+      <ProjectEditorTabs
+        files={[file("src/a.ts"), file("src/b.ts")]}
+        activePath="src/a.ts"
+        dirtyCount={0}
+        onSelect={jest.fn()}
+        onClose={jest.fn()}
+        onSaveAll={jest.fn()}
+      />
+    )
+    const strip = screen.getByRole("tablist")
+    // `overflow-x-auto` keeps wheel/drag scrolling and scrollIntoView; the two
+    // suppression rules are what stop a bare bar from hanging under the strip.
+    expect(strip.className).toContain("overflow-x-auto")
+    expect(strip.className).toContain("[scrollbar-width:none]")
+    expect(strip.className).toContain("[&::-webkit-scrollbar]:hidden")
+  })
+
   it("renders fixed leading tabs even when no files are open", () => {
     const onSelect = jest.fn()
     render(

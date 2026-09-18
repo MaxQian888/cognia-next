@@ -1304,7 +1304,7 @@ it("desktop reserves a fixed compact summary region and unmounts the full worksp
   act(() => useArtifactDockLayoutStore.getState().requestDockSize(43))
   act(() => useArtifactDockLayoutStore.getState().openSummary(SESSION))
   expect(summary).toBeVisible()
-  expect(summary).toHaveClass("w-[280px]", "shrink-0")
+  expect(summary).toHaveClass("w-[320px]", "shrink-0")
   expect(summary).not.toHaveAttribute("inert")
   expect(summary).not.toHaveClass("border-l", "bg-background")
   // Armed for exactly one open/collapse, on the shell's shared clock.
@@ -1315,7 +1315,7 @@ it("desktop reserves a fixed compact summary region and unmounts the full worksp
   // The card is held at its final width behind the clip, so it slides out from
   // the window edge instead of being squeezed into view.
   const host = screen.getByTestId("session-summary-dock-inner")
-  expect(host).toHaveClass("w-[280px]", "p-3")
+  expect(host).toHaveClass("w-[320px]", "p-3")
   expect(screen.queryByTestId("dock")).not.toBeInTheDocument()
   expect(screen.getByTestId("resizable-panel-artifact-dock")).toHaveAttribute("data-max", "0%")
   expect(useArtifactDockLayoutStore.getState().dockSize).toBe(43)

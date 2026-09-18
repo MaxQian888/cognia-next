@@ -373,6 +373,67 @@ it("renders the shared empty editor state", () => {
   expect(editor.saveFile).not.toHaveBeenCalled()
 })
 
+it("keeps the editor mounted under a veil while a cold open reads the file", () => {
+  // A cold open moves `activePath` synchronously but `activeFile` only exists
+  // after the async read lands. Falling back to the empty state in between
+  // unmounted Monaco for a frame — the file-switch flicker.
+  const rendered = render(<Harness />)
+  expect(screen.getByTestId("monaco")).toBeInTheDocument()
+
+  editor.activePath = "src/b.ts"
+  editor.activeFile = null
+  editor.openFiles = [{ relPath: "src/a.ts", absolutePath: "/repo/src/a.ts", draftContent: "old" }]
+  rendered.rerender(<Harness />)
+
+  expect(screen.getByTestId("monaco")).toBeInTheDocument()
+  expect(screen.getByTestId("editor-loading")).toBeInTheDocument()
+  expect(screen.queryByTestId("editor-empty")).not.toBeInTheDocument()
+
+  editor.activeFile = {
+    relPath: "src/b.ts",
+    absolutePath: "/repo/src/b.ts",
+    savedContent: "b",
+    draftContent: "b",
+    draftVersion: 1,
+  }
+  editor.openFiles = [
+    { relPath: "src/a.ts", absolutePath: "/repo/src/a.ts", draftContent: "old" },
+    editor.activeFile,
+  ]
+  rendered.rerender(<Harness />)
+
+  expect(screen.getByTestId("monaco")).toBeInTheDocument()
+  expect(screen.queryByTestId("editor-loading")).not.toBeInTheDocument()
+  editor.openFiles = []
+})
+
+it("shows a loading pane instead of the empty state on the very first open", () => {
+  editor.activePath = "src/a.ts"
+  editor.activeFile = null
+  editor.openFiles = []
+  render(<Harness />)
+
+  expect(screen.getByTestId("editor-loading")).toBeInTheDocument()
+  expect(screen.queryByTestId("editor-empty")).not.toBeInTheDocument()
+  expect(screen.queryByTestId("monaco")).not.toBeInTheDocument()
+})
+
+it("keeps the light editor mounted while the next file loads on mobile", () => {
+  const rendered = render(<MobileHarness />)
+  fireEvent.click(screen.getByTestId("project-editor-mobile-editor"))
+  expect(screen.getByTestId("light-editor")).toBeInTheDocument()
+
+  editor.activePath = "src/b.ts"
+  editor.activeFile = null
+  editor.openFiles = [{ relPath: "src/a.ts", absolutePath: "/repo/src/a.ts", draftContent: "old" }]
+  rendered.rerender(<MobileHarness />)
+
+  expect(screen.getByTestId("light-editor")).toBeInTheDocument()
+  expect(screen.getByTestId("editor-loading")).toBeInTheDocument()
+  expect(screen.queryByTestId("editor-empty")).not.toBeInTheDocument()
+  editor.openFiles = []
+})
+
 it("reports active and save-all failures through the shared toast path", async () => {
   editor.saveFile.mockRejectedValueOnce(new Error("save active"))
   editor.saveAll.mockRejectedValueOnce(new Error("save all"))

@@ -56,7 +56,10 @@ export function ProjectEditorTabs({
   if (files.length === 0 && fixedTabs.length === 0 && !trailingContent) return null
   return (
     <div className="flex items-center border-b" data-testid="project-editor-tabs">
-      <div className="flex min-w-0 flex-1 overflow-x-auto" role="tablist">
+      <div
+        className="flex min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        role="tablist"
+      >
         {fixedTabs.map((tab) => (
           <button
             key={tab.id}
