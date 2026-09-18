@@ -3,8 +3,7 @@
 
 import * as ReactForMocks from "react"
 
-const mockReasoningTrigger = jest.fn()
-const mockReasoningContent = jest.fn()
+const mockReasoningRow = jest.fn()
 
 jest.mock("@/components/ai-elements/message", () => ({
   Message: ({
@@ -60,13 +59,14 @@ jest.mock("@/components/ai-elements/message", () => ({
 jest.mock("@/components/ai-elements/reasoning", () => ({
   Reasoning: ({ children }: { children: ReactForMocks.ReactNode }) =>
     ReactForMocks.createElement("div", { "data-test": "reasoning" }, children),
-  ReasoningTrigger: (props: Record<string, unknown>) => {
-    mockReasoningTrigger(props)
-    return null
-  },
-  ReasoningContent: (props: { children: ReactForMocks.ReactNode }) => {
-    mockReasoningContent(props)
-    return ReactForMocks.createElement("div", null, props.children)
+}))
+
+// The row chrome itself (status dot, THINK verb, chevron, copy) is asserted in
+// `reasoning-part.test.tsx`; here we only need the props the renderer hands it.
+jest.mock("@/components/chat/message-parts/reasoning-part", () => ({
+  ReasoningToolRow: (props: { text?: string; streamdownProps?: unknown }) => {
+    mockReasoningRow(props)
+    return ReactForMocks.createElement("div", { "data-test": "reasoning-row" }, props.text)
   },
 }))
 
@@ -199,6 +199,32 @@ jest.mock("@/components/chat/message-parts/sources-part", () => ({
 jest.mock("@/components/chat/message-parts/terminal-tool-part", () => ({
   TerminalToolPart: () => ReactForMocks.createElement("div", { "data-test": "terminal-tool-part" }),
 }))
+
+// Row vs. card is the routing decision under test here — keep the real
+// `isFileToolPart` predicate but stub the row, whose body chain (code blocks,
+// workbench bridge) is out of scope for this suite.
+jest.mock("@/components/chat/message-parts/file-tool-part", () => {
+  const { resolveToolPartName } = jest.requireActual("@/lib/chat/tool-summary")
+  const FILE_TOOLS = new Set([
+    "read",
+    "write",
+    "edit",
+    "multiedit",
+    "multi_edit",
+    "grep",
+    "glob",
+    "ls",
+    "notebookedit",
+  ])
+  return {
+    isFileToolPart: (p: { type?: string; toolName?: string }) => {
+      const name = resolveToolPartName(p)
+      return name ? FILE_TOOLS.has(name.toLowerCase()) : false
+    },
+    FileToolPart: ({ part }: { part: { type: string } }) =>
+      ReactForMocks.createElement("div", { "data-test": "file-tool-part", "data-type": part.type }),
+  }
+})
 
 jest.mock("@/components/chat/branch-navigator", () => ({
   BranchNavigator: () => null,
@@ -349,6 +375,8 @@ jest.mock("@/components/chat/motion/motion-reveal", () => ({
   MotionReveal: ({ children }: { children: ReactForMocks.ReactNode }) => children,
   MotionCollapse: ({ children }: { children: ReactForMocks.ReactNode }) => children,
   MotionStatusSwap: ({ children }: { children: ReactForMocks.ReactNode }) => children,
+  ReadingCollapse: ({ open, children }: { open: boolean; children: ReactForMocks.ReactNode }) =>
+    open ? children : null,
   useFlowMotion: () => ({ reduce: true }),
 }))
 // Stands in for the real group's chrome but keeps its contract: every child is
@@ -508,8 +536,7 @@ describe("message display actions", () => {
 
 beforeEach(() => {
   useChatStore.getState().clear()
-  mockReasoningContent.mockClear()
-  mockReasoningTrigger.mockClear()
+  mockReasoningRow.mockClear()
 })
 
 // ── text rendering ────────────────────────────────────────────────────────────
@@ -647,7 +674,7 @@ describe("usage breakdown", () => {
 // ── reasoning parts ───────────────────────────────────────────────────────────
 
 describe("reasoning parts", () => {
-  it("renders a reasoning block", () => {
+  it("renders a reasoning block as an activity row", () => {
     const msg: UIMessage = {
       id: "r1",
       role: "assistant",
@@ -655,9 +682,11 @@ describe("reasoning parts", () => {
     }
     render(<MessageRenderer message={msg} />)
     expect(document.querySelector("[data-test='reasoning']")).toBeTruthy()
+    expect(document.querySelector("[data-test='reasoning-row']")).toBeTruthy()
+    expect(mockReasoningRow.mock.calls.at(-1)?.[0].text).toBe("thinking…")
   })
 
-  it("reuses the shared Streamdown configuration and translated trigger text", () => {
+  it("reuses the shared Streamdown configuration for the row body", () => {
     const msg: UIMessage = {
       id: "r2",
       role: "assistant",
@@ -665,18 +694,13 @@ describe("reasoning parts", () => {
     }
     render(<MessageRenderer message={msg} isStreaming projectRoot="/repo" />)
 
-    expect(mockReasoningContent.mock.calls.at(-1)?.[0].streamdownProps).toMatchObject({
+    expect(mockReasoningRow.mock.calls.at(-1)?.[0].streamdownProps).toMatchObject({
       className: "typeset typeset-chat",
       controls: { table: false },
       isAnimating: true,
       mode: "streaming",
       rehypePlugins: ["shared-rehype"],
     })
-    const trigger = mockReasoningTrigger.mock.calls.at(-1)?.[0] as {
-      getThinkingMessage: (streaming: boolean, duration?: number) => ReactForMocks.ReactNode
-    }
-    expect(trigger.getThinkingMessage(true)).toBe("reasoning.streaming")
-    expect(trigger.getThinkingMessage(false, 2)).toBe("reasoning.completedSeconds")
   })
 
   it("gives reasoning bodies the same math classes as the answer body", () => {
@@ -693,8 +717,7 @@ describe("reasoning parts", () => {
         parts: [{ type: "reasoning", text: "$$x^2$$", state: "done" }],
       }
       render(<MessageRenderer message={msg} />)
-      const className = mockReasoningContent.mock.calls.at(-1)?.[0].streamdownProps
-        .className as string
+      const className = mockReasoningRow.mock.calls.at(-1)?.[0].streamdownProps.className as string
       expect(className).toContain("chat-math-lg")
       expect(className).toContain("chat-math-left")
     } finally {
@@ -711,7 +734,7 @@ describe("reasoning parts", () => {
     }
     render(<MessageRenderer message={msg} />)
 
-    expect(mockReasoningContent.mock.calls.at(-1)?.[0].streamdownProps).toMatchObject({
+    expect(mockReasoningRow.mock.calls.at(-1)?.[0].streamdownProps).toMatchObject({
       isAnimating: false,
       mode: "static",
     })
@@ -1081,10 +1104,11 @@ describe("tool parts", () => {
       ],
     }
     render(<MessageRenderer message={msg} />)
-    expect(document.querySelector("[data-test='tool']")).toBeTruthy()
+    // Standard mode renders every tool through the shared ToolRowShell row.
+    expect(document.querySelector("[data-testid='structured-tool-part']")).toBeTruthy()
   })
 
-  it("passes the resolved title and semantic hint to the standard tool header", () => {
+  it("passes the resolved title and semantic hint to the standard tool row", () => {
     const msg: UIMessage = {
       id: "t-title",
       role: "assistant",
@@ -1101,8 +1125,9 @@ describe("tool parts", () => {
       ],
     }
     render(<MessageRenderer message={msg} />)
-    expect(screen.getByTestId("tool-header")).toHaveTextContent("Calendar · Create event")
-    expect(screen.getByTestId("tool-header")).toHaveAttribute("data-read-only", "false")
+    const row = screen.getByTestId("structured-tool-part")
+    expect(row).toHaveTextContent("Calendar · Create event")
+    expect(row.querySelector("[data-testid='tool-write-capable']")).toBeTruthy()
   })
 
   it("renders a dynamic-tool part as a tool call, not an unknown part", () => {
@@ -1123,9 +1148,10 @@ describe("tool parts", () => {
       ],
     }
     render(<MessageRenderer message={msg} />)
-    expect(document.querySelector("[data-test='tool']")).toBeTruthy()
+    const row = document.querySelector("[data-testid='structured-tool-part']")
+    expect(row).toBeTruthy()
     expect(document.querySelector("[data-testid='unknown-part-card']")).toBeNull()
-    expect(screen.getByTestId("tool-header")).toHaveAttribute("data-tool-name", "SomeTool")
+    expect(row?.getAttribute("data-kind")).toBe("sometool")
   })
 
   it("renders ErrorTraceDetails when the tool part is in output-error state", () => {
@@ -1134,11 +1160,11 @@ describe("tool parts", () => {
       role: "assistant",
       parts: [
         {
-          type: "tool-Bash",
+          type: "tool-MysteryTool",
           toolCallId: "call_e",
-          toolName: "Bash",
+          toolName: "MysteryTool",
           state: "output-error",
-          input: { command: "exit 1" },
+          input: { query: "a" },
           errorText: "Command failed with exit code 1",
         } as unknown as UIMessage["parts"][number],
       ],
@@ -1154,17 +1180,57 @@ describe("tool parts", () => {
     expect(document.querySelector("[data-test='tool-input']")).toBeTruthy()
   })
 
+  it("routes a failed file-tool call to the file row, not the generic error card", () => {
+    const msg: UIMessage = {
+      id: "terr-file",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-Write",
+          toolCallId: "call_ef",
+          toolName: "Write",
+          state: "output-error",
+          input: { file_path: "a.ts" },
+          errorText: "Command failed with exit code 1",
+        } as unknown as UIMessage["parts"][number],
+      ],
+    }
+    render(<MessageRenderer message={msg} />)
+    expect(document.querySelector("[data-test='file-tool-part']")).toBeTruthy()
+    expect(document.querySelector("[data-test='error-trace']")).toBeNull()
+  })
+
+  it("routes a failed Bash call to the terminal renderer too", () => {
+    const msg: UIMessage = {
+      id: "terr-bash",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-Bash",
+          toolCallId: "call_eb",
+          toolName: "Bash",
+          state: "output-error",
+          input: { command: "exit 1" },
+          errorText: "Command failed with exit code 1",
+        } as unknown as UIMessage["parts"][number],
+      ],
+    }
+    render(<MessageRenderer message={msg} />)
+    expect(document.querySelector("[data-test='terminal-tool-part']")).toBeTruthy()
+    expect(document.querySelector("[data-test='error-trace']")).toBeNull()
+  })
+
   it("falls back to a generic message when errorText is missing", () => {
     const msg: UIMessage = {
       id: "terr2",
       role: "assistant",
       parts: [
         {
-          type: "tool-Edit",
+          type: "tool-WebSearch",
           toolCallId: "call_e2",
-          toolName: "Edit",
+          toolName: "WebSearch",
           state: "output-error",
-          input: { path: "a.ts" },
+          input: { query: "a" },
         } as unknown as UIMessage["parts"][number],
       ],
     }
@@ -1212,7 +1278,7 @@ describe("tool parts", () => {
       ],
     }
     render(<MessageRenderer message={msg} />)
-    expect(document.querySelector("[data-test='task']")).toBeTruthy()
+    expect(screen.getByTestId("todo-list")).toBeInTheDocument()
   })
 
   it("renders TodoWrite as task list when todos are valid", () => {
@@ -1237,7 +1303,7 @@ describe("tool parts", () => {
       ],
     }
     render(<MessageRenderer message={msg} />)
-    expect(document.querySelector("[data-test='task']")).toBeTruthy()
+    expect(screen.getByTestId("todo-list")).toBeInTheDocument()
     expect(screen.getByText("Do A")).toBeInTheDocument()
   })
 })
@@ -1804,8 +1870,8 @@ describe("agent-flow grouping + mode", () => {
     expect(group?.getAttribute("data-mode")).toBe("standard")
     // The individual cards are owned by the group — rendered through its
     // `renderChild`, never standalone alongside it.
-    expect(group?.querySelectorAll("[data-test='tool']")).toHaveLength(2)
-    expect(document.querySelectorAll("[data-test='tool']")).toHaveLength(2)
+    expect(group?.querySelectorAll("[data-testid='structured-tool-part']")).toHaveLength(2)
+    expect(document.querySelectorAll("[data-testid='structured-tool-part']")).toHaveLength(2)
   })
 
   // Regression: the group used to render its simplified children itself,
@@ -1819,14 +1885,14 @@ describe("agent-flow grouping + mode", () => {
     const rows = group?.querySelectorAll("[data-test='tool-call-row']")
     expect(rows).toHaveLength(2)
     expect(rows?.[0].getAttribute("data-type")).toBe("tool-Read")
-    // …and no standard card leaked in alongside the rows.
-    expect(document.querySelector("[data-test='tool']")).toBeNull()
+    // …and no standard row leaked in alongside the compact rows.
+    expect(document.querySelector("[data-testid='structured-tool-part']")).toBeNull()
   })
 
-  it("renders a lone tool call as a standard card (no group)", () => {
+  it("renders a lone tool call as a standard row (no group)", () => {
     render(<MessageRenderer message={toolMsg("g2", "tool-SomeTool")} />)
     expect(document.querySelector("[data-test='activity-group']")).toBeNull()
-    expect(document.querySelector("[data-test='tool']")).toBeTruthy()
+    expect(document.querySelector("[data-testid='structured-tool-part']")).toBeTruthy()
   })
 
   it("renders a lone tool call as a compact row in simplified mode", () => {
@@ -1835,7 +1901,7 @@ describe("agent-flow grouping + mode", () => {
     const row = document.querySelector("[data-test='tool-call-row']")
     expect(row).toBeTruthy()
     expect(row?.getAttribute("data-type")).toBe("tool-SomeTool")
-    expect(document.querySelector("[data-test='tool']")).toBeNull()
+    expect(document.querySelector("[data-testid='structured-tool-part']")).toBeNull()
   })
 
   it("forwards the active mode to the activity group", () => {
@@ -1862,7 +1928,7 @@ describe("agent-flow grouping + mode", () => {
     const groups = document.querySelectorAll("[data-test='activity-group']")
     expect(groups).toHaveLength(1)
     expect(groups[0].getAttribute("data-count")).toBe("2")
-    expect(groups[0].querySelectorAll("[data-test='tool']")).toHaveLength(2)
+    expect(groups[0].querySelectorAll("[data-testid='structured-tool-part']")).toHaveLength(2)
   })
 
   it("still breaks the run when the model writes prose between tool calls", () => {
@@ -1923,27 +1989,27 @@ describe("display-mode reactivity (standard ⇄ detailed)", () => {
   // `isLastAssistant`), so the component re-runs and picks up `mockFlowMode`.
   const forceRender = () => ({ onRegenerate: () => {} })
 
-  it("reuses the tool-card DOM node across a re-render at the same mode", () => {
+  it("reuses the tool-row DOM node across a re-render at the same mode", () => {
     mockFlowMode = "standard"
     const msg = loneToolMsg("mode-stable")
     const { rerender } = render(<MessageRenderer message={msg} {...forceRender()} />)
-    const first = document.querySelector("[data-test='tool']")
+    const first = document.querySelector("[data-testid='structured-tool-part']")
     expect(first).toBeTruthy()
     rerender(<MessageRenderer message={msg} {...forceRender()} />)
     // Stable key at an unchanged mode → React keeps the same node (no
-    // gratuitous remount that would drop the user's manual card state).
-    expect(document.querySelector("[data-test='tool']")).toBe(first)
+    // gratuitous remount that would drop the user's manual row state).
+    expect(document.querySelector("[data-testid='structured-tool-part']")).toBe(first)
   })
 
-  it("remounts the lone tool card when the mode switches standard → detailed", () => {
+  it("remounts the lone tool row when the mode switches standard → detailed", () => {
     mockFlowMode = "standard"
     const msg = loneToolMsg("mode-remount")
     const { rerender } = render(<MessageRenderer message={msg} {...forceRender()} />)
-    const first = document.querySelector("[data-test='tool']")
+    const first = document.querySelector("[data-testid='structured-tool-part']")
     expect(first).toBeTruthy()
     mockFlowMode = "detailed"
     rerender(<MessageRenderer message={msg} {...forceRender()} />)
-    const second = document.querySelector("[data-test='tool']")
+    const second = document.querySelector("[data-testid='structured-tool-part']")
     expect(second).toBeTruthy()
     // Mode folded into the key → the card remounts so its new per-mode
     // `defaultOpen` takes effect (detailed expands what standard collapsed).

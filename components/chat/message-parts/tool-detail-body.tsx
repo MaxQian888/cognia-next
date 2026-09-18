@@ -18,9 +18,11 @@
  * always used:
  *  1. failed call    → parameters + parsed error trace
  *  2. Bash           → live terminal / structured stdout + "run in dock"
- *  3. dedicated card → built-in or plugin-contributed `MCPToolCard`
- *  4. A2UI payload   → interactive surface
- *  5. anything else  → MCP content blocks, or the stringified `ToolBody`
+ *  3. file tools     → bare Read/Write/Edit/Grep/Glob/LS/NotebookEdit bodies
+ *                     (the row chrome lives in `FileToolPart` / `ToolCallRow`)
+ *  4. dedicated card → built-in or plugin-contributed `MCPToolCard`
+ *  5. A2UI payload   → interactive surface
+ *  6. anything else  → MCP content blocks, or the stringified `ToolBody`
  */
 
 import { useTranslations } from "next-intl"
@@ -38,6 +40,7 @@ import {
   toolNameOf,
 } from "@/components/chat/message-parts/mcp-tool-card"
 import { TerminalToolBody } from "@/components/chat/message-parts/terminal-tool-part"
+import { FileToolBody, isFileToolPart } from "@/components/chat/message-parts/file-tool-part"
 import { resolveToolPartName } from "@/lib/chat/tool-summary"
 
 /**
@@ -86,6 +89,10 @@ export function ToolDetailBody({ part, sessionId }: ToolDetailBodyProps) {
 
   if (isBashToolPart(part)) {
     return <TerminalToolBody part={part} />
+  }
+
+  if (isFileToolPart(part)) {
+    return <FileToolBody part={part} sessionId={sessionId} />
   }
 
   if (isStructuredMcpToolPart(part)) {

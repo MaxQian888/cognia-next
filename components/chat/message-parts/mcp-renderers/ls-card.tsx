@@ -1,13 +1,14 @@
 "use client"
 
-// Structured card for the core `ls` tool — directory listing, reusing the
-// GlobCard list layout.
+// Body content for the core `ls` tool — directory listing, reusing the
+// GlobCard list layout. Rendered bare: the surrounding row owns the card
+// chrome now.
 
 import { useMemo } from "react"
 import { useTranslations } from "next-intl"
-import { FolderOpenIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
-import { McpCardShell } from "./common"
+import { PreviewClampNote, TOOL_LIST_MAX_ROWS, useClampedRows } from "./common"
+import { FileTypeIcon } from "@/components/shared/file-type-icon"
 
 interface LsInput {
   path?: string
@@ -23,34 +24,46 @@ export function LsCard({ part }: { part: ToolUIPart }) {
     return output.split(/\r?\n/).filter(Boolean)
   }, [part.output])
   // First output line is the resolved directory path; the rest are entries.
-  const dir = lines[0] ?? input.path
-  const entries = lines.slice(1)
-  if (!dir) return null
+  const entries = useMemo(() => lines.slice(1), [lines])
+  // A huge directory listing clamps to a row budget — same convention as the
+  // glob/grep result lists.
+  const clamp = useClampedRows(entries, TOOL_LIST_MAX_ROWS)
+  // Pending calls have no listing yet; a directory that genuinely has no
+  // entries still arrives as a one-line output (the dir itself).
+  if (lines.length === 0 && !input.path) return null
+  if (typeof part.output !== "string") return null
 
   return (
-    <McpCardShell title={t("title")} badge={dir} testId="mcp-ls-card">
-      <div className="flex items-start gap-2">
-        <FolderOpenIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-        <div className="min-w-0 flex-1">
-          <p className="font-mono text-[11px] text-muted-foreground" data-testid="mcp-ls-path">
-            {dir}
-          </p>
-          {entries.length === 0 ? (
-            <p className="text-muted-foreground">{t("empty")}</p>
-          ) : (
-            <ul
-              className="mt-1 max-h-60 overflow-auto rounded border bg-muted/30 px-2 py-1 font-mono text-[11px]"
-              data-testid="mcp-ls-list"
-            >
-              {entries.map((e, i) => (
-                <li key={i} data-testid="mcp-ls-entry" className="truncate">
-                  {e}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
-    </McpCardShell>
+    <div className="min-w-0" data-testid="mcp-ls-card">
+      {/* The row already states the directory as its target — the body
+          carries only the entry list. */}
+      {entries.length === 0 ? (
+        <p className="text-muted-foreground">{t("empty")}</p>
+      ) : (
+        <ul
+          className="max-h-60 overflow-auto rounded border bg-muted/30 px-2 py-1 font-mono text-[11px]"
+          data-testid="mcp-ls-list"
+        >
+          {clamp.visible.map((e, i) => {
+            // `ls` marks directories with a trailing slash.
+            const isDir = /[/\\]$/.test(e)
+            return (
+              <li key={i} data-testid="mcp-ls-entry" className="flex items-center gap-1.5">
+                <FileTypeIcon path={isDir ? e.slice(0, -1) : e} isDir={isDir} className="size-3" />
+                <span className="min-w-0 truncate">{e}</span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      {clamp.hidden > 0 && (
+        <PreviewClampNote
+          shown={clamp.shown}
+          total={clamp.total}
+          onExpand={clamp.reveal}
+          testId="mcp-ls-clamped"
+        />
+      )}
+    </div>
   )
 }

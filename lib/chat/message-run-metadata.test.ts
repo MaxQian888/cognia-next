@@ -103,6 +103,18 @@ describe("assistant run metadata", () => {
     }
     expect(buildCompletedRunMetadata({ completedAt: 500, routing }).routing).toEqual(routing)
   })
+
+  it("seals the turn's preset identity so the header survives later switches", () => {
+    const agent = { presetId: "build", name: "Build", icon: "Hammer" }
+    const sealed = buildCompletedRunMetadata({ completedAt: 500, agent })
+    expect(sealed.agent).toEqual(agent)
+
+    const merged = attachRunMetadataToLastAssistant(messages(), sealed)
+    expect(runMetadataOf(merged[1])?.agent).toEqual(agent)
+
+    // A turn with no resolved composition stamps nothing rather than a guess.
+    expect(buildCompletedRunMetadata({ completedAt: 500 }).agent).toBeUndefined()
+  })
 })
 
 describe("buildRouterFusionRunMetadata", () => {

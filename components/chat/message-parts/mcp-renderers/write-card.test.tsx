@@ -13,10 +13,21 @@ jest.mock("@/lib/files/edit-review-bridge", () => ({
 import { WriteCard } from "./write-card"
 
 jest.mock("@/components/chat/renderers/code-block", () => ({
-  CodeBlock: ({ code, language }: { code: string; language?: string }) => (
-    <pre data-testid="code-block" data-language={language}>
-      {code}
-    </pre>
+  CodeBlock: ({
+    code,
+    language,
+    headerTitle,
+  }: {
+    code: string
+    language?: string
+    headerTitle?: React.ReactNode
+  }) => (
+    <div>
+      {headerTitle}
+      <pre data-testid="code-block" data-language={language}>
+        {code}
+      </pre>
+    </div>
   ),
 }))
 
@@ -44,7 +55,7 @@ describe("WriteCard", () => {
 
   it("renders the path and a language-aware content preview", () => {
     render(<WriteCard part={part({ file_path: "src/new.ts", content: "export const a = 1\n" })} />)
-    expect(screen.getByTestId("mcp-write-path")).toHaveTextContent("src/new.ts")
+    expect(screen.getByTestId("mcp-write-path")).toHaveTextContent("new.ts")
     expect(screen.getByTestId("code-block")).toHaveAttribute("data-language", "typescript")
   })
 
@@ -65,5 +76,25 @@ describe("WriteCard", () => {
     expect(noPath).toBeEmptyDOMElement()
     const { container: noContent } = render(<WriteCard part={part({ file_path: "a.ts" })} />)
     expect(noContent).toBeEmptyDOMElement()
+  })
+
+  it("clamps a many-line write to the preview budget and reveals on demand", () => {
+    const content = Array.from({ length: 300 }, (_, i) => `L${i}`).join("\n")
+    render(<WriteCard part={part({ file_path: "big.txt", content })} />)
+    const code = screen.getByTestId("code-block")
+    expect(code.textContent).toContain("L119")
+    expect(code.textContent).not.toContain("L120")
+    const note = screen.getByTestId("mcp-write-clamped")
+    expect(note).toHaveTextContent("Showing the first 120 of 300")
+    expect(note).toHaveTextContent("full content is written to disk")
+    fireEvent.click(screen.getByTestId("mcp-write-clamped-show-all"))
+    expect(screen.getByTestId("code-block").textContent).toContain("L299")
+  })
+
+  it("reports the char-driven clip in characters, not lines", () => {
+    render(<WriteCard part={part({ file_path: "min.js", content: "x".repeat(10_000) })} />)
+    expect(screen.getByTestId("mcp-write-clamped")).toHaveTextContent(
+      "Showing the first 4,000 of 10,000"
+    )
   })
 })

@@ -14,8 +14,9 @@ import {
   WrenchIcon,
   XCircleIcon,
 } from "lucide-react"
+import { useTranslations } from "next-intl"
 import type { ComponentProps, ReactNode } from "react"
-import { isValidElement, useState } from "react"
+import { isValidElement } from "react"
 
 import { CodeBlock } from "@/components/chat/renderers/code-block"
 import { DiffBlock } from "@/components/chat/renderers/diff-block"
@@ -23,6 +24,7 @@ import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { ErrorParsedView } from "@/components/error/error-parsed-view"
 import { inferLanguageFromPath, resolveToolOutputRender } from "@/lib/chat/tool-output-format"
 import { ToolSemanticBadges } from "@/components/chat/message-parts/tool-semantic-badges"
+import { ToolRowBlock } from "@/components/chat/message-parts/tool-row"
 
 export type ToolProps = ComponentProps<typeof Collapsible>
 
@@ -159,31 +161,44 @@ export const ToolContent = ({ className, ...props }: ToolContentProps) => (
   />
 )
 
-const INPUT_AUTO_COLLAPSE_THRESHOLD = 200
+/** Slim uppercase caption above a payload block — same weight as `ToolRowBlock`'s header. */
+const PayloadLabel = ({ children }: { children: ReactNode }) => (
+  <div className="px-0.5 pb-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+    {children}
+  </div>
+)
+
+/**
+ * Uppercase block title matching `ToolRowBlock`'s header strip, so a compact
+ * `CodeBlock` next to an `input`/`error` block reads as the same chrome.
+ */
+const BlockHeaderTitle = ({ children }: { children: ReactNode }) => (
+  <span className="text-[10px] uppercase tracking-wide">{children}</span>
+)
 
 export type ToolInputProps = ComponentProps<"div"> & {
   input: ToolPart["input"]
 }
 
+/**
+ * The call's arguments as a bounded, left-railed block — the same chrome the
+ * tool-row expansions use (`ToolRowBlock`). The body scrolls at `max-h-56`, so
+ * oversized inputs need no collapse toggle.
+ */
 export const ToolInput = ({ className, input, ...props }: ToolInputProps) => {
+  const t = useTranslations("chat.toolRow")
   const json = JSON.stringify(input, null, 2)
-  const [open, setOpen] = useState(json.length <= INPUT_AUTO_COLLAPSE_THRESHOLD)
 
   return (
-    <div className={cn("space-y-2 overflow-hidden", className)} {...props}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors text-xs uppercase tracking-wide font-medium"
+    <div className={cn("min-w-0", className)} {...props}>
+      <ToolRowBlock
+        label={t("input")}
+        copyValue={json}
+        copyLabel={t("copyInput")}
+        testId="tool-input"
       >
-        <ChevronDownIcon className={cn("size-3 transition-transform", !open && "-rotate-90")} />
-        Parameters
-      </button>
-      {open && (
-        <div className="rounded-md bg-muted/80">
-          <CodeBlock code={json} language="json" showLineNumbers={false} />
-        </div>
-      )}
+        <pre className="px-2.5 py-2 whitespace-pre-wrap break-all">{json}</pre>
+      </ToolRowBlock>
     </div>
   )
 }
@@ -198,6 +213,7 @@ export type ToolEditPreviewProps = {
 }
 
 export const ToolEditPreview = ({ input, toolName }: ToolEditPreviewProps) => {
+  const t = useTranslations("chat.toolRow")
   if (!input || typeof input !== "object") return null
   const obj = input as Record<string, unknown>
   const filePath = typeof obj.file_path === "string" ? obj.file_path : undefined
@@ -250,11 +266,9 @@ export const ToolEditPreview = ({ input, toolName }: ToolEditPreviewProps) => {
   if (!diffText.trim()) return null
 
   return (
-    <div className="space-y-2">
-      <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-        Proposed change
-      </h4>
-      <DiffBlock content={diffText} filename={filePath} />
+    <div>
+      <PayloadLabel>{t("proposedChange")}</PayloadLabel>
+      <DiffBlock content={diffText} filename={filePath} className="my-1" />
     </div>
   )
 }
@@ -270,20 +284,20 @@ export type ToolReadPreviewProps = {
 }
 
 export const ToolReadPreview = ({ input, output }: ToolReadPreviewProps) => {
+  const t = useTranslations("chat.toolRow")
   if (typeof output !== "string") return null
   const filePath =
     input && typeof input === "object" ? (input as Record<string, unknown>).file_path : undefined
   const language = inferLanguageFromPath(typeof filePath === "string" ? filePath : undefined)
 
   return (
-    <div className="space-y-2">
-      <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">Result</h4>
-      <CodeBlock
-        code={output}
-        language={language}
-        filename={typeof filePath === "string" ? filePath : undefined}
-      />
-    </div>
+    <CodeBlock
+      code={output}
+      language={language}
+      filename={typeof filePath === "string" ? filePath : undefined}
+      compact
+      headerTitle={<BlockHeaderTitle>{t("output")}</BlockHeaderTitle>}
+    />
   )
 }
 
@@ -307,11 +321,28 @@ export const ToolOutput = ({
   input,
   ...props
 }: ToolOutputProps) => {
+  const t = useTranslations("chat.toolRow")
   if (!(output || errorText)) {
     return null
   }
 
-  let Output: ReactNode
+  if (errorText) {
+    return (
+      <div className={cn("min-w-0", className)} {...props}>
+        <ToolRowBlock
+          label={t("errorLabel")}
+          copyValue={errorText}
+          error
+          mono={false}
+          testId="tool-error"
+        >
+          <div className="px-2.5 py-2 [&_table]:w-full">
+            <ErrorParsedView rawError={errorText} toolType={toolType} />
+          </div>
+        </ToolRowBlock>
+      </div>
+    )
+  }
 
   if (typeof output === "string") {
     // A terminal stream is not Markdown: rendering it as such reflows lines,
@@ -319,40 +350,61 @@ export const ToolOutput = ({
     // code block. `resolveToolOutputRender` keeps it preformatted and picks a
     // highlight language from the dumped file (`cat foo.cpp` → cpp).
     const render = resolveToolOutputRender(output, toolType, input)
-    Output =
-      render.kind === "code" ? (
-        <CodeBlock code={output} language={render.language} showLineNumbers={false} />
-      ) : (
-        <MarkdownRenderer
-          content={output}
-          enableMermaid={false}
-          enableMath={false}
-          enableVideoEmbed={false}
-          enableAudioEmbed={false}
-          enableEnhancedImages={false}
-        />
-      )
-  } else if (typeof output === "object" && !isValidElement(output)) {
-    Output = (
-      <CodeBlock code={JSON.stringify(output, null, 2)} language="json" showLineNumbers={false} />
+    return (
+      <div className={cn("min-w-0", className)} {...props}>
+        {render.kind === "code" ? (
+          <CodeBlock
+            code={output}
+            language={render.language}
+            showLineNumbers={false}
+            compact
+            headerTitle={<BlockHeaderTitle>{t("output")}</BlockHeaderTitle>}
+          />
+        ) : (
+          <ToolRowBlock
+            label={t("output")}
+            copyValue={output}
+            copyLabel={t("copyOutput")}
+            mono={false}
+            testId="tool-output"
+          >
+            <div className="px-2.5 py-2 [&_table]:w-full">
+              <MarkdownRenderer
+                content={output}
+                enableMermaid={false}
+                enableMath={false}
+                enableVideoEmbed={false}
+                enableAudioEmbed={false}
+                enableEnhancedImages={false}
+              />
+            </div>
+          </ToolRowBlock>
+        )}
+      </div>
     )
-  } else {
-    Output = <div>{output as ReactNode}</div>
+  }
+
+  if (typeof output === "object" && !isValidElement(output)) {
+    const json = JSON.stringify(output, null, 2)
+    return (
+      <div className={cn("min-w-0", className)} {...props}>
+        <ToolRowBlock
+          label={t("output")}
+          copyValue={json}
+          copyLabel={t("copyOutput")}
+          testId="tool-output"
+        >
+          <pre className="px-2.5 py-2 whitespace-pre-wrap break-all">{json}</pre>
+        </ToolRowBlock>
+      </div>
+    )
   }
 
   return (
-    <div className={cn("space-y-2", className)} {...props}>
-      <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-        {errorText ? "Error" : "Result"}
-      </h4>
-      <div
-        className={cn(
-          "overflow-x-auto rounded-md text-xs [&_table]:w-full",
-          errorText ? "bg-destructive/10 text-destructive p-3" : "text-foreground"
-        )}
-      >
-        {errorText ? <ErrorParsedView rawError={errorText} toolType={toolType} /> : Output}
-      </div>
+    <div className={cn("min-w-0", className)} {...props}>
+      <ToolRowBlock label={t("output")} mono={false} testId="tool-output">
+        <div className="px-2.5 py-2">{output as ReactNode}</div>
+      </ToolRowBlock>
     </div>
   )
 }

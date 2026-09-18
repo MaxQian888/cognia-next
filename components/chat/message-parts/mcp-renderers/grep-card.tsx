@@ -2,9 +2,8 @@
 
 import { useMemo } from "react"
 import { useTranslations } from "next-intl"
-import { SearchIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
-import { McpCardShell, useParsedOutput } from "./common"
+import { PreviewClampNote, TOOL_LIST_MAX_ROWS, useClampedRows, useParsedOutput } from "./common"
 import { WorkbenchFileLink } from "./workbench-file-link"
 
 interface GrepInput {
@@ -69,11 +68,11 @@ export function splitGrepMatch(line: string): { path: string; line?: number; res
 }
 
 /**
- * Structured renderer for the Claude built-in `Grep` tool. Shows the pattern +
+ * Body content for the Claude built-in `Grep` tool. Shows the pattern +
  * scope (path / glob / output mode) as context and the matched files or content
  * lines in a scrollable mono list. Mirrors {@link GlobCard}; falls through to the
  * generic ToolBody (by returning `null`) when there is neither a pattern nor any
- * parsable matches.
+ * parsable matches. Rendered bare — the surrounding row owns the card chrome.
  */
 export function GrepCard({ part, sessionId }: { part: ToolUIPart; sessionId?: string }) {
   const t = useTranslations("chat.mcp.grep")
@@ -90,61 +89,53 @@ export function GrepCard({ part, sessionId }: { part: ToolUIPart; sessionId?: st
     if (typeof part.output === "string") return part.output.split(/\r?\n/).filter(Boolean)
     return []
   }, [parsed, part.output])
+  // Every match mounts a WorkbenchFileLink; a huge grep result clamps to a
+  // row budget instead of flooding the expansion with thousands of links.
+  const clamp = useClampedRows(lines, TOOL_LIST_MAX_ROWS)
 
   if (lines.length === 0 && !input.pattern) return null
 
-  const scope = input.glob ?? input.path
-
   return (
-    <McpCardShell
-      title={/* i18n-exempt: the tool's own name, identical in every locale */ "Grep"}
-      badge={input.pattern ?? `${lines.length} matches`}
-      testId="mcp-grep-card"
-    >
-      <div className="flex items-start gap-2">
-        <SearchIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-        <div className="min-w-0 flex-1">
-          {input.pattern && (
-            <p
-              className="font-mono text-[11px] text-muted-foreground"
-              data-testid="mcp-grep-pattern"
-            >
-              {input.pattern}
-              {scope && ` · in ${scope}`}
-              {input.output_mode && ` · ${input.output_mode}`}
-            </p>
-          )}
-          {lines.length === 0 ? (
-            <p className="text-muted-foreground">{t("noMatches")}</p>
-          ) : (
-            <ul
-              className="mt-1 max-h-60 overflow-auto rounded border bg-muted/50 px-2 py-1 font-mono text-[11px]"
-              data-testid="mcp-grep-list"
-            >
-              {lines.map((m, i) => {
-                const hit = splitGrepMatch(m)
-                return (
-                  <li key={i} data-testid="mcp-grep-match" className="truncate">
-                    {hit ? (
-                      <>
-                        <WorkbenchFileLink
-                          sessionId={sessionId}
-                          path={hit.path}
-                          line={hit.line}
-                          data-testid="mcp-grep-match-link"
-                        />
-                        {hit.rest}
-                      </>
-                    ) : (
-                      m
-                    )}
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </div>
-      </div>
-    </McpCardShell>
+    <div className="min-w-0" data-testid="mcp-grep-card">
+      {/* The row already states pattern + scope + output_mode as its target —
+          the body carries only the match list. */}
+      {lines.length === 0 ? (
+        <p className="text-muted-foreground">{t("noMatches")}</p>
+      ) : (
+        <ul
+          className="max-h-60 overflow-auto rounded border bg-muted/50 px-2 py-1 font-mono text-[11px]"
+          data-testid="mcp-grep-list"
+        >
+          {clamp.visible.map((m, i) => {
+            const hit = splitGrepMatch(m)
+            return (
+              <li key={i} data-testid="mcp-grep-match" className="truncate">
+                {hit ? (
+                  <>
+                    <WorkbenchFileLink
+                      sessionId={sessionId}
+                      path={hit.path}
+                      line={hit.line}
+                      data-testid="mcp-grep-match-link"
+                    />
+                    {hit.rest}
+                  </>
+                ) : (
+                  m
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      {clamp.hidden > 0 && (
+        <PreviewClampNote
+          shown={clamp.shown}
+          total={clamp.total}
+          onExpand={clamp.reveal}
+          testId="mcp-grep-clamped"
+        />
+      )}
+    </div>
   )
 }

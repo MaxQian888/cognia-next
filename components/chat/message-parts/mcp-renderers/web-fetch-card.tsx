@@ -2,11 +2,11 @@
 
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { ChevronDownIcon, GlobeIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
-import { McpCardShell, hostOf, useParsedOutput } from "./common"
-import { ExternalLink } from "@/components/shared/external-link"
-import { Button } from "@/components/ui/button"
+import { useParsedOutput } from "./common"
+import { CodeBlock } from "@/components/chat/renderers/code-block"
+import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
+import { InlineCopyButton } from "@/components/chat/message-parts/tool-row"
 import { cn } from "@/lib/utils"
 import { unwrapUntrustedContent } from "@/lib/web/untrusted-content"
 
@@ -31,13 +31,30 @@ interface WebFetchOutput {
 
 const FETCH_PREVIEW_CHARS = 600
 
+function looksLikeJsonPayload(s: string): boolean {
+  const trimmed = s.trim()
+  return (
+    (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+    (trimmed.startsWith("[") && trimmed.endsWith("]"))
+  )
+}
+
 /**
- * Renderer for the Claude built-in `WebFetch` tool: the fetched URL (clickable),
- * the optional extraction prompt, and a scrollable preview of the returned
- * content. Returns `null` (→ generic ToolBody) when no URL is present.
+ * Renderer for the Claude built-in `WebFetch` tool. The row above already
+ * carries the URL and HTTP status, so the body only adds what it can't: the
+ * page title, the extraction prompt, a redirect notice when the final URL
+ * differs from the requested one, and the fetched content.
+ *
+ * Content is surface-free — a hairline left rail groups the prose, which is
+ * markdown-rendered and fades out past the preview budget. JSON-ish payloads
+ * (API responses) render as a compact code block instead; binary payloads
+ * collapse to a single meta line rather than dumping base64.
+ *
+ * Returns `null` (→ generic ToolBody) when no URL is present.
  */
 export function WebFetchCard({ part }: { part: ToolUIPart }) {
   const t = useTranslations("chat.toolCards.webFetch")
+  const tRow = useTranslations("chat.toolRow")
   const input = (part.input ?? {}) as WebFetchInput
   const parsed = useParsedOutput<WebFetchOutput>(part.output)
   const [expanded, setExpanded] = useState(false)
@@ -54,7 +71,7 @@ export function WebFetchCard({ part }: { part: ToolUIPart }) {
     return typeof candidate === "string" ? unwrapUntrustedContent(candidate) : ""
   }, [parsed, part.output])
   const isLong = content.length > FETCH_PREVIEW_CHARS
-  const preview = expanded || !isLong ? content : `${content.slice(0, FETCH_PREVIEW_CHARS)}…`
+  const preview = expanded || !isLong ? content : content.slice(0, FETCH_PREVIEW_CHARS)
 
   // `ok` mirrors the HTTP outcome, not "did the tool run": a 404 resolves with
   // `ok: false` AND a `status`, and its body/note are still worth showing. A
@@ -64,88 +81,119 @@ export function WebFetchCard({ part }: { part: ToolUIPart }) {
   const isHttpOutcome = typeof parsed?.status === "number"
   if (!isHttpOutcome && (parsed?.ok === false || parsed?.error)) {
     return (
-      <McpCardShell
-        title={t("title")}
-        badge={url ? hostOf(url) : undefined}
-        testId="mcp-webfetch-card"
-      >
+      <div data-testid="mcp-webfetch-card" className="my-1 text-xs">
         <p className="text-destructive" data-testid="mcp-webfetch-error">
           {parsed.error ?? t("failed")}
         </p>
-      </McpCardShell>
+      </div>
     )
   }
   if (!url) return null
 
+  const redirected = Boolean(parsed?.url && input.url && parsed.url !== input.url)
+  const contentType = parsed?.contentType
+  const jsonPayload = (contentType?.includes("json") ?? false) || looksLikeJsonPayload(content)
+  const textual =
+    !contentType ||
+    contentType.startsWith("text/") ||
+    /json|xml|html|markdown|javascript/.test(contentType)
+
   return (
-    <McpCardShell
-      title={t("title")}
-      badge={
-        typeof parsed?.status === "number"
-          ? t("status", { status: parsed.status })
-          : url
-            ? hostOf(url)
-            : undefined
-      }
-      testId="mcp-webfetch-card"
-    >
-      <div className="flex items-start gap-2">
-        <GlobeIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-        <div className="min-w-0 flex-1 space-y-1">
+    <div data-testid="mcp-webfetch-card" className="my-1 space-y-0.5 text-xs">
+      {redirected && (
+        <p
+          className="text-[11px] text-amber-600 dark:text-amber-400"
+          data-testid="mcp-webfetch-redirect"
+        >
+          {t("redirectedTo", { url: parsed?.url ?? "" })}
+        </p>
+      )}
+      {(parsed?.title || input.prompt) && (
+        <p className="flex items-baseline gap-1.5 text-[12px] leading-snug">
           {parsed?.title && (
-            <p className="truncate text-[12px] font-medium" data-testid="mcp-webfetch-title">
+            <span className="font-medium" data-testid="mcp-webfetch-title">
               {unwrapUntrustedContent(parsed.title)}
-            </p>
-          )}
-          {url && (
-            <ExternalLink
-              href={url}
-              className="block break-all font-mono text-[11px] text-primary hover:underline"
-              data-testid="mcp-webfetch-url"
-              preferEmbedded
-            >
-              {url}
-            </ExternalLink>
+            </span>
           )}
           {input.prompt && (
-            <p className="mt-0.5 text-[11px] text-muted-foreground">{input.prompt}</p>
+            <span
+              className="min-w-0 truncate text-muted-foreground"
+              data-testid="mcp-webfetch-prompt"
+            >
+              {parsed?.title ? "· " : ""}
+              {input.prompt}
+            </span>
           )}
-          {parsed?.contentType && (
-            <span className="text-[10px] text-muted-foreground">{parsed.contentType}</span>
-          )}
-          {preview ? (
-            <>
-              <pre
-                className={cn(
-                  "whitespace-pre-wrap break-words rounded-md bg-muted/40 p-2 font-sans text-[11px] leading-relaxed",
-                  !expanded && isLong && "max-h-40 overflow-hidden"
-                )}
-                data-testid="mcp-webfetch-content"
-              >
-                {preview}
-              </pre>
-              {isLong && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 gap-1 px-2 text-[11px]"
-                  aria-expanded={expanded}
-                  onClick={() => setExpanded((value) => !value)}
-                >
-                  <ChevronDownIcon
-                    className={cn("size-3 transition-transform", expanded && "rotate-180")}
-                    aria-hidden
-                  />
-                  {expanded ? t("showLess") : t("showMore", { chars: content.length })}
-                </Button>
+        </p>
+      )}
+      {!content ? (
+        <p className="text-[11px] text-muted-foreground">{t("empty")}</p>
+      ) : jsonPayload ? (
+        <CodeBlock
+          code={content}
+          language="json"
+          showLineNumbers={false}
+          compact
+          headerTitle={t("content")}
+        />
+      ) : !textual ? (
+        <p className="text-[11px] text-muted-foreground" data-testid="mcp-webfetch-binary">
+          {contentType} · {t("chars", { count: content.length })}
+        </p>
+      ) : (
+        <>
+          <div className="group/wf relative border-l-2 border-border pl-2.5">
+            <span className="absolute right-0 top-0 z-10 opacity-0 transition-opacity focus-within:opacity-100 group-hover/wf:opacity-100">
+              <InlineCopyButton
+                value={content}
+                label={tRow("copyOutput")}
+                testId="mcp-webfetch-copy"
+              />
+            </span>
+            <div
+              className={cn(
+                "text-[11.5px] leading-relaxed text-foreground/80",
+                expanded
+                  ? "max-h-56 overflow-auto"
+                  : isLong &&
+                      "max-h-32 overflow-hidden [mask-image:linear-gradient(#000_55%,transparent)]"
               )}
-            </>
-          ) : (
-            <p className="text-muted-foreground">{t("empty")}</p>
+              data-testid="mcp-webfetch-content"
+            >
+              <MarkdownRenderer
+                content={preview}
+                rhythm="chat"
+                enableMermaid={false}
+                enableMath={false}
+                enableDiff={false}
+                enableAlerts={false}
+                enableEnhancedImages={false}
+                enableVideoEmbed={false}
+                enableAudioEmbed={false}
+                showLineNumbers={false}
+              />
+            </div>
+          </div>
+          {isLong && !expanded && (
+            <p
+              className="flex items-center gap-2 pt-0.5 pl-3 text-[10px] text-muted-foreground"
+              data-testid="mcp-webfetch-clamped"
+            >
+              <span>
+                {t("truncatedChars", { shown: FETCH_PREVIEW_CHARS, total: content.length })}
+              </span>
+              <button
+                type="button"
+                onClick={() => setExpanded(true)}
+                className="font-medium text-primary hover:underline"
+                data-testid="mcp-webfetch-show-all"
+              >
+                {tRow("preview.showAll")}
+              </button>
+            </p>
           )}
-        </div>
-      </div>
-    </McpCardShell>
+        </>
+      )}
+    </div>
   )
 }

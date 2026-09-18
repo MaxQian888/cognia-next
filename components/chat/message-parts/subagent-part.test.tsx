@@ -16,6 +16,17 @@ jest.mock("next-intl", () => ({
 // Stub Collapsible primitives so children always render in tests.
 jest.mock("@/components/ui/collapsible")
 
+// The row's expansion body mounts under `ReadingCollapse` — stub it open so
+// body assertions see the same always-rendered content the Collapsible mock
+// used to provide.
+jest.mock("@/components/chat/motion/motion-reveal", () => {
+  const actual = jest.requireActual("@/components/chat/motion/motion-reveal")
+  return {
+    ...actual,
+    ReadingCollapse: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  }
+})
+
 // MarkdownRenderer pulls in ESM (streamdown/shiki) — stub it.
 jest.mock("@/components/chat/markdown-renderer", () => ({
   MarkdownRenderer: ({ content }: { content: string }) => (
@@ -108,7 +119,9 @@ describe("SubagentPart", () => {
       })
     )
     render(<SubagentPart part={basePart} />)
-    expect(screen.getByText(/tool ran/)).toBeInTheDocument()
+    // The collapsed row preview and the expanded body both surface the last
+    // log line — expect the message at least once.
+    expect(screen.getAllByText(/tool ran/).length).toBeGreaterThan(0)
   })
 
   it("renders the noLogsYet placeholder when neither store nor part has logs", () => {
@@ -427,7 +440,7 @@ describe("SubagentPart", () => {
       expect(screen.getByTestId("tool-activity-group").getAttribute("data-count")).toBe("2")
       expect(screen.getByTestId("subagent-result")).toBeInTheDocument()
       expect(screen.getByTestId("subagent-md").textContent).toBe("# Frozen result")
-      expect(screen.getByText(/persisted log/)).toBeInTheDocument()
+      expect(screen.getAllByText(/persisted log/).length).toBeGreaterThan(0)
     })
 
     it("prefers the live store value over the part snapshot when both exist", () => {
@@ -442,7 +455,7 @@ describe("SubagentPart", () => {
         logs: [{ level: "info", message: "STALE log" }],
       }
       render(<SubagentPart part={snapshotPart} mode="detailed" />)
-      expect(screen.getByText(/LIVE log/)).toBeInTheDocument()
+      expect(screen.getAllByText(/LIVE log/).length).toBeGreaterThan(0)
       expect(screen.queryByText(/STALE log/)).toBeNull()
     })
   })
@@ -460,7 +473,7 @@ describe("SubagentPart", () => {
 
     it("hides stream-text logs in standard mode", () => {
       render(<SubagentPart part={streamLogPart()} mode="standard" />)
-      expect(screen.getByText(/ran a tool/)).toBeInTheDocument()
+      expect(screen.getAllByText(/ran a tool/).length).toBeGreaterThan(0)
       expect(screen.queryByText(/narrated reasoning/)).toBeNull()
     })
 
@@ -471,7 +484,7 @@ describe("SubagentPart", () => {
 
     it("shows stream-text logs in detailed mode", () => {
       render(<SubagentPart part={streamLogPart()} mode="detailed" />)
-      expect(screen.getByText(/narrated reasoning/)).toBeInTheDocument()
+      expect(screen.getAllByText(/narrated reasoning/).length).toBeGreaterThan(0)
     })
   })
 
@@ -515,9 +528,10 @@ describe("SubagentPart", () => {
         )
       render(<SubagentPart part={basePart} mode="simplified" />)
       const toggle = screen.getByTestId("subagent-toggle-sa-1")
+      // Collapsed first (ReadingCollapse is stubbed open in this file, so the
+      // collapse contract is checked via aria-expanded + data-open).
       expect(toggle.getAttribute("aria-expanded")).toBe("false")
-      // Collapsed: the workspace link (detail-only) is not rendered yet.
-      expect(screen.queryByTestId("subagent-open")).toBeNull()
+      expect(screen.getByTestId("subagent-part-sa-1").dataset.open).toBe("false")
       fireEvent.click(toggle)
       expect(toggle.getAttribute("aria-expanded")).toBe("true")
       expect(screen.getByTestId("subagent-open")).toBeInTheDocument()

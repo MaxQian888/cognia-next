@@ -37,3 +37,8 @@ export const Streaming: Story = {
 export const PlainText: Story = {
   args: { code: "no language → plain text\nsecond line", language: undefined },
 }
+
+// Nested inside a file-tool row expansion — slim header, tight padding.
+export const Compact: Story = {
+  args: { compact: true, showLineNumbers: true },
+}

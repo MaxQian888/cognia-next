@@ -3,12 +3,14 @@ import type { UIMessage } from "ai"
 import { useTranslations } from "next-intl"
 
 import { resolveMessageDisplayOptions } from "@/lib/chat/message-display"
-import { MessageShell } from "./message-shell"
+import { MessageMetaLine, MessageShell } from "./message-shell"
 
 interface MessageShellStoryProps {
   display: ReturnType<typeof resolveMessageDisplayOptions>
   role?: "assistant" | "user"
   isStreaming?: boolean
+  /** Sealed `run.agent` stamp — what a completed turn carries. */
+  agent?: { presetId: string; name: string; icon: string }
 }
 
 const STORY_NOW = 1_700_000_000_000
@@ -17,6 +19,7 @@ function MessageShellStory({
   display,
   role = "assistant",
   isStreaming = false,
+  agent,
 }: MessageShellStoryProps) {
   const t = useTranslations("chat.messageDisplay.story")
   const now = STORY_NOW
@@ -38,6 +41,7 @@ function MessageShellStory({
               completedAt: now,
               durationMs: 1450,
               finishReason: "success",
+              agent,
             },
           }
         : {}),
@@ -48,6 +52,11 @@ function MessageShellStory({
       <p className="leading-7">
         {role === "assistant" ? t("rendererOwnership") : t("userQuestion")}
       </p>
+      {/* The meta chip lives on the renderer's action row; here it stands in
+          for that row so the popover stays visible in isolation. */}
+      <div className="mt-1 flex">
+        <MessageMetaLine message={message} display={display} className="ml-auto" />
+      </div>
     </MessageShell>
   )
 }
@@ -72,6 +81,11 @@ export const Balanced: Story = {}
 
 export const Inspector: Story = {
   args: { display: resolveMessageDisplayOptions({ preset: "inspector" }) },
+}
+
+/** A turn sealed under the Build preset keeps its name + icon in the header. */
+export const PresetIdentity: Story = {
+  args: { agent: { presetId: "build", name: "Build", icon: "Hammer" } },
 }
 
 export const UserBubble: Story = {

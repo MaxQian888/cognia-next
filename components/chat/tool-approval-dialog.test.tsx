@@ -192,6 +192,24 @@ describe("ToolApprovalDialog — interrupted state", () => {
     expect(onRespond).not.toHaveBeenCalled()
   })
 
+  it("names the superseded cause instead of the generic interruption wording", () => {
+    render(
+      <ToolApprovalDialog
+        approval={approval({
+          toolName: "bash",
+          status: "interrupted",
+          interruptReason: "superseded",
+        })}
+        onRespond={jest.fn()}
+        onDismiss={jest.fn()}
+      />
+    )
+    const notice = screen.getByTestId("approval-interrupted-notice")
+    expect(notice).toHaveTextContent("supersededNotice")
+    expect(notice).not.toHaveTextContent("interruptedNotice")
+    expect(screen.queryByRole("button", { name: "allowOnce" })).toBeNull()
+  })
+
   it("keeps the answerable footer for live approvals", () => {
     render(<ToolApprovalDialog approval={approval({ toolName: "bash" })} onRespond={jest.fn()} />)
     expect(screen.queryByTestId("approval-interrupted-notice")).toBeNull()

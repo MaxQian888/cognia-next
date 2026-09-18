@@ -3,7 +3,7 @@ import type { UIMessage } from "ai"
 import { resolveMessageDisplayOptions } from "@/lib/chat/message-display"
 import { useSettingsStore } from "@/stores/settings"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { METADATA_FIELDS, MessageShell } from "./message-shell"
+import { METADATA_FIELDS, MessageMetaLine, MessageShell } from "./message-shell"
 
 const message: UIMessage = {
   id: "a1",
@@ -22,7 +22,7 @@ const message: UIMessage = {
 }
 
 describe("MessageShell", () => {
-  it("shows balanced identity, timestamp, model and progressive details", () => {
+  it("shows balanced identity, timestamp and model in the header", () => {
     render(
       <MessageShell message={message} display={resolveMessageDisplayOptions()}>
         <p>Hello</p>
@@ -34,11 +34,6 @@ describe("MessageShell", () => {
     expect(screen.getByTestId("message-shell")).toHaveAttribute("data-body-font", "sans")
     expect(screen.getByText("claude-sonnet-4-6")).toBeInTheDocument()
     expect(screen.getByRole("time")).toHaveAttribute("dateTime", "2023-11-14T22:13:20.000Z")
-
-    fireEvent.click(screen.getByRole("button", { name: "Message details" }))
-    expect(screen.getByText("anthropic")).toBeInTheDocument()
-    expect(screen.getByText("↑10 ↓20")).toBeInTheDocument()
-    expect(screen.getByText("$0.0123")).toBeInTheDocument()
   })
 
   it("puts usage and cost in the header when that is the chosen placement", () => {
@@ -298,6 +293,116 @@ describe("routing indicator (ADR-0043 Phase 12)", () => {
       </TooltipProvider>
     )
     expect(screen.queryByTestId("routing-indicator")).toBeNull()
+  })
+})
+
+describe("status dot and agent identity", () => {
+  it("leads the header with the same status-dot language the tool rows use", () => {
+    // A finished turn is the default state — a quiet green dot, and crucially
+    // NO "Complete" text chip: the row only speaks when something is live
+    // (streaming) or went wrong (error).
+    render(
+      <MessageShell message={message} display={resolveMessageDisplayOptions()}>
+        <p>Hello</p>
+      </MessageShell>
+    )
+    expect(screen.getByTestId("message-status-dot")).toBeInTheDocument()
+    expect(screen.queryByRole("status")).toBeNull()
+    expect(screen.queryByText("Complete")).toBeNull()
+  })
+
+  it("uses the sealed preset name and Lucide icon instead of the generic bot", () => {
+    const stamped: UIMessage = {
+      ...message,
+      metadata: {
+        ...(message.metadata as Record<string, unknown>),
+        run: {
+          ...(message.metadata as Record<string, { run?: object }>).run,
+          agent: { presetId: "build", name: "Build", icon: "Hammer" },
+        },
+      },
+    }
+    render(
+      <MessageShell message={stamped} display={resolveMessageDisplayOptions()}>
+        <p>Hello</p>
+      </MessageShell>
+    )
+    const header = screen.getByTestId("message-shell-header")
+    expect(header).toHaveTextContent("Build")
+    expect(header.querySelector("svg.lucide-hammer")).not.toBeNull()
+    expect(header).not.toHaveTextContent("Assistant")
+  })
+
+  it("renders an emoji preset glyph as text when the icon is not a Lucide name", () => {
+    const stamped: UIMessage = {
+      ...message,
+      metadata: {
+        ...(message.metadata as Record<string, unknown>),
+        run: { agent: { presetId: "custom", name: "Scout", icon: "🔍" } },
+      },
+    }
+    render(
+      <MessageShell message={stamped} display={resolveMessageDisplayOptions()}>
+        <p>Hello</p>
+      </MessageShell>
+    )
+    expect(screen.getByTestId("message-shell-header")).toHaveTextContent("🔍")
+    expect(screen.getByTestId("message-shell-header")).toHaveTextContent("Scout")
+  })
+
+  it("lets a room speaker keep overriding the sealed agent identity", () => {
+    const stamped: UIMessage = {
+      ...message,
+      metadata: {
+        ...(message.metadata as Record<string, unknown>),
+        run: { agent: { presetId: "build", name: "Build", icon: "Hammer" } },
+      },
+    }
+    render(
+      <MessageShell message={stamped} display={resolveMessageDisplayOptions()} speakerName="Ana">
+        <p>Hello</p>
+      </MessageShell>
+    )
+    const header = screen.getByTestId("message-shell-header")
+    expect(header).toHaveTextContent("Ana")
+    expect(header).not.toHaveTextContent("Build")
+  })
+})
+
+describe("MessageMetaLine", () => {
+  it("renders the run summary on one line and the field list in a popover", () => {
+    render(<MessageMetaLine message={message} display={resolveMessageDisplayOptions()} />)
+    const chip = screen.getByTestId("message-meta-line")
+    // Balanced puts provider/duration/usage/cost/finishState under "details" —
+    // the summary line is those values joined, not a labelled table.
+    expect(chip).toHaveTextContent("anthropic")
+    expect(chip).toHaveTextContent("$0.0123")
+    expect(screen.queryByTestId("message-meta-popover")).toBeNull()
+
+    fireEvent.click(chip)
+    const popover = screen.getByTestId("message-meta-popover")
+    expect(popover).toHaveTextContent("↑10 ↓20")
+    expect(popover).toHaveTextContent("1200 ms")
+  })
+
+  it("renders nothing when no field is placed under details", () => {
+    const allHidden = resolveMessageDisplayOptions(undefined, {
+      preset: "balanced",
+      overrides: {
+        metadata: {
+          identity: "hidden",
+          timestamp: "hidden",
+          model: "hidden",
+          provider: "hidden",
+          duration: "hidden",
+          usage: "hidden",
+          cost: "hidden",
+          finishState: "hidden",
+        },
+      },
+    })
+    const { container } = render(<MessageMetaLine message={message} display={allHidden} />)
+    expect(container.firstChild).toBeNull()
   })
 })
 

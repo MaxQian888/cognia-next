@@ -248,6 +248,33 @@ describe("CodeBlock", () => {
     })
   })
 
+  describe("compact density", () => {
+    it("packs tighter chrome than the standalone prose variant", () => {
+      const { container } = renderInProvider(
+        <CodeBlock code={"a\nb"} language="ts" isStreaming compact />
+      )
+      const figure = container.querySelector('[role="figure"]')!
+      expect(figure.className).toContain("my-1")
+      expect(figure.className).toContain("rounded-md")
+      expect(figure.className).not.toContain("my-3")
+      // Slim header + tight code padding; controls shrink too.
+      const header = figure.firstElementChild!
+      expect(header.className).toContain("py-1")
+      expect(header.querySelector("button")?.className).toContain("size-5")
+      // `size-*` classes exempt the svgs from Button's 16px default — h-/w-
+      // would be silently overridden and render bigger than the animated icons.
+      expect(header.querySelector("svg")?.getAttribute("class")).toContain("size-2.5")
+      expect(container.querySelector("pre")?.className).toContain("p-2.5")
+      expect(container.querySelector("pre")?.className).toContain("text-xs")
+    })
+
+    it("keeps the loose prose chrome by default", () => {
+      const { container } = renderInProvider(<CodeBlock code={"a\nb"} language="ts" isStreaming />)
+      expect(container.querySelector('[role="figure"]')?.className).toContain("my-3")
+      expect(container.querySelector("pre")?.className).toContain("p-4")
+    })
+  })
+
   // ADR-0127: `wrapLines` / `showLineNumbers` are settings-driven defaults;
   // the toolbar toggles are per-block overrides layered on top, so a settings
   // change after mount still reaches an untouched block.

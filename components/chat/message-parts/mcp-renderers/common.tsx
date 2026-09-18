@@ -11,10 +11,10 @@
  * generic ToolBody.
  */
 
-import { useMemo, type ReactNode } from "react"
-import { Badge } from "@/components/ui/badge"
-import { cn } from "@/lib/utils"
+import { useMemo, useState } from "react"
+import { useTranslations } from "next-intl"
 import type { McpResultBlock } from "@/lib/claude/parts-extensions"
+import { cn } from "@/lib/utils"
 
 export function parseOutputJson(output: unknown): unknown | null {
   if (output === null || output === undefined) return null
@@ -46,6 +46,62 @@ export function hostOf(url: string): string {
   } catch {
     return url
   }
+}
+
+/** Deterministic letter-chip hues for sources without a favicon. */
+const FAVICON_PALETTE = [
+  "bg-sky-600",
+  "bg-emerald-600",
+  "bg-amber-600",
+  "bg-rose-600",
+  "bg-violet-600",
+  "bg-orange-600",
+  "bg-teal-600",
+  "bg-slate-600",
+]
+
+/**
+ * A source's favicon when the provider payload ships one (`favicon` on
+ * `SearchResult` — brave/serpapi/serper/searchapi fill it), else a letter
+ * chip whose hue is hashed off the host. The favicon+domain pair is the
+ * source identity in every search UI (Perplexity, ChatGPT, AI Overviews);
+ * decorative only — the link text already carries the title.
+ */
+export function SourceFavicon({ src, host }: { src?: string; host: string }) {
+  const [failed, setFailed] = useState(false)
+  if (src && !failed) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- provider-supplied remote favicon; not an app asset
+      <img
+        src={src}
+        alt=""
+        aria-hidden
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        className="size-3.5 shrink-0 rounded-[3px]"
+        onError={() => setFailed(true)}
+      />
+    )
+  }
+  let hash = 0
+  for (const ch of host) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "inline-flex size-3.5 shrink-0 items-center justify-center rounded-[3px] text-[9px] font-semibold text-white",
+        FAVICON_PALETTE[hash % FAVICON_PALETTE.length]
+      )}
+    >
+      {host.charAt(0).toUpperCase() || "?"}
+    </span>
+  )
+}
+
+/** `publishedDate` rendered as `YYYY-MM-DD` when it parses; null otherwise. */
+export function dateOf(value: unknown): string | null {
+  if (typeof value !== "string" || !value) return null
+  return Number.isNaN(Date.parse(value)) ? null : value.slice(0, 10)
 }
 
 /**
@@ -88,6 +144,92 @@ export function languageFromPath(path: string | undefined): string {
 }
 
 /**
+ * Preview budgets for tool payloads expanded inside a chat row. An unbounded
+ * dump is both a DOM cost (Shiki highlighting, per-row workbench links,
+ * intraline diffs) and a scroll wall — bodies render at most this many
+ * lines/rows and collapse the rest behind a "show all" note. Escape hatches
+ * after reveal: CodeBlock's own line cap + fullscreen, and the workbench link.
+ */
+export const TOOL_PREVIEW_MAX_LINES = 120
+export const TOOL_LIST_MAX_ROWS = 200
+export const TOOL_PREVIEW_MAX_EDITS = 20
+
+export interface ClampedRows<T> {
+  /** Rows to render — the full list once revealed, else the first `max`. */
+  visible: readonly T[]
+  total: number
+  shown: number
+  /** Rows currently hidden behind the clamp note; 0 once revealed. */
+  hidden: number
+  /** True after the user revealed the full list. */
+  revealed: boolean
+  reveal: () => void
+}
+
+/**
+ * Clamp a row list to a preview budget with a show-all escape. Pass a stable
+ * or memoized `items` array — `visible` re-slices only when inputs change.
+ */
+export function useClampedRows<T>(
+  items: readonly T[],
+  max = TOOL_PREVIEW_MAX_LINES
+): ClampedRows<T> {
+  const [revealed, setRevealed] = useState(false)
+  const hidden = revealed ? 0 : Math.max(0, items.length - max)
+  const visible = useMemo(() => (hidden > 0 ? items.slice(0, max) : items), [items, hidden, max])
+  return {
+    visible,
+    total: items.length,
+    shown: visible.length,
+    hidden,
+    revealed,
+    reveal: () => setRevealed(true),
+  }
+}
+
+/**
+ * "Showing the first {shown} of {total} · Show all" footer under a clamped
+ * tool payload. Render only while `hidden > 0` — the note has no expanded
+ * state because revealing hands the payload to the component's own full view
+ * (CodeBlock's cap/fullscreen, the diff's scroll box, …).
+ */
+export function PreviewClampNote({
+  shown,
+  total,
+  onExpand,
+  hint,
+  testId,
+}: {
+  shown: number
+  total: number
+  onExpand: () => void
+  /** Optional trailing context, e.g. "full content is on disk". */
+  hint?: string
+  testId?: string
+}) {
+  const t = useTranslations("chat.toolRow.preview")
+  return (
+    <p
+      className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground"
+      data-testid={testId}
+    >
+      <span>
+        {t("truncated", { shown, total })}
+        {hint ? ` ${hint}` : null}
+      </span>
+      <button
+        type="button"
+        onClick={onExpand}
+        className="font-medium text-primary hover:underline"
+        data-testid={testId ? `${testId}-show-all` : undefined}
+      >
+        {t("showAll")}
+      </button>
+    </p>
+  )
+}
+
+/**
  * Build a usable `src` (data URL) from an image/audio block in either wire
  * shape — MCP's `{ data, mimeType }` or Anthropic's
  * `{ source: { data, media_type } }`. Returns null when the block carries no
@@ -110,41 +252,4 @@ export function blockMediaSrc(block: McpResultBlock, fallbackMime: string): stri
     return src.data.startsWith("data:") ? src.data : `data:${mime};base64,${src.data}`
   }
   return null
-}
-
-export function McpCardShell({
-  title,
-  badge,
-  action,
-  children,
-  className,
-  testId,
-}: {
-  title: string
-  badge?: string
-  /** Optional right-aligned header control (e.g. an "open in review" button). */
-  action?: ReactNode
-  children: ReactNode
-  className?: string
-  testId: string
-}) {
-  return (
-    <div
-      data-testid={testId}
-      className={cn("my-2 rounded-md border bg-card text-card-foreground", className)}
-    >
-      <div className="flex items-center justify-between gap-2 border-b bg-muted/40 px-3 py-2">
-        <span className="font-medium text-xs">{title}</span>
-        <div className="flex items-center gap-1">
-          {badge && (
-            <Badge variant="outline" className="text-[10px]" data-testid={`${testId}-badge`}>
-              {badge}
-            </Badge>
-          )}
-          {action}
-        </div>
-      </div>
-      <div className="space-y-1 px-3 py-2 text-xs">{children}</div>
-    </div>
-  )
 }

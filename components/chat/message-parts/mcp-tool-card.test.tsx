@@ -55,9 +55,38 @@ describe("isStructuredMcpToolPart", () => {
     expect(isStructuredMcpToolPart(part("tool-mcp__cognia-plugin-tools__spawn_task"))).toBe(true)
   })
 
-  it("recognises Claude built-ins", () => {
-    expect(isStructuredMcpToolPart(part("tool-Read"))).toBe(true)
-    expect(isStructuredMcpToolPart(part("tool-Glob"))).toBe(true)
+  it("recognises the Claude built-ins that still own cards here", () => {
+    expect(isStructuredMcpToolPart(part("tool-WebFetch"))).toBe(true)
+    expect(isStructuredMcpToolPart(part("tool-WebSearch"))).toBe(true)
+    expect(isStructuredMcpToolPart(part("tool-web_fetch"))).toBe(true)
+    expect(isStructuredMcpToolPart(part("tool-web_search"))).toBe(true)
+  })
+
+  // The file tools moved out of this registry: `FileToolPart` owns them
+  // upstream. A structured-card claim here would only fire when the row
+  // routing was bypassed — it must stay false.
+  it("does not claim the file tools — bare, PascalCase or namespaced", () => {
+    for (const name of [
+      "read",
+      "write",
+      "edit",
+      "multi_edit",
+      "grep",
+      "glob",
+      "ls",
+      "notebookedit",
+      "Read",
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "Grep",
+      "Glob",
+      "LS",
+      "NotebookEdit",
+    ]) {
+      expect(isStructuredMcpToolPart(part(`tool-${name}`))).toBe(false)
+      expect(isStructuredMcpToolPart(part(`tool-mcp__cognia-tools__${name}`))).toBe(false)
+    }
   })
 
   it("recognises the plan-mode signal tools — native, bare and cognia-namespaced", () => {
@@ -72,17 +101,6 @@ describe("isStructuredMcpToolPart", () => {
     expect(isStructuredMcpToolPart(part("tool-MysteryTool"))).toBe(false)
     expect(isStructuredMcpToolPart(part("text"))).toBe(false)
     expect(isStructuredMcpToolPart(part("Glob"))).toBe(false)
-  })
-
-  it("recognises the sidecar coreFiles suite — bare and namespaced", () => {
-    for (const name of ["read", "glob", "grep", "ls", "edit", "multi_edit", "write"]) {
-      expect(isStructuredMcpToolPart(part(`tool-${name}`))).toBe(true)
-      expect(isStructuredMcpToolPart(part(`tool-mcp__cognia-tools__${name}`))).toBe(true)
-    }
-  })
-
-  it("recognises the native Anthropic PascalCase LS tool", () => {
-    expect(isStructuredMcpToolPart(part("tool-LS"))).toBe(true)
   })
 
   it("recognises the workflow proposal plugin tools — bare and plugin-namespaced", () => {
@@ -101,47 +119,21 @@ describe("isStructuredMcpToolPart", () => {
   })
 })
 
-describe("MCPToolCard — coreFiles routing", () => {
-  it("routes the namespaced core read to the ReadCard", () => {
-    render(
-      <MCPToolCard
-        part={part("tool-mcp__cognia-tools__read", "     1\tconsole.log(1)", {
-          file_path: "a.ts",
-        })}
-      />
-    )
-    expect(screen.getByTestId("mcp-read-path")).toHaveTextContent("a.ts")
-  })
-
-  it("routes core edit to the EditCard diff view", () => {
-    render(
-      <MCPToolCard
-        part={part("tool-edit", "Edited a.ts: 1 replacement.", {
-          file_path: "a.ts",
-          old_string: "x = 1",
-          new_string: "x = 2",
-        })}
-      />
-    )
-    expect(screen.getByTestId("mcp-edit-card")).toBeInTheDocument()
-    expect(screen.getByTestId("diff-preview")).toBeInTheDocument()
-  })
-
-  it("routes core ls to the LsCard", () => {
-    render(<MCPToolCard part={part("tool-ls", "D:/proj\nsrc/\nfile.ts", { path: "." })} />)
-    expect(screen.getAllByTestId("mcp-ls-entry")).toHaveLength(2)
-  })
-
-  it("routes the native Anthropic LS to the same LsCard", () => {
-    render(<MCPToolCard part={part("tool-LS", "D:/proj\nsrc/\nfile.ts", { path: "." })} />)
-    expect(screen.getAllByTestId("mcp-ls-entry")).toHaveLength(2)
-  })
-
-  it("routes core write to the WriteCard", () => {
-    render(
-      <MCPToolCard part={part("tool-write", "Created a.ts", { file_path: "a.ts", content: "x" })} />
-    )
-    expect(screen.getByTestId("mcp-write-card")).toBeInTheDocument()
+// File tools are owned by `FileToolPart` upstream — nothing in the app routes
+// them here. When one does land (a caller that skipped the body router), the
+// contract is the generic body, never the retired card path.
+describe("MCPToolCard — file tools degrade to the generic body", () => {
+  it.each([
+    ["tool-mcp__cognia-tools__read", { file_path: "a.ts" }],
+    ["tool-Read", { file_path: "a.ts" }],
+    ["tool-edit", { file_path: "a.ts", old_string: "x", new_string: "y" }],
+    ["tool-ls", { path: "." }],
+    ["tool-LS", { path: "." }],
+    ["tool-write", { file_path: "a.ts", content: "x" }],
+    ["tool-NotebookEdit", { notebook_path: "a.ipynb", new_source: "x" }],
+  ])("%s renders the generic body", (type, input) => {
+    render(<MCPToolCard part={part(type, "out", input)} />)
+    expect(screen.getByTestId("generic-tool-body")).toBeInTheDocument()
   })
 })
 
@@ -173,26 +165,27 @@ describe("MCPToolCard — fallback semantics", () => {
   })
 
   it("bypasses a dedicated card that would swallow structured content blocks", () => {
-    // `write` has a dedicated card that renders off the string output; if a
+    // `web_fetch` has a dedicated card that renders off the string output; if a
     // result ever carries real blocks, the blocks win — a card must never
     // silently drop an image/resource because it only knows about `output`.
     const p = {
-      ...part("tool-write", "wrote a.ts", { file_path: "a.ts", content: "x" }),
+      ...part("tool-web_fetch", "fetched", { url: "https://example.com" }),
       mcpContent: [{ type: "image", data: "AAAA", mimeType: "image/png" }],
     } as unknown as ToolUIPart
     render(<MCPToolCard part={p} />)
     expect(screen.getByTestId("mcp-content-blocks")).toBeInTheDocument()
-    expect(screen.queryByTestId("mcp-write-card")).toBeNull()
+    expect(screen.queryByTestId("mcp-webfetch-card")).toBeNull()
   })
 
-  it("lets the Read card keep structured content because it renders the blocks itself", () => {
+  it("surfaces structured content blocks even for a file tool that lands here", () => {
+    // FileToolPart owns Read upstream; if one arrives anyway the blocks must
+    // still render rather than disappearing with the retired card path.
     const p = {
       ...part("tool-Read", "/tmp/a.png (12 bytes)", { file_path: "/tmp/a.png" }),
       mcpContent: [{ type: "image", data: "AAAA", mimeType: "image/png" }],
     } as unknown as ToolUIPart
     render(<MCPToolCard part={p} />)
-    expect(screen.getByTestId("mcp-read-image")).toBeInTheDocument()
-    expect(screen.queryByTestId("mcp-content-blocks")).toBeNull()
+    expect(screen.getByTestId("mcp-content-blocks")).toBeInTheDocument()
   })
 })
 
@@ -208,8 +201,12 @@ describe("MCPToolCard — dynamic-tool parts", () => {
     }) as unknown as ToolUIPart
 
   it("routes a dynamic-tool part to the card registered for its toolName", () => {
-    render(<MCPToolCard part={dynamicPart("Read", "const a = 1", { file_path: "a.ts" })} />)
-    expect(screen.getByTestId("mcp-read-path")).toHaveTextContent("a.ts")
+    render(
+      <MCPToolCard
+        part={dynamicPart("web_fetch", "fetched body", { url: "https://example.com" })}
+      />
+    )
+    expect(screen.getByTestId("mcp-webfetch-card")).toBeInTheDocument()
   })
 
   it("falls back to ToolBody for an unregistered dynamic tool", () => {
@@ -218,9 +215,12 @@ describe("MCPToolCard — dynamic-tool parts", () => {
   })
 
   it("isStructuredMcpToolPart recognises a dynamic-tool by its toolName", () => {
-    expect(isStructuredMcpToolPart(dynamicPart("Read"))).toBe(true)
+    expect(isStructuredMcpToolPart(dynamicPart("WebFetch"))).toBe(true)
     expect(isStructuredMcpToolPart(dynamicPart("MysteryTool"))).toBe(false)
-    expect(isStructuredMcpToolPart(part("tool-Read"))).toBe(true)
+    // A dynamic `Read` still names a file tool — FileToolPart's claim, not
+    // this registry's.
+    expect(isStructuredMcpToolPart(dynamicPart("Read"))).toBe(false)
+    expect(isStructuredMcpToolPart(part("tool-WebFetch"))).toBe(true)
     expect(isStructuredMcpToolPart(part("text"))).toBe(false)
   })
 })
@@ -237,7 +237,6 @@ describe("MCPToolCard — wiki_search", () => {
     const rows = screen.getAllByTestId("mcp-wiki-search-row")
     expect(rows).toHaveLength(2)
     expect(rows[0]).toHaveAttribute("data-slug", "intro")
-    expect(screen.getByTestId("mcp-wiki-search-card-badge")).toHaveTextContent("2 hits")
   })
 
   it("renders an empty message for zero hits", () => {
@@ -289,8 +288,9 @@ describe("MCPToolCard — wiki_read", () => {
       ],
     })
     render(<MCPToolCard part={part("tool-wiki_read", output)} />)
-    expect(screen.getByTestId("mcp-wiki-read-title")).toHaveTextContent("Introduction")
+    // The article title rides on the row's meta; the body carries sections.
     expect(screen.getAllByTestId("mcp-wiki-read-section")).toHaveLength(2)
+    expect(screen.getByText("Deeper text.")).toBeInTheDocument()
   })
 })
 
@@ -320,80 +320,9 @@ describe("MCPToolCard — exit_plan_mode", () => {
   })
 })
 
-describe("MCPToolCard — Read", () => {
-  it("renders a CodeBlock with language derived from extension", () => {
-    render(
-      <MCPToolCard part={part("tool-Read", { content: "console.log(1)" }, { path: "a.ts" })} />
-    )
-    expect(screen.getByTestId("mcp-read-path")).toHaveTextContent("a.ts")
-    expect(screen.getByTestId("code-block")).toHaveAttribute("data-language", "typescript")
-  })
-})
-
-describe("MCPToolCard — Glob", () => {
-  it("renders match rows from a JSON array output", () => {
-    render(
-      <MCPToolCard
-        part={part("tool-Glob", JSON.stringify({ matches: ["src/a.ts", "src/b.ts"] }), {
-          pattern: "src/*.ts",
-        })}
-      />
-    )
-    expect(screen.getByTestId("mcp-glob-pattern")).toHaveTextContent("src/*.ts")
-    expect(screen.getAllByTestId("mcp-glob-match")).toHaveLength(2)
-  })
-
-  it("splits a plain-string output into one match per line", () => {
-    render(
-      <MCPToolCard part={part("tool-Glob", "src/a.ts\nsrc/b.ts\n", { pattern: "src/*.ts" })} />
-    )
-    expect(screen.getAllByTestId("mcp-glob-match")).toHaveLength(2)
-  })
-})
-
-describe("MCPToolCard — Grep", () => {
-  it("is recognised as a structured tool", () => {
-    expect(isStructuredMcpToolPart(part("tool-Grep"))).toBe(true)
-  })
-
-  it("renders matched content lines from a plain-string output", () => {
-    render(
-      <MCPToolCard
-        part={part("tool-Grep", "a.ts:1:const x = 1\nb.ts:2:const y = 2\n", {
-          pattern: "const",
-          glob: "*.ts",
-          output_mode: "content",
-        })}
-      />
-    )
-    expect(screen.getByTestId("mcp-grep-pattern")).toHaveTextContent("const")
-    expect(screen.getByTestId("mcp-grep-pattern")).toHaveTextContent("*.ts")
-    expect(screen.getAllByTestId("mcp-grep-match")).toHaveLength(2)
-  })
-
-  it("renders files from a JSON { files: [...] } output", () => {
-    render(
-      <MCPToolCard
-        part={part("tool-Grep", JSON.stringify({ files: ["a.ts", "b.ts", "c.ts"] }), {
-          pattern: "TODO",
-        })}
-      />
-    )
-    expect(screen.getAllByTestId("mcp-grep-match")).toHaveLength(3)
-  })
-
-  it("shows the empty state when there are no matches", () => {
-    render(
-      <MCPToolCard part={part("tool-Grep", JSON.stringify({ matches: [] }), { pattern: "zzz" })} />
-    )
-    expect(screen.getByTestId("mcp-grep-card")).toHaveTextContent("No matches")
-  })
-
-  it("falls back to ToolBody when there is neither a pattern nor matches", () => {
-    render(<MCPToolCard part={part("tool-Grep", "")} />)
-    expect(screen.getByTestId("generic-tool-body")).toBeInTheDocument()
-  })
-})
+// Payload-level assertions for Read/Glob/Grep/LS/Write/Edit/NotebookEdit live
+// in the per-card suites under `mcp-renderers/*.test.tsx` — the bodies are the
+// same ones `FileToolBody` mounts under the file-tool row.
 
 describe("MCPToolCard — WebFetch", () => {
   it("renders the URL + content preview", () => {
@@ -405,8 +334,9 @@ describe("MCPToolCard — WebFetch", () => {
         })}
       />
     )
-    expect(screen.getByTestId("mcp-webfetch-url")).toHaveTextContent("https://example.com/docs")
-    expect(screen.getByTestId("mcp-webfetch-card")).toHaveTextContent("example.com")
+    // The URL lives on the StructuredToolPart row — the body shows the
+    // extraction prompt and the fetched prose only.
+    expect(screen.getByTestId("mcp-webfetch-prompt")).toHaveTextContent("summarise")
     expect(screen.getByTestId("mcp-webfetch-content")).toHaveTextContent("Fetched page body text")
   })
 
@@ -440,7 +370,6 @@ describe("MCPToolCard — WebSearch", () => {
       ],
     })
     render(<MCPToolCard part={part("tool-WebSearch", output, { query: "test query" })} />)
-    expect(screen.getByTestId("mcp-websearch-query")).toHaveTextContent("test query")
     expect(screen.getAllByTestId("mcp-websearch-result")).toHaveLength(2)
   })
 
@@ -467,29 +396,6 @@ describe("MCPToolCard — WebSearch", () => {
       />
     )
     expect(screen.getByTestId("mcp-websearch-card")).toBeInTheDocument()
-  })
-})
-
-describe("MCPToolCard — NotebookEdit", () => {
-  it("renders the notebook path, meta and the cell source", () => {
-    render(
-      <MCPToolCard
-        part={part("tool-NotebookEdit", "ok", {
-          notebook_path: "/work/analysis.ipynb",
-          cell_type: "python",
-          edit_mode: "replace",
-          new_source: "print(1)",
-        })}
-      />
-    )
-    expect(screen.getByTestId("mcp-notebookedit-path")).toHaveTextContent("/work/analysis.ipynb")
-    expect(screen.getByTestId("mcp-notebookedit-card")).toHaveTextContent("analysis.ipynb")
-    expect(screen.getByTestId("code-block")).toHaveAttribute("data-language", "python")
-  })
-
-  it("falls back to ToolBody without a notebook path", () => {
-    render(<MCPToolCard part={part("tool-NotebookEdit", "ok", { new_source: "x" })} />)
-    expect(screen.getByTestId("generic-tool-body")).toBeInTheDocument()
   })
 })
 

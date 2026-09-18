@@ -1,15 +1,18 @@
 "use client"
 
-// Structured card for the core `write` tool (and SDK `Write`): target path +
-// a syntax-highlighted preview of the content being written.
+// Body content for the core `write` tool (and SDK `Write`): target path +
+// a syntax-highlighted preview of the content being written, plus the
+// workbench review affordance. Rendered bare — the surrounding row owns the
+// card chrome now.
 
 import { useMemo } from "react"
 import { useTranslations } from "next-intl"
-import { FilePlus2Icon } from "lucide-react"
 import type { ToolUIPart } from "ai"
-import { McpCardShell, languageFromPath } from "./common"
+import { languageFromPath, PreviewClampNote, useClampedRows } from "./common"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
+import { basenameOf } from "@/lib/files/file-type-icon"
 import { WorkbenchReviewButton } from "./workbench-review-button"
+import { WorkbenchFileLink } from "./workbench-file-link"
 
 const PREVIEW_CHAR_CAP = 4_000
 
@@ -26,35 +29,60 @@ export function WriteCard({ part, sessionId }: { part: ToolUIPart; sessionId?: s
   const content = typeof input.content === "string" ? input.content : ""
   // Slicing the preview and counting lines both scan the full file content;
   // recompute only when the written content changes, not on every render.
-  const { clipped, preview, lineCount } = useMemo(() => {
-    const isClipped = content.length > PREVIEW_CHAR_CAP
+  // Two budgets: TOOL_PREVIEW_MAX_LINES keeps the row expansion readable, and
+  // PREVIEW_CHAR_CAP catches minified payloads whose few lines are enormous.
+  // Show-all bypasses both — CodeBlock's own line cap bounds the extreme case.
+  const lines = useMemo(() => content.split("\n"), [content])
+  const clamp = useClampedRows(lines)
+  const lineCount = lines.length
+  const { preview, clipped, shownLines } = useMemo(() => {
+    const base = clamp.hidden > 0 ? clamp.visible.join("\n") : content
+    const charClipped = !clamp.revealed && base.length > PREVIEW_CHAR_CAP
+    const p = charClipped ? base.slice(0, PREVIEW_CHAR_CAP) : base
     return {
-      clipped: isClipped,
-      preview: isClipped ? content.slice(0, PREVIEW_CHAR_CAP) : content,
-      lineCount: content.split("\n").length,
+      preview: p,
+      clipped: clamp.hidden > 0 || charClipped,
+      shownLines: p === "" ? 0 : p.split("\n").length,
     }
-  }, [content])
+  }, [content, clamp.hidden, clamp.revealed, clamp.visible])
   if (!path || typeof input.content !== "string") return null
 
+  // The row above states path + line count; the block's header carries the
+  // file identity (basename link), and review/clamp chrome sits underneath.
   return (
-    <McpCardShell
-      title={t("title")}
-      badge={path}
-      testId="mcp-write-card"
-      action={<WorkbenchReviewButton sessionId={sessionId} absolutePath={path} />}
-    >
-      <div className="flex items-start gap-2">
-        <FilePlus2Icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-        <div className="min-w-0 flex-1">
-          <p className="font-mono text-[11px] text-muted-foreground" data-testid="mcp-write-path">
-            {path} · {t("lineCount", { count: lineCount })}
-          </p>
-          <div className="mt-1" data-testid="mcp-write-code">
-            <CodeBlock code={preview} language={languageFromPath(path)} showLineNumbers />
-          </div>
-          {clipped && <p className="mt-1 text-[11px] text-muted-foreground">{t("truncated")}</p>}
+    <div className="min-w-0" data-testid="mcp-write-card">
+      <div data-testid="mcp-write-code">
+        <CodeBlock
+          code={preview}
+          language={languageFromPath(path)}
+          filename={basenameOf(path)}
+          headerTitle={
+            <span data-testid="mcp-write-path">
+              <WorkbenchFileLink sessionId={sessionId} path={path}>
+                {basenameOf(path)}
+              </WorkbenchFileLink>
+            </span>
+          }
+          showLineNumbers
+          compact
+        />
+        <div className="flex items-center justify-between gap-2">
+          {clipped ? (
+            <PreviewClampNote
+              // The note is unit-agnostic — report whichever budget bound
+              // the preview (lines normally, characters for minified input).
+              shown={clamp.hidden > 0 ? shownLines : preview.length}
+              total={clamp.hidden > 0 ? lineCount : content.length}
+              onExpand={clamp.reveal}
+              hint={t("truncated")}
+              testId="mcp-write-clamped"
+            />
+          ) : (
+            <span />
+          )}
+          <WorkbenchReviewButton sessionId={sessionId} absolutePath={path} />
         </div>
       </div>
-    </McpCardShell>
+    </div>
   )
 }

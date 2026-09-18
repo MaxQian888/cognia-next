@@ -27,22 +27,16 @@ import {
   subscribeToolResultRenderers,
 } from "@/lib/plugin/api/tool-result-renderers"
 import { PluginSurface } from "@/components/plugins/plugin-surface"
+import { isFileToolPart } from "@/components/chat/message-parts/file-tool-part"
 import { McpContentBlocksCard } from "./mcp-renderers/mcp-content-blocks-card"
 import { WikiSearchCard } from "./mcp-renderers/wiki-search-card"
 import { WikiReadCard } from "./mcp-renderers/wiki-read-card"
 import { RagSearchCard } from "./mcp-renderers/rag-search-card"
 import { RuntimeQueryCard } from "./mcp-renderers/runtime-query-card"
 import { PlanCard } from "./mcp-renderers/plan-card"
-import { ReadCard } from "./mcp-renderers/read-card"
-import { GlobCard } from "./mcp-renderers/glob-card"
-import { GrepCard } from "./mcp-renderers/grep-card"
 import { WebFetchCard } from "./mcp-renderers/web-fetch-card"
 import { WebSearchCard } from "./mcp-renderers/web-search-card"
-import { NotebookEditCard } from "./mcp-renderers/notebook-edit-card"
 import { ComputerUseCard } from "./mcp-renderers/computer-use-card"
-import { EditCard } from "./mcp-renderers/edit-card"
-import { WriteCard } from "./mcp-renderers/write-card"
-import { LsCard } from "./mcp-renderers/ls-card"
 import { SpawnTaskCard } from "./mcp-renderers/spawn-task-card"
 import { WorkflowProposalCard } from "@/components/workflow/editor/chat/workflow-proposal-card"
 import { ManagedMcpAppCard } from "@/components/mcp-apps/managed-mcp-app-card"
@@ -63,32 +57,16 @@ const REGISTRY: Record<string, CardComponent> = {
   // markdown in `input.plan`.
   exit_plan_mode: PlanCard,
   ExitPlanMode: PlanCard,
-  // Claude built-ins
-  Read: ReadCard,
-  Glob: GlobCard,
-  Grep: GrepCard,
+  // Claude built-ins. The file tools (Read / Write / Edit / MultiEdit / Grep /
+  // Glob / LS / NotebookEdit — both casings and the namespaced cognia forms)
+  // intentionally live outside this registry: `ToolDetailBody` routes them to
+  // `FileToolBody` first, so the row chrome in `FileToolPart` owns them
+  // end-to-end. Reaching them here would mean a part arrived without the file
+  // row — which the routing above now guarantees never happens.
   WebFetch: WebFetchCard,
   WebSearch: WebSearchCard,
   web_fetch: WebFetchCard,
   web_search: WebSearchCard,
-  NotebookEdit: NotebookEditCard,
-  // Sidecar coreFiles suite (ai-sdk path registers these flat-named; the
-  // Anthropic escape hatch namespaces them — normalizeToolName folds both
-  // onto these keys). read/glob/grep reuse the SDK-built-in cards (payload
-  // shapes already tolerate path/file_path + string output).
-  read: ReadCard,
-  glob: GlobCard,
-  grep: GrepCard,
-  ls: LsCard,
-  // Native Anthropic directory-listing tool is PascalCase `LS`; the card
-  // tolerates the same newline-delimited string output as bare `ls`.
-  LS: LsCard,
-  edit: EditCard,
-  multi_edit: EditCard,
-  write: WriteCard,
-  Edit: EditCard,
-  MultiEdit: EditCard,
-  Write: WriteCard,
   // Workflow Copilot — proposal card (wf_propose_batch + wf_apply_template
   // share the same payload shape: { proposalId, summary, opCount, ... }).
   // These are plugin tools: the ai-sdk path keys them bare, but the default
@@ -131,10 +109,10 @@ const REGISTRY: Record<string, CardComponent> = {
  * image / resource it never knew to look for.
  */
 const RICH_CONTENT_AWARE = new Set([
-  "Read",
-  "read",
   // The Computer Use frame IS an MCP image block now, so the card must be
   // allowed to see it rather than being bypassed for carrying rich content.
+  // (`Read` used to sit here too; it now routes through `FileToolBody`, which
+  // reads `part.mcpContent` itself before this set is ever consulted.)
   "get_app_state",
   "zoom",
   "mcp__cognia-plugin-tools__get_app_state",
@@ -209,7 +187,10 @@ export function MCPToolCard({ part, sessionId }: { part: ToolPart; sessionId?: s
   // No built-in card — offer the tool to the plugin registry before falling
   // back to the generic rendering. Checked AFTER the host table, so a plugin
   // cannot shadow `Read` / `Grep` / … no matter what name it registers.
-  const pluginEntry = getToolResultRenderer(toolName)
+  // File tools aren't in this registry any more (FileToolPart owns them
+  // upstream), so the same no-shadowing rule is applied by name: a plugin may
+  // not claim a file tool that lands here.
+  const pluginEntry = isFileToolPart(part) ? undefined : getToolResultRenderer(toolName)
   if (pluginEntry) {
     const PluginCard = pluginEntry.component
     // Plugin cards are treated as rich-content-aware: registering for a tool IS

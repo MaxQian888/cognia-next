@@ -6,11 +6,11 @@
 // generic card): a small collapsible that names the type and shows its JSON,
 // so a stray/custom part is debuggable instead of invisible.
 
-import { memo } from "react"
+import { memo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { ChevronRightIcon, HelpCircleIcon } from "lucide-react"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { HelpCircleIcon } from "lucide-react"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
+import { ToolRowShell } from "@/components/chat/message-parts/tool-row"
 
 export interface UnknownPartCardProps {
   part: unknown
@@ -56,20 +56,28 @@ export function safeDiagnosticJson(part: unknown, labels: DiagnosticFallbackLabe
 export const UnknownPartCard = memo(function UnknownPartCard({ part }: UnknownPartCardProps) {
   const t = useTranslations("chat.message")
   const diagnosticT = useTranslations("chat.message.unknownPartDiagnostic")
+  const [open, setOpen] = useState(false)
   const type = partType(part)
   return (
-    <div
-      className="not-prose my-1 rounded-md border border-dashed bg-muted/20"
-      data-testid="unknown-part-card"
-      data-part-type={type}
-    >
-      <Collapsible>
-        <CollapsibleTrigger className="group flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60">
-          <ChevronRightIcon className="size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
-          <HelpCircleIcon className="size-3.5 shrink-0" />
-          <span className="truncate">{t("unknownPart", { type })}</span>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="px-2 pb-2">
+    // Shared row chrome — an unrecognised part is a muted status row whose
+    // diagnostic payload expands under the left rule, same as a tool body.
+    <div data-testid="unknown-part-card" data-part-type={type}>
+      <ToolRowShell
+        className="my-1"
+        status="pending"
+        open={open}
+        onToggle={() => setOpen((v) => !v)}
+        ariaLabel={t("unknownPart", { type })}
+        testId="unknown-part-row"
+        lead={
+          <span className="truncate text-xs text-muted-foreground">
+            {t("unknownPart", { type })}
+          </span>
+        }
+        icon={<HelpCircleIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />}
+        target={<span className="flex-1" />}
+      >
+        <div className="mb-1 border-l pl-3 pt-1">
           <CodeBlock
             code={safeDiagnosticJson(part, {
               redacted: diagnosticT("redacted"),
@@ -80,8 +88,8 @@ export const UnknownPartCard = memo(function UnknownPartCard({ part }: UnknownPa
             language="json"
             showLineNumbers={false}
           />
-        </CollapsibleContent>
-      </Collapsible>
+        </div>
+      </ToolRowShell>
     </div>
   )
 })

@@ -2,7 +2,7 @@
 
 import { useState, memo, useCallback, useRef, useEffect } from "react"
 import { useTranslations } from "next-intl"
-import { Maximize2, WrapText, Hash } from "lucide-react"
+import { Expand, ListOrdered, WrapText } from "lucide-react"
 import { AnimatedActionIcon, CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
 import { DownloadIcon as AnimatedDownloadIcon } from "@/components/ui/download"
 import { cn } from "@/lib/utils"
@@ -39,6 +39,20 @@ export interface CodeBlockProps {
    * Once streaming finalises, the parent flips the flag and Shiki kicks in.
    */
   isStreaming?: boolean
+  /**
+   * Tighter chrome for a block nested inside another component's surface —
+   * the file-tool row expansions, where the standalone margin / header height
+   * / padding tuned for prose reads as a loose card-in-card. Same features,
+   * denser packing; fullscreen keeps the same density.
+   */
+  compact?: boolean
+  /**
+   * Replaces the header's left label (default: language + filename). File-tool
+   * bodies pass a workbench link so the header doubles as the file identity —
+   * `language` then drops to a muted suffix. `filename` still feeds the
+   * download name independently.
+   */
+  headerTitle?: React.ReactNode
 }
 
 /**
@@ -62,6 +76,8 @@ export const CodeBlock = memo(function CodeBlock({
   highlightLines = [],
   filename,
   isStreaming = false,
+  compact = false,
+  headerTitle,
 }: CodeBlockProps) {
   const t = useTranslations("chat.renderers.code")
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -162,9 +178,12 @@ export const CodeBlock = memo(function CodeBlock({
         return (
           <div
             className={cn(
-              "code-scroll-x overflow-x-auto text-sm",
-              "[&>pre]:m-0 [&>pre]:p-4 [&>pre]:bg-muted/50!",
-              "[&_code]:font-mono [&_code]:text-sm",
+              "code-scroll-x overflow-x-auto",
+              compact ? "text-xs" : "text-sm",
+              compact ? "[&>pre]:p-2.5" : "[&>pre]:p-4",
+              "[&>pre]:m-0 [&>pre]:bg-muted/50!",
+              "[&_code]:font-mono",
+              compact ? "[&_code]:text-xs" : "[&_code]:text-sm",
               localShowLineNumbers && "code-line-numbers",
               wordWrap && "[&>pre]:whitespace-pre-wrap",
               inFullscreen && "max-h-[70vh]"
@@ -186,7 +205,8 @@ export const CodeBlock = memo(function CodeBlock({
         <pre
           ref={inFullscreen ? undefined : codeRef}
           className={cn(
-            "code-scroll-x overflow-x-auto p-4 bg-muted/50 text-sm font-mono",
+            "code-scroll-x overflow-x-auto bg-muted/50 font-mono",
+            compact ? "p-2.5 text-xs" : "p-4 text-sm",
             wordWrap && "whitespace-pre-wrap wrap-break-word",
             inFullscreen && "max-h-[70vh]"
           )}
@@ -202,16 +222,25 @@ export const CodeBlock = memo(function CodeBlock({
                   {lines.map((line, i) => (
                     <tr
                       key={i}
-                      className={cn("leading-relaxed", isLineHighlighted(i + 1) && "bg-primary/10")}
+                      className={cn(
+                        compact ? "leading-5" : "leading-relaxed",
+                        isLineHighlighted(i + 1) && "bg-primary/10"
+                      )}
                     >
                       <td
-                        className="pr-4 text-right text-muted-foreground select-none w-8 align-top border-r border-muted mr-2"
+                        className={cn(
+                          "text-right text-muted-foreground select-none align-top border-r border-muted",
+                          compact ? "pr-2 w-6" : "pr-4 w-8 mr-2"
+                        )}
                         aria-hidden="true"
                       >
                         {i + 1}
                       </td>
                       <td
-                        className={cn("pl-4", wordWrap ? "whitespace-pre-wrap" : "whitespace-pre")}
+                        className={cn(
+                          compact ? "pl-2" : "pl-4",
+                          wordWrap ? "whitespace-pre-wrap" : "whitespace-pre"
+                        )}
                       >
                         {line || " "}
                       </td>
@@ -240,12 +269,18 @@ export const CodeBlock = memo(function CodeBlock({
       hasHighlighting,
       highlightedHtml,
       darkHighlightedHtml,
+      compact,
       t,
     ]
   )
 
   const truncationFooter = truncated ? (
-    <div className="flex items-center justify-between gap-2 border-t bg-muted/40 px-4 py-2 text-xs">
+    <div
+      className={cn(
+        "flex items-center justify-between gap-2 border-t bg-muted/40",
+        compact ? "px-2.5 py-1 text-[11px]" : "px-4 py-2 text-xs"
+      )}
+    >
       <span className="text-muted-foreground">
         {t("truncatedNotice", {
           shown: CODE_AUTO_RENDER_MAX_LINES,
@@ -255,26 +290,56 @@ export const CodeBlock = memo(function CodeBlock({
       <button
         type="button"
         onClick={() => setShowAllLines(true)}
-        className="rounded px-2 py-1 font-medium text-primary hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:outline-none"
+        className={cn(
+          "rounded font-medium text-primary hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:outline-none",
+          compact ? "px-1.5 py-0.5" : "px-2 py-1"
+        )}
       >
         {t("showAllLines")}
       </button>
     </div>
   ) : null
 
+  const controlBtn = compact ? "size-5" : "size-6"
+  // `size-*`, not `h-*`/`w-*`: Button pins any svg child without a `size-`
+  // class to 16px, which would silently override these.
+  const controlIcon = compact ? "size-2.5" : "size-3"
+
   return (
     <>
       <div
-        className={cn("group relative rounded-lg overflow-hidden my-3 border", className)}
+        className={cn(
+          "group relative overflow-hidden border",
+          compact ? "my-1 rounded-md" : "my-3 rounded-lg",
+          className
+        )}
         role="figure"
         aria-label={language ? t("figureLabelWithLang", { language }) : t("figureLabel")}
       >
-        <div className="flex items-center justify-between px-4 py-2 bg-muted/80 border-b text-xs">
-          <div className="flex items-center gap-2 text-muted-foreground">
-            {language && <span className="font-mono font-medium">{language}</span>}
-            {filename && <span className="text-muted-foreground/60">{filename}</span>}
-            {!language && !filename && (
-              <span className="font-mono">{/* i18n-exempt: generic fallback label */}code</span>
+        <div
+          className={cn(
+            "flex items-center justify-between bg-muted/80 border-b",
+            compact ? "px-2.5 py-1 text-[11px]" : "px-4 py-2 text-xs"
+          )}
+        >
+          <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
+            {headerTitle ? (
+              <>
+                <span className="min-w-0 truncate font-mono font-medium text-foreground">
+                  {headerTitle}
+                </span>
+                {language && (
+                  <span className="shrink-0 text-muted-foreground/60">· {language}</span>
+                )}
+              </>
+            ) : (
+              <>
+                {language && <span className="font-mono font-medium">{language}</span>}
+                {filename && <span className="text-muted-foreground/60">{filename}</span>}
+                {!language && !filename && (
+                  <span className="font-mono">{/* i18n-exempt: generic fallback label */}code</span>
+                )}
+              </>
             )}
           </div>
 
@@ -288,58 +353,58 @@ export const CodeBlock = memo(function CodeBlock({
             <TooltipIconButton
               variant="ghost"
               size="icon"
-              className="h-6 w-6"
+              className={controlBtn}
               onClick={() => setLocalShowLineNumbers(!localShowLineNumbers)}
               aria-label={localShowLineNumbers ? t("hideLinesAria") : t("showLinesAria")}
               aria-pressed={localShowLineNumbers}
               tooltip={localShowLineNumbers ? t("hideLines") : t("showLines")}
             >
-              <Hash className="h-3 w-3" />
+              <ListOrdered className={controlIcon} />
             </TooltipIconButton>
 
             <TooltipIconButton
               variant="ghost"
               size="icon"
-              className="h-6 w-6"
+              className={controlBtn}
               onClick={() => setWordWrap(!wordWrap)}
               aria-label={wordWrap ? t("unwrapAria") : t("wrapAria")}
               aria-pressed={wordWrap}
               tooltip={wordWrap ? t("unwrap") : t("wrap")}
             >
-              <WrapText className="h-3 w-3" />
+              <WrapText className={controlIcon} />
             </TooltipIconButton>
 
             <TooltipIconButton
               variant="ghost"
               size="icon"
-              className="h-6 w-6"
+              className={controlBtn}
               onClick={handleCopy}
               aria-label={t("copyAria")}
               tooltip={t("copy")}
             >
-              <CopyFeedbackIcon copied={copied} size={12} />
+              <CopyFeedbackIcon copied={copied} size={compact ? 10 : 12} />
             </TooltipIconButton>
 
             <TooltipIconButton
               variant="ghost"
               size="icon"
-              className="h-6 w-6"
+              className={controlBtn}
               onClick={handleDownload}
               aria-label={t("downloadAria")}
               tooltip={t("download")}
             >
-              <AnimatedActionIcon icon={AnimatedDownloadIcon} size={12} />
+              <AnimatedActionIcon icon={AnimatedDownloadIcon} size={compact ? 10 : 12} />
             </TooltipIconButton>
 
             <TooltipIconButton
               variant="ghost"
               size="icon"
-              className="h-6 w-6"
+              className={controlBtn}
               onClick={() => setIsFullscreen(true)}
               aria-label={t("fullscreenAria")}
               tooltip={t("fullscreen")}
             >
-              <Maximize2 className="h-3 w-3" />
+              <Expand className={controlIcon} />
             </TooltipIconButton>
           </div>
         </div>
@@ -363,7 +428,7 @@ export const CodeBlock = memo(function CodeBlock({
                   aria-label={localShowLineNumbers ? t("hideLinesAria") : t("showLinesAria")}
                   tooltip={localShowLineNumbers ? t("hideLines") : t("showLines")}
                 >
-                  <Hash className="h-3.5 w-3.5" />
+                  <ListOrdered className="size-3.5" />
                 </TooltipIconButton>
                 <TooltipIconButton
                   variant="ghost"
@@ -373,7 +438,7 @@ export const CodeBlock = memo(function CodeBlock({
                   aria-label={wordWrap ? t("unwrapAria") : t("wrapAria")}
                   tooltip={wordWrap ? t("unwrap") : t("wrap")}
                 >
-                  <WrapText className="h-3.5 w-3.5" />
+                  <WrapText className="size-3.5" />
                 </TooltipIconButton>
                 <TooltipIconButton
                   variant="ghost"

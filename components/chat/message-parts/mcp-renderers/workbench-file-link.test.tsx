@@ -103,6 +103,20 @@ describe("WorkbenchFileLink", () => {
     expect(screen.getByTestId("mcp-workbench-file-link")).toHaveTextContent("a.ts")
   })
 
+  it("prefixes the path with its file-type glyph, on both the link and inert forms", () => {
+    const { unmount } = render(<WorkbenchFileLink sessionId="s1" path="/repo/src/a.tsx" />)
+    expect(
+      screen.getByTestId("mcp-workbench-file-link").querySelector("[data-file-type]")
+    ).toHaveAttribute("data-file-type", "react")
+    unmount()
+
+    const { container } = render(<WorkbenchFileLink path="/repo/src/b.md" />)
+    expect(container.querySelector("[data-file-type]")).toHaveAttribute(
+      "data-file-type",
+      "markdown"
+    )
+  })
+
   it("names the file in its accessible name, not just the action", () => {
     // A Grep card renders one of these per match. A bare "Open in the workspace
     // panel" label replaces the visible path, so every row announces the same

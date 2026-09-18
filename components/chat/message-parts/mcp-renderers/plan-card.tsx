@@ -6,13 +6,10 @@
 // markdown string in `input.plan`; we render it with the shared
 // MarkdownRenderer so headings / lists / code in the plan format properly.
 
-import { useTranslations } from "next-intl"
 import type { ToolUIPart } from "ai"
-import { McpCardShell } from "./common"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 
 export function PlanCard({ part }: { part: ToolUIPart }) {
-  const t = useTranslations("chat.mcp.plan")
   const input = (part.input ?? {}) as { plan?: unknown }
   const plan = typeof input.plan === "string" ? input.plan.trim() : ""
   if (!plan) return null
@@ -22,12 +19,10 @@ export function PlanCard({ part }: { part: ToolUIPart }) {
   // ScrollArea): the hover-only Radix scrollbar is ungrabbable mid-text-selection
   // when nested inside the transcript scroller.
   return (
-    <McpCardShell title={t("title")} testId="mcp-plan-card">
-      <div className="max-h-80 overflow-y-auto overscroll-contain">
-        <div data-testid="mcp-plan-body" className="pr-3 text-sm">
-          <MarkdownRenderer content={plan} />
-        </div>
+    <div data-testid="mcp-plan-card" className="my-1 max-h-80 overflow-y-auto overscroll-contain">
+      <div data-testid="mcp-plan-body" className="pr-3 text-sm">
+        <MarkdownRenderer content={plan} />
       </div>
-    </McpCardShell>
+    </div>
   )
 }

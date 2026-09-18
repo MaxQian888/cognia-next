@@ -9,15 +9,14 @@
  * Phase 8 of the ClaudeCode 完整化 plan.
  */
 
-import { memo } from "react"
+import { memo, useState } from "react"
 import { useTranslations } from "next-intl"
 import Link from "next/link"
 import { ArrowRightIcon, ExternalLinkIcon, UsersIcon } from "lucide-react"
-import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { ToolRowShell } from "@/components/chat/message-parts/tool-row"
 import type { AgentTeamDispatchPart as DispatchPartType } from "@/lib/claude/parts-extensions"
 import type { AgentFlowMode } from "@/types/appearance"
-import { cn } from "@/lib/utils"
 
 interface Props {
   part: DispatchPartType
@@ -33,59 +32,60 @@ export const AgentTeamDispatchPart = memo(function AgentTeamDispatchPart({
 }: Props) {
   const t = useTranslations("chat.agentTeamDispatch")
   const compact = mode === "simplified"
+  // Standard shows the task by default — a dispatch exists to be read;
+  // simplified drops the body entirely (static row, link only).
+  const [open, setOpen] = useState(true)
   // `part.to` is a CHARACTER id, not a squad. This used to point at
   // `/agent-teams?focus=<character>`, a retired route with a parameter nothing
   // read, so the link went to a page that could not honour it. Characters live
   // in Discover, which takes `?category=…&item=…`.
   const memberHref = `/discover?category=characters&item=${encodeURIComponent(part.to)}`
   return (
-    <Card
-      className={cn(
-        "not-prose border-l-4 border-l-primary",
-        compact ? "my-1 px-3 py-1.5" : "my-2 p-3"
-      )}
-      data-testid={`agent-team-dispatch-${part.to}`}
-      data-mode={mode}
-    >
-      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-        <UsersIcon className="size-3 shrink-0" aria-hidden />
-        <span className="min-w-0 max-w-[40%] truncate font-medium">
-          {fromName ?? t("supervisor")}
-        </span>
-        <ArrowRightIcon className="size-3 shrink-0" aria-hidden />
-        <Badge
-          variant="secondary"
-          className="max-w-[45%] truncate text-[10px]"
-          data-testid="dispatch-to"
-        >
-          {part.toName}
-        </Badge>
-        {compact ? (
+    <div data-testid={`agent-team-dispatch-${part.to}`} data-mode={mode}>
+      <ToolRowShell
+        className={compact ? "my-1" : "my-2"}
+        status="complete"
+        open={open}
+        onToggle={() => setOpen((v) => !v)}
+        ariaLabel={t("supervisor")}
+        testId={`agent-team-dispatch-row-${part.to}`}
+        lead={
+          <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <UsersIcon className="size-3 shrink-0" aria-hidden />
+            <span className="min-w-0 max-w-[40%] truncate font-medium">
+              {fromName ?? t("supervisor")}
+            </span>
+            <ArrowRightIcon className="size-3 shrink-0" aria-hidden />
+            <Badge
+              variant="secondary"
+              className="max-w-[45%] truncate text-[10px]"
+              data-testid="dispatch-to"
+            >
+              {part.toName}
+            </Badge>
+          </span>
+        }
+        target={<span className="flex-1" />}
+        actions={
           <Link
             href={memberHref}
-            className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-sm underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+            className="inline-flex shrink-0 items-center gap-1 rounded-sm px-1 py-0.5 text-[11px] underline underline-offset-2 text-muted-foreground hover:text-foreground"
             data-testid="dispatch-open"
+            onClick={(e) => e.stopPropagation()}
           >
             {t("openMember")}
             <ExternalLinkIcon className="size-3" aria-hidden />
           </Link>
-        ) : null}
-      </div>
-      {compact ? null : (
-        <>
-          <p className="mt-1 max-h-60 overflow-y-auto whitespace-pre-wrap break-words text-xs">
-            {part.task}
-          </p>
-          <Link
-            href={memberHref}
-            className="mt-1.5 inline-flex items-center gap-1 rounded-sm text-[11px] underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-            data-testid="dispatch-open"
-          >
-            {t("openMember")}
-            <ExternalLinkIcon className="size-3" aria-hidden />
-          </Link>
-        </>
-      )}
-    </Card>
+        }
+      >
+        {compact ? null : (
+          <div className="mb-1 border-l pl-3 pt-1">
+            <p className="max-h-60 overflow-y-auto whitespace-pre-wrap break-words text-xs">
+              {part.task}
+            </p>
+          </div>
+        )}
+      </ToolRowShell>
+    </div>
   )
 })

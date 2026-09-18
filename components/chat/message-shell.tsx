@@ -1,33 +1,28 @@
 "use client"
 
-import { useMemo, useState, type ReactNode } from "react"
+import { useMemo, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
-import {
-  BotIcon,
-  CheckCircle2Icon,
-  ChevronDownIcon,
-  CircleAlertIcon,
-  SquareIcon,
-  UserIcon,
-} from "lucide-react"
+import { BotIcon, CircleAlertIcon, SquareIcon, UserIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
 import type { UsageInfo } from "@/lib/claude/adapter"
 import type { ResolvedMessageDisplayOptions } from "@/lib/chat/message-display"
 import type { MessageDisplayMetadataOptions } from "@/types/appearance"
 import { assistantBubbleClass, messageCardClass } from "@/lib/chat/message-bubble"
-import { runMetadataOf } from "@/lib/chat/message-run-metadata"
+import { runMetadataOf, type MessageRunMetadata } from "@/lib/chat/message-run-metadata"
 import { RouterFusionRunCard } from "@/components/router-fusion/router-fusion-run-card"
 import { RoutingIndicator } from "@/components/chat/routing-indicator"
 import { useSettingsStore } from "@/stores/settings"
+import { getLucideExport } from "@/lib/icons/lucide-catalog"
 import { cn } from "@/lib/utils"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import type { AvatarSubject } from "@/lib/ui/avatar"
 import type { UIMessage } from "ai"
 import { MessageMotionProvider } from "@/components/chat/motion/motion-reveal"
+import { ToolStatusDot, type ToolDotStatus } from "@/components/chat/message-parts/tool-row"
 
 export interface MessageShellProps {
   message: UIMessage
@@ -69,47 +64,70 @@ export const METADATA_FIELDS = [
 
 type MetadataField = (typeof METADATA_FIELDS)[number]
 
+export interface MetadataDetailRow {
+  key: MetadataField
+  label: string
+  value: string
+}
+
 function formatTimestamp(value: number): string {
   return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(value)
 }
 
-export function MessageShell({
-  message,
-  display,
-  speakerName,
-  speakerColor,
-  speakerAvatar,
-  isStreaming = false,
-  onStopSpeaker,
-  children,
-}: MessageShellProps) {
+/** The icon a sealed run's `agent.icon` resolves to, or an emoji/text glyph. */
+function agentIconNode(icon: string | undefined, className: string, color?: string): ReactNode {
+  if (!icon) return null
+  const LucideIcon = getLucideExport(icon) ?? getLucideExport(toPascal(icon))
+  if (LucideIcon) {
+    return <LucideIcon className={className} style={color ? { color } : undefined} />
+  }
+  // A preset may carry a single emoji glyph instead of a Lucide export name.
+  if (/\p{Extended_Pictographic}/u.test(icon)) {
+    return (
+      <span className="text-[11px] leading-none" aria-hidden>
+        {icon}
+      </span>
+    )
+  }
+  return null
+}
+
+function toPascal(name: string): string {
+  return name
+    .split(/[-_\s]/)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join("")
+}
+
+/**
+ * The run-metadata snapshot both the header and the footer meta line read.
+ * Extracted because the meta line lives in `message-renderer`'s action row
+ * while the values live here — deriving them twice would let the two
+ * placements drift on the same message.
+ */
+function useMessageMetadata(
+  message: UIMessage,
+  display: ResolvedMessageDisplayOptions,
+  speakerName: string | undefined
+): {
+  run: MessageRunMetadata | undefined
+  usage: UsageInfo | undefined
+  createdAt: number | undefined
+  isAssistant: boolean
+  identity: string
+  metadataValues: Partial<Record<MetadataField, string>>
+  detailRows: MetadataDetailRow[]
+} {
   const t = useTranslations("chat.messageDisplay")
-  const [detailsOpen, setDetailsOpen] = useState(false)
   const metadata = (message.metadata as Record<string, unknown> | undefined) ?? {}
   const run = runMetadataOf(message)
   const usage = metadata.usage as UsageInfo | undefined
   const createdAt = typeof metadata.createdAt === "number" ? metadata.createdAt : undefined
   const isAssistant = message.role === "assistant"
-  const isError = Boolean(run?.finishReason && /error|fail|abort|cancel/i.test(run.finishReason))
-  const identity = speakerName ?? (isAssistant ? t("assistant") : t("you"))
-  /**
-   * A named speaker means this message came out of a ROOM: a character team, a
-   * shared session, or an IM group. There the header is not decoration, it is
-   * the only thing that says which of several participants is talking, so it
-   * overrides the metadata placement preference. A direct chat has no
-   * `speakerName` and keeps honouring the setting exactly as before.
-   */
-  const inRoom = Boolean(speakerName)
-  const showIdentity = inRoom || display.metadata.identity === "header"
-  // Auto-routing explainability chip (ADR-0043 Phase 12). Opt-out: the flag
-  // defaults to on and only an explicit `false` hides it.
-  const showRoutingIndicator =
-    useSettingsStore((s) => s.settings?.autoRouting?.showRoutingIndicator) !== false
-  const routingChip =
-    isAssistant &&
-    run?.routing !== undefined &&
-    run.routing.mode !== "manual" &&
-    showRoutingIndicator
+  // The sealed preset/agent name beats the generic "Assistant"; a room speaker
+  // beats both — a named speaker is the only thing that says which participant
+  // is talking.
+  const identity = speakerName ?? run?.agent?.name ?? (isAssistant ? t("assistant") : t("you"))
   // One formatted value per metadata field, read by BOTH placements. `header`
   // and `details` used to be assembled independently, and the header list
   // simply omitted `usage` and `cost` — so choosing "header" for either
@@ -137,17 +155,129 @@ export function MessageShell({
   // `providerId` and `finishReason` are persisted strings and an unresolved run
   // stores them as `""`, which a bare `!== undefined` check would render as a
   // blank header entry (with its separator) or a blank details row.
-  const detailRows = useMemo(
+  const detailRows = useMemo<MetadataDetailRow[]>(
     () =>
       METADATA_FIELDS.filter(
         (key) => display.metadata[key] === "details" && Boolean(metadataValues[key])
       ).map((key) => ({
         key,
         label: t(`metadata.${key}`),
-        value: metadataValues[key] as ReactNode,
+        value: metadataValues[key] as string,
       })),
     [display.metadata, metadataValues, t]
   )
+
+  return { run, usage, createdAt, isAssistant, identity, metadataValues, detailRows }
+}
+
+/**
+ * The compact run-metadata chip that lives on the right end of the action
+ * footer (`message-renderer`). The summary — `external · 5.5s · ↑2.8k ↓15 ·
+ * $0.0216` — is itself the answer for most checks; clicking opens a popover
+ * with the full per-field list, anchored to the chip so expansion never moves
+ * the transcript around it.
+ */
+export function MessageMetaLine({
+  message,
+  display,
+  speakerName,
+  className,
+}: {
+  message: UIMessage
+  display: ResolvedMessageDisplayOptions
+  speakerName?: string
+  className?: string
+}) {
+  const t = useTranslations("chat.messageDisplay")
+  const { detailRows } = useMessageMetadata(message, display, speakerName)
+  if (detailRows.length === 0) return null
+  const summary = detailRows.map((row) => row.value).join(" · ")
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={t("details")}
+          title={t("details")}
+          data-testid="message-meta-line"
+          className={cn(
+            "inline-flex h-6 min-w-0 items-center rounded-md px-1.5",
+            "text-[11px] text-muted-foreground transition-colors",
+            "hover:bg-muted/60 hover:text-foreground",
+            "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            className
+          )}
+        >
+          <span className="truncate font-mono tabular-nums">{summary}</span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        side="top"
+        align="end"
+        className="w-auto max-w-sm p-3"
+        data-testid="message-meta-popover"
+      >
+        <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
+          {detailRows.map((row) => (
+            <div key={row.key} className="contents">
+              <dt className="text-muted-foreground">{row.label}</dt>
+              <dd className="min-w-0 break-words font-mono text-foreground">{row.value}</dd>
+            </div>
+          ))}
+        </dl>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+export function MessageShell({
+  message,
+  display,
+  speakerName,
+  speakerColor,
+  speakerAvatar,
+  isStreaming = false,
+  onStopSpeaker,
+  children,
+}: MessageShellProps) {
+  const t = useTranslations("chat.messageDisplay")
+  const { run, createdAt, isAssistant, identity, metadataValues } = useMessageMetadata(
+    message,
+    display,
+    speakerName
+  )
+  const isError = Boolean(run?.finishReason && /error|fail|abort|cancel/i.test(run.finishReason))
+  /**
+   * A named speaker means this message came out of a ROOM: a character team, a
+   * shared session, or an IM group. There the header is not decoration, it is
+   * the only thing that says which of several participants is talking, so it
+   * overrides the metadata placement preference. A direct chat has no
+   * `speakerName` and keeps honouring the setting exactly as before.
+   */
+  const inRoom = Boolean(speakerName)
+  const showIdentity = inRoom || display.metadata.identity === "header"
+  // Auto-routing explainability chip (ADR-0043 Phase 12). Opt-out: the flag
+  // defaults to on and only an explicit `false` hides it.
+  const showRoutingIndicator =
+    useSettingsStore((s) => s.settings?.autoRouting?.showRoutingIndicator) !== false
+  const routingChip =
+    isAssistant &&
+    run?.routing !== undefined &&
+    run.routing.mode !== "manual" &&
+    showRoutingIndicator
+
+  // The same breathing-dot language every tool row leads with, lifted to the
+  // turn's own row: a message IS the largest activity in the stream. Complete
+  // is the default state, so it gets a quiet green dot and no "Complete" text —
+  // the status chip below only speaks when something is actually happening
+  // (streaming) or went wrong (error).
+  const statusDot: ToolDotStatus | null = isAssistant
+    ? isStreaming
+      ? "running"
+      : isError
+        ? "error"
+        : "complete"
+    : null
 
   // `identity` and `timestamp` render their own header elements below (icon +
   // colour, and a `<time>`), so they are excluded here rather than missing.
@@ -180,7 +310,8 @@ export function MessageShell({
         {(showIdentity ||
           display.metadata.timestamp === "header" ||
           headerItems.length > 0 ||
-          routingChip) && (
+          routingChip ||
+          statusDot) && (
           <header
             className={cn(
               "mb-1.5 flex min-h-6 flex-wrap items-center gap-1.5 text-xs text-muted-foreground",
@@ -188,15 +319,22 @@ export function MessageShell({
             )}
             data-testid="message-shell-header"
           >
+            {statusDot ? (
+              <span data-testid="message-status-dot" className="inline-flex items-center">
+                <ToolStatusDot status={statusDot} />
+              </span>
+            ) : null}
             {showIdentity && (
               <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
                 {speakerAvatar ? (
                   <AvatarBadge subject={speakerAvatar} size={14} textClassName="text-[8px]" />
                 ) : isAssistant ? (
-                  <BotIcon
-                    className="size-3.5"
-                    style={speakerColor ? { color: speakerColor } : undefined}
-                  />
+                  (agentIconNode(run?.agent?.icon, "size-3.5", speakerColor) ?? (
+                    <BotIcon
+                      className="size-3.5"
+                      style={speakerColor ? { color: speakerColor } : undefined}
+                    />
+                  ))
                 ) : (
                   <UserIcon className="size-3.5" />
                 )}
@@ -228,20 +366,14 @@ export function MessageShell({
                 {formatTimestamp(createdAt)}
               </time>
             )}
-            {isAssistant && (
+            {isAssistant && (isStreaming || isError) && (
               <span className="inline-flex items-center gap-1" role="status" aria-live="polite">
                 {isStreaming ? (
                   <Spinner className="size-3" />
-                ) : isError ? (
-                  <CircleAlertIcon className="size-3 text-destructive" aria-hidden />
                 ) : (
-                  <CheckCircle2Icon className="size-3" aria-hidden />
+                  <CircleAlertIcon className="size-3 text-destructive" aria-hidden />
                 )}
-                {isStreaming
-                  ? t("status.streaming")
-                  : isError
-                    ? t("status.error")
-                    : t("status.complete")}
+                {isStreaming ? t("status.streaming") : t("status.error")}
               </span>
             )}
           </header>
@@ -256,35 +388,6 @@ export function MessageShell({
             <RouterFusionRunCard routerFusion={run.routerFusion} />
           </div>
         ) : null}
-
-        {detailRows.length > 0 && (
-          <Collapsible open={detailsOpen} onOpenChange={setDetailsOpen} className="mt-2">
-            <CollapsibleTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-7 gap-1 px-2 text-xs text-muted-foreground"
-                aria-label={t("details")}
-              >
-                <ChevronDownIcon
-                  className={cn("size-3.5 transition-transform", detailsOpen && "rotate-180")}
-                />
-                {t("details")}
-              </Button>
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 px-2 py-1 text-xs">
-                {detailRows.map((row) => (
-                  <div key={row.key} className="contents">
-                    <dt className="text-muted-foreground">{row.label}</dt>
-                    <dd className="min-w-0 break-words font-mono text-foreground">{row.value}</dd>
-                  </div>
-                ))}
-              </dl>
-            </CollapsibleContent>
-          </Collapsible>
-        )}
       </section>
     </MessageMotionProvider>
   )

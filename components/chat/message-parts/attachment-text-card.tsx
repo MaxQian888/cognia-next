@@ -32,26 +32,26 @@ export function AttachmentTextCard({ filename, mediaType, text }: AttachmentText
   const bodyId = useId()
 
   return (
-    <div className="my-1 overflow-hidden rounded-md border" data-testid="attachment-text-card">
+    // Borderless quiet row, same language as the prompt-preamble strip it sits
+    // beside in the user bubble: chevron + icon + name + count, the extracted
+    // text expanding under a left rule rather than inside a boxed card.
+    <div className="my-1 text-muted-foreground" data-testid="attachment-text-card">
       <button
         type="button"
         aria-expanded={open}
         aria-controls={bodyId}
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+        className="flex w-full items-center gap-1.5 px-1 py-1 text-left text-xs transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
       >
         <ChevronRightIcon
-          className={cn(
-            "size-3.5 shrink-0 text-muted-foreground transition-transform",
-            open && "rotate-90"
-          )}
+          className={cn("size-3 shrink-0 transition-transform", open && "rotate-90")}
           aria-hidden
         />
-        <FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        <FileTextIcon className="size-3.5 shrink-0" aria-hidden />
         <span className="truncate" title={mediaType ? `${filename} · ${mediaType}` : filename}>
           {filename}
         </span>
-        <span className="ms-auto shrink-0 tabular-nums text-[11px] text-muted-foreground">
+        <span className="ms-auto shrink-0 tabular-nums text-[11px]">
           {t("extractedChars", { count: text.length })}
         </span>
       </button>
@@ -59,7 +59,7 @@ export function AttachmentTextCard({ filename, mediaType, text }: AttachmentText
         <pre
           id={bodyId}
           data-testid="attachment-text-card-body"
-          className="max-h-80 overflow-auto border-t bg-muted/30 px-2 py-1.5 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words"
+          className="mt-1 max-h-80 overflow-auto whitespace-pre-wrap break-words border-s-2 border-border bg-muted/30 ps-2 pe-1 py-1.5 font-mono text-[11px] leading-relaxed"
         >
           {text}
         </pre>

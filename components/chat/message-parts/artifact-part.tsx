@@ -111,46 +111,55 @@ export const ArtifactPart = memo(function ArtifactPart({ part, className }: Arti
       data-artifact-id={part.artifactId}
       className={cn("not-prose my-2", className)}
     >
-      <ArtifactHeader>
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <ArtifactHeader className="px-3 py-1.5">
+        {/* Single-line header: title + kind inline, matching the slim tool-row
+            language the rest of the message stream now uses. */}
+        <div className="flex min-w-0 flex-1 items-center gap-2">
           <ArtifactTitle className="truncate">{artifact.title || part.title}</ArtifactTitle>
-          <ArtifactDescription className="truncate text-xs">{part.kind}</ArtifactDescription>
+          <ArtifactDescription className="shrink-0 text-xs">{part.kind}</ArtifactDescription>
         </div>
-        <ArtifactActions>
+        <ArtifactActions className="gap-0.5">
           <ArtifactAction
             tooltip={copied ? t("copied") : t("copy")}
             label={t("copyAria")}
             onClick={handleCopy}
+            className="size-6 p-0"
             data-testid="artifact-part-copy"
           >
-            <CopyFeedbackIcon copied={copied} size={16} />
+            <CopyFeedbackIcon copied={copied} size={12} />
           </ArtifactAction>
           <ArtifactAction
             tooltip={t("download")}
             label={t("downloadAria")}
             onClick={() => void handleDownload()}
+            className="size-6 p-0"
             data-testid="artifact-part-download"
           >
-            <AnimatedActionIcon icon={AnimatedDownloadIcon} size={16} />
+            <AnimatedActionIcon icon={AnimatedDownloadIcon} size={12} />
           </ArtifactAction>
           <ArtifactAction
             tooltip={t("openInCanvas")}
             label={t("openInCanvasAria")}
             icon={ExternalLinkIcon}
             onClick={handleOpenInCanvas}
+            className="size-6 p-0"
             data-testid="artifact-part-open-canvas"
           />
           <Button
             variant="ghost"
             size="sm"
-            className="size-8 p-0 text-muted-foreground hover:text-foreground"
+            className="size-6 p-0 text-muted-foreground hover:text-foreground"
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
             aria-label={open ? t("collapse") : t("expand")}
             data-testid="artifact-part-toggle"
             type="button"
           >
-            {open ? <ChevronUpIcon className="size-4" /> : <ChevronDownIcon className="size-4" />}
+            {open ? (
+              <ChevronUpIcon className="size-3.5" />
+            ) : (
+              <ChevronDownIcon className="size-3.5" />
+            )}
           </Button>
         </ArtifactActions>
       </ArtifactHeader>

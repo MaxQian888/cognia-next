@@ -7,10 +7,21 @@ import { ReadCard } from "./read-card"
 import type { McpResultBlock } from "@/lib/claude/parts-extensions"
 
 jest.mock("@/components/chat/renderers/code-block", () => ({
-  CodeBlock: ({ code, language }: { code: string; language?: string }) => (
-    <pre data-testid="code" data-language={language}>
-      {code}
-    </pre>
+  CodeBlock: ({
+    code,
+    language,
+    headerTitle,
+  }: {
+    code: string
+    language?: string
+    headerTitle?: React.ReactNode
+  }) => (
+    <div>
+      {headerTitle}
+      <pre data-testid="code" data-language={language}>
+        {code}
+      </pre>
+    </div>
   ),
 }))
 jest.mock("@/components/chat/renderers/image-block", () => ({
@@ -47,7 +58,9 @@ describe("ReadCard", () => {
   it("renders the file contents as a code block for a text read", () => {
     render(<ReadCard part={readPart({ output: "const a = 1" })} />)
     expect(screen.getByTestId("code").textContent).toBe("const a = 1")
-    expect(screen.getByTestId("mcp-read-path").textContent).toContain("/tmp/a.ts")
+    // The code block's header carries the file identity — basename only;
+    // the full path lives on the row and in the link's aria-label.
+    expect(screen.getByTestId("mcp-read-path").textContent).toContain("a.ts")
     expect(screen.queryByTestId("img")).toBeNull()
   })
 
@@ -141,6 +154,15 @@ describe("ReadCard", () => {
     expect(screen.queryByTestId("mcp-read-code")).toBeNull()
   })
 
+  it("hosts the file link in the code block header once output arrives", () => {
+    render(<ReadCard sessionId="s1" part={readPart({ output: "const a = 1" })} />)
+    // The header title is the basename link; the full path stays in the
+    // aria-label so the row above is not re-stated inside the payload.
+    const link = screen.getByTestId("mcp-read-path-link")
+    expect(link).toHaveTextContent("a.ts")
+    expect(link.getAttribute("aria-label")).toContain("/tmp/a.ts")
+  })
+
   it("returns null when the part carries no input at all", () => {
     const { container } = render(
       <ReadCard
@@ -157,13 +179,13 @@ describe("ReadCard", () => {
   })
   it("makes the file reachable in the workspace panel", () => {
     render(<ReadCard sessionId="s1" part={readPart({ output: "const a = 1" })} />)
-    expect(screen.getByTestId("mcp-read-path-link")).toHaveTextContent("/tmp/a.ts")
+    expect(screen.getByTestId("mcp-read-path-link")).toHaveTextContent("a.ts")
   })
 
   it("leaves the path as plain text with no conversation to open it in", () => {
     render(<ReadCard part={readPart({ output: "const a = 1" })} />)
     expect(screen.queryByTestId("mcp-read-path-link")).toBeNull()
-    expect(screen.getByTestId("mcp-read-path").textContent).toContain("/tmp/a.ts")
+    expect(screen.getByTestId("mcp-read-path").textContent).toContain("a.ts")
   })
 
   it("makes a relative file_path reachable, which built-in Read accepts", async () => {
@@ -175,7 +197,7 @@ describe("ReadCard", () => {
       />
     )
     const link = screen.getByTestId("mcp-read-path-link")
-    expect(link).toHaveTextContent("src/a.ts")
+    expect(link).toHaveTextContent("a.ts")
     fireEvent.click(link)
     await waitFor(() =>
       expect(openFileInWorkbenchWorkspace).toHaveBeenCalledWith({
@@ -185,5 +207,16 @@ describe("ReadCard", () => {
         column: undefined,
       })
     )
+  })
+
+  it("clamps a large read to the preview budget and reveals the rest on demand", () => {
+    const big = Array.from({ length: 200 }, (_, i) => `L${i}`).join("\n")
+    render(<ReadCard part={readPart({ output: big })} />)
+    expect(screen.getByTestId("code").textContent).toContain("L119")
+    expect(screen.getByTestId("code").textContent).not.toContain("L120")
+    expect(screen.getByTestId("mcp-read-clamped")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("mcp-read-clamped-show-all"))
+    expect(screen.getByTestId("code").textContent).toContain("L199")
+    expect(screen.queryByTestId("mcp-read-clamped")).not.toBeInTheDocument()
   })
 })

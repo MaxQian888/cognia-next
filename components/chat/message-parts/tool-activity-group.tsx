@@ -2,11 +2,17 @@
 
 /**
  * Aggregates a run of ≥2 consecutive tool calls into a single collapsible
- * "activity group" — e.g. "Ran 5 tools ✓" — so a tool-dense turn reads as one
- * glanceable unit instead of a wall of cards. Provides group-level collapse
- * plus expand-all / collapse-all over the children.
+ * "activity group" — e.g. "4 tool calls · 1 read · 1 search" — so a tool-dense
+ * turn reads as one glanceable unit instead of a wall of calls. Provides
+ * group-level collapse plus expand-all / collapse-all over the children.
  *
- * Per display mode:
+ * The chrome is one header *row* in every display mode — status dot + tally +
+ * expand-all + chevron — with children nested under a left rule, matching the
+ * inline-row language of `TerminalToolPart` / `FileToolPart` / `ToolCallRow`.
+ * (It used to wrap standard/detailed children in a bordered card, which read
+ * as a card of cards once the calls themselves became borderless rows.)
+ *
+ * Per display mode, only the child open-state channel differs:
  *  - simplified — collapsed by default; the group owns each child's open state
  *                 and hands it down as `expanded` + `onToggle`, so
  *                 expand/collapse all is a controlled state change.
@@ -25,35 +31,19 @@
 
 import { useCallback, useMemo, useState, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
-import {
-  CheckCircleIcon,
-  ChevronDownIcon,
-  ClockIcon,
-  CircleIcon,
-  LayersIcon,
-  XCircleIcon,
-} from "lucide-react"
-import type { LucideIcon } from "lucide-react"
+import { ChevronRightIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
 
-import { MotionStatusSwap, ReadingCollapse } from "@/components/chat/motion/motion-reveal"
+import { ReadingCollapse } from "@/components/chat/motion/motion-reveal"
+import { ToolStatusDot } from "@/components/chat/message-parts/tool-row"
 import {
   aggregateToolStatus,
   countErroredTools,
   summarizeContextCounts,
-  tallyToolNames,
-  type AggregateStatus,
 } from "@/lib/chat/tool-summary"
 import type { AgentFlowMode } from "@/types/appearance"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-
-const AGG_GLYPH: Record<AggregateStatus, { Icon: LucideIcon; className: string }> = {
-  running: { Icon: ClockIcon, className: "animate-pulse text-muted-foreground" },
-  error: { Icon: XCircleIcon, className: "text-red-600 dark:text-red-500" },
-  complete: { Icon: CheckCircleIcon, className: "text-green-600 dark:text-green-500" },
-  pending: { Icon: CircleIcon, className: "text-muted-foreground" },
-}
 
 export interface ToolActivityGroupEntry {
   part: ToolUIPart
@@ -90,11 +80,9 @@ export function ToolActivityGroup({ entries, mode, renderChild }: ToolActivityGr
   const [gen, setGen] = useState(0)
 
   const status = useMemo(() => aggregateToolStatus(entries.map((e) => e.part.state)), [entries])
-  const glyph = AGG_GLYPH[status]
   const errorCount = useMemo(() => countErroredTools(entries.map((e) => e.part.state)), [entries])
-  // Type-count preview ("read ×3 · grep ×1 · edit ×1") for the collapsed header
-  // (standard/detailed). Simplified swaps in a TUI-style count summary instead.
-  const tally = useMemo(() => tallyToolNames(entries.map((e) => e.part)), [entries])
+  // TUI-style count summary ("3 reads · 2 searches") for the collapsed header —
+  // shared by every mode now that the header is a row in all of them.
   const counts = useMemo(() => summarizeContextCounts(entries.map((e) => e.part)), [entries])
 
   // Open state follows the run's status until the user takes over: a simplified
@@ -135,7 +123,7 @@ export function ToolActivityGroup({ entries, mode, renderChild }: ToolActivityGr
 
   const body: ReactNode =
     mode === "simplified" ? (
-      <div className="space-y-1">
+      <div className="space-y-0.5">
         {entries.map((entry, i) =>
           renderChild(entry.part, entry.key, {
             expanded: expandedRows.has(i),
@@ -144,7 +132,7 @@ export function ToolActivityGroup({ entries, mode, renderChild }: ToolActivityGr
         )}
       </div>
     ) : (
-      <div className="space-y-0">
+      <div className="space-y-0.5">
         {entries.map((entry) =>
           renderChild(entry.part, `${entry.key}:${gen}`, {
             forceOpen: cardsOpen ?? (mode === "detailed" ? true : undefined),
@@ -153,84 +141,59 @@ export function ToolActivityGroup({ entries, mode, renderChild }: ToolActivityGr
       </div>
     )
 
-  // Simplified mode reads as a recessive Codex-style stack: no card chrome, the
-  // header muted, and the collapsed rows nested under it. Standard/detailed keep
-  // the bordered card that wraps their full tool cards.
-  const simplified = mode === "simplified"
-
   return (
     <div
-      className={cn("not-prose w-full", simplified ? "mb-2" : "mb-4 rounded-md border bg-card")}
+      className="not-prose mb-2 w-full"
       data-testid="tool-activity-group"
       data-mode={mode}
       data-status={status}
     >
-      <div className={cn("flex items-center gap-2", simplified ? "px-1.5 py-1" : "p-2.5")}>
+      <div className="flex items-center gap-1 rounded-md px-1.5 py-1 transition-colors hover:bg-muted/50">
         <button
           type="button"
           onClick={() => setOverride(!groupOpen)}
           aria-expanded={groupOpen}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
+          className="flex min-w-0 flex-1 items-center gap-2 text-left focus-visible:outline-none"
           data-testid="tool-activity-group-toggle"
         >
-          <ChevronDownIcon
-            className={cn(
-              "size-4 shrink-0 text-muted-foreground transition-transform",
-              !groupOpen && "-rotate-90"
-            )}
-          />
-          <LayersIcon className="size-4 shrink-0 text-muted-foreground" />
-          {simplified ? (
-            // TUI-style count summary ("3 reads · 2 searches") — the compact
-            // tally of the whole context-read burst.
-            <span
-              className="min-w-0 flex-1 truncate text-sm font-medium text-muted-foreground"
-              data-testid="tool-activity-group-actions"
-            >
-              {counts.map((bucket, i) => (
-                <span key={bucket.category}>
-                  {i > 0 ? <span aria-hidden> · </span> : null}
-                  {t(`count.${bucket.category}`, { count: bucket.count })}
-                </span>
-              ))}
+          <ToolStatusDot status={status} />
+          <span
+            className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
+            data-testid="tool-activity-group-tally"
+          >
+            <span className="font-medium text-foreground/80">
+              {t("group.summary", { count: entries.length })}
             </span>
-          ) : (
-            <>
-              <span className="shrink-0 text-sm font-medium">
-                {t("group.summary", { count: entries.length })}
+            {counts.length > 0 ? <span aria-hidden> · </span> : null}
+            {counts.map((bucket, i) => (
+              <span key={bucket.category}>
+                {i > 0 ? <span aria-hidden> · </span> : null}
+                {t(`count.${bucket.category}`, { count: bucket.count })}
               </span>
-              {/* Type-count preview — keeps the collapsed group glanceable. */}
-              <span
-                className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
-                data-testid="tool-activity-group-tally"
-              >
-                {tally.map((bucket, i) => (
-                  <span key={bucket.name}>
-                    {i > 0 ? <span aria-hidden> · </span> : null}
-                    {t("group.tally", { name: bucket.name, count: bucket.count })}
-                  </span>
-                ))}
-              </span>
-            </>
-          )}
+            ))}
+          </span>
           {errorCount > 0 ? (
             <span
-              className="shrink-0 text-xs font-medium text-red-600 dark:text-red-500"
+              className="shrink-0 text-[11px] font-medium text-red-600 dark:text-red-500"
               data-testid="tool-activity-group-failed"
             >
               {t("group.failed", { count: errorCount })}
             </span>
           ) : null}
-          <MotionStatusSwap swapKey={status} className="shrink-0">
-            <glyph.Icon className={cn("size-4", glyph.className)} aria-hidden />
-          </MotionStatusSwap>
+          <ChevronRightIcon
+            className={cn(
+              "size-3.5 shrink-0 text-muted-foreground transition-transform",
+              groupOpen && "rotate-90"
+            )}
+            aria-hidden
+          />
         </button>
         {groupOpen ? (
           <Button
             type="button"
             variant="ghost"
             size="sm"
-            className="h-6 px-2 text-[11px] text-muted-foreground"
+            className="h-6 shrink-0 px-2 text-[11px] text-muted-foreground"
             onClick={toggleExpandAll}
             data-testid="tool-activity-group-expand-all"
           >
@@ -240,7 +203,9 @@ export function ToolActivityGroup({ entries, mode, renderChild }: ToolActivityGr
       </div>
 
       <ReadingCollapse open={groupOpen}>
-        <div className={cn(simplified ? "pl-4 pt-0.5 pb-1" : "border-t p-2")}>{body}</div>
+        {/* The left rule mirrors the expansion indent of a single tool row, so
+            a group reads as one row whose children happen to be more rows. */}
+        <div className="ml-[15px] border-l-2 border-border/60 pl-1 pt-0.5 pb-0.5">{body}</div>
       </ReadingCollapse>
     </div>
   )

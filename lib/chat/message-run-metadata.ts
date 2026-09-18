@@ -13,6 +13,17 @@ export interface MessageRunMetadata {
   durationMs?: number
   finishReason?: string
   /**
+   * The agent composition this turn ran under (ADR-0117 preset identity),
+   * stamped at seal so the transcript keeps saying "Build" after the user
+   * switches the session to another preset mid-conversation. `icon` is a
+   * Lucide export name (`"Hammer"`), resolved via `getLucideExport`.
+   */
+  agent?: {
+    presetId?: string
+    name?: string
+    icon?: string
+  }
+  /**
    * Routing explainability for the turn that produced this message — the
    * plan's own record, not a re-derivation: what was asked for, what the
    * strategy chose, and why. Absent when the turn never went through
@@ -81,6 +92,7 @@ export interface CompletedRunMetadataInput {
   finishReason?: string
   routing?: MessageRunMetadata["routing"]
   routerFusion?: RouterFusionRunMetadata
+  agent?: MessageRunMetadata["agent"]
 }
 
 /**
@@ -159,6 +171,7 @@ export function buildCompletedRunMetadata({
   finishReason,
   routing,
   routerFusion,
+  agent,
 }: CompletedRunMetadataInput): MessageRunMetadata {
   return {
     providerId,
@@ -174,6 +187,7 @@ export function buildCompletedRunMetadata({
     finishReason,
     ...(routing ? { routing } : {}),
     ...(routerFusion ? { routerFusion } : {}),
+    ...(agent ? { agent } : {}),
   }
 }
 

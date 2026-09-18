@@ -8,10 +8,21 @@ const canOfferWorkbenchReview = jest.fn(() => true)
 const openFileInWorkbenchWorkspace = jest.fn(async (_args: unknown) => true)
 
 jest.mock("@/components/chat/renderers/code-block", () => ({
-  CodeBlock: ({ code, language }: { code: string; language?: string }) => (
-    <pre data-testid="code" data-language={language}>
-      {code}
-    </pre>
+  CodeBlock: ({
+    code,
+    language,
+    headerTitle,
+  }: {
+    code: string
+    language?: string
+    headerTitle?: React.ReactNode
+  }) => (
+    <div>
+      {headerTitle}
+      <pre data-testid="code" data-language={language}>
+        {code}
+      </pre>
+    </div>
   ),
 }))
 jest.mock("next-intl", () => ({
@@ -76,7 +87,9 @@ describe("NotebookEditCard", () => {
         })}
       />
     )
-    expect(screen.getByText("replace · code · cell c7")).toBeInTheDocument()
+    // edit_mode / cell_type / cell_id ride on the row's meta — the body
+    // carries only the source block.
+    expect(screen.getByTestId("mcp-notebookedit-card")).toBeInTheDocument()
   })
 
   it("makes the notebook reachable in the workspace panel", () => {
@@ -105,5 +118,14 @@ describe("NotebookEditCard", () => {
         column: undefined,
       })
     )
+  })
+
+  it("clamps a large cell source behind a show-all note", () => {
+    const new_source = Array.from({ length: 200 }, (_, i) => `# c${i}`).join("\n")
+    render(<NotebookEditCard part={notebookPart({ notebook_path: "/n.ipynb", new_source })} />)
+    expect(screen.getByTestId("code").textContent).toContain("# c119")
+    expect(screen.getByTestId("code").textContent).not.toContain("# c120")
+    fireEvent.click(screen.getByTestId("mcp-notebookedit-clamped-show-all"))
+    expect(screen.getByTestId("code").textContent).toContain("# c199")
   })
 })

@@ -77,28 +77,20 @@ describe("ToolActivityGroup", () => {
     expect(group.textContent).toContain("group.summary")
   })
 
-  it("renders a per-type tally preview in the header", () => {
+  it("renders the shared count summary in the header (all modes)", () => {
     const entries = [entry("tool-Read"), entry("tool-Read"), entry("tool-Grep")]
-    const { getByTestId } = render(
-      <ToolActivityGroup entries={entries} mode="standard" renderChild={renderRow} />
-    )
-    const tally = getByTestId("tool-activity-group-tally")
-    // Mocked t echoes `group.tally:{params}` — assert both buckets + counts.
-    expect(tally.textContent).toContain('"name":"Read","count":2')
-    expect(tally.textContent).toContain('"name":"Grep","count":1')
-  })
-
-  it("renders a TUI-style count summary in simplified mode (no tool-count label/tally)", () => {
-    const entries = [entry("tool-Read"), entry("tool-Read"), entry("tool-Grep")]
-    const { getByTestId, queryByTestId } = render(
-      <ToolActivityGroup entries={entries} mode="simplified" renderChild={renderRow} />
-    )
-    const actions = getByTestId("tool-activity-group-actions")
-    // Mocked t echoes `count.<category>:{params}` — assert each count bucket.
-    expect(actions.textContent).toContain('count.read:{"count":2}')
-    expect(actions.textContent).toContain('count.search:{"count":1}')
-    // The tool-call count label + per-type tally are standard/detailed only.
-    expect(queryByTestId("tool-activity-group-tally")).toBeNull()
+    for (const mode of ["standard", "simplified", "detailed"] as const) {
+      const { getByTestId, unmount } = render(
+        <ToolActivityGroup entries={entries} mode={mode} renderChild={renderRow} />
+      )
+      const tally = getByTestId("tool-activity-group-tally")
+      // Mocked t echoes `<key>:{params}` — the row shows the tool-call count
+      // label plus every bucket of the TUI-style count summary.
+      expect(tally.textContent).toContain('group.summary:{"count":3}')
+      expect(tally.textContent).toContain('count.read:{"count":2}')
+      expect(tally.textContent).toContain('count.search:{"count":1}')
+      unmount()
+    }
   })
 
   it("stays open in simplified mode while a child is still running", () => {

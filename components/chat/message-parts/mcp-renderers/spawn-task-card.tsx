@@ -5,11 +5,12 @@ import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { ChevronDownIcon, ChevronRightIcon, ExternalLinkIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { getDb } from "@/lib/db/schema"
 import { revealSpawnedTask } from "@/lib/tasks/spawn-task-dispatch"
-import { McpCardShell, useParsedOutput } from "./common"
+import { useParsedOutput } from "./common"
 
 interface SpawnTaskOutput {
   ok?: boolean
@@ -69,13 +70,19 @@ export function SpawnTaskCard({ part, sessionId }: { part: ToolUIPart; sessionId
   )
 
   return (
-    <McpCardShell
-      title={output.title}
-      badge={output.mode === "inherit" ? t("inherit") : t("aside")}
-      action={action}
-      testId="mcp-spawn-task-card"
-    >
-      <p className="text-sm">{output.tldr}</p>
+    <div data-testid="mcp-spawn-task-card" className="my-1 space-y-1 text-xs">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-medium" data-testid="mcp-spawn-task-title">
+          {output.title}
+        </span>
+        <span className="flex items-center gap-1.5">
+          <Badge variant="outline" className="text-[10px]">
+            {output.mode === "inherit" ? t("inherit") : t("aside")}
+          </Badge>
+          {action}
+        </span>
+      </div>
+      <p>{output.tldr}</p>
       {output.situation ? (
         <DetailSection label={t("situation")}>{output.situation}</DetailSection>
       ) : null}
@@ -100,6 +107,6 @@ export function SpawnTaskCard({ part, sessionId }: { part: ToolUIPart; sessionId
           </ul>
         </DetailSection>
       ) : null}
-    </McpCardShell>
+    </div>
   )
 }

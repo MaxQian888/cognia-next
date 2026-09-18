@@ -2,9 +2,8 @@
 
 import { useMemo } from "react"
 import { useTranslations } from "next-intl"
-import { FileSearchIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
-import { McpCardShell, useParsedOutput } from "./common"
+import { PreviewClampNote, TOOL_LIST_MAX_ROWS, useClampedRows, useParsedOutput } from "./common"
 import { WorkbenchFileLink } from "./workbench-file-link"
 
 interface GlobOutput {
@@ -12,6 +11,11 @@ interface GlobOutput {
   files?: string[]
 }
 
+/**
+ * Body content for a `glob` call — pattern context + a scrollable list of
+ * matched paths (each workbench-linkable). Rendered bare: the surrounding row
+ * owns the card chrome now.
+ */
 export function GlobCard({ part, sessionId }: { part: ToolUIPart; sessionId?: string }) {
   const t = useTranslations("chat.mcp.glob")
   const input = (part.input ?? {}) as { pattern?: string; path?: string }
@@ -27,48 +31,43 @@ export function GlobCard({ part, sessionId }: { part: ToolUIPart; sessionId?: st
     }
     return []
   }, [parsed, part.output])
+  // Every match mounts a WorkbenchFileLink; a huge glob result clamps to a
+  // row budget instead of flooding the expansion with thousands of links.
+  const clamp = useClampedRows(matches, TOOL_LIST_MAX_ROWS)
 
   if (matches.length === 0 && !input.pattern) return null
 
   return (
-    <McpCardShell
-      title={/* i18n-exempt: the tool's own name, identical in every locale */ "Glob"}
-      badge={input.pattern ?? `${matches.length} matches`}
-      testId="mcp-glob-card"
-    >
-      <div className="flex items-start gap-2">
-        <FileSearchIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-        <div className="min-w-0 flex-1">
-          {input.pattern && (
-            <p
-              className="font-mono text-[11px] text-muted-foreground"
-              data-testid="mcp-glob-pattern"
-            >
-              {input.pattern}
-              {input.path && ` · in ${input.path}`}
-            </p>
-          )}
-          {matches.length === 0 ? (
-            <p className="text-muted-foreground">{t("noMatches")}</p>
-          ) : (
-            <ul
-              className="mt-1 max-h-60 overflow-auto rounded border bg-muted/30 px-2 py-1 font-mono text-[11px]"
-              data-testid="mcp-glob-list"
-            >
-              {matches.map((m, i) => (
-                <li key={i} data-testid="mcp-glob-match" className="truncate">
-                  <WorkbenchFileLink
-                    sessionId={sessionId}
-                    path={m}
-                    className="block truncate"
-                    data-testid="mcp-glob-match-link"
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
-    </McpCardShell>
+    <div className="min-w-0" data-testid="mcp-glob-card">
+      {/* The row already states pattern + scope as its target — the body
+          carries only the matched file list. */}
+      {matches.length === 0 ? (
+        <p className="text-muted-foreground">{t("noMatches")}</p>
+      ) : (
+        <ul
+          className="max-h-60 overflow-auto rounded border bg-muted/30 px-2 py-1 font-mono text-[11px]"
+          data-testid="mcp-glob-list"
+        >
+          {clamp.visible.map((m, i) => (
+            <li key={i} data-testid="mcp-glob-match" className="truncate">
+              <WorkbenchFileLink
+                sessionId={sessionId}
+                path={m}
+                className="block truncate"
+                data-testid="mcp-glob-match-link"
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+      {clamp.hidden > 0 && (
+        <PreviewClampNote
+          shown={clamp.shown}
+          total={clamp.total}
+          onExpand={clamp.reveal}
+          testId="mcp-glob-clamped"
+        />
+      )}
+    </div>
   )
 }

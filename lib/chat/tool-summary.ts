@@ -91,7 +91,7 @@ function basename(p: string): string {
   return idx >= 0 ? cleaned.slice(idx + 1) : cleaned
 }
 
-function asString(v: unknown): string | undefined {
+export function asString(v: unknown): string | undefined {
   return typeof v === "string" && v.trim() ? v.trim() : undefined
 }
 

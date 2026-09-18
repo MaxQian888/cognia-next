@@ -65,6 +65,18 @@ describe("PermissionModeIndicator", () => {
     expect(screen.getByRole("button").querySelector("svg.lucide-shield-check")).not.toBeNull()
   })
 
+  // Fold tier 2 keeps the risk glyph and gives up the word — the label's
+  // meaning is already carried by the icon's shape+colour and the tooltip.
+  it("keeps the risk glyph and drops the word in glyph form", () => {
+    currentMode = "bypassPermissions"
+    renderChip(<PermissionModeIndicator onCycle={jest.fn()} glyph />)
+    const button = screen.getByRole("button")
+    expect(button).not.toHaveTextContent("bypass.label")
+    expect(button.querySelector("svg.lucide-shield-alert")).not.toBeNull()
+    expect(button.className).toContain("w-7")
+    expect(button).toHaveAttribute("data-risk", "danger")
+  })
+
   it("can be disabled", () => {
     currentMode = "plan"
     renderChip(<PermissionModeIndicator onCycle={jest.fn()} disabled />)

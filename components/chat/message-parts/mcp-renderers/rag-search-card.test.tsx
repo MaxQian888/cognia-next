@@ -17,7 +17,7 @@ function part(output: unknown): ToolUIPart {
 }
 
 describe("RagSearchCard", () => {
-  it("renders a translated title, pluralized count, and responsive hit metadata", () => {
+  it("renders responsive hit metadata", () => {
     render(
       <RagSearchCard
         part={part({
@@ -35,18 +35,14 @@ describe("RagSearchCard", () => {
       />
     )
 
-    expect(screen.getByText("Knowledge search")).toBeInTheDocument()
-    expect(screen.getByTestId("mcp-rag-search-card-badge")).toHaveTextContent("2 chunks")
     expect(screen.getByText("Vector ADR")).toBeInTheDocument()
     expect(screen.getByText("workspace")).toBeInTheDocument()
     expect(screen.getByTestId("mcp-rag-search-score")).toHaveTextContent("0.92")
     expect(screen.getByText("The native backend uses sqlite-vec.")).toBeInTheDocument()
   })
 
-  it("uses the singular count and renders an explicit empty result", () => {
+  it("renders an explicit empty result", () => {
     const { rerender } = render(<RagSearchCard part={part({ hits: [{ id: "only" }] })} />)
-    expect(screen.getByTestId("mcp-rag-search-card-badge")).toHaveTextContent("1 chunk")
-
     rerender(<RagSearchCard part={part({ hits: [] })} />)
     expect(screen.getByText("No matching knowledge found")).toBeInTheDocument()
   })

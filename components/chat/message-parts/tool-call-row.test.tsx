@@ -134,7 +134,7 @@ describe("ToolCallRow", () => {
 
   it("expands the body on click (uncontrolled)", () => {
     const { getByRole, getByTestId } = render(
-      <ToolCallRow part={part("tool-Bash", { command: "ls -la" })} />
+      <ToolCallRow part={part("tool-MysteryTool", { pattern: "x" })} />
     )
     fireEvent.click(getByRole("button"))
     expect(getByTestId("tool-body")).toBeTruthy()
@@ -171,7 +171,7 @@ describe("ToolCallRow", () => {
       />
     )
     fireEvent.click(getByRole("button"))
-    expect(getByTestId("mcp-read-path").textContent).toContain("a.ts")
+    expect(getByTestId("mcp-read-card")).toBeInTheDocument()
     expect(queryByTestId("tool-body")).toBeNull()
   })
 

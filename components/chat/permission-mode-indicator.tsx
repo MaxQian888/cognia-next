@@ -46,12 +46,19 @@ export interface PermissionModeIndicatorProps {
   disabled?: boolean
   /** Host styling; merged before the per-mode tone so the tone colour still wins. */
   className?: string
+  /**
+   * Icon-only form for a toolbar that has run out of label room. The risk is
+   * still carried by the glyph's shape and colour (and the tooltip's words);
+   * the label text is the only thing given up. Set by the toolbar's fold tier.
+   */
+  glyph?: boolean
 }
 
 export function PermissionModeIndicator({
   onCycle,
   disabled,
   className,
+  glyph,
 }: PermissionModeIndicatorProps) {
   const t = useTranslations("chat.permissionMode")
   const mode = useChatStore((s) => s.permissionMode)
@@ -71,6 +78,7 @@ export function PermissionModeIndicator({
           className={cn(
             "h-auto min-w-0 shrink gap-1 px-2 py-0.5 text-[11px] font-normal transition-colors hover:bg-accent",
             className,
+            glyph && "w-7 justify-center px-0",
             meta.tone
           )}
           aria-label={t("aria", { label })}
@@ -82,7 +90,7 @@ export function PermissionModeIndicator({
               read as a third typeface on the composer's status line. The hint
               lives in the tooltip below, where it is read once and costs the
               row nothing. */}
-          <span className="min-w-0 truncate">{label}</span>
+          {glyph ? null : <span className="min-w-0 truncate">{label}</span>}
         </Button>
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-xs">

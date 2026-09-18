@@ -54,12 +54,13 @@ const renderChild = (p: ToolUIPart, key: string, opts: ToolActivityChildOptions)
     key={key}
     type="button"
     onClick={opts.onToggle}
-    className="block w-full rounded-md border bg-muted/30 px-2.5 py-1.5 text-left text-sm"
+    className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-muted/50"
     data-state={p.state}
   >
-    <span className="font-mono text-xs text-muted-foreground">{p.type}</span>
+    <span className="size-1.5 shrink-0 rounded-full bg-green-600 dark:bg-green-500" aria-hidden />
+    <span className="min-w-0 flex-1 truncate font-mono text-xs">{p.type}</span>
     {opts.expanded || opts.forceOpen ? (
-      <span className="ml-2 text-xs text-muted-foreground">— open</span>
+      <span className="text-xs text-muted-foreground">— open</span>
     ) : null}
   </button>
 )

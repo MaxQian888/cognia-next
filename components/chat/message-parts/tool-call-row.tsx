@@ -19,10 +19,6 @@
 import { memo, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
-  CheckCircleIcon,
-  ChevronRightIcon,
-  CircleIcon,
-  ClockIcon,
   FileIcon,
   FilePlusIcon,
   FilesIcon,
@@ -34,12 +30,12 @@ import {
   SearchIcon,
   TerminalIcon,
   WrenchIcon,
-  XCircleIcon,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
 
 import { ToolDetailBody } from "@/components/chat/message-parts/tool-detail-body"
+import { ToolRowShell } from "@/components/chat/message-parts/tool-row"
 import {
   humanizeToolName,
   resolveProvidedToolTitle,
@@ -51,7 +47,6 @@ import {
   describeToolResult,
   type ToolResultDescriptor,
 } from "@/lib/chat/tool-result-summary"
-import { MotionStatusSwap, ReadingCollapse } from "@/components/chat/motion/motion-reveal"
 import { ToolSemanticBadges } from "@/components/chat/message-parts/tool-semantic-badges"
 import { cn } from "@/lib/utils"
 
@@ -69,37 +64,16 @@ const ICON_MAP: Record<ToolIconKey, LucideIcon> = {
   generic: WrenchIcon,
 }
 
-const STATUS_GLYPH: Record<
-  ToolUIPart["state"],
-  { Icon: LucideIcon; className: string; key: string }
-> = {
-  "approval-requested": {
-    Icon: ClockIcon,
-    className: "text-yellow-600 dark:text-yellow-500",
-    key: "awaitingApproval",
-  },
-  "approval-responded": {
-    Icon: CheckCircleIcon,
-    className: "text-blue-600 dark:text-blue-500",
-    key: "responded",
-  },
-  "input-available": {
-    Icon: ClockIcon,
-    className: "animate-pulse text-muted-foreground",
-    key: "running",
-  },
-  "input-streaming": { Icon: CircleIcon, className: "text-muted-foreground", key: "pending" },
-  "output-available": {
-    Icon: CheckCircleIcon,
-    className: "text-green-600 dark:text-green-500",
-    key: "completed",
-  },
-  "output-denied": {
-    Icon: XCircleIcon,
-    className: "text-orange-600 dark:text-orange-500",
-    key: "denied",
-  },
-  "output-error": { Icon: XCircleIcon, className: "text-red-600 dark:text-red-500", key: "error" },
+// The dot carries the state colour now (same STATUS_DOT map every tool row
+// uses); the accessible label still comes from the per-state key.
+const STATUS_KEY: Record<ToolUIPart["state"], string> = {
+  "approval-requested": "awaitingApproval",
+  "approval-responded": "responded",
+  "input-available": "running",
+  "input-streaming": "pending",
+  "output-available": "completed",
+  "output-denied": "denied",
+  "output-error": "error",
 }
 
 export interface ToolCallRowProps {
@@ -139,8 +113,7 @@ export const ToolCallRow = memo(function ToolCallRow({
   // null for tools that don't stream, leaving just the pulsing status glyph.
   const running = useMemo(() => describeRunningProgress(part), [part])
   const Icon = ICON_MAP[summary.iconKey]
-  const glyph = STATUS_GLYPH[part.state]
-  const statusLabel = t(`status.${glyph.key}`)
+  const statusLabel = t(`status.${STATUS_KEY[part.state]}`)
 
   const handleToggle = () => {
     if (controlled) onToggle?.()
@@ -148,49 +121,43 @@ export const ToolCallRow = memo(function ToolCallRow({
   }
 
   return (
-    // Borderless, recessive row (Codex-style): the tool activity fades into the
-    // background so the assistant's prose stands out. Expanding nests the full
-    // input/output under a left rule instead of boxing it in a card.
-    <div
-      className="not-prose"
-      data-testid={`tool-call-row-${summary.name}`}
-      data-status={part.state}
-    >
-      <button
-        type="button"
-        onClick={handleToggle}
-        aria-expanded={open}
-        aria-label={t("rowAria", { name: displayName, status: statusLabel })}
-        className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
-      >
-        <ChevronRightIcon
-          className={cn("size-3.5 shrink-0 opacity-60 transition-transform", open && "rotate-90")}
-        />
-        <Icon className="size-3.5 shrink-0" />
-        <span className="font-medium text-foreground/80">{displayName}</span>
-        {!providedTitle && summary.target ? (
-          <span className="min-w-0 flex-1 truncate font-mono text-xs">{summary.target}</span>
+    // Same `ToolRowShell` grammar as the standard-mode tool parts: status dot +
+    // name + icon + mono target + meta + trailing chevron, body nested under a
+    // left rule. The status glyph that used to sit at the right edge is the
+    // dot's job now.
+    <ToolRowShell
+      status={part.state}
+      open={open}
+      onToggle={handleToggle}
+      ariaLabel={t("rowAria", { name: displayName, status: statusLabel })}
+      testId={`tool-call-row-${summary.name}`}
+      lead={<span className="shrink-0 text-xs font-medium text-foreground/80">{displayName}</span>}
+      icon={<Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />}
+      target={
+        !providedTitle && summary.target ? (
+          <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
+            {summary.target}
+          </span>
         ) : (
           <span className="flex-1" />
-        )}
-        <ToolSemanticBadges readOnlyHint={readOnlyHint} />
-        {result ? (
-          <ToolResultChip descriptor={result} />
-        ) : running ? (
-          <RunningProgressChip lines={running.lines} />
-        ) : null}
-        <MotionStatusSwap swapKey={part.state} className="shrink-0">
-          <glyph.Icon className={cn("size-3.5", glyph.className)} aria-hidden />
-        </MotionStatusSwap>
-        <span className="sr-only">{statusLabel}</span>
-      </button>
-      <ReadingCollapse open={open}>
-        {/* ml aligns the left rule under the chevron (px-1.5 + half of size-3.5). */}
-        <div className="ml-[13px] mb-1 space-y-3 border-l pl-3 pt-1 text-popover-foreground">
-          <ToolDetailBody part={part} sessionId={sessionId} />
-        </div>
-      </ReadingCollapse>
-    </div>
+        )
+      }
+      badges={<ToolSemanticBadges readOnlyHint={readOnlyHint} />}
+      meta={
+        <>
+          {result ? (
+            <ToolResultChip descriptor={result} />
+          ) : running ? (
+            <RunningProgressChip lines={running.lines} />
+          ) : null}
+          <span className="sr-only">{statusLabel}</span>
+        </>
+      }
+    >
+      <div className="mb-1 space-y-3 border-l pl-3 pt-1 text-popover-foreground">
+        <ToolDetailBody part={part} sessionId={sessionId} />
+      </div>
+    </ToolRowShell>
   )
 })
 

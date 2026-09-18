@@ -1,10 +1,30 @@
 /**
  * @jest-environment jsdom
  */
+import * as ReactForMocks from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import type { ToolUIPart } from "ai"
 
 import { WebFetchCard } from "./web-fetch-card"
+
+// The body hands its prose to the heavy MarkdownRenderer and JSON payloads to
+// the Shiki CodeBlock — both are mocked to keep this suite about the card's
+// own routing: which payload shape lands in which renderer.
+jest.mock("@/components/chat/markdown-renderer", () => ({
+  MarkdownRenderer: ({ content }: { content: string }) =>
+    ReactForMocks.createElement("div", { "data-testid": "md" }, content),
+}))
+jest.mock("@/components/chat/renderers/code-block", () => ({
+  CodeBlock: ({ code, language }: { code: string; language?: string }) =>
+    ReactForMocks.createElement(
+      "figure",
+      { "data-testid": "code-block", "data-language": language ?? "" },
+      code
+    ),
+}))
+jest.mock("@/hooks/ui", () => ({
+  useCopy: () => ({ copied: false, copy: jest.fn(async () => true) }),
+}))
 
 const part = (input?: unknown, output?: unknown): ToolUIPart =>
   ({
@@ -16,15 +36,40 @@ const part = (input?: unknown, output?: unknown): ToolUIPart =>
   }) as unknown as ToolUIPart
 
 describe("WebFetchCard", () => {
-  it("renders the fetched URL as an external link and previews the body", () => {
+  it("renders the page title and prose body without repeating the row's URL", () => {
     render(
-      <WebFetchCard part={part({ url: "https://example.com/doc" }, { content: "hello body" })} />
+      <WebFetchCard
+        part={part(
+          { url: "https://example.com/doc" },
+          { ok: true, status: 200, title: "Doc", contentType: "text/html", content: "hello body" }
+        )}
+      />
     )
-    const link = screen.getByTestId("mcp-webfetch-url")
-    expect(link).toHaveAttribute("href", "https://example.com/doc")
-    // Routed through the shared ExternalLink → target=_blank on web.
-    expect(link).toHaveAttribute("target", "_blank")
+    expect(screen.getByTestId("mcp-webfetch-title")).toHaveTextContent("Doc")
     expect(screen.getByTestId("mcp-webfetch-content")).toHaveTextContent("hello body")
+    // The URL/status live on the StructuredToolPart row — no link in the body.
+    expect(screen.queryByRole("link")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("mcp-webfetch-url")).not.toBeInTheDocument()
+  })
+
+  it("shows a redirect notice when the resolved URL differs from the request", () => {
+    render(
+      <WebFetchCard
+        part={part(
+          { url: "https://input.example/old" },
+          {
+            ok: true,
+            status: 200,
+            url: "https://resolved.example/page",
+            body: "raw response body",
+          }
+        )}
+      />
+    )
+    expect(screen.getByTestId("mcp-webfetch-redirect")).toHaveTextContent(
+      "https://resolved.example/page"
+    )
+    expect(screen.getByTestId("mcp-webfetch-content")).toHaveTextContent("raw response body")
   })
 
   it("renders an HTTP failure as a result, not as a tool failure", () => {
@@ -47,10 +92,6 @@ describe("WebFetchCard", () => {
     )
     expect(screen.queryByTestId("mcp-webfetch-error")).not.toBeInTheDocument()
     expect(screen.getByTestId("mcp-webfetch-content")).toHaveTextContent("Not Found")
-    expect(screen.getByTestId("mcp-webfetch-url")).toHaveAttribute(
-      "href",
-      "https://example.com/missing"
-    )
   })
 
   it("returns null (generic body) when no URL is present", () => {
@@ -58,31 +99,16 @@ describe("WebFetchCard", () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it("renders Cognia fetch status, metadata, and raw body", () => {
+  it("renders the extraction prompt next to the title", () => {
     render(
       <WebFetchCard
         part={part(
-          { url: "https://input.example/ignored" },
-          {
-            ok: true,
-            status: 200,
-            url: "https://resolved.example/page",
-            title: "Resolved page",
-            contentType: "text/plain",
-            body: "raw response body",
-          }
+          { url: "https://example.com", prompt: "extract the caveats" },
+          { ok: true, status: 200, title: "Page", body: "body" }
         )}
       />
     )
-
-    expect(screen.getByTestId("mcp-webfetch-card-badge")).toHaveTextContent("HTTP 200")
-    expect(screen.getByTestId("mcp-webfetch-title")).toHaveTextContent("Resolved page")
-    expect(screen.getByTestId("mcp-webfetch-url")).toHaveAttribute(
-      "href",
-      "https://resolved.example/page"
-    )
-    expect(screen.getByText("text/plain")).toBeInTheDocument()
-    expect(screen.getByTestId("mcp-webfetch-content")).toHaveTextContent("raw response body")
+    expect(screen.getByTestId("mcp-webfetch-prompt")).toHaveTextContent("extract the caveats")
   })
 
   it("hides the model-only untrusted-content frame", () => {
@@ -97,7 +123,7 @@ describe("WebFetchCard", () => {
     expect(screen.queryByText(/Untrusted web content below/)).not.toBeInTheDocument()
   })
 
-  it("expands and collapses a long Cognia preview", () => {
+  it("clamps a long body behind a fade and reveals it on demand", () => {
     const body = `${"a".repeat(650)}TAIL`
     render(
       <WebFetchCard
@@ -106,10 +132,74 @@ describe("WebFetchCard", () => {
     )
 
     expect(screen.getByTestId("mcp-webfetch-content")).not.toHaveTextContent("TAIL")
-    fireEvent.click(screen.getByRole("button", { name: /Show all/ }))
+    expect(screen.getByTestId("mcp-webfetch-clamped")).toHaveTextContent("600")
+    fireEvent.click(screen.getByTestId("mcp-webfetch-show-all"))
     expect(screen.getByTestId("mcp-webfetch-content")).toHaveTextContent("TAIL")
-    fireEvent.click(screen.getByRole("button", { name: "Show less" }))
-    expect(screen.getByTestId("mcp-webfetch-content")).not.toHaveTextContent("TAIL")
+    expect(screen.queryByTestId("mcp-webfetch-clamped")).not.toBeInTheDocument()
+  })
+
+  it("routes JSON payloads to the compact code block instead of prose", () => {
+    render(
+      <WebFetchCard
+        part={part(
+          { url: "https://api.example.com/data" },
+          {
+            ok: true,
+            status: 200,
+            contentType: "application/json",
+            body: '{"a":1}',
+          }
+        )}
+      />
+    )
+    const block = screen.getByTestId("code-block")
+    expect(block).toHaveAttribute("data-language", "json")
+    expect(block).toHaveTextContent('{"a":1}')
+    expect(screen.queryByTestId("mcp-webfetch-content")).not.toBeInTheDocument()
+  })
+
+  it("detects JSON-shaped bodies even without a JSON content type", () => {
+    render(
+      <WebFetchCard
+        part={part(
+          { url: "https://example.com/api" },
+          { ok: true, status: 200, contentType: "text/plain", body: '  {"a":1}  ' }
+        )}
+      />
+    )
+    expect(screen.getByTestId("code-block")).toBeInTheDocument()
+  })
+
+  it("collapses binary payloads to a single meta line", () => {
+    render(
+      <WebFetchCard
+        part={part(
+          { url: "https://example.com/img.png" },
+          {
+            ok: true,
+            status: 200,
+            contentType: "image/png",
+            body: "iVBORw0KGgo=",
+          }
+        )}
+      />
+    )
+    expect(screen.getByTestId("mcp-webfetch-binary")).toHaveTextContent("image/png")
+    expect(screen.getByTestId("mcp-webfetch-binary")).toHaveTextContent("12 characters")
+  })
+
+  it("renders the empty state when the fetch returned nothing", () => {
+    render(<WebFetchCard part={part({ url: "https://example.com" }, { ok: true, status: 204 })} />)
+    expect(screen.getByText("No content returned.")).toBeInTheDocument()
+  })
+
+  it("offers a copy affordance for the fetched content", () => {
+    render(
+      <WebFetchCard
+        part={part({ url: "https://example.com" }, { ok: true, status: 200, body: "copy me" })}
+      />
+    )
+    expect(screen.getByTestId("mcp-webfetch-copy")).toBeInTheDocument()
   })
 
   it("renders a structured Cognia error", () => {

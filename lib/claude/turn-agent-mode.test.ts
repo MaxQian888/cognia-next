@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { resolveTurnAgentMode } from "./turn-agent-mode"
+import { resolveTurnAgentMode, turnAgentStamp } from "./turn-agent-mode"
 import { useAgentRuntimeStore } from "@/stores/agent/agent-runtime-store"
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
@@ -133,5 +133,34 @@ describe("resolveTurnAgentMode", () => {
     })
 
     expect(resolveTurnAgentMode({ sessionId: "s1" }).requestedAuthority).toBe("plan")
+  })
+})
+
+describe("turnAgentStamp", () => {
+  beforeEach(() => {
+    useAgentRuntimeStore.setState({
+      defaultComposition: { presetId: "standard" },
+      sessionCompositions: {},
+    })
+    useCustomModeStore.setState({ customModes: {} })
+  })
+
+  it("stamps the session's preset name and icon for the transcript header", () => {
+    useAgentRuntimeStore.setState({
+      sessionCompositions: { s1: { presetId: "minimal" } },
+    })
+    expect(turnAgentStamp("s1")).toEqual({
+      presetId: "minimal",
+      name: "Minimal",
+      icon: "Eye",
+    })
+  })
+
+  it("stamps the default composition when the session has no override", () => {
+    expect(turnAgentStamp("other")).toEqual({
+      presetId: "standard",
+      name: "Standard",
+      icon: "Bot",
+    })
   })
 })

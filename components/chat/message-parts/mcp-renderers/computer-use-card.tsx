@@ -22,7 +22,7 @@ import type { ToolUIPart } from "ai"
 import { hasMcpContent } from "@/lib/claude/parts-extensions"
 import { ImageBlock } from "@/components/chat/renderers/image-block"
 import { Badge } from "@/components/ui/badge"
-import { McpCardShell, blockMediaSrc, useParsedOutput } from "./common"
+import { blockMediaSrc, useParsedOutput } from "./common"
 
 /** The JSON half of a `get_app_state` / `zoom` result. */
 interface RevisionOutput {
@@ -86,20 +86,22 @@ export function ComputerUseCard({ part }: { part: ToolUIPart }) {
     const height = parsed?.screenshot?.height
     const region = parsed?.region
     return (
-      <McpCardShell
-        title={`${tool}${parsed?.app?.displayName ? ` · ${parsed.app.displayName}` : ""}`}
-        badge={
-          width && height
-            ? `${width}×${height}${parsed?.revision ? ` · r${parsed.revision}` : ""}`
-            : undefined
-        }
-        testId="computer-use-card-frame"
-      >
-        {region && (
-          <Badge variant="secondary" className="mb-1 text-[10px]">
-            {t("region", region)}
-          </Badge>
-        )}
+      <div data-testid="computer-use-card-frame" className="my-1 text-xs">
+        {(width && height) || region ? (
+          <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
+            {width && height ? (
+              <span>
+                {width}×{height}
+                {parsed?.revision ? ` · r${parsed.revision}` : ""}
+              </span>
+            ) : null}
+            {region && (
+              <Badge variant="secondary" className="text-[10px]">
+                {t("region", region)}
+              </Badge>
+            )}
+          </div>
+        ) : null}
         {images.map((src, index) => (
           <ImageBlock
             key={src.slice(0, 64) + String(index)}
@@ -109,7 +111,7 @@ export function ComputerUseCard({ part }: { part: ToolUIPart }) {
             height={height}
           />
         ))}
-      </McpCardShell>
+      </div>
     )
   }
 
@@ -117,15 +119,12 @@ export function ComputerUseCard({ part }: { part: ToolUIPart }) {
   // revision, and saying so is the point.
   if (parsed?.screenshotUnchanged) {
     return (
-      <McpCardShell
-        title={tool}
-        badge={parsed.revision ? `r${parsed.revision}` : undefined}
-        testId="computer-use-card-unchanged"
-      >
+      <div data-testid="computer-use-card-unchanged" className="my-1 text-xs">
         <p className="text-muted-foreground text-[11px]">
           {parsed.screenshotNote ?? t("screenUnchanged")}
+          {parsed.revision ? ` · r${parsed.revision}` : ""}
         </p>
-      </McpCardShell>
+      </div>
     )
   }
 
@@ -133,17 +132,14 @@ export function ComputerUseCard({ part }: { part: ToolUIPart }) {
   if (parsed?.status) {
     const delivered = parsed.status === "delivered"
     return (
-      <McpCardShell
-        title={`${tool} · ${input.request?.action?.kind ?? t("actionFallback")}`}
-        badge={parsed.status}
-        testId="computer-use-card-action"
-      >
+      <div data-testid="computer-use-card-action" className="my-1 text-xs">
         <div className="flex flex-wrap items-center gap-2">
           {delivered ? (
             <MousePointerClickIcon className="size-3 text-muted-foreground" />
           ) : (
             <TypeIcon className="text-destructive size-3" />
           )}
+          <span className="font-medium">{parsed.status}</span>
           {input.request?.target?.kind && (
             <Badge variant="secondary" className="text-[10px]">
               {input.request.target.kind}
@@ -160,7 +156,7 @@ export function ComputerUseCard({ part }: { part: ToolUIPart }) {
             </Badge>
           )}
         </div>
-      </McpCardShell>
+      </div>
     )
   }
 
@@ -170,32 +166,31 @@ export function ComputerUseCard({ part }: { part: ToolUIPart }) {
       ? parsed.clicked.text
       : t("matches", { count: parsed.matches?.length ?? 0 })
     return (
-      <McpCardShell title={tool} badge={input.query} testId="computer-use-card-ocr">
+      <div data-testid="computer-use-card-ocr" className="my-1 text-xs">
         <div className="flex items-center gap-2">
           <ScanSearchIcon className="size-3 text-muted-foreground" />
           <code className="max-w-[40ch] truncate font-mono text-[10px]">{label}</code>
         </div>
-      </McpCardShell>
+      </div>
     )
   }
 
   // Everything else: list_apps / query_elements / expand_element / wait.
   const nodeCount = parsed?.tree?.nodes?.length
   return (
-    <McpCardShell
-      title={tool}
-      badge={typeof nodeCount === "number" ? t("nodes", { count: nodeCount }) : undefined}
-      testId="computer-use-card-generic"
-    >
+    <div data-testid="computer-use-card-generic" className="my-1 text-xs">
       <div className="flex items-center gap-2">
         <ScreenShareIcon className="size-3 text-muted-foreground" />
+        {typeof nodeCount === "number" && (
+          <span className="text-muted-foreground">{t("nodes", { count: nodeCount })}</span>
+        )}
         {typeof input.durationMs === "number" && (
           <Badge variant="secondary" className="text-[10px]">
             {input.durationMs}ms
           </Badge>
         )}
       </div>
-    </McpCardShell>
+    </div>
   )
 }
 

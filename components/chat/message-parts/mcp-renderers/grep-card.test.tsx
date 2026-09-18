@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import type { ToolUIPart } from "ai"
 
 const canOfferWorkbenchReview = jest.fn(() => true)
@@ -97,21 +97,6 @@ describe("splitGrepMatch", () => {
 })
 
 describe("GrepCard", () => {
-  it("shows the pattern with its scope and output mode", () => {
-    render(
-      <GrepCard
-        part={grepPart({
-          input: { pattern: "TODO", path: "/repo/src", output_mode: "content" },
-          output: "/repo/src/a.ts:1:TODO",
-        })}
-      />
-    )
-    const header = screen.getByTestId("mcp-grep-pattern").textContent
-    expect(header).toContain("TODO")
-    expect(header).toContain("/repo/src")
-    expect(header).toContain("content")
-  })
-
   it("returns null with neither a pattern nor a match, so the caller can fall back", () => {
     const { container } = render(<GrepCard part={grepPart({ input: {}, output: "" })} />)
     expect(container).toBeEmptyDOMElement()
@@ -140,5 +125,14 @@ describe("GrepCard", () => {
     render(<GrepCard sessionId="s1" part={grepPart({ output: "src/a.ts:42:  const x = 1" })} />)
     expect(screen.getByTestId("mcp-grep-match-link")).toHaveTextContent("src/a.ts")
     expect(screen.getByTestId("mcp-grep-match").textContent).toBe("src/a.ts:42:  const x = 1")
+  })
+
+  it("clamps a huge match list behind a show-all note", () => {
+    const lines = Array.from({ length: 250 }, (_, i) => `/repo/f${i}.ts:${i}:  hit`)
+    render(<GrepCard part={grepPart({ output: lines.join("\n") })} />)
+    expect(screen.getAllByTestId("mcp-grep-match")).toHaveLength(200)
+    expect(screen.getByTestId("mcp-grep-clamped")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("mcp-grep-clamped-show-all"))
+    expect(screen.getAllByTestId("mcp-grep-match")).toHaveLength(250)
   })
 })

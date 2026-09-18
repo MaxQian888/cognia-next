@@ -6,11 +6,11 @@ import {
   MessageActions,
   MessageContent,
 } from "@/components/ai-elements/message"
-import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning"
+import { Reasoning } from "@/components/ai-elements/reasoning"
 import { selectStreamdownPlugins } from "@/components/ai-elements/streamdown-plugins"
-import { Tool, ToolHeader, ToolContent } from "@/components/ai-elements/tool"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
-import { MessageShell } from "@/components/chat/message-shell"
+import { MessageMetaLine, MessageShell } from "@/components/chat/message-shell"
+import { ReasoningToolRow } from "@/components/chat/message-parts/reasoning-part"
 import {
   chatMarkdownUrlTransform,
   chatStreamdownRehypePlugins,
@@ -23,6 +23,7 @@ import {
   mathScaleClass,
 } from "@/components/chat/streaming-text-part"
 import { A2UIPart } from "@/components/chat/message-parts/a2ui-part"
+import { AsyncQuestionsCard } from "@/components/chat/message-parts/async-questions-card"
 import { InboundA2UIRenderer } from "@/components/chat/message-parts/inbound-a2ui-renderer"
 import { SubagentTree } from "@/components/chat/message-parts/subagent-tree"
 import { AgentTeamDispatchPart } from "@/components/chat/message-parts/agent-team-dispatch-part"
@@ -33,7 +34,9 @@ import { ArtifactPart } from "@/components/chat/message-parts/artifact-part"
 import { SourcesPart } from "@/components/chat/message-parts/sources-part"
 import { GroundingPart } from "@/components/chat/message-parts/grounding-part"
 import { TerminalToolPart } from "@/components/chat/message-parts/terminal-tool-part"
-import { ToolDetailBody, isBashToolPart } from "@/components/chat/message-parts/tool-detail-body"
+import { FileToolPart, isFileToolPart } from "@/components/chat/message-parts/file-tool-part"
+import { StructuredToolPart } from "@/components/chat/message-parts/structured-tool-part"
+import { isBashToolPart } from "@/components/chat/message-parts/tool-detail-body"
 import { CanvasInlinePart } from "@/components/chat/message-parts/canvas-inline-part"
 import { FilePartPreview } from "@/components/chat/message-parts/file-part-preview"
 import { AttachmentTextCard } from "@/components/chat/message-parts/attachment-text-card"
@@ -78,7 +81,6 @@ import {
 } from "@/lib/chat/agent-flow-grouping"
 import { parseTodoInput } from "@/lib/chat/todos"
 import { userBubbleClass } from "@/lib/chat/message-bubble"
-import { resolveToolDisplayTitle } from "@/lib/chat/tool-summary"
 import { buildReplyTo, readReplyTo } from "@/lib/chat/reply-to"
 import { ReplyToQuote } from "@/components/chat/message-parts/reply-to-quote"
 import { PromptPreambleCard } from "@/components/chat/message-parts/prompt-preamble-card"
@@ -1245,6 +1247,15 @@ function MessageRendererInner({
                   <BranchPointMarker sessionId={branchSessionId} messageId={message.id} />
                 )}
               </MessageActions>
+              {/* Footer meta: the run summary line on the row's right end.
+                  Click opens the per-field popover — no inline expansion, so
+                  the transcript below never shifts. */}
+              <MessageMetaLine
+                message={message}
+                display={display}
+                speakerName={speakerName}
+                className="ml-auto"
+              />
             </div>
           )}
 
@@ -1493,6 +1504,26 @@ function MessageRendererInner({
                   className="flex items-center gap-1 empty:hidden"
                 />
               </MessageActions>
+              <MessageMetaLine
+                message={message}
+                display={display}
+                speakerName={speakerName}
+                className="ml-auto"
+              />
+            </div>
+          )}
+
+          {/* The action row is suppressed while editing and on tool-only
+              turns, but the run metadata still applies — the chip gets a
+              meta-only line so the sealed turn keeps its cost/duration read. */}
+          {(editing || isToolOnlyTurn) && (
+            <div className="flex empty:hidden" data-testid="message-meta-row">
+              <MessageMetaLine
+                message={message}
+                display={display}
+                speakerName={speakerName}
+                className="ml-auto"
+              />
             </div>
           )}
         </MessageShell>
@@ -1703,18 +1734,6 @@ function renderToolPart(
   sessionId: string | undefined,
   visibility: ResolvedMessageDisplayOptions["tools"]
 ): React.ReactNode {
-  const toolPresentation = tp as ToolUIPart & {
-    title?: string
-    toolName?: unknown
-    toolMetadata?: { readOnlyHint?: boolean | null }
-  }
-  const isDynamicTool = (tp as { type: string }).type === "dynamic-tool"
-  const dynamicToolName =
-    typeof toolPresentation.toolName === "string" && toolPresentation.toolName.trim()
-      ? toolPresentation.toolName
-      : "tool"
-  const displayTitle = resolveToolDisplayTitle(tp)
-  const readOnlyHint = toolPresentation.toolMetadata?.readOnlyHint
   const slot = (
     <PluginExtensionSlot
       point="chat.tool-call.actions"
@@ -1754,36 +1773,19 @@ function renderToolPart(
     preferenceOpen ??
     (mode === "detailed" || tp.state === "output-error" || tp.state === "input-available")
 
-  // Bash keeps its own card so the terminal view owns the whole block; every
-  // other tool — and a *failed* Bash, whose parsed error trace outranks the
-  // terminal view — shares one generic card whose body routes in
-  // `ToolDetailBody`.
-  const toolEl =
-    isBashToolPart(tp) && tp.state !== "output-error" ? (
-      <TerminalToolPart part={tp} defaultOpen={defaultOpen} />
-    ) : (
-      <Tool defaultOpen={defaultOpen}>
-        {isDynamicTool ? (
-          <ToolHeader
-            type="dynamic-tool"
-            toolName={dynamicToolName}
-            state={tp.state}
-            title={displayTitle}
-            readOnlyHint={readOnlyHint}
-          />
-        ) : (
-          <ToolHeader
-            type={tp.type}
-            state={tp.state}
-            title={displayTitle}
-            readOnlyHint={readOnlyHint}
-          />
-        )}
-        <ToolContent>
-          <ToolDetailBody part={tp} sessionId={sessionId} />
-        </ToolContent>
-      </Tool>
-    )
+  // Every tool renders as an inline row (status dot + lead + target + meta +
+  // chevron) through the shared `ToolRowShell` chrome: Bash gets the `$`
+  // prompt row, file tools the verb row, and everything else — built-ins,
+  // plugin tools, unknown MCP tools — the generic structured row. The
+  // expanded body is `ToolDetailBody` in every case, so a row never decides
+  // how a payload renders.
+  const toolEl = isBashToolPart(tp) ? (
+    <TerminalToolPart part={tp} defaultOpen={defaultOpen} />
+  ) : isFileToolPart(tp) ? (
+    <FileToolPart part={tp} sessionId={sessionId} defaultOpen={defaultOpen} />
+  ) : (
+    <StructuredToolPart part={tp} sessionId={sessionId} defaultOpen={defaultOpen} />
+  )
 
   return (
     <React.Fragment key={key}>
@@ -1960,15 +1962,11 @@ function renderPart(
         // the instant the answer streams in — the reasoning is part of the
         // transcript and should stay readable.
         closeOnFinish={false}
+        // The row joins the activity stream — no section spacing.
+        className="mb-0"
       >
-        <ReasoningTrigger
-          getThinkingMessage={(streaming, duration) => {
-            if (streaming || duration === 0) return t("reasoning.streaming")
-            if (duration === undefined) return t("reasoning.completed")
-            return t("reasoning.completedSeconds", { duration })
-          }}
-        />
-        <ReasoningContent
+        <ReasoningToolRow
+          text={text}
           streamdownProps={{
             className: cn(
               "typeset typeset-chat",
@@ -1989,11 +1987,15 @@ function renderPart(
             rehypePlugins: chatStreamdownRehypePlugins,
             urlTransform: chatMarkdownUrlTransform,
           }}
-        >
-          {text}
-        </ReasoningContent>
+        />
       </Reasoning>
     )
+  }
+
+  if (type === "data-async-questions") {
+    // Non-blocking agent questions (opt-in: settings.inlineQuestions). The
+    // card answers with ordinary user messages via the chat-send bridge.
+    return <AsyncQuestionsCard key={key} part={part} sessionId={sessionId} messageId={messageId} />
   }
 
   if (type === "data-commentary") {

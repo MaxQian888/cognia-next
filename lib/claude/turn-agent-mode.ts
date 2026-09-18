@@ -27,6 +27,7 @@ import { STANDARD_PRESET, presetFromAgentMode } from "@/lib/agent/composition/pr
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
 import type { AgentPermissionMode } from "@cognia/agent-config-types"
 import type { AgentPresetDefinitionV1 } from "@cognia/agent-config-types/agent-composition"
+import type { MessageRunMetadata } from "@/lib/chat/message-run-metadata"
 
 export interface TurnAgentMode {
   /** Absent only when the caller suppressed modes entirely. */
@@ -105,4 +106,15 @@ export function resolveTurnAgentMode(input: ResolveTurnAgentModeInput = {}): Tur
       preset.maxAuthority
     ),
   }
+}
+
+/**
+ * The identity the transcript stamps on a completed turn, so the message
+ * header keeps naming the composition that produced it (`Build`, `Plan`…)
+ * after the session selection later moves on. `undefined` when the caller
+ * suppressed modes (`explicitMode: null`) — no stamp beats a wrong stamp.
+ */
+export function turnAgentStamp(sessionId?: string): MessageRunMetadata["agent"] {
+  const preset = resolveTurnAgentMode({ sessionId }).preset
+  return preset ? { presetId: preset.id, name: preset.name, icon: preset.icon } : undefined
 }

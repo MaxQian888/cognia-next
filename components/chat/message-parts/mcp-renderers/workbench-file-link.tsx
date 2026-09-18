@@ -21,6 +21,7 @@ import {
   canOfferWorkbenchReview,
   openFileInWorkbenchWorkspace,
 } from "@/lib/files/edit-review-bridge"
+import { FileTypeIcon } from "@/components/shared/file-type-icon"
 import { cn } from "@/lib/utils"
 
 export interface WorkbenchFileLinkProps {
@@ -57,7 +58,23 @@ export function WorkbenchFileLink({
   // path gets, so a path that climbs out still ends up reported, not opened.
   const reachable = Boolean(sessionId) && canOfferWorkbenchReview() && path.trim() !== ""
 
-  if (!reachable) return <span className={className}>{children ?? path}</span>
+  // The same file-type glyph the composer file picker and file trees show —
+  // tool-card paths were the odd surface out. Decorative: the link itself
+  // already names the file for assistive tech.
+  const icon = (
+    <FileTypeIcon
+      path={path}
+      className="mr-1 inline-block size-3 shrink-0 -translate-y-px align-middle"
+    />
+  )
+
+  if (!reachable)
+    return (
+      <span className={className}>
+        {icon}
+        {children ?? path}
+      </span>
+    )
 
   return (
     <button
@@ -84,6 +101,7 @@ export function WorkbenchFileLink({
         })
       }}
     >
+      {icon}
       {children ?? path}
     </button>
   )

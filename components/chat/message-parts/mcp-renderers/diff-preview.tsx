@@ -7,9 +7,10 @@
 // word/char-level intraline highlight (via `fast-diff`) so the eye lands on
 // the exact changed run instead of a whole-line wash.
 
-import { memo, useMemo } from "react"
+import { memo, useMemo, useState } from "react"
 import { cn } from "@/lib/utils"
 import { computeIntralineDiff, type IntralineSegment } from "@/lib/chat/intraline-diff"
+import { PreviewClampNote, TOOL_PREVIEW_MAX_LINES } from "./common"
 
 export interface DiffPreviewProps {
   oldText: string
@@ -54,14 +55,23 @@ export const DiffPreview = memo(function DiffPreview({
   // tool-approval dialog) don't re-split unchanged strings.
   const oldLines = useMemo(() => (oldText.length > 0 ? oldText.split("\n") : []), [oldText])
   const newLines = useMemo(() => (newText.length > 0 ? newText.split("\n") : []), [newText])
+  // A large edit clamps each side to the preview budget — done *before* the
+  // intraline pass so a multi-thousand-line payload doesn't pay a fast-diff
+  // per paired line until the user asks for the full diff.
+  const [expanded, setExpanded] = useState(false)
+  const hidden =
+    Math.max(0, oldLines.length - TOOL_PREVIEW_MAX_LINES) +
+    Math.max(0, newLines.length - TOOL_PREVIEW_MAX_LINES)
+  const visibleOld = expanded ? oldLines : oldLines.slice(0, TOOL_PREVIEW_MAX_LINES)
+  const visibleNew = expanded ? newLines : newLines.slice(0, TOOL_PREVIEW_MAX_LINES)
   // Intraline pass, paired by line index (best-effort — naive pairing degrades
   // to whole-line color when the line was inserted/deleted rather than edited).
   const intraline = useMemo(
     () =>
-      oldLines.map((line, i) =>
-        newLines[i] !== undefined ? computeIntralineDiff(line, newLines[i]) : null
+      visibleOld.map((line, i) =>
+        visibleNew[i] !== undefined ? computeIntralineDiff(line, visibleNew[i]) : null
       ),
-    [oldLines, newLines]
+    [visibleOld, visibleNew]
   )
   return (
     <div
@@ -71,7 +81,7 @@ export const DiffPreview = memo(function DiffPreview({
       )}
       data-testid="diff-preview"
     >
-      {oldLines.map((line, i) => (
+      {visibleOld.map((line, i) => (
         <div
           key={`o-${i}`}
           data-testid="diff-removed"
@@ -85,7 +95,7 @@ export const DiffPreview = memo(function DiffPreview({
           />
         </div>
       ))}
-      {newLines.map((line, i) => (
+      {visibleNew.map((line, i) => (
         <div
           key={`n-${i}`}
           data-testid="diff-added"
@@ -93,12 +103,20 @@ export const DiffPreview = memo(function DiffPreview({
         >
           <span className="select-none">+ </span>
           <IntralineText
-            segments={i < oldLines.length ? (intraline[i]?.added ?? null) : null}
+            segments={i < visibleOld.length ? (intraline[i]?.added ?? null) : null}
             fallback={line}
             emphasis="bg-emerald-500/30"
           />
         </div>
       ))}
+      {hidden > 0 && !expanded && (
+        <PreviewClampNote
+          shown={visibleOld.length + visibleNew.length}
+          total={oldLines.length + newLines.length}
+          onExpand={() => setExpanded(true)}
+          testId="diff-preview-clamped"
+        />
+      )}
     </div>
   )
 })

@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import type { ToolUIPart } from "ai"
 
 import { WebSearchCard } from "./web-search-card"
@@ -16,48 +16,99 @@ const part = (input?: unknown, output?: unknown): ToolUIPart =>
   }) as unknown as ToolUIPart
 
 describe("WebSearchCard", () => {
-  it("renders the query and one external link per result", () => {
+  it("renders one compact row per result — favicon, link, host", () => {
     render(
       <WebSearchCard
         part={part(
           { query: "cats" },
           {
             results: [
-              { title: "A", url: "https://a.test/x" },
+              {
+                title: "A",
+                url: "https://a.test/x",
+                favicon: "https://a.test/favicon.ico",
+              },
               { title: "B", url: "https://b.test/y" },
             ],
           }
         )}
       />
     )
-    expect(screen.getByTestId("mcp-websearch-query")).toHaveTextContent("cats")
     const rows = screen.getAllByTestId("mcp-websearch-result")
     expect(rows).toHaveLength(2)
     const firstLink = screen.getByRole("link", { name: "A" })
     expect(firstLink).toHaveAttribute("href", "https://a.test/x")
     expect(firstLink).toHaveAttribute("target", "_blank")
+    // Provider favicon renders as an <img>; the host follows the title.
+    expect(rows[0]!.querySelector("img")).toHaveAttribute("src", "https://a.test/favicon.ico")
+    expect(rows[0]).toHaveTextContent("a.test")
   })
 
-  it("returns null when there is neither a query nor results", () => {
-    const { container } = render(<WebSearchCard part={part({}, {})} />)
-    expect(container).toBeEmptyDOMElement()
+  it("falls back to a host letter chip when no favicon is provided", () => {
+    render(
+      <WebSearchCard
+        part={part({ query: "cats" }, { results: [{ title: "B", url: "https://b.test/y" }] })}
+      />
+    )
+    const row = screen.getByTestId("mcp-websearch-result")
+    expect(row.querySelector("img")).not.toBeInTheDocument()
+    expect(row).toHaveTextContent("B")
   })
 
-  it("renders Cognia search metadata, answer, content, and credibility", () => {
+  it("renders a single clamped snippet line and the publication date", () => {
     render(
       <WebSearchCard
         part={part(
-          { query: "ignored input" },
+          { query: "q" },
+          {
+            results: [
+              {
+                title: "Doc",
+                url: "https://cognia.example/docs",
+                content: "A provider-shaped result.",
+                publishedDate: "2026-09-01T00:00:00Z",
+              },
+            ],
+          }
+        )}
+      />
+    )
+    const row = screen.getByTestId("mcp-websearch-result")
+    const snippet = row.querySelector("p")
+    expect(snippet).toHaveTextContent("A provider-shaped result.")
+    expect(snippet).toHaveClass("line-clamp-1")
+    expect(row).toHaveTextContent("2026-09-01")
+  })
+
+  it("renders the answer as a quote rail instead of a filled card", () => {
+    render(
+      <WebSearchCard
+        part={part(
+          { query: "q" },
           {
             ok: true,
-            query: "cognia query",
-            provider: "tavily",
             answer: "A concise answer.",
+            results: [{ title: "R", url: "https://r.test" }],
+          }
+        )}
+      />
+    )
+    const answer = screen.getByTestId("mcp-websearch-answer")
+    expect(answer).toHaveTextContent("A concise answer.")
+    expect(answer).toHaveClass("border-l-2")
+    expect(answer.className).not.toMatch(/bg-muted/)
+  })
+
+  it("keeps the credibility badge on the result row", () => {
+    render(
+      <WebSearchCard
+        part={part(
+          { query: "q" },
+          {
             results: [
               {
                 title: "Cognia",
                 url: "https://cognia.example/docs",
-                content: "A provider-shaped result.",
                 credibility: "high",
               },
             ],
@@ -65,12 +116,42 @@ describe("WebSearchCard", () => {
         )}
       />
     )
-
-    expect(screen.getByTestId("mcp-websearch-query")).toHaveTextContent("cognia query")
-    expect(screen.getByTestId("mcp-websearch-card-badge")).toHaveTextContent("via tavily")
-    expect(screen.getByTestId("mcp-websearch-answer")).toHaveTextContent("A concise answer.")
     expect(screen.getByTestId("mcp-websearch-credibility")).toHaveTextContent("high")
-    expect(screen.getByText("A provider-shaped result.")).toBeInTheDocument()
+  })
+
+  it("renders results that lack a URL as plain text", () => {
+    render(
+      <WebSearchCard
+        part={part({ query: "q" }, { results: [{ title: "NoLink", snippet: "s" }] })}
+      />
+    )
+    expect(screen.getByText("NoLink")).toBeInTheDocument()
+    expect(screen.queryByRole("link")).not.toBeInTheDocument()
+  })
+
+  it("folds a long result page behind the preview budget", () => {
+    const results = Array.from({ length: 8 }, (_, i) => ({
+      title: `r${i}`,
+      url: `https://r${i}.test`,
+    }))
+    render(<WebSearchCard part={part({ query: "q" }, { results })} />)
+    // Only the preview rows render; the rest sit behind the clamp note.
+    expect(screen.getAllByTestId("mcp-websearch-result")).toHaveLength(5)
+    const note = screen.getByTestId("mcp-websearch-clamped")
+    expect(note).toHaveTextContent("5 of 8")
+    fireEvent.click(note.querySelector("button")!)
+    expect(screen.getAllByTestId("mcp-websearch-result")).toHaveLength(8)
+    expect(screen.queryByTestId("mcp-websearch-clamped")).not.toBeInTheDocument()
+  })
+
+  it("returns null when there is neither a query nor results", () => {
+    const { container } = render(<WebSearchCard part={part({}, {})} />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it("renders the empty state for a query with zero hits", () => {
+    render(<WebSearchCard part={part({ query: "q" }, { ok: true, results: [] })} />)
+    expect(screen.getByText("No results.")).toBeInTheDocument()
   })
 
   it("hides model-only untrusted-content framing", () => {

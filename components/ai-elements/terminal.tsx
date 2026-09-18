@@ -1,123 +1,252 @@
 "use client"
 
 /**
- * Cognia compat shim — minimal terminal-style output viewer used by
- * the canvas code-execution panel. cognia-next renders a simple
- * monospace block; the broader Cognia terminal (with PTY support,
- * search, etc.) is out of scope. The compound components below mirror
- * the Cognia surface so canvas's code-execution-panel compiles.
+ * Terminal — aligned with upstream ai-elements. Displays console output with
+ * ANSI colour support (via `ansi-to-react`), a streaming cursor, auto-scroll,
+ * and copy/clear actions. The compound parts share state through
+ * `TerminalContext` so headers/actions stay in sync with the body.
+ *
+ * Cognia deviations from upstream:
+ * - surface colours come from the `--terminal-*` CSS vars (mode-fixed dark
+ *   console identity — see app/globals.css §terminal) instead of literal zinc.
+ * - `output` is optional so callers can compose an empty shell.
  */
 
-import { ScrollArea } from "@/components/ui/scroll-area"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { useTranslations } from "next-intl"
+import Ansi from "ansi-to-react"
+import { CheckIcon, CopyIcon, TerminalIcon, Trash2Icon } from "lucide-react"
+import type { ComponentProps, HTMLAttributes } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 
-export interface TerminalProps {
-  className?: string
+interface TerminalContextType {
+  output: string
+  isStreaming: boolean
+  autoScroll: boolean
+  onClear?: () => void
+}
+
+const TerminalContext = createContext<TerminalContextType>({
+  autoScroll: true,
+  isStreaming: false,
+  output: "",
+})
+
+export type TerminalHeaderProps = HTMLAttributes<HTMLDivElement>
+
+export const TerminalHeader = ({ className, children, ...props }: TerminalHeaderProps) => (
+  <div
+    className={cn(
+      "flex items-center justify-between border-[var(--terminal-border)] border-b px-4 py-2",
+      className
+    )}
+    {...props}
+  >
+    {children}
+  </div>
+)
+
+export type TerminalTitleProps = HTMLAttributes<HTMLDivElement>
+
+export const TerminalTitle = ({ className, children, ...props }: TerminalTitleProps) => (
+  <div className={cn("flex items-center gap-2 text-sm text-zinc-400", className)} {...props}>
+    <TerminalIcon className="size-4" />
+    {children ?? "Terminal"}
+  </div>
+)
+
+export type TerminalStatusProps = HTMLAttributes<HTMLDivElement>
+
+export const TerminalStatus = ({ className, children, ...props }: TerminalStatusProps) => {
+  const { isStreaming } = useContext(TerminalContext)
+
+  if (!isStreaming) {
+    return null
+  }
+
+  return (
+    <div className={cn("flex items-center gap-2 text-xs text-zinc-400", className)} {...props}>
+      {children}
+    </div>
+  )
+}
+
+export type TerminalActionsProps = HTMLAttributes<HTMLDivElement>
+
+export const TerminalActions = ({ className, children, ...props }: TerminalActionsProps) => (
+  <div className={cn("flex items-center gap-1", className)} {...props}>
+    {children}
+  </div>
+)
+
+export type TerminalCopyButtonProps = ComponentProps<typeof Button> & {
+  onCopy?: () => void
+  onError?: (error: Error) => void
+  timeout?: number
+}
+
+export const TerminalCopyButton = ({
+  onCopy,
+  onError,
+  timeout = 2000,
+  children,
+  className,
+  ...props
+}: TerminalCopyButtonProps) => {
+  const t = useTranslations("aiElements.terminal")
+  const [isCopied, setIsCopied] = useState(false)
+  const timeoutRef = useRef<number>(0)
+  const { output } = useContext(TerminalContext)
+
+  const copyToClipboard = useCallback(async () => {
+    if (typeof window === "undefined" || !navigator?.clipboard?.writeText) {
+      onError?.(new Error(t("clipboardUnavailable")))
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(output)
+      setIsCopied(true)
+      onCopy?.()
+      timeoutRef.current = window.setTimeout(() => setIsCopied(false), timeout)
+    } catch (error) {
+      onError?.(error as Error)
+    }
+  }, [output, onCopy, onError, t, timeout])
+
+  useEffect(
+    () => () => {
+      window.clearTimeout(timeoutRef.current)
+    },
+    []
+  )
+
+  const Icon = isCopied ? CheckIcon : CopyIcon
+
+  return (
+    <Button
+      className={cn(
+        "size-7 shrink-0 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100",
+        className
+      )}
+      onClick={copyToClipboard}
+      size="icon"
+      variant="ghost"
+      {...props}
+    >
+      {children ?? <Icon size={14} />}
+    </Button>
+  )
+}
+
+export type TerminalClearButtonProps = ComponentProps<typeof Button>
+
+export const TerminalClearButton = ({
+  children,
+  className,
+  ...props
+}: TerminalClearButtonProps) => {
+  const { onClear } = useContext(TerminalContext)
+
+  if (!onClear) {
+    return null
+  }
+
+  return (
+    <Button
+      className={cn(
+        "size-7 shrink-0 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100",
+        className
+      )}
+      onClick={onClear}
+      size="icon"
+      variant="ghost"
+      {...props}
+    >
+      {children ?? <Trash2Icon size={14} />}
+    </Button>
+  )
+}
+
+export type TerminalContentProps = HTMLAttributes<HTMLDivElement>
+
+export const TerminalContent = ({ className, children, ...props }: TerminalContentProps) => {
+  const { output, isStreaming, autoScroll } = useContext(TerminalContext)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (autoScroll && containerRef.current) {
+      containerRef.current.scrollTop = containerRef.current.scrollHeight
+    }
+  }, [output, autoScroll])
+
+  return (
+    <div
+      className={cn("max-h-96 overflow-auto p-4 font-mono text-sm leading-relaxed", className)}
+      ref={containerRef}
+      {...props}
+    >
+      {children ?? (
+        <pre className="whitespace-pre-wrap break-words">
+          <Ansi>{output}</Ansi>
+          {isStreaming && (
+            <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-zinc-100" />
+          )}
+        </pre>
+      )}
+    </div>
+  )
+}
+
+export type TerminalProps = HTMLAttributes<HTMLDivElement> & {
   output?: string
   isStreaming?: boolean
-  children?: React.ReactNode
+  autoScroll?: boolean
+  onClear?: () => void
 }
 
-export function Terminal({ className, children, output, isStreaming }: TerminalProps) {
+export const Terminal = ({
+  output = "",
+  isStreaming = false,
+  autoScroll = true,
+  onClear,
+  className,
+  children,
+  ...props
+}: TerminalProps) => {
+  const contextValue = useMemo(
+    () => ({ autoScroll, isStreaming, onClear, output }),
+    [autoScroll, isStreaming, onClear, output]
+  )
+
   return (
-    <ScrollArea
-      data-slot="ai-terminal"
-      className={cn(
-        "h-full w-full rounded border bg-[var(--terminal-surface)] font-mono text-xs text-[var(--terminal-foreground)]",
-        className
-      )}
-    >
-      <div className="p-2">
-        {output && <pre className="whitespace-pre-wrap">{output}</pre>}
-        {children}
-        {isStreaming && (
-          <span className="inline-block h-3 w-1 animate-pulse bg-zinc-200 align-middle" />
+    <TerminalContext.Provider value={contextValue}>
+      <div
+        data-slot="ai-terminal"
+        className={cn(
+          "flex flex-col overflow-hidden rounded-lg border bg-[var(--terminal-surface)] text-[var(--terminal-foreground)]",
+          className
+        )}
+        {...props}
+      >
+        {children ?? (
+          <>
+            <TerminalHeader>
+              <TerminalTitle />
+              <div className="flex items-center gap-1">
+                <TerminalStatus />
+                <TerminalActions>
+                  <TerminalCopyButton />
+                  {onClear && <TerminalClearButton />}
+                </TerminalActions>
+              </div>
+            </TerminalHeader>
+            <TerminalContent />
+          </>
         )}
       </div>
-    </ScrollArea>
-  )
-}
-
-export interface TerminalLineProps {
-  stream?: "stdout" | "stderr" | "info"
-  children: React.ReactNode
-}
-
-export function TerminalLine({ stream = "stdout", children }: TerminalLineProps) {
-  return (
-    <div
-      className={cn(
-        "whitespace-pre-wrap break-words",
-        stream === "stderr" && "text-red-400",
-        stream === "info" && "text-blue-300"
-      )}
-    >
-      {children}
-    </div>
-  )
-}
-
-export function TerminalHeader({
-  className,
-  children,
-}: {
-  className?: string
-  children?: React.ReactNode
-}) {
-  return (
-    <div
-      className={cn(
-        "flex items-center justify-between gap-2 border-b border-[var(--terminal-border)] px-2 py-1 text-[11px] text-zinc-300",
-        className
-      )}
-    >
-      {children}
-    </div>
-  )
-}
-
-export function TerminalContent({
-  className,
-  children,
-}: {
-  className?: string
-  children?: React.ReactNode
-}) {
-  return <div className={cn("min-h-0", className)}>{children}</div>
-}
-
-export function TerminalActions({
-  className,
-  children,
-}: {
-  className?: string
-  children?: React.ReactNode
-}) {
-  return <div className={cn("flex items-center gap-1", className)}>{children}</div>
-}
-
-export function TerminalStatus({
-  className,
-  children,
-  status,
-}: {
-  className?: string
-  children?: React.ReactNode
-  status?: "running" | "ok" | "error" | "idle"
-}) {
-  return (
-    <div
-      className={cn(
-        "rounded px-1.5 py-0.5 text-[10px]",
-        status === "running" && "bg-blue-500/20 text-blue-300",
-        status === "ok" && "bg-emerald-500/20 text-emerald-300",
-        status === "error" && "bg-red-500/20 text-red-300",
-        !status && "bg-zinc-700/40 text-zinc-300",
-        className
-      )}
-    >
-      {children}
-    </div>
+    </TerminalContext.Provider>
   )
 }
 

@@ -36,7 +36,6 @@ describe("GlobCard", () => {
   it("lists matches from a structured payload", () => {
     render(<GlobCard part={globPart({ output: { files: ["/repo/a.ts", "/repo/b.ts"] } })} />)
     expect(screen.getAllByTestId("mcp-glob-match")).toHaveLength(2)
-    expect(screen.getByTestId("mcp-glob-pattern").textContent).toContain("**/*.ts")
   })
 
   it("splits a plain-string payload into one match per line", () => {
@@ -83,5 +82,15 @@ describe("GlobCard", () => {
         column: undefined,
       })
     )
+  })
+
+  it("clamps a huge match list behind a show-all note", () => {
+    const files = Array.from({ length: 250 }, (_, i) => `/repo/f${i}.ts`)
+    render(<GlobCard part={globPart({ output: { files } })} />)
+    expect(screen.getAllByTestId("mcp-glob-match")).toHaveLength(200)
+    expect(screen.getByTestId("mcp-glob-clamped")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("mcp-glob-clamped-show-all"))
+    expect(screen.getAllByTestId("mcp-glob-match")).toHaveLength(250)
+    expect(screen.queryByTestId("mcp-glob-clamped")).not.toBeInTheDocument()
   })
 })

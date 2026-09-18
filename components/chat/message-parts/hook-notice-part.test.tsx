@@ -138,11 +138,11 @@ describe("HookNoticeMarker", () => {
     expect(screen.getByTestId("hook-notice-warnings").textContent).toContain("hook crashed: boom")
   })
 
-  it("defensively disables the trigger and shows no body for a degenerate fire", () => {
+  it("degenerates to a static line (no toggle, no body) for a degenerate fire", () => {
     // A fire with no block/context/warnings and an unrecognized outcome should
     // never reach the renderer (the Rust side gates it out), but the component
-    // degrades gracefully: the bar colour falls back, the row has no chevron,
-    // and the trigger is non-interactive.
+    // degrades gracefully: the outcome styling falls back, the row renders as
+    // a static status line with nothing to expand.
     render(
       <HookNoticeMarker
         message={hookMessage({
@@ -153,8 +153,7 @@ describe("HookNoticeMarker", () => {
         })}
       />
     )
-    const trigger = screen.getByRole("button", { name: "Toggle hook details" })
-    expect((trigger as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.queryByRole("button", { name: "Toggle hook details" })).toBeNull()
     expect(screen.queryByTestId("hook-notice-reason")).toBeNull()
     expect(screen.queryByTestId("hook-notice-warnings")).toBeNull()
   })

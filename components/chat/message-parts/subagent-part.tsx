@@ -6,11 +6,13 @@
  * insertion time) come from the part itself; live `progress` + `logs`
  * come from `useSubagentRuntimeStore` via subscription.
  *
- * Mode-aware (mirrors the tool-call flow):
- *  - simplified — compact single row (icon + name + status glyph + duration);
- *                 clicking expands progress/logs inline. Matches `ToolCallRow`.
- *  - standard   — full card, collapsed by default.
- *  - detailed   — full card, expanded by default (progress + logs visible).
+ * Mode-aware (mirrors the tool-call flow): every mode renders the shared
+ * `ToolRowShell` row (status dot + name + badges + meta + trailing chevron)
+ * with the detail body nested under a left rule. `mode` chooses the seed open
+ * state and whether narrated stream logs show:
+ *  - simplified — collapsed row.
+ *  - standard   — collapsed row.
+ *  - detailed   — expanded by default (progress + logs + stream text visible).
  *
  * Open state is controllable from the parent tree (expand-all / collapse-all)
  * via `open` + `onToggle`; omit both for self-managed toggling.
@@ -22,23 +24,8 @@ import { memo, useEffect, useMemo, useState, type MouseEvent } from "react"
 import { useTranslations } from "next-intl"
 import Link from "next/link"
 import { toast } from "sonner"
-import {
-  AlertTriangleIcon,
-  BanIcon,
-  BotIcon,
-  CheckCircleIcon,
-  ChevronRightIcon,
-  CircleIcon,
-  ClockIcon,
-  ExternalLinkIcon,
-  Loader2Icon,
-  PauseIcon,
-  ShieldAlertIcon,
-  XCircleIcon,
-} from "lucide-react"
-import type { LucideIcon } from "lucide-react"
+import { AlertTriangleIcon, BotIcon, ExternalLinkIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import { useChatStore } from "@/stores/chat/chat-store"
 import type { SubagentPart as SubagentPartType } from "@/lib/claude/parts-extensions"
@@ -46,7 +33,7 @@ import { SUB_AGENT_STATUS_CONFIG } from "@/types/agent/sub-agent"
 import type { SubAgentToolCall, SubAgentTokenUsage } from "@/types/agent/sub-agent"
 import type { AgentFlowMode } from "@/types/appearance"
 import { ChainOfThoughtStep } from "@/components/ai-elements/chain-of-thought"
-import { MotionStatusSwap, ReadingCollapse } from "@/components/chat/motion/motion-reveal"
+import { ToolRowShell, type ToolDotStatus } from "@/components/chat/message-parts/tool-row"
 import { BackgroundedRunControls } from "@/components/chat/message-parts/backgrounded-run-controls"
 import {
   ToolActivityGroup,
@@ -59,17 +46,17 @@ import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { cancelSubagentRun } from "@/lib/claude/agents/cancel-subagent"
 import { cn, formatDurationShort } from "@/lib/utils"
 
-/** Status → concrete glyph for the simplified row + card header. */
-const STATUS_GLYPH: Record<string, { Icon: LucideIcon; className: string }> = {
-  pending: { Icon: CircleIcon, className: "text-muted-foreground" },
-  queued: { Icon: ClockIcon, className: "text-blue-500" },
-  running: { Icon: Loader2Icon, className: "animate-spin text-primary" },
-  waiting: { Icon: PauseIcon, className: "text-yellow-500" },
-  completed: { Icon: CheckCircleIcon, className: "text-green-600 dark:text-green-500" },
-  failed: { Icon: XCircleIcon, className: "text-destructive" },
-  cancelled: { Icon: BanIcon, className: "text-orange-500" },
-  timeout: { Icon: AlertTriangleIcon, className: "text-red-500" },
-  rejected: { Icon: ShieldAlertIcon, className: "text-destructive" },
+/** Sub-agent run status → the shared status-dot colour language. */
+const DOT_STATUS: Record<string, ToolDotStatus> = {
+  pending: "pending",
+  queued: "pending",
+  running: "running",
+  waiting: "warning",
+  completed: "complete",
+  failed: "error",
+  cancelled: "output-denied",
+  timeout: "error",
+  rejected: "error",
 }
 
 interface Props {
@@ -339,55 +326,63 @@ export const SubagentPart = memo(function SubagentPart({
     else setInternalOpen((v) => !v)
   }
 
-  const glyph = STATUS_GLYPH[status]
   const statusLabel = tStatus(cfg.labelKey)
 
   const rejectionBanner = rejection ? (
     <p
-      className="mt-2 rounded border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive"
+      className="mt-1 rounded border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive"
       data-testid="subagent-rejection"
     >
       {rejection.reason === "cycle" ? t("rejected.cycle") : t("rejected.maxDepth")}
     </p>
   ) : null
-
-  // Simplified mode: one glanceable, borderless row (matches ToolCallRow's
-  // Codex-style recession), expandable to the full detail body nested under a
-  // left rule.
-  if (mode === "simplified") {
-    return (
-      <div
-        // `@container/subagent` measures THIS card, not the viewport: the same
-        // row renders full width in a desktop transcript and three levels deep
-        // inside a subagent tree on a phone. Every piece of chrome below drops
-        // in priority order rather than pushing the name and the status glyph —
-        // the two things the row exists for — out of the box.
-        className="@container/subagent not-prose my-0.5"
-        data-testid={`subagent-part-${part.subagentId}`}
-        data-status={status}
-      >
-        <div className="flex items-center">
-          <button
-            type="button"
-            onClick={toggle}
-            aria-expanded={isOpen}
-            aria-label={t("rowAria", { name: part.name, status: statusLabel })}
-            data-testid={`subagent-toggle-${part.subagentId}`}
-            className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
-          >
-            <ChevronRightIcon
-              className={cn(
-                "size-3.5 shrink-0 opacity-60 transition-transform",
-                isOpen && "rotate-90"
-              )}
-            />
-            <BotIcon className="size-3.5 shrink-0" />
-            {/* Below ~384px the name is the cell that absorbs the free space
-                (the log preview is gone); above it the log takes over and the
-                name falls back to content width, still shrinkable. */}
-            <span className="min-w-0 flex-1 truncate font-medium text-foreground/80 @sm/subagent:flex-initial">
-              {part.name}
-            </span>
+  // One row grammar in every mode: the simplified row and the old standard
+  // card collapse into the shared `ToolRowShell` chrome — the status dot
+  // carries the run state, badges + meta sit right-aligned, the abort button
+  // is a hover action, and the body nests under the row's left rule. `mode`
+  // now only chooses the seed open state + whether narrated stream logs show.
+  return (
+    <div
+      // `@container/subagent` measures THIS row, not the viewport: the same
+      // row renders full width in a desktop transcript and three levels deep
+      // inside a subagent tree on a phone. Every piece of chrome below drops
+      // in priority order rather than pushing the name out of the box.
+      className="@container/subagent not-prose my-0.5"
+      data-testid={`subagent-part-${part.subagentId}`}
+      data-status={status}
+      data-open={isOpen}
+    >
+      <ToolRowShell
+        status={DOT_STATUS[status] ?? "pending"}
+        open={isOpen}
+        onToggle={toggle}
+        ariaLabel={t("rowAria", { name: part.name, status: statusLabel })}
+        testId={`subagent-row-${part.subagentId}`}
+        toggleTestId={`subagent-toggle-${part.subagentId}`}
+        lead={
+          <span className="min-w-0 max-w-[40%] truncate text-xs font-medium text-foreground/80">
+            {part.name}
+          </span>
+        }
+        icon={<BotIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />}
+        target={
+          // Lowest-priority cell: the log preview is simply dropped below
+          // ~384px, and the name above claims the width it was using.
+          <span className="hidden min-w-0 flex-1 truncate text-xs text-muted-foreground @sm/subagent:block">
+            {lastLog?.message ?? ""}
+          </span>
+        }
+        badges={
+          <>
+            {/* The dot alone can't distinguish failed/cancelled/timeout — the
+                text badge keeps the named status legible. */}
+            <Badge
+              variant="outline"
+              className={cn("text-[10px]", cfg.color)}
+              data-testid="subagent-status-badge"
+            >
+              {statusLabel}
+            </Badge>
             {typeof depth === "number" ? (
               <Badge variant="secondary" className="text-[10px]" data-testid="subagent-depth-badge">
                 {t("depthBadge", { n: depth })}
@@ -411,11 +406,6 @@ export const SubagentPart = memo(function SubagentPart({
                 {t("retrying", { n: retryCount })}
               </Badge>
             ) : null}
-            {/* Lowest-priority cell: it is simply dropped below ~384px, and
-                the name above claims the width it was using. */}
-            <span className="hidden min-w-0 flex-1 truncate text-xs text-muted-foreground @sm/subagent:block">
-              {lastLog?.message ?? ""}
-            </span>
             {typeof tokenTotal === "number" && tokenTotal > 0 ? (
               <Badge
                 variant="outline"
@@ -425,6 +415,10 @@ export const SubagentPart = memo(function SubagentPart({
                 {t("tokens", { n: tokenTotal })}
               </Badge>
             ) : null}
+          </>
+        }
+        meta={
+          <>
             {isRunning && toolUses > 0 ? (
               <span
                 className="hidden shrink-0 text-[11px] text-muted-foreground tabular-nums @md/subagent:inline"
@@ -436,118 +430,10 @@ export const SubagentPart = memo(function SubagentPart({
             <span className="shrink-0 text-[11px] text-muted-foreground">
               {formatDurationShort(durationMs)}
             </span>
-            <MotionStatusSwap swapKey={status} className="shrink-0">
-              <glyph.Icon className={cn("size-3.5", glyph.className)} aria-hidden />
-            </MotionStatusSwap>
             <span className="sr-only">{statusLabel}</span>
-          </button>
-          <BackgroundedRunControls
-            variant="icon"
-            isRunning={canAbort}
-            onAbort={handleAbort}
-            abortAria={t("abort")}
-            abortTestId={`subagent-abort-${part.subagentId}`}
-            className="mr-1"
-          />
-        </div>
-        {rejectionBanner}
-        <ReadingCollapse open={isOpen}>
-          {/* ml aligns the left rule under the chevron (px-1.5 + half of size-3.5). */}
-          <div className="ml-[13px] mb-1 space-y-2 border-l pl-3 pt-1">
-            <SubagentLogBody
-              summary={part.summary}
-              logs={logs}
-              lastLog={lastLog}
-              subagentId={part.subagentId}
-              nestedSessionId={part.nestedSessionId}
-              mode={mode}
-              toolCalls={toolCalls}
-              finalResponse={finalResponse}
-              tokenUsage={tokenUsage}
-              cutOff={cutOff}
-            />
-          </div>
-        </ReadingCollapse>
-      </div>
-    )
-  }
-
-  // Standard / detailed: the full card with a controllable Collapsible.
-  return (
-    <div
-      // Same container as the simplified row: the header wraps onto a second
-      // line instead of overflowing once the badges no longer fit beside the
-      // name. See the simplified branch for why the viewport is the wrong
-      // thing to measure here.
-      className="@container/subagent not-prose my-2 rounded-md border bg-card p-3"
-      data-testid={`subagent-part-${part.subagentId}`}
-      data-status={status}
-    >
-      <Collapsible open={isOpen}>
-        <div className="flex items-center justify-between gap-2">
-          <CollapsibleTrigger
-            className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
-            data-testid={`subagent-toggle-${part.subagentId}`}
-            onClick={toggle}
-          >
-            <glyph.Icon className={cn("size-3.5 shrink-0", glyph.className)} aria-hidden />
-            <span className="min-w-0 truncate text-sm font-medium">{part.name}</span>
-            {typeof depth === "number" ? (
-              <Badge variant="secondary" className="text-[10px]" data-testid="subagent-depth-badge">
-                {t("depthBadge", { n: depth })}
-              </Badge>
-            ) : null}
-            <Badge
-              variant="outline"
-              className={cn("text-[10px]", cfg.color)}
-              data-testid="subagent-status-badge"
-            >
-              {statusLabel}
-            </Badge>
-            {backgrounded ? (
-              <Badge
-                variant="outline"
-                className="text-[10px] text-muted-foreground"
-                data-testid="subagent-background-badge"
-              >
-                {t("backgroundRunning")}
-              </Badge>
-            ) : null}
-            {isRunning && retryCount > 0 ? (
-              <Badge
-                variant="outline"
-                className="text-[10px] text-amber-600"
-                data-testid="subagent-retry-badge"
-              >
-                {t("retrying", { n: retryCount })}
-              </Badge>
-            ) : null}
-            {typeof tokenTotal === "number" && tokenTotal > 0 ? (
-              <Badge
-                variant="outline"
-                className="text-[10px] text-muted-foreground"
-                data-testid="subagent-tokens-badge"
-              >
-                {t("tokens", { n: tokenTotal })}
-              </Badge>
-            ) : null}
-            {isRunning && toolUses > 0 ? (
-              <span
-                className="ml-auto shrink-0 text-[11px] text-muted-foreground tabular-nums"
-                data-testid="subagent-tools-count"
-              >
-                {t("toolsRunCount", { n: toolUses })}
-              </span>
-            ) : null}
-            <span
-              className={cn(
-                "shrink-0 text-[11px] text-muted-foreground",
-                !(isRunning && toolUses > 0) && "ml-auto"
-              )}
-            >
-              {formatDurationShort(durationMs)}
-            </span>
-          </CollapsibleTrigger>
+          </>
+        }
+        actions={
           <BackgroundedRunControls
             variant="icon"
             isRunning={canAbort}
@@ -555,9 +441,9 @@ export const SubagentPart = memo(function SubagentPart({
             abortAria={t("abort")}
             abortTestId={`subagent-abort-${part.subagentId}`}
           />
-        </div>
-        {rejectionBanner}
-        <CollapsibleContent className="mt-2 space-y-2">
+        }
+      >
+        <div className="mb-1 space-y-2 border-l pl-3 pt-1">
           <SubagentLogBody
             summary={part.summary}
             logs={logs}
@@ -570,8 +456,11 @@ export const SubagentPart = memo(function SubagentPart({
             tokenUsage={tokenUsage}
             cutOff={cutOff}
           />
-        </CollapsibleContent>
-      </Collapsible>
+        </div>
+      </ToolRowShell>
+      {/* A rejection is the reason the run never started — it must stay
+          visible even when the row is collapsed. */}
+      {rejectionBanner}
     </div>
   )
 })

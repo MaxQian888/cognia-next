@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 
 import { DiffPreview } from "./diff-preview"
 
@@ -40,5 +40,25 @@ describe("DiffPreview", () => {
   it("does not emphasize anything for a pure addition (no counterpart line)", () => {
     render(<DiffPreview oldText="" newText="brand new" />)
     expect(screen.queryAllByTestId("diff-intraline")).toHaveLength(0)
+  })
+
+  it("clamps a large diff behind a show-all note", () => {
+    const oldText = Array.from({ length: 300 }, (_, i) => `old ${i}`).join("\n")
+    render(<DiffPreview oldText={oldText} newText="" />)
+    expect(screen.getAllByTestId("diff-removed")).toHaveLength(120)
+    const note = screen.getByTestId("diff-preview-clamped")
+    expect(note).toHaveTextContent("Showing the first 120 of 300")
+    fireEvent.click(screen.getByTestId("diff-preview-clamped-show-all"))
+    expect(screen.getAllByTestId("diff-removed")).toHaveLength(300)
+    expect(screen.queryByTestId("diff-preview-clamped")).not.toBeInTheDocument()
+  })
+
+  it("clamps the added side independently of the removed side", () => {
+    const newText = Array.from({ length: 200 }, (_, i) => `new ${i}`).join("\n")
+    render(<DiffPreview oldText="one" newText={newText} />)
+    expect(screen.getAllByTestId("diff-added")).toHaveLength(120)
+    expect(screen.getByTestId("diff-preview-clamped")).toHaveTextContent(
+      "Showing the first 121 of 201"
+    )
   })
 })

@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl"
 import { ChevronDownIcon, BookOpenCheckIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
 import { Button } from "@/components/ui/button"
-import { McpCardShell, useParsedOutput } from "./common"
+import { useParsedOutput } from "./common"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 
 interface WikiReadOutput {
@@ -25,15 +25,12 @@ export function WikiReadCard({ part }: { part: ToolUIPart }) {
   const fallbackBody = typeof parsed.body === "string" ? parsed.body : undefined
 
   return (
-    <McpCardShell title="wiki_read" badge={parsed.slug} testId="mcp-wiki-read-card">
+    <div data-testid="mcp-wiki-read-card" className="my-1 text-xs">
+      {/* The row owns the article's identity (slug target + title meta) — the
+          body carries only the collapsible content. */}
       <div className="flex items-start gap-2">
         <BookOpenCheckIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
-          {parsed.title && (
-            <p className="mb-1 font-medium" data-testid="mcp-wiki-read-title">
-              {parsed.title}
-            </p>
-          )}
           <Button
             variant="ghost"
             size="sm"
@@ -44,7 +41,7 @@ export function WikiReadCard({ part }: { part: ToolUIPart }) {
             <ChevronDownIcon
               className={`mr-1 size-3 transition-transform ${open ? "" : "-rotate-90"}`}
             />
-            {open ? t("hide") : t("show")} body
+            {open ? t("hideBody") : t("showBody")}
           </Button>
           {open &&
             (sections.length > 0 ? (
@@ -69,6 +66,6 @@ export function WikiReadCard({ part }: { part: ToolUIPart }) {
             ))}
         </div>
       </div>
-    </McpCardShell>
+    </div>
   )
 }

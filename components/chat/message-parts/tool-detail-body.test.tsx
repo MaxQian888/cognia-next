@@ -34,6 +34,36 @@ jest.mock("@/components/chat/message-parts/terminal-tool-part", () => ({
     ReactForMocks.createElement("div", { "data-testid": "terminal-body" }, part.type),
 }))
 
+// Same for the file-tool body: keep the real `isFileToolPart` predicate (the
+// routing decision IS the thing under test) but stub the body, whose card
+// imports drag in the workbench/Dexie chain.
+jest.mock("@/components/chat/message-parts/file-tool-part", () => {
+  const { resolveToolPartName } = jest.requireActual("@/lib/chat/tool-summary")
+  const FILE_TOOLS = new Set([
+    "read",
+    "write",
+    "edit",
+    "multiedit",
+    "multi_edit",
+    "grep",
+    "glob",
+    "ls",
+    "notebookedit",
+  ])
+  return {
+    isFileToolPart: (p: { type?: string; toolName?: string }) => {
+      const name = resolveToolPartName(p)
+      return name ? FILE_TOOLS.has(name.toLowerCase()) : false
+    },
+    FileToolBody: ({ part, sessionId }: { part: { type: string }; sessionId?: string }) =>
+      ReactForMocks.createElement(
+        "div",
+        { "data-testid": "file-tool-body", "data-session-id": sessionId ?? "" },
+        part.type
+      ),
+  }
+})
+
 // Stub the error chrome, keep the real `normalizeErrorText` behind it.
 jest.mock("@/components/error/error-trace-details", () => ({
   ErrorTraceDetails: ({ error, body }: { error: { message: string }; body?: unknown }) =>
@@ -113,7 +143,7 @@ describe("ToolDetailBody", () => {
 
   it("routes a registered tool to its structured card", () => {
     const { getByTestId, queryByTestId } = render(
-      <ToolDetailBody part={part({ type: "tool-Read", input: { file_path: "a.ts" } })} />
+      <ToolDetailBody part={part({ type: "tool-WebFetch", input: { url: "https://a.com" } })} />
     )
     expect(getByTestId("mcp-card")).toBeTruthy()
     expect(queryByTestId("tool-body")).toBeNull()
@@ -124,11 +154,30 @@ describe("ToolDetailBody", () => {
   it("threads sessionId into the structured card", () => {
     const { getByTestId } = render(
       <ToolDetailBody
-        part={part({ type: "tool-Edit", input: { file_path: "a.ts" } })}
+        part={part({ type: "tool-WebFetch", input: { url: "https://a.com" } })}
         sessionId="sess-9"
       />
     )
     expect(getByTestId("mcp-card").getAttribute("data-session-id")).toBe("sess-9")
+  })
+
+  it("routes a file tool to the file-tool body, not the MCP card", () => {
+    const { getByTestId, queryByTestId } = render(
+      <ToolDetailBody part={part({ type: "tool-Read", input: { file_path: "a.ts" } })} />
+    )
+    expect(getByTestId("file-tool-body")).toBeTruthy()
+    expect(queryByTestId("mcp-card")).toBeNull()
+    expect(queryByTestId("tool-body")).toBeNull()
+  })
+
+  it("threads sessionId into the file-tool body — workbench actions gate on it", () => {
+    const { getByTestId } = render(
+      <ToolDetailBody
+        part={part({ type: "tool-Edit", input: { file_path: "a.ts" } })}
+        sessionId="sess-9"
+      />
+    )
+    expect(getByTestId("file-tool-body").getAttribute("data-session-id")).toBe("sess-9")
   })
 
   it("mounts the managed Apps resolver for arbitrary namespaced MCP tools", () => {

@@ -4,7 +4,7 @@ import { useTranslations } from "next-intl"
 import { FileSearchIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
 import { Badge } from "@/components/ui/badge"
-import { McpCardShell, useParsedOutput } from "./common"
+import { PreviewClampNote, TOOL_LIST_MAX_ROWS, useClampedRows, useParsedOutput } from "./common"
 
 interface RagHit {
   id?: string
@@ -21,19 +21,19 @@ interface RagSearchOutput {
 export function RagSearchCard({ part }: { part: ToolUIPart }) {
   const t = useTranslations("chat.mcp.ragSearch")
   const parsed = useParsedOutput<RagSearchOutput>(part.output)
+  const hits = parsed && Array.isArray(parsed.hits) ? parsed.hits : []
+  // Hooks precede the null guard — a large RAG result clamps to the shared
+  // list budget like the other search bodies.
+  const clamped = useClampedRows(hits, TOOL_LIST_MAX_ROWS)
   if (!parsed || !Array.isArray(parsed.hits)) return null
 
   return (
-    <McpCardShell
-      title={t("title")}
-      badge={t("hitCount", { count: parsed.hits.length })}
-      testId="mcp-rag-search-card"
-    >
+    <div data-testid="mcp-rag-search-card" className="my-1 text-xs">
       {parsed.hits.length === 0 ? (
         <p className="text-muted-foreground">{t("noMatches")}</p>
       ) : (
         <ul className="space-y-2">
-          {parsed.hits.map((hit, i) => (
+          {clamped.visible.map((hit, i) => (
             <li
               key={hit.id || i}
               className="flex min-w-0 items-start gap-2"
@@ -71,6 +71,14 @@ export function RagSearchCard({ part }: { part: ToolUIPart }) {
           ))}
         </ul>
       )}
-    </McpCardShell>
+      {clamped.hidden > 0 && (
+        <PreviewClampNote
+          shown={clamped.shown}
+          total={clamped.total}
+          onExpand={clamped.reveal}
+          testId="mcp-rag-search-clamped"
+        />
+      )}
+    </div>
   )
 }

@@ -22,21 +22,6 @@ const part = (input?: unknown, output?: unknown): ToolUIPart =>
   }) as unknown as ToolUIPart
 
 describe("EditCard", () => {
-  it("offers a workbench-review action that routes the edited file", () => {
-    openEditInWorkbenchReview.mockClear()
-    render(
-      <EditCard
-        sessionId="s1"
-        part={part({ file_path: "/repo/src/a.ts", old_string: "a", new_string: "b" })}
-      />
-    )
-    fireEvent.click(screen.getByTestId("mcp-open-in-review"))
-    expect(openEditInWorkbenchReview).toHaveBeenCalledWith({
-      sessionId: "s1",
-      absolutePath: "/repo/src/a.ts",
-    })
-  })
-
   it("renders the path and a diff for a single edit payload", () => {
     render(
       <EditCard
@@ -46,7 +31,7 @@ describe("EditCard", () => {
         )}
       />
     )
-    expect(screen.getByTestId("mcp-edit-path")).toHaveTextContent("src/a.ts")
+    // The row above owns the file identity — the body carries only diffs.
     expect(screen.getByTestId("diff-preview")).toBeInTheDocument()
     expect(screen.getByTestId("mcp-edit-result")).toHaveTextContent("1 replacement")
   })
@@ -68,7 +53,7 @@ describe("EditCard", () => {
 
   it("accepts the legacy `path` field and renders without an output", () => {
     render(<EditCard part={part({ path: "x.ts", old_string: "a", new_string: "b" })} />)
-    expect(screen.getByTestId("mcp-edit-path")).toHaveTextContent("x.ts")
+    expect(screen.getByTestId("diff-preview")).toBeInTheDocument()
     expect(screen.queryByTestId("mcp-edit-result")).not.toBeInTheDocument()
   })
 
@@ -79,5 +64,18 @@ describe("EditCard", () => {
     expect(noPath).toBeEmptyDOMElement()
     const { container: noEdits } = render(<EditCard part={part({ file_path: "x.ts" })} />)
     expect(noEdits).toBeEmptyDOMElement()
+  })
+
+  it("clamps a many-edit payload behind a show-all note", () => {
+    const edits = Array.from({ length: 25 }, (_, i) => ({
+      old_string: `old${i}`,
+      new_string: `new${i}`,
+    }))
+    render(<EditCard part={part({ file_path: "a.ts", edits })} />)
+    expect(screen.getAllByTestId("diff-preview")).toHaveLength(20)
+    expect(screen.getByTestId("mcp-edit-clamped")).toHaveTextContent("Showing the first 20 of 25")
+    fireEvent.click(screen.getByTestId("mcp-edit-clamped-show-all"))
+    expect(screen.getAllByTestId("diff-preview")).toHaveLength(25)
+    expect(screen.queryByTestId("mcp-edit-clamped")).not.toBeInTheDocument()
   })
 })

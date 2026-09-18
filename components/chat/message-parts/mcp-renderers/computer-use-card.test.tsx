@@ -52,7 +52,7 @@ describe("ComputerUseCard", () => {
       })
     )
     expect(screen.getByTestId("computer-use-card-frame")).toBeInTheDocument()
-    expect(screen.getByText(/Notes/)).toBeInTheDocument()
+    // The app name rides on the row target; the body carries the frame itself.
     expect(screen.getByText(/1600×1200/)).toBeInTheDocument()
   })
 
@@ -84,7 +84,7 @@ describe("ComputerUseCard", () => {
       })
     )
     expect(screen.getByTestId("computer-use-card-unchanged")).toBeInTheDocument()
-    expect(screen.getByText("No visible change since r8.")).toBeInTheDocument()
+    expect(screen.getByText(/No visible change since r8/)).toBeInTheDocument()
   })
 
   it("renders a perform_action result with its revision transition", () => {
@@ -151,13 +151,16 @@ describe("ComputerUseCard", () => {
     expect(screen.getByText("3 nodes")).toBeInTheDocument()
   })
 
-  it("resolves the namespaced MCP tool name to the bare one", () => {
+  it("renders the generic body for a namespaced computer-use call", () => {
+    // The bare tool name now rides on the surrounding row's target; the body
+    // only has to pick the right payload branch.
     renderCard(
       part({
         type: "tool-mcp__cognia-plugin-tools__list_apps",
-        output: JSON.stringify({}),
+        output: JSON.stringify({ tree: { nodes: [{}, {}] } }),
       } as Partial<ToolUIPart>)
     )
-    expect(screen.getByText("list_apps")).toBeInTheDocument()
+    expect(screen.getByTestId("computer-use-card-generic")).toBeInTheDocument()
+    expect(screen.getByText("2 nodes")).toBeInTheDocument()
   })
 })

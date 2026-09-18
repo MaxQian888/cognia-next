@@ -9,19 +9,13 @@
 // Rust side emits nothing for them). The message list swaps these markers in for
 // the normal MessageRenderer so they carry no avatar / actions / usage chrome.
 
-import type { ComponentType } from "react"
+import { useState, type ComponentType } from "react"
 import { useTranslations } from "next-intl"
-import {
-  ChevronRightIcon,
-  FileInputIcon,
-  ShieldXIcon,
-  TriangleAlertIcon,
-  type LucideProps,
-} from "lucide-react"
+import { FileInputIcon, ShieldXIcon, TriangleAlertIcon, type LucideProps } from "lucide-react"
 import type { UIMessage } from "ai"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { isKnownHookEvent } from "@/lib/claude/hooks/event-catalog"
 import type { HookNoticePartData } from "@/lib/claude/hooks"
+import { ToolRowShell, type ToolDotStatus } from "@/components/chat/message-parts/tool-row"
 import { cn } from "@/lib/utils"
 
 // Canonical home is `lib/claude/hooks.ts`; re-exported here so existing
@@ -37,29 +31,30 @@ export function isHookNoticeMessage(message: UIMessage): boolean {
   )
 }
 
-// Status-keyed visuals: a leading icon (coloured), the left status bar, and the
-// outcome pill. The icon makes the outcome legible at a glance before reading.
+// Status-keyed visuals: the shared status-dot colour, a leading icon
+// (coloured), and the outcome pill. The icon makes the outcome legible at a
+// glance before reading.
 interface OutcomeStyle {
-  bar: string
+  dot: ToolDotStatus
   icon: string
   pill: string
   Icon: ComponentType<LucideProps>
 }
 const OUTCOME_STYLES: Record<HookNoticePartData["outcome"], OutcomeStyle> = {
   blocked: {
-    bar: "bg-destructive",
+    dot: "error",
     icon: "text-destructive",
     pill: "bg-destructive/10 text-destructive",
     Icon: ShieldXIcon,
   },
   context: {
-    bar: "bg-primary",
+    dot: "info",
     icon: "text-primary",
     pill: "bg-primary/10 text-primary",
     Icon: FileInputIcon,
   },
   warning: {
-    bar: "bg-amber-500",
+    dot: "warning",
     icon: "text-amber-600 dark:text-amber-400",
     pill: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
     Icon: TriangleAlertIcon,
@@ -83,6 +78,7 @@ export function HookNoticeMarker({ message }: { message: UIMessage }) {
 export function HookNoticeRow({ data: part }: { data: HookNoticePartData }) {
   const t = useTranslations("chat.hookNotice")
   const tHooks = useTranslations("hooks")
+  const [open, setOpen] = useState(false)
   const styles = OUTCOME_STYLES[part.outcome] ?? OUTCOME_STYLES.warning
   const OutcomeIcon = styles.Icon
 
@@ -95,40 +91,38 @@ export function HookNoticeRow({ data: part }: { data: HookNoticePartData }) {
   const hasBody = Boolean(part.block) || Boolean(part.additionalContext) || part.warnings.length > 0
 
   return (
-    <Collapsible className="my-2" data-testid={`hook-notice-${part.outcome}`}>
-      <div className="flex items-stretch overflow-hidden rounded-md bg-muted/50 text-xs">
-        <div className={cn("w-1 shrink-0", styles.bar)} aria-hidden />
-        <CollapsibleTrigger
-          className="group flex flex-1 items-center gap-2 px-2 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60 enabled:hover:bg-muted/40 disabled:cursor-default"
-          aria-label={t("toggle")}
-          disabled={!hasBody}
-        >
-          <OutcomeIcon className={cn("size-3.5 shrink-0", styles.icon)} aria-hidden />
-          <span className="font-medium">{eventLabel}</span>
-          {part.toolName ? (
-            <span
-              className="rounded bg-background px-1 py-0.5 font-mono text-[10px] text-muted-foreground"
-              data-testid="hook-notice-tool"
-            >
-              {part.toolName}
-            </span>
-          ) : null}
+    <ToolRowShell
+      className="my-2"
+      status={styles.dot}
+      open={open}
+      onToggle={() => setOpen((v) => !v)}
+      ariaLabel={t("toggle")}
+      testId={`hook-notice-${part.outcome}`}
+      lead={<span className="shrink-0 text-xs font-medium text-foreground/80">{eventLabel}</span>}
+      icon={<OutcomeIcon className={cn("size-3.5 shrink-0", styles.icon)} aria-hidden />}
+      target={
+        part.toolName ? (
           <span
-            className={cn("shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium", styles.pill)}
-            data-testid="hook-notice-outcome"
+            className="min-w-0 flex-1 truncate rounded bg-muted/60 px-1 py-0.5 font-mono text-[10px] text-muted-foreground"
+            data-testid="hook-notice-tool"
           >
-            {outcomeLabel}
+            {part.toolName}
           </span>
-          {hasBody ? (
-            <ChevronRightIcon
-              className="ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-90"
-              aria-hidden
-            />
-          ) : null}
-        </CollapsibleTrigger>
-      </div>
+        ) : (
+          <span className="flex-1" />
+        )
+      }
+      meta={
+        <span
+          className={cn("shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium", styles.pill)}
+          data-testid="hook-notice-outcome"
+        >
+          {outcomeLabel}
+        </span>
+      }
+    >
       {hasBody ? (
-        <CollapsibleContent className="ml-2.5 mt-1 flex flex-col gap-1 border-l pl-3 text-xs text-muted-foreground">
+        <div className="mb-1 flex flex-col gap-1 border-l pl-3 pt-1 text-xs text-muted-foreground">
           {part.block ? (
             <div data-testid="hook-notice-reason">
               <span className="font-medium text-foreground/80">{t("section.reason")}</span>{" "}
@@ -151,9 +145,9 @@ export function HookNoticeRow({ data: part }: { data: HookNoticePartData }) {
               ))}
             </ul>
           ) : null}
-        </CollapsibleContent>
+        </div>
       ) : null}
-    </Collapsible>
+    </ToolRowShell>
   )
 }
 
