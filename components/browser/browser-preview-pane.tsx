@@ -66,6 +66,7 @@ import {
   transitionBrowserAnnotation,
   type BrowserAnnotationIntent,
   type BrowserAnnotationSeverity,
+  type BrowserAnnotationStatus,
 } from "@/lib/db/browser-annotations"
 import { setActivePaneRect } from "@/lib/browser/pane-rect"
 import {
@@ -612,7 +613,7 @@ export function BrowserPreviewPane({
   ])
 
   const transitionQueuedAnnotation = useCallback(
-    async (id: string, status: "resolved" | "dismissed") => {
+    async (id: string, status: BrowserAnnotationStatus) => {
       try {
         await transitionBrowserAnnotation(id, status, new Date().getTime(), "human")
       } catch {

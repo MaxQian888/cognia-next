@@ -4,16 +4,23 @@
     ".": {
       "entry": [
         "app/sw.ts",
-        "cli/src/cli/entry.ts",
         "components/{ai-elements,ui}/**/*.{ts,tsx}",
         "hooks/builtin/*.mjs",
         "lib/browser-stubs/*.{js,ts}",
-        "lib/browser/overlay.injected.js",
+        // Embedded into the Rust binary via `include_str!`.
+        "lib/browser/*.injected.js",
         "plugins/*/src/index.{ts,tsx}",
+        "plugins/*/build.mjs",
         "plugins/*/*.harness.mjs",
         "plugins/**/tests/fixtures/**/*.{js,mjs,ts}",
+        // Skill scripts are executed by the agent at runtime
+        // (`node ${COGNIA_PLUGIN_ROOT}/skills/<name>/scripts/*.mjs`), not imported.
+        "plugins/*/skills/**/*.{js,mjs,ts}",
         "scripts/**/*.{js,cjs,mjs,ts,mts}",
         "src-tauri/scripts/**/*.{js,mjs,ts}",
+        // Read by tests via path joins, or mounted into docker-compose services.
+        "tests/**/fixtures/**/*.{ts,tsx,mts,mjs,js}",
+        "tests/**/*-fixture.{ts,mts,mjs}",
       ],
       "project": [
         "{__mocks__,app,cli,components,hooks,i18n,lib,plugins,scripts,src-tauri/scripts,stores,tests,types}/**/*.{js,jsx,cjs,mjs,ts,tsx,cts,mts}",
@@ -24,11 +31,9 @@
         "@ai-sdk/react",
         "@hookform/resolvers",
         "@radix-ui/react-slot",
-        "@tauri-apps/api",
         "@tauri-apps/plugin-shell",
         "@types/katex",
         "katex",
-        "langfuse",
         "mammoth",
         "mermaid",
         "pdfjs-dist",
@@ -37,10 +42,9 @@
         "tesseract.js",
         "tw-animate-css",
         "ts-jest",
-        "xlsx",
       ],
       // Host toolchains installed outside pnpm and invoked by repository scripts.
-      "ignoreBinaries": ["chcp.com", "pwsh", "rg", "rustfmt", "uv"],
+      "ignoreBinaries": ["chcp.com", "osascript", "openssl", "pwsh", "rg", "rustfmt", "uv"],
       "ignoreIssues": {
         "**/*.generated.{js,ts,tsx}": [
           "files",
@@ -54,19 +58,33 @@
         ],
       },
     },
+    "cli": {
+      "entry": [
+        // esbuild bundle entry (scripts/build/build-cli.mjs).
+        "src/cli/entry.ts",
+        // Bundled by scripts/build/bundle-tui-fixture.mjs for PTY tests.
+        "src/tui/pty/tui-app-fixture.tsx",
+        // Read by tests via path.join(__dirname, "fixtures", ...).
+        "src/**/fixtures/**/*.{ts,tsx}",
+      ],
+    },
     "docs": {},
     "crates/cognia-plugin-template-ts": {
       // The template intentionally predeclares the host libraries available to
       // third-party plugin authors; its starter module need not import all of
       // them before generation.
       "ignoreDependencies": [
+        "@agentclientprotocol/sdk",
         "@types/json-schema",
         "ai",
         "class-variance-authority",
         "clsx",
         "cmdk",
         "dexie",
+        "lucide-react",
         "radix-ui",
+        "react-hook-form",
+        "sonner",
         "zod",
       ],
     },
@@ -87,7 +105,13 @@
     },
     "packages/*": {},
     "packages/plugin-sdk": {
-      "entry": ["scripts/import-code-128-contribution-schemas.mjs", "tsup.author-types.config.ts"],
+      "entry": [
+        "scripts/import-code-128-contribution-schemas.mjs",
+        "tsup.author-types.config.ts",
+        // Public SDK surface: every module here is a package.json `exports`
+        // subpath consumed by third-party plugin authors, not by the app.
+        "src/api/*.ts",
+      ],
     },
     "packages/plugin-ui": {
       "entry": ["tsup.author-types.config.ts"],
@@ -95,11 +119,21 @@
     "services/share-server/worker": {
       "ignoreDependencies": ["^cloudflare$"],
     },
+    "services/update-server/worker": {
+      // `cloudflare:test` is a virtual specifier provided by
+      // @cloudflare/vitest-pool-workers, not a real package.
+      "ignoreDependencies": ["^cloudflare$"],
+    },
     "services/workspace-runtime": {},
     "sidecar": {
-      // Packaged by Tauri and launched from the Rust bridge.
-      "entry": ["a2ui-mcp.mjs"],
-      "ignoreDependencies": ["@vscode/ripgrep"],
+      // Packaged by Tauri and launched from the Rust bridge / spawned helpers.
+      "entry": ["a2ui-mcp.mjs", "codex-app-control/*.mjs"],
+      "ignoreDependencies": [
+        "@vscode/ripgrep",
+        // Pulled in transitively by @langfuse/vercel-ai-sdk; pinned directly so
+        // `ai` and the Langfuse processor share one otel instance.
+        "@ai-sdk/otel",
+      ],
       "ignoreIssues": {
         "dispatch/protocol-adapters/provider-protocol.d.mts": ["files"],
       },
@@ -109,8 +143,35 @@
       "ignoreDependencies": ["^vscode$", "vscode-languageclient"],
     },
     "sidecar/codeserver-agent-ext": {
-      "entry": ["build.mjs", "src/{extension,proxy-extension}.mjs"],
+      "entry": ["src/{extension,proxy-extension}.mjs"],
     },
     "sidecar/webclone": {},
+  },
+  "ignoreDependencies": [
+    // Imported inside a template-literal bundle entry that only esbuild sees
+    // (scripts/build/build-artifact-runtime.mjs → JSX_TRANSFORM_ENTRY).
+    "@babel/standalone",
+    // Jest reporter configured by name in jest.config.ts.
+    "jest-junit",
+    // Type declarations consumed implicitly by `import … from "js-yaml"`.
+    "@types/js-yaml",
+    // Read as files from node_modules (web/scripts/sync-agent-icons.mjs).
+    "@lobehub/icons-static-svg",
+  ],
+  "ignoreIssues": {
+    // Resolves css-tree / @babel/traverse from the webclone sidecar's own
+    // dependency tree via createRequire — not root dependencies.
+    "scripts/build/lib/webclone-bundle-plugin.mjs": ["unlisted"],
+    // @yao-pkg/pkg is an on-demand dev tool: the script exits with an
+    // install hint when absent, by design.
+    "scripts/build/build-cli-binary.mjs": ["unlisted"],
+    // runtime/deepseek-harness is outside the pnpm workspace and manages
+    // its own dependencies.
+    "runtime/deepseek-harness/**/*.mjs": ["unlisted"],
+    // plugins/* are not workspace members; @jest/globals and browser-side
+    // libs resolve from the host environment when the harness or the skill's
+    // scripts run.
+    "plugins/*/build.test.mjs": ["unlisted"],
+    "plugins/*/skills/**/*.mjs": ["unlisted"],
   },
 }

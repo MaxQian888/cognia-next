@@ -64,6 +64,5 @@ export default defineConfig({
   format: ["esm", "cjs"],
   dts: false,
   sourcemap: true,
-  external: ["ajv", "jszip"],
   clean: true,
 })

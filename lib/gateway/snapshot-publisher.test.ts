@@ -64,7 +64,7 @@ describe("buildGatewaySnapshot", () => {
       {
         modelMappings: [
           mapping("fast", [
-            { providerId: "openai", modelId: "gpt-4o", conditions: { minContextLength: 1000 } },
+            { providerId: "openai", modelId: "gpt-4o", conditions: { maxLatencyMs: 1000 } },
           ]),
         ],
         routingConfig: {
@@ -714,7 +714,7 @@ it("publishes the complete live model catalog and preserves independent limits a
           ],
         },
       ],
-    } as SnapshotSettingsSlice,
+    } as unknown as SnapshotSettingsSlice,
     1
   )
   expect(result.providers[0]).toMatchObject({

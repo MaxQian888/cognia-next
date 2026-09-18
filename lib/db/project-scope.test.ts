@@ -153,6 +153,15 @@ describe("project-scope helper", () => {
         sessionId: "cognia-gateway:team-task:native",
         createdAt: 1,
         updatedAt: 1,
+        resourceUsage: {
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+          wallTimeMs: 0,
+          toolTimeMs: 0,
+          attempts: 1,
+          failures: 0,
+        },
       })
       mockAgentInvoke.mockRejectedValueOnce(new Error("task active"))
       await expect(deleteProjectCascade("A")).rejects.toThrow("task active")

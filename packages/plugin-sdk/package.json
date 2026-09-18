@@ -337,11 +337,11 @@
     "performance:check": "node scripts/check-performance-budget.mjs"
   },
   "dependencies": {
+    "@cognia/agent-config-types": "workspace:*",
+    "@cognia/ocr": "workspace:*",
     "@cognia/provider-core": "workspace:*",
     "@cognia/provider-routing": "workspace:*",
-    "@cognia/provider-types": "workspace:*",
-    "ajv": "^8.20.0",
-    "jszip": "^3.10.1"
+    "@cognia/provider-types": "workspace:*"
   },
   "devDependencies": {
     "@cognia/security-findings": "workspace:*"

@@ -129,8 +129,11 @@ it("sanitizes persisted URL secrets and form values", async () => {
     })
   )
   const saved = await getBrowserAnnotation("safe")
-  expect(saved?.selection.pageUrl).toBe("http://localhost:3000/settings")
-  expect(saved?.selection.outerHTML).toBe("<input>")
+  if (!saved?.selection || !("pageUrl" in saved.selection)) {
+    throw new Error("expected a browser selection with pageUrl")
+  }
+  expect(saved.selection.pageUrl).toBe("http://localhost:3000/settings")
+  expect(saved.selection.outerHTML).toBe("<input>")
 })
 
 it("lists pending annotations by session and expires old rows", async () => {

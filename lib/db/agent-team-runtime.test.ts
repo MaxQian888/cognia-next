@@ -376,6 +376,15 @@ describe("durable AgentTeam runtime persistence", () => {
         sessionId: `cognia-gateway:gateway-${suffix}:native`,
         createdAt: 1,
         updatedAt: 1,
+        resourceUsage: {
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+          wallTimeMs: 0,
+          toolTimeMs: 0,
+          attempts: 1,
+          failures: 0,
+        },
       })
     }
     mockAgentInvoke
@@ -420,6 +429,15 @@ describe("durable AgentTeam runtime persistence", () => {
         sessionId: "cognia-gateway:old-task:native",
         createdAt: 1,
         updatedAt: 1,
+        resourceUsage: {
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+          wallTimeMs: 0,
+          toolTimeMs: 0,
+          attempts: 1,
+          failures: 0,
+        },
       })
       const purge = () =>
         scope === "run" ? purgeAgentTeamRun("run-race") : purgeAgentTeam("managed-team")
@@ -465,6 +483,15 @@ describe("durable AgentTeam runtime persistence", () => {
         sessionId: "cognia-gateway:shared-task:native",
         createdAt: 1,
         updatedAt: 1,
+        resourceUsage: {
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+          wallTimeMs: 0,
+          toolTimeMs: 0,
+          attempts: 1,
+          failures: 0,
+        },
       })
     await purgeAgentTeamRun("run-dedup")
     expect(mockAgentInvoke).toHaveBeenCalledTimes(1)
