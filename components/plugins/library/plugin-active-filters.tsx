@@ -101,19 +101,36 @@ function buildChips(filters: PluginFilters, subActive: boolean): ActiveChip[] {
   return chips
 }
 
+function useActiveFilterChips(): ActiveChip[] {
+  const filters = usePluginsStore((s) => s.filters)
+  const subActive = usePluginsStore((s) => s.librarySubFilter !== "all")
+  return buildChips(filters, subActive)
+}
+
+/**
+ * Whether the strip renders any chip — i.e. whether any filter sits at a
+ * non-default value. `PluginLibraryStatusBar` reads this to decide between
+ * mounting its band and returning null, instead of relying on this
+ * component's own null return showing through CSS `:empty`.
+ */
+export function useHasActivePluginFilters(): boolean {
+  return useActiveFilterChips().length > 0
+}
+
 export function PluginActiveFilters() {
   const t = useTranslations("plugins.activeFilters")
-  const filters = usePluginsStore((s) => s.filters)
   const setFilters = usePluginsStore((s) => s.setFilters)
   const resetFilters = usePluginsStore((s) => s.resetFilters)
-  const subActive = usePluginsStore((s) => s.librarySubFilter !== "all")
 
-  const chips = buildChips(filters, subActive)
+  const chips = useActiveFilterChips()
   if (chips.length === 0) return null
 
   return (
     <div
-      className="flex flex-wrap items-center gap-1.5"
+      // `w-max`, not wrap: the strip's parent scrolls horizontally, so this
+      // row must stay one line — wrapping would grow the band's height and
+      // push the rows it describes, the same shift it exists to prevent.
+      className="flex w-max items-center gap-1.5"
       role="group"
       aria-label={t("ariaLabel")}
       data-testid="plugin-active-filters"

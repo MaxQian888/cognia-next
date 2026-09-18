@@ -40,6 +40,8 @@ const mockSetProviderConfig = jest.fn()
 const mockSetDefaultProvider = jest.fn()
 const mockSetProviderUIPreferences = jest.fn()
 
+jest.mock("@/components/ui/tooltip")
+
 let mockHookState: ReturnType<typeof makeHookState>
 
 function makeHookState(overrides?: {
@@ -1472,6 +1474,19 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     const { findByTestId } = render(<ProviderSettings />)
     fireEvent.click(screen.getByTestId("provider-sidebar-add").querySelector("button") as Element)
     expect(await findByTestId("quick-add-provider-dialog")).toBeInTheDocument()
+  })
+
+  // The rail toolbar rows up search (h-9), a 36px sort trigger, the icon-size
+  // import/export pair and this button; `size="sm"` rendered it 38x32 next to
+  // three 36x36 squares.
+  it("renders the add button at icon size like the rest of the rail toolbar", () => {
+    mockHookState = makeHookState({
+      filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
+      selectedProviderId: "openai",
+    })
+    render(<ProviderSettings />)
+    const addButton = screen.getByTestId("provider-sidebar-add").querySelector("button")
+    expect(addButton).toHaveAttribute("data-size", "icon")
   })
 
   it("routes the onboarding banner scroll action and swaps the detail column into the compare pane", async () => {

@@ -14,6 +14,7 @@ import { ConversationSidebarCard } from "./conversation-sidebar-card"
 import { RunStatusBarCard } from "./run-status-bar-card"
 import { SessionPowerCard } from "./session-power-card"
 import { ComposerAssistanceCard } from "../chat/composer-assistance-card"
+import { InlineQuestionsCard } from "../chat/inline-questions-card"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 
@@ -179,17 +180,23 @@ export function ConversationSection() {
         title={t("messageStream.title")}
         description={t("messageStream.description")}
       >
-        <div className="flex items-center justify-between gap-4">
-          <div className="space-y-0.5">
-            <Label htmlFor="conv-stream-partial">{t("streaming.heading")}</Label>
-            <p className="text-sm text-muted-foreground">{t("streaming.description")}</p>
+        <div className="space-y-6">
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <Label htmlFor="conv-stream-partial">{t("streaming.heading")}</Label>
+              <p className="text-sm text-muted-foreground">{t("streaming.description")}</p>
+            </div>
+            <Switch
+              id="conv-stream-partial"
+              aria-label={t("streaming.label")}
+              checked={settings?.streamPartialMessages !== false}
+              onCheckedChange={(v) => void save({ streamPartialMessages: v })}
+            />
           </div>
-          <Switch
-            id="conv-stream-partial"
-            aria-label={t("streaming.label")}
-            checked={settings?.streamPartialMessages !== false}
-            onCheckedChange={(v) => void save({ streamPartialMessages: v })}
-          />
+          <SettingsDivider />
+          {/* Opt-in card UI for Codex `delivery: "async"` questions — off, the
+              same events degrade to plain text instead of an answer card. */}
+          <InlineQuestionsCard />
         </div>
       </SettingsCard>
     </div>

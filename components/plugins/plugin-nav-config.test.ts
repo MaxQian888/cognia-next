@@ -1,7 +1,9 @@
+import type { PluginNavSection } from "@/stores/plugins"
 import {
   PLUGIN_NAV_SECTIONS,
   PLUGIN_LIBRARY_SUBFILTERS,
   PLUGIN_GOVERNANCE_VIEWS,
+  pluginNavItem,
   visiblePluginSections,
 } from "./plugin-nav-config"
 
@@ -96,5 +98,16 @@ describe("visiblePluginSections", () => {
     for (const entry of entries.filter((e) => !e.featureFlag)) {
       expect(entry.disabled).toBe(false)
     }
+  })
+
+  it("resolves every nav section to its item", () => {
+    for (const item of PLUGIN_NAV_SECTIONS) {
+      expect(pluginNavItem(item.section)).toBe(item)
+    }
+  })
+
+  it("throws on a section value with no nav item", () => {
+    // Only reachable through a cast — the union is exhaustive over the map.
+    expect(() => pluginNavItem("nope" as PluginNavSection)).toThrow("unknown plugin nav section")
   })
 })

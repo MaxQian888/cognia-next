@@ -35,13 +35,26 @@ beforeEach(() => {
 })
 
 describe("PluginLibraryStatusBar", () => {
-  // The strip must leave no trace on the unfiltered view — it is `empty:hidden`
-  // precisely so the band (and its border) vanishes instead of sitting there.
-  it("renders an empty strip when nothing is filtered", () => {
+  // The strip must leave no trace on the unfiltered view — it returns null
+  // so the band (and its border) never mounts instead of sitting there
+  // hidden behind CSS.
+  it("renders nothing when nothing is filtered", () => {
+    const { container } = render(<PluginLibraryStatusBar />)
+    expect(container.firstChild).toBeNull()
+    expect(screen.queryByTestId("plugin-library-status-bar")).not.toBeInTheDocument()
+  })
+
+  // A wrap would let the band grow a second row and push the list it
+  // describes — the same shift this component exists to kill. One line,
+  // scrolling horizontally, keeps the band a fixed height.
+  it("lays out as a single scrolling line, never a wrapping stack", () => {
+    usePluginsStore.setState({
+      filters: { ...DEFAULT_PLUGIN_FILTERS, capability: "tools" },
+    })
     render(<PluginLibraryStatusBar />)
     const bar = screen.getByTestId("plugin-library-status-bar")
-    expect(bar).toBeEmptyDOMElement()
-    expect(bar.className).toContain("empty:hidden")
+    expect(bar.className).toContain("overflow-x-auto")
+    expect(bar.className).not.toContain("flex-wrap")
   })
 
   it("shows the active-filter chips inside the strip", () => {
@@ -52,6 +65,28 @@ describe("PluginLibraryStatusBar", () => {
     const bar = screen.getByTestId("plugin-library-status-bar")
     expect(bar).not.toBeEmptyDOMElement()
     expect(screen.getByTestId("plugin-active-filter-capability")).toBeInTheDocument()
+  })
+
+  // A librarySubFilter narrows the list but its owned chips (status /
+  // hasUpdate / configurable) are suppressed while it's active, so the chip
+  // strip can be empty while the count still has something to say — the bar
+  // must mount for the count alone.
+  it("mounts for the count alone when a sub-filter narrows the list", () => {
+    usePluginsStore.setState({
+      filters: { ...DEFAULT_PLUGIN_FILTERS, status: "enabled" },
+      librarySubFilter: "enabled",
+    })
+    mockUsePlugins.mockReturnValue({
+      all: [],
+      filtered: [{ id: "a" }],
+      totals: { ...emptyTotals, total: 3, enabled: 1 },
+      loading: false,
+    })
+    render(<PluginLibraryStatusBar />)
+    const bar = screen.getByTestId("plugin-library-status-bar")
+    expect(bar).toBeInTheDocument()
+    expect(screen.queryByTestId("plugin-active-filters")).not.toBeInTheDocument()
+    expect(screen.getByTestId("plugin-library-result-count")).toBeInTheDocument()
   })
 
   it("hides the result count when filters are inactive (filtered === total)", () => {

@@ -11,9 +11,10 @@ import userEvent from "@testing-library/user-event"
 
 let mockSection = "appearance"
 const replace = jest.fn()
+const back = jest.fn()
 
 jest.mock("next/navigation", () => ({
-  useRouter: () => ({ replace, push: jest.fn() }),
+  useRouter: () => ({ replace, back, push: jest.fn() }),
   useSearchParams: () => new URLSearchParams(`section=${mockSection}`),
 }))
 
@@ -37,6 +38,8 @@ jest.mock("next/dynamic", () => () => {
 jest.mock("./settings-sidebar", () => ({
   SettingsSidebar: () => <div data-testid="settings-sidebar" />,
 }))
+
+jest.mock("@/components/ui/tooltip")
 
 // Narrow-window state for the sidebar auto-collapse rule.
 let narrowWindow = false
@@ -105,6 +108,7 @@ afterEach(() => setDesktop(false))
 describe("SettingsShell reset button", () => {
   beforeEach(() => {
     replace.mockClear()
+    back.mockClear()
   })
 
   it("renders the reset button in the header for a section that owns settings keys", () => {
@@ -128,6 +132,22 @@ describe("SettingsShell reset button", () => {
     render(<SettingsShell />)
     await user.click(screen.getByTestId("settings-finder-trigger"))
     expect(requestCommandPalette).toHaveBeenCalledWith({ query: "in:settings ", scope: "pages" })
+  })
+
+  it("back pops history when it can and replaces to / when it cannot", async () => {
+    const user = userEvent.setup()
+    mockSection = "appearance"
+    const { unmount } = render(<SettingsShell />)
+    // jsdom starts at history.length === 1: nothing to pop, so it replaces home
+    // rather than pushing another entry for the global back arrow to land on.
+    await user.click(screen.getByRole("button", { name: "backToChat" }))
+    expect(replace).toHaveBeenCalledWith("/")
+    unmount()
+
+    window.history.pushState({}, "", "/settings?section=appearance")
+    render(<SettingsShell />)
+    await user.click(screen.getByRole("button", { name: "backToChat" }))
+    expect(back).toHaveBeenCalledTimes(1)
   })
 
   it("provides AI Connections with an action target inside the header", () => {

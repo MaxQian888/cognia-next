@@ -882,7 +882,7 @@ it("keeps Bedrock configuration read-only when its settings mutation is unavaila
     <ProviderConfigTab
       {...defaultProps}
       providerId="bedrock"
-      settings={{ providerId: "bedrock", enabled: false }}
+      settings={{ providerId: "bedrock", enabled: false, defaultModel: "" }}
     />
   )
   expect(screen.queryByText(/Bedrock default-chain/)).not.toBeInTheDocument()
@@ -918,7 +918,7 @@ it("keeps an unconfigured provider empty without links or transport assumptions"
     <ProviderConfigTab
       {...defaultProps}
       providerId="unknown-provider"
-      settings={{ providerId: "unknown-provider", enabled: false }}
+      settings={{ providerId: "unknown-provider", enabled: false, defaultModel: "" }}
       providerDashboardUrl={undefined}
       providerDocsUrl={undefined}
     />

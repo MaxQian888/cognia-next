@@ -50,10 +50,10 @@ export interface PluginDiscoverHeaderProps {
 }
 
 /**
- * No result count in the status slot on purpose. The counts depend on both
- * axes and on which registry answered, so only the pane can compute them, and
- * the pane already states them on its own "Load more (shown / total)" control.
- * A second copy up here would be one more thing that can disagree.
+ * No result count up here on purpose. The counts depend on both axes and on
+ * which registry answered, so only the pane can compute them, and the pane
+ * already states them on its own "Load more (shown / total)" control. A
+ * second copy here would be one more thing that can disagree.
  */
 export function PluginDiscoverHeader({ layout }: PluginDiscoverHeaderProps = {}) {
   const t = useTranslations("plugins.discover")

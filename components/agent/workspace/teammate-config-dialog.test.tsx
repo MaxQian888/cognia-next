@@ -393,7 +393,7 @@ describe("teammate Cognia model binding", () => {
     fireEvent.click(
       within(screen.getByText("rosterSection.runtime").parentElement!).getByRole("combobox")
     )
-    fireEvent.click(screen.getByRole("option", { name: "claude", exact: true }))
+    fireEvent.click(screen.getByRole("option", { name: "claude" }))
     expect(updateTeammateMock).toHaveBeenCalledWith("t1", {
       config: { runtime: "claude", cogniaModel: null },
     })
@@ -405,7 +405,7 @@ describe("teammate Cognia model binding", () => {
       config: { runtime: "claude", cogniaModel: { providerId: "kimi", modelId: "coder" } },
     }
     render(<TeammateConfigDialog open onOpenChange={() => {}} teammate={member} team={team} />)
-    fireEvent.click(screen.getByRole("button", { name: "save", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "save" }))
     await waitFor(() =>
       expect(updateTeammateMock).toHaveBeenCalledWith(
         "t1",

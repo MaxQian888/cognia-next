@@ -299,7 +299,12 @@ describe("useProviderRows", () => {
 })
 
 it("uses the effective subscription projection for provider readiness", () => {
-  const projected = { providerId: "openai", enabled: true, apiKey: "subscription:hash" }
+  const projected = {
+    providerId: "openai",
+    enabled: true,
+    defaultModel: "",
+    apiKey: "subscription:hash",
+  }
   render({ settings: makeSettings({ readinessProviderSettings: { openai: projected } }) })
   expect(jest.requireMock("./provider-readiness").getBuiltInProviderReadiness).toHaveBeenCalledWith(
     "openai",

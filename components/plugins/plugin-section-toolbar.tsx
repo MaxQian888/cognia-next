@@ -11,10 +11,12 @@
 // fixed position and a fixed control vocabulary and only its contents
 // change as the user moves between sections.
 //
-// Layout is a single row — search (flexes), segments, section tools —
-// with an optional status line beneath for active-filter chips and result
-// counts. The row lives in `FeaturePageHeader`'s `controls` slot, which
-// already scrolls horizontally when the pane is narrow.
+// Layout is a single row — search (flexes), segments, section tools. The
+// row lives in `FeaturePageHeader`'s `controls` slot, which already
+// scrolls horizontally when the pane is narrow. There is deliberately no
+// status line beneath it: a second line whose height depends on filter
+// state resizes the header band and shifts every pane under it — the
+// defect `plugin-library-status-bar.tsx` was extracted to fix.
 //
 // `layout="stacked"` is the phone shape: the search takes its own line and
 // segments + tools scroll on a second one. A mobile body has no header
@@ -76,8 +78,6 @@ export interface PluginSectionToolbarProps {
   }
   /** Section-specific controls: sort, view toggle, filter sheet trigger. */
   tools?: ReactNode
-  /** Second line — active-filter chips, result counts. Hidden when empty. */
-  status?: ReactNode
   /**
    * `"row"` (default) is the desktop shape: search, segments and tools share
    * one line, and the header's `controls` slot scrolls it horizontally when
@@ -96,7 +96,6 @@ export function PluginSectionToolbar({
   search,
   segments,
   tools,
-  status,
   layout = "row",
   className,
   testId = "plugin-section-toolbar",
@@ -152,7 +151,7 @@ export function PluginSectionToolbar({
     ) : null
 
   return (
-    <div className={cn("w-full space-y-2", className)} data-testid={testId} data-layout={layout}>
+    <div className={cn("w-full", className)} data-testid={testId} data-layout={layout}>
       {stacked ? (
         <div className="flex flex-col gap-2">
           {searchNode}
@@ -173,8 +172,6 @@ export function PluginSectionToolbar({
           {tools}
         </div>
       )}
-
-      {status}
     </div>
   )
 }

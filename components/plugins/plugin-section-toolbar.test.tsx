@@ -147,12 +147,9 @@ describe("PluginSectionToolbar", () => {
     expect(item).not.toHaveAttribute("data-testid")
   })
 
-  it("renders section tools and the status line when supplied", () => {
-    render(
-      <PluginSectionToolbar tools={<button type="button">Sort</button>} status={<p>3 of 40</p>} />
-    )
+  it("renders section tools when supplied", () => {
+    render(<PluginSectionToolbar tools={<button type="button">Sort</button>} />)
     expect(screen.getByRole("button", { name: "Sort" })).toBeInTheDocument()
-    expect(screen.getByText("3 of 40")).toBeInTheDocument()
   })
 
   it("renders nothing but its own container when given no slots", () => {

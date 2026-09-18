@@ -5,10 +5,11 @@ import dynamic from "next/dynamic"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { ArrowLeftIcon, ChevronRightIcon, MonitorIcon, SearchIcon } from "lucide-react"
-import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { SettingsSidebar } from "./settings-sidebar"
 import { SectionResetButton } from "./common/section-reset-button"
@@ -433,7 +434,18 @@ function SettingsShellInner({ actions }: Props) {
     router.replace(`/settings?${next.toString()}`, { scroll: false })
   }
 
-  const goHome = () => router.push("/")
+  // Same contract as the mobile sub-page shell (`components/mobile/me/
+  // sub-page-shell.tsx`): pop history so the user lands where they came from,
+  // with a replace() fallback when a cold start left nothing to pop. A bare
+  // push("/") used to grow history — the global back arrow then returned
+  // straight into the settings page just left.
+  const goHome = () => {
+    if (window.history.length > 1) {
+      router.back()
+    } else {
+      router.replace("/")
+    }
+  }
 
   const activeItem = SETTINGS_NAV.find((item) => item.id === activeSection)
   const hasSectionReset = Boolean(resetKeysForSection(activeSection))
@@ -456,7 +468,6 @@ function SettingsShellInner({ actions }: Props) {
       <SidebarInset data-bg-target="chat" className="flex flex-col min-w-0 h-full overflow-hidden">
         <FeaturePageHeader
           variant="compact"
-          icon={<MonitorIcon />}
           title={
             <span className="flex min-w-0 items-center gap-1.5">
               <span>{t("title")}</span>
@@ -481,7 +492,6 @@ function SettingsShellInner({ actions }: Props) {
               >
                 <ArrowLeftIcon className="size-4" />
               </Button>
-              <SidebarTrigger />
             </div>
           }
           actions={
@@ -494,16 +504,21 @@ function SettingsShellInner({ actions }: Props) {
                 />
               )}
               {hasSectionReset && <SectionResetButton sectionId={activeSection} />}
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-8"
-                onClick={openSettingsFinder}
-                aria-label={t("finder.triggerAria")}
-                data-testid="settings-finder-trigger"
-              >
-                <SearchIcon className="size-4" />
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-8"
+                    onClick={openSettingsFinder}
+                    aria-label={t("finder.triggerAria")}
+                    data-testid="settings-finder-trigger"
+                  >
+                    <SearchIcon className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">{t("finder.triggerAria")}</TooltipContent>
+              </Tooltip>
               {actions}
             </>
           }

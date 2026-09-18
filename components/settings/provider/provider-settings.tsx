@@ -7,6 +7,7 @@ import { Plus, Settings, PlugZap, Route, RotateCcw } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -657,9 +658,15 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
         setStatusFilter("all")
       }}
       addButton={
-        <div className="flex items-center gap-1.5">
-          <Button size="sm" variant="outline" onClick={() => setShowQuickAdd(true)}>
-            <Plus className="mr-1 h-4 w-4" />
+        <div className="flex items-center gap-2">
+          <Button
+            size="icon"
+            variant="outline"
+            className="shrink-0 @[420px]/provider-rail:w-auto @[420px]/provider-rail:px-3"
+            title={t("addProvider")}
+            onClick={() => setShowQuickAdd(true)}
+          >
+            <Plus className="h-4 w-4" />
             <span className="sr-only @[420px]/provider-rail:not-sr-only">{t("addProvider")}</span>
           </Button>
           <ProviderImportExport compact />
@@ -676,36 +683,53 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
     )
   }
 
+  // Ghost icon buttons with tooltips — same shape as the shell's own header
+  // actions (finder trigger, actions menu) so the whole row reads uniformly.
   const verifyEnabledButton = (
     <div className="flex items-center gap-1.5">
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="gap-1.5"
-        data-testid="verify-enabled-providers"
-        disabled={batchVerification.isRunning || batchEligibleCount === 0}
-        title={batchEligibleCount === 0 ? t("batchNoEligibleProviders") : undefined}
-        onClick={() => void runBatchVerification()}
-      >
-        <PlugZap className="h-3.5 w-3.5" />
-        {t("batchOperationVerifyEnabled")}
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-8"
+            data-testid="verify-enabled-providers"
+            disabled={batchVerification.isRunning || batchEligibleCount === 0}
+            aria-label={t("batchOperationVerifyEnabled")}
+            onClick={() => void runBatchVerification()}
+          >
+            <PlugZap className="size-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          {batchEligibleCount === 0
+            ? t("batchNoEligibleProviders")
+            : t("batchOperationVerifyEnabled")}
+        </TooltipContent>
+      </Tooltip>
       {/* Only offered once something has actually failed — an always-visible
           disabled button would just be noise next to Verify. */}
       {batchRetryCount > 0 && (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="gap-1.5"
-          data-testid="retry-failed-providers"
-          disabled={batchVerification.isRunning}
-          onClick={() => void runBatchRetryFailed()}
-        >
-          <RotateCcw className="h-3.5 w-3.5" />
-          {t("batchOperationRetryFailed")} ({batchRetryCount})
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              data-testid="retry-failed-providers"
+              disabled={batchVerification.isRunning}
+              aria-label={`${t("batchOperationRetryFailed")} (${batchRetryCount})`}
+              onClick={() => void runBatchRetryFailed()}
+            >
+              <RotateCcw className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {t("batchOperationRetryFailed")} ({batchRetryCount})
+          </TooltipContent>
+        </Tooltip>
       )}
     </div>
   )

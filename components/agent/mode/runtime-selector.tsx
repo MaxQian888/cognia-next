@@ -39,6 +39,7 @@ import {
   PowerIcon,
   ServerCogIcon,
   SlidersHorizontalIcon,
+  XIcon,
 } from "lucide-react"
 import {
   CommandEmpty,
@@ -50,7 +51,14 @@ import {
 } from "@/components/ui/command"
 import { ResponsivePicker, PickerCheck } from "@/components/shared/responsive-picker"
 import { Badge } from "@/components/ui/badge"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { toast } from "@/components/ui/sonner"
 import { BrandIcon } from "@/components/icons/brand-icon"
@@ -85,15 +93,16 @@ interface Props {
    */
   providerId?: string
   /**
-   * The row this chip sits on has run out of width.
+   * The row this chip sits on has run out of width — go glyph-only on EVERY
+   * lane, not just the builtin one.
    *
    * The glyph-only form used to be decided by the runtime KIND: the builtin
    * lane never spelled its name, on any screen, because the label had once
-   * cost a crowded status line the room it needed. That traded a permanent
-   * loss for an occasional one, and on a wide composer it left an unlabelled
-   * icon beside a stretch of empty toolbar. The measurement the toolbar
-   * already takes for its own layout decides it instead, so the name is there
-   * whenever there is room to put it.
+   * cost a crowded status line the room it needed — while an external agent
+   * always kept its name, so a long one still painted over the status cluster
+   * on a narrow pane. Neither rule survives contact with the fold ladder: the
+   * tooltip and the aria-label carry the wording in both states, so a dense
+   * chip gives up the label and keeps the answer.
    */
   dense?: boolean
 }
@@ -108,6 +117,7 @@ export function AgentRuntimeSelector({
   const t = useTranslations("agentRuntime")
   const tExternal = useTranslations("externalAgent")
   const tHostConfigs = useTranslations("externalAgent.hostConfigs")
+  const tCommon = useTranslations("common")
   const [open, setOpen] = useState(false)
   const [manageOpen, setManageOpen] = useState(false)
 
@@ -170,13 +180,13 @@ export function AgentRuntimeSelector({
       (selected?.name ??
       (runtimeRef.kind === "host" ? runtimeRef.name : undefined) ??
       t("externalUnconfigured"))
-  // Off the default lane the agent's NAME is the whole point of the chip, so it
-  // is spelled out at any width. On the builtin lane the label is worth the
-  // room only when there is room: it is the one value the chip can never be
-  // wrong about, and it was what pushed the composer's status line into its
-  // neighbours. The tooltip and the aria-label carry the wording in both
-  // states, so nothing is only visual.
-  const namesAChoice = !onBuiltin || !dense
+  // Off the default lane the agent's NAME is the whole point of the chip, so
+  // it is spelled out while there is room. Once `dense` says there is not,
+  // every lane goes glyph-only — a long external agent name ellipsizing to
+  // "Def…" teaches less than the plug icon plus its tooltip, and it cannot
+  // spill past its box. The tooltip and the aria-label carry the wording in
+  // both states, so nothing is only visual.
+  const namesAChoice = !dense
 
   const handleValueChange = (next: string) => {
     const row = runtimes.find((candidate) => candidate.key === next)
@@ -392,11 +402,29 @@ export function AgentRuntimeSelector({
       {/* Mounted OUTSIDE the picker, not inside it: the row that opens this
           closes the picker, and on a phone that unmounts the picker's subtree. */}
       <Dialog open={manageOpen} onOpenChange={setManageOpen}>
-        <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-3xl">
+        <DialogContent
+          className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-3xl"
+          // The default open-focus lands on the body's first control — the
+          // Refresh button — and its tooltip pops the instant the dialog
+          // appears. Leave focus on the content instead.
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          // The body's header row owns the close control (`headerActions`
+          // below), so the corner-floating default would duplicate it.
+          showCloseButton={false}
+        >
           <DialogHeader className="sr-only">
             <DialogTitle>{tExternal("manageAgents")}</DialogTitle>
           </DialogHeader>
-          <ExternalAgentManager className="min-h-0 flex-1" />
+          <ExternalAgentManager
+            className="min-h-0 flex-1"
+            headerActions={
+              <DialogClose asChild>
+                <Button variant="ghost" size="icon" aria-label={tCommon("close")}>
+                  <XIcon className="size-4" />
+                </Button>
+              </DialogClose>
+            }
+          />
         </DialogContent>
       </Dialog>
     </>

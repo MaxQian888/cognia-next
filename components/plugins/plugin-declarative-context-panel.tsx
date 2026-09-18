@@ -130,7 +130,7 @@ function PanelSelectionToolbar({
   return (
     <div
       className="pointer-events-auto fixed z-50 flex items-center gap-1 rounded-md border bg-popover p-1 shadow-md"
-      style={{ left: Math.max(8, anchor.x - 160), top: anchor.y + 8 }}
+      style={{ left: Math.max(8, anchor.rect.left - 160), top: anchor.rect.bottom + 8 }}
     >
       <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={stageInMainChat}>
         {t("selectionToChat")}

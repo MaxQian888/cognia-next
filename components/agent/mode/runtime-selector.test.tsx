@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, within } from "@testing-library/react"
 import { AgentRuntimeSelector } from "./runtime-selector"
 import type { AgentRuntimeRef } from "@/lib/ai/agent/runtime-catalog/types"
 
@@ -88,20 +88,41 @@ jest.mock("@/components/ui/tooltip", () => ({
   TooltipContent: () => null,
 }))
 
-jest.mock("@/components/ui/dialog", () => ({
-  Dialog: ({ open, children }: { open: boolean; children: React.ReactNode }) =>
-    open ? <div data-testid="manage-dialog">{children}</div> : null,
-  DialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DialogHeader: ({ children, className }: { children: React.ReactNode; className?: string }) => (
-    <div className={className} data-testid="manage-dialog-header">
-      {children}
-    </div>
-  ),
-  DialogTitle: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}))
+jest.mock("@/components/ui/dialog", () => {
+  // The real Radix Close reaches the root's onOpenChange through context;
+  // the mock captures it off Dialog instead so a click on the injected close
+  // button actually dismisses the stubbed dialog.
+  let onOpenChange: ((open: boolean) => void) | undefined
+  return {
+    Dialog: ({
+      open,
+      onOpenChange: cb,
+      children,
+    }: {
+      open: boolean
+      onOpenChange?: (open: boolean) => void
+      children: React.ReactNode
+    }) => {
+      onOpenChange = cb
+      return open ? <div data-testid="manage-dialog">{children}</div> : null
+    },
+    DialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+    DialogClose: ({ children }: { children: React.ReactNode; asChild?: boolean }) => (
+      <span onClick={() => onOpenChange?.(false)}>{children}</span>
+    ),
+    DialogHeader: ({ children, className }: { children: React.ReactNode; className?: string }) => (
+      <div className={className} data-testid="manage-dialog-header">
+        {children}
+      </div>
+    ),
+    DialogTitle: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  }
+})
 
 jest.mock("@/components/agent/external-agent/manager", () => ({
-  ExternalAgentManager: () => <div data-testid="external-agent-manager" />,
+  ExternalAgentManager: ({ headerActions }: { headerActions?: React.ReactNode }) => (
+    <div data-testid="external-agent-manager">{headerActions}</div>
+  ),
 }))
 jest.mock("@/components/agent/external-agent/connection-status-badge", () => ({
   ConnectionStatusBadge: ({ status }: { status: string }) => (
@@ -284,13 +305,18 @@ describe("AgentRuntimeSelector — chip label", () => {
     expect(trigger).toHaveTextContent("cogniaAgent")
   })
 
-  it("keeps the agent's name at any width, because the name is the point", () => {
+  // A long agent name used to keep its words at any width — and on a narrow
+  // pane it painted over the status cluster, because nothing else on that row
+  // could give. `dense` now glyphs EVERY lane; the name survives in the
+  // accessible label and the tooltip.
+  it("glyphs an external agent's name too when the row is out of room", () => {
     runtimeState.runtimeRef = { kind: "external", agentId: "a1" }
     externalAgentState.agents = { a1: agent("a1", "Codex") }
     render(<AgentRuntimeSelector dense />)
     const trigger = screen.getByTestId("agent-runtime-trigger")
-    expect(trigger).toHaveAttribute("data-labelled", "true")
-    expect(trigger).toHaveTextContent("Codex")
+    expect(trigger).not.toHaveAttribute("data-labelled")
+    expect(trigger).not.toHaveTextContent("Codex")
+    expect(trigger.getAttribute("aria-label")).toContain("Codex")
   })
 
   it("names the selected external agent instead of a generic 'external' label", () => {
@@ -508,6 +534,16 @@ describe("AgentRuntimeSelector — one dropdown, one choice", () => {
     fireEvent.click(screen.getByTestId("runtime-manage-agents"))
     expect(screen.getByTestId("external-agent-manager")).toBeInTheDocument()
     expect(screen.getByTestId("manage-dialog-header")).toHaveClass("sr-only")
+  })
+
+  it("closes the manager dialog from the close control in the body's header row", () => {
+    externalAgentState.agents = { a1: agent("a1", "Codex") }
+    render(<AgentRuntimeSelector />)
+    fireEvent.click(screen.getByTestId("runtime-manage-agents"))
+    const manager = screen.getByTestId("external-agent-manager")
+    // i18n is passthrough in this suite, so the aria-label is the raw key.
+    fireEvent.click(within(manager).getByRole("button", { name: "close" }))
+    expect(screen.queryByTestId("manage-dialog")).toBeNull()
   })
 })
 

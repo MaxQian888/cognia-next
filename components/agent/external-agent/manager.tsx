@@ -125,6 +125,13 @@ import { canUseCogniaModels } from "@/lib/ai/agent/external/gateway-task"
 import type { AddAgentFormData } from "@/types/agent/component-types"
 import type { SessionObservationSummary } from "@/types/agent/agent-trace"
 
+/**
+ * Rows rendered in the Sessions section before the "show all" toggle. A busy
+ * agent can carry hundreds of resumable sessions; rendering every row eagerly
+ * turned a connected agent into a wall of rows the moment it was selected.
+ */
+const SESSION_LIST_PREVIEW_COUNT = 20
+
 const DEFAULT_TIMEOUT_MS = "300000"
 const DEFAULT_RETRY_MAX_RETRIES = "3"
 const DEFAULT_RETRY_DELAY_MS = "1000"
@@ -224,45 +231,37 @@ function AgentCard({
       onClick={onSelect}
     >
       <CardContent className="px-3">
-        <div className="flex items-center gap-2">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                className="truncate rounded text-left text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                aria-pressed={isActive}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  onSelect()
-                }}
-              >
-                {config.name}
-              </button>
-              {ecosystem?.supportTier && (
-                <Badge variant="outline" className="shrink-0 text-[10px]">
-                  {ecosystem.supportTier}
-                </Badge>
-              )}
-              <ConnectionStatusBadge
-                status={pending ? "connecting" : connectionStatus}
-                withIcon
-                className="ml-auto shrink-0"
-              />
-              {/* Connected and signed into nothing is a real state, and it used
-                  to be visible only in settings. Self-hides for an agent with
-                  no credential probe. */}
-              <AgentCredentialBadge agentId={config.id} className="shrink-0" />
-            </div>
-            <p className="truncate text-[11px] text-muted-foreground">
-              {tManager("protocolViaTransport", {
-                protocol: config.protocol.toUpperCase(),
-                transport: config.transport,
-              })}
-              {" · "}
-              {config.process?.command || config.network?.endpoint || tManager("noEndpoint")}
-            </p>
-          </div>
-          <div className="flex shrink-0 gap-1">
+        {/* One flex line for name, badges, and actions — nesting the badges in
+            the title line and the buttons in a sibling column centered them
+            against different heights, so the status pill floated a half-line
+            above the buttons. */}
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            className="min-w-0 truncate rounded text-left text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-pressed={isActive}
+            onClick={(event) => {
+              event.stopPropagation()
+              onSelect()
+            }}
+          >
+            {config.name}
+          </button>
+          {ecosystem?.supportTier && (
+            <Badge variant="outline" className="shrink-0 text-[10px]">
+              {ecosystem.supportTier}
+            </Badge>
+          )}
+          <ConnectionStatusBadge
+            status={pending ? "connecting" : connectionStatus}
+            withIcon
+            className="ml-auto shrink-0"
+          />
+          {/* Connected and signed into nothing is a real state, and it used
+              to be visible only in settings. Self-hides for an agent with
+              no credential probe. */}
+          <AgentCredentialBadge agentId={config.id} className="shrink-0" />
+          <div className="flex shrink-0 items-center gap-1">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -320,6 +319,14 @@ function AgentCard({
             </Tooltip>
           </div>
         </div>
+        <p className="truncate text-[11px] text-muted-foreground">
+          {tManager("protocolViaTransport", {
+            protocol: config.protocol.toUpperCase(),
+            transport: config.transport,
+          })}
+          {" · "}
+          {config.process?.command || config.network?.endpoint || tManager("noEndpoint")}
+        </p>
         {isConnecting && (
           <p role="status" className="mt-2 text-xs text-muted-foreground">
             {tManager("connectingHint")}
@@ -1125,9 +1132,17 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
 
 export interface ExternalAgentManagerProps {
   className?: string
+  /**
+   * Chrome the hosting dialog wants inside the body's header row — e.g. the
+   * host's `DialogClose` button. The body renders it after its own actions so
+   * the control sits with Refresh / Add Agent instead of floating at the
+   * dialog corner, and it stays a prop (not a `DialogClose` rendered here)
+   * because this body is also mounted outside a Dialog in tests.
+   */
+  headerActions?: React.ReactNode
 }
 
-export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
+export function ExternalAgentManager({ className, headerActions }: ExternalAgentManagerProps) {
   const t = useTranslations("externalAgent")
   const tSettings = useTranslations("externalAgent.settings")
   const tManager = useTranslations("externalAgent.manager")
@@ -1165,6 +1180,11 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
     }>
   >([])
   const [isLoadingSessions, setIsLoadingSessions] = useState(false)
+  /**
+   * Which agent's session list is fully expanded — keyed by id so selecting a
+   * different agent re-collapses to the preview instead of inheriting a wall.
+   */
+  const [sessionsExpandedFor, setSessionsExpandedFor] = useState<string | null>(null)
   const connectingIds = useRef(new Set<string>())
   const [pendingConnections, setPendingConnections] = useState<Set<string>>(new Set())
 
@@ -1403,6 +1423,10 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
     isActiveAgentConnected &&
     isActiveAgentExecutable &&
     listSupport?.state !== "unsupported"
+  const sessionsExpanded = sessionsExpandedFor === activeAgentId
+  const visibleSessions = sessionsExpanded
+    ? sessionList
+    : sessionList.slice(0, SESSION_LIST_PREVIEW_COUNT)
   const contractVersion = activeAgentValidity?.contractVersion ?? 1
   const lifecycleStage = activeAgentValidity?.lifecycleStage || "config"
   const blockedStage = activeAgentValidity?.blockedStage
@@ -1672,6 +1696,7 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
             <Plus className="mr-2 h-4 w-4" />
             {tSettings("addAgent")}
           </Button>
+          {headerActions}
         </div>
       </div>
 
@@ -1751,52 +1776,73 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
               ) : sessionList.length === 0 ? (
                 <p className="text-xs text-muted-foreground">{tManager("noResumableSessions")}</p>
               ) : (
-                <div className="space-y-2">
-                  {sessionList.map((session) => (
-                    <div
-                      key={session.sessionId}
-                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-background/50 px-2 py-2"
+                <>
+                  {/* Bounded scroll region: the list alone can be hundreds of
+                      rows, and without a cap it swallows the whole dialog. */}
+                  <div
+                    className="max-h-72 space-y-2 overflow-y-auto"
+                    data-testid="external-agent-session-list"
+                  >
+                    {visibleSessions.map((session) => (
+                      <div
+                        key={session.sessionId}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-background/50 px-2 py-2"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-medium">
+                            {session.title || session.sessionId}
+                          </p>
+                          <p className="truncate text-[11px] text-muted-foreground">
+                            {session.sessionId}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleResumeSession(session.sessionId)}
+                            disabled={
+                              isExecuting ||
+                              activeSession?.id === session.sessionId ||
+                              !isActiveAgentExecutable ||
+                              !isActiveAgentConnected ||
+                              resumeSupport?.state === "unsupported"
+                            }
+                          >
+                            {tManager("resume")}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleForkSession(session.sessionId)}
+                            disabled={
+                              isExecuting ||
+                              !isActiveAgentExecutable ||
+                              !isActiveAgentConnected ||
+                              forkSupport?.state === "unsupported"
+                            }
+                          >
+                            {tManager("fork")}
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {sessionList.length > SESSION_LIST_PREVIEW_COUNT && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="mt-2 w-full text-xs text-muted-foreground"
+                      onClick={() =>
+                        setSessionsExpandedFor(sessionsExpanded ? null : activeAgentId)
+                      }
                     >
-                      <div className="min-w-0">
-                        <p className="truncate text-xs font-medium">
-                          {session.title || session.sessionId}
-                        </p>
-                        <p className="truncate text-[11px] text-muted-foreground">
-                          {session.sessionId}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleResumeSession(session.sessionId)}
-                          disabled={
-                            isExecuting ||
-                            activeSession?.id === session.sessionId ||
-                            !isActiveAgentExecutable ||
-                            !isActiveAgentConnected ||
-                            resumeSupport?.state === "unsupported"
-                          }
-                        >
-                          {tManager("resume")}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleForkSession(session.sessionId)}
-                          disabled={
-                            isExecuting ||
-                            !isActiveAgentExecutable ||
-                            !isActiveAgentConnected ||
-                            forkSupport?.state === "unsupported"
-                          }
-                        >
-                          {tManager("fork")}
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                      {sessionsExpanded
+                        ? tManager("showFewerSessions")
+                        : tManager("showAllSessions", { count: sessionList.length })}
+                    </Button>
+                  )}
+                </>
               )}
               {(resumeSupport?.state === "unsupported" || forkSupport?.state === "unsupported") && (
                 <div className="mt-2 space-y-1 text-[11px] text-amber-700 dark:text-amber-400">

@@ -68,17 +68,15 @@ describe("PluginLibraryPane", () => {
     expect(rail.className).not.toMatch(/\bw-52\b/)
   })
 
-  // The filter/status strip lives inside the LIST column — between the sheet
-  // fallback and the scroller — so it can appear without resizing the page
+  // The filter/status strip is the first row inside the LIST column — above
+  // even the sheet fallback — so it can appear without resizing the page
   // header or shifting the rails under the cursor.
-  it("mounts the status strip inside the list column, not at pane level", () => {
+  it("mounts the status strip first inside the list column, not at pane level", () => {
     render(<PluginLibraryPane />)
     const strip = screen.getByTestId("plugin-library-status-bar-stub")
-    const listColumn = screen
-      .getByTestId("plugin-library-list-stub")
-      .closest(".\\@container\\/plugin-list")
-    expect(listColumn).not.toBeNull()
-    expect(listColumn!.contains(strip)).toBe(true)
+    const listColumn = screen.getByTestId("plugin-library-list-column")
+    expect(listColumn.contains(strip)).toBe(true)
+    expect(listColumn.firstElementChild).toBe(strip)
     // And it sits above the scroller, so the chips stay put while rows scroll.
     const scroller = screen.getByTestId("plugin-library-list-stub").parentElement!
     expect(strip.compareDocumentPosition(scroller) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -87,8 +85,11 @@ describe("PluginLibraryPane", () => {
   it("scopes the list body to its own container so cards/rows size to the pane", () => {
     render(<PluginLibraryPane />)
     const pane = screen.getByTestId("plugin-library-pane")
-    expect(pane.className).toContain("@container/plugin-pane")
-    // The list wrapper opens a nested container measured after the rail.
-    expect(pane.querySelector(".\\@container\\/plugin-list")).not.toBeNull()
+    const listColumn = screen.getByTestId("plugin-library-list-column")
+    expect(pane.contains(listColumn)).toBe(true)
+    // The list wrapper opens a nested container measured after the rail. The
+    // class IS the mechanism under test, so it is asserted — not used as a
+    // locator.
+    expect(listColumn.className).toContain("@container/plugin-list")
   })
 })

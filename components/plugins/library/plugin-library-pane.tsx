@@ -42,7 +42,13 @@ export function PluginLibraryPane() {
       </aside>
       {/* Nested container so the list body (cards / rows) measures the space
           it actually gets — i.e. after the rail is subtracted. */}
-      <div className="@container/plugin-list flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div
+        className="@container/plugin-list flex min-h-0 flex-1 flex-col overflow-hidden"
+        data-testid="plugin-library-list-column"
+      >
+        {/* Filter chips + result count — first in the list column, never the
+            page header. Why: `plugin-library-status-bar.tsx`. */}
+        <PluginLibraryStatusBar />
         {/* The rail's fallback lives HERE, not in the page header, and is
             gated on the SAME container as the rail itself. It used to sit in
             `PluginLibraryHeader` behind `lg:hidden` — a *viewport* rule
@@ -54,11 +60,6 @@ export function PluginLibraryPane() {
         <div className="@xl/plugin-pane:hidden shrink-0 border-b px-2 py-1.5">
           <PluginCategorySheet />
         </div>
-        {/* Filter chips + result count. Inside the list column — NOT the
-            page header — so a filter change never resizes the header band
-            and shifts the rails (or the capability row just clicked) out
-            from under the cursor. */}
-        <PluginLibraryStatusBar />
         <div className="min-h-0 flex-1 overflow-y-auto">
           <PluginLibraryList />
         </div>

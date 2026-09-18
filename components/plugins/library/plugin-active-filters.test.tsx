@@ -2,14 +2,14 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, renderHook, screen, fireEvent } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
-import { PluginActiveFilters } from "./plugin-active-filters"
+import { PluginActiveFilters, useHasActivePluginFilters } from "./plugin-active-filters"
 import { usePluginsStore, DEFAULT_PLUGIN_FILTERS } from "@/stores/plugins"
 
 beforeEach(() => {
@@ -125,5 +125,45 @@ describe("PluginActiveFilters", () => {
     expect(next.query).toBe("")
     expect(next.capability).toBe("all")
     expect(next.signedOnly).toBe(false)
+  })
+
+  // `w-max` keeps the chip row one line inside the status bar's horizontal
+  // scroller — wrapping would grow the band's height and push the rows it
+  // describes, the very shift it exists to prevent.
+  it("keeps the chip row on a single line for the parent's scroller", () => {
+    usePluginsStore.setState({
+      filters: { ...DEFAULT_PLUGIN_FILTERS, capability: "tools" },
+    })
+    render(<PluginActiveFilters />)
+    const group = screen.getByTestId("plugin-active-filters")
+    expect(group.className).toContain("w-max")
+    expect(group.className).not.toContain("flex-wrap")
+  })
+})
+
+// `PluginLibraryStatusBar` mounts or skips its whole band on this answer,
+// so it has to mirror exactly what the strip would render — including the
+// sub-filter suppression rule.
+describe("useHasActivePluginFilters", () => {
+  it("is false at default filters", () => {
+    const { result } = renderHook(() => useHasActivePluginFilters())
+    expect(result.current).toBe(false)
+  })
+
+  it("is true once a filter leaves its default", () => {
+    usePluginsStore.setState({
+      filters: { ...DEFAULT_PLUGIN_FILTERS, capability: "tools" },
+    })
+    const { result } = renderHook(() => useHasActivePluginFilters())
+    expect(result.current).toBe(true)
+  })
+
+  it("is false when the only non-default filters are sub-filter-owned and suppressed", () => {
+    usePluginsStore.setState({
+      filters: { ...DEFAULT_PLUGIN_FILTERS, status: "enabled" },
+      librarySubFilter: "enabled",
+    })
+    const { result } = renderHook(() => useHasActivePluginFilters())
+    expect(result.current).toBe(false)
   })
 })

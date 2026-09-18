@@ -640,13 +640,13 @@ export function ProviderImportExport({ onClose, compact = false }: ProviderImpor
   }, [selectedProviders, availableProviders])
 
   return (
-    <div className={cn("flex items-center", compact ? "gap-1" : "gap-2")}>
+    <div className="flex items-center gap-2">
       {/* Export Button */}
       <Button
         variant="outline"
-        size="sm"
-        className={cn(compact && "px-2")}
+        size={compact ? "icon" : "sm"}
         aria-label={t("export")}
+        title={t("export")}
         onClick={() => handleExportDialogOpen(true)}
       >
         <Download className={cn("h-4 w-4", !compact && "mr-2")} />
@@ -662,10 +662,11 @@ export function ProviderImportExport({ onClose, compact = false }: ProviderImpor
       >
         <Button
           variant="outline"
-          size="sm"
+          size={compact ? "icon" : "sm"}
           onClick={() => fileInputRef.current?.click()}
-          className={cn(compact && "px-2", isDragging && "ring-2 ring-primary")}
+          className={cn(isDragging && "ring-2 ring-primary")}
           aria-label={t("import")}
+          title={t("import")}
         >
           <Upload className={cn("h-4 w-4", !compact && "mr-2")} />
           <span className={cn(compact && "sr-only")}>{t("import")}</span>

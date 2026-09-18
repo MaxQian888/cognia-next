@@ -120,3 +120,16 @@ export function visiblePluginSections({
     (item) => item.featureFlag !== "devtools" || devtoolsEnabled
   ).map((item) => ({ ...item, disabled: item.featureFlag === "desktop" && !isDesktop }))
 }
+
+/**
+ * The nav entry for a section. `PluginNavSection` is a closed union and every
+ * member appears in `PLUGIN_NAV_SECTIONS`, so the lookup is total for a typed
+ * caller — the throw only fires on values that bypassed the type, e.g. a URL
+ * param that skipped `isValidSection`. Keeps the section → item rule beside
+ * the map instead of re-`find`ing at each call site.
+ */
+export function pluginNavItem(section: PluginNavSection): PluginNavItem {
+  const item = PLUGIN_NAV_SECTIONS.find((entry) => entry.section === section)
+  if (!item) throw new Error(`unknown plugin nav section: ${section}`)
+  return item
+}

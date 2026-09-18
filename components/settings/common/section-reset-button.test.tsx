@@ -67,17 +67,13 @@ describe("SectionResetButton", () => {
     expect(toastSuccess).toHaveBeenCalled()
   })
 
-  it("keeps an accessible name while the label is collapsed in a narrow header", () => {
-    // The header's action slot is `shrink-0` inside an `overflow-hidden`
-    // header, so this button hides its text under `@2xl/feature-header` rather
-    // than pushing the page title off the edge. Hiding the only text would
-    // leave the control unnamed, so the name has to come from `aria-label`.
+  it("stays icon-only with an accessible name at every width", () => {
+    // The header's action row is all ghost icon buttons; this one renders no
+    // text at all, so the name has to come from `aria-label` and the tooltip.
     renderButton(<SectionResetButton sectionId="security" />)
     const button = screen.getByTestId("section-reset-button")
     expect(button).toHaveAccessibleName("button")
-    const label = button.querySelector("span")
-    expect(label).not.toBeNull()
-    expect(label).toHaveClass("hidden", "@2xl/feature-header:inline")
+    expect(button.querySelector("span")).toBeNull()
   })
 
   it("resets the data section's real telemetry consent", async () => {

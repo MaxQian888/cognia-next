@@ -142,7 +142,7 @@ export function ProviderSidebar({
               <Button
                 size="icon"
                 variant="outline"
-                className="h-9 w-9 shrink-0"
+                className="shrink-0"
                 aria-label={t("sidebar.sortLabel")}
                 title={t("sidebar.sortLabel")}
                 data-testid="provider-sort-trigger"

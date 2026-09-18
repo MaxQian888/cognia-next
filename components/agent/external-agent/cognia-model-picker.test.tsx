@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import en from "@/i18n/messages/en.json"
+import type { ExternalAgentProtocol } from "@/types/agent/external-agent"
 import { CogniaModelPicker } from "./cognia-model-picker"
 
 const binding = { providerId: "gateway", modelId: "coder", accountId: "account-a" }
@@ -102,7 +103,11 @@ jest.mock("@/components/settings/provider/provider-model-list", () => ({
   ),
 }))
 
-function mount(value: typeof binding | null, onChange = jest.fn(), protocol = "pi-rpc") {
+function mount(
+  value: typeof binding | null,
+  onChange = jest.fn(),
+  protocol: ExternalAgentProtocol = "pi-rpc"
+) {
   render(
     <NextIntlClientProvider locale="en" messages={en} timeZone="UTC">
       <CogniaModelPicker
@@ -156,7 +161,7 @@ it("shows distinct context/input/output limits and filters known incompatible mo
 
 it("preserves the subscription account when selecting a model from that provider", () => {
   const change = mount(binding)
-  fireEvent.click(screen.getByRole("button", { name: "coder", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "coder" }))
   expect(change).toHaveBeenCalledWith(binding)
 })
 
@@ -228,7 +233,7 @@ it("aborts pending discovery on unmount and retains models after failure", async
   )
   fireEvent.click(screen.getByRole("button", { name: "Refresh account models" }))
   await screen.findByText(/Could not load model information/)
-  expect(screen.getByRole("button", { name: "coder", exact: true })).toBeInTheDocument()
+  expect(screen.getByRole("button", { name: "coder" })).toBeInTheDocument()
   discoveryMock.mockImplementationOnce(() => new Promise(() => {}))
   fireEvent.click(screen.getByRole("button", { name: "Refresh account models" }))
   const signal = discoveryMock.mock.calls.at(-1)[0].signal as AbortSignal

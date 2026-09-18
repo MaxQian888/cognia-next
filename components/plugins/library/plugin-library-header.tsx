@@ -14,11 +14,12 @@
 // actions are hosted by the header's fixed action tier so they remain visible
 // when this dense controls row scrolls horizontally.
 //
-// The active-filter chips + result count deliberately do NOT use the
-// toolbar's `status` line: appearing there resized the header band and
-// shifted all three panes (including the capability rail the user just
-// clicked). They render inside `PluginLibraryPane`'s list column instead —
-// see `plugin-library-status-bar.tsx`.
+// The active-filter chips + result count deliberately do NOT render here:
+// a second line in the header resized the band and shifted all three panes
+// (including the capability rail the user just clicked), so the toolbar no
+// longer carries a `status` slot at all. They render inside
+// `PluginLibraryPane`'s list column instead — see
+// `plugin-library-status-bar.tsx`.
 
 import { useTranslations } from "next-intl"
 import { ArrowDownUpIcon, FilterIcon } from "lucide-react"

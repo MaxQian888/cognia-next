@@ -205,7 +205,9 @@ describe("useProviderBatchVerify", () => {
 })
 
 it("checks batch eligibility against the effective subscription configuration", () => {
-  const projected = { codex: { providerId: "codex", enabled: true, apiKey: "subscription:hash" } }
+  const projected = {
+    codex: { providerId: "codex", enabled: true, defaultModel: "", apiKey: "subscription:hash" },
+  }
   renderHook(() => useProviderBatchVerify(makeSettings({ readinessProviderSettings: projected })))
   expect(eligibleBuiltIn).toHaveBeenCalledWith([], projected, {})
   expect(retryBuiltIn).toHaveBeenCalledWith([], projected, {})

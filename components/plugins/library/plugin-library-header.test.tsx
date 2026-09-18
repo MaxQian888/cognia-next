@@ -23,12 +23,16 @@ jest.mock("@/hooks/plugins", () => ({
   usePlugins: () => mockUsePlugins(),
 }))
 
-import { usePluginsStore } from "@/stores/plugins"
+import { usePluginsStore, DEFAULT_PLUGIN_FILTERS } from "@/stores/plugins"
 import { PluginLibraryHeader, visibleSortModes } from "./plugin-library-header"
 
 beforeEach(() => {
+  // Reset to defaults, not to "defaults plus whatever the last test left":
+  // merging the previous filters leaks capability/sort/status into the next
+  // test and makes the suite order-dependent.
   usePluginsStore.setState({
-    filters: { ...usePluginsStore.getState().filters, query: "" },
+    filters: { ...DEFAULT_PLUGIN_FILTERS },
+    librarySubFilter: "all",
     filterSheetOpen: false,
   })
   mockUsePlugins.mockReset()
@@ -131,9 +135,9 @@ describe("PluginLibraryHeader", () => {
   })
 
   // The chips + count moved into the list column (`PluginLibraryStatusBar`):
-  // appearing in the toolbar's `status` line resized the header band and
-  // shifted every pane under it. Their assertions live in
-  // `plugin-library-status-bar.test.tsx`.
+  // a second header line resized the band and shifted every pane under it,
+  // so the toolbar carries no status slot at all. The strip's assertions
+  // live in `plugin-library-status-bar.test.tsx`.
   it("keeps the toolbar a single row — no status line", () => {
     usePluginsStore.setState({
       filters: { ...usePluginsStore.getState().filters, capability: "tools" },

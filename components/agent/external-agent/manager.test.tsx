@@ -203,11 +203,35 @@ describe("ExternalAgentManager", () => {
     expect(screen.getByText(en.externalAgent.statusConnected)).toBeInTheDocument()
   })
 
+  it("puts the status badge and the card actions on the same flex line", () => {
+    const agent = makeAgent()
+    agent.connectionStatus = "connected"
+    mockUseExternalAgent.mockReturnValue({ ...baseHookValue(), agents: [agent] })
+    render(wrap(<ExternalAgentManager />))
+    const badge = screen.getByText(en.externalAgent.statusConnected)
+    const disconnect = screen.getByRole("button", {
+      name: en.externalAgent.settings.disconnect,
+    })
+    // One flat `items-center` row — previously the badge lived in the title
+    // line and the buttons in a sibling column, so the two centered against
+    // different heights and the pill floated a half-line high.
+    expect(badge.parentElement).toHaveClass("items-center")
+    expect(badge.parentElement).toContainElement(disconnect)
+  })
+
   it("opens the add-agent dialog from the header button", () => {
     mockUseExternalAgent.mockReturnValue(baseHookValue())
     render(wrap(<ExternalAgentManager />))
     fireEvent.click(screen.getAllByRole("button", { name: /add agent/i })[0])
     expect(screen.getByText(en.externalAgent.manager.addExternalAgent)).toBeInTheDocument()
+  })
+
+  it("renders host-supplied chrome in the header's action row", () => {
+    mockUseExternalAgent.mockReturnValue(baseHookValue())
+    render(wrap(<ExternalAgentManager headerActions={<button type="button">host close</button>} />))
+    const addButton = screen.getAllByRole("button", { name: /add agent/i })[0]
+    // Same row as Refresh / Add Agent — not a corner-floating overlay.
+    expect(within(addButton.parentElement!).getByText("host close")).toBeInTheDocument()
   })
 
   it("shows the runtime diagnostics panel when an agent is active", () => {
@@ -481,6 +505,52 @@ describe("ExternalAgentManager", () => {
       screen.getByRole("button", { name: en.externalAgent.manager.resume })
     ).toBeInTheDocument()
     expect(screen.getByRole("button", { name: en.externalAgent.manager.fork })).toBeInTheDocument()
+  })
+
+  it("caps the session list at a preview and expands on demand", async () => {
+    const agent = makeAgent()
+    agent.connectionStatus = "connected"
+    const sessions = Array.from({ length: 25 }, (_, i) => ({
+      sessionId: `s${i}`,
+      title: `Session ${i}`,
+    }))
+    const listSessions = jest.fn().mockResolvedValue(sessions)
+    mockUseExternalAgent.mockReturnValue({
+      ...baseHookValue(),
+      agents: [agent],
+      activeAgentId: "agent-1",
+      activeAgentValidity: {
+        executable: true,
+        contractVersion: 1,
+        sessionExtensions: {
+          "session/list": { state: "supported" },
+          "session/fork": { state: "supported" },
+          "session/resume": { state: "supported" },
+        },
+        lifecycleStage: "execution",
+        canonicalReasonCode: "ok",
+        canonicalReason: "ok",
+      },
+      listSessions,
+    })
+    await act(async () => {
+      render(wrap(<ExternalAgentManager />))
+    })
+    // Only the preview slice renders — a long history must not become a wall.
+    expect(screen.getByText("Session 0")).toBeInTheDocument()
+    expect(screen.getByText("Session 19")).toBeInTheDocument()
+    expect(screen.queryByText("Session 20")).toBeNull()
+    expect(screen.getByTestId("external-agent-session-list")).toHaveClass("overflow-y-auto")
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: en.externalAgent.manager.showAllSessions.replace("{count}", "25"),
+      })
+    )
+    expect(screen.getByText("Session 24")).toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole("button", { name: en.externalAgent.manager.showFewerSessions })
+    )
+    expect(screen.queryByText("Session 24")).toBeNull()
   })
 
   it("shows the unsupported-session warning when list state is unsupported", async () => {

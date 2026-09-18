@@ -42,7 +42,15 @@ jest.mock("@/components/chat/composer", () => ({
 let selectionText: string | null = null
 jest.mock("@/components/chat/message-selection-toolbar", () => ({
   useTranscriptSelection: () =>
-    selectionText === null ? null : { text: selectionText, x: 400, y: 200 },
+    selectionText === null
+      ? null
+      : {
+          text: selectionText,
+          rect: { left: 400, top: 180, right: 560, bottom: 200 },
+          messageIds: [],
+          context: "",
+          range: null,
+        },
 }))
 
 const staged: unknown[] = []

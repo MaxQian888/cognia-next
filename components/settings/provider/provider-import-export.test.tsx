@@ -43,9 +43,9 @@ jest.mock("@/stores", () => ({
   },
 }))
 
-// Mock UI components
-jest.mock("@/components/ui/button")
-
+// Mock UI components. `@/components/ui/button` is deliberately NOT mocked:
+// the shared manual mock strips `size`, and the compact-vs-default tests
+// assert the rendered `data-size` the rail toolbar's geometry depends on.
 jest.mock("@/components/ui/dialog")
 
 jest.mock("@/components/ui/alert", () => ({
@@ -143,6 +143,20 @@ describe("ProviderImportExport", () => {
     expect(screen.getByRole("button", { name: "import" })).toBeInTheDocument()
     expect(screen.getByText("export")).toHaveClass("sr-only")
     expect(screen.getByText("import")).toHaveClass("sr-only")
+  })
+
+  // The rail toolbar mixes this pair with `size="icon"` neighbours; compact
+  // must render the same 36px square or the row visibly mismatches.
+  it("renders compact triggers at icon size to match the rail toolbar", () => {
+    render(<ProviderImportExport compact />)
+    expect(screen.getByRole("button", { name: "export" })).toHaveAttribute("data-size", "icon")
+    expect(screen.getByRole("button", { name: "import" })).toHaveAttribute("data-size", "icon")
+  })
+
+  it("keeps labelled sm triggers outside compact mode", () => {
+    render(<ProviderImportExport />)
+    expect(screen.getByRole("button", { name: "export" })).toHaveAttribute("data-size", "sm")
+    expect(screen.getByRole("button", { name: "import" })).toHaveAttribute("data-size", "sm")
   })
 
   it("opens export dialog on click", () => {
