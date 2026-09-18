@@ -49,6 +49,25 @@ jest.mock("./composer", () => {
 })
 
 jest.mock("./chat-header", () => ({ ChatHeader: () => null }))
+// ChatPane resolves its runtime through useChatPaneRuntime, which requires
+// ClaudeChatRuntimeProvider. These tests only exercise composer focus, so a
+// stub runtime with ownsDecisions off (keeps ChatSessionGates unmounted) is
+// enough — same shape as chat-view.test.tsx's mockPaneRuntime.
+jest.mock("@/hooks/chat/use-chat-pane-runtime", () => ({
+  useChatPaneRuntime: () => ({
+    runtime: {
+      respondToApproval: jest.fn(async () => undefined),
+      interruptAndSteer: jest.fn(),
+      flushSteer: jest.fn(),
+      compact: jest.fn(),
+      setModel: jest.fn(),
+      resetRuntime: jest.fn(),
+      rewindFiles: jest.fn(),
+    },
+    ownsDecisions: false,
+    resumePlan: jest.fn(async () => undefined),
+  }),
+}))
 jest.mock("./character-missing-banner", () => ({ CharacterMissingBanner: () => null }))
 jest.mock("./empty-state", () => ({ EmptyChatState: () => null }))
 jest.mock("@/components/error/diagnostic-card", () => ({ InlineError: () => null }))
