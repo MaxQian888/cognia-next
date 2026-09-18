@@ -1167,4 +1167,122 @@ describe("shared chat synchronization", () => {
     expect(await getDb().messages.get("message_1")).toBeUndefined()
     expect(await getDb().collabChatSessions.get(session.id)).toBeUndefined()
   })
+
+  it("projects the payload's reference metadata onto the local row", async () => {
+    const metadata = {
+      mentions: [{ kind: "entity", id: "session:source_a", label: "Sprint planning" }],
+      promptPreamble: {
+        sections: ["references"],
+        references: [{ kind: "entity", entityKind: "session", title: "Sprint planning" }],
+      },
+    }
+    await syncSharedSession(
+      readerFor({
+        ...messageEvent,
+        payload: { ...(messageEvent.payload as Record<string, unknown>), metadata },
+      }),
+      session.orgId,
+      session.id
+    )
+    expect(
+      (await getDb().messages.where("sessionId").equals("shared:shared_1").first())?.metadata
+    ).toMatchObject(metadata)
+  })
+
+  it("drops malformed and non-reference keys from the payload metadata", async () => {
+    // Remote input any member could shape: only `mentions`/`promptPreamble`
+    // survive, each entry re-validated, and a malformed entry reads as absent.
+    await syncSharedSession(
+      readerFor({
+        ...messageEvent,
+        payload: {
+          ...(messageEvent.payload as Record<string, unknown>),
+          metadata: {
+            mentions: [
+              { kind: "entity", id: "session:source_a" },
+              { kind: "bogus-kind", id: "x" },
+              "garbage",
+            ],
+            promptPreamble: { not: "a summary" },
+            steer: { entryId: "forged" },
+          },
+        },
+      }),
+      session.orgId,
+      session.id
+    )
+    const row = await getDb().messages.where("sessionId").equals("shared:shared_1").first()
+    expect(row?.metadata).toEqual({
+      mentions: [{ kind: "entity", id: "session:source_a" }],
+    })
+  })
+
+  it("keeps the row's existing metadata when a correction carries none", async () => {
+    await syncSharedSession(
+      readerFor({
+        ...messageEvent,
+        payload: {
+          ...(messageEvent.payload as Record<string, unknown>),
+          metadata: { mentions: [{ kind: "entity", id: "session:source_a" }] },
+        },
+      }),
+      session.orgId,
+      session.id
+    )
+    await syncSharedSession(
+      readerFor({
+        ...messageEvent,
+        id: "event_2",
+        sequence: 2,
+        kind: "message.corrected",
+        payload: {
+          targetMessageId: "message_1",
+          parts: [{ type: "text", text: "edited" }],
+        },
+      }),
+      session.orgId,
+      session.id
+    )
+    const row = await getDb().messages.where("sessionId").equals("shared:shared_1").first()
+    expect(row?.parts).toEqual([{ type: "text", text: "edited" }])
+    expect(row?.metadata).toMatchObject({
+      mentions: [{ kind: "entity", id: "session:source_a" }],
+    })
+  })
+
+  it("strips reference metadata when the message is redacted", async () => {
+    // Redaction removes the shared content — and the citations naming the
+    // referenced conversation (incl. its title) are part of that content.
+    await syncSharedSession(
+      readerFor({
+        ...messageEvent,
+        payload: {
+          ...(messageEvent.payload as Record<string, unknown>),
+          metadata: {
+            mentions: [{ kind: "entity", id: "session:source_a", label: "Sprint planning" }],
+            promptPreamble: {
+              sections: ["references"],
+              references: [{ kind: "entity", entityKind: "session", title: "Sprint planning" }],
+            },
+          },
+        },
+      }),
+      session.orgId,
+      session.id
+    )
+    await syncSharedSession(
+      readerFor({
+        ...messageEvent,
+        id: "event_2",
+        sequence: 2,
+        kind: "message.redacted",
+        payload: { targetMessageId: "message_1" },
+      }),
+      session.orgId,
+      session.id
+    )
+    const row = await getDb().messages.where("sessionId").equals("shared:shared_1").first()
+    expect(row?.parts).toEqual([])
+    expect(row?.metadata).toBeUndefined()
+  })
 })

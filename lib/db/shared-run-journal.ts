@@ -21,6 +21,12 @@ export interface SharedSendJournal {
   messageId: string
   parts: unknown[]
   createdAt: number
+  /**
+   * `metadata.mentions` / `metadata.promptPreamble` to publish with the row.
+   * Kept in the journal so a retried send carries the same citations the
+   * first attempt computed.
+   */
+  metadata?: Record<string, unknown>
 }
 
 function encryptedDatabase(db: CogniaDB): CogniaDB {

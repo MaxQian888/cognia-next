@@ -11,6 +11,7 @@ import { getDb } from "@/lib/db/schema"
 import { assertFetchTargetAllowed } from "@/lib/web/fetch-guard"
 import { bytesToBase64 } from "@/lib/ocr/image-prep"
 import { getMessageMedia, parseMediaRef } from "@/lib/db/message-media"
+import { pickReferenceMetadata } from "@/lib/chat/mentions/read"
 import type { CollabClient } from "./client"
 import { assertSharedChatClientEnabled } from "./shared-chat-feature"
 
@@ -358,6 +359,10 @@ export async function convertLocalSessionToShared(
     const parts = uploaded.parts
     if (getDb() !== db) throw new DOMException("Shared conversion cancelled", "AbortError")
     const author = authorFor(message, identity.userId)
+    // Whitelist the reference subset of the row's metadata: imported messages
+    // keep the citations their send recorded, so a converted transcript's
+    // backlinks survive the move to shared storage.
+    const referenceMetadata = pickReferenceMetadata(message.metadata)
     const event = await client.appendSessionEvent(input.orgId, remoteDraft.id, {
       kind: "message.created",
       operationId: `${prefix}:message:${message.id}`,
@@ -369,6 +374,7 @@ export async function convertLocalSessionToShared(
         createdAt: message.createdAt,
         author,
         imported: true,
+        ...(referenceMetadata ? { metadata: referenceMetadata } : {}),
       },
     })
     if (getDb() !== db) throw new DOMException("Shared conversion cancelled", "AbortError")

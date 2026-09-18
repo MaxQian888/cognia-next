@@ -352,7 +352,18 @@ export async function sharedRequestTranscript(
 /** Failed sends retain the operation identity; reconnect never automatically sends a draft. */
 export async function sendSharedSessionMessage(
   session: Pick<ChatSession, "id" | "collaboration">,
-  message: { id: string; parts: unknown[]; createdAt?: number }
+  message: {
+    id: string
+    parts: unknown[]
+    createdAt?: number
+    /**
+     * `metadata.mentions` / `metadata.promptPreamble` for the published row.
+     * The sender's own local copy is written by the sync projection of this
+     * event, so the citations have to ride the payload or no member — sender
+     * included — can ever resolve a backlink to what was referenced.
+     */
+    metadata?: Record<string, unknown>
+  }
 ): Promise<void> {
   assertSharedChatClientEnabled()
   const db = getDb()
@@ -380,6 +391,7 @@ export async function sendSharedSessionMessage(
     messageId: message.id,
     parts: message.parts,
     createdAt: message.createdAt ?? Date.now(),
+    ...(message.metadata ? { metadata: message.metadata } : {}),
   }
   await putSharedSendJournal(key, pending, db)
   if (
@@ -411,6 +423,7 @@ export async function sendSharedSessionMessage(
       role: "user",
       parts: pending.parts,
       createdAt: pending.createdAt,
+      ...(pending.metadata ? { metadata: pending.metadata } : {}),
     },
     operationId: `user-message:${pending.messageId}`,
   })

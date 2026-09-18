@@ -239,6 +239,84 @@ describe("local-to-shared chat conversion", () => {
     expect(client.createSharedSession).not.toHaveBeenCalled()
     expect((await getDb().sessions.get("local_team"))?.collaboration).toBeUndefined()
   })
+
+  it("publishes each message's reference metadata with its event", async () => {
+    // The converted transcript's backlinks live in the payload: without the
+    // field the shared copy of an `@chat:` turn has no `metadata.mentions`.
+    await getDb().messages.put({
+      id: "message_refs",
+      sessionId: "local_1",
+      projectId: "workspace_1",
+      role: "user",
+      parts: [{ type: "text", text: "see attached" }],
+      createdAt: 5,
+      metadata: {
+        mentions: [{ kind: "entity", id: "session:source_a", label: "Sprint planning" }],
+        promptPreamble: {
+          sections: ["references"],
+          references: [{ kind: "entity", entityKind: "session", title: "Sprint planning" }],
+        },
+        // Not part of the reference subset — must NOT cross the boundary.
+        usage: { tokens: 12 },
+      },
+    })
+    const client = {
+      identity: jest.fn().mockResolvedValue({ userId: "user_1", orgId: "org_1" }),
+      createSharedSession: jest.fn().mockResolvedValue({
+        id: "shared_1",
+        orgId: "org_1",
+        workspaceId: "workspace_1",
+        title: "Private history",
+        status: "importing",
+        createdBy: { kind: "human", id: "user_1" },
+        createdAt: 10,
+        updatedAt: 10,
+        revision: 1,
+        policyRevision: 1,
+      }),
+      appendSessionEvent: jest.fn(async (_orgId, sessionId, input) => ({
+        id: `event_${input.operationId}`,
+        sessionId,
+        sequence: 1,
+        kind: input.kind,
+        actor: { kind: "human" as const, id: "user_1" },
+        payload: input.payload,
+        createdAt: 11,
+        operationId: input.operationId,
+      })),
+      updateSharedSession: jest.fn().mockResolvedValue({
+        id: "shared_1",
+        status: "active",
+        revision: 2,
+        policyRevision: 2,
+      }),
+    }
+
+    await convertLocalSessionToShared(client, {
+      localSessionId: "local_1",
+      orgId: "org_1",
+      workspaceId: "workspace_1",
+    })
+
+    const imported = client.appendSessionEvent.mock.calls
+      .filter(([, , input]) => input.kind === "message.created")
+      .map(([, , input]) => input.payload)
+    const withRefs = imported.find(
+      (payload) => (payload as { messageId?: string }).messageId === "message_refs"
+    ) as Record<string, unknown>
+    expect(withRefs.metadata).toEqual({
+      mentions: [{ kind: "entity", id: "session:source_a", label: "Sprint planning" }],
+      promptPreamble: {
+        sections: ["references"],
+        references: [{ kind: "entity", entityKind: "session", title: "Sprint planning" }],
+      },
+    })
+    // Plain messages carry no metadata field at all.
+    const plain = imported.find(
+      (payload) => (payload as { messageId?: string }).messageId === "message_1"
+    ) as Record<string, unknown>
+    expect(plain.metadata).toBeUndefined()
+  })
 })
 
 describe("attachment reads are guarded", () => {

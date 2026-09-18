@@ -60,6 +60,7 @@ import {
   type HostStateActionRow,
 } from "./host-state-store"
 import { markSessionDirty } from "@/lib/chat/search/indexer"
+import { pickReferenceMetadata } from "@/lib/chat/mentions/read"
 
 export const HOST_STATE_ACTION_TOPIC = "host-state://action"
 export const MAX_HOST_STATE_SNAPSHOT_BYTES = 512 * 1024
@@ -785,6 +786,13 @@ async function materializeOptimisticMessages(
   for (const queued of state.queue) {
     if (await db.messages.get(queued.messageId)) continue
     const session = await db.sessions.get(state.sessionId)
+    // Whitelist the reference subset the queue item carried: a remote client
+    // wrote these fields, so they re-validate through `isContextRef` /
+    // `readPromptPreambleSummary` before they can land on a local row.
+    const referenceMetadata = pickReferenceMetadata({
+      mentions: queued.mentions,
+      promptPreamble: queued.promptPreamble,
+    })
     const message: StoredMessage = {
       id: queued.messageId,
       sessionId: state.sessionId,
@@ -798,6 +806,7 @@ async function materializeOptimisticMessages(
           attachmentRefs: queued.attachments,
           optimistic: true,
         },
+        ...referenceMetadata,
       },
       createdAt: Date.now(),
     }
@@ -1602,6 +1611,10 @@ function mutationForAction(
             text: action.action.text,
             attachments: action.action.attachments,
             clientId: action.clientId,
+            ...(action.action.mentions ? { mentions: action.action.mentions } : {}),
+            ...(action.action.promptPreamble
+              ? { promptPreamble: action.action.promptPreamble }
+              : {}),
           },
           operation: operation(),
           revision,

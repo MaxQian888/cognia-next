@@ -108,6 +108,39 @@ export interface HostStateAttachmentRef {
   ref?: string
 }
 
+/**
+ * Wire mirror of the app's `ContextRef` (`lib/chat/mentions/types.ts`), which
+ * this zero-`@/` package cannot import. The structural subset is declared here
+ * and app-side readers re-validate each entry through `isContextRef`, so a
+ * kind this build does not know reads as "absent" rather than breaking the row.
+ *
+ * Carried alongside `text` because the context envelope inside the text feeds
+ * the model but leaves no `metadata.mentions` on the persisted row — without
+ * this field a remote-enqueued turn cites nothing it referenced.
+ */
+export interface HostStateContextRef {
+  kind: string
+  id: string
+  label?: string
+  raw?: string
+}
+
+/**
+ * Wire mirror of `PromptPreambleSummary` (`lib/chat/prompt-preamble.ts`):
+ * section names and reference titles, never bodies. Lets the materialized row
+ * name what the turn's envelope attached.
+ */
+export interface HostStatePromptPreamble {
+  sections: string[]
+  references: Array<{
+    kind: string
+    title: string
+    entityKind?: string
+    href?: string
+    count?: number
+  }>
+}
+
 export type AllowedHostStateIntent =
   | { kind: "session.create"; title?: string }
   | { kind: "session.rename"; title: string }
@@ -118,9 +151,23 @@ export type AllowedHostStateIntent =
       messageId: string
       text: string
       attachments: HostStateAttachmentRef[]
+      /** What the turn cites — the sent context chips and typed `@…` tokens. */
+      mentions?: HostStateContextRef[]
+      /** The envelope summary for the row's `metadata.promptPreamble`. */
+      promptPreamble?: HostStatePromptPreamble
     }
-  | { kind: "turn.steer"; text: string }
-  | { kind: "turn.followup"; text: string }
+  | {
+      kind: "turn.steer"
+      text: string
+      mentions?: HostStateContextRef[]
+      promptPreamble?: HostStatePromptPreamble
+    }
+  | {
+      kind: "turn.followup"
+      text: string
+      mentions?: HostStateContextRef[]
+      promptPreamble?: HostStatePromptPreamble
+    }
   | { kind: "turn.abort" }
   | {
       kind: "approval.respond"
@@ -370,6 +417,13 @@ export interface HostStateQueuedMessage {
   text: string
   attachments: HostStateAttachmentRef[]
   clientId: string
+  /**
+   * Reference metadata carried from `message.enqueue` so the row the runtime
+   * materializes keeps its citations and preamble summary. Absent on older
+   * queue items — read as "no references", never dropped.
+   */
+  mentions?: HostStateContextRef[]
+  promptPreamble?: HostStatePromptPreamble
 }
 
 /**
@@ -1171,6 +1225,8 @@ export function reduceHostStateIntent<TState extends HostStateChannelState>(
                 text: intent.text,
                 attachments: intent.attachments,
                 clientId: envelope.clientId,
+                ...(intent.mentions ? { mentions: intent.mentions } : {}),
+                ...(intent.promptPreamble ? { promptPreamble: intent.promptPreamble } : {}),
               },
             ],
       } as TState
@@ -1608,14 +1664,28 @@ function isAllowedIntent(value: unknown): value is AllowedHostStateIntent {
       )
     case "message.enqueue":
       return (
-        hasOnlyKeys(value, ["kind", "messageId", "text", "attachments"]) &&
+        hasOnlyKeys(value, [
+          "kind",
+          "messageId",
+          "text",
+          "attachments",
+          "mentions",
+          "promptPreamble",
+        ]) &&
         nonEmptyString(value.messageId) &&
         typeof value.text === "string" &&
-        isAttachmentList(value.attachments)
+        isAttachmentList(value.attachments) &&
+        (value.mentions === undefined || isContextRefList(value.mentions)) &&
+        (value.promptPreamble === undefined || isPromptPreamble(value.promptPreamble))
       )
     case "turn.steer":
     case "turn.followup":
-      return hasOnlyKeys(value, ["kind", "text"]) && typeof value.text === "string"
+      return (
+        hasOnlyKeys(value, ["kind", "text", "mentions", "promptPreamble"]) &&
+        typeof value.text === "string" &&
+        (value.mentions === undefined || isContextRefList(value.mentions)) &&
+        (value.promptPreamble === undefined || isPromptPreamble(value.promptPreamble))
+      )
     case "turn.abort":
       return hasOnlyKeys(value, ["kind"])
     case "approval.respond":
@@ -1764,12 +1834,63 @@ function isDecision(value: unknown): value is HostStateDecision {
 function isQueuedMessage(value: unknown): value is HostStateQueuedMessage {
   return (
     isRecord(value) &&
-    hasOnlyKeys(value, ["actionId", "messageId", "text", "attachments", "clientId"]) &&
+    hasOnlyKeys(value, [
+      "actionId",
+      "messageId",
+      "text",
+      "attachments",
+      "clientId",
+      "mentions",
+      "promptPreamble",
+    ]) &&
     nonEmptyString(value.actionId) &&
     nonEmptyString(value.messageId) &&
     typeof value.text === "string" &&
     isAttachmentList(value.attachments) &&
-    nonEmptyString(value.clientId)
+    nonEmptyString(value.clientId) &&
+    (value.mentions === undefined || isContextRefList(value.mentions)) &&
+    (value.promptPreamble === undefined || isPromptPreamble(value.promptPreamble))
+  )
+}
+
+/**
+ * Structural check for the wire mirror of `ContextRef`. Per-entry `kind` is an
+ * open string on purpose: app-side readers re-validate through `isContextRef`
+ * and drop kinds they do not know, so a newer client's kind must not reject
+ * the whole row here.
+ */
+function isContextRefList(value: unknown): value is HostStateContextRef[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (item) =>
+        isRecord(item) &&
+        hasOnlyKeys(item, ["kind", "id", "label", "raw"]) &&
+        nonEmptyString(item.kind) &&
+        nonEmptyString(item.id) &&
+        (item.label === undefined || typeof item.label === "string") &&
+        (item.raw === undefined || typeof item.raw === "string")
+    )
+  )
+}
+
+function isPromptPreamble(value: unknown): value is HostStatePromptPreamble {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, ["sections", "references"]) &&
+    Array.isArray(value.sections) &&
+    value.sections.every((item) => typeof item === "string") &&
+    Array.isArray(value.references) &&
+    value.references.every(
+      (item) =>
+        isRecord(item) &&
+        hasOnlyKeys(item, ["kind", "title", "entityKind", "href", "count"]) &&
+        typeof item.kind === "string" &&
+        typeof item.title === "string" &&
+        (item.entityKind === undefined || typeof item.entityKind === "string") &&
+        (item.href === undefined || typeof item.href === "string") &&
+        (item.count === undefined || nonNegativeInteger(item.count))
+    )
   )
 }
 

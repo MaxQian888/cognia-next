@@ -54,6 +54,10 @@ import { Spinner } from "@/components/ui/spinner"
 import { Surface } from "@/components/surface/surface"
 import { authorizeSessionAction } from "@/lib/collab/session-permissions"
 import { convertLocalSessionToShared } from "@/lib/collab/shared-chat-conversion"
+import {
+  scanSharedTranscriptReferences,
+  type SharedTranscriptReference,
+} from "@/lib/collab/shared-reference-scan"
 import { useSharedChatEnabled } from "@/hooks/collab/use-shared-chat-enabled"
 import { resolveCurrentCollabContext, type CurrentCollabContext } from "@/lib/collab/runtime-client"
 import { syncSharedSession, sharedChatCacheKey } from "@/lib/collab/shared-chat-sync"
@@ -283,6 +287,9 @@ export function SharedSessionPanel({ session }: Props) {
   // a shared session's turns come from the server. Converting one leaves the
   // row as both, with nothing reconciling the two writers.
   const isTeamRoom = session.kind === "team"
+  // Non-null while the embedded-references warning is showing. The refs were
+  // scanned at click time; confirming runs the conversion they warned about.
+  const [shareWarningRefs, setShareWarningRefs] = useState<SharedTranscriptReference[] | null>(null)
 
   const shareHistory = async () => {
     if (!context || !session.projectId || !navigator.onLine) return
@@ -297,6 +304,30 @@ export function SharedSessionPanel({ session }: Props) {
       setOpen(false)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("conversionFailed"))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // The snapshot inside a `@chat:`/`@msg:` envelope was read under THIS user's
+  // permissions; publishing it hands the text to every member of the shared
+  // session, including ones who could not open the source. Name what is about
+  // to leak and let the user decide — the check is informational, not a block.
+  const requestShareHistory = async () => {
+    if (!context || !session.projectId || !navigator.onLine) return
+    setLoading(true)
+    try {
+      const refs = await scanSharedTranscriptReferences(session.id)
+      if (refs.length === 0) {
+        await shareHistory()
+        return
+      }
+      setShareWarningRefs(refs)
+    } catch {
+      // A scan failure must not gate the share: the warning is a courtesy, the
+      // conversion is the action. Show the dialog with no list rather than
+      // silently skipping the heads-up.
+      setShareWarningRefs([])
     } finally {
       setLoading(false)
     }
@@ -556,7 +587,7 @@ export function SharedSessionPanel({ session }: Props) {
               <Button
                 className="w-full gap-2"
                 disabled={loading || !online || isTeamRoom}
-                onClick={shareHistory}
+                onClick={() => void requestShareHistory()}
               >
                 <Share2Icon className="size-4" /> {t("convertAndShare")}
               </Button>
@@ -939,6 +970,48 @@ export function SharedSessionPanel({ session }: Props) {
           )}
         </ScrollArea>
       </SheetContent>
+      {/* Controlled rather than triggered: the scan runs async after the click,
+          so the dialog cannot be a child of the button that asks for it. */}
+      <AlertDialog
+        open={shareWarningRefs !== null}
+        onOpenChange={(next) => {
+          if (!next) setShareWarningRefs(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("shareReferencesTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {/* An empty list is only reached when the scan itself failed —
+                  claiming "0 embedded snapshots" would state the one thing we
+                  do not know. */}
+              {shareWarningRefs && shareWarningRefs.length > 0
+                ? t("shareReferencesWarning", { count: shareWarningRefs.length })
+                : t("shareReferencesWarningUnknown")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {shareWarningRefs && shareWarningRefs.length > 0 ? (
+            <ul className="max-h-48 space-y-1 overflow-auto text-sm">
+              {shareWarningRefs.map((ref, index) => (
+                <li key={`${ref.entityKind}:${ref.sessionId ?? index}`} className="truncate">
+                  {ref.title}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("shareReferencesCancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setShareWarningRefs(null)
+                void shareHistory()
+              }}
+            >
+              {t("shareReferencesConfirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Sheet>
   )
 }

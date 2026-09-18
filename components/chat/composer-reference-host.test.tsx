@@ -36,10 +36,11 @@ describe("ComposerReferenceHost", () => {
   })
 
   // `sessionId: null` writes to the FOCUSED composer projection. A per-composer
-  // subscription would stage the same reference into every open pane.
+  // subscription would stage the same reference into every open pane. `via`
+  // tells telemetry the pick came through the palette request, not the `@` menu.
   it("stages into the focused composer, not a named one", () => {
     render(<ComposerReferenceHost />)
-    expect(stagingOptionsMock).toHaveBeenCalledWith({ sessionId: null })
+    expect(stagingOptionsMock).toHaveBeenCalledWith({ sessionId: null, via: "palette" })
   })
 
   it("stages a requested reference", () => {

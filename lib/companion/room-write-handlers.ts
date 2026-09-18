@@ -23,6 +23,9 @@
 import { readChatTemplateRun } from "@/lib/chat/template/run"
 import type { SendContent, SendOptions } from "@cognia/agent-config-types"
 import { parseReplyToPayload } from "@/lib/chat/reply-to"
+import { isContextRef } from "@/lib/chat/mentions/read"
+import { readPromptPreambleSummary } from "@/lib/chat/prompt-preamble"
+import type { ContextRef } from "@/lib/chat/mentions/types"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { getHostRoomRunner } from "@/lib/chat/room/runner-host"
 import type { RoomRunner, RoomSendOptions } from "@/lib/chat/room/runner"
@@ -156,6 +159,20 @@ export async function roomSend(
   }
   const targetMemberIds = readTargetMemberIds(payload.targetMemberIds)
 
+  // The reference fields a turn carries (ADR-0157). The citations are the only
+  // record of what the turn's context chips named — the envelope in `content`
+  // feeds the model but leaves no `metadata.mentions` on the persisted row.
+  const citations = readCitations(payload.citations)
+  const promptPreamble =
+    payload.promptPreamble === undefined
+      ? undefined
+      : (readPromptPreambleSummary({ promptPreamble: payload.promptPreamble }) ?? undefined)
+  if (payload.promptPreamble !== undefined && !promptPreamble) {
+    throw new Error(
+      "room_send.promptPreamble must be a preamble summary ({ sections, references }) when present"
+    )
+  }
+
   return awaitRoomAdmission((onAccepted) =>
     runner.send(content, {
       onAccepted,
@@ -166,8 +183,28 @@ export async function roomSend(
       ...(templateRun ? { templateRun } : {}),
       ...(replyTo ? { replyTo } : {}),
       ...(targetMemberIds ? { targetMemberIds } : {}),
+      ...(citations ? { citations } : {}),
+      ...(promptPreamble ? { promptPreamble } : {}),
     })
   )
+}
+
+/**
+ * `room_send.citations`: a list of `ContextRef`s, or absent. A present-but-
+ * unparseable entry is rejected the way `replyTo` is — a malformed value must
+ * not silently narrow to "no citations" and strip the turn's record of what
+ * it referenced.
+ */
+function readCitations(value: unknown): ContextRef[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value)) {
+    throw new Error("room_send.citations must be a list of context refs when present")
+  }
+  const refs = value.filter(isContextRef)
+  if (refs.length !== value.length) {
+    throw new Error("room_send.citations must be a list of context refs when present")
+  }
+  return refs.length > 0 ? refs : undefined
 }
 
 /** The composer's pick (ADR-0177 batch 3): member ids, or nothing. */

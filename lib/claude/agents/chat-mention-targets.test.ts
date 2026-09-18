@@ -1,4 +1,8 @@
-import { buildChatMentionTargets, resolveTargetAgentId } from "./chat-mention-targets"
+import {
+  buildChatMentionTargets,
+  chatMentionResolvers,
+  resolveTargetAgentId,
+} from "./chat-mention-targets"
 import type { SubagentMentionTarget } from "./chat-mention-targets"
 
 // Mock only the subagent source; slugify + parseMentions run for real so the
@@ -107,5 +111,25 @@ describe("resolveTargetAgentId", () => {
     const text = "@my-reviewer keep this exact text"
     resolveTargetAgentId(text, targets)
     expect(text).toBe("@my-reviewer keep this exact text")
+  })
+})
+
+describe("chatMentionResolvers", () => {
+  it("resolves a handle to the same subagent ref on every send path", () => {
+    // Direct send, steer and room turn all share this factory so a typed
+    // `@handle` lands as an identical `subagent` ref whichever path parsed it.
+    mockResolve.mockReturnValue([
+      {
+        id: "template:my-reviewer",
+        def: { id: "template:my-reviewer", name: "My Reviewer", description: "Reviews" },
+      },
+    ])
+    const resolvers = chatMentionResolvers()
+    expect(resolvers.resolveAgentHandle("my-reviewer")).toEqual({
+      kind: "subagent",
+      id: "my-reviewer",
+      label: "My Reviewer",
+    })
+    expect(resolvers.resolveAgentHandle("nobody")).toBeNull()
   })
 })

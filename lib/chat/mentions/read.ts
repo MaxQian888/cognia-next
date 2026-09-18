@@ -13,12 +13,14 @@
  */
 
 import { resolveMentions } from "./resolve-mentions"
+import { readPromptPreambleSummary, type PromptPreambleSummary } from "@/lib/chat/prompt-preamble"
 import type { ContextRef, ContextRefKind } from "./types"
 
 const KINDS: ReadonlySet<string> = new Set([
   "file",
   "agent",
   "subagent",
+  "member",
   "skill",
   "preset",
   "wfNode",
@@ -49,4 +51,29 @@ export function getMessageMentions(message: MentionReadableMessage): ContextRef[
     return resolveMentions(message.text, { resolveAgentHandle: () => null })
   }
   return []
+}
+
+/**
+ * The reference subset of a message's metadata that is allowed to cross a
+ * transport boundary — a shared-session event payload, a host-state queue
+ * item, a room RPC: `mentions` re-validated through {@link isContextRef},
+ * `promptPreamble` shape-checked, every other metadata key dropped.
+ *
+ * Used in both directions: a publisher whitelists a local row's metadata
+ * before sending it out; a sync projection runs the same function over remote
+ * input, where a malformed entry must read as "absent", never as a broken row.
+ */
+export function pickReferenceMetadata(
+  metadata: unknown
+): { mentions?: ContextRef[]; promptPreamble?: PromptPreambleSummary } | undefined {
+  if (!metadata || typeof metadata !== "object") return undefined
+  const mentions = Array.isArray((metadata as { mentions?: unknown }).mentions)
+    ? (metadata as { mentions: unknown[] }).mentions.filter(isContextRef)
+    : []
+  const promptPreamble = readPromptPreambleSummary(metadata)
+  if (!mentions.length && !promptPreamble) return undefined
+  return {
+    ...(mentions.length ? { mentions } : {}),
+    ...(promptPreamble ? { promptPreamble } : {}),
+  }
 }

@@ -2,6 +2,7 @@ import { getDb } from "./schema"
 import { enqueueHostStateIntentIfAvailable } from "./mobile-outbound-queue"
 import type { ChatTemplateBinding } from "@/lib/chat/template/binding"
 import type { ContextRef } from "@/lib/chat/mentions/types"
+import type { ContextSelectionRef } from "@/types/artifact/artifact"
 import type { VideoPreprocessSettings } from "@/lib/chat/attachments/video/settings"
 
 /**
@@ -126,6 +127,20 @@ export interface ChatDraftRow {
    * where a link pointed.
    */
   foldedLinks?: Record<string, string>
+  /**
+   * The context chips staged beside the text — `@memory:`/`@chat:`/`@msg:`
+   * picks, file excerpts, artifact ranges.
+   *
+   * Each ref carries its own snapshot, fingerprint and `stale` marker, so a
+   * restored draft re-stages the chip exactly as it was captured; staleness is
+   * re-checked on hydrate and on send, never re-frozen silently.
+   *
+   * DEVICE-LOCAL, like `templateBinding` and `foldedLinks`: `draft.replace`
+   * carries text and attachments only, so a draft projected to another device
+   * arrives without its chips rather than with chips whose snapshots never
+   * crossed the wire.
+   */
+  contextSelections?: ContextSelectionRef[]
 }
 
 export interface SetDraftOptions {
@@ -147,6 +162,11 @@ export interface SetDraftOptions {
    * PRESERVE, pass a map to replace, pass `null` to clear.
    */
   foldedLinks?: Record<string, string> | null
+  /**
+   * Context selections to store. Three-way like `templateBinding`: omit to
+   * PRESERVE, pass a list to replace, pass `null` to clear.
+   */
+  contextSelections?: ContextSelectionRef[] | null
 }
 
 export async function getDraft(sessionId: string): Promise<ChatDraftRow | null> {
@@ -171,13 +191,18 @@ export async function setDraft(
       },
     })
   }
-  // A draft is empty only when BOTH the text and the attachment list are empty —
-  // a staged image with no caption is still worth restoring as a reminder.
-  if (text.length === 0 && attachments.length === 0) {
-    await clearDraftLocal(sessionId)
-    return
-  }
   const db = getDb()
+  // Cancelling a pending debounced save used to ride the early `clearDraftLocal`
+  // call on the empty path. The row delete itself now happens inside the
+  // transaction below (where the preserved-selections read lives), but the
+  // timer is a module map — safe to cancel here, before any async work.
+  if (text.length === 0 && attachments.length === 0) {
+    const pending = debounceTimers.get(sessionId)
+    if (pending) {
+      clearTimeout(pending)
+      debounceTimers.delete(sessionId)
+    }
+  }
   // Local and authority writes share one `revision` field, so a local write has
   // to continue the row's own sequence — deriving it from a wall clock (or from
   // a module-global that never observes the authority's writes) lets a local
@@ -199,12 +224,25 @@ export async function setDraft(
         return false
       }
       const previous = await db.chatDrafts.get(sessionId)
-      const revision = options.revision ?? (previous?.revision ?? 0) + 1
       // Omitted means keep; `null` means clear. See `SetDraftOptions`.
       const templateBinding =
         options.templateBinding === undefined ? previous?.templateBinding : options.templateBinding
       const foldedLinks =
         options.foldedLinks === undefined ? previous?.foldedLinks : options.foldedLinks
+      const contextSelections =
+        options.contextSelections === undefined
+          ? previous?.contextSelections
+          : (options.contextSelections ?? undefined)
+      // A draft is empty only when the text, the attachment list AND the staged
+      // context chips are all empty — a staged image or a `@chat:` pick with
+      // no typed words is still worth restoring. Resolved inside the
+      // transaction so the "preserve" read of `previous` cannot race a
+      // concurrent save.
+      if (text.length === 0 && attachments.length === 0 && !contextSelections?.length) {
+        await db.chatDrafts.delete(sessionId)
+        return false
+      }
+      const revision = options.revision ?? (previous?.revision ?? 0) + 1
       await db.chatDrafts.put({
         sessionId,
         text,
@@ -212,6 +250,7 @@ export async function setDraft(
         revision,
         ...(templateBinding ? { templateBinding } : {}),
         ...(foldedLinks && Object.keys(foldedLinks).length > 0 ? { foldedLinks } : {}),
+        ...(contextSelections && contextSelections.length > 0 ? { contextSelections } : {}),
         ...(options.originClientId || hostStateRow?.clientId
           ? { originClientId: options.originClientId ?? hostStateRow?.clientId }
           : {}),

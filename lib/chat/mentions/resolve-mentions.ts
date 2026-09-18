@@ -14,6 +14,9 @@
  */
 
 import { parseSegments, splitMentionSegments } from "@/lib/slash-commands/parse-segments"
+import type { SendContent } from "@cognia/agent-config-types"
+import { stripPromptPreamble } from "@/lib/chat/prompt-preamble"
+import { mergeContextRefs } from "./merge-refs"
 import type { ContextRef } from "./types"
 
 export interface MentionResolvers {
@@ -38,4 +41,35 @@ export function resolveMentions(text: string, resolvers: MentionResolvers): Cont
     refs.push(agentRef ? { ...agentRef, raw: agentRef.raw ?? seg.raw } : ref)
   }
   return refs
+}
+
+/**
+ * The complete `metadata.mentions` one outgoing turn claims: the `@…` tokens
+ * still present in the typed text PLUS the token-less citations the composer
+ * attached (staged records, documents, context chips).
+ *
+ * This is the single contract every send path must share — a normal send, a
+ * live or queued steer, a shared-session publish, a room turn. Each used to
+ * re-implement (or skip) the merge, which is how a steered `@chat:` message
+ * could reach the model while its persisted row recorded no citation at all.
+ *
+ * Parsing runs on the preamble-stripped text: an `@path` inside a referenced
+ * snapshot or a fetched page is quoted material, not a mention this turn made.
+ * `citations` is caller-supplied rather than read from the store so a first
+ * turn staged under no conversation still resolves.
+ */
+export function resolveTurnContextRefs(
+  content: SendContent,
+  resolvers: MentionResolvers,
+  citations: readonly ContextRef[] = []
+): ContextRef[] {
+  const sourceText =
+    typeof content === "string"
+      ? stripPromptPreamble(content)
+      : content
+          .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")
+          .map((b, index) => (index === 0 ? stripPromptPreamble(b.text) : b.text))
+          .join("\n")
+  const parsed = sourceText.includes("@") ? resolveMentions(sourceText, resolvers) : []
+  return mergeContextRefs(parsed, citations)
 }

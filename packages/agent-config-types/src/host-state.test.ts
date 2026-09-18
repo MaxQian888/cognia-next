@@ -1227,6 +1227,110 @@ describe("wire guards", () => {
   })
 })
 
+// The `mentions`/`promptPreamble` a turn's reference metadata rides on
+// (ADR-0157). The wire shapes are structural mirrors — the package cannot
+// import the app's `ContextRef`, so every field is re-validated here.
+describe("reference metadata on the wire", () => {
+  const mentions = [{ kind: "entity", id: "session:s1", label: "Sprint planning" }]
+  const promptPreamble = {
+    sections: ["references"],
+    references: [{ kind: "entity", entityKind: "session", title: "Sprint planning" }],
+  }
+
+  it("accepts reference fields on the three message intents", () => {
+    for (const intent of [
+      {
+        kind: "message.enqueue",
+        messageId: "m",
+        text: "t",
+        attachments: [],
+        mentions,
+        promptPreamble,
+      },
+      { kind: "turn.steer", text: "t", mentions, promptPreamble },
+      { kind: "turn.followup", text: "t", mentions, promptPreamble },
+    ] satisfies AllowedHostStateIntent[]) {
+      expect(isHostStateAction(action(intent))).toBe(true)
+    }
+  })
+
+  it("rejects a malformed mentions list or preamble on every carrier", () => {
+    const broken: unknown[] = [
+      { kind: "message.enqueue", messageId: "m", text: "t", attachments: [], mentions: "x" },
+      {
+        kind: "message.enqueue",
+        messageId: "m",
+        text: "t",
+        attachments: [],
+        mentions: [{ id: 1 }],
+      },
+      { kind: "turn.steer", text: "t", mentions: [{ kind: "entity" }] },
+      { kind: "turn.steer", text: "t", promptPreamble: "x" },
+      { kind: "turn.followup", text: "t", promptPreamble: { sections: "x" } },
+      { kind: "turn.followup", text: "t", promptPreamble: { sections: [], references: [{}] } },
+    ]
+    for (const intent of broken) {
+      expect(isHostStateAction({ ...action({ kind: "turn.abort" }), action: intent })).toBe(false)
+    }
+  })
+
+  it("carries the fields into the queued message", () => {
+    const optimistic = reduceHostStateIntent(
+      session(),
+      action({
+        kind: "message.enqueue",
+        messageId: "m1",
+        text: "with a reference",
+        attachments: [],
+        mentions,
+        promptPreamble,
+      })
+    )
+    expect(optimistic.queue[0]).toMatchObject({ messageId: "m1", mentions, promptPreamble })
+  })
+
+  it("validates them on the message.queued mutation and the snapshot queue", () => {
+    const queued = {
+      actionId: "a",
+      messageId: "m",
+      text: "t",
+      attachments: [],
+      clientId: "client-a",
+      mentions,
+      promptPreamble,
+    }
+    expect(
+      isHostStateAppliedAction({
+        channel: CHANNEL,
+        hostId: "host-a",
+        hostGeneration: 1,
+        hostSeq: 1,
+        outcome: "applied",
+        mutation: {
+          kind: "message.queued",
+          message: queued,
+          operation: operation({ kind: "message.enqueue" }),
+          draftRevision: 1,
+          revision: 1,
+        },
+      })
+    ).toBe(true)
+    // A malformed entry inside the queue fails the snapshot guard.
+    const state = session({ queue: [{ ...queued, mentions: [{ kind: "entity" } as never] }] })
+    expect(
+      isHostStateSnapshot({
+        channel: CHANNEL,
+        hostId: "host-a",
+        hostGeneration: 1,
+        cutHostSeq: 1,
+        revision: state.revision,
+        digest: hostStateDigest(state),
+        state,
+      })
+    ).toBe(false)
+  })
+})
+
 describe("channels and canonical JSON", () => {
   it("percent-encodes ids so a slash cannot forge a channel segment", () => {
     expect(sessionIndexChannel("a/b")).toBe("cognia://target/a%2Fb/sessions")

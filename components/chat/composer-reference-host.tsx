@@ -24,7 +24,7 @@ import { onComposerReferenceRequest } from "@/lib/chat/composer-reference-reques
 
 export function ComposerReferenceHost() {
   // The focused composer, not a named one — see the docblock.
-  const stage = useEntityMentionStaging({ sessionId: null })
+  const stage = useEntityMentionStaging({ sessionId: null, via: "palette" })
 
   useEffect(
     () =>

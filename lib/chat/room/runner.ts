@@ -84,6 +84,8 @@ import {
   type TeamTranscriptMessage,
 } from "@/lib/chat/team-transcript"
 import type { ContextRef } from "@/lib/chat/mentions/types"
+import { resolveTurnContextRefs } from "@/lib/chat/mentions/resolve-mentions"
+import { chatMentionResolvers } from "@/lib/claude/agents/chat-mention-targets"
 import {
   carryPromptPreamble,
   chipCitationsOf,
@@ -394,13 +396,14 @@ export class RoomRunner {
         if (!text && blocks.length === 0) return
         const entryId = crypto.randomUUID()
         const steerMeta: SteerMessageMeta = { entryId, state: "queued" }
+        const steerRefs = referenceMetadata(content, opts)
         const optimistic = withMetadata(
           makeUserMessage(content, undefined, opts.attachmentManifest),
           {
             senderKind: "user",
             steer: steerMeta,
             ...replyMetadata(opts),
-            ...referenceMetadata(opts),
+            ...steerRefs,
             ...authorMetadata(opts),
             ...(opts.templateRun ? { templateRun: opts.templateRun } : {}),
           }
@@ -412,6 +415,11 @@ export class RoomRunner {
           blocks: blocks.length > 0 ? blocks : undefined,
           webSearchContext: opts.webSearchContext,
           ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
+          // The queue copy is what a replay forwards when this device is not
+          // the writer — e.g. a companion's drained `room_send`, whose host
+          // row is built from the RPC fields alone.
+          ...(steerRefs.mentions ? { citations: steerRefs.mentions } : {}),
+          ...(steerRefs.promptPreamble ? { promptPreamble: steerRefs.promptPreamble } : {}),
         })
         opts.onAccepted?.()
         return
@@ -493,7 +501,7 @@ export class RoomRunner {
         senderKind: "user",
         ...(opts.templateRun ? { templateRun: opts.templateRun } : {}),
         ...replyMetadata(opts),
-        ...referenceMetadata(opts),
+        ...referenceMetadata(content, opts),
         ...authorMetadata(opts),
       })
       if (opts.branchTag) {
@@ -910,7 +918,7 @@ export class RoomRunner {
   private drainSteerInto(sessionId: string): void {
     this.sinks.steer.drain(
       sessionId,
-      (payload, webSearchContext, replyTo) =>
+      (payload, webSearchContext, replyTo, references) =>
         new Promise<boolean>((resolve) => {
           let accepted = false
           void this.send(payload, {
@@ -918,6 +926,8 @@ export class RoomRunner {
             steerDrain: true,
             webSearchContext,
             ...(replyTo ? { replyTo } : {}),
+            ...(references?.citations ? { citations: references.citations } : {}),
+            ...(references?.promptPreamble ? { promptPreamble: references.promptPreamble } : {}),
             onAccepted: () => {
               accepted = true
               resolve(true)
@@ -1555,13 +1565,20 @@ export class RoomRunner {
         const pendingEditOwner = this.pendingEditOwners.get(teamSessionId)
         let tagged = nextMessages.map((m) => {
           if (existingIds.has(m.id)) return m
+          // A row that already carries an owner keeps it — the pending edit
+          // only claims rows with no owner yet, the same skip the 1:1
+          // stamping loop makes on `branchOwnerId !== undefined`.
+          const unowned =
+            (m as { metadata?: { branchOwnerId?: unknown } }).metadata?.branchOwnerId === undefined
           if (m.role !== "assistant") {
-            return pendingEditOwner ? withMetadata(m, { branchOwnerId: pendingEditOwner }) : m
+            return pendingEditOwner && unowned
+              ? withMetadata(m, { branchOwnerId: pendingEditOwner })
+              : m
           }
           let extra: Record<string, unknown> = {
             senderId,
             ...(ctx?.extraMetadata ?? {}),
-            ...(pendingEditOwner ? { branchOwnerId: pendingEditOwner } : {}),
+            ...(pendingEditOwner && unowned ? { branchOwnerId: pendingEditOwner } : {}),
           }
           if (pendingBranch) {
             const ord = pendingBranch.seenByMember.get(senderId) ?? 0
@@ -1747,12 +1764,17 @@ function replyMetadata(opts: RoomSendOptions): Record<string, unknown> {
 
 /**
  * The citations and the envelope summary for a user turn, stamped the way the
- * direct-chat send path stamps them. A room never recorded `metadata.mentions`
- * at all, so a record referenced into a room had no backlink to it.
+ * direct-chat send path stamps them: chip citations merged with the `@…`
+ * tokens still in the typed text. A room that only honored `opts.citations`
+ * recorded nothing for a hand-typed `@file`, so that message had no backlink.
  */
-function referenceMetadata(opts: RoomSendOptions): Record<string, unknown> {
+function referenceMetadata(
+  content: SendContent,
+  opts: RoomSendOptions
+): { mentions?: ContextRef[]; promptPreamble?: PromptPreambleSummary } {
+  const mentions = resolveTurnContextRefs(content, chatMentionResolvers(), opts.citations ?? [])
   return {
-    ...(opts.citations && opts.citations.length > 0 ? { mentions: [...opts.citations] } : {}),
+    ...(mentions.length > 0 ? { mentions } : {}),
     ...(opts.promptPreamble ? { promptPreamble: opts.promptPreamble } : {}),
   }
 }

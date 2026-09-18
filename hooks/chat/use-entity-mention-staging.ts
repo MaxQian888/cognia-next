@@ -29,14 +29,24 @@ import {
   type EntityMentionCandidate,
 } from "@/lib/chat/mentions/entity-sources"
 import { useChatStore } from "@/stores/chat"
+import { trackEvent } from "@/lib/telemetry/events/track-event"
 import type { EntitySelectionRef } from "@/types/artifact/artifact"
 
 export interface UseEntityMentionStagingOptions {
   /** Conversation the chip belongs to; `null` uses the focused projection. */
   sessionId: string | null
+  /**
+   * Which surface produced the pick — the composer's own `@` panel or the
+   * `ComposerReferenceHost` that serves ⌘K and other out-of-tree requesters.
+   * Reported on `chat.reference.staged`; defaults to `"composer"`.
+   */
+  via?: "composer" | "palette" | "surface"
 }
 
-export function useEntityMentionStaging({ sessionId }: UseEntityMentionStagingOptions) {
+export function useEntityMentionStaging({
+  sessionId,
+  via = "composer",
+}: UseEntityMentionStagingOptions) {
   const t = useTranslations("chat.composer.popover")
 
   return useCallback(
@@ -69,6 +79,10 @@ export function useEntityMentionStaging({ sessionId }: UseEntityMentionStagingOp
           : undefined
         const selection = entitySelectionFrom(candidate, body, { fingerprint })
         useChatStore.getState().addContextSelection(selection, sessionId)
+        void trackEvent("chat.reference.staged", {
+          entityKind: candidate.entityKind,
+          via,
+        })
         toast.success(t("entityStaged", { title: candidate.title }))
         return selection
       } catch (err) {
@@ -85,6 +99,6 @@ export function useEntityMentionStaging({ sessionId }: UseEntityMentionStagingOp
         return null
       }
     },
-    [sessionId, t]
+    [sessionId, via, t]
   )
 }

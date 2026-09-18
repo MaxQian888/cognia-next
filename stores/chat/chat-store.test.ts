@@ -264,6 +264,31 @@ describe("useChatStore", () => {
       expect(result.current.errorMessage).toBeNull()
       expect(result.current.status).toBe("idle")
     })
+
+    it("clears a stale error when the session resumes streaming without a send", () => {
+      // Status-only recovery paths (reconnect resume, queue retry) flip the
+      // slice back to streaming without going through the send path that
+      // clears errors — the banner must not ride a live stream.
+      const { result } = renderHook(() => useChatStore())
+      act(() => {
+        result.current.setSessionStatus("s1", "streaming")
+        result.current.setSessionError("s1", "provider timeout")
+      })
+      expect(result.current.sessions.s1.errorMessage).toBe("provider timeout")
+      act(() => result.current.setSessionStatus("s1", "streaming"))
+      expect(result.current.sessions.s1.status).toBe("streaming")
+      expect(result.current.sessions.s1.errorMessage).toBeNull()
+      expect(result.current.sessions.s1.errorDiagnostic).toBeNull()
+    })
+
+    it("keeps the error banner on non-streaming status transitions", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => {
+        result.current.setSessionError("s1", "boom")
+        result.current.setSessionStatus("s1", "awaiting_approval")
+      })
+      expect(result.current.sessions.s1.errorMessage).toBe("boom")
+    })
   })
 
   describe("approvals", () => {

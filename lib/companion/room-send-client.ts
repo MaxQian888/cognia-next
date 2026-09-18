@@ -15,6 +15,8 @@ import type { ChatTemplateRun } from "@/lib/chat/template/run"
 import { transport } from "@/lib/tauri"
 import type { MessageReplyTo, SendContent, SendOptions } from "@cognia/agent-config-types"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
+import type { ContextRef } from "@/lib/chat/mentions/types"
+import type { PromptPreambleSummary } from "@/lib/chat/prompt-preamble"
 
 export const ROOM_SEND_COMMAND = "room_send"
 export const ROOM_STOP_COMMAND = "room_stop"
@@ -35,6 +37,16 @@ export interface RoomSendRequest {
   replyTo?: MessageReplyTo
   /** The members the composer picked to answer (ADR-0177 batch 3), in pick order. */
   targetMemberIds?: string[]
+  /**
+   * The records this turn cites (ADR-0157): the sent context chips plus the
+   * typed `@…` tokens. The envelope inside `content` carries the snapshot to
+   * the model, but only this field lets the persisted row keep its citations —
+   * without it the host's user row gets no `metadata.mentions` and no
+   * backlink.
+   */
+  citations?: readonly ContextRef[]
+  /** What the context envelope in `content` carries — sections and reference names, never bodies. */
+  promptPreamble?: PromptPreambleSummary
 }
 
 export interface RoomSendResponse {

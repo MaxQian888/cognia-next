@@ -24,6 +24,7 @@
 import { resolveDispatchableSubagents } from "@/lib/claude/agents/subagents"
 import { slugify } from "@/lib/claude/subagent-importers/_parse-helpers"
 import { parseMentions } from "@/lib/claude/team-router"
+import type { MentionResolvers } from "@/lib/chat/mentions/resolve-mentions"
 
 export interface SubagentMentionTarget {
   /** Projected dispatcher id — the key that must exist in `SendOptions.agents`. */
@@ -95,4 +96,19 @@ export function resolveTargetAgentId(
     targets.map((t) => ({ id: t.id, name: t.handle }))
   )
   return matched[0]?.id ?? null
+}
+
+/**
+ * The `MentionResolvers` every send path passes to
+ * `resolveMentions`/`resolveTurnContextRefs`, built over the same target list
+ * the picker offered. Centralised so a direct send, a steer, and a room turn
+ * all resolve a handle to the identical `subagent` ref instead of drifting.
+ */
+export function chatMentionResolvers(): MentionResolvers {
+  return {
+    resolveAgentHandle: (name) => {
+      const hit = buildChatMentionTargets().find((t) => t.handle === name)
+      return hit ? { kind: "subagent", id: hit.handle, label: hit.name } : null
+    },
+  }
 }

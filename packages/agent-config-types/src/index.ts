@@ -402,6 +402,14 @@ export interface SendOptions {
   env?: Record<string, string>
   /** Per-name MCP server configs forwarded to the SDK. */
   mcpServers?: Record<string, Record<string, unknown>>
+  /**
+   * Per-server `declared_by` locators for hook `tool_provenance`, keyed by the
+   * same server name `mcpServers` uses: the config file path for file-loaded
+   * servers (CLI `.mcp.json` scan), `<plugin root>/plugin.json` / `plugin:<id>`
+   * for plugin-contributed servers, `"settings"` for store-declared rows.
+   * Metadata only — never forwarded to the model or the server itself.
+   */
+  mcpDeclaredBy?: Record<string, string>
   /** Hard cap on agentic turns inside a single SDK invocation (1..=100). */
   maxTurns?: number
   /**
@@ -617,6 +625,12 @@ export interface SendOptions {
      * (synthetic entries only: `ask_user`, `dispatch_agent`).
      */
     timeoutMs?: number
+    /**
+     * Absolute path of the manifest that declared this tool (`<plugin
+     * root>/plugin.json`) — read only by the hook `tool_provenance.declared_by`
+     * resolver. Absent on host-synthesized entries.
+     */
+    manifestPath?: string
   }>
 
   /**
@@ -1067,6 +1081,13 @@ export interface SendOptions {
     withheldCount?: number
     budget?: { limit: number; used: number; truncated: boolean }
     degraded: boolean
+    /**
+     * `"prepared"` delivery receipt for the injection pass
+     * (`packages/memory/src/types/context-snapshot.ts`). The chat hook's
+     * sources merge upgrades it to `delivered` as it lands on the message —
+     * the persisted part is then the auditable proof of what was injected.
+     */
+    snapshot?: import("@cognia/memory").MemoryContextSnapshot
   }
 
   /**
@@ -4037,6 +4058,21 @@ export interface AppSettings {
     effortSelectorMode?: "slider" | "list"
   }
   /**
+   * Non-blocking inline questions from external agents (Codex
+   * `delivery: "async"` agent messages). When enabled, an `async_questions`
+   * event renders as an interactive card in the transcript — suggested-option
+   * chips plus a free-text field — and answering sends an ordinary user
+   * message (quoted question + answer) back into the session. When disabled
+   * or absent the same event degrades to plain assistant text, matching what
+   * the agent wrote. Read in `hooks/chat/use-claude-chat-controller.ts` and
+   * `lib/ai/agent/external/event-to-parts.ts`; card in
+   * `components/chat/message-parts/async-questions-card.tsx`.
+   */
+  inlineQuestions?: {
+    /** Master switch. Off by default — the card is opt-in UI. */
+    enabled?: boolean
+  }
+  /**
    * Agent command-execution permission policy — the "Auto mode" that
    * auto-decides whether a shell command the agent runs is safe (allow),
    * needs confirmation (ask), or must be blocked (deny). Modeled on
@@ -6064,6 +6100,14 @@ export interface McpServer {
   /** Increments when a referenced credential is rotated. */
   credentialVersion?: number
   origin?: McpServerOrigin
+  /**
+   * Runtime provenance only: the config file that declared this server,
+   * populated by loaders that scan on-disk config (the CLI's `.mcp.json`
+   * roots). Never persisted — store-backed rows leave it undefined and
+   * `resolveSendOptions` derives their `declared_by` locator from
+   * `origin`/`pluginId` instead.
+   */
+  declaredBy?: string
   trust?: McpServerTrust
   createdAt: number
   updatedAt: number

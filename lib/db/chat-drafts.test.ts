@@ -581,6 +581,90 @@ describe("draft template binding", () => {
   })
 })
 
+describe("draft context selections", () => {
+  const chip = {
+    kind: "entity" as const,
+    entityKind: "session" as const,
+    entityId: "sess_source",
+    capturedAt: 1,
+    title: "Sprint planning",
+    snapshot: "snapshot body",
+    comment: "",
+    fingerprint: "v1",
+  }
+
+  it("stores the staged chips alongside the text", async () => {
+    await setDraft("s-chip", "compare with this", [], { contextSelections: [chip] })
+
+    await expect(getDraft("s-chip")).resolves.toMatchObject({
+      contextSelections: [chip],
+    })
+  })
+
+  it("keeps a chips-only draft — staged references are worth restoring too", async () => {
+    await setDraft("s-chip", "", [], { contextSelections: [chip] })
+
+    const row = await getDraft("s-chip")
+    expect(row).not.toBeNull()
+    expect(row?.text).toBe("")
+    expect(row?.contextSelections).toEqual([chip])
+  })
+
+  it("preserves the list on a save that does not mention it", async () => {
+    // Template binding's contract applies here too: an omitted option must not
+    // erase what an earlier save stored.
+    await setDraft("s-chip", "with chips", [], { contextSelections: [chip] })
+    await setDraft("s-chip", "with chips, edited", [])
+
+    await expect(getDraft("s-chip")).resolves.toMatchObject({
+      contextSelections: [chip],
+    })
+  })
+
+  it("clears the list when an empty one is passed", async () => {
+    // The composer passes its live chip list on every save, so unstaging the
+    // last chip has to actually clear the row — otherwise the chip resurrects
+    // on the next reload.
+    await setDraft("s-chip", "with chips", [], { contextSelections: [chip] })
+    await setDraft("s-chip", "with chips", [], { contextSelections: [] })
+
+    const row = await getDraft("s-chip")
+    expect(row?.contextSelections).toBeUndefined()
+  })
+
+  it("clears the list when null is passed", async () => {
+    await setDraft("s-chip", "with chips", [], { contextSelections: [chip] })
+    await setDraft("s-chip", "with chips", [], { contextSelections: null })
+
+    expect((await getDraft("s-chip"))?.contextSelections).toBeUndefined()
+  })
+
+  it("deletes the row once text, attachments AND chips are all empty", async () => {
+    await setDraft("s-chip", "", [], { contextSelections: [chip] })
+    expect(await getDraft("s-chip")).not.toBeNull()
+
+    // Dropping the last chip with no text left empties the draft entirely.
+    await setDraft("s-chip", "", [], { contextSelections: [] })
+    expect(await getDraft("s-chip")).toBeNull()
+  })
+
+  it("carries the list through a debounced save", async () => {
+    jest.useFakeTimers()
+    try {
+      setDraftDebounced("s-chip", "with chips", [], 500, { contextSelections: [chip] })
+      jest.advanceTimersByTime(500)
+      jest.useRealTimers()
+      await flushDebouncedDraftWrites()
+
+      await expect(getDraft("s-chip")).resolves.toMatchObject({
+        contextSelections: [chip],
+      })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+})
+
 describe("draft folded links", () => {
   const links = { "svenstaro/genact": "https://github.com/svenstaro/genact" }
 

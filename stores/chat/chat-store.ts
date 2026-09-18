@@ -13,6 +13,7 @@ import type { CogniaDiagnostic } from "@cognia/diagnostics"
 import type { ContextSelectionRef } from "@/types/artifact/artifact"
 import { contextSelectionIdentity } from "@/lib/chat/mentions/selection-identity"
 import type { ContextRef } from "@/lib/chat/mentions/types"
+import type { PromptPreambleSummary } from "@/lib/chat/prompt-preamble"
 import { nextNavEpoch } from "@/lib/ui/nav-epoch"
 import { decodeSubSession } from "@/lib/claude/team-session-id"
 import { getSubagentApprovalRoute } from "@/lib/claude/agents/subagent-approval-routes"
@@ -39,6 +40,15 @@ export type SteerEntry = {
   webSearchContext?: SendOptions["webSearchContext"]
   /** The message this follow-up answers, replayed with the drained turn. */
   replyTo?: MessageReplyTo
+  /**
+   * The records this follow-up cited when it was typed (ADR-0157). The
+   * optimistic bubble already carries them as `metadata.mentions`; the queue
+   * copy is what a REMOTE replay — a companion's `room_send` drain — forwards
+   * to the host, whose persisted row is the one the backlinks index.
+   */
+  citations?: ContextRef[]
+  /** What the follow-up's context envelope carried; merged on drain. */
+  promptPreamble?: PromptPreambleSummary
 }
 
 export type PermissionMode = NonNullable<SendOptions["permissionMode"]>
@@ -467,6 +477,14 @@ function statusPatch(state: ChatState, id: string, next: ChatStatus): Partial<Se
   if (next === "streaming" && prev.runTiming.startedAt == null) {
     patch.runId = prev.runId + 1
     patch.toolTimestamps = {}
+  }
+  // A live stream supersedes any recorded failure: a banner left over from a
+  // dropped/errored attempt must not ride a session that is streaming again.
+  // New sends clear the error explicitly; this backstop covers status-only
+  // recoveries (reconnect resumes, queue retries) that skip the send path.
+  if (next === "streaming" && (prev.errorMessage != null || prev.errorDiagnostic != null)) {
+    patch.errorMessage = null
+    patch.errorDiagnostic = null
   }
   return patch
 }

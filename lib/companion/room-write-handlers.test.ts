@@ -300,6 +300,108 @@ describe("roomSend", () => {
   })
 })
 
+describe("room_send reference metadata", () => {
+  it("forwards citations and the preamble summary to the runner", async () => {
+    const { runner, calls, release } = fakeRunner()
+    const citations = [
+      { kind: "entity", id: "session:source_a", label: "Sprint planning" },
+      { kind: "file", id: "src/a.ts", raw: "@src/a.ts" },
+    ]
+    const promptPreamble = {
+      sections: ["references"],
+      references: [{ kind: "entity", entityKind: "session", title: "Sprint planning" }],
+    }
+    await roomSend(
+      {
+        sessionId: "room-1",
+        callerDeviceId: "dev-1",
+        content: "with refs",
+        citations,
+        promptPreamble,
+      },
+      deps(runner)
+    )
+    expect(calls.send).toHaveBeenCalledWith(
+      "with refs",
+      expect.objectContaining({ citations, promptPreamble })
+    )
+    release()
+  })
+
+  it("rejects a citations list with a malformed entry rather than narrowing it", async () => {
+    const { runner, calls, release } = fakeRunner()
+    await expect(
+      roomSend(
+        {
+          sessionId: "room-1",
+          callerDeviceId: "dev-1",
+          content: "x",
+          citations: [
+            { kind: "file", id: "ok.ts" },
+            { kind: "bogus", id: "x" },
+          ],
+        },
+        deps(runner)
+      )
+    ).rejects.toThrow(/citations/)
+    await expect(
+      roomSend(
+        {
+          sessionId: "room-1",
+          callerDeviceId: "dev-1",
+          content: "x",
+          citations: "not-a-list",
+        },
+        deps(runner)
+      )
+    ).rejects.toThrow(/citations/)
+    expect(calls.send).not.toHaveBeenCalled()
+    release()
+  })
+
+  it("rejects a preamble that is not a summary, forwards a valid one", async () => {
+    const { runner, calls, release } = fakeRunner()
+    await expect(
+      roomSend(
+        {
+          sessionId: "room-1",
+          callerDeviceId: "dev-1",
+          content: "x",
+          promptPreamble: "not-an-object",
+        },
+        deps(runner)
+      )
+    ).rejects.toThrow(/promptPreamble/)
+    await expect(
+      roomSend(
+        {
+          sessionId: "room-1",
+          callerDeviceId: "dev-1",
+          content: "x",
+          promptPreamble: { sections: "nope", references: [] },
+        },
+        deps(runner)
+      )
+    ).rejects.toThrow(/promptPreamble/)
+    expect(calls.send).not.toHaveBeenCalled()
+    release()
+  })
+
+  it("omits both fields when the payload carries none", async () => {
+    const { runner, calls, release } = fakeRunner()
+    await roomSend({ sessionId: "room-1", callerDeviceId: "dev-1", content: "plain" }, deps(runner))
+    expect(calls.send).toHaveBeenCalledWith(
+      "plain",
+      expect.not.objectContaining({ citations: expect.anything() })
+    )
+    expect(calls.send).toHaveBeenCalledWith(
+      "plain",
+      expect.not.objectContaining({ promptPreamble: expect.anything() })
+    )
+    release()
+  })
+})
+
 describe("roomStop", () => {
   it("stops the room and waits for the interrupt acks", async () => {
     const { runner, calls } = fakeRunner()

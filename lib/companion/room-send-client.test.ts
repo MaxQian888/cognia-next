@@ -71,6 +71,22 @@ describe("sendRoomTurn", () => {
     })
   })
 
+  it("forwards the turn's citations and preamble summary to the host", async () => {
+    // Without these fields the host's persisted row got no `metadata.mentions`
+    // — the model saw the snapshot but no backlink was ever written.
+    callMock.mockResolvedValue({ accepted: true })
+    const citations = [{ kind: "entity" as const, id: "session:s9", label: "Sprint planning" }]
+    const promptPreamble = {
+      sections: ["references" as const],
+      references: [{ kind: "entity" as const, entityKind: "session" as const, title: "Sprint" }],
+    }
+    await sendRoomTurn({ sessionId: "room-1", content: "see", citations, promptPreamble })
+    expect(callMock).toHaveBeenCalledWith(
+      ROOM_SEND_COMMAND,
+      expect.objectContaining({ citations, promptPreamble })
+    )
+  })
+
   it("reads a null answer as not accepted rather than as success", async () => {
     callMock.mockResolvedValue(null)
     await expect(sendRoomTurn({ sessionId: "room-1", content: "x" })).resolves.toEqual({

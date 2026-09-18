@@ -11,6 +11,14 @@ const mockActive = jest.fn()
 jest.mock("@/lib/collab/shared-chat-conversion", () => ({
   convertLocalSessionToShared: (...args: unknown[]) => mockConvert(...args),
 }))
+const mockScan = jest.fn()
+jest.mock("@/lib/collab/shared-reference-scan", () => {
+  const actual = jest.requireActual("@/lib/collab/shared-reference-scan")
+  return {
+    ...actual,
+    scanSharedTranscriptReferences: (...args: unknown[]) => mockScan(...args),
+  }
+})
 jest.mock("@/lib/collab/shared-chat-sync", () => ({
   syncSharedSession: (...args: unknown[]) => mockSync(...args),
   sharedChatCacheKey: () => "cache",
@@ -101,6 +109,7 @@ describe("SharedSessionPanel", () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true })
     jest.clearAllMocks()
     resolveContext.mockReset().mockResolvedValue(null)
+    mockScan.mockResolvedValue([])
   })
 
   it("marks legacy and local sessions private by default", () => {
@@ -169,6 +178,8 @@ function configured(role = "owner") {
     updateSessionMember: jest.fn().mockResolvedValue({}),
   }
   resolveContext.mockResolvedValue({ orgId: "org_1", userId: "me", client })
+  // Default: nothing embedded, so the share proceeds without the warning.
+  mockScan.mockResolvedValue([])
   return client
 }
 it("requests AI for a durable message independently from Send", () => {
@@ -231,6 +242,69 @@ it("only converts a local conversation after the explicit share action", async (
   expect(mockConvert).not.toHaveBeenCalled()
   fireEvent.click(screen.getByRole("button", { name: "convertAndShare" }))
   await waitFor(() => expect(mockConvert).toHaveBeenCalled())
+})
+
+// The snapshot inside a `@chat:`/`@msg:` envelope was permission-checked for
+// the author, not the members it is about to be published to — the dialog
+// names the sources before the user commits.
+it("warns about embedded transcript snapshots before converting", async () => {
+  configured()
+  mockScan.mockResolvedValue([
+    { entityKind: "session", sessionId: "s-other", title: "Sprint planning" },
+    { entityKind: "message", sessionId: "s-third", title: "Broker postmortem" },
+  ])
+  render(<SharedSessionPanel session={session()} />)
+  fireEvent.click(screen.getByRole("button", { name: "openPrivateSession" }))
+  fireEvent.click(await screen.findByRole("button", { name: "convertAndShare" }))
+
+  await screen.findByText("shareReferencesTitle")
+  expect(screen.getByText(/shareReferencesWarning/)).toHaveTextContent('"count":2')
+  expect(screen.getByText("Sprint planning")).toBeInTheDocument()
+  expect(screen.getByText("Broker postmortem")).toBeInTheDocument()
+  expect(mockConvert).not.toHaveBeenCalled()
+
+  fireEvent.click(screen.getByRole("button", { name: "shareReferencesConfirm" }))
+  await waitFor(() => expect(mockConvert).toHaveBeenCalled())
+})
+
+it("lets the user back out of a share that would publish snapshots", async () => {
+  configured()
+  mockScan.mockResolvedValue([
+    { entityKind: "session", sessionId: "s-other", title: "Sprint planning" },
+  ])
+  render(<SharedSessionPanel session={session()} />)
+  fireEvent.click(screen.getByRole("button", { name: "openPrivateSession" }))
+  fireEvent.click(await screen.findByRole("button", { name: "convertAndShare" }))
+
+  await screen.findByText("shareReferencesTitle")
+  fireEvent.click(screen.getByRole("button", { name: "shareReferencesCancel" }))
+  await waitFor(() => expect(screen.queryByText("shareReferencesTitle")).not.toBeInTheDocument())
+  expect(mockConvert).not.toHaveBeenCalled()
+})
+
+// A failed scan must not claim "nothing embedded" — the unknown-state copy is
+// the honest one — and it must not gate the share either.
+it("warns of an uncertain scan instead of claiming zero references", async () => {
+  configured()
+  mockScan.mockRejectedValue(new Error("db closed"))
+  render(<SharedSessionPanel session={session()} />)
+  fireEvent.click(screen.getByRole("button", { name: "openPrivateSession" }))
+  fireEvent.click(await screen.findByRole("button", { name: "convertAndShare" }))
+
+  await screen.findByText("shareReferencesWarningUnknown")
+  expect(screen.queryByText(/shareReferencesWarning:/)).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button", { name: "shareReferencesConfirm" }))
+  await waitFor(() => expect(mockConvert).toHaveBeenCalled())
+})
+
+it("converts without a dialog when nothing references another transcript", async () => {
+  configured()
+  render(<SharedSessionPanel session={session()} />)
+  fireEvent.click(screen.getByRole("button", { name: "openPrivateSession" }))
+  fireEvent.click(await screen.findByRole("button", { name: "convertAndShare" }))
+  await waitFor(() => expect(mockConvert).toHaveBeenCalled())
+  expect(mockScan).toHaveBeenCalledWith("local_1")
+  expect(screen.queryByText("shareReferencesTitle")).not.toBeInTheDocument()
 })
 it("offers no share for a team room, and says why rather than hiding the button", async () => {
   // Converting a team room left it as both a team session and a shared one:

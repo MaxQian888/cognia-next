@@ -27,6 +27,26 @@ export interface TelemetryEventCatalog {
     errorType?: string
     durationMs?: number
   }
+  // --- Reference / citation lifecycle -------------------------------------
+  // Attribute values are enums, ids and counts only — never a snapshot body,
+  // a record title, or anything the user typed.
+  /** A context chip was staged into the composer (a `@`/`⌘K` pick resolved). */
+  "chat.reference.staged": {
+    /** The referenced record's noun — `memory` / `session` / `message` / … */
+    entityKind: string
+    /** Where the pick happened. */
+    via: "composer" | "palette" | "surface"
+  }
+  /** A sent turn carried references. `kinds` is the sorted, `+`-joined ref kinds. */
+  "chat.reference.sent": {
+    kinds: string
+    /** How many of the sent references were flagged stale at send time. */
+    staleCount: number
+  }
+  /** A chip rendered its "source changed" badge to the user. */
+  "chat.reference.stale_shown": {
+    entityKind: string
+  }
   // --- Conversation list (desktop sidebar + mobile list) -------------------
   // Attribute values are ids and enums only: never a title, a query string, a
   // folder / preset name or anything else the user typed.
@@ -224,6 +244,9 @@ export const TELEMETRY_EVENT_CATALOG: Readonly<
   "chat.message.sent": { category: "chat" },
   "chat.turn.completed": { category: "chat" },
   "chat.turn.failed": { category: "chat" },
+  "chat.reference.staged": { category: "chat" },
+  "chat.reference.sent": { category: "chat" },
+  "chat.reference.stale_shown": { category: "chat" },
   "chat.list.opened": { category: "chat" },
   "chat.list.created": { category: "chat" },
   "chat.list.searched": { category: "chat" },

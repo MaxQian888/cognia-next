@@ -384,6 +384,54 @@ it("sends ordinary text without claiming or executing AI", async () => {
   expect(client.appendSessionEvent).toHaveBeenCalledTimes(1)
 })
 
+it("publishes the message's reference metadata in the event payload", async () => {
+  // The sender's own local row is written by the sync projection of this
+  // event, so the citations have to ride the payload — otherwise no member,
+  // sender included, ever gets a backlink.
+  const client = fullClient()
+  useContext(client)
+  const metadata = {
+    mentions: [{ kind: "entity", id: "session:source_a", label: "Sprint planning" }],
+    promptPreamble: { sections: ["references"], references: [] },
+  }
+  await sendSharedSessionMessage(session, {
+    id: "m",
+    parts: [{ type: "text", text: "with a reference" }],
+    metadata,
+  })
+  expect(client.appendSessionEvent).toHaveBeenCalledWith(
+    "org",
+    "shared-session",
+    expect.objectContaining({
+      kind: "message.created",
+      payload: expect.objectContaining({ messageId: "m", metadata }),
+    })
+  )
+})
+
+it("carries the same reference metadata on a retried send", async () => {
+  // The journal keeps the pending payload; a reconnecting retry must not
+  // silently strip the citations the first attempt computed.
+  const client = fullClient()
+  useContext(client)
+  client.appendSessionEvent.mockRejectedValueOnce(new Error("offline"))
+  const metadata = {
+    mentions: [{ kind: "entity", id: "session:source_a", label: "Sprint planning" }],
+  }
+  const message = {
+    id: "m",
+    parts: [{ type: "text", text: "with a reference" }],
+    metadata,
+  }
+  await expect(sendSharedSessionMessage(session, message)).rejects.toThrow("offline")
+  await sendSharedSessionMessage(session, { ...message, id: "new-id-after-reload" })
+  const retried = client.appendSessionEvent.mock.calls[1][2] as {
+    payload: { messageId?: string; metadata?: unknown }
+  }
+  expect(retried.payload.messageId).toBe("m")
+  expect(retried.payload.metadata).toEqual(metadata)
+})
+
 it("rejects a send on a different endpoint and preserves its local draft", async () => {
   const client = fullClient()
   useContext(client)

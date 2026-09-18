@@ -29,13 +29,17 @@ jest.mock("@/lib/claude/adapter", () => {
   return {
     applySdkEvent: (
       messages: Msg[],
-      evt: { type: string; message?: { id: string; text: string } }
+      evt: {
+        type: string
+        message?: { id: string; text: string; metadata?: Record<string, unknown> }
+      }
     ) => {
       if (evt.type === "assistant" && evt.message) {
         const next: Msg = {
           id: evt.message.id,
           role: "assistant",
           parts: [{ type: "text", text: evt.message.text }],
+          ...(evt.message.metadata ? { metadata: evt.message.metadata } : {}),
         }
         const idx = messages.findIndex((m) => m.id === next.id)
         const out =
@@ -599,6 +603,55 @@ describe("a linear turn", () => {
     expect(w.steerAppended.at(-1)?.metadata).toMatchObject({ mentions: citations, promptPreamble })
   })
 
+  // Parity with direct send: a hand-typed `@path` in a room records the same
+  // `metadata.mentions` the composer's chips do — no citation list needed.
+  it("records a hand-typed @mention even with no citations passed", async () => {
+    const w = createWorld()
+    await w.runner.send("check @src/app.ts please", { sessionId: ROOM })
+    expect(w.db.get(ROOM)?.[0].metadata).toMatchObject({
+      mentions: [{ kind: "file", id: "src/app.ts", raw: "@src/app.ts" }],
+    })
+  })
+
+  it("merges typed tokens with chip citations on one user row", async () => {
+    const w = createWorld()
+    const citations = [{ kind: "entity" as const, id: "issue:i1", label: "Bug" }]
+    await w.runner.send("check @src/app.ts please", { sessionId: ROOM, citations })
+    expect(w.db.get(ROOM)?.[0].metadata).toMatchObject({
+      mentions: [
+        { kind: "file", id: "src/app.ts", raw: "@src/app.ts" },
+        { kind: "entity", id: "issue:i1", label: "Bug" },
+      ],
+    })
+  })
+
+  it("does not resolve an @ token quoted inside the context envelope", async () => {
+    const w = createWorld()
+    const { text } = composeTurnText(
+      "only @src/real.ts counts",
+      [{ kind: "references", text: "Referencing @src/quoted.ts — not a mention" }],
+      { nonce: "0a1b2c3d4e" }
+    )
+    await w.runner.send(text, { sessionId: ROOM })
+    expect(w.db.get(ROOM)?.[0].metadata).toMatchObject({
+      mentions: [{ kind: "file", id: "src/real.ts", raw: "@src/real.ts" }],
+    })
+  })
+
+  it("carries citations and the preamble summary onto the queued steer entry", async () => {
+    const w = createWorld()
+    w.status.set(ROOM, "streaming")
+    const citations = [{ kind: "entity" as const, id: "issue:i1", label: "Bug" }]
+    const promptPreamble = {
+      sections: ["references" as const],
+      references: [{ kind: "entity" as const, entityKind: "issue" as const, title: "Bug" }],
+    }
+    await w.runner.send("follow up", { sessionId: ROOM, citations, promptPreamble })
+    // The queue copy is what a remote replay (a companion's drained room_send)
+    // forwards to the writer — it has to carry the references itself.
+    expect(w.steerQueues.get(ROOM)?.[0]).toMatchObject({ citations, promptPreamble })
+  })
+
   it("stamps the author a companion turn arrived with", async () => {
     const w = createWorld()
     await w.runner.send("from my phone", {
@@ -822,6 +875,36 @@ describe("regenerate and edit", () => {
       senderId: "a",
       branchOwnerId: replacement.id,
     })
+  })
+
+  it("keeps an already-owned row's branchOwnerId instead of re-owning it", async () => {
+    // A mid-turn row the adapter emits already carrying an owner — e.g.
+    // replayed history stamped by another path — belongs to that sibling,
+    // not to the edit's replacement variant (the 1:1 stamping loop skips
+    // owned rows the same way).
+    const w = createWorld({ team: { members: [{ characterId: "a" }] } })
+    w.seed([{ id: "u-0", role: "user", parts: [{ type: "text", text: "typo" }] } as Msg])
+    w.scripts.set("a", (sub, emit) => {
+      emit({
+        type: "event",
+        sessionId: sub,
+        event: {
+          type: "assistant",
+          message: {
+            id: "r-1",
+            text: "Ava says hi",
+            metadata: { branchOwnerId: "other-owner" },
+          },
+        },
+      } as never)
+      emit(resultFrame(sub))
+      emit(endedFrame(sub))
+    })
+    await w.runner.editAndResend(ROOM, "u-0", "fixed")
+    await flush()
+    const reply = w.db.get(ROOM)!.find((m) => m.id === "r-1")
+    expect(reply?.metadata?.branchOwnerId).toBe("other-owner")
+    expect(reply?.metadata?.senderId).toBe("a")
   })
 })
 

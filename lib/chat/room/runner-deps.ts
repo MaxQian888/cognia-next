@@ -26,6 +26,7 @@ import type {
 } from "@cognia/agent-config-types"
 import type { SDKMessage } from "@cognia/agent-config-types"
 import type { SteerEntry, ChatStatus } from "@/stores/chat"
+import type { SteerDrainReferences } from "@/hooks/chat/steer-runtime"
 import type { MemberStatus } from "@/stores/ui"
 import type { ApplyMemoryContextDeps } from "@/lib/memory/runtime/apply-memory-context"
 import type { TwinDepsForBuild } from "@/lib/twin/runtime/build-deps"
@@ -193,7 +194,8 @@ export interface RoomRunnerSinks {
       replay: (
         content: SendContent,
         webSearchContext?: SendOptions["webSearchContext"],
-        replyTo?: MessageReplyTo
+        replyTo?: MessageReplyTo,
+        references?: SteerDrainReferences
       ) => Promise<boolean>
     ) => void
     armed: Set<string>

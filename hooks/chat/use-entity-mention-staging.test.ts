@@ -8,6 +8,10 @@ jest.mock("sonner", () => ({
     success: (...a: unknown[]) => toastSuccessMock(...a),
   },
 }))
+const trackEventMock = jest.fn()
+jest.mock("@/lib/telemetry/events/track-event", () => ({
+  trackEvent: (...a: unknown[]) => trackEventMock(...a),
+}))
 jest.mock("next-intl", () => ({
   // Echo the key plus the interpolated title, so an assertion can tell WHICH
   // message fired without pinning the English copy.
@@ -46,6 +50,7 @@ function stagedSelections() {
 beforeEach(() => {
   toastErrorMock.mockClear()
   toastSuccessMock.mockClear()
+  trackEventMock.mockClear()
   __resetEntityMentionSourcesForTests()
   useChatStore.getState().clearContextSelections(null)
   snapshot = jest.fn(async () => "the body")
@@ -132,5 +137,29 @@ describe("useEntityMentionStaging", () => {
       await stage.current(candidate)
     })
     expect(stagedSelections()[0]).toMatchObject({ subtitle: "open" })
+  })
+
+  it("emits chat.reference.staged with the kind and surface, never the title", async () => {
+    const stage = renderHook(() =>
+      useEntityMentionStaging({ sessionId: null, via: "palette" })
+    ).result
+    await act(async () => {
+      await stage.current(candidate)
+    })
+    // The payload carries ids and enums only — a title would put the user's
+    // record names into telemetry.
+    expect(trackEventMock).toHaveBeenCalledWith("chat.reference.staged", {
+      entityKind: CUSTOM,
+      via: "palette",
+    })
+  })
+
+  it("does not emit staged telemetry when the pick fails", async () => {
+    snapshot.mockResolvedValueOnce(null)
+    const stage = render()
+    await act(async () => {
+      await stage.current(candidate)
+    })
+    expect(trackEventMock).not.toHaveBeenCalled()
   })
 })

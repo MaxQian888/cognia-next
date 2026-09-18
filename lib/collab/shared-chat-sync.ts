@@ -21,6 +21,8 @@ import { assertSharedChatClientEnabled } from "./shared-chat-feature"
 import { resolveSharedAttachmentParts } from "./shared-chat-conversion"
 import { normalizeStoredMessageMedia } from "@/lib/chat/media/normalize-message-media"
 import { messageMediaRefRows } from "@/lib/db/message-media-refs"
+import { markSessionDirty } from "@/lib/chat/search/indexer"
+import { pickReferenceMetadata } from "@/lib/chat/mentions/read"
 
 type SharedChatReader = Pick<
   CollabClient,
@@ -88,6 +90,19 @@ function payloadRole(payload: Record<string, unknown>): StoredMessage["role"] | 
 function payloadCreatedAt(payload: Record<string, unknown>, fallback: number): number {
   const value = payload.createdAt
   return typeof value === "number" && Number.isFinite(value) ? value : fallback
+}
+
+/**
+ * The message metadata a `message.created`/`message.corrected` payload is
+ * allowed to project: the reference subset only (`mentions`,
+ * `promptPreamble`). `pickReferenceMetadata` re-validates every entry — the
+ * payload is remote input any member could shape, so a malformed value must
+ * read as "absent", never as a broken row.
+ */
+function payloadMessageMetadata(
+  payload: Record<string, unknown>
+): StoredMessage["metadata"] | undefined {
+  return pickReferenceMetadata(payload.metadata) as StoredMessage["metadata"] | undefined
 }
 
 /** Author kinds that name a PERSON, and can therefore be impersonated. */
@@ -222,6 +237,7 @@ async function projectEvents(
               senderKind:
                 role === "assistant" ? "assistant" : role === "system" ? "system" : "user",
               createdAt: existing?.createdAt ?? payloadCreatedAt(payload, event.createdAt),
+              metadata: payloadMessageMetadata(payload) ?? existing?.metadata,
               collaboration: {
                 remoteMessageId,
                 author,
@@ -244,6 +260,7 @@ async function projectEvents(
           const projected: StoredMessage = {
             ...target,
             parts,
+            metadata: payloadMessageMetadata(payload) ?? target.metadata,
             collaboration: {
               remoteMessageId: target.collaboration?.remoteMessageId ?? targetId,
               author: target.collaboration?.author ?? event.actor,
@@ -261,9 +278,14 @@ async function projectEvents(
         const targetId = payloadString(payload, "targetMessageId")
         const target = targetId ? messages.get(targetId) : undefined
         if (target && (target.collaboration?.eventSequence ?? 0) < event.sequence) {
+          // Redaction removes the shared content; the reference metadata
+          // (`mentions`, `promptPreamble` — including the referenced
+          // conversation's title) is part of that content, so it goes too.
+          const { mentions: _m, promptPreamble: _p, ...restMeta } = target.metadata ?? {}
           const projected: StoredMessage = {
             ...target,
             parts: [],
+            metadata: Object.keys(restMeta).length > 0 ? restMeta : undefined,
             collaboration: {
               remoteMessageId: target.collaboration?.remoteMessageId ?? targetId,
               author: target.collaboration?.author ?? event.actor,
@@ -547,6 +569,20 @@ async function synchronize(
         return { session: remote, members, events, localSessionId: local.id, cursor }
       }
     )
+    // Synced rows carry `metadata.mentions` now — reproject so the shared
+    // transcript's citations reach the search text and mention-link indexes
+    // like a locally written row's would.
+    if (
+      result.events.some(
+        (event) =>
+          event.sequence > applied &&
+          (event.kind === "message.created" ||
+            event.kind === "message.corrected" ||
+            event.kind === "message.redacted")
+      )
+    ) {
+      markSessionDirty(result.localSessionId)
+    }
     if (
       typeof window !== "undefined" &&
       events.some(
