@@ -16,7 +16,7 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::commands::status::probe_bridge_status;
+use crate::commands::status::probe_bridge_status_at;
 use crate::ui::{style, RuntimeUi};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -78,11 +78,17 @@ impl Need {
     }
 }
 
-pub fn run(fix: bool, as_json: bool, ui: &mut RuntimeUi) -> Result<()> {
+pub fn run(
+    fix: bool,
+    as_json: bool,
+    query: Option<&str>,
+    endpoint_file: Option<&Path>,
+    ui: &mut RuntimeUi,
+) -> Result<()> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let project_kind = read_project_kind(&cwd);
 
-    let mut checks = collect_checks(&cwd, project_kind.as_deref());
+    let mut checks = collect_checks(&cwd, project_kind.as_deref(), endpoint_file);
     if fix {
         apply_fixes(&cwd, &mut checks);
     }
@@ -96,7 +102,7 @@ pub fn run(fix: bool, as_json: bool, ui: &mut RuntimeUi) -> Result<()> {
     };
 
     if as_json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
+        crate::shared::print_json_projected(&report, query)?;
     } else if !ui.flags.quiet || !ok {
         print_human(&report);
     }
@@ -130,7 +136,11 @@ fn read_project_kind(dir: &Path) -> Option<String> {
         .map(str::to_owned)
 }
 
-fn collect_checks(cwd: &Path, project_kind: Option<&str>) -> Vec<Check> {
+fn collect_checks(
+    cwd: &Path,
+    project_kind: Option<&str>,
+    endpoint_file: Option<&Path>,
+) -> Vec<Check> {
     // Which toolchains does *this* project need?
     let wasm_need = if project_kind == Some("wasm") {
         Need::Required
@@ -146,7 +156,7 @@ fn collect_checks(cwd: &Path, project_kind: Option<&str>) -> Vec<Check> {
         cargo_component_check(probe_cargo_component(), wasm_need),
         wasm_target_check(probe_rustup_targets().as_deref(), wasm_need),
         node_check(probe_node(), node_need),
-        bridge_check(probe_bridge_status().running),
+        bridge_check(probe_bridge_status_at(endpoint_file).running),
     ];
 
     // Project checks only apply inside a plugin directory.
@@ -521,14 +531,14 @@ mod tests {
     #[test]
     fn collect_checks_adds_project_checks_only_in_a_plugin_dir() {
         let tmp = tempfile::tempdir().unwrap();
-        let non_project = collect_checks(tmp.path(), None);
+        let non_project = collect_checks(tmp.path(), None, None);
         assert!(!non_project.iter().any(|c| c.name == "manifest lint"));
         std::fs::write(
             tmp.path().join("plugin.json"),
             r#"{"id":"p","name":"P","version":"0.1.0","description":"d","type":"frontend","capabilities":[],"main":"dist/i.js"}"#,
         )
         .unwrap();
-        let project = collect_checks(tmp.path(), Some("frontend"));
+        let project = collect_checks(tmp.path(), Some("frontend"), None);
         assert!(project.iter().any(|c| c.name == "manifest lint"));
         assert!(project.iter().any(|c| c.name == "signing key"));
     }

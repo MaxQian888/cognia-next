@@ -21,6 +21,21 @@ describe("WorkingIndicator", () => {
     const { container } = render(<WorkingIndicator turnStatus="idle" />)
     expect(container.textContent).toContain(SPINNER_VERBS[0])
   })
+
+  it("pins the word on the compaction phase instead of a rotating verb", () => {
+    const { container } = render(<WorkingIndicator turnStatus="streaming" compacting />)
+    expect(container.textContent).toBe("compacting context")
+  })
+
+  it("shows the compaction word even while the turn is otherwise idle", () => {
+    const { container } = render(<WorkingIndicator turnStatus="idle" compacting />)
+    expect(container.textContent).toBe("compacting context")
+  })
+
+  it("keeps 'stopping' authoritative while aborting during a compaction report", () => {
+    const { container } = render(<WorkingIndicator turnStatus="aborting" compacting />)
+    expect(container.textContent).toBe("stopping")
+  })
 })
 
 it("keeps screen-reader work status stable without a timer", () => {

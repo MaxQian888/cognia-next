@@ -114,7 +114,7 @@ describe("buildContextReport", () => {
   it("reports configured builtin categories without treating modifiers as tools or claiming loaded", () => {
     const builtinTools = Object.fromEntries(
       Object.keys(config.builtinTools).map((key) => [key, key === "coreFilesOnAnthropic"])
-    ) as ResolvedConfig["builtinTools"]
+    ) as unknown as ResolvedConfig["builtinTools"]
     const report = buildContextReport(undefined, { ...config, builtinTools })
     expect(report).toContain("0 enabled categories / 0 catalog tools")
     expect(report).toContain("does not establish runtime availability or loading")

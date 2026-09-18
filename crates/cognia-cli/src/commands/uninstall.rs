@@ -8,7 +8,7 @@ use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::engine::bridge_client::{get_json, load_endpoint, post_json, EndpointFile};
+use crate::engine::bridge_client::{get_json, load_endpoint_from, post_json, EndpointFile};
 use crate::ui::{style, RuntimeUi};
 
 const PATH: &str = "/api/dev/plugins/uninstall";
@@ -47,7 +47,12 @@ struct InstalledPluginEntry {
 ///   * The plain `uninstall` flow (without `--purge-data`) just runs —
 ///     uninstall is reversible (re-install the same bundle), so we don't
 ///     prompt for it. Only the irreversible data wipe is gated.
-pub fn run(plugin_id: String, purge_data: bool, ui: &mut RuntimeUi) -> Result<()> {
+pub fn run(
+    plugin_id: String,
+    purge_data: bool,
+    endpoint_file: Option<&std::path::Path>,
+    ui: &mut RuntimeUi,
+) -> Result<()> {
     if plugin_id.trim().is_empty() {
         if ui.flags.json {
             return emit_json_failure(
@@ -60,7 +65,7 @@ pub fn run(plugin_id: String, purge_data: bool, ui: &mut RuntimeUi) -> Result<()
         bail!("plugin_id is empty");
     }
 
-    let endpoint = match load_endpoint() {
+    let endpoint = match load_endpoint_from(endpoint_file) {
         Ok(endpoint) => endpoint,
         Err(err) if ui.flags.json => {
             return emit_json_failure("endpoint", plugin_id, purge_data, err.to_string());

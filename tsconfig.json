@@ -176,6 +176,7 @@
     "out",
     ".next",
     "target",
+    "cli/dist",
     "packages/*/dist",
     "packages/*/tsup.config.ts"
   ]

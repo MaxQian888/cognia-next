@@ -114,6 +114,26 @@ describe("cliConfigFileSchema.aiSdkMaxSteps", () => {
   })
 })
 
+describe("cliConfigFileSchema.disabledTools", () => {
+  it("accepts a list of tool names", () => {
+    const r = cliConfigFileSchema.safeParse({
+      disabledTools: ["bash", "mcp__github__push"],
+    })
+    expect(r.success).toBe(true)
+    if (r.success) expect(r.data.disabledTools).toEqual(["bash", "mcp__github__push"])
+  })
+
+  it("rejects non-arrays, empty names, and non-string entries", () => {
+    expect(cliConfigFileSchema.safeParse({ disabledTools: "bash" }).success).toBe(false)
+    expect(cliConfigFileSchema.safeParse({ disabledTools: [""] }).success).toBe(false)
+    expect(cliConfigFileSchema.safeParse({ disabledTools: [42] }).success).toBe(false)
+  })
+
+  it("is absent by default in the resolved config", () => {
+    expect(DEFAULT_RESOLVED_CONFIG.disabledTools).toBeUndefined()
+  })
+})
+
 describe("cliConfigFileSchema.devPlugins", () => {
   it("accepts the dev-plugin flags", () => {
     expect(cliConfigFileSchema.safeParse({ devPlugins: true }).success).toBe(true)

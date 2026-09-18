@@ -46,8 +46,10 @@ function entriesOf(parsed: unknown): Record<string, unknown> {
   return obj
 }
 
-/** Parse one config file's text into McpServer rows (all enabled). */
-export function parseMcpConfig(text: string): McpServer[] {
+/** Parse one config file's text into McpServer rows (all enabled). `declaredBy`
+ * records the file each row came from — hook `tool_provenance.declared_by`
+ * reads it; never persisted. */
+export function parseMcpConfig(text: string, declaredBy?: string): McpServer[] {
   let parsed: unknown
   try {
     parsed = JSON.parse(text)
@@ -64,6 +66,7 @@ export function parseMcpConfig(text: string): McpServer[] {
       transport: normalized.transport,
       config: normalized.config,
       enabled: true,
+      ...(declaredBy ? { declaredBy } : {}),
       createdAt: 0,
       updatedAt: 0,
     })
@@ -82,7 +85,7 @@ export function loadMcpServers(roots: string[], fs: McpFs = defaultFs): McpServe
     } catch {
       continue
     }
-    for (const row of parseMcpConfig(text)) {
+    for (const row of parseMcpConfig(text, file)) {
       if (!byName.has(row.name)) byName.set(row.name, row)
     }
   }

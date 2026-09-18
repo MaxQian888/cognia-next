@@ -24,6 +24,7 @@ import type {
   ExternalAgentPermissionRequestEvent,
 } from "@/types/agent/external-agent"
 import type { HookAgentKind } from "@/lib/claude/hooks"
+import { resolveToolProvenance } from "@/lib/claude/hooks/tool-provenance"
 
 const log = createLogger("agent.external.hooks")
 
@@ -101,6 +102,35 @@ function maybeEmit(emit: EmitHookNotice | undefined, notice: ExternalHookFireNot
 }
 
 /**
+ * Resolve `tool_provenance` for an external-agent tool call. Bare tool names
+ * on an external agent's surface belong to that agent (`kind: "agent"`);
+ * MCP-namespaced names still resolve to their server. Omitted (null) when the
+ * name is absent — hook scripts must tolerate the field being missing.
+ */
+function provenanceFor(ctx: AgentHookContext, toolName: string | undefined) {
+  return resolveToolProvenance(toolName, {
+    externalAgentId: ctx.agentKind === "external" ? ctx.agentId : undefined,
+  })
+}
+
+/**
+ * Shorthand for the tool-scoped payload: `tool_name`, `tool_input` when given,
+ * and `tool_provenance` when resolvable. Any extra event fields merge on top.
+ */
+function toolPayload(
+  ctx: AgentHookContext,
+  toolName: string | undefined,
+  extra: Record<string, unknown> = {}
+): Record<string, unknown> {
+  const provenance = provenanceFor(ctx, toolName)
+  return {
+    tool_name: toolName,
+    ...(provenance ? { tool_provenance: provenance } : {}),
+    ...extra,
+  }
+}
+
+/**
  * Call the Rust settings.json hook runtime for one external-agent lifecycle
  * event. Returns null on web/mobile or any bridge error.
  */
@@ -157,12 +187,11 @@ export async function observeExternalAgentEvent(
       const toolName = event.toolName ?? "unknown"
       const d = await fireAgentHook(evName, ctx, {
         toolName,
-        payload: {
-          tool_name: toolName,
+        payload: toolPayload(ctx, toolName, {
           tool_use_id: event.toolUseId,
           is_error: failed,
           tool_response: event.result,
-        },
+        }),
       })
       maybeEmit(emit, noticeFromDecision(evName, toolName, d))
       break
@@ -209,12 +238,12 @@ export async function gateExternalAgentPermission(
   )
   void fireAgentHook("PermissionRequest", ctx, {
     toolName,
-    payload: { tool_name: toolName, tool_input: toolInput },
+    payload: toolPayload(ctx, toolName, { tool_input: toolInput }),
   })
 
   const decision = await fireAgentHook("PreToolUse", ctx, {
     toolName,
-    payload: { tool_name: toolName, tool_input: toolInput },
+    payload: toolPayload(ctx, toolName, { tool_input: toolInput }),
   })
 
   // Surface any consequential PreToolUse fire (block / context / warnings) as an
@@ -229,7 +258,7 @@ export async function gateExternalAgentPermission(
     }
     void fireAgentHook("PermissionDenied", ctx, {
       toolName,
-      payload: { tool_name: toolName, reason: decision.block },
+      payload: toolPayload(ctx, toolName, { reason: decision.block }),
     })
     return true
   }

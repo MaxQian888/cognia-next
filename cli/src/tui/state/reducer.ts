@@ -820,22 +820,50 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         state.config.locale
       )
       const toastId = `agent-quota:${key}`
+      // Warn only on a status transition, and remove that warning when the
+      // provider reports recovery. Repeated pushes must not create a storm.
+      const statusToasts =
+        action.event.status === "allowed"
+          ? state.toasts.filter((toast) => toast.id !== toastId)
+          : state.agentRateLimits?.[key]?.status === action.event.status
+            ? state.toasts
+            : pushToast(state.toasts, {
+                id: toastId,
+                severity: action.event.status === "rejected" ? "error" : "warn",
+                message:
+                  snapshots[0].meters.find((meter) => meter.id === `native/${key}`)?.label ?? key,
+              })
+      // Codex-parity early warning: the status toast only fires once the
+      // provider flips to warning/rejected — often too late to pace a turn.
+      // Fire once on the UPWARD 50%-utilization crossing instead (a window
+      // reset drops utilization below the mark, re-arming the next window).
+      const halfToastId = `agent-quota:half:${key}`
+      const prevUtil = state.agentRateLimits?.[key]?.utilization
+      const nextUtil = action.event.utilization
+      const toasts =
+        typeof nextUtil === "number" && Number.isFinite(nextUtil)
+          ? nextUtil >= 0.5
+            ? typeof prevUtil === "number" && Number.isFinite(prevUtil) && prevUtil >= 0.5
+              ? statusToasts
+              : pushToast(
+                  statusToasts.filter((toast) => toast.id !== halfToastId),
+                  {
+                    id: halfToastId,
+                    severity: "warn",
+                    message: `${action.event.rateLimitType ?? key} window ${Math.round(nextUtil * 100)}% used`,
+                    hint: "Half the quota window is gone — check /limits for reset timing.",
+                  }
+                )
+            : statusToasts.filter((toast) => toast.id !== halfToastId)
+          : // No utilization reading: an `allowed` recovery still retires the
+            // early warning (the window reset behind it).
+            action.event.status === "allowed"
+            ? statusToasts.filter((toast) => toast.id !== halfToastId)
+            : statusToasts
       return {
         ...state,
         agentRateLimits,
-        // Warn only on a status transition, and remove that warning when the
-        // provider reports recovery. Repeated pushes must not create a storm.
-        toasts:
-          action.event.status === "allowed"
-            ? state.toasts.filter((toast) => toast.id !== toastId)
-            : state.agentRateLimits?.[key]?.status === action.event.status
-              ? state.toasts
-              : pushToast(state.toasts, {
-                  id: toastId,
-                  severity: action.event.status === "rejected" ? "error" : "warn",
-                  message:
-                    snapshots[0].meters.find((meter) => meter.id === `native/${key}`)?.label ?? key,
-                }),
+        toasts,
         ...(state.overlay.kind === "limits"
           ? {
               overlay: {
@@ -894,6 +922,7 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         // previous turn's character count.
         streamEpoch: state.streamEpoch + 1,
         turnStatus: "streaming",
+        turnActivity: undefined,
         usageSeenThisTurn: false,
         planCapturedThisTurn: false,
         overlay: { kind: "none" },
@@ -970,6 +999,7 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         seq: committed.seq,
         inflight: { text: "", thinking: "", tools: [] },
         turnStatus: "idle",
+        turnActivity: undefined,
         lastPlan,
         lastCompletion: { kind: "turn", status: "done", label: "Response ready" },
         ...(missingDurationMs !== undefined && state.usage
@@ -1050,6 +1080,7 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         seq: committed.seq + 1,
         inflight: { text: "", thinking: "", tools: [] },
         turnStatus: "idle",
+        turnActivity: undefined,
         lastCompletion: { kind: "turn", status: "error", label: action.title ?? "Error" },
       }
     }
@@ -1095,6 +1126,7 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         seq: committed.seq + 1,
         inflight: { text: "", thinking: "", tools: [] },
         turnStatus: "idle",
+        turnActivity: undefined,
         lastCompletion: { kind: "turn", status: "aborted", label: "Interrupted" },
       }
     }
@@ -1384,6 +1416,12 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         kind: "notice",
         message: formatCompactBoundary(action.trigger, action.preTokens, action.postTokens),
       }))
+    case "SET_TURN_ACTIVITY":
+      // Self-superseding runtime phase: the latest report wins, `null` (the
+      // provider's `idle` phase) clears it. No dedup — successive identical
+      // reports are cheap, and `turnStatus: idle` is not forced here (a
+      // compaction report can legitimately precede the turn's busy flag).
+      return { ...state, turnActivity: action.activity ?? undefined }
     case "LOAD_CELLS":
       return {
         ...state,
@@ -1417,6 +1455,7 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         toolStats: {},
         usageSeenThisTurn: false,
         turnStatus: "idle",
+        turnActivity: undefined,
         lastPlan: undefined,
         planCapturedThisTurn: false,
         initDraft: undefined,

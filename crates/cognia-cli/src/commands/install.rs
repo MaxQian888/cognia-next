@@ -16,7 +16,7 @@ use serde_json::json;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use crate::engine::bridge_client::{get_json, load_endpoint, post_json, EndpointFile};
+use crate::engine::bridge_client::{get_json, load_endpoint_from, post_json, EndpointFile};
 use crate::ui::{style, RuntimeUi};
 
 const INSTALL_BUNDLE_PATH: &str = "/api/dev/plugins/install";
@@ -54,7 +54,7 @@ struct InstalledPluginEntry {
 /// Phase 5 adds the preflight check: read the bundle's manifest, ask the
 /// bridge for the currently installed plugins, and if our id is already
 /// loaded, surface "X v1.0 → v1.1" and prompt for replace. `--yes` skips.
-pub fn run(bundle: PathBuf, ui: &mut RuntimeUi) -> Result<()> {
+pub fn run(bundle: PathBuf, endpoint_file: Option<&Path>, ui: &mut RuntimeUi) -> Result<()> {
     let prepared = match prepare_install_input(bundle.clone()) {
         Ok(prepared) => prepared,
         Err(err) if ui.flags.json => {
@@ -68,7 +68,7 @@ pub fn run(bundle: PathBuf, ui: &mut RuntimeUi) -> Result<()> {
         }
         Err(err) => return Err(err),
     };
-    let endpoint = match load_endpoint() {
+    let endpoint = match load_endpoint_from(endpoint_file) {
         Ok(endpoint) => endpoint,
         Err(err) if ui.flags.json => {
             return emit_json_failure(

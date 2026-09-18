@@ -1395,6 +1395,17 @@ export async function skillsScanOpencode(): Promise<NativeSkill[]> {
   return skillsScanDir(joinPath(opencodeConfigDir, "skills"))
 }
 
+/** Scan Cursor's global `~/.cursor/skills` directory. */
+export async function skillsScanCursor(): Promise<NativeSkill[]> {
+  const [{ resolveVendorRoots }, { joinPath }] = await Promise.all([
+    import("@/lib/agent-roots"),
+    import("@/lib/claude/instructions/paths"),
+  ])
+  const { cursorDir } = await resolveVendorRoots()
+  if (!cursorDir) return []
+  return skillsScanDir(joinPath(cursorDir, "skills"))
+}
+
 export async function skillsMoveToTrash(dirName: string): Promise<string> {
   return transport.call<string>("skills_move_to_trash", { dirName })
 }

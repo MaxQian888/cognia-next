@@ -48,9 +48,10 @@
 //!   cognia plugin status [--json]
 //!     Probe whether the running cognia desktop bridge is reachable.
 //!
-//!   cognia plugin dev [--path .] [--reload-url URL] [--once] [--json]
+//!   cognia plugin dev [--path .] [--reload-url LOOPBACK-URL] [--once] [--json]
 //!     Watch the crate, rebuild on save, and ping a running cognia. `--json`
-//!     is accepted only with `--once`.
+//!     is accepted only with `--once`. `--reload-url` only accepts loopback
+//!     http(s) origins — the dev token is never sent off-loopback.
 //!
 //!   cognia plugin embed-version <wasm> <ver> [--out wasm] [--json]
 //!     Manually inject the api-version custom section (normally automatic).
@@ -74,6 +75,36 @@
 //!
 //!   cognia host categories|resources|commands|schema|call|doctor|events|skills
 //!     Discover and safely invoke the loopback-only Headless service API.
+//!     JSON-producing subcommands accept `--query <dot-path>` (`--select` is
+//!     an alias) to project a subtree, and `call` accepts `-f KEY=VALUE` /
+//!     `-F KEY=JSON` as an alternative to `--data`. Connection flags
+//!     (`--server-url`/`--data-dir`/`--ca-cert`/`--server-bin`) are global
+//!     inside `host` and may be written after the subcommand.
+//!
+//!   cognia acp
+//!     Bridge newline-delimited ACP JSON-RPC on stdio to the running
+//!     companion WebSocket endpoint (for Zed, Neovim, JetBrains, ...).
+//!
+//!   cognia logs tail|query|doctor|export
+//!     Inspect, query, follow, diagnose, and export local structured logs.
+//!
+//!   cognia crash list|show|package|submit|status|withdraw|delete
+//!     Inspect, package, submit, track, and delete crash reports.
+//!
+//!   cognia status [--json] [--endpoint-file PATH]
+//!     Probe every local control plane at once — the desktop CLI bridge and
+//!     the Headless service. Exits zero when at least one plane responds.
+//!
+//!   cognia open [PATH|cognia://URL] [--session ID] [--settings[=TAB]] ...
+//!     Launch the desktop at a specific surface via `cognia://` deep links;
+//!     `--print` emits the URL without launching.
+//!
+//!   cognia completions <bash|zsh|fish|powershell|elvish>
+//!     Print a shell completion script to stdout.
+//!
+//! Bridge commands (`plugin status|list|install|uninstall|reload|dev` and
+//! `doctor`) accept `--endpoint-file <path>` (env: COGNIA_CLI_ENDPOINT_FILE)
+//! to point at a non-default endpoint file.
 //!
 //! Global flags (apply to every subcommand):
 //!
@@ -127,7 +158,10 @@ fn main() -> eyre::Result<()> {
     // color-eyre's formatter renders it with severity colors + cause chain
     // + (with RUST_BACKTRACE=1) backtrace.
     let result: Result<()> = match cli.command {
-        TopCommand::Plugin { command } => dispatch_plugin(command, &mut ui),
+        TopCommand::Plugin {
+            endpoint_file,
+            command,
+        } => dispatch_plugin(command, endpoint_file.as_deref(), &mut ui),
         TopCommand::Pack { command } => dispatch_pack(command, &mut ui),
         TopCommand::Host {
             server_url,
@@ -145,9 +179,9 @@ fn main() -> eyre::Result<()> {
             },
             &mut ui,
         ),
-        TopCommand::Acp => {
+        TopCommand::Acp { endpoint_file } => {
             ui.verbose("running acp");
-            commands::acp::run(&ui)
+            commands::acp::run(endpoint_file.as_deref(), &ui)
         }
         TopCommand::Logs { command } => commands::logs::run(command, &mut ui),
         TopCommand::Crash { command } => commands::crash::run(command, &mut ui),
@@ -183,6 +217,49 @@ fn main() -> eyre::Result<()> {
                 json,
                 &mut ui,
             )
+        }
+        TopCommand::Status {
+            json,
+            query,
+            endpoint_file,
+            server_url,
+            data_dir,
+            ca_cert,
+            server_bin,
+        } => {
+            ui.flags.json = json;
+            ui.verbose(format!(
+                "probing control planes (endpoint_file={} server_url={server_url})",
+                endpoint_file
+                    .as_ref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "<auto>".to_string())
+            ));
+            commands::status::run_overview(
+                json,
+                query.as_deref(),
+                endpoint_file.as_deref(),
+                commands::host::HostConfig {
+                    server_url,
+                    data_dir,
+                    ca_cert,
+                    server_bin,
+                },
+                &mut ui,
+            )
+        }
+        TopCommand::Open(args) => {
+            ui.verbose("launching cognia deep link");
+            commands::open::run(&args, &mut ui)
+        }
+        TopCommand::Completions { shell } => {
+            clap_complete::generate(
+                shell,
+                &mut <Cli as clap::CommandFactory>::command(),
+                "cognia",
+                &mut std::io::stdout(),
+            );
+            Ok(())
         }
     };
     if let Err(err) = result {

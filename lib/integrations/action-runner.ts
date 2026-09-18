@@ -222,6 +222,7 @@ async function assertApprovedPublicationHead(
   binding: Awaited<ReturnType<typeof assertBotIntegrationAction>>
 ): Promise<void> {
   if (!binding.approvedPublication) return
+  if (!binding.repository) throw new Error("Approved publication has no repository scope")
   const baseUrl = (await integrationApiBaseUrl(binding.account)) ?? "https://api.github.com"
   const current = await authenticatedRequest<{ sha?: string }>(
     binding.account.pluginId,

@@ -26,7 +26,7 @@ import { WorkingIndicator } from "./WorkingIndicator"
 import { buildLiveAgentTreeRows, type LiveAgentTreeRow } from "../runtime/agents-panel-model"
 import { agentInkColor } from "../theme/agent-color"
 import { listLiveSubagents, type SubagentLiveEntry } from "../../agent/subagent-live-output"
-import type { ActivityState, ToolCell, TurnStatus } from "../state/types"
+import type { ActivityState, ToolCell, TurnActivityState, TurnStatus } from "../state/types"
 
 /** Display width of the steer-queue preview lines (per entry). */
 const QUEUE_PREVIEW_MAX = 3
@@ -74,6 +74,7 @@ function truncate(text: string, max: number): string {
 
 function BottomStatusImpl({
   turnStatus,
+  turnActivity,
   activity,
   tools = [],
   steerQueue = [],
@@ -94,6 +95,8 @@ function BottomStatusImpl({
   suppressAgentTree = false,
 }: {
   turnStatus: TurnStatus
+  /** The runtime's latest in-turn phase report (compaction drives its verb). */
+  turnActivity?: TurnActivityState
   activity?: ActivityState
   /** The current turn's still-resolving tool cells (`state.inflight.tools`). */
   tools?: ToolCell[]
@@ -271,11 +274,14 @@ function BottomStatusImpl({
 
   const queuePreview = steerQueue.slice(0, QUEUE_PREVIEW_MAX)
 
+  const compacting = turnActivity?.phase === "compacting"
+
   // Nothing live to show — render nothing. Detached background runs (and their
   // interrupted remnants) are persistent across turns, so they keep the layer
   // mounted even when the current turn is idle.
   if (
     !busy &&
+    !compacting &&
     !activity &&
     steerQueue.length === 0 &&
     !backtrackArmed &&
@@ -309,8 +315,21 @@ function BottomStatusImpl({
               <Spinner />{" "}
             </>
           ) : null}
-          <WorkingIndicator turnStatus={turnStatus} />
+          <WorkingIndicator turnStatus={turnStatus} compacting={compacting} />
+          {compacting && turnActivity?.detail ? ` · ${turnActivity.detail}` : ""}
           {elapsed ? ` · ${elapsed}` : ""} · esc to interrupt
+        </Text>
+      ) : null}
+
+      {!busy && compacting ? (
+        <Text color={theme.warning}>
+          {!screenReader ? (
+            <>
+              <Spinner />{" "}
+            </>
+          ) : null}
+          <WorkingIndicator turnStatus={turnStatus} compacting />
+          {turnActivity?.detail ? ` · ${turnActivity.detail}` : ""}
         </Text>
       ) : null}
 

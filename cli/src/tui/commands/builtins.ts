@@ -182,7 +182,7 @@ export function buildToolCatalogEntries(
   const metadata = createMessageResolver(locale === "zh-CN" ? zhToolSettings : enToolSettings)
   const state = (enabled: boolean) => t(`toolsBrowser.data.${enabled ? "enabled" : "disabled"}`)
   return BUILTIN_TOOL_CATEGORIES.flatMap((category) => {
-    const enabled = builtin[category.id] ?? DEFAULT_BUILTIN_TOOLS[category.id]
+    const enabled = builtin[category.id] ?? DEFAULT_BUILTIN_TOOLS[category.id] ?? false
     return category.tools.map((tool) => {
       const description = metadata(tool.descriptionKey)
       const risk = metadata(
@@ -200,7 +200,9 @@ export function buildToolCatalogEntries(
           ? [
               t("toolsBrowser.data.coreAnthropic", {
                 state: state(
-                  builtin.coreFilesOnAnthropic ?? DEFAULT_BUILTIN_TOOLS.coreFilesOnAnthropic
+                  builtin.coreFilesOnAnthropic ??
+                    DEFAULT_BUILTIN_TOOLS.coreFilesOnAnthropic ??
+                    false
                 ),
               }),
             ]

@@ -163,6 +163,56 @@ describe("cellToTerminalBlock", () => {
     expect(added?.plain.startsWith("  │ ")).toBe(true)
   })
 
+  it("tail-truncates a large diff with a muted marker, keeping the newest lines", () => {
+    const content = Array.from({ length: 80 }, (_, i) => `line${i}`).join("\n")
+    const cell: Cell = {
+      id: "w",
+      kind: "tool",
+      callKey: "w",
+      toolName: "write",
+      input: { file_path: "/big.ts", content },
+      status: "done",
+      collapsed: true,
+    }
+    const block = cellToTerminalBlock(cell, { width: 120, verbose: false })
+    expect(block.plainText).toContain("⋯ 30 earlier lines truncated")
+    expect(block.plainText).toContain("line79")
+    expect(block.plainText).not.toContain("+ line29")
+  })
+
+  it("renders a settled read-only shell command as a compact title-only card", () => {
+    const block = cellToTerminalBlock(
+      {
+        id: "c",
+        kind: "tool",
+        callKey: "c",
+        toolName: "bash",
+        input: { command: "git status" },
+        status: "done",
+        result: "nothing to commit",
+        collapsed: true,
+      },
+      { width: 120, verbose: false }
+    )
+    expect(block.plainText).toContain("git status")
+    expect(block.plainText).not.toContain("↳")
+    // Expansion still reveals the output.
+    const verbose = cellToTerminalBlock(
+      {
+        id: "c",
+        kind: "tool",
+        callKey: "c",
+        toolName: "bash",
+        input: { command: "git status" },
+        status: "done",
+        result: "nothing to commit",
+        collapsed: true,
+      },
+      { width: 120, verbose: true }
+    )
+    expect(verbose.plainText).toContain("nothing to commit")
+  })
+
   it("puts a failure on its own detail row, not in the header chip", () => {
     const cell: Cell = {
       id: "f",
@@ -509,10 +559,12 @@ describe("fullscreen tool readability", () => {
   })
 
   it("keeps completed command output at normal contrast", () => {
-    const block = cellToTerminalBlock(tool({ result: "working tree clean", collapsed: true }), {
-      width: 80,
-      verbose: false,
-    })
+    // A non-read-only command keeps its collapsed `↳` preview row — read-only
+    // ones compact to a title-only card instead.
+    const block = cellToTerminalBlock(
+      tool({ input: { command: "mv a b" }, result: "working tree clean", collapsed: true }),
+      { width: 80, verbose: false }
+    )
     expect(
       block.lines
         .flatMap((line) => line.spans)

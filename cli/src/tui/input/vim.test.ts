@@ -1,4 +1,16 @@
-import { enterNormalFromInsert, handleVimNormalKey, initialVimState, type VimState } from "./vim"
+import {
+  enterNormalFromInsert,
+  handleVimNormalKey,
+  handleVimReplaceKey,
+  initialVimState,
+  insertedTextBetween,
+  nextVimSearchMatch,
+  sealVimEntry,
+  vimSearchMatches,
+  type VimState,
+} from "./vim"
+import { insertText } from "./buffer"
+import type { KeyFlags } from "./keymap"
 import type { InputBuffer } from "../state/types"
 
 const buf = (text: string, row = 0, col = 0): InputBuffer => ({
@@ -209,5 +221,265 @@ describe("requests + fallthrough", () => {
     const r = feed("abc def", "dz")
     expect(r.buffer.lines[0]).toBe("abc def")
     expect(r.state.pending).toBeNull()
+  })
+})
+
+// ── W1: replace mode, dot-repeat, draft search ───────────────────────────────
+
+/**
+ * Drive the interpreter the way the composer does: INSERT-mode chars edit the
+ * buffer through `insertText` (the composer's default flow), Esc in INSERT
+ * seals the pending `.` entry, and mode picks the handler. `steps` is a list
+ * of `{ input, key }` — a bare string is shorthand for typing it.
+ */
+function drive(
+  text: string,
+  steps: ReadonlyArray<string | { input?: string; key?: KeyFlags }>,
+  start: { row?: number; col?: number } = {}
+) {
+  let state = normal()
+  let buffer = buf(text, start.row ?? 0, start.col ?? 0)
+  const requests: string[] = []
+  for (const raw of steps) {
+    const step = typeof raw === "string" ? { input: raw } : raw
+    const key = step.key ?? {}
+    const input = step.input ?? ""
+    if (state.mode === "insert") {
+      if (key.escape) {
+        state = { ...sealVimEntry(state, buffer), mode: "normal", pending: null, count: "" }
+        buffer = enterNormalFromInsert(buffer)
+        continue
+      }
+      if (!key.return && !key.ctrl && !key.meta && input) {
+        buffer = insertText(buffer, input)
+        continue
+      }
+    }
+    const r =
+      state.mode === "replace"
+        ? handleVimReplaceKey(input, key, state, buffer)
+        : handleVimNormalKey(input, key, state, buffer)
+    state = r.state
+    buffer = r.buffer
+    if (r.request) requests.push(r.request)
+  }
+  return { state, buffer, requests }
+}
+
+describe("replace mode (R)", () => {
+  it("R enters replace; typed chars overwrite instead of inserting", () => {
+    const r = drive("hello", ["R", "HE"])
+    expect(r.state.mode).toBe("replace")
+    expect(r.buffer.lines[0]).toBe("HEllo")
+    expect(r.buffer.cursorCol).toBe(2)
+  })
+
+  it("typing past end-of-line appends", () => {
+    const r = drive("ab", ["R", "XYZ"], { col: 1 })
+    expect(r.buffer.lines[0]).toBe("aXYZ")
+  })
+
+  it("backspace restores overwritten chars; at startCol it only moves", () => {
+    const r = drive("hello", ["R", "XY", { key: { backspace: true } }])
+    expect(r.buffer.lines[0]).toBe("Xello")
+    expect(r.buffer.cursorCol).toBe(1)
+    const r2 = drive("hello", [
+      "R",
+      "XY",
+      { key: { backspace: true } },
+      { key: { backspace: true } },
+    ])
+    expect(r2.buffer.lines[0]).toBe("hello")
+    // R at col 1: type one char, backspace once restores it, backspace again
+    // sits at startCol so it only moves the cursor left.
+    const r3 = drive(
+      "abcd",
+      ["R", "Z", { key: { backspace: true } }, { key: { backspace: true } }],
+      { col: 1 }
+    )
+    expect(r3.buffer.lines[0]).toBe("abcd")
+    expect(r3.buffer.cursorCol).toBe(0)
+  })
+
+  it("Esc seals the session, drops to NORMAL with the cursor on the last char", () => {
+    const r = drive("hello", ["R", "XY", { key: { escape: true } }])
+    expect(r.state.mode).toBe("normal")
+    expect(r.state.replace).toBeNull()
+    expect(r.buffer.cursorCol).toBe(1)
+    expect(r.state.lastChange).toEqual({ op: "replace", text: "XY" })
+  })
+
+  it("Enter submits; control chords fall through", () => {
+    const enter = drive("abc", ["R", { key: { return: true } }])
+    expect(enter.requests).toEqual(["submit"])
+    const r = handleVimReplaceKey("c", { ctrl: true }, normal({ mode: "replace" }), buf("abc"))
+    expect(r.handled).toBe(false)
+  })
+})
+
+describe("dot-repeat (.)", () => {
+  it("is a no-op before any change", () => {
+    const r = feed("abc", ".")
+    expect(r.buffer.lines[0]).toBe("abc")
+  })
+
+  it("repeats deletions: x, dd, dw, D", () => {
+    expect(feed("abc", "x.").buffer.lines[0]).toBe("c")
+    expect(feed("a\nb\nc", "dd.").buffer.lines).toEqual(["c"])
+    expect(feed("one two three", "dw.").buffer.lines[0]).toBe("three")
+    // D deleted to EOL leaving "o"; `.` at the clamped cursor deletes it too.
+    expect(feed("one two", "lD.").buffer.lines[0]).toBe("")
+  })
+
+  it("repeats a paste", () => {
+    expect(feed("abc", "xp.").buffer.lines[0]).toBe("baac")
+  })
+
+  it("repeats an insert: iX<Esc>. inserts X again at the new cursor", () => {
+    const r = drive("abc", ["i", "X", { key: { escape: true } }, "."])
+    expect(r.buffer.lines[0]).toBe("XXabc")
+  })
+
+  it("repeats a change: cwX<Esc>. at the next word swaps it too", () => {
+    const r = drive("one two three", ["c", "w", "ONE ", { key: { escape: true } }, "w", "."])
+    expect(r.buffer.lines[0]).toBe("ONE ONE three")
+  })
+
+  it("repeats open-line: o<Esc>. adds another line below", () => {
+    const r = drive("a", ["o", "hi", { key: { escape: true } }, "."])
+    expect(r.buffer.lines).toEqual(["a", "hi", "hi"])
+  })
+
+  it("repeats substitute and change-to-EOL", () => {
+    // `.` replays AT the cursor — after `s`+Esc the cursor sits on the
+    // inserted char, so move right first to substitute the next one.
+    expect(drive("abc", ["s", "Z", { key: { escape: true } }, "l", "."]).buffer.lines[0]).toBe(
+      "ZZc"
+    )
+    // "one two" → lC X Esc → "oX"; b to col 0, `.` changes to EOL again → "X".
+    expect(
+      drive("one two", ["l", "C", "X", { key: { escape: true } }, "b", "."]).buffer.lines[0]
+    ).toBe("X")
+  })
+
+  it("repeats a replace session (overwrite semantics)", () => {
+    // "XYllo" with the cursor on col 1; `.` overwrites "Yl" → "XXYlo".
+    const r = drive("hello", ["R", "XY", { key: { escape: true } }, "."])
+    expect(r.buffer.lines[0]).toBe("XXYlo")
+  })
+
+  it("an insert entry sealed with no text repeats just the structural op", () => {
+    // `cw` + Esc without typing = `dw`; `.` deletes the next word.
+    const r = drive("one two three", ["c", "w", { key: { escape: true } }, "."])
+    expect(r.buffer.lines[0]).toBe("three")
+  })
+})
+
+describe("seal + insertedTextBetween", () => {
+  it("diffs the typed middle segment", () => {
+    expect(insertedTextBetween("helloworld", "helloXXworld")).toBe("XX")
+    expect(insertedTextBetween("ab", "ab")).toBe("")
+    expect(insertedTextBetween("ab", "ab\nline")).toBe("\nline")
+  })
+
+  it("sealVimEntry is a no-op without a live entry", () => {
+    const s = normal()
+    expect(sealVimEntry(s, buf("abc"))).toBe(s)
+  })
+})
+
+describe("draft search (/ ? n N)", () => {
+  it("collects all literal matches per line for highlighting", () => {
+    expect(vimSearchMatches(["foo bar foo", "zfoo"], "foo")).toEqual([
+      { row: 0, start: 0, end: 3 },
+      { row: 0, start: 8, end: 11 },
+      { row: 1, start: 1, end: 4 },
+    ])
+    expect(vimSearchMatches(["abc"], "")).toEqual([])
+  })
+
+  it("/query + Enter lands on the first match from the cursor", () => {
+    // incsearch positions while typing: "fo" hits the first "foo" at col 0.
+    const r = drive("foo bar foo", ["/", "foo", { key: { return: true } }])
+    expect(r.buffer.cursorCol).toBe(0)
+    expect(r.state.lastSearch).toEqual({ dir: "fwd", query: "foo" })
+  })
+
+  it("n walks forward through matches and wraps; N reverses", () => {
+    let r = drive("foo bar foo", ["/", "foo", { key: { return: true } }, "n"])
+    expect(r.buffer.cursorCol).toBe(8)
+    r = drive("foo bar foo", ["/", "foo", { key: { return: true } }, "n", "n"])
+    expect(r.buffer.cursorCol).toBe(0) // wrapped
+    r = drive("foo bar foo", ["/", "foo", { key: { return: true } }, "n", "N"])
+    expect(r.buffer.cursorCol).toBe(0)
+  })
+
+  it("? searches backward and crosses lines", () => {
+    const r = drive("foo a\nb foo", ["?", "foo", { key: { return: true } }], { row: 1, col: 5 })
+    // incsearch: first `f` backward from (1,5) lands on row-1 "foo" at col 2.
+    expect(r.buffer.cursorRow).toBe(1)
+    expect(r.buffer.cursorCol).toBe(2)
+    const r2 = drive("foo a\nb foo", ["?", "foo", { key: { return: true } }, "n"], {
+      row: 1,
+      col: 5,
+    })
+    expect(r2.buffer.cursorRow).toBe(0)
+    expect(r2.buffer.cursorCol).toBe(0)
+  })
+
+  it("Esc cancels the entry without committing the search", () => {
+    const r = drive("foo", ["/", "f", { key: { escape: true } }])
+    expect(r.state.search).toBeNull()
+    expect(r.state.lastSearch).toBeNull()
+  })
+
+  it("a no-match query leaves the cursor where it is", () => {
+    const r = drive("abc", ["/", "zzz", { key: { return: true } }], { col: 1 })
+    expect(r.buffer.cursorCol).toBe(1)
+  })
+
+  it("n/N with no committed search are no-ops", () => {
+    expect(feed("abc", "n").buffer.cursorCol).toBe(0)
+    expect(feed("abc", "N").buffer.cursorCol).toBe(0)
+  })
+
+  it("empty / + Enter repeats the previous search", () => {
+    const r = drive("foo x foo", [
+      "/",
+      "foo",
+      { key: { return: true } },
+      "/",
+      { key: { return: true } },
+    ])
+    expect(r.buffer.cursorCol).toBe(6)
+  })
+
+  it("backspace in the entry edits the query and repositions", () => {
+    const r = drive("foo far", ["/", "foa", { key: { backspace: true } }])
+    // "fo" still matches at col 0 (inclusive incsearch).
+    expect(r.state.search?.query).toBe("fo")
+    expect(r.buffer.cursorCol).toBe(0)
+  })
+
+  it("search entry swallows keys instead of editing the buffer", () => {
+    const r = drive("abc", ["/", "x"])
+    expect(r.buffer.lines[0]).toBe("abc")
+    const ctrl = handleVimNormalKey(
+      "c",
+      { ctrl: true },
+      normal({ search: { dir: "fwd", query: "x" } }),
+      buf("abc")
+    )
+    expect(ctrl.handled).toBe(false)
+  })
+
+  it("nextVimSearchMatch is strict unless inclusive", () => {
+    const b = buf("foo foo", 0, 0)
+    expect(nextVimSearchMatch(b, { dir: "fwd", query: "foo" })).toEqual({ row: 0, col: 4 })
+    expect(nextVimSearchMatch(b, { dir: "fwd", query: "foo" }, { inclusive: true })).toEqual({
+      row: 0,
+      col: 0,
+    })
+    expect(nextVimSearchMatch(b, { dir: "fwd", query: "zzz" })).toBeNull()
   })
 })

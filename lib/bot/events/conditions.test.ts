@@ -88,6 +88,34 @@ describe("structured Bot trigger conditions", () => {
     )
   })
 
+  it("matches PagerDuty-shaped incident payloads on envelope paths", () => {
+    // The pagerduty plugin's normalizer projects `event.data` onto
+    // `payload.incident`; a responder Bot can gate on urgency/service without
+    // new condition code.
+    const incident = event({
+      incident: {
+        id: "P1ABC",
+        status: "triggered",
+        urgency: "high",
+        service: { id: "SVC1", summary: "checkout" },
+      },
+    })
+    expect(
+      botConditionMismatch(
+        {
+          match: {
+            "payload.incident.urgency": "high",
+            "payload.incident.service.id": "SVC1",
+          },
+        },
+        incident
+      )
+    ).toBeUndefined()
+    expect(botConditionMismatch({ match: { "payload.incident.urgency": ["low"] } }, incident)).toBe(
+      "match:payload.incident.urgency"
+    )
+  })
+
   it("never matches a missing, null, or object-valued path", () => {
     const conditions = { match: { "payload.deep.value": 1 } }
     expect(botConditionMismatch(conditions, event({}))).toBe("match:payload.deep.value")

@@ -86,7 +86,7 @@ pub(crate) struct HostConfig {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct HostCatalog {
+pub(crate) struct HostCatalog {
     schema_version: u32,
     catalog_hash: String,
     categories: Vec<HostCatalogCategory>,
@@ -141,7 +141,7 @@ struct ResolvedConfig {
 }
 
 #[derive(Debug)]
-struct HostFailure {
+pub(crate) struct HostFailure {
     error_type: &'static str,
     code: String,
     message: String,
@@ -201,6 +201,12 @@ impl HostFailure {
         self.retryable = true;
         self
     }
+
+    /// One-line `code: message` form for reports that embed a failure as a
+    /// plain string (the `cognia status` overview).
+    pub(crate) fn describe(&self) -> String {
+        format!("{}: {}", self.code, self.message)
+    }
 }
 
 #[derive(Debug)]
@@ -220,14 +226,18 @@ struct OutputValidation {
 pub(crate) fn run(command: HostCommand, config: HostConfig, ui: &mut RuntimeUi) -> Result<()> {
     let catalog = load_catalog().map_err(|failure| emit_failure("catalog", None, failure))?;
     match command {
-        HostCommand::Categories { format } => run_categories(&catalog, format)
-            .map_err(|failure| emit_failure("categories", None, failure)),
-        HostCommand::Resources { category, format } => {
-            run_resources(&catalog, category.as_deref(), format)
-                .map_err(|failure| emit_failure("resources", None, failure))
+        HostCommand::Categories { format, query } => {
+            run_categories(&catalog, format, query.as_deref())
+                .map_err(|failure| emit_failure("categories", None, failure))
         }
-        HostCommand::Commands {
+        HostCommand::Resources {
+            category,
+            format,
             query,
+        } => run_resources(&catalog, category.as_deref(), format, query.as_deref())
+            .map_err(|failure| emit_failure("resources", None, failure)),
+        HostCommand::Commands {
+            search,
             target,
             operation,
             risk,
@@ -236,9 +246,10 @@ pub(crate) fn run(command: HostCommand, config: HostConfig, ui: &mut RuntimeUi) 
             category,
             resource,
             format,
+            query,
         } => run_commands(
             &catalog,
-            query.as_deref(),
+            search.as_deref(),
             target.as_deref(),
             operation.as_deref(),
             risk.as_deref(),
@@ -247,45 +258,60 @@ pub(crate) fn run(command: HostCommand, config: HostConfig, ui: &mut RuntimeUi) 
             category.as_deref(),
             resource.as_deref(),
             format,
+            query.as_deref(),
         )
         .map_err(|failure| emit_failure("commands", None, failure)),
         HostCommand::Schema {
             rpc_command,
             format,
-        } => run_schema(&catalog, &rpc_command, format)
+            query,
+        } => run_schema(&catalog, &rpc_command, format, query.as_deref())
             .map_err(|failure| emit_failure("schema", Some(&rpc_command), failure)),
         HostCommand::Call {
             rpc_command,
             data,
+            fields,
+            fields_json,
             idempotency_key,
             dry_run,
             no_wait,
+            paginate,
             strict_output,
             timeout_seconds,
             format,
+            query,
         } => {
             let result = run_call(
                 &catalog,
                 &config,
                 &rpc_command,
                 data.as_deref(),
+                &fields,
+                &fields_json,
                 idempotency_key.as_deref(),
                 dry_run,
                 no_wait,
+                paginate,
                 strict_output,
                 timeout_seconds,
                 format,
+                query.as_deref(),
                 ui,
             );
             result.map_err(|failure| emit_failure("call", Some(&rpc_command), failure))
         }
-        HostCommand::Doctor { offline, format } => run_doctor(&catalog, &config, offline, format)
+        HostCommand::Doctor {
+            offline,
+            format,
+            query,
+        } => run_doctor(&catalog, &config, offline, format, query.as_deref())
             .map_err(|failure| emit_failure("doctor", None, failure)),
         HostCommand::Events {
             since,
             events,
             max_events,
-        } => run_events(&config, since, &events, max_events)
+            query,
+        } => run_events(&config, since, &events, max_events, query.as_deref())
             .map_err(|failure| emit_failure("events", None, failure)),
         HostCommand::Skills { command } => {
             let action = if matches!(&command, HostSkillsCommand::Install { .. }) {
@@ -325,7 +351,7 @@ fn emit_failure(action: &str, rpc_command: Option<&str>, failure: HostFailure) -
     .into()
 }
 
-fn load_catalog() -> std::result::Result<HostCatalog, HostFailure> {
+pub(crate) fn load_catalog() -> std::result::Result<HostCatalog, HostFailure> {
     let catalog: HostCatalog = serde_json::from_slice(CATALOG_BYTES).map_err(|error| {
         HostFailure::configuration(
             "invalid_embedded_catalog",
@@ -348,7 +374,9 @@ fn load_catalog() -> std::result::Result<HostCatalog, HostFailure> {
 fn run_categories(
     catalog: &HostCatalog,
     format: HostListFormat,
+    query: Option<&str>,
 ) -> std::result::Result<(), HostFailure> {
+    reject_query_unless_json(query, matches!(format, HostListFormat::Json))?;
     let categories: Vec<Value> = catalog
         .categories
         .iter()
@@ -384,14 +412,17 @@ fn run_categories(
         })
         .collect();
     match format {
-        HostListFormat::Json => print_json(&json!({
-            "schemaVersion": 1,
-            "ok": true,
-            "action": "categories",
-            "catalogHash": catalog.catalog_hash,
-            "count": categories.len(),
-            "categories": categories,
-        })),
+        HostListFormat::Json => print_projected(
+            &json!({
+                "schemaVersion": 1,
+                "ok": true,
+                "action": "categories",
+                "catalogHash": catalog.catalog_hash,
+                "count": categories.len(),
+                "categories": categories,
+            }),
+            query,
+        ),
         HostListFormat::Table => {
             let mut table = Table::new();
             table.load_style(UTF8_FULL).set_header([
@@ -436,7 +467,9 @@ fn run_resources(
     catalog: &HostCatalog,
     category: Option<&str>,
     format: HostListFormat,
+    query: Option<&str>,
 ) -> Result<(), HostFailure> {
+    reject_query_unless_json(query, matches!(format, HostListFormat::Json))?;
     validate_category(catalog, category)?;
     let resources: Vec<Value> = catalog
         .resources
@@ -460,14 +493,17 @@ fn run_resources(
         })
         .collect();
     match format {
-        HostListFormat::Json => print_json(&json!({
-            "schemaVersion": 1,
-            "ok": true,
-            "action": "resources",
-            "catalogHash": catalog.catalog_hash,
-            "count": resources.len(),
-            "resources": resources,
-        })),
+        HostListFormat::Json => print_projected(
+            &json!({
+                "schemaVersion": 1,
+                "ok": true,
+                "action": "resources",
+                "catalogHash": catalog.catalog_hash,
+                "count": resources.len(),
+                "resources": resources,
+            }),
+            query,
+        ),
         HostListFormat::Table => {
             let mut table = Table::new();
             table.load_style(UTF8_FULL).set_header([
@@ -499,7 +535,7 @@ fn run_resources(
 #[allow(clippy::too_many_arguments)]
 fn run_commands(
     catalog: &HostCatalog,
-    query: Option<&str>,
+    search: Option<&str>,
     target: Option<&str>,
     operation: Option<&str>,
     risk: Option<&str>,
@@ -508,7 +544,9 @@ fn run_commands(
     category: Option<&str>,
     resource: Option<&str>,
     format: HostListFormat,
+    query: Option<&str>,
 ) -> std::result::Result<(), HostFailure> {
+    reject_query_unless_json(query, matches!(format, HostListFormat::Json))?;
     validate_filter(
         target,
         &["execution", "host-admin", "service", "client"],
@@ -536,12 +574,12 @@ fn run_commands(
         &["none", "interactive", "signed-policy"],
         "approval",
     )?;
-    let query = query.map(str::to_lowercase);
+    let search = search.map(str::to_lowercase);
     let commands: Vec<&HostCatalogCommand> = catalog
         .commands
         .iter()
         .filter(|command| {
-            query.as_ref().is_none_or(|needle| {
+            search.as_ref().is_none_or(|needle| {
                 command.name.to_lowercase().contains(needle)
                     || command.capability.to_lowercase().contains(needle)
                     || command.summary.to_lowercase().contains(needle)
@@ -556,14 +594,17 @@ fn run_commands(
         .collect();
 
     match format {
-        HostListFormat::Json => print_json(&json!({
-            "schemaVersion": 1,
-            "ok": true,
-            "action": "commands",
-            "catalogHash": catalog.catalog_hash,
-            "count": commands.len(),
-            "commands": commands,
-        })),
+        HostListFormat::Json => print_projected(
+            &json!({
+                "schemaVersion": 1,
+                "ok": true,
+                "action": "commands",
+                "catalogHash": catalog.catalog_hash,
+                "count": commands.len(),
+                "commands": commands,
+            }),
+            query,
+        ),
         HostListFormat::Table => {
             let mut table = Table::new();
             table.load_style(UTF8_FULL).set_header([
@@ -617,13 +658,32 @@ fn find_command<'a>(
         .iter()
         .find(|command| command.name == name)
         .ok_or_else(|| {
-            let suggestions: Vec<&str> = catalog
+            let mut suggestions: Vec<&str> = catalog
                 .commands
                 .iter()
                 .filter(|command| command.name.contains(name) || name.contains(&command.name))
                 .take(5)
                 .map(|command| command.name.as_str())
                 .collect();
+            if suggestions.len() < 5 {
+                // Fill remaining slots with the closest names by edit
+                // distance so a transposition or one-off typo still
+                // surfaces a useful "did you mean".
+                let mut scored: Vec<(usize, &str)> = catalog
+                    .commands
+                    .iter()
+                    .filter(|command| !suggestions.contains(&command.name.as_str()))
+                    .map(|command| (edit_distance(name, &command.name), command.name.as_str()))
+                    .filter(|(distance, _)| *distance <= suggestion_threshold(name))
+                    .collect();
+                scored.sort();
+                suggestions.extend(
+                    scored
+                        .into_iter()
+                        .take(5 - suggestions.len())
+                        .map(|(_, command_name)| command_name),
+                );
+            }
             HostFailure::validation(
                 "unknown_command",
                 format!("Headless RPC command `{name}` is not in the embedded catalog"),
@@ -632,34 +692,64 @@ fn find_command<'a>(
         })
 }
 
+/// How far a candidate may drift from the typed name and still count as a
+/// "did you mean" — scales with name length so short names stay strict.
+fn suggestion_threshold(name: &str) -> usize {
+    (name.len() / 3).max(2)
+}
+
+/// Classic Levenshtein distance over bytes. Command names are ASCII
+/// snake_case, so byte-level distance is sufficient.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let a = a.as_bytes();
+    let b = b.as_bytes();
+    let mut previous: Vec<usize> = (0..=b.len()).collect();
+    let mut current = vec![0; b.len() + 1];
+    for (i, &ca) in a.iter().enumerate() {
+        current[0] = i + 1;
+        for (j, &cb) in b.iter().enumerate() {
+            current[j + 1] = (previous[j] + usize::from(ca != cb))
+                .min(previous[j + 1] + 1)
+                .min(current[j] + 1);
+        }
+        std::mem::swap(&mut previous, &mut current);
+    }
+    previous[b.len()]
+}
+
 fn run_schema(
     catalog: &HostCatalog,
     name: &str,
     format: HostSchemaFormat,
+    query: Option<&str>,
 ) -> std::result::Result<(), HostFailure> {
+    reject_query_unless_json(query, matches!(format, HostSchemaFormat::Json))?;
     let command = find_command(catalog, name)?;
     match format {
-        HostSchemaFormat::Json => print_json(&json!({
-            "schemaVersion": 1,
-            "ok": true,
-            "action": "schema",
-            "rpcCommand": name,
-            "inputSchema": command.input_schema,
-            "inputSchemaSource": command.input_schema_source,
-            "outputSchema": command.output_schema,
-            "outputSchemaSource": command.output_schema_source,
-            "outputTyped": command.output_typed,
-            "meta": {
-                "category": command.category,
-                "resource": command.resource,
-                "target": command.target,
-                "operation": command.operation,
-                "capability": command.capability,
-                "risk": command.risk,
-                "approval": command.approval,
-                "idempotency": command.idempotency,
-            }
-        })),
+        HostSchemaFormat::Json => print_projected(
+            &json!({
+                "schemaVersion": 1,
+                "ok": true,
+                "action": "schema",
+                "rpcCommand": name,
+                "inputSchema": command.input_schema,
+                "inputSchemaSource": command.input_schema_source,
+                "outputSchema": command.output_schema,
+                "outputSchemaSource": command.output_schema_source,
+                "outputTyped": command.output_typed,
+                "meta": {
+                    "category": command.category,
+                    "resource": command.resource,
+                    "target": command.target,
+                    "operation": command.operation,
+                    "capability": command.capability,
+                    "risk": command.risk,
+                    "approval": command.approval,
+                    "idempotency": command.idempotency,
+                }
+            }),
+            query,
+        ),
         HostSchemaFormat::Human => {
             println!("{}", command.name);
             println!("  {}", command.description);
@@ -699,28 +789,26 @@ fn run_call(
     config: &HostConfig,
     name: &str,
     data: Option<&str>,
+    fields: &[String],
+    fields_json: &[String],
     explicit_idempotency_key: Option<&str>,
     dry_run: bool,
     no_wait: bool,
+    paginate: bool,
     strict_output: bool,
     timeout_seconds: u64,
     format: HostCallFormat,
+    query: Option<&str>,
     ui: &mut RuntimeUi,
 ) -> std::result::Result<(), HostFailure> {
     let command = find_command(catalog, name)?;
-    let body_bytes = read_data(data)?;
-    let body: Value = serde_json::from_slice(&body_bytes).map_err(|error| {
-        HostFailure::validation(
-            "invalid_json",
-            format!("request body is not valid UTF-8 JSON: {error}"),
-        )
-    })?;
+    let (body, body_bytes) = build_request_body(data, fields, fields_json)?;
     validate_body(command, &body)?;
     let idempotency_key = resolve_idempotency_key(command, explicit_idempotency_key)?;
 
     if dry_run {
         let body_hash = hex::encode(Sha256::digest(&body_bytes));
-        return print_json(&json!({
+        return print_projected(&json!({
             "schemaVersion": 1,
             "ok": true,
             "action": "call",
@@ -743,7 +831,7 @@ fn run_call(
                 "idempotencyKeyGenerated": command.idempotency == "required" && explicit_idempotency_key.is_none(),
                 "outputTyped": command.output_typed,
             }
-        }));
+        }), query);
     }
 
     require_confirmation(command, ui)?;
@@ -804,7 +892,9 @@ fn run_call(
                     idempotency_key.as_deref(),
                     last_operation_id.as_deref(),
                     None,
+                    None,
                     format,
+                    query,
                 );
             }
             if Instant::now() >= deadline {
@@ -831,17 +921,266 @@ fn run_call(
                 output_validation.violations.join("; ")
             );
         }
+        let mut body_out = outcome.body;
+        let mut pages = None;
+        if paginate {
+            let plan = pagination_plan(command)?.ok_or_else(|| {
+                HostFailure::validation(
+                    "pagination_unsupported",
+                    format!(
+                        "Headless command `{name}` does not declare a followable page token \
+                         (pageToken→nextPageToken or cursor→nextCursor); drop --paginate or \
+                         page through it manually"
+                    ),
+                )
+            })?;
+            let mut count = 1_u64;
+            let mut last_sent: Option<String> = None;
+            loop {
+                let next = body_out
+                    .get(plan.continuation_field)
+                    .and_then(Value::as_str)
+                    .filter(|token| !token.is_empty())
+                    .map(str::to_owned);
+                let Some(next) = next else { break };
+                if last_sent.as_deref() == Some(next.as_str()) {
+                    return Err(HostFailure::new(
+                        "server",
+                        "pagination_stalled",
+                        "the Headless server returned the same page token twice",
+                    )
+                    .with_exit(6)
+                    .with_details(json!({ "token": next, "pagesFetched": count })));
+                }
+                if Instant::now() >= deadline {
+                    return Err(HostFailure::new(
+                        "timeout",
+                        "pagination_timeout",
+                        "pagination did not finish within --timeout-seconds",
+                    )
+                    .with_exit(5)
+                    .retryable()
+                    .with_details(json!({ "pagesFetched": count })));
+                }
+                let mut page_body = body.clone();
+                page_body[plan.request_field] = json!(next);
+                last_sent = Some(next);
+                let page = post_rpc_with_retry(
+                    &agent,
+                    &resolved,
+                    &token,
+                    name,
+                    &page_body,
+                    idempotency_key.as_deref(),
+                )?;
+                if page.status == 202 {
+                    return Err(HostFailure::new(
+                        "server",
+                        "pagination_unexpected_operation",
+                        "a page fetch returned a durable operation instead of data",
+                    )
+                    .with_exit(6));
+                }
+                let page_validation =
+                    validate_completed_output(command, &page.body, strict_output)?;
+                if page_validation.status == "invalid" {
+                    eprintln!(
+                        "warning: Headless command `{name}` page {} violates its output contract: {}",
+                        count + 1,
+                        page_validation.violations.join("; ")
+                    );
+                }
+                merge_page(&mut body_out, &page.body, &plan)?;
+                count += 1;
+            }
+            pages = Some(count);
+        }
         return print_call_success(
             name,
             command,
             "completed",
-            outcome.body,
+            body_out,
             idempotency_key.as_deref(),
             last_operation_id.as_deref(),
             Some(&output_validation),
+            pages,
             format,
+            query,
         );
     }
+}
+
+/// Pagination conventions detectable from a command's declared schemas:
+/// the request field carrying the page token, the response field
+/// continuing the traversal, and the array property merged across pages.
+#[derive(Debug)]
+struct PaginationPlan {
+    request_field: &'static str,
+    continuation_field: &'static str,
+    list_field: String,
+}
+
+/// Inspect the command's input/output schemas for a supported
+/// `pageToken`→`nextPageToken` or `cursor`→`nextCursor` pair. Returns
+/// `None` when the pair is absent or the output schema is unknown; errors
+/// only when the pair exists but the list field cannot be determined.
+fn pagination_plan(
+    command: &HostCatalogCommand,
+) -> std::result::Result<Option<PaginationPlan>, HostFailure> {
+    let input_props = command
+        .input_schema
+        .get("properties")
+        .and_then(Value::as_object);
+    let output_props = command
+        .output_schema
+        .as_ref()
+        .and_then(|schema| schema.get("properties"))
+        .and_then(Value::as_object);
+    let (Some(input), Some(output)) = (input_props, output_props) else {
+        return Ok(None);
+    };
+    let (request_field, continuation_field) =
+        if input.contains_key("pageToken") && output.contains_key("nextPageToken") {
+            ("pageToken", "nextPageToken")
+        } else if input.contains_key("cursor") && output.contains_key("nextCursor") {
+            ("cursor", "nextCursor")
+        } else {
+            return Ok(None);
+        };
+    let arrays: Vec<&str> = output
+        .iter()
+        .filter(|(_, schema)| schema.get("type").and_then(Value::as_str) == Some("array"))
+        .map(|(key, _)| key.as_str())
+        .collect();
+    let list_field = if let Some(preferred) = ["items", "data", "runs"]
+        .iter()
+        .find(|name| arrays.iter().any(|array| array == *name))
+    {
+        (*preferred).to_string()
+    } else if arrays.len() == 1 {
+        arrays[0].to_string()
+    } else {
+        return Err(HostFailure::validation(
+            "pagination_ambiguous_list",
+            format!(
+                "Headless command `{name}` paginates but its list field is ambiguous; \
+                 array fields: {}",
+                if arrays.is_empty() {
+                    "none declared".to_string()
+                } else {
+                    arrays.join(", ")
+                },
+                name = command.name
+            ),
+        ));
+    };
+    Ok(Some(PaginationPlan {
+        request_field,
+        continuation_field,
+        list_field,
+    }))
+}
+
+/// Merge one page into the accumulated result: the list field's array is
+/// concatenated; every other field takes the latest page's value (so
+/// `total`/`hasMore` reflect the final page and repeated metadata does not
+/// duplicate).
+fn merge_page(
+    accumulator: &mut Value,
+    page: &Value,
+    plan: &PaginationPlan,
+) -> std::result::Result<(), HostFailure> {
+    let (Some(acc), Some(page)) = (accumulator.as_object_mut(), page.as_object()) else {
+        return Err(HostFailure::new(
+            "server",
+            "pagination_non_object_page",
+            "a paginated Headless response was not a JSON object",
+        )
+        .with_exit(6));
+    };
+    for (key, value) in page {
+        if *key == plan.list_field {
+            if let (Some(dst), Some(src)) = (
+                acc.get_mut(key).and_then(Value::as_array_mut),
+                value.as_array(),
+            ) {
+                dst.extend(src.iter().cloned());
+                continue;
+            }
+        }
+        acc.insert(key.clone(), value.clone());
+    }
+    Ok(())
+}
+
+/// Assemble the request body for `host call`: `--data` (literal / stdin /
+/// `@file`) or `-f` string fields + `-F` JSON-typed fields merged onto an
+/// empty object. Clap already rejects mixing `--data` with field flags.
+/// Returns the parsed body plus the canonical bytes used for hashing and
+/// the request-size check.
+fn build_request_body(
+    data: Option<&str>,
+    fields: &[String],
+    fields_json: &[String],
+) -> std::result::Result<(Value, Vec<u8>), HostFailure> {
+    let body_bytes = read_data(data)?;
+    let mut body: Value = serde_json::from_slice(&body_bytes).map_err(|error| {
+        HostFailure::validation(
+            "invalid_json",
+            format!("request body is not valid UTF-8 JSON: {error}"),
+        )
+    })?;
+    if fields.is_empty() && fields_json.is_empty() {
+        return Ok((body, body_bytes));
+    }
+    let map = body.as_object_mut().ok_or_else(|| {
+        HostFailure::validation(
+            "fields_require_object_body",
+            "-f/--field and -F/--field-json require an object request body",
+        )
+    })?;
+    for (entries, typed) in [(fields, false), (fields_json, true)] {
+        for entry in entries {
+            let (key, raw) = entry.split_once('=').ok_or_else(|| {
+                HostFailure::validation(
+                    "invalid_field_syntax",
+                    format!("field `{entry}` must be KEY=VALUE"),
+                )
+            })?;
+            if key.is_empty() {
+                return Err(HostFailure::validation(
+                    "invalid_field_syntax",
+                    "field key must not be empty",
+                ));
+            }
+            let value = if typed {
+                serde_json::from_str(raw).map_err(|error| {
+                    HostFailure::validation(
+                        "invalid_field_json",
+                        format!("--field-json value for `{key}` is not valid JSON: {error}"),
+                    )
+                })?
+            } else {
+                Value::String(raw.to_string())
+            };
+            if map.insert(key.to_string(), value).is_some() {
+                return Err(HostFailure::validation(
+                    "duplicate_field_key",
+                    format!("field `{key}` was set more than once"),
+                ));
+            }
+        }
+    }
+    let bytes = serde_json::to_vec(&body).map_err(|error| {
+        HostFailure::new("server", "serialize_body", error.to_string())
+    })?;
+    if bytes.len() > MAX_REQUEST_BYTES {
+        return Err(HostFailure::validation(
+            "request_body_too_large",
+            format!("request body exceeds the {MAX_REQUEST_BYTES}-byte Headless limit"),
+        ));
+    }
+    Ok((body, bytes))
 }
 
 fn read_data(data: Option<&str>) -> std::result::Result<Vec<u8>, HostFailure> {
@@ -1485,28 +1824,34 @@ fn print_call_success(
     idempotency_key: Option<&str>,
     operation_id: Option<&str>,
     output_validation: Option<&OutputValidation>,
+    pages: Option<u64>,
     format: HostCallFormat,
+    query: Option<&str>,
 ) -> std::result::Result<(), HostFailure> {
     match format {
-        HostCallFormat::Raw => print_json(&data),
-        HostCallFormat::Json => print_json(&json!({
-            "schemaVersion": 1,
-            "ok": true,
-            "action": "call",
-            "rpcCommand": name,
-            "state": state,
-            "data": data,
-            "meta": {
-                "category": command.category,
-                "resource": command.resource,
-                "risk": command.risk,
-                "approval": command.approval,
-                "outputTyped": command.output_typed,
-                "outputValidation": output_validation,
-                "idempotencyKey": idempotency_key,
-                "operationId": operation_id,
-            }
-        })),
+        HostCallFormat::Raw => print_projected(&data, query),
+        HostCallFormat::Json => print_projected(
+            &json!({
+                "schemaVersion": 1,
+                "ok": true,
+                "action": "call",
+                "rpcCommand": name,
+                "state": state,
+                "data": data,
+                "meta": {
+                    "category": command.category,
+                    "resource": command.resource,
+                    "risk": command.risk,
+                    "approval": command.approval,
+                    "outputTyped": command.output_typed,
+                    "outputValidation": output_validation,
+                    "idempotencyKey": idempotency_key,
+                    "operationId": operation_id,
+                    "pages": pages,
+                }
+            }),
+            query,
+        ),
     }
 }
 
@@ -1515,8 +1860,56 @@ fn run_doctor(
     config: &HostConfig,
     offline: bool,
     format: HostSchemaFormat,
+    query: Option<&str>,
 ) -> std::result::Result<(), HostFailure> {
-    let resolved = resolve_config(config)?;
+    reject_query_unless_json(query, matches!(format, HostSchemaFormat::Json))?;
+    let (checks, terminal) = probe_host_plane(catalog, config, offline);
+    if let Some(failure) = terminal {
+        return Err(failure);
+    }
+    let ok = checks
+        .iter()
+        .all(|check| check.get("status").and_then(Value::as_str) != Some("fail"));
+    if !ok {
+        return Err(HostFailure::configuration(
+            "doctor_failed",
+            "one or more local Headless checks failed",
+        )
+        .with_details(json!({"checks": checks})));
+    }
+    match format {
+        HostSchemaFormat::Json => print_projected(
+            &json!({
+                "schemaVersion":1,"ok":true,"action":"doctor","offline":offline,"checks":checks
+            }),
+            query,
+        ),
+        HostSchemaFormat::Human => {
+            for check in checks {
+                println!(
+                    "[{:<4}] {}: {}",
+                    check["status"].as_str().unwrap_or("?"),
+                    check["name"].as_str().unwrap_or("check"),
+                    check["detail"].as_str().unwrap_or("")
+                );
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Collect the doctor checks without printing — shared by `host doctor`
+/// and the top-level `cognia status` overview. Returns the checks gathered
+/// so far plus the terminal failure (if any) that aborted the probe.
+pub(crate) fn probe_host_plane(
+    catalog: &HostCatalog,
+    config: &HostConfig,
+    offline: bool,
+) -> (Vec<Value>, Option<HostFailure>) {
+    let resolved = match resolve_config(config) {
+        Ok(resolved) => resolved,
+        Err(failure) => return (Vec::new(), Some(failure)),
+    };
     let credential_source = if let Some(token) = std::env::var_os("COGNIA_SERVICE_TOKEN") {
         let valid = token
             .into_string()
@@ -1536,48 +1929,40 @@ fn run_doctor(
         credential_source,
     ];
     if !offline {
-        let agent = build_agent(&resolved)?;
-        checks.push(probe_json(&agent, &resolved, "healthz", Some(catalog))?);
-        checks.push(probe_json(&agent, &resolved, "readyz", None)?);
-        let token = resolve_service_token(&resolved)?;
-        let safe = find_command(catalog, "host_capabilities")?;
-        validate_body(safe, &json!({}))?;
-        post_rpc_with_retry(
+        let agent = match build_agent(&resolved) {
+            Ok(agent) => agent,
+            Err(failure) => return (checks, Some(failure)),
+        };
+        for (path, expected) in [("healthz", Some(catalog)), ("readyz", None)] {
+            match probe_json(&agent, &resolved, path, expected) {
+                Ok(check) => checks.push(check),
+                Err(failure) => return (checks, Some(failure)),
+            }
+        }
+        let token = match resolve_service_token(&resolved) {
+            Ok(token) => token,
+            Err(failure) => return (checks, Some(failure)),
+        };
+        let safe = match find_command(catalog, "host_capabilities") {
+            Ok(command) => command,
+            Err(failure) => return (checks, Some(failure)),
+        };
+        if let Err(failure) = validate_body(safe, &json!({})) {
+            return (checks, Some(failure));
+        }
+        if let Err(failure) = post_rpc_with_retry(
             &agent,
             &resolved,
             &token,
             "host_capabilities",
             &json!({}),
             None,
-        )?;
+        ) {
+            return (checks, Some(failure));
+        }
         checks.push(json!({"name":"authenticated-rpc","status":"ok","detail":"host_capabilities"}));
     }
-    let ok = checks
-        .iter()
-        .all(|check| check.get("status").and_then(Value::as_str) != Some("fail"));
-    if !ok {
-        return Err(HostFailure::configuration(
-            "doctor_failed",
-            "one or more local Headless checks failed",
-        )
-        .with_details(json!({"checks": checks})));
-    }
-    match format {
-        HostSchemaFormat::Json => print_json(&json!({
-            "schemaVersion":1,"ok":true,"action":"doctor","offline":offline,"checks":checks
-        })),
-        HostSchemaFormat::Human => {
-            for check in checks {
-                println!(
-                    "[{:<4}] {}: {}",
-                    check["status"].as_str().unwrap_or("?"),
-                    check["name"].as_str().unwrap_or("check"),
-                    check["detail"].as_str().unwrap_or("")
-                );
-            }
-            Ok(())
-        }
-    }
+    (checks, None)
 }
 
 fn probe_json(
@@ -1655,9 +2040,16 @@ fn run_events(
     since: Option<u64>,
     event_filters: &[String],
     max_events: Option<u64>,
+    query: Option<&str>,
 ) -> std::result::Result<(), HostFailure> {
     if max_events == Some(0) {
         return Ok(());
+    }
+    // Reject a malformed expression before the socket opens — projection
+    // errors mid-stream would otherwise surface only after reconnects.
+    if let Some(expression) = query {
+        crate::shared::json_path::validate(expression)
+            .map_err(|message| HostFailure::validation("invalid_query", message))?;
     }
     let resolved = resolve_config(config)?;
     let connector = build_tls_connector(&resolved.ca_cert)?;
@@ -1671,6 +2063,7 @@ fn run_events(
     let mut cursor = since;
     let mut emitted = 0_u64;
     let mut failures = 0_u8;
+    let mut last_failure: Option<HostFailure> = None;
     while !stop.load(Ordering::SeqCst) {
         match stream_events_once(
             &resolved,
@@ -1679,6 +2072,7 @@ fn run_events(
             cursor,
             &filters,
             max_events.map(|max| max.saturating_sub(emitted)),
+            query,
             &stop,
         ) {
             Ok(StreamResult::Stopped) => return Ok(()),
@@ -1695,15 +2089,27 @@ fn run_events(
                 emitted += count;
                 failures = if count > 0 { 1 } else { failures + 1 };
             }
-            Err(failure) if failure.error_type == "resync" => return Err(failure),
-            Err(_) => failures += 1,
+            // Only transport failures earn a reconnect — a deterministic
+            // protocol, configuration, or server error must surface
+            // immediately instead of being retried and masked.
+            Err(failure) if is_retryable_stream_failure(&failure) => {
+                failures += 1;
+                last_failure = Some(failure);
+            }
+            Err(failure) => return Err(failure),
         }
         if failures >= 3 {
             return Err(HostFailure::transport(
                 "event_reconnect_exhausted",
                 "the Headless event stream failed three consecutive times",
             )
-            .with_details(json!({"cursor": cursor})));
+            .with_details(json!({
+                "cursor": cursor,
+                "lastError": last_failure.map(|failure| json!({
+                    "code": failure.code,
+                    "message": failure.message,
+                })),
+            })));
         }
         thread::sleep(Duration::from_millis(250 * u64::from(failures.max(1))));
     }
@@ -1716,6 +2122,14 @@ enum StreamResult {
     Disconnected { last_seq: Option<u64>, count: u64 },
 }
 
+/// Which stream failures earn a reconnect: only transport errors are
+/// transient. `resync`, `server`, `configuration`, and authentication
+/// failures are deterministic — retrying them only masks the real error.
+fn is_retryable_stream_failure(failure: &HostFailure) -> bool {
+    failure.error_type == "transport"
+}
+
+#[allow(clippy::too_many_arguments)]
 fn stream_events_once(
     resolved: &ResolvedConfig,
     token: &str,
@@ -1723,6 +2137,7 @@ fn stream_events_once(
     since: Option<u64>,
     filters: &HashSet<&str>,
     remaining: Option<u64>,
+    query: Option<&str>,
     stop: &AtomicBool,
 ) -> std::result::Result<StreamResult, HostFailure> {
     let host = resolved.base_url.host_str().ok_or_else(|| {
@@ -1796,10 +2211,25 @@ fn stream_events_once(
                             last_seq = Some(seq);
                         }
                         if filters.is_empty() || filters.contains(event_type) {
-                            println!(
-                                "{}",
-                                serde_json::to_string(&frame).unwrap_or_else(|_| frame.to_string())
-                            );
+                            let line = match query {
+                                None => serde_json::to_string(&frame)
+                                    .unwrap_or_else(|_| frame.to_string()),
+                                Some(expression) => {
+                                    let selected =
+                                        crate::shared::json_path::project(&frame, expression)
+                                            .map_err(|message| {
+                                                HostFailure::new(
+                                                    "server",
+                                                    "event_projection_failed",
+                                                    message,
+                                                )
+                                                .with_exit(6)
+                                            })?;
+                                    serde_json::to_string(&selected)
+                                        .unwrap_or_else(|_| selected.to_string())
+                                }
+                            };
+                            println!("{line}");
                             count += 1;
                             if remaining.is_some_and(|limit| count >= limit) {
                                 return Ok(StreamResult::LimitReached { last_seq, count });
@@ -2085,6 +2515,33 @@ fn print_json(value: &Value) -> std::result::Result<(), HostFailure> {
         HostFailure::new("server", "json_serialization_failed", error.to_string())
     })?;
     println!("{output}");
+    Ok(())
+}
+
+/// Emit a JSON document, projected through `--query` when one was given.
+fn print_projected(document: &Value, query: Option<&str>) -> std::result::Result<(), HostFailure> {
+    match query {
+        None => print_json(document),
+        Some(expression) => {
+            let selected = crate::shared::json_path::project(document, expression)
+                .map_err(|message| HostFailure::validation("invalid_query", message))?;
+            print_json(&selected)
+        }
+    }
+}
+
+/// `--query` only makes sense where JSON is emitted; reject it on the
+/// human/table formats up front rather than silently ignoring it.
+fn reject_query_unless_json(
+    query: Option<&str>,
+    json_format: bool,
+) -> std::result::Result<(), HostFailure> {
+    if query.is_some() && !json_format {
+        return Err(HostFailure::validation(
+            "select_requires_json",
+            "--query can only be used with a JSON output format",
+        ));
+    }
     Ok(())
 }
 
@@ -2723,5 +3180,246 @@ mod tests {
         assert_eq!(error.error_type, "transport");
         assert_eq!(error.code, "rpc_transport_failed");
         server.handle.join().expect("TLS server");
+    }
+
+    #[test]
+    fn only_transport_stream_failures_earn_reconnects() {
+        let transport = HostFailure::transport("event_connect_failed", "refused");
+        assert!(is_retryable_stream_failure(&transport));
+        for failure in [
+            HostFailure::new("resync", "resync_required", "cursor outside retention"),
+            HostFailure::new("server", "invalid_event_frame", "bad JSON"),
+            HostFailure::configuration("signal_handler_failed", "no handler"),
+            HostFailure::authentication("invalid_service_token", "expired"),
+        ] {
+            assert!(
+                !is_retryable_stream_failure(&failure),
+                "{} must surface immediately",
+                failure.code
+            );
+        }
+    }
+
+    fn catalog_with(names: &[&str]) -> HostCatalog {
+        HostCatalog {
+            schema_version: 1,
+            catalog_hash: "0".repeat(64),
+            categories: vec![HostCatalogCategory {
+                id: "system".into(),
+                title: "System".into(),
+                description: String::new(),
+                skill: "system.md".into(),
+            }],
+            resources: vec![HostCatalogResource {
+                id: "host".into(),
+                title: "Host".into(),
+                category: "system".into(),
+            }],
+            commands: names
+                .iter()
+                .map(|name| HostCatalogCommand {
+                    name: (*name).to_string(),
+                    category: "system".into(),
+                    resource: "host".into(),
+                    target: "host-admin".into(),
+                    operation: "read".into(),
+                    capability: "host.read".into(),
+                    risk: "low".into(),
+                    approval: "none".into(),
+                    idempotency: "none".into(),
+                    summary: String::new(),
+                    description: String::new(),
+                    input_schema_source: "test".into(),
+                    input_schema: json!({"type": "object"}),
+                    output_schema_source: None,
+                    output_schema: None,
+                    output_typed: false,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn edit_distance_counts_substitutions_inserts_and_deletes() {
+        assert_eq!(edit_distance("session_list", "session_list"), 0);
+        assert_eq!(edit_distance("session_lst", "session_list"), 1);
+        assert_eq!(edit_distance("session_lsit", "session_list"), 2);
+        assert_eq!(edit_distance("abc", "def"), 3);
+    }
+
+    #[test]
+    fn find_command_suggests_close_typo_matches() {
+        let catalog = catalog_with(&[
+            "session_list",
+            "session_get",
+            "host_capabilities",
+            "workspace_scan",
+        ]);
+        // A one-character deletion no longer satisfies substring matching
+        // for short names — edit distance should still surface the intent.
+        let error = find_command(&catalog, "sessiion_list").expect_err("typo");
+        assert_eq!(error.code, "unknown_command");
+        let suggestions = error.details["suggestions"]
+            .as_array()
+            .expect("suggestions array");
+        assert!(
+            suggestions
+                .iter()
+                .any(|entry| entry.as_str() == Some("session_list")),
+            "expected session_list in {suggestions:?}"
+        );
+        assert!(suggestions.len() <= 5);
+    }
+
+    #[test]
+    fn build_request_body_merges_string_and_json_fields() {
+        let (body, bytes) = build_request_body(
+            None,
+            &["title=hello".to_string()],
+            &["count=3".to_string(), "enabled=true".to_string()],
+        )
+        .expect("merged body");
+        assert_eq!(body, json!({"title": "hello", "count": 3, "enabled": true}));
+        assert_eq!(bytes, serde_json::to_vec(&body).unwrap());
+    }
+
+    #[test]
+    fn build_request_body_rejects_bad_field_shapes() {
+        for (fields, code) in [
+            (vec!["no-equals".to_string()], "invalid_field_syntax"),
+            (vec!["=empty-key".to_string()], "invalid_field_syntax"),
+        ] {
+            let error = build_request_body(None, &fields, &[]).expect_err("rejected");
+            assert_eq!(error.code, code, "fields {fields:?}");
+        }
+        let error = build_request_body(None, &["a=1".to_string(), "a=2".to_string()], &[])
+            .expect_err("duplicate");
+        assert_eq!(error.code, "duplicate_field_key");
+        let error =
+            build_request_body(None, &[], &["n=not-json".to_string()]).expect_err("bad json");
+        assert_eq!(error.code, "invalid_field_json");
+        let error = build_request_body(Some("[1,2]"), &["a=b".to_string()], &[])
+            .expect_err("non-object body");
+        assert_eq!(error.code, "fields_require_object_body");
+    }
+
+    #[test]
+    fn build_request_body_merges_fields_into_data_object() {
+        // `run_call` relies on this when `--data` and field flags are
+        // combined programmatically (clap blocks it at the CLI).
+        let (body, _) = build_request_body(
+            Some(r#"{"keep": true}"#),
+            &["extra=x".to_string()],
+            &[],
+        )
+        .expect("merged");
+        assert_eq!(body, json!({"keep": true, "extra": "x"}));
+    }
+
+    fn command_with_schemas(name: &str, input: Value, output: Value) -> HostCatalogCommand {
+        HostCatalogCommand {
+            name: name.to_string(),
+            category: "system".into(),
+            resource: "host".into(),
+            target: "execution".into(),
+            operation: "read".into(),
+            capability: "host.read".into(),
+            risk: "low".into(),
+            approval: "none".into(),
+            idempotency: "none".into(),
+            summary: String::new(),
+            description: String::new(),
+            input_schema_source: "test".into(),
+            input_schema: input,
+            output_schema_source: Some("test".into()),
+            output_schema: Some(output),
+            output_typed: true,
+        }
+    }
+
+    #[test]
+    fn pagination_plan_detects_page_token_and_cursor_conventions() {
+        let page_token = command_with_schemas(
+            "session_list",
+            json!({"type": "object", "properties": {"pageToken": {"type": "string"}}}),
+            json!({"type": "object", "properties": {
+                "items": {"type": "array"},
+                "nextPageToken": {"type": "string"},
+            }}),
+        );
+        let plan = pagination_plan(&page_token)
+            .expect("plan")
+            .expect("supported");
+        assert_eq!(plan.request_field, "pageToken");
+        assert_eq!(plan.continuation_field, "nextPageToken");
+        assert_eq!(plan.list_field, "items");
+
+        let cursor = command_with_schemas(
+            "session_timeline",
+            json!({"type": "object", "properties": {"cursor": {"type": "string"}}}),
+            json!({"type": "object", "properties": {
+                "items": {"type": "array"},
+                "nextCursor": {"type": "string"},
+                "hasMore": {"type": "boolean"},
+            }}),
+        );
+        let plan = pagination_plan(&cursor).expect("plan").expect("supported");
+        assert_eq!(plan.request_field, "cursor");
+        assert_eq!(plan.continuation_field, "nextCursor");
+    }
+
+    #[test]
+    fn pagination_plan_returns_none_without_a_followable_pair() {
+        // Token on the request but nothing to continue from in the response.
+        let one_sided = command_with_schemas(
+            "memory_list",
+            json!({"type": "object", "properties": {"pageToken": {"type": "string"}}}),
+            json!({"type": "object", "properties": {"items": {"type": "array"}}}),
+        );
+        assert!(pagination_plan(&one_sided).expect("plan").is_none());
+        // No token fields at all.
+        let plain = command_with_schemas(
+            "host_ping",
+            json!({"type": "object", "properties": {}}),
+            json!({"type": "object", "properties": {"ok": {"type": "boolean"}}}),
+        );
+        assert!(pagination_plan(&plain).expect("plan").is_none());
+    }
+
+    #[test]
+    fn pagination_plan_errors_when_the_list_field_is_ambiguous() {
+        let ambiguous = command_with_schemas(
+            "environment_catalog_list",
+            json!({"type": "object", "properties": {"pageToken": {"type": "string"}}}),
+            json!({"type": "object", "properties": {
+                "egressPresets": {"type": "array"},
+                "rejected": {"type": "array"},
+                "nextPageToken": {"type": "string"},
+            }}),
+        );
+        let error = pagination_plan(&ambiguous).expect_err("ambiguous");
+        assert_eq!(error.code, "pagination_ambiguous_list");
+    }
+
+    #[test]
+    fn merge_page_concatenates_the_list_field_and_keeps_latest_scalars() {
+        let plan = PaginationPlan {
+            request_field: "pageToken",
+            continuation_field: "nextPageToken",
+            list_field: "items".to_string(),
+        };
+        let mut acc = json!({"items": [1, 2], "nextPageToken": "t1", "total": 5});
+        merge_page(
+            &mut acc,
+            &json!({"items": [3, 4], "nextPageToken": "t2", "total": 5}),
+            &plan,
+        )
+        .expect("merge");
+        assert_eq!(acc["items"], json!([1, 2, 3, 4]));
+        assert_eq!(acc["nextPageToken"], json!("t2"));
+
+        // A non-object page aborts rather than silently dropping data.
+        let error = merge_page(&mut acc, &json!([1]), &plan).expect_err("non-object");
+        assert_eq!(error.code, "pagination_non_object_page");
     }
 }

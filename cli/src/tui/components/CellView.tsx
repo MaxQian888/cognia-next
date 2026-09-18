@@ -13,7 +13,8 @@ import { useTheme } from "../theme/context"
 import { useRenderPrefs } from "../render/context"
 import { useElapsedSeconds } from "../render/use-elapsed-seconds"
 import { sanitizeCell } from "../render/sanitize-cell"
-import { diffFilePath, formatEditDiff } from "../markdown/diff"
+import { commandIsAutoApprovable } from "../../agent/command-approval"
+import { diffFilePath, formatEditDiff, tailDiffPreview } from "../markdown/diff"
 import { truncateToWidth } from "../markdown/width"
 import { langFromPath } from "../markdown/highlight"
 import { renderResultLines, toolResultLang } from "../format/result-render"
@@ -261,10 +262,18 @@ function ToolView({ cell, columns }: { cell: ToolCell; columns: number }) {
   const summaryDisplay = linkifyToolSummary(cell, summary)
   const diff = isDiffTool(cell.toolName) ? formatEditDiff(cell.toolName, cell.input) : []
   const diffLang = diff.length > 0 ? langFromPath(diffFilePath(cell.input) ?? "") : undefined
+  // A large diff keeps its tail, not its head — the newest content of a big
+  // write/edit lives at the end, and the card stays bounded.
+  const diffPreview = tailDiffPreview(diff)
   // One descriptor answers "what did this produce" for both TUI renderers and
   // for the web row, so the same call reads the same everywhere.
   const descriptor = describeToolResult(cell)
   const chip = descriptor && !isDetailDescriptor(descriptor) ? descriptor : null
+  // A read-only shell command that succeeded renders as a compact title-only
+  // card — the header already carries the command and the result-size chip, so
+  // an extra preview line is noise. Errors and unrecognized commands keep the
+  // detail row; expansion still reveals the full output.
+  const compactShell = cell.status === "done" && commandIsAutoApprovable(cell.toolName, cell.input)
   // A failure's first line, and the first line of a result whose header chip
   // only carries a size. Both land under the header where they have room.
   const detail =
@@ -273,6 +282,7 @@ function ToolView({ cell, columns }: { cell: ToolCell; columns: number }) {
       : cell.collapsed &&
           cell.status === "done" &&
           cell.result != null &&
+          !compactShell &&
           // A context tool's chip already says how much came back, and the first
           // line of a file or a match list adds nothing. Preview the tools whose
           // output IS the answer (a shell command, an MCP call) instead.
@@ -317,9 +327,14 @@ function ToolView({ cell, columns }: { cell: ToolCell; columns: number }) {
           <Text color={detail.tone === "error" ? theme.danger : theme.text}>↳ {detail.text}</Text>
         </Box>
       ) : null}
-      {diff.length > 0 ? (
+      {diffPreview.lines.length > 0 ? (
         <CardBody>
-          <DiffView diff={diff} lang={diffLang} />
+          {diffPreview.hidden > 0 ? (
+            <Text color={theme.muted} dimColor>
+              {`    ⋯ ${diffPreview.hidden} earlier line${diffPreview.hidden === 1 ? "" : "s"} truncated`}
+            </Text>
+          ) : null}
+          <DiffView diff={diffPreview.lines} lang={diffLang} />
         </CardBody>
       ) : null}
       {!cell.collapsed && diff.length === 0 && hasUsefulResult ? (

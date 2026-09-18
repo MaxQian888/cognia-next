@@ -61,6 +61,20 @@ describe("loadMcpServers", () => {
     expect(servers.map((s) => s.name).sort()).toEqual(["extra", "fs"])
   })
 
+  it("records each server's declaring file on `declaredBy` for tool_provenance", () => {
+    const cwd = "/proj"
+    const home = "/home"
+    const projectFile = path.join(cwd, ".mcp.json")
+    const homeFile = path.join(home, ".cognia", "mcp.json")
+    const fs = fakeFs({
+      [projectFile]: JSON.stringify({ mcpServers: { fs: { command: "x" } } }),
+      [homeFile]: JSON.stringify({ mcpServers: { extra: { command: "e" } } }),
+    })
+    const servers = loadMcpServers([cwd, home], fs)
+    expect(servers.find((s) => s.name === "fs")?.declaredBy).toBe(projectFile)
+    expect(servers.find((s) => s.name === "extra")?.declaredBy).toBe(homeFile)
+  })
+
   it("skips absent files", () => {
     expect(loadMcpServers(["/nowhere"], fakeFs({}))).toEqual([])
   })

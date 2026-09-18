@@ -85,7 +85,13 @@ export function classifyToolCommand(
 ): CommandClassification | null {
   const command = shellCommandOf(toolName, input)
   if (!command) return null
-  return classifyCommand(command)
+  // The call's own cwd anchors `cd` chains in the classifier — `cd / && rm -rf
+  // ./etc` must resolve `./etc` against `/`, not wherever the CLI was started.
+  const workdir =
+    input && typeof input === "object"
+      ? ((input as Record<string, unknown>).cwd ?? (input as Record<string, unknown>).workdir)
+      : undefined
+  return classifyCommand(command, { cwd: typeof workdir === "string" ? workdir : undefined })
 }
 
 /**

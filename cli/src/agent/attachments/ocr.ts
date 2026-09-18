@@ -1,23 +1,21 @@
 /**
- * Node-safe OCR runner for the CLI. Reuses `lib/ocr`'s `extract` with a
+ * Node-safe OCR runner for the CLI. Reuses `@cognia/ocr`'s `extract` with a
  * hand-built `ExtractDeps` (fresh registry holding only `anthropic-vision`,
  * injected credentials from the CLI's Anthropic key, cache disabled) so it
  * pulls in NO Dexie/Tauri/keyring code. Used as the PDF fallback when the
  * active model cannot accept a native PDF block.
  *
- * Import discipline: ONLY `extract` (`@/lib/ocr`), `createOcrRegistry`
- * (`@/lib/ocr/registry`), `anthropicVisionProvider`
- * (`@/lib/ocr/providers/anthropic-vision`), `DEFAULT_OCR_SETTINGS`
- * (`@/types/ocr`), and the null-cache factories (`@/lib/ocr/cache-contract` —
- * pure types plus no-op implementations, no Tauri/Dexie). Never `runtime.ts` /
- * `deps.ts` / `credentials.ts` / `cache.ts` / `lib/keyring` / `lib/db/*`
- * (Tauri/Dexie at module top level).
+ * Import discipline: ONLY `@cognia/ocr` subpaths — the pure, zero-`@/` core.
+ * Never `lib/ocr`'s index (its `extract` wrapper meters through
+ * `@/lib/db/session-usage` → Dexie), `runtime.ts` / `deps.ts` /
+ * `credentials.ts` / `cache.ts` / `lib/keyring` / `lib/db/*` (Tauri/Dexie at
+ * module top level).
  */
-import { createNullOcrCache, createNullOcrPageCache } from "@/lib/ocr/cache-contract"
-import { extract as realExtract, type ExtractDeps } from "@/lib/ocr"
-import { createOcrRegistry } from "@/lib/ocr/registry"
-import { anthropicVisionProvider } from "@/lib/ocr/providers/anthropic-vision"
-import { DEFAULT_OCR_SETTINGS, type OcrInput, type OcrResult } from "@/types/ocr"
+import { createNullOcrCache, createNullOcrPageCache } from "@cognia/ocr/cache-contract"
+import { extract as realExtract, type ExtractDeps } from "@cognia/ocr"
+import { createOcrRegistry } from "@cognia/ocr/registry"
+import { anthropicVisionProvider } from "@cognia/ocr/providers/anthropic-vision"
+import { DEFAULT_OCR_SETTINGS, type OcrInput, type OcrResult } from "@cognia/ocr/types"
 
 export interface OcrRunDeps {
   /** Resolves the Anthropic API key (from CLI config / env). */

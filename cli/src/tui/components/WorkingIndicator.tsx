@@ -16,7 +16,14 @@ import type { TurnStatus } from "../state/types"
 /** Verb rotation interval — slow enough to read each word. */
 const VERB_MS = 1800
 
-export function WorkingIndicator({ turnStatus }: { turnStatus: TurnStatus }) {
+export function WorkingIndicator({
+  turnStatus,
+  compacting,
+}: {
+  turnStatus: TurnStatus
+  /** The runtime reports it is compacting context — pin the verb on that. */
+  compacting?: boolean
+}) {
   const screenReader = useScreenReader()
   const t = useCliTranslations("cliUiCommon")
   const [tick, setTick] = useState(0)
@@ -32,7 +39,13 @@ export function WorkingIndicator({ turnStatus }: { turnStatus: TurnStatus }) {
 
   return (
     <Text>
-      {turnStatus === "aborting" ? t("stopping") : screenReader ? t("working") : spinnerVerb(tick)}
+      {turnStatus === "aborting"
+        ? t("stopping")
+        : compacting
+          ? t("compacting")
+          : screenReader
+            ? t("working")
+            : spinnerVerb(tick)}
     </Text>
   )
 }

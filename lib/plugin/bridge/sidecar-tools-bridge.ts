@@ -71,6 +71,14 @@ export interface PluginToolManifestEntry {
    * where the 120s safety net would otherwise sever a still-valid call.
    */
   timeoutMs?: number
+  /**
+   * Absolute path of the manifest that declared this tool (`<plugin
+   * root>/plugin.json`). Provenance metadata only — the hook payload's
+   * `tool_provenance.declared_by` reads it; nothing else does. Absent on
+   * synthetic entries (ask_user, dispatch_agent, terminal dock), which the
+   * host declares rather than a plugin manifest.
+   */
+  manifestPath?: string
 }
 
 export interface BuildPluginToolsManifestOptions {
@@ -197,6 +205,8 @@ export function buildPluginToolsManifest(
         // Undefined fields stay off the wire — `Object.keys` parity with the
         // historical shape matters (the IPC surface is tested on key lists).
         ...(tool.definition.access ? { access: tool.definition.access } : {}),
+        // `declared_by` for hook tool_provenance — the manifest on disk.
+        ...(plugin.path ? { manifestPath: `${plugin.path}/plugin.json` } : {}),
         ...(tool.definition.pathParams?.length ? { pathParams: tool.definition.pathParams } : {}),
         ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       })

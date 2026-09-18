@@ -49,6 +49,15 @@ export interface CommandSegment {
    * a read-only fetch, because the write was invisible to the classifier.
    */
   redirects: CommandRedirect[]
+  /**
+   * Identity of the shell scope the segment runs in: `0` is the command's own
+   * scope; every `$(...)`, backtick, or `(...)` span is its own scope because
+   * a `cd` inside one does not move the enclosing shell's working directory.
+   * Sibling substitutions get different scope ids.
+   */
+  scope: number
+  /** Scope the substitution was written in — its working directory at spawn. */
+  scopeParent: number
 }
 
 /** `NAME=value` leading env-assignment prefix (skipped to find the head). */
@@ -498,7 +507,13 @@ export function canonicalizeCommand(command: string): string {
   return out.replace(/\s+/g, " ").trim()
 }
 
-function collect(command: string, out: CommandSegment[], depth: number): void {
+function collect(
+  command: string,
+  out: CommandSegment[],
+  depth: number,
+  scope: number,
+  nextScope: { id: number }
+): void {
   if (depth > MAX_DEPTH) return
   for (const raw of splitTopLevel(command)) {
     const { inner, stripped } = extractSubstitutions(raw)
@@ -531,10 +546,28 @@ function collect(command: string, out: CommandSegment[], depth: number): void {
     const headToken = words[idx]
     if (headToken !== undefined) {
       const head = normalizeHead(headToken)
-      if (head) out.push({ head, raw: raw.trim(), args: words.slice(idx + 1), redirects })
+      if (head) {
+        out.push({
+          head,
+          raw: raw.trim(),
+          args: words.slice(idx + 1),
+          redirects,
+          scope,
+          scopeParent: scope,
+        })
+      }
     }
     for (const sub of inner) {
-      if (sub.trim()) collect(sub, out, depth + 1)
+      if (!sub.trim()) continue
+      const child = nextScope.id++
+      const start = out.length
+      collect(sub, out, depth + 1, child, nextScope)
+      // Segments added directly under `child` (scope === child) point their
+      // parent at this scope; deeper descendants keep their own parents.
+      for (let j = start; j < out.length; j++) {
+        const seg = out[j]
+        if (seg.scope === child) seg.scopeParent = scope
+      }
     }
   }
 }
@@ -547,6 +580,6 @@ function collect(command: string, out: CommandSegment[], depth: number): void {
 export function splitCommandSegments(command: string): CommandSegment[] {
   if (!command || !command.trim()) return []
   const out: CommandSegment[] = []
-  collect(command, out, 0)
+  collect(command, out, 0, 0, { id: 1 })
   return out
 }

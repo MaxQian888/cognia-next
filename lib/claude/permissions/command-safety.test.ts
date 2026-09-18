@@ -140,6 +140,60 @@ describe("redirects gate the verdict", () => {
   })
 })
 
+describe("cd chains re-anchor relative paths", () => {
+  it("denies a critical relative target after cd to a critical dir", () => {
+    const v = classifyCommand("cd / && rm -rf ./etc")
+    expect(v.verdict).toBe("deny")
+    expect(v.matched).toBe("rm")
+  })
+
+  it("denies inside a parenthesised subshell too", () => {
+    expect(classifyCommand("(cd / && rm -rf ./etc)").verdict).toBe("deny")
+    expect(classifyCommand("echo $(cd /usr && rm -rf ./lib)").verdict).toBe("deny")
+  })
+
+  it("does not let a subshell cd move the outer shell", () => {
+    // `$(cd /)` runs in a child scope — the outer rm still sees opts.cwd.
+    const v = classifyCommand("echo $(cd /) && rm -rf ./etc", { cwd: "/repo" })
+    expect(v.verdict).toBe("ask")
+  })
+
+  it("still denies when the outer cd itself reaches a critical dir", () => {
+    const v = classifyCommand("cd / && echo $(cd /tmp) && rm -rf ./etc")
+    expect(v.verdict).toBe("deny")
+  })
+
+  it("resolves relative rm targets against the tracked dir", () => {
+    expect(classifyCommand("cd /usr && rm -rf ./lib").verdict).toBe("deny")
+    expect(classifyCommand("cd /repo && rm -rf ./build").verdict).toBe("ask")
+  })
+
+  it("resolves .. chains against the tracked dir", () => {
+    expect(classifyCommand("cd /usr/local && rm -rf ../etc").verdict).toBe("deny")
+    expect(classifyCommand("cd /a/b && rm -rf ../c").verdict).toBe("ask")
+  })
+
+  it("uses the initial cwd when there is no cd", () => {
+    expect(classifyCommand("rm -rf ./etc", { cwd: "/" }).verdict).toBe("deny")
+    expect(classifyCommand("rm -rf ./etc", { cwd: "/repo" }).verdict).toBe("ask")
+  })
+
+  it("fails closed when the cd target is opaque", () => {
+    expect(classifyCommand("cd $DIR && rm -rf ./etc", { cwd: "/repo" }).verdict).toBe("ask")
+    expect(classifyCommand("cd $(pwd) && rm -rf ./etc", { cwd: "/repo" }).verdict).toBe("ask")
+    expect(classifyCommand("cd - && rm -rf ./etc", { cwd: "/repo" }).verdict).toBe("ask")
+  })
+
+  it("tracks cd under builtin/command wrappers", () => {
+    expect(classifyCommand("builtin cd / && rm -rf ./etc").verdict).toBe("deny")
+  })
+
+  it("allows a bare cd — it has no side effects of its own", () => {
+    expect(classifyCommand("cd /repo").verdict).toBe("allow")
+    expect(classifyCommand("cd /repo && ls").verdict).toBe("allow")
+  })
+})
+
 describe("respelt heads classify like the command they run", () => {
   it.each([
     "rm -rf /tmp/x",

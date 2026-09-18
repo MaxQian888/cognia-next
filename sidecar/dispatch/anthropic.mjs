@@ -927,6 +927,12 @@ export function dispatchAnthropic(
         // the renderer names the turn and it rides in on sendOptions.
         agentKind: sendOptions.agentKind,
         agentRef: sendOptions.agentRef,
+        // Session's plugin-tools manifest: resolves `mcp__cognia-plugin-tools__*`
+        // names back to their pluginId for the `tool_provenance` payload field.
+        pluginTools: sendOptions.pluginTools,
+        // Per-server `declared_by` locators for `mcp` tool_provenance — same
+        // keys as the `mcpServers` wire map.
+        mcpDeclaredBy: sendOptions.mcpDeclaredBy,
         executeNativeHandler: executeNativeHook,
         pendingPluginHookCalls,
         newId: () => randomUUID(),

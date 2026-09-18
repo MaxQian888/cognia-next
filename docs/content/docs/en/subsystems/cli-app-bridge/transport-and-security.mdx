@@ -1,6 +1,6 @@
 ---
 title: Transport and security
-description: Endpoint discovery, the complete 12-route catalog, per-launch authentication, route ownership, and WebView-backed request/response behavior.
+description: Endpoint discovery, the complete 22-route catalog, per-launch authentication, route ownership, and WebView-backed request/response behavior.
 ---
 
 # Transport and security
@@ -36,27 +36,38 @@ the file and rotates the token.
 
 ## Route catalog
 
-There are exactly **12** registered paths. A Rust characterization test in
-`src-tauri/src/cli_bridge/server.rs` locks this list and the router's route count.
+There are exactly **22** registered paths. A Rust characterization test in
+`src-tauri/src/cli_bridge/server.rs` locks this list and the router's route count. The wire prefix
+is `/api/dev/*` (stable, shared with the installed CLIs — it is not a debug-only gate).
 
 | Method and path | Consumer | Execution |
 | --- | --- | --- |
-| `GET /api/v1/dev/health` | both CLIs | Rust liveness response |
-| `GET /api/v1/dev/plugins/installed` | `cognia` | Privacy-safe plugin snapshot |
-| `POST /api/v1/dev/plugins/install` | `cognia` | Install bundle |
-| `POST /api/v1/dev/plugins/install-directory` | `cognia` | Install unpacked directory |
-| `POST /api/v1/dev/plugins/uninstall` | `cognia` | Remove plugin |
-| `POST /api/v1/dev/plugins/reload` | `cognia` | Reload or reinstall artifact |
-| `POST /api/v1/dev/acp/token` | `cognia` | Mint device-scope companion JWT for ACP |
-| `POST /api/v1/dev/sessions/handoff` | `cognia-agent` | Emit asynchronous renderer import event |
-| `POST /api/v1/dev/twin/context` | `cognia-agent` | Renderer round-trip |
-| `POST /api/v1/dev/teams/list` | `cognia-agent` | Renderer round-trip |
-| `POST /api/v1/dev/teams/run` | `cognia-agent` | Renderer round-trip |
-| `POST /api/v1/dev/teams/run-status` | `cognia-agent` | Renderer round-trip |
+| `GET /api/dev/health` | both CLIs | Rust liveness response |
+| `GET /api/dev/plugins/installed` | `cognia` | Privacy-safe plugin snapshot |
+| `POST /api/dev/plugins/install` | `cognia` | Install bundle |
+| `POST /api/dev/plugins/install-directory` | `cognia` | Install unpacked directory |
+| `POST /api/dev/plugins/uninstall` | `cognia` | Remove plugin |
+| `POST /api/dev/plugins/reload` | `cognia` | Reload or reinstall artifact |
+| `POST /api/dev/plugins/session-events` | `cognia` | Dev-session lifecycle events (64 KiB body cap) |
+| `POST /api/dev/acp/ticket` | `cognia` | Mint single-use Companion socket ticket for ACP |
+| `POST /api/dev/sessions/handoff` | `cognia-agent` | Emit asynchronous renderer import event |
+| `POST /api/dev/host-state/snapshot` | `cognia-agent` | Attach/session-state snapshot |
+| `POST /api/dev/host-state/submit` | `cognia-agent` | Attach/session-state submit |
+| `POST /api/dev/host-state/status` | `cognia-agent` | Attach/session-state status |
+| `GET /api/dev/host-state/events` | `cognia-agent` | Long-poll host event stream |
+| `GET /api/dev/host-state/agent-events` | `cognia-agent` | Long-poll agent event stream |
+| `POST /api/dev/twin/context` | `cognia-agent` | Renderer round-trip |
+| `POST /api/dev/teams/list` | `cognia-agent` | Renderer round-trip |
+| `POST /api/dev/teams/run` | `cognia-agent` | Renderer round-trip |
+| `POST /api/dev/teams/run-status` | `cognia-agent` | Renderer round-trip |
+| `GET /api/dev/provider-operations/manifest` | `cognia-agent` | Provider admin manifest (ADR-0163) |
+| `POST /api/dev/provider-operations/execute` | `cognia-agent` | Provider admin execution |
+| `POST /api/dev/gateway/route-ticket` | `cognia-agent` | Mint LLM-gateway route ticket |
+| `POST /api/dev/gateway/route-ticket/revoke` | `cognia-agent` | Revoke a route ticket |
 
-`cognia-agent` uses six paths; `cognia` uses seven. Health is the only shared path, so their union
-is 12. The installed-plugin projection deliberately excludes `runtime_state`, and twin context
-returns redacted prompt segments rather than raw source chunks.
+`cognia` uses eight paths (plugins, ACP ticket, and health); `cognia-agent` uses fifteen. Health is
+the only shared path, so their union is 22. The installed-plugin projection deliberately excludes
+`runtime_state`, and twin context returns redacted prompt segments rather than raw source chunks.
 
 ## Renderer request/response
 

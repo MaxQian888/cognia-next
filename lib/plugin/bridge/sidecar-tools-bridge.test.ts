@@ -138,9 +138,19 @@ describe("buildPluginToolsManifest", () => {
     })
     const [entry] = buildPluginToolsManifest()
     expect(Object.keys(entry).sort()).toEqual(
-      ["description", "jsonSchema", "name", "pluginId"].sort()
+      ["description", "jsonSchema", "manifestPath", "name", "pluginId"].sort()
     )
     expect("execute" in entry).toBe(false)
+  })
+
+  it("carries the declaring manifest path for tool_provenance, absent on synthetic entries", () => {
+    setStore({
+      p: makePlugin("p", { tools: [makeTool("t")] }),
+    })
+    const result = buildPluginToolsManifest()
+    expect(result.find((t) => t.name === "t")?.manifestPath).toBe("/plugins/p/plugin.json")
+    // ask_user is host-synthesized — no manifest declares it.
+    expect(result.find((t) => t.name === "ask_user")?.manifestPath).toBeUndefined()
   })
 
   it("preserves description and parametersSchema verbatim", () => {

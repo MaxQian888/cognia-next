@@ -84,13 +84,19 @@ export function createIntegrationsAPI(
       requirePermission(hasPermission, "integrations:read", "ctx.integrations.listSubscriptions")
       if (accountId && typeof accountId !== "string") {
         const binding = await resolveBotIntegrationBinding(pluginId, accountId)
-        return (
-          await listIntegrationSubscriptions(binding.account.pluginId, binding.account.id)
-        ).filter(
-          (subscription) =>
-            subscription.resourceKind === "repository" &&
-            subscription.resourceId?.toLowerCase() === binding.repository
+        const subscriptions = await listIntegrationSubscriptions(
+          binding.account.pluginId,
+          binding.account.id
         )
+        // A repository-scoped installation sees only its repository's
+        // subscriptions; other bindings are scoped by the bound account itself.
+        return binding.repository
+          ? subscriptions.filter(
+              (subscription) =>
+                subscription.resourceKind === "repository" &&
+                subscription.resourceId?.toLowerCase() === binding.repository
+            )
+          : subscriptions
       }
       return listIntegrationSubscriptions(pluginId, accountId)
     },
@@ -98,16 +104,18 @@ export function createIntegrationsAPI(
       requirePermission(hasPermission, "integrations:read", "ctx.integrations.listResources")
       if (typeof query.accountId !== "string") {
         const binding = await resolveBotIntegrationBinding(pluginId, query.accountId)
-        if (query.kind !== "repository")
+        if (binding.repository && query.kind !== "repository")
           throw new Error("Bot binding only permits scoped repository discovery")
         const page = await listIntegrationResources(binding.account.pluginId, {
           ...query,
           accountId: binding.account.id,
         })
-        return {
-          ...page,
-          items: page.items.filter((item) => item.id.toLowerCase() === binding.repository),
-        }
+        return binding.repository
+          ? {
+              ...page,
+              items: page.items.filter((item) => item.id.toLowerCase() === binding.repository),
+            }
+          : page
       }
       return listIntegrationResources(pluginId, { ...query, accountId: query.accountId })
     },
@@ -184,6 +192,12 @@ export function createIntegrationsAPI(
           throw new Error(
             "Bot binding authenticated requests are read-only; use executeAction for writes"
           )
+        }
+        // Raw authenticated requests stay repository-scoped: integrations
+        // without a repository boundary expose the structured action broker
+        // (`executeAction`) instead of arbitrary HTTP.
+        if (!binding.repository) {
+          throw new Error("Bot binding requests require a repository-scoped installation")
         }
         const url = new URL(input)
         const base = new URL(

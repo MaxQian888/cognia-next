@@ -98,6 +98,10 @@ For `http`/`webhook`, `mcp_tool`, `prompt`, and `agent`, Cognia:
 
 This gate runs before `fetch`, MCP, or model execution. It is not a best-effort logging filter.
 
+## Tool provenance
+
+Tool-scoped payloads (`PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, `PermissionDenied`) carry `tool_provenance`: `{ kind, source, declared_by }` naming the surface and artifact that declared the tool — `builtin` (`source: "cognia"`, `declared_by: "builtin-tools-data.json"`), `plugin` (`source` = the plugin id resolved from the session's tool manifest, `declared_by` = the plugin's `plugin.json` path), `mcp` (`source` = the MCP server name, `declared_by` = the config file / `"settings"` / `plugin:<id>` locator that declares it), or `agent` (`source` = the external agent id, for bare names on an external agent's own surface; `declared_by` is absent — the agent's own config is not ours). The field is metadata only — never tool arguments or secrets — and is absent when the event has no resolvable tool name, so hook scripts must tolerate it missing. A hook can therefore match policy on a tool's origin (for example, deny every tool from a given MCP server) instead of enumerating tool names. The bundled `tool-provenance-guard` built-in hook (default off) is one such consumer: `COGNIA_DENY_TOOL_PROVENANCE` selectors `kind` / `kind:source` / `kind:source:declared` deny matching calls.
+
 ## Model-backed Hooks
 
 Nested Hook work is isolated from the parent turn:

@@ -280,9 +280,12 @@ nativeMac("native macOS clipboard image formats", () => {
 
 it("selects wl-paste for Wayland and xclip for X11", () => {
   expect(
-    clipboardImageCommand("linux", "/tmp/out.png", { WAYLAND_DISPLAY: "wayland-0" })?.cmd
+    clipboardImageCommand("linux", "/tmp/out.png", {
+      WAYLAND_DISPLAY: "wayland-0",
+      NODE_ENV: "test",
+    })?.cmd
   ).toBe("wl-paste")
-  expect(clipboardImageCommand("linux", "/tmp/out.png", {})?.cmd).toBe("xclip")
+  expect(clipboardImageCommand("linux", "/tmp/out.png", { NODE_ENV: "test" })?.cmd).toBe("xclip")
 })
 it("waits for the streamed PNG to finish before checking the file", async () => {
   let finish: (() => void) | undefined

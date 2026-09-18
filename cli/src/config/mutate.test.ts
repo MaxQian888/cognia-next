@@ -586,6 +586,14 @@ describe("setStringArrayConfig", () => {
     expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({ provider: "openai" })
   })
 
+  it("writes a disabledTools deny-list", () => {
+    const m = memFs()
+    setStringArrayConfig(HOME, "disabledTools", ["bash", "mcp__github__push"], m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      disabledTools: ["bash", "mcp__github__push"],
+    })
+  })
+
   it("rejects a non-array key", () => {
     expect(() => setStringArrayConfig(HOME, "provider" as never, [], memFs().fsx)).toThrow(
       /unknown array key/

@@ -1,14 +1,15 @@
 ---
 title: CLI core & terminal UI
-description: main.rs — the clap-derive command tree, dispatch_plugin() router, and error conversion — plus the ui/ layer — RuntimeUi state, the Prompter trait with three implementations, indicatif spinners, the owo-colors palette, and color-eyre integration.
+description: cli.rs — the clap-derive command tree, dispatch_plugin() router, and error conversion — plus the ui/ layer — RuntimeUi state, the Prompter trait with three implementations, indicatif spinners, the owo-colors palette, and color-eyre integration.
 ---
 
 # CLI core & terminal UI
 
 <TLDR>
-  `main.rs` (`crates/cognia-cli/src/main.rs`) parses one clap-derive tree —
-  `Cli` → `TopCommand` (`plugin`, `acp`, `release-key`, `release-verify`) with a 14-variant
-  `PluginCommand` enum under `plugin` — resolves a `ColorMode`, builds a `RuntimeUi`
+  `main.rs` parses one clap-derive tree defined in `crates/cognia-cli/src/cli.rs` —
+  `Cli` → `TopCommand` (`plugin`, `pack`, `host`, `acp`, `logs`, `crash`, `release-key`,
+  `release-verify`, `status`, `open`, `completions`) with a 19-variant `PluginCommand`
+  enum under `plugin` — resolves a `ColorMode`, builds a `RuntimeUi`
   (`ui/runtime.rs`), and routes plugin commands through `dispatch_plugin()`.
   Every interactive touchpoint goes through the **`Prompter` trait**
   (`ui/prompter.rs`) with three implementations: `DialoguerPrompter` on a TTY,
@@ -39,7 +40,7 @@ description: main.rs — the clap-derive command tree, dispatch_plugin() router,
 ## The command tree
 
 ```rust
-// crates/cognia-cli/src/main.rs (abridged)
+// crates/cognia-cli/src/cli.rs (abridged)
 struct Cli {
     --color <auto|always|never>   // default auto
     --no-color                    // wins over --color
@@ -50,14 +51,21 @@ struct Cli {
 }
 
 enum TopCommand {
-    Plugin { #[command(subcommand)] command: PluginCommand },
+    Plugin { endpoint_file, #[command(subcommand)] command: PluginCommand },
+    Pack { #[command(subcommand)] command: PackCommand },
+    Host { server_url, data_dir, ca_cert, server_bin, #[command(subcommand)] command: HostCommand },
     Acp,
-    ReleaseKey { json: bool },
+    Logs { #[command(subcommand)] command: LogsCommand },
+    Crash { #[command(subcommand)] command: CrashCommand },
+    ReleaseKey { json },
     ReleaseVerify { artifact, checksums, artifact_name, signature, json },
+    Status { json, endpoint_file, server_url, data_dir, ca_cert, server_bin },
+    Open(OpenArgs),
+    Completions { shell },
 }
 ```
 
-The 14 `PluginCommand` variants and their dispatch sites in `dispatch_plugin()`:
+The 19 `PluginCommand` variants and their dispatch sites in `dispatch_plugin()`:
 
 | Variant | Flags | Dispatch |
 | --- | --- | --- |

@@ -100,6 +100,7 @@ export type SettingsFormField =
   | "systemPrompt"
   | "skillDirs"
   | "allowedTools"
+  | "disabledTools"
   | "customTheme"
   | "gitProtectedBranches"
   | "gitBaseBranch"
@@ -651,6 +652,16 @@ export function settingsSections(
         control: { type: "form", field: "allowedTools" },
         description: "Restrict the agent to an allow-list of tools (empty = all tools allowed).",
       },
+      {
+        id: "disabledTools",
+        label: "Disabled tools denylist…",
+        value: (config.disabledTools ?? []).length
+          ? `${config.disabledTools!.length} tools`
+          : "none",
+        control: { type: "form", field: "disabledTools" },
+        description:
+          "Tool names withheld from every turn (space-separated; empty = nothing disabled).",
+      },
       ...BUILTIN_TOOL_ROWS.map((t): SettingsRow => ({
         id: `tool:${t.key}`,
         label: t.label,
@@ -1110,6 +1121,7 @@ export function settingsSections(
     ),
     skillDirs: count("dirs", config.skillDirs?.length ?? 0),
     allowedTools: count("tools", config.allowedTools?.length ?? 0, "all"),
+    disabledTools: count("tools", config.disabledTools?.length ?? 0),
     gitProtectedBranches: gitCfg.protectedBranches.length ? undefined : text("values.none"),
     gitBaseBranch: gitCfg.baseBranch ? undefined : text("values.autoBranch"),
     systemPrompt: text(config.systemPrompt ? "values.set" : "values.none"),

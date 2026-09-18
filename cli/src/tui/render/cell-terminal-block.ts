@@ -21,7 +21,7 @@ import {
   tableRule,
 } from "../markdown/table-layout"
 import type { DiffLine, MdLine, MdSpan } from "../markdown/types"
-import { diffFilePath, formatEditDiff } from "../markdown/diff"
+import { diffFilePath, formatEditDiff, tailDiffPreview } from "../markdown/diff"
 import { highlightLine, langFromPath, paletteCodeTheme } from "../markdown/highlight"
 import { renderResultLines, resultToText, toolResultLang } from "../format/result-render"
 import { elideImageData } from "../format/result-images"
@@ -42,6 +42,7 @@ import {
   type ToolResultDescriptor,
 } from "../format/tool-result"
 import { isContextTool } from "../format/context-group"
+import { commandIsAutoApprovable } from "../../agent/command-approval"
 import { ansiToSpans } from "./ansi-spans"
 import { RENDER_DEFAULTS, type ResolvedRenderConfig } from "../../config/schema"
 import type { ThemePalette } from "../theme/palette"
@@ -563,6 +564,10 @@ function detailSpans(cell: ToolCell): TerminalSpan[] {
     return [BREAK, seg(`  ↳ ${formatResultDescriptor(descriptor)}`, "danger")]
   }
   if (cell.status !== "done") return []
+  // A read-only shell command that succeeded renders as a compact title-only
+  // card — the header already carries the command + result chip, so a preview
+  // line is noise. Same rule the Ink card applies; expansion reveals output.
+  if (commandIsAutoApprovable(cell.toolName, cell.input)) return []
   // A context tool's chip already says how much came back, and the first line of
   // a file or a match list adds nothing. Preview the tools whose output IS the
   // answer (a shell command, an MCP call) instead.
@@ -592,7 +597,19 @@ function toolSpans(
     const lang = prefs.syntaxHighlightInline
       ? langFromPath(diffFilePath(cell.input) ?? "")
       : undefined
-    out.push(BREAK, ...diffSpans(diff, lang, palette))
+    // Same tail truncation the Ink card applies — the end of a big write/edit
+    // carries the newest content, and the transcript stays bounded.
+    const preview = tailDiffPreview(diff)
+    if (preview.hidden > 0) {
+      out.push(
+        BREAK,
+        seg(
+          `${RULE}    ⋯ ${preview.hidden} earlier line${preview.hidden === 1 ? "" : "s"} truncated`,
+          "muted"
+        )
+      )
+    }
+    out.push(BREAK, ...diffSpans(preview.lines, lang, palette))
     return out
   }
   if (!hasUsefulResult) return out

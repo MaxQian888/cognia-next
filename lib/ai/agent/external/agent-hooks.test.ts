@@ -289,6 +289,31 @@ describe("gateExternalAgentPermission", () => {
     expect(eventsFor("PermissionRequest")).toHaveLength(1)
   })
 
+  it("attaches tool_provenance to every tool-scoped payload", async () => {
+    invoke.mockResolvedValue({ block: "stop", warnings: [] })
+    const deny = jest.fn().mockResolvedValue(undefined)
+    await gateExternalAgentPermission(ctx, permEvent(), deny)
+    const expectedProvenance = { kind: "agent", source: "a1" }
+    for (const name of ["PermissionRequest", "PreToolUse", "PermissionDenied"]) {
+      const calls = eventsFor(name)
+      expect(calls).toHaveLength(1)
+      expect((calls[0] as [string, { payload: Record<string, unknown> }])[1].payload).toMatchObject(
+        { tool_name: "Bash", tool_provenance: expectedProvenance }
+      )
+    }
+    // MCP-namespaced tools still resolve to their server on the external
+    // surface — the agent's own mcp config isn't ours, so `declared_by` stays
+    // absent.
+    invoke.mockClear()
+    const mcp = permEvent()
+    mcp.request.toolInfo = { id: "tool", name: "mcp__github__create_issue" }
+    await gateExternalAgentPermission(ctx, mcp, deny)
+    const pre = eventsFor("PreToolUse")[0] as [string, { payload: Record<string, unknown> }]
+    expect(pre[1].payload).toMatchObject({
+      tool_provenance: { kind: "mcp", source: "github" },
+    })
+  })
+
   it("denies and returns true when PreToolUse blocks", async () => {
     invoke.mockResolvedValue({ block: "policy violation", warnings: [] })
     const deny = jest.fn().mockResolvedValue(undefined)

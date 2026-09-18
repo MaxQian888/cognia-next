@@ -231,7 +231,7 @@ describe("runInteractiveShell", () => {
     })
     const installed = process.listeners("SIGINT").filter((listener) => !before.includes(listener))
     expect(installed).toHaveLength(1)
-    installed[0]()
+    installed[0]("SIGINT")
     expect(kill).not.toHaveBeenCalled()
     handlers.close?.forEach((cb) => cb(0, null))
     await expect(promise).resolves.toMatchObject({ code: 0, aborted: true })

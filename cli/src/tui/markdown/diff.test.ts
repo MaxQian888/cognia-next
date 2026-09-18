@@ -1,7 +1,13 @@
 /**
  * @jest-environment node
  */
-import { bareToolName, diffFilePath, formatEditDiff, highlightDiffText } from "./diff"
+import {
+  bareToolName,
+  diffFilePath,
+  formatEditDiff,
+  highlightDiffText,
+  tailDiffPreview,
+} from "./diff"
 import { langFromPath, stripAnsi } from "./highlight"
 import type { DiffLine } from "./types"
 
@@ -132,6 +138,43 @@ describe("langFromPath (used to infer the diff language)", () => {
   it("returns undefined for unknown or extensionless paths", () => {
     expect(langFromPath("/src/LICENSE")).toBeUndefined()
     expect(langFromPath("/src/data.unknownext")).toBeUndefined()
+  })
+})
+
+describe("tailDiffPreview", () => {
+  const body = (n: number): DiffLine[] =>
+    Array.from({ length: n }, (_, i) => ({ kind: "add" as const, text: `l${i}`, newNo: i + 1 }))
+
+  it("returns the diff unchanged when it fits", () => {
+    const diff: DiffLine[] = [{ kind: "meta", text: "/a.ts" }, ...body(3)]
+    const out = tailDiffPreview(diff, 50)
+    expect(out.lines).toBe(diff)
+    expect(out.hidden).toBe(0)
+  })
+
+  it("keeps the meta header and the last `max` body lines", () => {
+    const diff: DiffLine[] = [{ kind: "meta", text: "/a.ts" }, ...body(60)]
+    const out = tailDiffPreview(diff, 50)
+    expect(out.hidden).toBe(10)
+    expect(out.lines[0]).toEqual({ kind: "meta", text: "/a.ts" })
+    expect(out.lines).toHaveLength(51)
+    // The tail survives: the newest lines of a big write/edit are what remains.
+    expect(out.lines[out.lines.length - 1].text).toBe("l59")
+    expect(out.lines.some((l) => l.text === "l9")).toBe(false)
+  })
+
+  it("handles a diff with no meta line", () => {
+    const out = tailDiffPreview(body(60), 10)
+    expect(out.hidden).toBe(50)
+    expect(out.lines).toHaveLength(10)
+    expect(out.lines[0].text).toBe("l50")
+  })
+
+  it("treats an all-meta diff as untruncatable", () => {
+    const diff: DiffLine[] = [{ kind: "meta", text: "/a.ts" }]
+    const out = tailDiffPreview(diff, 1)
+    expect(out.hidden).toBe(0)
+    expect(out.lines).toHaveLength(1)
   })
 })
 

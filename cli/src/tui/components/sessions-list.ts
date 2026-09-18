@@ -6,12 +6,7 @@
  */
 import path from "node:path"
 
-import {
-  readTranscript,
-  SESSIONS_DIR,
-  type TranscriptFs,
-  type TranscriptEntry,
-} from "../../agent/transcript"
+import { iterTranscriptEntries, SESSIONS_DIR, type TranscriptFs } from "../../agent/transcript"
 import type { SessionSummary } from "../state/types"
 
 export type ReadDir = (dir: string) => string[]
@@ -38,20 +33,34 @@ export function listSessions(home: string, deps: SessionsListDeps): SessionSumma
   for (const file of files) {
     if (!file.endsWith(".jsonl")) continue
     const sessionId = file.slice(0, -".jsonl".length)
-    let entries: TranscriptEntry[]
+    // Stream the entries — the summary needs only first-user/count/last-ts, so
+    // materializing the whole array would multiply the scan's footprint by the
+    // number of sessions listed.
+    let firstUser: string | undefined
+    let firstContent: string | undefined
+    let turns = 0
+    let updatedAt = 0
+    let sawAny = false
     try {
-      entries = readTranscript(home, sessionId, deps.transcriptFs)
+      for (const entry of iterTranscriptEntries(home, sessionId, deps.transcriptFs)) {
+        if (!sawAny) {
+          sawAny = true
+          firstContent = entry.content
+        }
+        if (entry.role === "user") {
+          turns++
+          if (firstUser === undefined) firstUser = entry.content
+        }
+        updatedAt = entry.ts
+      }
     } catch {
       // A disappearing/unreadable transcript must not hide every other session.
       continue
     }
-    if (entries.length === 0) continue
-    const firstUser = entries.find((e) => e.role === "user")
-    const turns = entries.filter((e) => e.role === "user").length
-    const updatedAt = entries[entries.length - 1].ts
+    if (!sawAny) continue
     summaries.push({
       sessionId,
-      title: titleFrom(firstUser?.content ?? entries[0].content),
+      title: titleFrom(firstUser ?? firstContent ?? ""),
       turns,
       updatedAt,
     })

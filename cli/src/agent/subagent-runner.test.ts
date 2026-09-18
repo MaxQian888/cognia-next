@@ -595,6 +595,18 @@ describe("runCliSubagent, definition fidelity", () => {
     expect(sendOptions.disallowedTools).toEqual(expect.arrayContaining(["bash", "write"]))
   })
 
+  it("unions the user config's disabledTools into the child's send options", async () => {
+    const deps = setupDeps()
+    deps.config = cfg({ disabledTools: ["mcp__github__push", "bash"] })
+    deps.disabledMcpTools = new Set(["mcp__s__x"])
+    deps.capture = jest.fn(async () => captureResult())
+    await runCliSubagent(def({ disallowedTools: ["bash"] }), "go", "parent", deps)
+    const sendOptions = (deps.capture as jest.Mock).mock.calls[0][2] as SendOptions
+    expect(sendOptions.disallowedTools).toEqual(
+      expect.arrayContaining(["bash", "mcp__github__push", "mcp__s__x"])
+    )
+  })
+
   it("forwards the definition's effort dial", async () => {
     const deps = setupDeps()
     deps.capture = jest.fn(async () => captureResult())

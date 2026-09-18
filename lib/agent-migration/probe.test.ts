@@ -12,6 +12,7 @@ describe("probeVendors", () => {
         piSessionDir: "/pi/agent/sessions",
         geminiDir: "/gemini",
         continueDir: "/continue",
+        cursorDir: "/cursor",
       }),
       exists: async (path) => path === "/opencode-data" || path === "/pi/agent",
       readAgentConfig: async (vendor) => ({
@@ -40,6 +41,7 @@ describe("probeVendors", () => {
         piSessionDir: "/pi/agent/sessions",
         geminiDir: "",
         continueDir: "",
+        cursorDir: "",
       }),
       exists: async () => false,
       readAgentConfig: async () => ({ exists: false, path: null }),
@@ -64,6 +66,7 @@ describe("probeVendors", () => {
           piSessionDir: "",
           geminiDir: "",
           continueDir: "",
+          cursorDir: "",
         }),
         exists: async (path) => {
           probed.push(path)

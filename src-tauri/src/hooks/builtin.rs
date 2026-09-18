@@ -63,6 +63,13 @@ pub const BUILTIN_HOOKS: &[BuiltinHookDef] = &[
         script: "pii-safety-guard.mjs",
         default_enabled: false,
     },
+    BuiltinHookDef {
+        id: "tool-provenance-guard",
+        event: "PreToolUse",
+        matcher: None,
+        script: "tool-provenance-guard.mjs",
+        default_enabled: false,
+    },
 ];
 
 fn is_enabled(def: &BuiltinHookDef, overrides: &Map<String, Value>) -> bool {

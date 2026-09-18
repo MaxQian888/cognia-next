@@ -21,6 +21,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Spinner } from "@/components/ui/spinner"
 import {
   skillsScanCodex,
+  skillsScanCursor,
   skillsScanDir,
   skillsScanNative,
   skillsScanOpencode,
@@ -132,7 +133,7 @@ export function SkillDiscovery() {
         <h2 className="text-xs font-semibold">{t("title")}</h2>
       </div>
 
-      <div className="grid gap-2 md:grid-cols-4">
+      <div className="grid gap-2 md:grid-cols-5">
         <Button
           variant="outline"
           size="sm"
@@ -159,6 +160,15 @@ export function SkillDiscovery() {
         >
           <BotIcon className="mr-1.5 size-3.5" />
           {t("scanOpencode")}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void runScan("~/.cursor/skills/", skillsScanCursor)}
+          disabled={!desktop || scan.status === "loading"}
+        >
+          <BotIcon className="mr-1.5 size-3.5" />
+          {t("scanCursor")}
         </Button>
         <Button
           variant="outline"

@@ -97,6 +97,10 @@ export interface McpDeps {
 /** Flag keys consumed by `/mcp add` itself; everything else is a preset field. */
 const RESERVED_ADD_FLAGS = new Set(["name", "preset", "transport", "command", "url", "args"])
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
 function loadServers(deps: McpDeps): McpServer[] {
   if (deps.load) return deps.load()
   return applyDisabled(loadMcpServers(deps.roots), readDisabled(deps.home))
@@ -703,7 +707,7 @@ export async function openMcpToolsPanel(name: string, deps: McpDeps): Promise<vo
       tools: tools.map((t) => ({
         name: t.name,
         description: t.description,
-        inputSchema: t.inputSchema,
+        inputSchema: isRecord(t.inputSchema) ? t.inputSchema : undefined,
         enabled: !disabled.has(mcpToolGateName(name, t.name)),
       })),
     },

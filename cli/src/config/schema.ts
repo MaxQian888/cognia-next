@@ -872,6 +872,14 @@ export const cliConfigFileSchema = z
     permissionMode: z.enum(PERMISSION_MODES).optional(),
     bypassConfirmation: z.enum(["ask", "never"]).optional(),
     allowedTools: z.array(z.string().min(1)).optional(),
+    /**
+     * User-level tool deny-list: bare tool names withheld from every turn.
+     * Unioned into the resolved `disallowedTools` alongside the `/mcp` panel's
+     * per-tool toggles, so it governs built-in, plugin, projected, and MCP
+     * tools alike (Devin `disabled_tools` parity). Project-scoped layers
+     * override rather than merge, matching {@link allowedTools}.
+     */
+    disabledTools: z.array(z.string().min(1)).optional(),
     builtinTools: builtinToolsSchema.optional(),
     providers: z.record(z.string(), providerConfigSchema).optional(),
     cwd: z.string().min(1).optional(),
@@ -1208,6 +1216,9 @@ export interface ResolvedConfig {
   /** True when a file, flag, or live user selection supplies the mode. */
   permissionModeExplicit?: boolean
   allowedTools?: string[]
+  /** User-level tool deny-list, unioned into `disallowedTools` with the `/mcp`
+   * panel's per-tool toggles. Absent = no config-level suppression. */
+  disabledTools?: string[]
   builtinTools: BuiltinToolsConfig
   providers: Record<string, ProviderConfig>
   /** Per-external-backend model memory, keyed by executable preset id. Separate

@@ -114,8 +114,9 @@ export async function runHeadlessExec(input: HeadlessExecInput): Promise<Headles
     }
   }
 
-  // 2-4. Safety classifier replaces the human gate.
-  const classified = classifyCommand(command)
+  // 2-4. Safety classifier replaces the human gate. `input.cwd` anchors `cd`
+  // chains so `cd / && rm -rf ./etc` resolves `./etc` against `/`.
+  const classified = classifyCommand(command, { cwd: input.cwd })
   if (classified.verdict === "deny") {
     audit({
       command,

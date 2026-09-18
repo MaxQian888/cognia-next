@@ -4,7 +4,8 @@ use anyhow::Result;
 use comfy_table::{presets::UTF8_FULL, ContentArrangement, Table};
 use serde::{Deserialize, Serialize};
 
-use crate::engine::bridge_client::{get_json, load_endpoint, EndpointFile};
+use crate::engine::bridge_client::{get_json, load_endpoint_from, EndpointFile};
+use std::path::Path;
 use crate::ui::{style, RuntimeUi};
 
 const LIST_PATH: &str = "/api/dev/plugins/installed";
@@ -46,16 +47,26 @@ struct ListFailureJsonPayload {
     error: String,
 }
 
-pub fn run(json: bool, ui: &mut RuntimeUi) -> Result<()> {
-    let endpoint = match load_endpoint() {
+pub fn run(
+    json: bool,
+    query: Option<&str>,
+    endpoint_file: Option<&Path>,
+    ui: &mut RuntimeUi,
+) -> Result<()> {
+    let endpoint = match load_endpoint_from(endpoint_file) {
         Ok(endpoint) => endpoint,
         Err(err) if json => return emit_json_failure("endpoint", err),
         Err(err) => return Err(err),
     };
-    run_with_endpoint(json, &endpoint, ui)
+    run_with_endpoint(json, query, &endpoint, ui)
 }
 
-pub fn run_with_endpoint(json: bool, endpoint: &EndpointFile, ui: &mut RuntimeUi) -> Result<()> {
+pub fn run_with_endpoint(
+    json: bool,
+    query: Option<&str>,
+    endpoint: &EndpointFile,
+    ui: &mut RuntimeUi,
+) -> Result<()> {
     let plugins = match fetch_installed_plugins(endpoint) {
         Ok(plugins) => plugins,
         Err(err) if json => return emit_json_failure("bridge", err),
@@ -68,7 +79,7 @@ pub fn run_with_endpoint(json: bool, endpoint: &EndpointFile, ui: &mut RuntimeUi
             action: "list",
             plugins,
         };
-        println!("{}", serde_json::to_string_pretty(&payload)?);
+        crate::shared::print_json_projected(&payload, query)?;
     } else if !ui.flags.quiet {
         print_human(&plugins);
     }

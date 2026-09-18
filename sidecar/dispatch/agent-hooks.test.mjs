@@ -1193,3 +1193,73 @@ test("buildAgentHooks: the identity reaches the hook script as real stdin fields
   const anonOut = await anon.PostToolUse[0].hooks[0]({ tool_name: "Bash" }, undefined, {})
   assert.doesNotMatch(JSON.stringify(anonOut), /saw identity/)
 })
+
+test("buildAgentHooks: tool_provenance reaches the hook script as a real stdin field", async () => {
+  // End-to-end through the SDK callback: a command hook that reads stdin and
+  // blocks only when the resolved provenance names the right plugin. Proves
+  // the manifest-driven resolution happens before payload serialization.
+  const script = join(tmpdir(), `cognia-hook-provenance-${process.pid}.mjs`)
+  writeFileSync(
+    script,
+    [
+      'import { readFileSync } from "node:fs"',
+      'const p = JSON.parse(readFileSync(0, "utf8"))',
+      'if (p.tool_provenance?.kind === "plugin" && p.tool_provenance?.source === "ripgrep-tools") {',
+      '  process.stderr.write("saw plugin provenance")',
+      "  process.exit(2)",
+      "}",
+      'if (p.tool_provenance?.kind === "builtin" && p.tool_provenance?.declared_by === "builtin-tools-data.json") {',
+      '  process.stderr.write("saw builtin provenance")',
+      "  process.exit(2)",
+      "}",
+      "process.exit(0)",
+    ].join("\n")
+  )
+  const groups = {
+    PreToolUse: [
+      { hooks: [{ type: "command", command: `${process.execPath} ${JSON.stringify(script)}` }] },
+    ],
+  }
+  const pluginTools = [{ name: "ripgrep-tools:ripgrep_search", pluginId: "ripgrep-tools" }]
+  const map = buildAgentHooks(groups, { emit: () => {}, sessionId: "s1", pluginTools })
+  const cb = map.PreToolUse[0].hooks[0]
+
+  const pluginOut = await cb(
+    { tool_name: "mcp__cognia-plugin-tools__ripgrep-tools:ripgrep_search", tool_input: {} },
+    undefined,
+    {}
+  )
+  assert.match(JSON.stringify(pluginOut), /saw plugin provenance/)
+
+  const builtinOut = await cb({ tool_name: "Bash", tool_input: {} }, undefined, {})
+  assert.match(JSON.stringify(builtinOut), /saw builtin provenance/)
+
+  // A session-scoped event carries no tool name → no provenance field at all.
+  const noToolScript = join(tmpdir(), `cognia-hook-no-prov-${process.pid}.mjs`)
+  writeFileSync(
+    noToolScript,
+    [
+      'import { readFileSync } from "node:fs"',
+      'const p = JSON.parse(readFileSync(0, "utf8"))',
+      'if (!("tool_provenance" in p)) {',
+      '  process.stderr.write("absent")',
+      "  process.exit(2)",
+      "}",
+      "process.exit(0)",
+    ].join("\n")
+  )
+  const stopMap = buildAgentHooks(
+    {
+      Stop: [
+        {
+          hooks: [
+            { type: "command", command: `${process.execPath} ${JSON.stringify(noToolScript)}` },
+          ],
+        },
+      ],
+    },
+    { emit: () => {}, sessionId: "s1", pluginTools }
+  )
+  const stopOut = await stopMap.Stop[0].hooks[0]({ hook_event_name: "Stop" }, undefined, {})
+  assert.match(JSON.stringify(stopOut), /absent/)
+})

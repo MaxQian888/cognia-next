@@ -97,6 +97,10 @@ codex app-server generate-json-schema --out <temporary-directory>
 
 该门禁发生在 `fetch`、MCP 或模型执行之前，不是尽力而为的日志过滤。
 
+## 工具来源（tool provenance）
+
+工具级载荷（`PreToolUse`、`PostToolUse`、`PostToolUseFailure`、`PermissionRequest`、`PermissionDenied`）携带 `tool_provenance`：`{ kind, source, declared_by }`，命名声明该工具的来源面与声明产物 —— `builtin`（`source: "cognia"`，`declared_by: "builtin-tools-data.json"`）、`plugin`（`source` = 插件 id，从会话工具清单解析；`declared_by` = 该插件的 `plugin.json` 路径）、`mcp`（`source` = MCP server 名；`declared_by` = 声明它的配置文件 / `"settings"` / `plugin:<id>` 定位符）、`agent`（`source` = 外部 agent id，用于外部 agent 自有工具面上的裸名；`declared_by` 缺席 —— agent 自己的配置不在我们手里）。该字段只含元数据 —— 不含工具参数或密钥 —— 且当事件没有可解析的工具名时缺席，hook 脚本必须容忍其缺失。因此 hook 可以按工具来源写策略（例如拒绝某个 MCP server 的全部工具），而无需枚举工具名。随附的 `tool-provenance-guard` 内置 hook（默认关闭）即是这样一个消费者：`COGNIA_DENY_TOOL_PROVENANCE` 选择器 `kind` / `kind:source` / `kind:source:declared` 可拒绝匹配的调用。
+
 ## 模型驱动 Hooks
 
 嵌套 Hook 工作与父 turn 隔离：

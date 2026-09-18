@@ -1059,7 +1059,11 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
             if (field === "systemPrompt") {
               patch = { systemPrompt: effect.value || undefined }
               setConfigValue(home, "systemPrompt", effect.value)
-            } else if (field === "skillDirs" || field === "allowedTools") {
+            } else if (
+              field === "skillDirs" ||
+              field === "allowedTools" ||
+              field === "disabledTools"
+            ) {
               const arr = effect.value.split(/\s+/).filter(Boolean)
               patch = { [field]: arr.length ? arr : undefined } as Partial<ResolvedConfig>
               setStringArrayConfig(home, field, arr)

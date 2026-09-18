@@ -1997,6 +1997,36 @@ fn plugin_list_json_success_uses_consistent_envelope_without_human_noise() {
 }
 
 #[test]
+fn plugin_list_json_query_projects_the_payload() {
+    let tmp = tempfile::tempdir().unwrap();
+    let endpoint_file = tmp.path().join("endpoint.json");
+    let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+    let port = server.server_addr().to_ip().unwrap().port();
+    write_endpoint_file(&endpoint_file, &format!("http://127.0.0.1:{port}"));
+
+    let server_thread = std::thread::spawn(move || {
+        if let Ok(Some(req)) = server.recv_timeout(MOCK_BRIDGE_TIMEOUT) {
+            let body = r#"{"ok":true,"plugins":[{"pluginId":"demo","version":"1.2.3"},{"pluginId":"beta","version":"0.1.0"}]}"#;
+            let response = tiny_http::Response::from_string(body).with_header(
+                tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+                    .unwrap(),
+            );
+            let _ = req.respond(response);
+        }
+    });
+
+    let (code, stdout, stderr) = run_cognia_with_env(
+        &["plugin", "list", "--json", "--query", ".plugins[].pluginId"],
+        &[("COGNIA_CLI_ENDPOINT_FILE", endpoint_file.to_str().unwrap())],
+    );
+    let _ = server_thread.join();
+
+    assert_eq!(code, Some(0), "query should succeed: {stderr}");
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
+    assert_eq!(parsed, serde_json::json!(["demo", "beta"]));
+}
+
+#[test]
 fn plugin_reload_help_accepts_id_bundle_or_path() {
     let (code, stdout, stderr) = run_cognia(&["plugin", "reload", "--help"]);
     assert_eq!(code, Some(0), "stderr: {stderr}");
@@ -4808,4 +4838,145 @@ fn plugin_import_json_reports_the_machine_readable_contract() {
     assert!(report["files"].as_array().unwrap().len() >= 7);
     assert!(!report["todos"].as_array().unwrap().is_empty());
     assert!(!stdout.contains("ghp_INTEGRATION_SECRET"));
+}
+
+#[test]
+fn plugin_list_endpoint_file_flag_beats_env_var() {
+    // Precedence: explicit --endpoint-file > COGNIA_CLI_ENDPOINT_FILE.
+    let tmp = tempfile::tempdir().unwrap();
+    let good_endpoint = tmp.path().join("good-endpoint.json");
+    let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+    let port = server.server_addr().to_ip().unwrap().port();
+    write_endpoint_file(&good_endpoint, &format!("http://127.0.0.1:{port}"));
+
+    let server_thread = std::thread::spawn(move || {
+        if let Ok(Some(req)) = server.recv_timeout(MOCK_BRIDGE_TIMEOUT) {
+            let body = r#"{"ok":true,"plugins":[]}"#;
+            let response = tiny_http::Response::from_string(body).with_header(
+                tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+                    .unwrap(),
+            );
+            let _ = req.respond(response);
+        }
+    });
+
+    // The env var points at a file that does not exist; the flag must win.
+    let missing = tmp.path().join("missing-endpoint.json");
+    let (code, stdout, stderr) = run_cognia_with_env(
+        &[
+            "plugin",
+            "list",
+            "--json",
+            "--endpoint-file",
+            good_endpoint.to_str().unwrap(),
+        ],
+        &[("COGNIA_CLI_ENDPOINT_FILE", missing.to_str().unwrap())],
+    );
+    let _ = server_thread.join();
+
+    assert_eq!(code, Some(0), "flag should override env: {stderr}");
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
+    assert_eq!(parsed["ok"], true);
+}
+
+#[test]
+fn completions_bash_prints_a_script() {
+    let (code, stdout, stderr) = run_cognia(&["completions", "bash"]);
+    assert_eq!(code, Some(0), "stderr: {stderr}");
+    assert!(
+        stdout.contains("cognia"),
+        "completion script should reference the binary: {stdout}"
+    );
+    assert!(stdout.len() > 500, "script looks truncated: {} bytes", stdout.len());
+}
+
+#[test]
+fn completions_every_shell_generates_a_script() {
+    for shell in ["bash", "zsh", "fish", "powershell", "elvish"] {
+        let (code, stdout, stderr) = run_cognia(&["completions", shell]);
+        assert_eq!(code, Some(0), "{shell} stderr: {stderr}");
+        assert!(
+            stdout.len() > 200,
+            "{shell} script looks empty: {} bytes",
+            stdout.len()
+        );
+    }
+}
+
+#[test]
+fn open_print_emits_the_deeplink_without_launching() {
+    let (code, stdout, stderr) = run_cognia(&["open", "--session", "abc-123", "--print"]);
+    assert_eq!(code, Some(0), "stderr: {stderr}");
+    assert_eq!(stdout.trim(), "cognia://session/abc-123");
+
+    // `--chat` is a documented alias of `--session`.
+    let (code, stdout, stderr) = run_cognia(&["open", "--chat", "abc-123", "--print"]);
+    assert_eq!(code, Some(0), "stderr: {stderr}");
+    assert_eq!(stdout.trim(), "cognia://session/abc-123");
+
+    // A non-cognia URL must be rejected before any launch attempt.
+    let (code, _, stderr) = run_cognia(&["open", "https://evil.example", "--print"]);
+    assert_ne!(code, Some(0), "foreign scheme should fail");
+    assert!(stderr.contains("cognia://"), "stderr should explain: {stderr}");
+}
+
+#[test]
+fn status_json_reports_bridge_and_headless_sections() {
+    // Bridge up via a mock server; headless down (nothing on the default
+    // port). The composite still exits zero because the bridge responds.
+    let tmp = tempfile::tempdir().unwrap();
+    let endpoint_file = tmp.path().join("endpoint.json");
+    let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+    let port = server.server_addr().to_ip().unwrap().port();
+    std::fs::write(
+        &endpoint_file,
+        format!(
+            r#"{{"baseUrl":"http://127.0.0.1:{port}","devToken":"distinctive-secret-token-9f8e"}}"#
+        ),
+    )
+    .unwrap();
+
+    let server_thread = std::thread::spawn(move || {
+        while let Ok(Some(req)) = server.recv_timeout(MOCK_BRIDGE_TIMEOUT) {
+            let body = r#"{"ok":true}"#;
+            let response = tiny_http::Response::from_string(body).with_header(
+                tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+                    .unwrap(),
+            );
+            let _ = req.respond(response);
+        }
+    });
+
+    // Point the headless probe at a port nothing listens on so the check
+    // fails fast instead of hanging.
+    let (code, stdout, stderr) = run_cognia_with_env(
+        &[
+            "status",
+            "--json",
+            "--endpoint-file",
+            endpoint_file.to_str().unwrap(),
+            "--server-url",
+            "https://127.0.0.1:9",
+            "--data-dir",
+            tmp.path().to_str().unwrap(),
+        ],
+        &[],
+    );
+    server_thread.join().expect("mock bridge");
+
+    assert_eq!(code, Some(0), "bridge up should be enough: {stderr}");
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
+    assert_eq!(parsed["schemaVersion"], 1);
+    assert_eq!(parsed["action"], "status");
+    assert_eq!(parsed["ok"], true);
+    assert_eq!(parsed["bridge"]["running"], true);
+    assert!(
+        parsed["host"].is_object(),
+        "host section must be present: {parsed}"
+    );
+    // Never leak the dev token in reports.
+    assert!(
+        !stdout.contains("distinctive-secret-token-9f8e"),
+        "token leaked: {stdout}"
+    );
 }

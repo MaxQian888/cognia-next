@@ -103,6 +103,33 @@ describe("tuiReducer — startup", () => {
     state = reduce(state, { type: "CLEAR_AGENT_RATE_LIMITS" })
     expect(state.agentRateLimits).toBeUndefined()
   })
+  it("SET_TURN_ACTIVITY tracks the runtime phase and turn lifecycle clears it", () => {
+    let state = reduce(base(), {
+      type: "SET_TURN_ACTIVITY",
+      activity: { phase: "compacting", detail: "summarizing" },
+    })
+    expect(state.turnActivity).toEqual({ phase: "compacting", detail: "summarizing" })
+    // Self-superseding: the latest report replaces, `null` clears.
+    state = reduce(state, {
+      type: "SET_TURN_ACTIVITY",
+      activity: { phase: "requesting" },
+    })
+    expect(state.turnActivity).toEqual({ phase: "requesting" })
+    state = reduce(state, { type: "SET_TURN_ACTIVITY", activity: { phase: "compacting" } })
+    state = reduce(state, { type: "SET_TURN_ACTIVITY", activity: null })
+    expect(state.turnActivity).toBeUndefined()
+    // …and the turn lifecycle resets a stale report.
+    state = reduce(
+      { ...state, turnActivity: { phase: "compacting" } },
+      { type: "TURN_START", prompt: "hi" }
+    )
+    expect(state.turnActivity).toBeUndefined()
+    state = reduce(
+      { ...state, turnActivity: { phase: "compacting" } },
+      { type: "RESET", sessionId: "s2" }
+    )
+    expect(state.turnActivity).toBeUndefined()
+  })
   it("deduplicates quota warnings until the native status changes", () => {
     const event = {
       kind: "rate-limit",
@@ -118,6 +145,54 @@ describe("tuiReducer — startup", () => {
     expect(state.toasts).toBe(first)
     expect(state.toasts).toHaveLength(1)
     state = reduce(state, { type: "SET_AGENT_RATE_LIMIT", event: { ...event, status: "allowed" } })
+    expect(state.toasts).toHaveLength(0)
+  })
+  it("warns once when a quota window's utilization crosses 50% used", () => {
+    const at = (utilization: number) =>
+      ({
+        type: "SET_AGENT_RATE_LIMIT",
+        event: {
+          kind: "rate-limit",
+          status: "allowed",
+          rateLimitType: "five_hour",
+          utilization,
+        },
+      }) as const
+    let state = reduce(base(), at(0.3))
+    expect(state.toasts).toHaveLength(0)
+    state = reduce(state, at(0.52))
+    expect(state.toasts).toEqual([
+      expect.objectContaining({ id: "agent-quota:half:five_hour", severity: "warn" }),
+    ])
+    // One-shot while utilization stays at or above the mark.
+    state = reduce(state, at(0.6), at(0.7))
+    expect(state.toasts).toHaveLength(1)
+    // A window reset drops utilization below 50% — clears the stale toast and
+    // re-arms the crossing for the new window.
+    state = reduce(state, at(0.1))
+    expect(state.toasts).toHaveLength(0)
+    state = reduce(state, at(0.55))
+    expect(state.toasts).toHaveLength(1)
+    // CLEAR_AGENT_RATE_LIMITS sweeps the early-warning toast with the rest.
+    state = reduce(state, { type: "CLEAR_AGENT_RATE_LIMITS" })
+    expect(state.toasts).toHaveLength(0)
+  })
+  it("does not fire the 50% warning on a first reading already past the mark twice", () => {
+    // First seen at ≥50% counts as a crossing (prev unknown < 50%) — but a
+    // second push at the same level must not re-add a dismissed toast.
+    const event = {
+      type: "SET_AGENT_RATE_LIMIT",
+      event: {
+        kind: "rate-limit",
+        status: "allowed",
+        rateLimitType: "five_hour",
+        utilization: 0.8,
+      },
+    } as const
+    let state = reduce(base(), event)
+    expect(state.toasts).toHaveLength(1)
+    state = { ...state, toasts: [] }
+    state = reduce(state, event)
     expect(state.toasts).toHaveLength(0)
   })
   it.each(["gemini-cli", "claude-code", "codex-acp", "opencode-server", "pi"])(

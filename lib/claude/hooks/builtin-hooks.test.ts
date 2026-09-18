@@ -33,6 +33,7 @@ describe("BUILTIN_HOOKS catalog", () => {
     expect(byId["auto-context-loader"].defaultEnabled).toBe(true)
     expect(byId["cost-quota-guard"].defaultEnabled).toBe(false)
     expect(byId["pii-safety-guard"].defaultEnabled).toBe(false)
+    expect(byId["tool-provenance-guard"].defaultEnabled).toBe(false)
   })
 })
 
@@ -210,6 +211,73 @@ describe("pii-safety-guard.mjs", () => {
     })
     expect(res.code).toBe(2)
     expect(res.stderr).toContain("SSN")
+  })
+})
+
+describe("tool-provenance-guard.mjs", () => {
+  const mcpPayload = {
+    hook_event_name: "PreToolUse",
+    tool_name: "mcp__github__create_issue",
+    tool_provenance: { kind: "mcp", source: "github", declared_by: "/repo/.mcp.json" },
+  }
+
+  it("soft-allows (exit 0) when no selectors are configured", () => {
+    const res = runScript("tool-provenance-guard.mjs", mcpPayload)
+    expect(res.code).toBe(0)
+  })
+
+  it("soft-allows when the payload carries no provenance", () => {
+    const res = runScript(
+      "tool-provenance-guard.mjs",
+      { hook_event_name: "PreToolUse", tool_name: "Bash" },
+      { COGNIA_DENY_TOOL_PROVENANCE: "builtin" }
+    )
+    expect(res.code).toBe(0)
+  })
+
+  it("blocks (exit 2) a tool whose kind matches a bare selector", () => {
+    const res = runScript("tool-provenance-guard.mjs", mcpPayload, {
+      COGNIA_DENY_TOOL_PROVENANCE: "mcp",
+    })
+    expect(res.code).toBe(2)
+    expect(res.stderr).toContain("github")
+  })
+
+  it("blocks on a kind:source selector and lets other surfaces through", () => {
+    const deny = runScript("tool-provenance-guard.mjs", mcpPayload, {
+      COGNIA_DENY_TOOL_PROVENANCE: "mcp:github",
+    })
+    expect(deny.code).toBe(2)
+
+    const allow = runScript("tool-provenance-guard.mjs", mcpPayload, {
+      COGNIA_DENY_TOOL_PROVENANCE: "mcp:gitlab,plugin",
+    })
+    expect(allow.code).toBe(0)
+  })
+
+  it("matches the declared_by segment as a substring so a basename pins its file", () => {
+    const res = runScript("tool-provenance-guard.mjs", mcpPayload, {
+      COGNIA_DENY_TOOL_PROVENANCE: "mcp:github:.mcp.json",
+    })
+    expect(res.code).toBe(2)
+  })
+
+  it("denies a builtin tool by its fixed declared_by", () => {
+    const res = runScript(
+      "tool-provenance-guard.mjs",
+      {
+        hook_event_name: "PreToolUse",
+        tool_name: "Bash",
+        tool_provenance: {
+          kind: "builtin",
+          source: "cognia",
+          declared_by: "builtin-tools-data.json",
+        },
+      },
+      { COGNIA_DENY_TOOL_PROVENANCE: "builtin:cognia:builtin-tools-data.json" }
+    )
+    expect(res.code).toBe(2)
+    expect(res.stderr).toContain("builtin-tools-data.json")
   })
 })
 

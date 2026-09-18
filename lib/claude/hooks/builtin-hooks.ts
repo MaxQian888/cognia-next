@@ -74,6 +74,14 @@ export const BUILTIN_HOOKS: readonly BuiltinHookDef[] = [
     description: "Block a tool call whose input carries obvious PII / credentials.",
     defaultEnabled: false,
   },
+  {
+    id: "tool-provenance-guard",
+    event: "PreToolUse",
+    script: "tool-provenance-guard.mjs",
+    description:
+      "Deny a tool call by which surface declared it — selectors in COGNIA_DENY_TOOL_PROVENANCE.",
+    defaultEnabled: false,
+  },
 ] as const
 
 /** Per-id enable/disable overrides (id → enabled). */

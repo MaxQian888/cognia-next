@@ -7,7 +7,9 @@ import os from "node:os"
 
 import {
   appendTranscript,
+  iterTranscriptEntries,
   readTranscript,
+  readTranscriptTail,
   sessionTranscriptPath,
   writeTranscript,
   type TranscriptFs,
@@ -116,5 +118,73 @@ describe("transcript", () => {
     appendTranscript(HOME, "s1", { role: "user", content: "x" }, m.fsx, 1)
     writeTranscript(HOME, "s1", [], m.fsx)
     expect(readTranscript(HOME, "s1", m.fsx)).toEqual([])
+  })
+
+  it("iterTranscriptEntries streams the same entries readTranscript returns", () => {
+    const m = memFs()
+    appendTranscript(HOME, "s1", { role: "user", content: "hi" }, m.fsx, 1)
+    appendTranscript(HOME, "s1", { role: "assistant", content: "hey" }, m.fsx, 2)
+    appendTranscript(HOME, "s1", { role: "system", content: "note" }, m.fsx, 3)
+    expect(Array.from(iterTranscriptEntries(HOME, "s1", m.fsx))).toEqual(
+      readTranscript(HOME, "s1", m.fsx)
+    )
+  })
+
+  it("iterTranscriptEntries handles a file without a trailing newline", () => {
+    const m = memFs()
+    m.files.set(
+      sessionTranscriptPath(HOME, "s1"),
+      '{"ts":1,"role":"user","content":"a"}\n{"ts":2,"role":"assistant","content":"b"}'
+    )
+    expect(Array.from(iterTranscriptEntries(HOME, "s1", m.fsx))).toHaveLength(2)
+  })
+
+  it("iterTranscriptEntries yields nothing for a missing file", () => {
+    expect(Array.from(iterTranscriptEntries(HOME, "missing", memFs().fsx))).toEqual([])
+  })
+
+  it("readTranscriptTail finds the latest assistant + last non-system role", () => {
+    const m = memFs()
+    appendTranscript(HOME, "s1", { role: "user", content: "q1" }, m.fsx, 1)
+    appendTranscript(
+      HOME,
+      "s1",
+      { role: "assistant", content: "a1", meta: { runtimeHistory: { version: 1 } } },
+      m.fsx,
+      2
+    )
+    appendTranscript(HOME, "s1", { role: "system", content: "sys" }, m.fsx, 3)
+    appendTranscript(HOME, "s1", { role: "assistant", content: "a2" }, m.fsx, 4)
+    const tail = readTranscriptTail(HOME, "s1", m.fsx)
+    expect(tail.hasEntries).toBe(true)
+    expect(tail.latestAssistant?.content).toBe("a2")
+    expect(tail.lastNonSystemRole).toBe("assistant")
+  })
+
+  it("readTranscriptTail reports a trailing user turn as the last non-system role", () => {
+    const m = memFs()
+    appendTranscript(HOME, "s1", { role: "assistant", content: "a1" }, m.fsx, 1)
+    appendTranscript(HOME, "s1", { role: "user", content: "q2" }, m.fsx, 2)
+    const tail = readTranscriptTail(HOME, "s1", m.fsx)
+    expect(tail.latestAssistant?.content).toBe("a1")
+    expect(tail.lastNonSystemRole).toBe("user")
+  })
+
+  it("readTranscriptTail returns hasEntries=false for missing/empty/corrupt files", () => {
+    const m = memFs()
+    expect(readTranscriptTail(HOME, "missing", m.fsx).hasEntries).toBe(false)
+    m.files.set(sessionTranscriptPath(HOME, "s1"), "{bad json\n   \n")
+    const tail = readTranscriptTail(HOME, "s1", m.fsx)
+    expect(tail.hasEntries).toBe(false)
+    expect(tail.latestAssistant).toBeUndefined()
+  })
+
+  it("readTranscriptTail tolerates a transcript of only system entries", () => {
+    const m = memFs()
+    appendTranscript(HOME, "s1", { role: "system", content: "n" }, m.fsx, 1)
+    const tail = readTranscriptTail(HOME, "s1", m.fsx)
+    expect(tail.hasEntries).toBe(true)
+    expect(tail.latestAssistant).toBeUndefined()
+    expect(tail.lastNonSystemRole).toBeUndefined()
   })
 })

@@ -24,13 +24,15 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use notify::{EventKind, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use url::Url;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{mpsc, Arc, OnceLock};
 use std::time::{Duration, Instant};
 
+use crate::commands::acp::is_loopback_host;
 use crate::engine::bridge_client::{
-    load_endpoint, post_json, post_json_with_timeout, EndpointFile,
+    load_endpoint_from, post_json, post_json_with_timeout, EndpointFile,
 };
 use crate::shared::{
     clear_process_interrupt, read_plugin_manifest, request_process_interrupt, ProcessInterrupted,
@@ -63,6 +65,7 @@ pub fn run(
     reload_url: Option<String>,
     session_id: Option<String>,
     once: bool,
+    endpoint_file: Option<&Path>,
     ui: &mut RuntimeUi,
 ) -> Result<()> {
     if ui.flags.json && !once {
@@ -111,7 +114,19 @@ pub fn run(
         Err(err) => return Err(err),
     };
 
-    let reload_endpoint = resolve_reload_endpoint(reload_url.as_deref());
+    let (reload_endpoint, reload_warning) =
+        match resolve_reload_endpoint(reload_url.as_deref(), endpoint_file) {
+        Ok(resolved) => resolved,
+        Err(err) if ui.flags.json => {
+            return emit_json_input_failure(&crate_root, once, err.to_string());
+        }
+        Err(err) => return Err(err),
+    };
+    if let Some(warning) = reload_warning {
+        if !ui.flags.quiet {
+            eprintln!("{}{}", style::warn_prefix(), warning);
+        }
+    }
     let session_id = match session_id {
         Some(value) => uuid::Uuid::parse_str(&value)
             .map_err(|_| anyhow::anyhow!("--session-id must be a UUID"))?
@@ -943,22 +958,72 @@ fn request_graceful_stop(state: &AtomicU8) {
     state.store(QUIT_STOP_REQUESTED, Ordering::SeqCst);
 }
 
-/// Resolve the reload endpoint. If `--reload-url` is supplied we try to
-/// honor it (with the token from the endpoint file if available); else
-/// we fall back to the endpoint file alone.
-fn resolve_reload_endpoint(override_url: Option<&str>) -> Option<EndpointFile> {
-    match (override_url, load_endpoint().ok()) {
-        (Some(url), Some(ep)) => Some(EndpointFile {
-            base_url: url.into(),
-            dev_token: ep.dev_token,
-        }),
-        (Some(url), None) => Some(EndpointFile {
-            base_url: url.into(),
-            dev_token: String::new(),
-        }),
-        (None, Some(ep)) => Some(ep),
-        (None, None) => None,
+/// Resolve the reload endpoint plus an optional startup warning.
+///
+/// `--reload-url` must name a loopback http(s) origin: the endpoint file's
+/// dev token is only ever sent to the loopback bridge, so an arbitrary
+/// remote URL must never see it. When the flag is given but the endpoint
+/// file is missing there is no token to authenticate with — fabricating an
+/// empty token would 401 on every reload POST, so instead we disable
+/// reload and surface a one-time warning.
+fn resolve_reload_endpoint(
+    override_url: Option<&str>,
+    endpoint_file_path: Option<&Path>,
+) -> Result<(Option<EndpointFile>, Option<String>)> {
+    let endpoint_file = load_endpoint_from(endpoint_file_path).ok();
+    let Some(url) = override_url else {
+        return Ok((endpoint_file, None));
+    };
+    validate_reload_url(url)?;
+    match endpoint_file {
+        Some(ep) => Ok((
+            Some(EndpointFile {
+                base_url: url.trim_end_matches('/').to_string(),
+                dev_token: ep.dev_token,
+            }),
+            None,
+        )),
+        None => Ok((
+            None,
+            Some(format!(
+                "reload disabled: --reload-url {url} cannot be authenticated — \
+                 no endpoint file found (start the cognia desktop app first)"
+            )),
+        )),
     }
+}
+
+/// The reload target must be a loopback http(s) origin — the same rule the
+/// bridge enforces inbound and `cognia acp` applies to its WS target.
+fn validate_reload_url(raw: &str) -> Result<()> {
+    let url = Url::parse(raw).with_context(|| format!("invalid --reload-url {raw:?}"))?;
+    if url.scheme() != "http" && url.scheme() != "https" {
+        bail!("--reload-url must use http or https");
+    }
+    let host = url.host_str().unwrap_or_default();
+    // `Url::host_str` keeps the brackets on IPv6 literals (`[::1]`) —
+    // strip them so the loopback check sees the bare address.
+    let host = host
+        .strip_prefix('[')
+        .and_then(|inner| inner.strip_suffix(']'))
+        .unwrap_or(host);
+    if !is_loopback_host(host) {
+        bail!(
+            "--reload-url must point at the loopback cognia bridge, got host {host:?} \
+             (the dev token is never sent off-loopback)"
+        );
+    }
+    if !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        bail!("--reload-url must be an origin without credentials, query, or fragment");
+    }
+    if url.path() != "/" && !url.path().is_empty() {
+        bail!("--reload-url must be an origin without a path");
+    }
+    Ok(())
 }
 
 /// Install a process-wide Ctrl+C handler that requests a graceful stop.
@@ -1199,11 +1264,13 @@ mod tests {
         )
         .unwrap();
         std::env::set_var("COGNIA_CLI_ENDPOINT_FILE", tmp.path());
-        let ep = resolve_reload_endpoint(Some("http://localhost:1234"));
+        let resolved = resolve_reload_endpoint(Some("http://localhost:1234"), None);
         crate::shared::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
-        let ep = ep.expect("endpoint should resolve");
+        let (ep, warning) = resolved.expect("endpoint should resolve");
+        let ep = ep.expect("endpoint should be present");
         assert_eq!(ep.base_url, "http://localhost:1234");
         assert_eq!(ep.dev_token, "realtoken");
+        assert!(warning.is_none());
     }
 
     #[test]
@@ -1211,21 +1278,65 @@ mod tests {
         let _guard = crate::shared::test_env::lock();
         let prior_endpoint = std::env::var_os("COGNIA_CLI_ENDPOINT_FILE");
         std::env::set_var("COGNIA_CLI_ENDPOINT_FILE", "/definitely/no/such/file.json");
-        let ep = resolve_reload_endpoint(None);
+        let resolved = resolve_reload_endpoint(None, None);
         crate::shared::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
+        let (ep, warning) = resolved.expect("resolution should not error");
         assert!(ep.is_none());
+        assert!(warning.is_none());
     }
 
     #[test]
-    fn resolve_reload_endpoint_uses_override_with_empty_token() {
+    fn resolve_reload_endpoint_without_token_warns_and_disables() {
         let _guard = crate::shared::test_env::lock();
         let prior_endpoint = std::env::var_os("COGNIA_CLI_ENDPOINT_FILE");
         std::env::set_var("COGNIA_CLI_ENDPOINT_FILE", "/definitely/no/such/file.json");
-        let ep = resolve_reload_endpoint(Some("http://localhost:4321"));
+        let resolved = resolve_reload_endpoint(Some("http://localhost:4321"), None);
         crate::shared::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
-        let ep = ep.expect("override alone should resolve");
-        assert_eq!(ep.base_url, "http://localhost:4321");
-        assert_eq!(ep.dev_token, "");
+        let (ep, warning) = resolved.expect("resolution should not error");
+        assert!(ep.is_none(), "no token means no usable endpoint");
+        let warning = warning.expect("a startup warning should be surfaced");
+        assert!(warning.contains("--reload-url"), "got: {warning}");
+    }
+
+    #[test]
+    fn resolve_reload_endpoint_refuses_non_loopback_override() {
+        let _guard = crate::shared::test_env::lock();
+        let prior_endpoint = std::env::var_os("COGNIA_CLI_ENDPOINT_FILE");
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        use std::io::Write;
+        write!(
+            tmp,
+            r#"{{"baseUrl":"http://127.0.0.1:9999","devToken":"realtoken"}}"#
+        )
+        .unwrap();
+        std::env::set_var("COGNIA_CLI_ENDPOINT_FILE", tmp.path());
+        for url in [
+            "https://bridge.example.com",
+            "http://10.0.0.5:7891",
+            "http://169.254.0.1:7891",
+            "wss://127.0.0.1:7891",
+            "http://user:pw@127.0.0.1:7891",
+            "http://127.0.0.1:7891?x=1",
+            "http://127.0.0.1:7891/api/dev",
+        ] {
+            assert!(
+                resolve_reload_endpoint(Some(url), None).is_err(),
+                "expected refusal for {url}"
+            );
+        }
+        crate::shared::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
+    }
+
+    #[test]
+    fn validate_reload_url_accepts_loopback_origins() {
+        for url in [
+            "http://127.0.0.1:7891",
+            "http://localhost:7891",
+            "http://[::1]:7891",
+            "https://127.0.0.1:7891/",
+        ] {
+            validate_reload_url(url).unwrap_or_else(|err| panic!("{url} rejected: {err}"));
+        }
     }
 
     #[test]

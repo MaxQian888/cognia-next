@@ -144,6 +144,19 @@ describe("layer precedence", () => {
     expect(cfg.model).toBe("project-model")
   })
 
+  it("carries disabledTools and lets a project layer replace (not merge) it", () => {
+    const userOnly = run({
+      [userConfigPath(HOME)]: JSON.stringify({ disabledTools: ["bash"] }),
+    })
+    expect(userOnly.disabledTools).toEqual(["bash"])
+
+    const both = run({
+      [userConfigPath(HOME)]: JSON.stringify({ disabledTools: ["bash"] }),
+      [projectConfigPath(CWD)]: JSON.stringify({ disabledTools: ["write"] }),
+    })
+    expect(both.disabledTools).toEqual(["write"])
+  })
+
   it("env overrides project config", () => {
     const cfg = run(
       { [projectConfigPath(CWD)]: JSON.stringify({ provider: "openai" }) },

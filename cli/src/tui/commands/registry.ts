@@ -47,6 +47,7 @@ const SETTINGS_FORM_FIELDS = [
   "systemPrompt",
   "skillDirs",
   "allowedTools",
+  "disabledTools",
   "gitProtectedBranches",
   "gitBaseBranch",
 ] as const

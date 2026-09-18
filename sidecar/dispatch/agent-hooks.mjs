@@ -20,6 +20,7 @@ import { spawn } from "node:child_process"
 import { HOOK_EVENTS } from "@anthropic-ai/claude-agent-sdk"
 import { hasNoLeakingPiiDeep, redactText } from "@cognia/redact"
 import { runPluginHookHandler } from "./plugin-hook-exec.mjs"
+import { resolveToolProvenance } from "./tool-provenance.mjs"
 
 const DEFAULT_TIMEOUT_SECS = 5
 const HARD_TIMEOUT_CAP_SECS = 30
@@ -813,7 +814,20 @@ function makeEventCallback(eventName, hooksConfig, deps) {
     // `agent_kind` / `agent_ref` as top-level fields, exactly as the Rust rail
     // emits them.
     const agentIdentity = resolveAgentIdentity(input, deps)
-    const identifiedInput = { ...input, ...agentIdentity }
+    // `tool_provenance` joins the identity fields: resolved host-side from the
+    // tool name + the session's plugin manifest, metadata only (never args).
+    // Merged BEFORE serialization for the same reason `agent_kind` is — a hook
+    // script reads it as a top-level field. Absent when the event carries no
+    // resolvable tool name.
+    const toolProvenance = resolveToolProvenance(input?.tool_name, {
+      pluginTools: deps?.pluginTools,
+      mcpDeclaredBy: deps?.mcpDeclaredBy,
+    })
+    const identifiedInput = {
+      ...input,
+      ...agentIdentity,
+      ...(toolProvenance ? { tool_provenance: toolProvenance } : {}),
+    }
     const target = hookMatchTarget(eventName, identifiedInput)
     const payloadJson = safeStringify(identifiedInput)
     const hookDepth =
@@ -853,7 +867,7 @@ function makeEventCallback(eventName, hooksConfig, deps) {
  * caller can omit the field.
  *
  * @param {object|undefined} hooksConfig  `HooksConfig` (event → HookGroup[])
- * @param {{ emit: Function, emitAudit?: Function, log?: Function, sessionId: string, cwd?: string, provider?: string, agentKind?: string, agentRef?: string, executeNativeHandler?: Function, pendingPluginHookCalls?: Map<string, any>, newId?: () => string }} deps
+ * @param {{ emit: Function, emitAudit?: Function, log?: Function, sessionId: string, cwd?: string, provider?: string, agentKind?: string, agentRef?: string, pluginTools?: readonly { name?: unknown, pluginId?: unknown }[], executeNativeHandler?: Function, pendingPluginHookCalls?: Map<string, any>, newId?: () => string }} deps
  */
 export function buildAgentHooks(hooksConfig, deps) {
   if (!hooksConfig || typeof hooksConfig !== "object") return undefined

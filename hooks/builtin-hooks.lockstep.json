@@ -52,6 +52,13 @@
       "matcher": null,
       "script": "pii-safety-guard.mjs",
       "defaultEnabled": false
+    },
+    {
+      "id": "tool-provenance-guard",
+      "event": "PreToolUse",
+      "matcher": null,
+      "script": "tool-provenance-guard.mjs",
+      "defaultEnabled": false
     }
   ]
 }

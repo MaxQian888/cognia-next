@@ -60,8 +60,10 @@ pub(crate) struct ConnectionTarget {
     pub ticket: String,
 }
 
-/// Resolve the WS URL + ticket: env override first, broker second.
-pub(crate) fn resolve_target() -> Result<ConnectionTarget> {
+/// Resolve the WS URL + ticket: env override first, broker second. The
+/// optional path overrides the endpoint file the ticket broker is found
+/// through (`--endpoint-file` > `COGNIA_CLI_ENDPOINT_FILE` > default).
+pub(crate) fn resolve_target(endpoint_file: Option<&std::path::Path>) -> Result<ConnectionTarget> {
     let env_url = std::env::var("COGNIA_ACP_URL")
         .ok()
         .filter(|s| !s.is_empty());
@@ -79,7 +81,7 @@ pub(crate) fn resolve_target() -> Result<ConnectionTarget> {
         _ => {}
     }
 
-    let endpoint = bridge_client::load_endpoint()?;
+    let endpoint = bridge_client::load_endpoint_from(endpoint_file)?;
     let response: AcpTicketResponse =
         bridge_client::post_json(&endpoint, "/api/dev/acp/ticket", &serde_json::json!({}))?;
     if !response.ok {
@@ -160,8 +162,8 @@ pub(crate) fn has_explicit_acp_url_override() -> bool {
         .is_some_and(|value| !value.is_empty())
 }
 
-pub fn run(ui: &RuntimeUi) -> Result<()> {
-    let target = resolve_target()?;
+pub fn run(endpoint_file: Option<&std::path::Path>, ui: &RuntimeUi) -> Result<()> {
+    let target = resolve_target(endpoint_file)?;
     let (host, port, is_tls) = parse_ws_host(&target.ws_url)?;
 
     // Certificate verification is skipped below, which is only sound on the
@@ -378,7 +380,7 @@ mod tests {
         let prior_ticket = std::env::var_os("COGNIA_ACP_TICKET");
         std::env::set_var("COGNIA_ACP_URL", "wss://127.0.0.1:1/ws/acp");
         std::env::set_var("COGNIA_ACP_TICKET", "tok");
-        let target = resolve_target().unwrap();
+        let target = resolve_target(None).unwrap();
         crate::shared::test_env::restore("COGNIA_ACP_URL", prior_url);
         crate::shared::test_env::restore("COGNIA_ACP_TICKET", prior_ticket);
         assert_eq!(
@@ -397,7 +399,7 @@ mod tests {
         let prior_ticket = std::env::var_os("COGNIA_ACP_TICKET");
         std::env::set_var("COGNIA_ACP_URL", "wss://127.0.0.1:1/ws/acp");
         std::env::remove_var("COGNIA_ACP_TICKET");
-        let err = resolve_target().unwrap_err();
+        let err = resolve_target(None).unwrap_err();
         crate::shared::test_env::restore("COGNIA_ACP_URL", prior_url);
         crate::shared::test_env::restore("COGNIA_ACP_TICKET", prior_ticket);
         assert!(err.to_string().contains("COGNIA_ACP_TICKET"));
@@ -410,7 +412,7 @@ mod tests {
         let prior_ticket = std::env::var_os("COGNIA_ACP_TICKET");
         std::env::remove_var("COGNIA_ACP_URL");
         std::env::set_var("COGNIA_ACP_TICKET", "tok");
-        let err = resolve_target().unwrap_err();
+        let err = resolve_target(None).unwrap_err();
         crate::shared::test_env::restore("COGNIA_ACP_URL", prior_url);
         crate::shared::test_env::restore("COGNIA_ACP_TICKET", prior_ticket);
         assert!(err.to_string().contains("COGNIA_ACP_URL"));
@@ -457,7 +459,7 @@ mod tests {
         std::env::remove_var("COGNIA_ACP_URL");
         std::env::remove_var("COGNIA_ACP_TICKET");
 
-        let target = resolve_target().unwrap();
+        let target = resolve_target(None).unwrap();
         crate::shared::test_env::restore("COGNIA_ACP_URL", prior_url);
         crate::shared::test_env::restore("COGNIA_ACP_TICKET", prior_ticket);
         crate::shared::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
@@ -500,7 +502,7 @@ mod tests {
         std::io::Write::write_all(&mut tmp, payload.as_bytes()).unwrap();
         std::env::set_var("COGNIA_CLI_ENDPOINT_FILE", tmp.path());
 
-        let err = resolve_target().unwrap_err();
+        let err = resolve_target(None).unwrap_err();
         crate::shared::test_env::restore("COGNIA_ACP_URL", prior_url);
         crate::shared::test_env::restore("COGNIA_ACP_TICKET", prior_ticket);
         crate::shared::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);

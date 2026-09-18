@@ -1,6 +1,6 @@
 /**
- * Where Claude Code / Codex / OpenCode / Pi keep their config and data trees
- * on this host.
+ * Where Claude Code / Codex / OpenCode / Pi / Gemini / Continue / Cursor keep
+ * their config and data trees on this host.
  *
  * Every importer in the app — sessions (`lib/session-import/`), MCP
  * (`lib/claude/agents/`), subagents (`lib/claude/subagent-importers/`),
@@ -69,6 +69,12 @@ export interface VendorRoots {
    * `sessions/`). Home-relative, no confirmed override; see {@link geminiDir}.
    */
   continueDir: string
+  /**
+   * `<home>/.cursor` — Cursor's user-scope directory; its `skills/` tree is
+   * scanned by the skill-discovery surface. Home-relative, no confirmed
+   * override; see {@link geminiDir}.
+   */
+  cursorDir: string
 }
 
 /** All roots unresolvable — what web mode gets, and the shape of a failed IPC. */
@@ -82,6 +88,7 @@ export const EMPTY_VENDOR_ROOTS: VendorRoots = {
   piSessionDir: "",
   geminiDir: "",
   continueDir: "",
+  cursorDir: "",
 }
 
 /** True when at least one vendor tree is locatable. */
@@ -157,6 +164,7 @@ export function vendorRootsFromEnv(
     // Home-relative on every OS; see the field docs for why no env override.
     geminiDir: base ? joinPath(base, ".gemini") : "",
     continueDir: base ? joinPath(base, ".continue") : "",
+    cursorDir: base ? joinPath(base, ".cursor") : "",
   }
 }
 
@@ -189,6 +197,7 @@ function asVendorRoots(value: unknown): VendorRoots | null {
     piSessionDir: read("piSessionDir"),
     geminiDir: read("geminiDir"),
     continueDir: read("continueDir"),
+    cursorDir: read("cursorDir"),
   }
   const platformDataDir = read("opencodePlatformDataDir")
   if (platformDataDir) roots.opencodePlatformDataDir = platformDataDir

@@ -8,6 +8,12 @@
  *  - compound-command aware (via `splitCommandSegments`) — the worst verdict
  *    across the chain wins, and destructive commands hidden inside
  *    substitutions still surface;
+ *  - `cd`-chain aware — a `cd <dir>` segment re-anchors the working directory
+ *    for later segments *in the same shell scope*, so `cd / && rm -rf ./etc`
+ *    denies (target resolves to `/etc`) instead of sliding through as an
+ *    ambiguous relative path. `cd` inside `$(...)`/`(...)` stays in its own
+ *    subshell scope and never moves the outer directory. Ambiguous targets
+ *    (`cd -`, `cd $VAR`) leave the directory unknown → fail closed at `ask`;
  *  - subcommand aware for `git` / `npm`-family / `cargo`, so `git status`
  *    is allowed while `git push` asks;
  *  - privilege aware — a `sudo`-wrapped safe command escalates to `ask`;
@@ -397,14 +403,111 @@ function bareArgs(args: string[]): string[] {
   return args.filter((a) => !a.startsWith("-"))
 }
 
-function classifyRm(head: string, args: string[]): SegmentClassification {
+/** Directory-changing builtins — `cd`, `pushd`; `popd`/`dirs` share the head
+ * check but only `cd`/`pushd` carry a resolvable target. */
+const DIR_HEADS = new Set(["cd", "pushd", "popd", "dirs"])
+
+/**
+ * Collapse `.`/`..` in a POSIX path without touching the filesystem. `..`
+ * above the root clamps at `/`, matching shell behaviour. Returns the
+ * normalized path, or `undefined` for empty input.
+ */
+export function normalizePosixPath(path: string): string | undefined {
+  if (!path) return undefined
+  const rooted = path.startsWith("/")
+  const parts: string[] = []
+  for (const part of path.split("/")) {
+    if (!part || part === ".") continue
+    if (part === "..") {
+      if (parts.length && parts[parts.length - 1] !== "..") parts.pop()
+      else if (!rooted) parts.push("..")
+      continue
+    }
+    parts.push(part)
+  }
+  if (!parts.length) return rooted ? "/" : "."
+  return `${rooted ? "/" : ""}${parts.join("/")}`
+}
+
+/**
+ * Resolve a possibly-relative path against the directory a segment runs in.
+ * Absolute and `~`-rooted targets normalize standalone; relative targets need
+ * a known `workDir`, else the result is ambiguous → `undefined` (fail closed).
+ */
+export function resolvePathInDir(
+  target: string,
+  workDir: string | undefined,
+  home: string | undefined
+): string | undefined {
+  if (!target) return undefined
+  if (target === "~") return home
+  if (target.startsWith("~/")) {
+    return home ? normalizePosixPath(`${home}/${target.slice(2)}`) : undefined
+  }
+  if (target.startsWith("/")) return normalizePosixPath(target)
+  if (!workDir) return undefined
+  return normalizePosixPath(`${workDir.replace(/\/+$/, "")}/${target}`)
+}
+
+/**
+ * Where a `cd`/`pushd` segment leaves its scope's working directory, or
+ * `undefined` when the target cannot be proven — bare `cd` and `cd ~` go home
+ * (unknown unless `home` was supplied), `cd -` jumps to OLDPWD, and a target
+ * containing a substitution or variable is opaque. Unknown → subsequent
+ * relative paths stay unresolvable → fail closed.
+ */
+function dirAfter(
+  head: string,
+  raw: string,
+  args: string[],
+  workDir: string | undefined,
+  home: string | undefined
+): string | undefined {
+  // `dirs` only prints the stack; `popd` pops to an entry we don't track.
+  if (head === "dirs") return workDir
+  if (head === "popd") return undefined
+  // A substitution/variable anywhere in the segment makes the target opaque —
+  // `cd $(pwd)` tokenizes as a bare `cd` after extraction, so this check must
+  // run before the empty-target branch or it would read as "goes home".
+  if (/[$`]/.test(raw)) return undefined
+  const target = bareArgs(args)[0]
+  if (!target || target === "~") return home
+  if (target === "-") return undefined
+  return resolvePathInDir(target, workDir, home)
+}
+
+/** Unwrap `builtin`/`command`/`env`-style wrappers to the head that actually
+ * runs — needed so `builtin cd /x` still moves the tracked directory. Same
+ * wrapper set and depth cap as `classifySegmentInner`. */
+function effectiveDirHead(
+  head: string,
+  args: string[],
+  depth = 0
+): { head: string; args: string[] } | null {
+  if (depth >= 3 || !WRAPPERS.has(head)) return { head, args }
+  const inner = unwrap(args)
+  if (!inner) return null
+  return effectiveDirHead(inner.head, inner.args, depth + 1)
+}
+
+function classifyRm(
+  head: string,
+  args: string[],
+  workDir?: string,
+  home?: string
+): SegmentClassification {
   const flags = flagsOf(args)
   const recursive = flags.includes("r") || hasLongFlag(args, "recursive")
   const force = flags.includes("f") || hasLongFlag(args, "force")
   const targets = bareArgs(args)
-  const critical = targets.some(
-    (t) => CRITICAL_RM_TARGETS.has(t.toLowerCase()) || CRITICAL_RM_PREFIX.test(t)
-  )
+  const critical = targets.some((t) => {
+    if (CRITICAL_RM_TARGETS.has(t.toLowerCase()) || CRITICAL_RM_PREFIX.test(t)) return true
+    const resolved = resolvePathInDir(t, workDir, home)
+    return (
+      resolved !== undefined &&
+      (CRITICAL_RM_TARGETS.has(resolved.toLowerCase()) || CRITICAL_RM_PREFIX.test(resolved))
+    )
+  })
   if ((recursive || head === "rmdir") && force && critical) {
     return { head, verdict: "deny", reason: "recursive force-delete of a critical path" }
   }
@@ -491,8 +594,16 @@ function classifyDd(args: string[]): SegmentClassification {
 }
 
 /** Classify a single resolved head + args (after wrapper unwrapping). */
-function classifyHead(head: string, args: string[]): SegmentClassification {
-  if (DELETE_HEADS.has(head)) return classifyRm(head, args)
+function classifyHead(
+  head: string,
+  args: string[],
+  workDir?: string,
+  home?: string
+): SegmentClassification {
+  if (DIR_HEADS.has(head)) {
+    return { head, verdict: "allow", reason: "changes the working directory (no side effects)" }
+  }
+  if (DELETE_HEADS.has(head)) return classifyRm(head, args, workDir, home)
   if (head === "git") return classifyGit(args)
   if (head === "npm" || head === "pnpm" || head === "yarn" || head === "bun") {
     return classifyPackageManager(head, args)
@@ -538,13 +649,19 @@ function unwrap(args: string[]): { head: string; args: string[] } | null {
   return null
 }
 
-function classifySegmentInner(head: string, args: string[], depth: number): SegmentClassification {
+function classifySegmentInner(
+  head: string,
+  args: string[],
+  depth: number,
+  workDir?: string,
+  home?: string
+): SegmentClassification {
   if (depth < 3 && WRAPPERS.has(head)) {
     const inner = unwrap(args)
     if (!inner) {
       return { head, verdict: "ask", reason: "privilege/util wrapper with no inner command" }
     }
-    const sub = classifySegmentInner(inner.head, inner.args, depth + 1)
+    const sub = classifySegmentInner(inner.head, inner.args, depth + 1, workDir, home)
     if (head === "sudo" || head === "doas") {
       // Privilege escalation never *lowers* the verdict; a safe command still
       // needs confirmation when run as root.
@@ -555,7 +672,7 @@ function classifySegmentInner(head: string, args: string[], depth: number): Segm
     }
     return sub
   }
-  return classifyHead(head, args)
+  return classifyHead(head, args, workDir, home)
 }
 
 /**
@@ -590,16 +707,43 @@ function classifyRedirects(
   return null
 }
 
+export interface ClassifyOptions {
+  /** Directory the command line starts in; relative paths resolve from it. */
+  cwd?: string
+  /** Home directory for bare `cd` / `~` targets; omit to leave them unknown. */
+  home?: string
+}
+
 /**
  * Classify a (possibly compound) command line into an allow/ask/deny verdict.
  * The worst verdict across all segments — including those inside command
  * substitutions and subshells — wins.
+ *
+ * `cd`/`pushd`/`popd` update the tracked working directory for later segments
+ * *in the same scope* (`segment.scope`), so `cd / && rm -rf ./etc` denies —
+ * `./etc` resolves to `/etc`. A `cd` inside `$(...)`/`(...)` lives in a child
+ * scope that inherits the parent's directory at spawn and never writes back,
+ * matching subshell semantics. An ambiguous target (`cd -`, `cd $VAR`) leaves
+ * the scope's directory unknown, so relative paths fail closed at `ask`.
  */
-export function classifyCommand(command: string): CommandClassification {
+export function classifyCommand(
+  command: string,
+  opts: ClassifyOptions = {}
+): CommandClassification {
   const parsed = splitCommandSegments(command)
+  const dirByScope = new Map<number, string | undefined>([[0, opts.cwd]])
   const segments: SegmentClassification[] = parsed.map((s) => {
-    const base = classifySegmentInner(s.head, s.args, 0)
+    if (!dirByScope.has(s.scope)) dirByScope.set(s.scope, dirByScope.get(s.scopeParent))
+    const workDir = dirByScope.get(s.scope)
+    const base = classifySegmentInner(s.head, s.args, 0, workDir, opts.home)
     const floor = classifyRedirects(s.redirects)
+    // Track `cd` even under `builtin`/`command`/`env` wrappers — `builtin cd /`
+    // really does move the shell — but only the outermost segment's dir
+    // tracking applies; the substitution scopes above already got their own.
+    const eff = effectiveDirHead(s.head, s.args)
+    if (eff && DIR_HEADS.has(eff.head)) {
+      dirByScope.set(s.scope, dirAfter(eff.head, s.raw, eff.args, workDir, opts.home))
+    }
     if (floor && RANK[floor.verdict] > RANK[base.verdict]) {
       return { head: base.head, verdict: floor.verdict, reason: floor.reason }
     }

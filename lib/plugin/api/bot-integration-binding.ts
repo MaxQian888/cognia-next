@@ -5,6 +5,7 @@ import { requireOwnedBotRun } from "@/lib/bot/runtime/owned-run"
 import { assertBotPublicationAuthority } from "@/lib/bot/policy/run-authority"
 import { getBot } from "@/lib/plugin/registries/bot-registry"
 import { getRegisteredIntegration } from "@/lib/integrations/registry"
+import { readJsonPointer } from "@/lib/integrations/events"
 import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 import { defaultsFromConfigSchema } from "@/lib/bot/config/resolve-effective"
 import type { IntegrationBotBindingRef } from "@/types/plugin/plugin-integration"
@@ -50,18 +51,38 @@ export async function resolveBotIntegrationBinding(
   }
   const config = { ...defaultsFromConfigSchema(definition.configSchema), ...installation.config }
   const configured = config.repository ?? config.repoFullName
-  if (
-    typeof configured !== "string" ||
-    !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(configured) ||
-    configured.split("/").some((part) => part === "." || part === "..")
-  ) {
-    throw new Error("Bot integration repository scope is missing")
+  // The repository scope is optional: integrations whose resource model is not
+  // repository-shaped (incidents, services, ...) never declare it. A present
+  // but malformed value still fails closed — a declared scope the host cannot
+  // parse cannot be enforced.
+  let repository: string | undefined
+  if (configured !== undefined) {
+    if (
+      typeof configured !== "string" ||
+      !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(configured) ||
+      configured.split("/").some((part) => part === "." || part === "..")
+    ) {
+      throw new Error("Bot integration repository scope is invalid")
+    }
+    repository = configured.toLowerCase()
   }
-  const repository = configured.toLowerCase()
-  if (expectedRepository && expectedRepository.toLowerCase() !== repository) {
-    throw new Error("Bot integration repository is outside its installation scope")
+  if (expectedRepository) {
+    if (!repository) throw new Error("Bot integration repository scope is missing")
+    if (expectedRepository.toLowerCase() !== repository) {
+      throw new Error("Bot integration repository is outside its installation scope")
+    }
   }
-  return { run, installation, definition, account, repository }
+  // Every scope dimension the installation declares: `repository` plus the
+  // generic `scopes` map (`{ service: "P...", ... }`) for non-repository kinds.
+  const declaredScopes = config.scopes
+  const scopes: Record<string, string> = {}
+  if (declaredScopes && typeof declaredScopes === "object" && !Array.isArray(declaredScopes)) {
+    for (const [kind, value] of Object.entries(declaredScopes)) {
+      if (typeof value === "string" && value) scopes[kind] = value
+    }
+  }
+  if (repository) scopes.repository = repository
+  return { run, installation, definition, account, repository, scopes }
 }
 
 /** Exact JSON equality, independent of property insertion order. */
@@ -96,17 +117,31 @@ export async function assertBotIntegrationAction(
   ) {
     throw new Error("Bot integration action is not allowlisted")
   }
-  if (
-    typeof action.input.repoFullName !== "string" ||
-    action.input.repoFullName.toLowerCase() !== binding.repository
-  ) {
-    throw new Error("Bot integration action repository is outside its installation scope")
-  }
   const definition = getRegisteredIntegration(
     binding.account.pluginId,
     action.integrationId
   )?.definition.actions.find((candidate) => candidate.id === action.actionId)
   if (!definition) throw new Error("Bot integration action is unavailable")
+  // Scope is declared by the action, not assumed: every `scopeSelectors` entry
+  // names a dimension (`kind`) and where its value lives in the input
+  // (`jsonPointer`). The installation must declare a matching scope value —
+  // `repository` from its repository config, other kinds from `config.scopes` —
+  // and the input must equal it. An action with no selectors carries no scope
+  // check; the allowlist and approval gates still apply.
+  for (const selector of definition.scopeSelectors ?? []) {
+    const expected = binding.scopes[selector.kind]
+    if (!expected) {
+      throw new Error(`Bot integration ${selector.kind} scope is missing`)
+    }
+    const raw = readJsonPointer(action.input, selector.jsonPointer)
+    const value = typeof raw === "string" ? raw : typeof raw === "number" ? String(raw) : undefined
+    const matches =
+      value !== undefined &&
+      (selector.kind === "repository" ? value.toLowerCase() === expected : value === expected)
+    if (!matches) {
+      throw new Error(`Bot integration action ${selector.kind} is outside its installation scope`)
+    }
+  }
   if (definition.risk !== "read") {
     const approval = approvalId ? await getDb().executionRunInterrupts.get(approvalId) : undefined
     if (

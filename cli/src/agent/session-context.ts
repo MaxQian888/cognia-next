@@ -319,7 +319,9 @@ export function createCliContextAssembler(params: CliContextAssemblerParams): Cl
     ctx.compositionSelection = params.compositionSelection
     const sendOptions = withCliDisabledMcpTools(
       withCliAutoApprovedTools(await resolveOptions(ctx), resolveApprovedTools()),
-      resolveDisabledMcpTools()
+      // Two overlays share this union: the `/mcp` panel's per-tool toggles and
+      // the user's config `disabledTools` deny-list (any tool name).
+      [...resolveDisabledMcpTools(), ...(config.disabledTools ?? [])]
     )
     let contextualSkills: Array<LoadableSkill & { intents: string[] }> = []
     if (skillLoadMode === "name" && databaseError === null) {

@@ -44,6 +44,26 @@ test("emits a plugin_hook_exec frame carrying the parsed payload", async () => {
   })
 })
 
+test("tool_provenance in the payload reaches the plugin handler untouched", async () => {
+  // The plugin-handler path parses the same serialized payload the command
+  // handlers read — provenance injected by agent-hooks.mjs rides through.
+  const h = harness({ result: {} })
+  await runPluginHookHandler(
+    { type: "plugin", pluginId: "p1", hookId: "onPreToolUse" },
+    JSON.stringify({
+      hook_event_name: "PreToolUse",
+      tool_name: "mcp__github__create_issue",
+      tool_provenance: { kind: "mcp", source: "github", declared_by: "/repo/.mcp.json" },
+    }),
+    { emit: h.emit, sessionId: "s1", pendingPluginHookCalls: h.pending, newId: h.newId }
+  )
+  assert.deepEqual(h.emitted[0].payload.tool_provenance, {
+    kind: "mcp",
+    source: "github",
+    declared_by: "/repo/.mcp.json",
+  })
+})
+
 test("a plugin's explicit deny becomes a block", async () => {
   for (const answer of [
     { result: { block: "nope" } },

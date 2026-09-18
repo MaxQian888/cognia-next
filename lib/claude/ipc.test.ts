@@ -357,7 +357,7 @@ describe("Claude session commands", () => {
     const { buildEditorBuiltinManifestEntries, buildEditorWriteManifestEntries } =
       await import("@/lib/claude/editor-builtin-tools")
     const { buildVectorManifestEntries } = await import("@/lib/claude/vector-builtin-tools")
-    mockHasNoLeakingPiiDeep.mockImplementation(hasNoLeakingPiiDeep)
+    mockHasNoLeakingPiiDeep.mockImplementation((payload) => hasNoLeakingPiiDeep(payload))
     callSpy.mockResolvedValueOnce(undefined)
     const pluginTools = [
       ...buildEditorBuiltinManifestEntries(),

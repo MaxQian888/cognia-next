@@ -188,7 +188,7 @@ describe("startDurability", () => {
       // serializes every account-db table to disk (seconds, not ms), so await
       // the flush chain itself rather than polling the file for a fixed window.
       listeners.get("beforeExit")!()
-      await durability.db.flush()
+      await durability.db!.flush()
       expect(fs.existsSync(manifestPath)).toBe(true)
       expect(durability.rss().lastFlushAt).toBeGreaterThan(0)
 
@@ -288,7 +288,7 @@ describe("startDurability", () => {
         .catch(() => {})
       // The clear() above schedules a debounced write into `home`; settle it
       // through the still-open handle before removing the directory.
-      await second?.db.flush().catch(() => {})
+      await second?.db?.flush().catch(() => {})
       __resetCliDbForTesting()
       fs.rmSync(home, { recursive: true, force: true })
     }

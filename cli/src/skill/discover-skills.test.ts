@@ -104,6 +104,32 @@ describe("discoverDiskSkills", () => {
       await discoverDiskSkills([{ dir: "/nope/.cognia/skills", source: "project" }], fs)
     ).toEqual([])
   })
+
+  it("scans a directory reachable through two aliases only once", async () => {
+    // `.agents/skills` symlinked onto `.claude/skills`: the skill loads under
+    // the first alias in precedence order, not once per alias.
+    const base = memFs(
+      { "/real/skills": ["dup.md"], "/alias/skills": ["dup.md"] },
+      {
+        "/real/skills/dup.md": SKILL("Dup", "real body"),
+        "/alias/skills/dup.md": SKILL("Dup", "alias body"),
+      }
+    )
+    const fs: SkillFs = {
+      ...base,
+      realPath: async (p) => (p === "/alias/skills" ? "/real/skills" : p),
+    }
+    const found = await discoverDiskSkills(
+      [
+        { dir: "/real/skills", source: "claude" },
+        { dir: "/alias/skills", source: "codex" },
+      ],
+      fs
+    )
+    expect(found).toHaveLength(1)
+    expect(found[0].source).toBe("claude")
+    expect(found[0].draft.name).toBe("Dup")
+  })
 })
 
 describe("discovered file paths", () => {
@@ -192,6 +218,34 @@ describe("findDiskSkillByCanonicalId", () => {
     expect(found?.id).toBe("proj-oc")
     expect(found?.source).toBe("opencode")
   })
+
+  it("finds a skill in the global Cursor dir", async () => {
+    const fs = memFs(
+      { "/home/u/.cursor/skills": ["cu.md"] },
+      { "/home/u/.cursor/skills/cu.md": SKILL("Cursor Skill") }
+    )
+    const found = await findDiskSkillByCanonicalId(
+      { cwd: "/work", home: "/home/u/.cognia", osHome: "/home/u" },
+      "cli-disk:cursor:cu",
+      fs
+    )
+    expect(found?.id).toBe("cu")
+    expect(found?.source).toBe("cursor")
+  })
+
+  it("finds a skill in a project-level Cursor dir", async () => {
+    const fs = memFs(
+      { "/work/.cursor/skills": ["proj-cu.md"] },
+      { "/work/.cursor/skills/proj-cu.md": SKILL("Proj CU") }
+    )
+    const found = await findDiskSkillByCanonicalId(
+      { cwd: "/work", home: "/home/u/.cognia", osHome: "/home/u" },
+      "cli-disk:cursor-project:proj-cu",
+      fs
+    )
+    expect(found?.id).toBe("proj-cu")
+    expect(found?.source).toBe("cursor-project")
+  })
 })
 
 describe("listSkillBundledFiles", () => {
@@ -223,10 +277,12 @@ describe("skillScanDirs", () => {
       { dir: "/work/.cognia/skills", source: "project" },
       { dir: "/work/.claude/skills", source: "claude-project" },
       { dir: "/work/.opencode/skills", source: "opencode" },
+      { dir: "/work/.cursor/skills", source: "cursor-project" },
       { dir: "/home/u/.cognia/skills", source: "global" },
       { dir: "/home/u/.claude/skills", source: "claude" },
       { dir: "/home/u/.agents/skills", source: "codex" },
       { dir: "/home/u/.opencode/skills", source: "opencode" },
+      { dir: "/home/u/.cursor/skills", source: "cursor" },
     ])
   })
 
@@ -263,7 +319,13 @@ describe("skillScanDirs", () => {
 
   it("skips Claude Code / Codex / OpenCode global dirs when the OS home is absent", () => {
     const dirs = norm(skillScanDirs({ cwd: "/work", home: "/home/u/.cognia" }))
-    expect(dirs.map((d) => d.source)).toEqual(["project", "claude-project", "opencode", "global"])
+    expect(dirs.map((d) => d.source)).toEqual([
+      "project",
+      "claude-project",
+      "opencode",
+      "cursor-project",
+      "global",
+    ])
   })
 })
 
@@ -275,6 +337,8 @@ describe("skillOriginLabel", () => {
     expect(skillOriginLabel("cli-disk:claude:x")).toBe("claude")
     expect(skillOriginLabel("cli-disk:codex:x")).toBe("codex")
     expect(skillOriginLabel("cli-disk:opencode:x")).toBe("opencode")
+    expect(skillOriginLabel("cli-disk:cursor-project:x")).toBe("cursor·proj")
+    expect(skillOriginLabel("cli-disk:cursor:x")).toBe("cursor")
     expect(skillOriginLabel("cli-disk:custom:x")).toBe("custom")
   })
 

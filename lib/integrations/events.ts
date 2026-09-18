@@ -41,7 +41,7 @@ function subscriptionMatches(
   return true
 }
 
-function readJsonPointer(value: unknown, pointer: string): unknown {
+export function readJsonPointer(value: unknown, pointer: string): unknown {
   if (pointer === "") return value
   if (!pointer.startsWith("/")) return undefined
   let current = value

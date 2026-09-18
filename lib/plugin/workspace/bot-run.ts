@@ -87,7 +87,10 @@ export async function assertOwnedBotWorkspace(pluginId: string, handle: PluginWo
     { runId: handle.runId, slotId: owned.spec.credentialSlot },
     owned.spec.repository
   )
-  return { ...owned, binding }
+  // `spec.repository` is required, so resolve has already enforced a
+  // repository-scoped binding; this only narrows the type for the callers.
+  if (!binding.repository) throw new Error("Bot integration repository scope is missing")
+  return { ...owned, binding: binding as typeof binding & { repository: string } }
 }
 
 export async function acquireBotWorkspace(
@@ -132,6 +135,7 @@ export async function acquireBotWorkspace(
   const destination = await deps.repoCacheDir(segments)
   const runtimeStateRoot = await deps.repoCacheDir(["bot-runs", `${id}-state`])
   const repository = binding.repository
+  if (!repository) throw new Error("Bot integration repository scope is missing")
   const url = `https://github.com/${repository}.git`
   const cachedHead =
     allocation && deps.headOf ? await deps.headOf(destination).catch(() => null) : null

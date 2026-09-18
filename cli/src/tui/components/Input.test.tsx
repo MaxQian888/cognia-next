@@ -849,6 +849,56 @@ describe("Input vim mode (/vim)", () => {
     key("", { return: true })
     expect(onSubmit).toHaveBeenCalledWith("helloz")
   })
+
+  it("R overwrites text in REPLACE mode end to end", () => {
+    const onSubmit = jest.fn()
+    const { container } = render(<Harness onSubmit={onSubmit} vimEnabled />)
+    type("hello")
+    key("", { escape: true })
+    type("0R")
+    expect(container.textContent).toContain("-- REPLACE --")
+    type("HE")
+    key("", { escape: true })
+    key("", { return: true })
+    expect(onSubmit).toHaveBeenCalledWith("HEllo")
+  })
+
+  it(". repeats the last NORMAL-mode change", () => {
+    const onSubmit = jest.fn()
+    render(<Harness onSubmit={onSubmit} vimEnabled />)
+    type("abc")
+    key("", { escape: true })
+    type("0x.")
+    key("", { return: true })
+    expect(onSubmit).toHaveBeenCalledWith("c")
+  })
+
+  it("/ finds draft matches and n/N walk them", () => {
+    const onSubmit = jest.fn()
+    render(<Harness onSubmit={onSubmit} vimEnabled />)
+    type("foo bar foo bar")
+    key("", { escape: true })
+    type("0/")
+    type("bar")
+    key("", { return: true })
+    // incsearch landed on the first "bar" (col 4); n hops to the second
+    // (col 12) and x deletes its "b" — observable through the submitted text.
+    type("nx")
+    key("", { return: true })
+    expect(onSubmit).toHaveBeenCalledWith("foo bar foo ar")
+  })
+
+  it("shows the search query below the composer while typing it", () => {
+    const onSubmit = jest.fn()
+    const { container } = render(<Harness onSubmit={onSubmit} vimEnabled />)
+    type("foo bar")
+    key("", { escape: true })
+    type("/")
+    type("ba")
+    expect(container.textContent).toContain("/ba")
+    key("", { escape: true })
+    expect(container.textContent).not.toContain("/ba")
+  })
 })
 
 it("omits the decorative caret for screen readers while preserving editable text", async () => {

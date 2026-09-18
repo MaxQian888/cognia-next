@@ -165,6 +165,27 @@ describe("createCliContextAssembler — session context", () => {
     expect(assembler.peek()).toBeNull()
   })
 
+  it("unions the config disabledTools deny-list into disallowedTools with the /mcp overlay", async () => {
+    const assembler = makeAssembler(
+      {
+        resolveOptions: async () =>
+          ({ disallowedTools: ["from-resolver"] }) as unknown as SendOptions,
+        resolveDisabledMcpTools: () => new Set(["mcp__github__push"]),
+      },
+      cfg({ disabledTools: ["bash", "mcp__github__push"] })
+    )
+    const ctx = await assembler.resolveSession()
+    expect(ctx.sendOptions.disallowedTools).toEqual(["from-resolver", "mcp__github__push", "bash"])
+  })
+
+  it("leaves disallowedTools untouched when no overlay applies", async () => {
+    const assembler = makeAssembler({
+      resolveOptions: async () => ({ disallowedTools: ["from-resolver"] }) as SendOptions,
+    })
+    const ctx = await assembler.resolveSession()
+    expect(ctx.sendOptions.disallowedTools).toEqual(["from-resolver"])
+  })
+
   it("surfaces dispatch_agent and drops the desktop SDK-native agents map", async () => {
     const assembler = makeAssembler({
       resolveOptions: async () =>

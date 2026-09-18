@@ -59,6 +59,7 @@ describe("browser-builtin-registry", () => {
       "figma-external-service",
       "github-delivery",
       "github-devin-bot",
+      "pagerduty",
       "pet-daily-quests",
       "ripgrep-tools",
       "sre-agent",

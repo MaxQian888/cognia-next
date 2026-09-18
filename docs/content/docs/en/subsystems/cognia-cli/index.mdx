@@ -21,15 +21,16 @@ description: The cognia plugin-author CLI — a standalone Rust binary for scaff
   ephemeral `127.0.0.1` port, discovered via `<config_dir>/cognia/cli-endpoint.json` and gated by a
   per-launch 64-hex dev token compared in constant time. The renderer detects, downloads
   (SHA-256 + optional Ed25519-verified), and launches the CLI from Plugin DevTools. Top-level
-  utilities cover `cognia acp`, `cognia release-key`, and `cognia release-verify`.
+  utilities cover `cognia acp`, `cognia host`, `cognia logs`, `cognia crash`, `cognia pack`,
+  `cognia status`, `cognia open`, `cognia completions`, `cognia release-key`, and `cognia release-verify`.
 </TLDR>
 
 <StatGrid>
-  <Stat label="Plugin commands" value="14" hint="PluginCommand enum — crates/cognia-cli/src/main.rs" />
+  <Stat label="Plugin commands" value="19" hint="PluginCommand enum — crates/cognia-cli/src/cli.rs" />
   <Stat label="Lint codes" value="60" hint="distinct diagnostic codes — cmd_lint::validate_manifest" />
   <Stat label="Permissions / capabilities" value="45 / 45" hint="hard-coded whitelists, parity-tested against TS — cmd_lint.rs" />
-  <Stat label="Bridge routes / cognia routes" value="12 / 7" hint="shared server total / Rust CLI consumer set — health overlaps cognia-agent" />
-  <Stat label="Rust source" value="~8.5k lines" hint="crates/cognia-cli/src (28 files) + src-tauri/src/cli_bridge (6 files)" />
+  <Stat label="Bridge routes / cognia routes" value="22 / 8" hint="shared server total / Rust CLI consumer set — health overlaps cognia-agent" />
+  <Stat label="Rust source" value="~23.5k lines" hint="crates/cognia-cli/src (57 files) + src-tauri/src/cli_bridge" />
   <Stat label="Renderer surface" value="4 + 4" hint="lib/cli-bridge (4 modules) + DevTools status card / install dialog / launcher / status chip" />
 </StatGrid>
 

@@ -4,6 +4,7 @@ import React from "react"
 import { act, render } from "@testing-library/react"
 
 import { BottomStatus, agentTreeRowTarget, type AgentTreeHit } from "./BottomStatus"
+import { SPINNER_VERBS } from "../format/spinner-verbs"
 import type { SubagentLiveEntry } from "../../agent/subagent-live-output"
 import type { ToolCell } from "../state/types"
 
@@ -158,6 +159,44 @@ describe("BottomStatus", () => {
     expect(text).toContain("goal")
     expect(text).toContain("2/5")
     expect(text).toContain("esc to cancel")
+  })
+
+  it("swaps the working verb for the compaction phase mid-stream", () => {
+    const { container } = render(
+      <BottomStatus
+        turnStatus="streaming"
+        since={Date.now()}
+        turnActivity={{ phase: "compacting", detail: "summarizing history" }}
+      />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("compacting context")
+    expect(text).toContain("summarizing history")
+    expect(text).toContain("esc to interrupt")
+    expect(text).not.toContain(SPINNER_VERBS[0])
+  })
+
+  it("keeps the layer mounted for a compaction report that outlives the busy flag", () => {
+    const { container } = render(
+      <BottomStatus turnStatus="idle" turnActivity={{ phase: "compacting" }} />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("compacting context")
+    // Not part of the turn — no interrupt hint.
+    expect(text).not.toContain("esc to interrupt")
+  })
+
+  it("does not surface the request phase as a compaction", () => {
+    const { container } = render(
+      <BottomStatus
+        turnStatus="streaming"
+        since={Date.now()}
+        turnActivity={{ phase: "requesting" }}
+      />
+    )
+    const text = container.textContent ?? ""
+    expect(text).not.toContain("compacting context")
+    expect(text).toContain("esc to interrupt")
   })
 
   it("shows the backtrack confirm hint when armed and idle", () => {

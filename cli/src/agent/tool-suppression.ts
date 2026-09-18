@@ -70,10 +70,12 @@ export function withCliAutoApprovedTools(
 }
 
 /**
- * Union the user's per-tool MCP disable overlay (the `/mcp` panel's tool
- * toggles) into the resolved options' `disallowedTools`, so a disabled
- * `mcp__server__tool` never reaches the model — without losing whatever the
- * resolver already disallowed. Empty overlay → options unchanged.
+ * Union a disabled-tool overlay into the resolved options' `disallowedTools`,
+ * so a denied tool never reaches the model — without losing whatever the
+ * resolver already disallowed. Two overlays ride through here: the `/mcp`
+ * panel's per-tool toggles (`mcp__server__tool` names) and the user's
+ * config-level `disabledTools` list (any tool name — Devin `disabled_tools`
+ * parity). Empty overlay → options unchanged.
  */
 export function withCliDisabledMcpTools(
   options: SendOptions,

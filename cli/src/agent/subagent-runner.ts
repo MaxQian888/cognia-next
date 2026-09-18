@@ -248,7 +248,10 @@ export async function runCliSubagent(
   }
   sendOptions = withCliDisabledMcpTools(
     withCliAutoApprovedTools(sendOptions, deps.approvedTools),
-    deps.disabledMcpTools
+    // The parent's `/mcp` overlay AND the user's config `disabledTools` list —
+    // a child inherits both (the config deny-list is user-level policy, not
+    // something a subagent definition may waive).
+    [...deps.disabledMcpTools, ...(deps.config.disabledTools ?? [])]
   )
   // Hand the child the same hook engine the parent turn gets. Without this a
   // CLI subagent ran completely hook-blind: the CLI transport bypasses the

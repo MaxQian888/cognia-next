@@ -543,14 +543,19 @@ export function setLoggingConfig(
 }
 
 /** Top-level string-array keys editable from the settings panel. */
-export const ARRAY_CONFIG_KEYS = ["skillDirs", "allowedTools", "additionalRoots"] as const
+export const ARRAY_CONFIG_KEYS = [
+  "skillDirs",
+  "allowedTools",
+  "disabledTools",
+  "additionalRoots",
+] as const
 export type ArrayConfigKey = (typeof ARRAY_CONFIG_KEYS)[number]
 
 /**
  * Replace one top-level string-array key in `config.json` (`skillDirs` /
- * `allowedTools` / `additionalRoots`). An empty array clears the key (so an
- * empty `allowedTools` means "all tools", not "no tools"). The caller dedupes /
- * validates the entries first.
+ * `allowedTools` / `disabledTools` / `additionalRoots`). An empty array clears
+ * the key (so an empty `allowedTools` means "all tools", not "no tools"). The
+ * caller dedupes / validates the entries first.
  */
 export function setStringArrayConfig(
   home: string,

@@ -123,6 +123,36 @@ Payloads are limited to 1 MiB. Failed normalization retries five times before
 dead-lettering. Normalized events retain for 30 days and audit for 90 days;
 the raw body is deleted when its spool row is acknowledged.
 
+### Declarative signature verification
+
+`ingress.verification` supports `hmac-sha256` (with `signatureHeader`,
+`encoding`, optional `prefix`, `signedPayload`, and timestamp skew checks) and
+`static-token`. For providers that send several signatures during key
+rotation — PagerDuty's `X-PagerDuty-Signature: v1=<hex>,v1=<hex>` — set
+`signatureListSeparator` to the list delimiter: each item is an independent
+candidate, malformed entries are skipped, and the request verifies when any
+candidate matches. With no decodable candidate the request fails closed.
+
+The bundled `pagerduty` plugin is the reference implementation: verified
+`incident.*` webhooks, brokered actions (`getIncident`, `addIncidentNote`,
+`acknowledgeIncident`, `resolveIncident`, `escalateIncident`), and a
+handler-executor on-call responder Bot that triages an incident with the
+on-call character, asks approval, and posts findings back as an incident note
+through the action broker.
+
+## Bot-bound scope selectors
+
+When a Bot calls a brokered action (`ctx.integrations.executeAction` with a
+`binding`), the host enforces every `scopeSelectors` entry the action
+declares: the input value at `jsonPointer` must equal the installation's
+declared scope for that `kind`. `repository` scopes resolve from the Bot
+installation's `repository`/`repoFullName` config (compared
+case-insensitively); any other `kind` resolves from a `scopes` map in the
+installation config (`config.scopes.<kind>`). An action that declares no
+selectors carries no scope check — the credential-slot allowlist and the
+write-approval gate still apply. A selector the installation cannot satisfy
+fails closed.
+
 ## GitHub compatibility migration
 
 The `github-delivery` package keeps the existing plugin ID and legacy Dexie

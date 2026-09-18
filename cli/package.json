@@ -30,7 +30,23 @@
   },
   "dependencies": {
     "@types/ws": "8.18.1",
-    "undici": "7.29.0",
     "ws": "8.21.3"
+  },
+  "devDependencies": {
+    "@cognia/agent": "workspace:*",
+    "@cognia/agent-config-types": "workspace:*",
+    "@cognia/agent-trace": "workspace:*",
+    "@cognia/companion-client": "workspace:*",
+    "@cognia/document": "workspace:*",
+    "@cognia/eval-core": "workspace:*",
+    "@cognia/logging": "workspace:*",
+    "@cognia/ocr": "workspace:*",
+    "@cognia/plugin-sdk": "workspace:*",
+    "@cognia/provider-core": "workspace:*",
+    "@cognia/provider-routing": "workspace:*",
+    "@cognia/provider-types": "workspace:*",
+    "@cognia/redact": "workspace:*",
+    "@cognia/security-findings": "workspace:*",
+    "@cognia/vector": "workspace:*"
   }
 }

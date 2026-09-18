@@ -190,3 +190,27 @@ HTTP handler 的兼容形式读取。所有出站 HTTP/模型/MCP 路径都必�
   `agents` 之后一个分组有两种落空方式，这一点更重要。
 - **两份 `BUILTIN_HOOKS` 被互相钉住。** `hooks/builtin-hooks.lockstep.json` 由 TS 与 Rust 两侧测试断言；
   由于 `builtinHookOverrides` 按 id 索引，id 漂移还会让用户在某个 shell 上的启用/禁用选择变成孤儿。
+
+## 修订 —— 工具级载荷携带 `tool_provenance`（2026-09-17）
+
+工具级 hook 载荷（`PreToolUse`、`PostToolUse`、`PostToolUseFailure`、`PermissionRequest`、
+`PermissionDenied`）现在携带 `tool_provenance`：`{ kind, source, declared_by }`，命名声明该工具的
+来源面与声明产物 —— `builtin`（`source: "cognia"`，`declared_by: "builtin-tools-data.json"`）、
+`plugin`（`source` = 从会话 `pluginTools` 清单解析出的插件 id，`declared_by` = 该插件的
+`plugin.json` 路径）、`mcp`（`source` = server 名，`declared_by` = 声明它的配置文件 /
+`"settings"` / `plugin:<id>` 定位符）、`agent`（外部 agent 自有工具面上的裸名，
+`source` = 该 agent id；`declared_by` 缺席 —— agent 自己的配置不在我们手里）。该字段只含元数据 ——
+不含参数或密钥 —— 且当事件没有可解析的工具名时整个字段省略，hook 脚本必须容忍其缺席。
+
+provenance 由拥有工具面的那一层解析，绝不由 Rust 解析：sidecar 在载荷序列化之前把它注入
+`identifiedInput`（`sidecar/dispatch/tool-provenance.mjs`，与
+`lib/claude/hooks/tool-provenance.ts` 互为镜像），数据来源为 `sendOptions.pluginTools`
+（每条目的 `manifestPath`）与 `sendOptions.mcpDeclaredBy`（`resolveSendOptions` 构建的
+按 server 定位表）；外部 agent 桥则把它附在原有经 `run_agent_hook` 发送的 `payload` 上。
+Rust 运行时保持纯透传 —— 它没有 registry 访问权，`fields` flatten 会原样保留该字段
+（由 `hooks/types.rs` 内 `#[cfg(test)]` 测试钉住）。
+
+随附的 `tool-provenance-guard` 内置 hook（注册于两份 `BUILTIN_HOOKS` 目录与 lockstep 表，
+默认关闭）是该字段的第一个消费者：`COGNIA_DENY_TOOL_PROVENANCE` 选择器
+`kind` / `kind:source` / `kind:source:declared`（对 `declared_by` 做子串匹配）可拒绝匹配的
+调用，满足 parity 计划"至少一个内置 hook 脚本消费该字段"的验收项。

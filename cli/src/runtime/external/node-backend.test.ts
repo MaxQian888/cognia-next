@@ -38,7 +38,7 @@ function nextEvent<T>(
 describe("NodeExternalAgentBackend", () => {
   it("derives writable Bot temp and package caches from the owned runtime state", () => {
     const env = buildExternalAgentChildEnv(
-      { TMPDIR: "/ambient/tmp", pnpm_config_store_dir: "/ambient/store" },
+      { TMPDIR: "/ambient/tmp", pnpm_config_store_dir: "/ambient/store", NODE_ENV: "test" },
       { COGNIA_BOT_ISOLATION: "1", COGNIA_BOT_STATE_DIR: "/owned/state" }
     )
     expect(env).toMatchObject({
@@ -55,7 +55,7 @@ describe("NodeExternalAgentBackend", () => {
   it.each([undefined, "relative/state"])("rejects an invalid owned state directory %s", (state) => {
     expect(() =>
       buildExternalAgentChildEnv(
-        {},
+        { NODE_ENV: "test" },
         {
           COGNIA_BOT_ISOLATION: "1",
           ...(state ? { COGNIA_BOT_STATE_DIR: state } : {}),

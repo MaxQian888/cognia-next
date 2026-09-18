@@ -5,12 +5,12 @@ description: How the two local CLIs discover the desktop, call its authenticated
 
 # CLI ↔ App Bridge
 
-<Status variant="stable">12 authenticated loopback routes · two CLI consumers · bidirectional transcript handoff</Status>
+<Status variant="stable">22 authenticated loopback routes · two CLI consumers · bidirectional transcript handoff</Status>
 
 <TLDR>
   Cognia has two different local CLIs. `cognia-agent` is the TypeScript chat TUI; `cognia` is the
   Rust plugin-author CLI. Both discover the running Tauri app through
-  `cli-endpoint.json`, but they consume different parts of one 12-route loopback server. The
+  `cli-endpoint.json`, but they consume different parts of one 22-route loopback server. The
   desktop also projects config, credentials, history, and selected MCP servers directly into the
   standalone agent's home. Session handoff is bidirectional but copy-based: the shells keep
   separate stores and never share a live sidecar session.
@@ -21,7 +21,7 @@ flowchart LR
   AG["cognia-agent<br/>TypeScript chat TUI"]
   PL["cognia<br/>Rust plugin CLI"]
   EP["cli-endpoint.json<br/>baseUrl + per-launch token"]
-  HTTP["cli_bridge<br/>127.0.0.1:ephemeral<br/>12 /api/v1/dev routes"]
+  HTTP["cli_bridge<br/>127.0.0.1:ephemeral<br/>22 /api/dev routes"]
   RB["Renderer bridge<br/>Tauri event + response command"]
   WEB["Desktop WebView<br/>Dexie + Zustand + twin runtime"]
   PUSH["Direct file projection<br/>config · credentials · history · MCP"]
@@ -75,7 +75,7 @@ devices and uses device JWTs. Neither route catalog is mounted into the other.
 ## Read next
 
 <Cards>
-  <Card title="Transport and security" href="./transport-and-security" description="Endpoint discovery, all 12 routes, authentication, consumer ownership, and renderer request/response flow." />
+  <Card title="Transport and security" href="./transport-and-security" description="Endpoint discovery, all 22 routes, authentication, consumer ownership, and renderer request/response flow." />
   <Card title="Sync and handoff" href="./sync-and-handoff" description="Direct file projection, credentials and MCP scope, both transcript directions, and the forked-store model." />
 </Cards>
 

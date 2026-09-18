@@ -214,6 +214,10 @@ pub struct HookEventPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_ref: Option<String>,
     /// Free-form bag of event-specific fields (prompt text, tool name + input, etc.).
+    /// Tool-scoped callers may include `tool_provenance` — `{kind, source, declared_by}`
+    /// naming the surface and artifact that declared the tool (builtin/plugin/mcp/agent).
+    /// This layer is a pass-through: provenance is resolved by the caller, which
+    /// owns the tool registry (sidecar manifest, external-agent surface).
     #[serde(flatten)]
     pub fields: Value,
 }
@@ -235,6 +239,28 @@ mod tests {
             let event: HookEvent = serde_json::from_value(Value::String(name.into())).unwrap();
             assert_eq!(event, expected);
         }
+    }
+
+    #[test]
+    fn fields_flatten_preserves_tool_provenance() {
+        // `run_agent_hook` callers put `tool_provenance` into `fields`; the
+        // serde flatten must surface it as a top-level key on the JSON a hook
+        // script reads from stdin.
+        let payload = HookEventPayload {
+            hook_event_name: "PreToolUse".into(),
+            session_id: "s1".into(),
+            cwd: None,
+            agent_kind: None,
+            agent_ref: None,
+            fields: serde_json::json!({
+                "tool_name": "mcp__github__create_issue",
+                "tool_provenance": { "kind": "mcp", "source": "github", "declared_by": "/repo/.mcp.json" }
+            }),
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["tool_provenance"]["kind"], "mcp");
+        assert_eq!(json["tool_provenance"]["source"], "github");
+        assert_eq!(json["tool_name"], "mcp__github__create_issue");
     }
 
     #[test]

@@ -89,7 +89,7 @@ import { createIdleWatchdog } from "./idle-watchdog"
 import { isResumableLink, readExternalLink, writeExternalLink } from "./external-session-link"
 import { mintSessionId } from "./run"
 import type { AgentModelOption, AgentSession, SendTurnOptions } from "./session-runner"
-import { appendTranscript, readTranscript, type TranscriptFs } from "./transcript"
+import { appendTranscript, iterTranscriptEntries, type TranscriptFs } from "./transcript"
 import {
   createCliContextAssembler,
   prependTextBlock,
@@ -1213,9 +1213,10 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
         // wire has no resume request, so subsequent tasks replay Cognia history.
         const conversationHistory =
           restarted || (protocol === "dsh-sdk" && externalSessionId?.startsWith("cognia-gateway:"))
-            ? readTranscript(home, sessionId, params.transcriptFs)
-                .map((entry) => `${entry.role}: ${entry.content}`)
-                .join("\n\n")
+            ? Array.from(
+                iterTranscriptEntries(home, sessionId, params.transcriptFs),
+                (entry) => `${entry.role}: ${entry.content}`
+              ).join("\n\n")
             : undefined
         appendTranscript(
           home,

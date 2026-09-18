@@ -31,6 +31,7 @@ const DESKTOP_ROOTS: VendorRoots = {
   piSessionDir: "/custom/pi-agent/sessions",
   geminiDir: "/custom/gemini",
   continueDir: "/custom/continue",
+  cursorDir: "/custom/cursor",
 }
 
 beforeEach(() => {
@@ -57,6 +58,7 @@ describe("vendorRootsFromHome", () => {
       // adapters deriving their own paths from a bare home.
       geminiDir: "/home/u/.gemini",
       continueDir: "/home/u/.continue",
+      cursorDir: "/home/u/.cursor",
     })
   })
 

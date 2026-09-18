@@ -354,8 +354,8 @@
       "path": "builtin://cognia-visualize",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-visualize/487d0bbb5658bf31e42f7263a005642e77300d03fd4bad29a651431595bca4fd.cjs",
-        "sha256": "487d0bbb5658bf31e42f7263a005642e77300d03fd4bad29a651431595bca4fd",
+        "url": "/_cognia/builtin-plugins/cognia-visualize/068fc22af9ac33e02bb657988baad15801f30cccb012ea6048acb396201376e2.cjs",
+        "sha256": "068fc22af9ac33e02bb657988baad15801f30cccb012ea6048acb396201376e2",
         "sharedModules": [
           "@cognia/plugin-sdk"
         ]

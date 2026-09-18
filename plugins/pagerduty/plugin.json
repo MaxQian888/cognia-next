@@ -1,0 +1,42 @@
+{
+  "id": "pagerduty",
+  "name": "PagerDuty",
+  "version": "1.0.0",
+  "type": "frontend",
+  "description": "Verified PagerDuty incident webhooks, incident actions, and an on-call responder Bot that triages incidents and posts findings back as notes.",
+  "author": "Cognia Official",
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "main": "src/index.ts",
+  "activationEvents": ["startup"],
+  "capabilities": ["integrations", "bot", "character-pack"],
+  "permissions": [
+    "integrations:read",
+    "integrations:events",
+    "integrations:execute",
+    "integrations:manage",
+    "agent:control",
+    "network:fetch"
+  ],
+  "runtimeCompatibility": {
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "headless": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "browser": {
+      "availability": "degraded",
+      "reason": "Webhook ingress and Bot runs require a Desktop or Headless host."
+    },
+    "mobile": {
+      "availability": "degraded",
+      "reason": "Webhook ingress and Bot runs require a Desktop or Headless host."
+    }
+  }
+}

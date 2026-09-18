@@ -4,11 +4,16 @@ import { createHookRunner } from "./hook-runner"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 
 /** A minimal fake child process: emits `close` with the given code next tick. */
-function fakeChild(code: number) {
+function fakeChild(code: number, stdinData?: string[]) {
   const child = new EventEmitter() as EventEmitter & {
     stdin: { end: (d?: unknown) => void; on: () => void }
   }
-  child.stdin = { end: () => {}, on: () => {} }
+  child.stdin = {
+    end: (d?: unknown) => {
+      if (stdinData && typeof d === "string") stdinData.push(d)
+    },
+    on: () => {},
+  }
   queueMicrotask(() => child.emit("close", code))
   return child as never
 }
@@ -24,9 +29,10 @@ describe("createHookRunner", () => {
     opts: { sdkNativeHooks?: boolean } = {}
   ) {
     const spawned: string[] = []
+    const payloads: string[] = []
     const spawn = ((cmd: string) => {
       spawned.push(cmd)
-      return fakeChild(exitCode)
+      return fakeChild(exitCode, payloads)
     }) as never
     const readFile = (p: string): string | null =>
       p.endsWith("config.json") ? settings(configHooks) : null
@@ -48,7 +54,7 @@ describe("createHookRunner", () => {
         "auto-context-loader-prompt": false,
       },
     })
-    return { spawned, runner }
+    return { spawned, payloads, runner }
   }
 
   const toolResult: CaptureStreamEvent = {
@@ -156,6 +162,38 @@ describe("createHookRunner", () => {
     )
     const decision = await runner.preToolUse("Edit", { file_path: "/x" })
     expect(decision.deny).toBe(true)
+  })
+
+  it("attaches tool_provenance to tool-scoped payloads, never to session events", async () => {
+    const { runner, payloads } = harness({
+      PreToolUse: [{ hooks: [{ type: "command", command: "pre.sh" }] }],
+      PostToolUse: [{ hooks: [{ type: "command", command: "post.sh" }] }],
+      Stop: [{ hooks: [{ type: "command", command: "stop.sh" }] }],
+    })
+    await runner.preToolUse("mcp__github__create_issue", { title: "t" })
+    // The shared fixture carries `name`, but the real `tool-result` shape uses
+    // `toolName` — provenance resolves off it, so this test needs the real key.
+    runner.onCapture({
+      type: "tool-result",
+      toolName: "Edit",
+      input: { file_path: "/x" },
+      result: "ok",
+    })
+    runner.onStop(true)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(payloads).toHaveLength(3)
+    const [pre, post, stop] = payloads.map((p) => JSON.parse(p))
+    expect(pre.tool_provenance).toEqual({
+      kind: "mcp",
+      source: "github",
+    })
+    expect(post.tool_provenance).toEqual({
+      kind: "builtin",
+      source: "cognia",
+      declared_by: "builtin-tools-data.json",
+    })
+    expect(stop).not.toHaveProperty("tool_provenance")
   })
 
   it("allows a tool when no PreToolUse hooks are configured", async () => {

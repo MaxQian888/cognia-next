@@ -62,11 +62,24 @@ pub fn endpoint_file_path() -> Result<PathBuf> {
     Ok(dirs.config_dir().join("cognia").join(ENDPOINT_FILE_NAME))
 }
 
-/// Load the endpoint file. Errors with an actionable message if the file
-/// is missing — meaning no cognia is running, or the user hasn't enabled
-/// the CLI bridge in Settings yet.
-pub fn load_endpoint() -> Result<EndpointFile> {
-    let path = endpoint_file_path()?;
+/// Resolve the endpoint-file path with an explicit `--endpoint-file` flag
+/// taking precedence over the env var and the default location.
+pub fn endpoint_file_path_for(override_path: Option<&std::path::Path>) -> Result<PathBuf> {
+    match override_path {
+        Some(path) => Ok(path.to_path_buf()),
+        None => endpoint_file_path(),
+    }
+}
+
+/// Load the endpoint file from the `--endpoint-file` override when given,
+/// else the env/default location. Errors with an actionable message if the
+/// file is missing — meaning no cognia is running, or the user hasn't
+/// enabled the CLI bridge in Settings yet.
+pub fn load_endpoint_from(override_path: Option<&std::path::Path>) -> Result<EndpointFile> {
+    load_endpoint_at(&endpoint_file_path_for(override_path)?)
+}
+
+fn load_endpoint_at(path: &std::path::Path) -> Result<EndpointFile> {
     if !path.exists() {
         bail!(
             "no running cognia detected: expected {} to exist.\n\
@@ -75,7 +88,7 @@ pub fn load_endpoint() -> Result<EndpointFile> {
             path.display()
         );
     }
-    let bytes = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
+    let bytes = std::fs::read(path).with_context(|| format!("read {}", path.display()))?;
     let endpoint: EndpointFile = serde_json::from_slice(&bytes)
         .with_context(|| format!("parse {} as JSON", path.display()))?;
     if endpoint.base_url.is_empty() || endpoint.dev_token.is_empty() {
@@ -146,7 +159,7 @@ pub fn probe_health(endpoint: &EndpointFile) -> Result<()> {
 }
 
 /// Build the actionable error shown when the bridge URL is unreachable.
-/// Distinct from the missing-file case (`load_endpoint`): here the endpoint
+/// Distinct from the missing-file case (`load_endpoint_from`): here the endpoint
 /// file exists but nothing is listening — almost always a stale file from a
 /// previous launch.
 fn unreachable_bridge_error(base_url: &str, err: ureq::Error) -> anyhow::Error {
@@ -243,7 +256,7 @@ mod tests {
             json!({ "baseUrl": "http://127.0.0.1:1234", "devToken": "deadbeef" }).to_string();
         write!(tmp, "{payload}").unwrap();
         std::env::set_var("COGNIA_CLI_ENDPOINT_FILE", tmp.path());
-        let ep = load_endpoint().unwrap();
+        let ep = load_endpoint_from(None).unwrap();
         crate::shared::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
         assert_eq!(ep.base_url, "http://127.0.0.1:1234");
         assert_eq!(ep.dev_token, "deadbeef");
@@ -257,7 +270,7 @@ mod tests {
             "COGNIA_CLI_ENDPOINT_FILE",
             "/definitely/does/not/exist.json",
         );
-        let err = load_endpoint().unwrap_err();
+        let err = load_endpoint_from(None).unwrap_err();
         crate::shared::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
         let msg = err.to_string();
         assert!(msg.contains("no running cognia detected"), "got: {msg}");
@@ -270,7 +283,7 @@ mod tests {
         let mut tmp = NamedTempFile::new().unwrap();
         write!(tmp, r#"{{"baseUrl": "", "devToken": ""}}"#).unwrap();
         std::env::set_var("COGNIA_CLI_ENDPOINT_FILE", tmp.path());
-        let err = load_endpoint().unwrap_err();
+        let err = load_endpoint_from(None).unwrap_err();
         crate::shared::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
         assert!(err.to_string().contains("missing baseUrl / devToken"));
     }

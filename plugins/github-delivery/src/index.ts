@@ -896,6 +896,9 @@ export const githubIntegration: PluginIntegrationDef = {
     handler: action.handler,
     risk: action.risk,
     idempotency: action.risk === "read" ? "supported" : "required",
+    // Every GitHub action is repository-scoped: a Bot-bound call must name the
+    // installation's own repository at this pointer or the broker refuses it.
+    scopeSelectors: [{ kind: "repository", jsonPointer: "/repoFullName" }],
     inputSchema: objectSchema([...action.required], action.properties),
     timeoutMs: action.id === "runIssueLoop" ? 30 * 60_000 : 30_000,
   })),

@@ -355,7 +355,9 @@ it("delegates account, publication and recovery operations with the calling plug
     await expect(api.cancelAction("job")).rejects.toThrow("not found")
     job.mockResolvedValue({ pluginId: "owner" } as never)
     expect(await api.getActionJob("job")).toMatchObject({ pluginId: "owner" })
-    const cancel = jest.spyOn(actions, "cancelIntegrationActionJob").mockResolvedValue(undefined)
+    const cancel = jest
+      .spyOn(actions, "cancelIntegrationActionJob")
+      .mockResolvedValue({ id: "job" } as never)
     await api.cancelAction("job")
     expect(cancel).toHaveBeenCalledWith("job")
     job.mockResolvedValue({
@@ -397,7 +399,7 @@ it("delegates account, publication and recovery operations with the calling plug
     expect(deadletter).toHaveBeenCalledWith("owner", "account", "route", "delivery")
     const replay = jest
       .spyOn(ingress, "requeueIntegrationIngressDeadletter")
-      .mockResolvedValue(undefined)
+      .mockResolvedValue(true)
     await api.requeueIngressDeadletter("account", "route", "delivery")
     expect(replay).toHaveBeenCalledWith("owner", "account", "route", "delivery")
     const migrate = jest

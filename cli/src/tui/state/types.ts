@@ -216,6 +216,21 @@ export interface Inflight {
 
 export type TurnStatus = "idle" | "streaming" | "aborting"
 
+/**
+ * The runtime's latest self-reported `activity` event — what it is doing right
+ * now inside the current turn (`compacting` is the one that changes the status
+ * line). Self-superseding: a newer event replaces it, `idle` clears it, and the
+ * turn lifecycle actions reset it. Kept apart from {@link ActivityState}, which
+ * tracks *background* runs outside the turn.
+ */
+export interface TurnActivityState {
+  phase: "requesting" | "compacting"
+  /** Provider detail (e.g. a compaction error string). */
+  detail?: string
+  /** Terminal outcome of a compaction that just finished, when reported. */
+  compactResult?: "success" | "failed"
+}
+
 // ── Background activity (goal loop, workflow run, subagent dispatch) ───────────
 // These run outside the normal chat turn, so they get their own status pill.
 
@@ -999,6 +1014,8 @@ export interface TuiState {
   /** Whether a `usage` stream event already landed this turn (guards double-count). */
   usageSeenThisTurn: boolean
   turnStatus: TurnStatus
+  /** The runtime's latest in-turn `activity` report (e.g. live compaction). */
+  turnActivity?: TurnActivityState
   /** A background runtime run (goal / workflow / subagent), if one is active. */
   activity?: ActivityState
   /** Live workflow run panel state; undefined when no run is in flight. */
@@ -1168,6 +1185,9 @@ export type TuiAction =
   // A context-compaction boundary crossed (auto threshold or a manual `/compact`),
   // surfaced from the capture stream / the manual-compact runner.
   | { type: "COMPACT_BOUNDARY"; trigger: "manual" | "auto"; preTokens: number; postTokens: number }
+  // The runtime's self-reported in-turn phase (canonical `activity` event);
+  // `null` clears it (the provider's `idle` phase).
+  | { type: "SET_TURN_ACTIVITY"; activity: TurnActivityState | null }
   // Active model's resolved context window + pricing (from the catalog)
   | { type: "SET_MODEL_META"; meta: ModelMeta }
   // Turn lifecycle (from the turn engine)

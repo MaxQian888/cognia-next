@@ -132,6 +132,7 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
       ) : (
         <BottomStatus
           turnStatus={state.turnStatus}
+          turnActivity={state.turnActivity}
           activity={state.activity}
           tools={state.inflight.tools}
           steerQueue={state.steerQueue}

@@ -236,13 +236,55 @@ describe("CellView", () => {
       kind: "tool",
       callKey: "k",
       toolName: "bash",
-      input: { command: "pwd" },
+      input: { command: "mv a.txt b.txt" },
       status: "done",
-      result: "/workspace\n",
+      result: "moved\n",
       collapsed: true,
     })
-    expect(text).toContain("pwd")
-    expect(text).toContain("↳ /workspace")
+    expect(text).toContain("mv a.txt b.txt")
+    expect(text).toContain("↳ moved")
+  })
+
+  it("renders a settled read-only shell command as a compact title-only card", () => {
+    const text = renderCell({
+      id: "1",
+      kind: "tool",
+      callKey: "k",
+      toolName: "bash",
+      input: { command: "git status" },
+      status: "done",
+      result: "On branch main\nnothing to commit",
+      collapsed: true,
+    })
+    expect(text).toContain("git status")
+    // Title-only: no `↳` result preview under the header.
+    expect(text).not.toContain("↳")
+    // Expansion still reveals the output.
+    const expanded = renderCell({
+      id: "1",
+      kind: "tool",
+      callKey: "k",
+      toolName: "bash",
+      input: { command: "git status" },
+      status: "done",
+      result: "On branch main\nnothing to commit",
+      collapsed: false,
+    })
+    expect(expanded).toContain("nothing to commit")
+  })
+
+  it("keeps the detail row for a shell command that is not auto-approvable", () => {
+    const text = renderCell({
+      id: "1",
+      kind: "tool",
+      callKey: "k",
+      toolName: "bash",
+      input: { command: "rm -rf ./dist" },
+      status: "done",
+      result: "done\n",
+      collapsed: true,
+    })
+    expect(text).toContain("↳ done")
   })
 
   it("makes a parallel subagent batch and a cancelled dispatch explicit", () => {
@@ -462,18 +504,19 @@ describe("CellView", () => {
     })
     expect(read).toContain("2 lines")
     expect(read).not.toContain("first line")
-    // A shell command's output IS the answer, so it keeps its preview row.
+    // A shell command's output IS the answer, so a mutating one keeps its
+    // preview row — read-only ones compact to title-only instead.
     const bash = renderCell({
       id: "2",
       kind: "tool",
       callKey: "k",
       toolName: "bash",
-      input: { command: "pwd" },
+      input: { command: "mv a b" },
       status: "done",
-      result: "/workspace",
+      result: "done",
       collapsed: true,
     })
-    expect(bash).toContain("↳ /workspace")
+    expect(bash).toContain("↳ done")
   })
 
   it("keeps a failed call's message on the detail line, not in the header chip", () => {

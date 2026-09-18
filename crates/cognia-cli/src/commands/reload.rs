@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 
-use crate::engine::bridge_client::{load_endpoint, post_json, EndpointFile};
+use crate::engine::bridge_client::{load_endpoint_from, post_json, EndpointFile};
 use crate::ui::{style, RuntimeUi};
 
 const RELOAD_PATH: &str = "/api/dev/plugins/reload";
@@ -22,7 +22,12 @@ struct ReloadResponse {
     warnings: Vec<String>,
 }
 
-pub fn run(bundle: Option<PathBuf>, plugin_id: Option<String>, ui: &mut RuntimeUi) -> Result<()> {
+pub fn run(
+    bundle: Option<PathBuf>,
+    plugin_id: Option<String>,
+    endpoint_file: Option<&Path>,
+    ui: &mut RuntimeUi,
+) -> Result<()> {
     let prepared = match prepare_reload_request(bundle.clone(), plugin_id.clone()) {
         Ok(prepared) => prepared,
         Err(err) if ui.flags.json => {
@@ -30,7 +35,7 @@ pub fn run(bundle: Option<PathBuf>, plugin_id: Option<String>, ui: &mut RuntimeU
         }
         Err(err) => return Err(err),
     };
-    let endpoint = match load_endpoint() {
+    let endpoint = match load_endpoint_from(endpoint_file) {
         Ok(endpoint) => endpoint,
         Err(err) if ui.flags.json => {
             return emit_json_failure("endpoint", &prepared, err.to_string(), Vec::new());

@@ -419,6 +419,22 @@ export function canonicalEnvelopeToActions(
           postTokens: event.postTokens ?? 0,
         },
       ]
+    case "activity":
+      // The runtime's live phase belongs on the status line, not in a toast —
+      // "requesting"/"compacting" fire per request and would spam the stack.
+      return [
+        {
+          type: "SET_TURN_ACTIVITY",
+          activity:
+            event.phase === "idle"
+              ? null
+              : {
+                  phase: event.phase,
+                  ...(event.detail ? { detail: event.detail } : {}),
+                  ...(event.compactResult ? { compactResult: event.compactResult } : {}),
+                },
+        },
+      ]
     case "permission-request": {
       const req: PermissionRequestEvent = {
         type: "permission_request",

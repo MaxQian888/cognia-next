@@ -139,7 +139,7 @@ import { addToolApproval, readToolApprovals } from "../../agent/tool-approvals"
 import { approvalKey } from "../../agent/command-approval"
 import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import { mintSessionId } from "../../agent/run"
-import { readTranscript, type TranscriptFs } from "../../agent/transcript"
+import { iterTranscriptEntries, type TranscriptFs } from "../../agent/transcript"
 import { resolveHome } from "../../config/load"
 import { setCredential, type CredentialKind } from "../../config/credentials"
 import {
@@ -2014,10 +2014,12 @@ export function App({
     (id: string) => {
       void (async () => {
         try {
-          const entries = readTranscript(home, id, transcriptFs)
-          if (entries.length === 0)
+          // Stream the transcript straight into cells — materializing the
+          // entries array first would keep a second copy of the whole history
+          // resident during the replay (the resume-memory fix this mirrors).
+          const cells = transcriptToCells(iterTranscriptEntries(home, id, transcriptFs))
+          if (cells.length === 0)
             throw new Error("Session transcript is missing or has no readable messages.")
-          const cells = transcriptToCells(entries)
           await agent.resume(id, cells)
         } catch (error) {
           dispatch({
@@ -2729,6 +2731,7 @@ export function App({
       if (c.field === "systemPrompt") current = cfg.systemPrompt ?? ""
       else if (c.field === "skillDirs") current = (cfg.skillDirs ?? []).join(" ")
       else if (c.field === "allowedTools") current = (cfg.allowedTools ?? []).join(" ")
+      else if (c.field === "disabledTools") current = (cfg.disabledTools ?? []).join(" ")
       else if (c.field === "gitProtectedBranches")
         current = resolveGitWorkflowConfig(cfg.git).protectedBranches.join(" ")
       else if (c.field === "gitBaseBranch") current = cfg.git?.baseBranch ?? ""

@@ -9,12 +9,15 @@
  *
  * Beyond the CLI's own `.cognia/skills` dirs, discovery also reuses the skill
  * directories other agents write — Claude Code (`~/.claude/skills`, project
- * `<cwd>/.claude/skills`) and Codex (`~/.agents/skills`) — plus any extra
- * directories the user configures (`config.skillDirs`). This mirrors the
+ * `<cwd>/.claude/skills`), Codex (`~/.agents/skills`), Cursor
+ * (`~/.cursor/skills`, project `<cwd>/.cursor/skills`) and OpenCode — plus any
+ * extra directories the user configures (`config.skillDirs`). This mirrors the
  * desktop's native sync, which already scans `~/.claude/skills` /
  * `~/.agents/skills` via Rust. The first directory wins on an id collision, so
  * a project skill overrides a global one and the CLI's own dirs win over the
- * reused external ones.
+ * reused external ones. Directories that resolve to the same real path (e.g.
+ * `.claude/skills` symlinked to `.agents/skills`) are scanned once, under the
+ * first alias in precedence order.
  *
  * Discovery is pure + fs-injected (tests pass an in-memory fs); the seeding step
  * reuses the desktop's `upsertSkillByCanonicalId`, keyed by a stable
@@ -69,10 +72,20 @@ const defaultFs: SkillFs = {
  *   - `claude`         — `<osHome>/.claude/skills` (Claude Code global)
  *   - `codex`          — `<osHome>/.agents/skills` (Codex global)
  *   - `opencode`       — `<osHome>/.opencode/skills` (OpenCode global)
+ *   - `cursor-project` — `<cwd>/.cursor/skills`
+ *   - `cursor`         — `<osHome>/.cursor/skills` (Cursor global)
  *   - `custom`         — a user-configured `config.skillDirs` entry
  */
 export type SkillSourceKind =
-  "project" | "global" | "claude-project" | "claude" | "codex" | "opencode" | "custom"
+  | "project"
+  | "global"
+  | "claude-project"
+  | "claude"
+  | "codex"
+  | "opencode"
+  | "cursor-project"
+  | "cursor"
+  | "custom"
 
 /** One skill directory to scan, tagged with where it came from. */
 export interface SkillScanDir {
@@ -119,9 +132,21 @@ export async function discoverDiskSkills(
 ): Promise<DiscoveredSkill[]> {
   const byId = new Map<string, DiscoveredSkill>()
   const claimed = new Set<string>()
+  // A scan dir reachable under more than one alias (symlinked dirs, a custom
+  // dir naming a built-in root) is scanned once — the first occurrence in
+  // precedence order keeps the source attribution.
+  const scannedDirs = new Set<string>()
 
   for (const { dir, source } of dirs) {
     if (!(await fs.exists(dir))) continue
+    let realDir = dir
+    try {
+      realDir = fs.realPath ? await fs.realPath(dir) : path.resolve(dir)
+    } catch {
+      realDir = path.resolve(dir)
+    }
+    if (scannedDirs.has(realDir)) continue
+    scannedDirs.add(realDir)
     for (const entry of await fs.readDir(dir)) {
       const full = path.join(dir, entry)
       let filePath: string | null = null
@@ -188,12 +213,14 @@ export interface SkillScanOptions {
  *   1. project `.cognia/skills`
  *   2. project `.claude/skills`
  *   3. project `.opencode/skills`
- *   4. global  `<home>/skills`
- *   5. `<osHome>/.claude/skills` (Claude Code)
- *   6. `<osHome>/.agents/skills` (Codex)
- *   7. `<osHome>/.opencode/skills` (OpenCode)
- *   8. each `customDirs` entry
- * Steps 2–3 + 5–8 are skipped when `external` is `false`; 5–7 are also skipped
+ *   4. project `.cursor/skills`
+ *   5. global  `<home>/skills`
+ *   6. `<osHome>/.claude/skills` (Claude Code)
+ *   7. `<osHome>/.agents/skills` (Codex)
+ *   8. `<osHome>/.opencode/skills` (OpenCode)
+ *   9. `<osHome>/.cursor/skills` (Cursor)
+ *  10. each `customDirs` entry
+ * Steps 2–4 + 6–10 are skipped when `external` is `false`; 6–9 are also skipped
  * when `osHome` is absent. Non-existent dirs are harmlessly no-ops downstream.
  */
 export function skillScanDirs(opts: SkillScanOptions): SkillScanDir[] {
@@ -202,6 +229,7 @@ export function skillScanDirs(opts: SkillScanOptions): SkillScanDir[] {
   if (external) {
     dirs.push({ dir: path.join(cwd, ".claude", "skills"), source: "claude-project" })
     dirs.push({ dir: path.join(cwd, ".opencode", "skills"), source: "opencode" })
+    dirs.push({ dir: path.join(cwd, ".cursor", "skills"), source: "cursor-project" })
   }
   dirs.push({ dir: path.join(home, "skills"), source: "global" })
   if (external) {
@@ -209,6 +237,7 @@ export function skillScanDirs(opts: SkillScanOptions): SkillScanDir[] {
       dirs.push({ dir: path.join(osHome, ".claude", "skills"), source: "claude" })
       dirs.push({ dir: path.join(osHome, ".agents", "skills"), source: "codex" })
       dirs.push({ dir: path.join(osHome, ".opencode", "skills"), source: "opencode" })
+      dirs.push({ dir: path.join(osHome, ".cursor", "skills"), source: "cursor" })
     }
     for (const dir of customDirs ?? []) {
       if (dir.trim()) dirs.push({ dir, source: "custom" })
@@ -236,6 +265,10 @@ export function skillOriginLabel(canonicalId: string | undefined): string | unde
       return "codex"
     case "opencode":
       return "opencode"
+    case "cursor-project":
+      return "cursor·proj"
+    case "cursor":
+      return "cursor"
     case "custom":
       return "custom"
     default:

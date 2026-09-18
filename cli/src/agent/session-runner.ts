@@ -51,7 +51,12 @@ import { type PermissionResponder } from "./permission-gate"
 import { fetchTwinContext as defaultFetchTwinContext } from "../twin/context-client"
 import { approvalKey } from "./command-approval"
 import { readToolApprovals } from "./tool-approvals"
-import { appendTranscript, readTranscript, type TranscriptFs } from "./transcript"
+import {
+  appendTranscript,
+  readTranscriptTail,
+  type TranscriptFs,
+  type TranscriptTail,
+} from "./transcript"
 import {
   CLI_AUTO_APPROVED_TOOLS,
   withCliAutoApprovedTools,
@@ -296,14 +301,14 @@ export interface AgentSession {
  * subscribed, and streaming the turn through `runAndCaptureAssistantReply`.
  */
 /** Reject lossy restoration before dispatching a new provider turn. */
-function restoreRuntimeHistory(options: SendOptions, entries: ReturnType<typeof readTranscript>) {
-  if (entries.length === 0) return
+function restoreRuntimeHistory(options: SendOptions, tail: TranscriptTail) {
+  if (!tail.hasEntries) return
   function fail(reason: string): never {
     throw new Error(
       `Cannot resume this conversation: ${reason}. Start a new session or resume with the original runtime/provider.`
     )
   }
-  const latest = [...entries].reverse().find((entry) => entry.role === "assistant")
+  const latest = tail.latestAssistant
   const saved = latest?.meta?.runtimeHistory as
     | {
         version?: number
@@ -336,7 +341,7 @@ function restoreRuntimeHistory(options: SendOptions, entries: ReturnType<typeof 
     }
     return
   }
-  if ([...entries].reverse().find((entry) => entry.role !== "system")?.role !== "assistant")
+  if (tail.lastNonSystemRole !== "assistant")
     fail("the last turn did not save a completed provider snapshot")
   if (!Array.isArray(saved.messages) || saved.messages.length === 0)
     fail("the provider message snapshot is missing")
@@ -480,9 +485,12 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
     if (closed) throw new Error("agent session is closed")
     const session = await assembler.resolveSession()
     if (!boot) {
+      // Only the tail of the transcript matters for a provider-runtime resume —
+      // the latest assistant snapshot plus the last non-system role. Scanning
+      // backwards keeps a large transcript from being parsed a second time.
       restoreRuntimeHistory(
         session.sendOptions,
-        readTranscript(home, sessionId, params.transcriptFs)
+        readTranscriptTail(home, sessionId, params.transcriptFs)
       )
       publishStatus(session, "initializing")
       try {

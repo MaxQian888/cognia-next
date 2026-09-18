@@ -6,10 +6,13 @@
 import type { TranscriptEntry } from "../../agent/transcript"
 import type { Cell } from "../state/types"
 
-export function transcriptToCells(entries: TranscriptEntry[]): Cell[] {
+export function transcriptToCells(entries: Iterable<TranscriptEntry>): Cell[] {
   const cells: Cell[] = []
-  entries.forEach((entry, i) => {
-    const id = `r${i}`
+  let i = 0
+  // Accepts any iterable so resume can stream `iterTranscriptEntries` straight
+  // into cells without an intermediate entries array duplicating the history.
+  for (const entry of entries) {
+    const id = `r${i++}`
     if (entry.role === "user") {
       cells.push({ id, kind: "user", text: entry.content })
     } else if (entry.role === "assistant") {
@@ -17,6 +20,6 @@ export function transcriptToCells(entries: TranscriptEntry[]): Cell[] {
     } else {
       cells.push({ id, kind: "notice", message: entry.content })
     }
-  })
+  }
   return cells
 }

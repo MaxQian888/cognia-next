@@ -209,6 +209,39 @@ missing capability drove it; the decisions below are the ones that stand.
   asserted by both the TS and Rust suites; because `builtinHookOverrides` is keyed by id, a drifted
   id also orphaned a user's enable/disable choice on one shell.
 
+## Amendment — `tool_provenance` on tool-scoped payloads (2026-09-17)
+
+Tool-scoped hook payloads (`PreToolUse`, `PostToolUse`, `PostToolUseFailure`,
+`PermissionRequest`, `PermissionDenied`) now carry `tool_provenance`:
+`{ kind, source, declared_by }` naming the surface and artifact that declared
+the tool — `builtin` (`source: "cognia"`,
+`declared_by: "builtin-tools-data.json"`), `plugin` (`source` = plugin id
+resolved from the session's `pluginTools` manifest, `declared_by` = the
+plugin's `plugin.json` path), `mcp` (`source` = server name, `declared_by` =
+the config file / `"settings"` / `plugin:<id>` locator that declares it), or
+`agent` (`source` = external agent id for bare names on an external surface;
+`declared_by` absent — the agent's own config is not ours).
+The field is metadata only — never arguments or secrets — and is omitted when
+the event has no resolvable tool name, so hook scripts must tolerate absence.
+
+Provenance is resolved by the layer that owns the tool surface, never by Rust:
+the sidecar injects it into `identifiedInput` before payload serialization
+(`sidecar/dispatch/tool-provenance.mjs`, mirror of
+`lib/claude/hooks/tool-provenance.ts`), fed by `sendOptions.pluginTools`
+(each entry's `manifestPath`) and `sendOptions.mcpDeclaredBy` (per-server
+locators built in `resolveSendOptions`); the external-agent bridge attaches
+it to the `payload` it already sends through `run_agent_hook`. The Rust
+runtime stays a pass-through — it has no registry access, and `fields`
+flattening preserves the key verbatim (pinned by a `#[cfg(test)]` in
+`hooks/types.rs`).
+
+The bundled `tool-provenance-guard` built-in hook (registered in both
+`BUILTIN_HOOKS` catalogs + the lockstep table, default off) is the field's
+first consumer: `COGNIA_DENY_TOOL_PROVENANCE` selectors
+`kind` / `kind:source` / `kind:source:declared` (substring on `declared_by`)
+deny matching calls, satisfying the parity plan's "one built-in hook script
+consuming it" acceptance.
+
 ## Primary sources
 
 - [Claude Code hooks reference](https://code.claude.com/docs/en/hooks)

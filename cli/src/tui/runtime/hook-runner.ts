@@ -26,6 +26,7 @@ import { runHooks } from "../../hooks/run-hooks"
 import type { HookEvent, HooksConfig } from "../../hooks/types"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 import { buildBuiltinHookGroups, type BuiltinHookOverrides } from "@/lib/claude/hooks/builtin-hooks"
+import { resolveToolProvenance } from "@/lib/claude/hooks/tool-provenance"
 
 export interface HookRunnerDeps {
   /** Cognia config home (`~/.cognia`). */
@@ -119,12 +120,22 @@ export function createHookRunner(deps: HookRunnerDeps): HookRunner {
 
   const groupsFor = (event: HookEvent) => (sdkOwnsEvents ? [] : (config[event] ?? []))
 
+  // `tool_provenance` rides on every tool-scoped payload, same contract as the
+  // sidecar rail: resolved by name shape; plugin ids resolve to "unknown" and
+  // `declared_by` is absent for plugin/mcp tools here because this dormant
+  // fallback has no session manifest or mcp config map (the sidecar owns the
+  // live rail and resolves real ids + declaring files there).
+  const withProvenance = (payload: Record<string, unknown>): Record<string, unknown> => {
+    const provenance = resolveToolProvenance(payload.tool_name)
+    return provenance ? { ...payload, tool_provenance: provenance } : payload
+  }
+
   const fireLifecycle = (event: HookEvent, payload: Record<string, unknown>): void => {
     const groups = groupsFor(event)
     if (groups.length === 0) return
     // Observational: run the command handlers for their side effects; deny is
     // meaningless for lifecycle events, so the decision is intentionally ignored.
-    void runHooks({ event, payload, groups, spawn }).catch(() => {})
+    void runHooks({ event, payload: withProvenance(payload), groups, spawn }).catch(() => {})
   }
 
   return {
@@ -144,7 +155,7 @@ export function createHookRunner(deps: HookRunnerDeps): HookRunner {
       return runHooks({
         event: "PreToolUse",
         toolName,
-        payload: { tool_name: toolName, tool_input: input },
+        payload: withProvenance({ tool_name: toolName, tool_input: input }),
         groups,
         spawn,
       })

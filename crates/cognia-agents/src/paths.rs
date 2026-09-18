@@ -122,6 +122,10 @@ pub struct VendorRoots {
     /// under `sessions/`). Home-relative, no confirmed override; see
     /// [`VendorRoots::gemini_dir`].
     pub continue_dir: String,
+    /// `<home>/.cursor` — Cursor's user-scope directory (its `skills/` tree is
+    /// scanned by the skill-discovery surface). Home-relative, no confirmed
+    /// override; see [`VendorRoots::gemini_dir`].
+    pub cursor_dir: String,
 }
 
 /// A non-blank env override as a path.
@@ -187,6 +191,7 @@ pub fn vendor_roots_from(
 
     let gemini = home_dir.as_ref().map(|h| h.join(".gemini"));
     let continue_dir = home_dir.as_ref().map(|h| h.join(".continue"));
+    let cursor = home_dir.as_ref().map(|h| h.join(".cursor"));
 
     VendorRoots {
         claude_config_dir: to_string(claude),
@@ -198,6 +203,7 @@ pub fn vendor_roots_from(
         pi_session_dir: to_string(pi_session),
         gemini_dir: to_string(gemini),
         continue_dir: to_string(continue_dir),
+        cursor_dir: to_string(cursor),
     }
 }
 
@@ -519,6 +525,9 @@ mod tests {
         // renderer, which is the drift this module exists to prevent.
         assert_eq!(got.gemini_dir, "/h/.gemini");
         assert_eq!(got.continue_dir, "/h/.continue");
+        // Cursor is resolved here for the same reason — the skill-discovery
+        // surface scans `<home>/.cursor/skills` and must not derive it.
+        assert_eq!(got.cursor_dir, "/h/.cursor");
     }
 
     #[test]
@@ -612,6 +621,7 @@ mod tests {
         assert_eq!(got.pi_session_dir, "");
         assert_eq!(got.gemini_dir, "");
         assert_eq!(got.continue_dir, "");
+        assert_eq!(got.cursor_dir, "");
     }
 
     #[test]
@@ -669,6 +679,7 @@ mod tests {
         // these exact camelCase keys; a rename here silently blanks them there.
         assert!(json.get("piAgentDir").is_some());
         assert!(json.get("piSessionDir").is_some());
+        assert!(json.get("cursorDir").is_some());
     }
 
     #[test]

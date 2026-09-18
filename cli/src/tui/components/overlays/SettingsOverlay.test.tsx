@@ -59,10 +59,7 @@ const sections: SettingsSectionView[] = [
 ]
 
 function setup(over: Partial<React.ComponentProps<typeof SettingsOverlay>> = {}) {
-  const props = {
-    sections,
-    section: 0,
-    index: 0,
+  const mocks = {
     onMoveRow: jest.fn(),
     onSwitchSection: jest.fn(),
     onAdjust: jest.fn(),
@@ -70,10 +67,10 @@ function setup(over: Partial<React.ComponentProps<typeof SettingsOverlay>> = {})
     onActivate: jest.fn(),
     onReset: jest.fn(),
     onClose: jest.fn(),
-    ...over,
   }
+  const props = { sections, section: 0, index: 0, ...mocks, ...over }
   const r = render(<SettingsOverlay {...props} />)
-  return { ...props, ...r }
+  return { ...props, ...mocks, ...r }
 }
 
 describe("SettingsOverlay", () => {
@@ -370,9 +367,19 @@ describe("settings draft and responsive chrome", () => {
   })
 
   it("windows tabs at both ends and rows within the measured height", () => {
-    const many = Array.from({ length: 8 }, (_, i) => ({
+    const SECTION_IDS = [
+      "model",
+      "appearance",
+      "display",
+      "tools",
+      "git",
+      "behavior",
+      "terminal",
+      "logging",
+    ] as const
+    const many = SECTION_IDS.map((id, i) => ({
       ...sections[1],
-      id: `section${i}`,
+      id,
       title: `Section${i}`,
       rows: Array.from({ length: 20 }, (_, j) => ({
         ...sections[1].rows[0],

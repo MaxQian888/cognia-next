@@ -65,41 +65,117 @@ export function appendTranscript(
   fsx.append(target, JSON.stringify(record) + "\n")
 }
 
+/**
+ * Parse one JSONL line into a {@link TranscriptEntry}, or `undefined` for
+ * blank/corrupt/wrong-shape lines. A partially migrated file can contain valid
+ * JSON of the wrong shape, so validation lives at this boundary before
+ * resume/list/export consume anything.
+ */
+function parseTranscriptLine(line: string): TranscriptEntry | undefined {
+  const trimmed = line.trim()
+  if (!trimmed) return undefined
+  try {
+    const entry: unknown = JSON.parse(trimmed)
+    if (
+      entry === null ||
+      typeof entry !== "object" ||
+      Array.isArray(entry) ||
+      !("ts" in entry) ||
+      typeof entry.ts !== "number" ||
+      !Number.isFinite(entry.ts) ||
+      !("role" in entry) ||
+      !["user", "assistant", "system"].includes(entry.role as string) ||
+      !("content" in entry) ||
+      typeof entry.content !== "string"
+    )
+      return undefined
+    return entry as TranscriptEntry
+  } catch {
+    // A corrupt line is skipped rather than failing the whole read.
+    return undefined
+  }
+}
+
+/**
+ * Lazily yield a session's transcript entries, parsing one line at a time.
+ * `readTranscript` materializes an entries array on top of the raw file text,
+ * so a resume that maps straight to cells held two full copies of the history;
+ * iterating here keeps a single line resident between yields. Consumers that
+ * only need the tail should use {@link readTranscriptTail} instead — it scans
+ * backwards and stops as soon as the entries it needs are found.
+ */
+export function* iterTranscriptEntries(
+  home: string,
+  sessionId: string,
+  fsx: TranscriptFs = realTranscriptFs
+): Generator<TranscriptEntry> {
+  const raw = fsx.read(sessionTranscriptPath(home, sessionId))
+  if (raw === null) return
+  let start = 0
+  while (start < raw.length) {
+    const nl = raw.indexOf("\n", start)
+    const end = nl === -1 ? raw.length : nl
+    const entry = parseTranscriptLine(raw.slice(start, end))
+    start = end + 1
+    if (entry !== undefined) yield entry
+  }
+}
+
 /** Read + parse a session transcript. Returns [] when the file is missing. */
 export function readTranscript(
   home: string,
   sessionId: string,
   fsx: TranscriptFs = realTranscriptFs
 ): TranscriptEntry[] {
+  return Array.from(iterTranscriptEntries(home, sessionId, fsx))
+}
+
+/**
+ * The tail of a transcript that a provider-runtime resume needs, found by
+ * scanning lines backwards — the whole file is never parsed for this.
+ */
+export interface TranscriptTail {
+  /** Whether at least one structurally valid entry exists. */
+  hasEntries: boolean
+  /** The most recent assistant entry (carries the saved runtime metadata). */
+  latestAssistant?: TranscriptEntry
+  /** Role of the most recent non-system entry, when one exists. */
+  lastNonSystemRole?: TranscriptRole
+}
+
+/**
+ * Backward scan for the resume-time tail. Stops as soon as both pieces it
+ * looks for are found, so a fresh resume touches a handful of lines instead of
+ * re-parsing a transcript the UI path already replayed.
+ */
+export function readTranscriptTail(
+  home: string,
+  sessionId: string,
+  fsx: TranscriptFs = realTranscriptFs
+): TranscriptTail {
   const raw = fsx.read(sessionTranscriptPath(home, sessionId))
-  if (raw === null) return []
-  const out: TranscriptEntry[] = []
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    try {
-      const entry: unknown = JSON.parse(trimmed)
-      // A partially migrated/corrupt file can contain valid JSON of the wrong
-      // shape. Validate at the disk boundary before resume/list/export consume it.
-      if (
-        entry === null ||
-        typeof entry !== "object" ||
-        Array.isArray(entry) ||
-        !("ts" in entry) ||
-        typeof entry.ts !== "number" ||
-        !Number.isFinite(entry.ts) ||
-        !("role" in entry) ||
-        !["user", "assistant", "system"].includes(entry.role as string) ||
-        !("content" in entry) ||
-        typeof entry.content !== "string"
-      )
-        continue
-      out.push(entry as TranscriptEntry)
-    } catch {
-      // Skip a corrupt line rather than failing the whole read.
+  if (raw === null) return { hasEntries: false }
+  let hasEntries = false
+  let latestAssistant: TranscriptEntry | undefined
+  let lastNonSystemRole: TranscriptRole | undefined
+  let end = raw.length
+  while (end > 0) {
+    const nl = raw.lastIndexOf("\n", end - 1)
+    const line = raw.slice(nl + 1, end)
+    end = nl
+    const entry = parseTranscriptLine(line)
+    if (!entry) continue
+    hasEntries = true
+    if (entry.role === "assistant" && latestAssistant === undefined) latestAssistant = entry
+    if (entry.role !== "system" && lastNonSystemRole === undefined) {
+      lastNonSystemRole = entry.role
     }
+    if (latestAssistant !== undefined && lastNonSystemRole !== undefined) break
   }
-  return out
+  const tail: TranscriptTail = { hasEntries }
+  if (latestAssistant !== undefined) tail.latestAssistant = latestAssistant
+  if (lastNonSystemRole !== undefined) tail.lastNonSystemRole = lastNonSystemRole
+  return tail
 }
 
 /**

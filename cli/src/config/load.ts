@@ -201,6 +201,7 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
     permissionModeExplicit:
       layer.permissionMode !== undefined || acc.permissionModeExplicit === true,
     allowedTools: layer.allowedTools ?? acc.allowedTools,
+    disabledTools: layer.disabledTools ?? acc.disabledTools,
     builtinTools: layer.builtinTools
       ? { ...acc.builtinTools, ...stripUndefined(layer.builtinTools) }
       : acc.builtinTools,

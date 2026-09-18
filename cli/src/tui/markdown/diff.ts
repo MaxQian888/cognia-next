@@ -87,6 +87,35 @@ export function diffFilePath(input: Record<string, unknown>): string | undefined
   return str(input.file_path) ?? str(input.filePath) ?? str(input.path)
 }
 
+/** How many body lines a large diff preview keeps in the transcript card. */
+export const DIFF_PREVIEW_TAIL_LINES = 50
+
+export interface TailTruncatedDiff {
+  /** Meta lines plus the last `max` body lines — ready to render. */
+  lines: DiffLine[]
+  /** Body lines dropped from the middle, 0 when nothing was truncated. */
+  hidden: number
+}
+
+/**
+ * Tail-truncate a diff for the transcript card: keep the leading `meta` lines
+ * (the file path) plus the LAST `max` add/del lines, and report how many body
+ * lines were elided. The tail is kept rather than the head because the end of a
+ * large write/edit carries the newest content — the head is reconstructable
+ * from the file itself, the tail is not. Renderers draw the `hidden` count as a
+ * muted marker row above the kept lines.
+ */
+export function tailDiffPreview(
+  diff: DiffLine[],
+  max: number = DIFF_PREVIEW_TAIL_LINES
+): TailTruncatedDiff {
+  const firstBody = diff.findIndex((l) => l.kind !== "meta")
+  const meta = firstBody === -1 ? diff : diff.slice(0, firstBody)
+  const body = firstBody === -1 ? [] : diff.slice(firstBody)
+  if (body.length <= max) return { lines: diff, hidden: 0 }
+  return { lines: [...meta, ...body.slice(-max)], hidden: body.length - max }
+}
+
 /**
  * Render one {@link DiffLine}'s code text for display:
  *

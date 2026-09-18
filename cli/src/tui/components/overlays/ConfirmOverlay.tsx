@@ -56,19 +56,18 @@ export function ConfirmOverlay({
     [body, format, title]
   )
   const bodyWidth = Math.max(1, columns - 4)
-  const lines = React.useMemo(
-    () =>
-      wrapTerminalSpans(
-        prepared.lines.flatMap((line, index) => [
-          ...(index > 0 ? [{ text: "\n", style: "plain" as const }] : []),
-          ...(typeof line === "string"
-            ? ansiToSpans(line, "plain")
-            : markdownLineSpans(line, true, theme, bodyWidth)),
-        ]),
-        bodyWidth
-      ),
-    [prepared, theme, bodyWidth]
-  )
+  const lines = React.useMemo(() => {
+    if (prepared.kind === "diff") return prepared.lines
+    return wrapTerminalSpans(
+      prepared.lines.flatMap((line, index) => [
+        ...(index > 0 ? [{ text: "\n", style: "plain" as const }] : []),
+        ...(typeof line === "string"
+          ? ansiToSpans(line, "plain")
+          : markdownLineSpans(line, true, theme, bodyWidth)),
+      ]),
+      bodyWidth
+    )
+  }, [prepared, theme, bodyWidth])
   const total = lines.length
   const colors: Record<TerminalStyle, string | undefined> = {
     plain: undefined,

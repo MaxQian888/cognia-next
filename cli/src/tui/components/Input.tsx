@@ -49,8 +49,12 @@ import type { InlineCommandInfo } from "@/lib/chat/completion/inline/types"
 import {
   enterNormalFromInsert,
   handleVimNormalKey,
+  handleVimReplaceKey,
   initialVimState,
+  sealVimEntry,
+  vimSearchMatches,
   type VimMode,
+  type VimSearch,
 } from "../input/vim"
 import { matchSlash, slashQuery } from "../commands/matcher"
 import { listVisibleCommands } from "../commands/registry"
@@ -112,6 +116,7 @@ const LineView = React.memo(function LineView({
   logicalLine,
   start,
   pastes,
+  matches,
 }: {
   line: string
   cursorCol: number
@@ -119,6 +124,8 @@ const LineView = React.memo(function LineView({
   logicalLine: string
   start: number
   pastes: Record<string, string>
+  /** Vim search hits on this logical line (buffer-column ranges) to highlight. */
+  matches?: Array<{ start: number; end: number }>
 }) {
   const theme = useTheme()
   const screenReader = useScreenReader()
@@ -134,24 +141,26 @@ const LineView = React.memo(function LineView({
   )
   const styled = useMemo(() => {
     let offset = start
-    const result: Array<CursorLineSegment & { image?: string }> = []
+    const result: Array<CursorLineSegment & { image?: string; match?: boolean }> = []
     for (const segment of segments) {
       if (segment.atEnd) {
         result.push(segment)
         continue
       }
-      const parts: Array<CursorLineSegment & { image?: string }> = []
+      const parts: Array<CursorLineSegment & { image?: string; match?: boolean }> = []
       for (const char of segment.text) {
         const image = imagePlaceholderAt(logicalLine, offset, pastes)?.path
+        // `offset` is a logical-line column, same space the match ranges use.
+        const match = matches?.some((m) => offset >= m.start && offset < m.end) ?? false
         const last = parts[parts.length - 1]
-        if (last && last.image === image) last.text += char
-        else parts.push({ ...segment, text: char, image })
+        if (last && last.image === image && last.match === match) last.text += char
+        else parts.push({ ...segment, text: char, image, match })
         offset += char.length
       }
       result.push(...parts)
     }
     return result
-  }, [segments, logicalLine, start, pastes])
+  }, [segments, logicalLine, start, pastes, matches])
   return (
     <Text>
       {styled.map((seg, i) => {
@@ -168,11 +177,13 @@ const LineView = React.memo(function LineView({
             color={
               atEndCaret
                 ? theme.caret
-                : ("image" in seg && seg.image) || seg.kind === "skill"
-                  ? theme.accent
-                  : seg.kind === "agent"
-                    ? theme.info
-                    : undefined
+                : seg.match
+                  ? theme.warning
+                  : ("image" in seg && seg.image) || seg.kind === "skill"
+                    ? theme.accent
+                    : seg.kind === "agent"
+                      ? theme.info
+                      : undefined
             }
             inverse={onCharCaret}
             underline={"image" in seg && Boolean(seg.image)}
@@ -280,6 +291,10 @@ function InputImpl({
   // of the mode indicator. `vimBufRef` tracks the latest buffer applied this
   // tick for the same reason — reducer updates land a render later.
   const [vimMode, setVimMode] = useState<VimMode>("insert")
+  /** Live vim search-entry (typing after `/`/`?`) and the last committed search
+   * — mirrored out of vimStateRef for the search line and match highlighting. */
+  const [vimSearch, setVimSearch] = useState<VimSearch | null>(null)
+  const [vimLastSearch, setVimLastSearch] = useState<VimSearch | null>(null)
   const vimStateRef = useRef(initialVimState())
   const vimBufRef = useRef(buffer)
   useEffect(() => {
@@ -677,7 +692,13 @@ function InputImpl({
     if (vimEnabled) {
       if (vimStateRef.current.mode === "insert") {
         if (key.escape && !popupOpen) {
-          vimStateRef.current = { ...vimStateRef.current, mode: "normal", pending: null, count: "" }
+          // Seal the insert entry first so `.` can repeat the whole change.
+          vimStateRef.current = {
+            ...sealVimEntry(vimStateRef.current, vimBufRef.current),
+            mode: "normal",
+            pending: null,
+            count: "",
+          }
           setVimMode("normal")
           const next = enterNormalFromInsert(vimBufRef.current)
           vimBufRef.current = next
@@ -685,10 +706,15 @@ function InputImpl({
           return
         }
       } else {
-        const r = handleVimNormalKey(inputCh, key, vimStateRef.current, vimBufRef.current)
+        const r =
+          vimStateRef.current.mode === "replace"
+            ? handleVimReplaceKey(inputCh, key, vimStateRef.current, vimBufRef.current)
+            : handleVimNormalKey(inputCh, key, vimStateRef.current, vimBufRef.current)
         if (r.handled) {
           vimStateRef.current = r.state
           if (r.state.mode !== vimMode) setVimMode(r.state.mode)
+          if (r.state.search !== vimSearch) setVimSearch(r.state.search)
+          if (r.state.lastSearch !== vimLastSearch) setVimLastSearch(r.state.lastSearch)
           if (r.buffer !== vimBufRef.current) {
             vimBufRef.current = r.buffer
             setBuffer(r.buffer)
@@ -703,6 +729,8 @@ function InputImpl({
             // A fresh prompt starts back in INSERT (Claude Code behaviour).
             vimStateRef.current = initialVimState()
             setVimMode("insert")
+            setVimSearch(null)
+            setVimLastSearch(null)
             doSubmit()
           }
           return
@@ -906,9 +934,24 @@ function InputImpl({
   const modeHint =
     !disabled && !popupOpen && commandMode === "bash"
       ? "shell mode · Enter runs this in your shell"
-      : !disabled && vimEnabled && vimMode === "normal"
-        ? "-- NORMAL -- · i insert · dd/cw edit · Enter send"
-        : null
+      : !disabled && vimEnabled && vimMode === "replace"
+        ? "-- REPLACE -- · Esc normal"
+        : !disabled && vimEnabled && vimMode === "normal"
+          ? "-- NORMAL -- · i/a/R edit · /? search · . repeat · Enter send"
+          : null
+  // Match ranges for the live (`/` being typed) or last committed search —
+  // hlsearch-style highlighting, grouped by buffer row for LineView.
+  const vimSearchQuery = vimSearch?.query ?? vimLastSearch?.query ?? null
+  const vimMatchMap = useMemo(() => {
+    const map = new Map<number, Array<{ start: number; end: number }>>()
+    if (!vimEnabled || !vimSearchQuery) return map
+    for (const m of vimSearchMatches(buffer.lines, vimSearchQuery)) {
+      const list = map.get(m.row)
+      if (list) list.push({ start: m.start, end: m.end })
+      else map.set(m.row, [{ start: m.start, end: m.end }])
+    }
+    return map
+  }, [vimEnabled, vimSearchQuery, buffer.lines])
   const showPlaceholder = !disabled && !popupOpen && text.length === 0
   // Live attachment count — labels that resolve through the paste map to an
   // image. Drives the "N attached · /images to manage" hint; the panel itself
@@ -972,6 +1015,7 @@ function InputImpl({
                 logicalLine={buffer.lines[visualRow.logicalRow]}
                 start={visualRow.start}
                 pastes={input.pastes}
+                matches={vimMatchMap.get(visualRow.logicalRow)}
                 cursorCol={visualRow.cursorCol ?? -1}
                 disabled={disabled}
               />
@@ -1003,7 +1047,13 @@ function InputImpl({
           ))}
         </Box>
       </Box>
-      {modeHint ? (
+      {vimSearch ? (
+        <Text color={theme.secondary}>
+          {"  "}
+          {vimSearch.dir === "fwd" ? "/" : "?"}
+          {vimSearch.query}
+        </Text>
+      ) : modeHint ? (
         <Text color={theme.secondary}>
           {"  "}
           {modeHint}

@@ -1,5 +1,5 @@
 import { ocrExtractText } from "./ocr"
-import type { OcrInput, OcrResult } from "@/types/ocr"
+import type { OcrInput, OcrResult } from "@cognia/ocr/types"
 
 const fakeResult = (combinedMarkdown: string): OcrResult =>
   ({ combinedMarkdown, combinedText: combinedMarkdown }) as unknown as OcrResult

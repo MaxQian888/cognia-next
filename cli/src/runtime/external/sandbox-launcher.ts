@@ -103,7 +103,7 @@ export function launcherSupportsBotIsolation(launcher: string): boolean {
       encoding: "utf8",
       timeout: 5_000,
       maxBuffer: 16_384,
-      env: { PATH: process.env.PATH },
+      env: { PATH: process.env.PATH, NODE_ENV: process.env.NODE_ENV ?? "production" },
     })
     return (
       !probe.error &&

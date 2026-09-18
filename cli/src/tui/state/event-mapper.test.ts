@@ -194,6 +194,33 @@ describe("canonicalEnvelopeToActions", () => {
     event,
   })
 
+  it("maps a compacting activity report to the live turn-activity slot", () => {
+    expect(
+      canonicalEnvelopeToActions(
+        envelope({
+          kind: "activity",
+          phase: "compacting",
+          detail: "summarizing",
+        })
+      )
+    ).toEqual([
+      {
+        type: "SET_TURN_ACTIVITY",
+        activity: { phase: "compacting", detail: "summarizing" },
+      },
+    ])
+  })
+
+  it("clears turn activity on the provider's idle phase and drops the toast path", () => {
+    expect(canonicalEnvelopeToActions(envelope({ kind: "activity", phase: "idle" }))).toEqual([
+      { type: "SET_TURN_ACTIVITY", activity: null },
+    ])
+    // `requesting` reports land in the same slot — none of them become toasts.
+    expect(canonicalEnvelopeToActions(envelope({ kind: "activity", phase: "requesting" }))).toEqual(
+      [{ type: "SET_TURN_ACTIVITY", activity: { phase: "requesting" } }]
+    )
+  })
+
   it("routes native quota pushes and recovery to account state without requesting a refresh", () => {
     for (const status of ["allowed_warning", "rejected", "allowed"] as const) {
       const event: CanonicalAgentEvent = {

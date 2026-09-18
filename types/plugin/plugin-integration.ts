@@ -46,7 +46,14 @@ export interface IntegrationActionDef {
   risk: IntegrationActionRisk
   idempotency: IntegrationActionIdempotency
   timeoutMs?: number
-  /** Input selectors used to scope durable account/resource grants. */
+  /**
+   * Input selectors used to scope durable account/resource grants — and, for
+   * Bot-bound calls, the installation scope check: each selector names a scope
+   * `kind` and the `jsonPointer` in `input` that must equal the installation's
+   * declared value (`repository` from the repository config, other kinds from
+   * `config.scopes`). A declared selector the installation cannot satisfy
+   * denies the action.
+   */
   scopeSelectors?: Array<{ kind: string; jsonPointer: string }>
 }
 
@@ -73,6 +80,13 @@ export interface IntegrationHmacSha256Verification {
   signatureHeader: string
   encoding: IntegrationSignatureEncoding
   prefix?: string
+  /**
+   * When set, the signature header is a list of prefixed signatures separated
+   * by this string — e.g. PagerDuty's `X-PagerDuty-Signature: v1=<hex>,v1=<hex>`
+   * during key rotation. Each item is an independent candidate; verification
+   * passes when any one matches. Omit for the common single-signature header.
+   */
+  signatureListSeparator?: string
   signedPayload?: IntegrationSignedPayloadPart[]
   timestampHeader?: string
   maxSkewSeconds?: number

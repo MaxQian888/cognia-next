@@ -348,6 +348,12 @@
           "handler": "openPr",
           "risk": "write",
           "idempotency": "required",
+          "scopeSelectors": [
+            {
+              "kind": "repository",
+              "jsonPointer": "/repoFullName"
+            }
+          ],
           "inputSchema": {
             "type": "object",
             "required": ["repoFullName", "title", "head", "base"],
@@ -387,6 +393,12 @@
           "handler": "closePr",
           "risk": "destructive",
           "idempotency": "required",
+          "scopeSelectors": [
+            {
+              "kind": "repository",
+              "jsonPointer": "/repoFullName"
+            }
+          ],
           "inputSchema": {
             "type": "object",
             "required": ["repoFullName", "prNumber"],
@@ -411,6 +423,12 @@
           "handler": "mergePr",
           "risk": "destructive",
           "idempotency": "required",
+          "scopeSelectors": [
+            {
+              "kind": "repository",
+              "jsonPointer": "/repoFullName"
+            }
+          ],
           "inputSchema": {
             "type": "object",
             "required": ["repoFullName", "prNumber"],
@@ -445,6 +463,12 @@
           "handler": "reviewPr",
           "risk": "write",
           "idempotency": "required",
+          "scopeSelectors": [
+            {
+              "kind": "repository",
+              "jsonPointer": "/repoFullName"
+            }
+          ],
           "inputSchema": {
             "type": "object",
             "required": ["repoFullName", "prNumber", "body"],
@@ -504,6 +528,12 @@
           "handler": "reviewPrInline",
           "risk": "write",
           "idempotency": "required",
+          "scopeSelectors": [
+            {
+              "kind": "repository",
+              "jsonPointer": "/repoFullName"
+            }
+          ],
           "inputSchema": {
             "type": "object",
             "required": ["repoFullName", "prNumber", "comments"],
@@ -563,6 +593,12 @@
           "handler": "commentPr",
           "risk": "write",
           "idempotency": "required",
+          "scopeSelectors": [
+            {
+              "kind": "repository",
+              "jsonPointer": "/repoFullName"
+            }
+          ],
           "inputSchema": {
             "type": "object",
             "required": ["repoFullName", "prNumber", "body"],
@@ -590,6 +626,12 @@
           "handler": "commentIssue",
           "risk": "write",
           "idempotency": "required",
+          "scopeSelectors": [
+            {
+              "kind": "repository",
+              "jsonPointer": "/repoFullName"
+            }
+          ],
           "inputSchema": {
             "type": "object",
             "required": ["repoFullName", "issueNumber", "body"],
@@ -617,6 +659,12 @@
           "handler": "labelIssue",
           "risk": "write",
           "idempotency": "required",
+          "scopeSelectors": [
+            {
+              "kind": "repository",
+              "jsonPointer": "/repoFullName"
+            }
+          ],
           "inputSchema": {
             "type": "object",
             "required": ["repoFullName", "issueNumber", "labels"],
@@ -647,6 +695,12 @@
           "handler": "closeIssue",
           "risk": "destructive",
           "idempotency": "required",
+          "scopeSelectors": [
+            {
+              "kind": "repository",
+              "jsonPointer": "/repoFullName"
+            }
+          ],
           "inputSchema": {
             "type": "object",
             "required": ["repoFullName", "issueNumber"],
@@ -675,6 +729,12 @@
           "handler": "updateIssue",
           "risk": "write",
           "idempotency": "required",
+          "scopeSelectors": [
+            {
+              "kind": "repository",
+              "jsonPointer": "/repoFullName"
+            }
+          ],
           "inputSchema": {
             "type": "object",
             "required": ["repoFullName", "issueNumber"],
@@ -728,6 +788,12 @@
           "handler": "createRelease",
           "risk": "destructive",
           "idempotency": "required",
+          "scopeSelectors": [
+            {
+              "kind": "repository",
+              "jsonPointer": "/repoFullName"
+            }
+          ],
           "inputSchema": {
             "type": "object",
             "required": ["repoFullName", "tag"],
@@ -766,6 +832,12 @@
           "handler": "generateChangelog",
           "risk": "read",
           "idempotency": "supported",
+          "scopeSelectors": [
+            {
+              "kind": "repository",
+              "jsonPointer": "/repoFullName"
+            }
+          ],
           "inputSchema": {
             "type": "object",
             "required": ["repoFullName", "base", "head"],
@@ -792,6 +864,12 @@
           "handler": "pushTag",
           "risk": "destructive",
           "idempotency": "required",
+          "scopeSelectors": [
+            {
+              "kind": "repository",
+              "jsonPointer": "/repoFullName"
+            }
+          ],
           "inputSchema": {
             "type": "object",
             "required": ["repoFullName", "tag", "sha"],
@@ -818,6 +896,12 @@
           "handler": "runIssueLoop",
           "risk": "write",
           "idempotency": "required",
+          "scopeSelectors": [
+            {
+              "kind": "repository",
+              "jsonPointer": "/repoFullName"
+            }
+          ],
           "inputSchema": {
             "type": "object",
             "required": ["repoFullName", "issueNumber", "head", "base"],

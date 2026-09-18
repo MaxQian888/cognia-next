@@ -7,7 +7,7 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::commands;
 use crate::ui::RuntimeUi;
@@ -41,6 +41,12 @@ pub(crate) struct Cli {
 pub(crate) enum TopCommand {
     /// Plugin-author subcommands.
     Plugin {
+        /// Override the CLI-bridge endpoint file used to find the running
+        /// desktop (the file the app writes on launch). Only meaningful for
+        /// subcommands that talk to the bridge: status, list, install,
+        /// uninstall, reload, dev.
+        #[arg(long, env = "COGNIA_CLI_ENDPOINT_FILE", global = true)]
+        endpoint_file: Option<PathBuf>,
         #[command(subcommand)]
         command: PluginCommand,
     },
@@ -59,17 +65,18 @@ pub(crate) enum TopCommand {
         #[arg(
             long,
             env = "COGNIA_SERVER_URL",
-            default_value = "https://127.0.0.1:27890"
+            default_value = "https://127.0.0.1:27890",
+            global = true
         )]
         server_url: String,
         /// Cognia server data directory (TLS material and signing state).
-        #[arg(long, env = "COGNIA_DATA_DIR")]
+        #[arg(long, env = "COGNIA_DATA_DIR", global = true)]
         data_dir: Option<PathBuf>,
         /// Explicit PEM certificate trusted for the self-signed Headless listener.
-        #[arg(long, env = "COGNIA_CA_CERT")]
+        #[arg(long, env = "COGNIA_CA_CERT", global = true)]
         ca_cert: Option<PathBuf>,
         /// `cognia-server` binary used to issue an in-memory service token.
-        #[arg(long, env = "COGNIA_SERVER_BIN")]
+        #[arg(long, env = "COGNIA_SERVER_BIN", global = true)]
         server_bin: Option<PathBuf>,
         #[command(subcommand)]
         command: HostCommand,
@@ -77,7 +84,12 @@ pub(crate) enum TopCommand {
     /// Bridge stdio to the cognia ACP server so ACP clients (Zed, Neovim,
     /// JetBrains) can drive cognia. Configure your editor with
     /// `{"command": "cognia", "args": ["acp"]}`.
-    Acp,
+    Acp {
+        /// Override the CLI-bridge endpoint file used to reach the ACP
+        /// ticket broker when `COGNIA_ACP_URL`/`COGNIA_ACP_TICKET` are unset.
+        #[arg(long, env = "COGNIA_CLI_ENDPOINT_FILE")]
+        endpoint_file: Option<PathBuf>,
+    },
     /// Inspect, query, follow, diagnose, and export local structured logs.
     Logs {
         #[command(subcommand)]
@@ -112,6 +124,88 @@ pub(crate) enum TopCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Probe every local control plane at once: the desktop CLI bridge and
+    /// the Headless service. Exits zero when at least one plane responds.
+    Status {
+        /// Emit a machine-readable JSON report instead of human prose.
+        #[arg(long)]
+        json: bool,
+        /// Project the JSON report through a dot-path selector
+        /// (e.g. `--query .bridge.reachable`). Requires `--json`.
+        #[arg(long, alias = "select", value_name = "PATH", requires = "json")]
+        query: Option<String>,
+        /// Override the CLI-bridge endpoint file used to find the running desktop.
+        #[arg(long, env = "COGNIA_CLI_ENDPOINT_FILE")]
+        endpoint_file: Option<PathBuf>,
+        /// Headless server base URL. Must be HTTPS on a loopback host.
+        #[arg(long, env = "COGNIA_SERVER_URL", default_value = "https://127.0.0.1:27890")]
+        server_url: String,
+        /// Cognia server data directory (TLS material and signing state).
+        #[arg(long, env = "COGNIA_DATA_DIR")]
+        data_dir: Option<PathBuf>,
+        /// Explicit PEM certificate trusted for the self-signed Headless listener.
+        #[arg(long, env = "COGNIA_CA_CERT")]
+        ca_cert: Option<PathBuf>,
+        /// `cognia-server` binary used to issue an in-memory service token.
+        #[arg(long, env = "COGNIA_SERVER_BIN")]
+        server_bin: Option<PathBuf>,
+    },
+    /// Open the cognia desktop at a specific surface via its `cognia://`
+    /// deep-link routes (for example `cognia open .` or `cognia open --settings`).
+    Open(OpenArgs),
+    /// Print a shell completion script to stdout.
+    Completions {
+        /// Shell to generate completions for.
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
+}
+
+/// Surface selectors for `cognia open` — at most one may be given.
+#[derive(Debug, clap::Args)]
+#[group(required = false, multiple = false)]
+pub(crate) struct OpenSurfaceArgs {
+    /// Workspace path or a full `cognia://` URL to open (positional —
+    /// `cognia open .` works like `code .`).
+    #[arg(value_name = "PATH|URL")]
+    pub(crate) target: Option<String>,
+    /// Open a session/chat by id (`--chat` is an alias — the routes are
+    /// equivalent in `lib/navigation/cognia-deeplink.ts`).
+    #[arg(long, visible_alias = "chat", value_name = "ID")]
+    pub(crate) session: Option<String>,
+    /// Open Settings, optionally at one tab (`--settings` or `--settings=plugins`).
+    #[arg(long, num_args = 0..=1, require_equals = true, default_missing_value = "", value_name = "TAB")]
+    pub(crate) settings: Option<String>,
+    /// Open a workflow run (`--workflow-run <workflow-id>/<run-id>`).
+    #[arg(long, value_name = "WORKFLOW/RUN")]
+    pub(crate) workflow_run: Option<String>,
+    /// Open a scheduled task by id.
+    #[arg(long, value_name = "ID")]
+    pub(crate) scheduler_task: Option<String>,
+    /// Open the IM surface, optionally at one conversation (`--im` or `--im=<key>`).
+    #[arg(long, num_args = 0..=1, require_equals = true, default_missing_value = "", value_name = "KEY")]
+    pub(crate) im: Option<String>,
+    /// Open the device-pairing surface with a pairing payload.
+    #[arg(long, value_name = "PAYLOAD")]
+    pub(crate) pair: Option<String>,
+    /// Open the share target; combine with `--text` / `--url`.
+    #[arg(long)]
+    pub(crate) share: bool,
+}
+
+#[derive(Debug, clap::Args)]
+pub(crate) struct OpenArgs {
+    #[command(flatten)]
+    pub(crate) surface: OpenSurfaceArgs,
+    /// Text payload for `--share`.
+    #[arg(long, requires = "share")]
+    pub(crate) text: Option<String>,
+    /// URL payload for `--share`.
+    #[arg(long, requires = "share")]
+    pub(crate) url: Option<String>,
+    /// Print the deep link instead of launching it.
+    #[arg(long)]
+    pub(crate) print: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -177,6 +271,9 @@ pub(crate) enum HostCommand {
     Categories {
         #[arg(long, value_enum, default_value_t = HostListFormat::Json)]
         format: HostListFormat,
+        /// Project the JSON output through a dot-path selector (e.g. `.categories[0].id`).
+        #[arg(long, alias = "select", value_name = "PATH")]
+        query: Option<String>,
     },
     /// Summarize resource groups within the generated command catalog.
     Resources {
@@ -185,11 +282,15 @@ pub(crate) enum HostCommand {
         category: Option<String>,
         #[arg(long, value_enum, default_value_t = HostListFormat::Json)]
         format: HostListFormat,
+        /// Project the JSON output through a dot-path selector.
+        #[arg(long, alias = "select", value_name = "PATH")]
+        query: Option<String>,
     },
     /// Browse the embedded Headless RPC command catalog without connecting.
     Commands {
+        /// Free-text filter over command names, summaries, and resources.
         #[arg(long)]
-        query: Option<String>,
+        search: Option<String>,
         #[arg(long)]
         target: Option<String>,
         #[arg(long)]
@@ -206,12 +307,18 @@ pub(crate) enum HostCommand {
         resource: Option<String>,
         #[arg(long, value_enum, default_value_t = HostListFormat::Json)]
         format: HostListFormat,
+        /// Project the JSON output through a dot-path selector.
+        #[arg(long, alias = "select", value_name = "PATH")]
+        query: Option<String>,
     },
     /// Print the concrete input schema for one Headless RPC command.
     Schema {
         rpc_command: String,
         #[arg(long, value_enum, default_value_t = HostSchemaFormat::Json)]
         format: HostSchemaFormat,
+        /// Project the JSON output through a dot-path selector.
+        #[arg(long, alias = "select", value_name = "PATH")]
+        query: Option<String>,
     },
     /// Validate and invoke one named Headless RPC command.
     Call {
@@ -219,12 +326,23 @@ pub(crate) enum HostCommand {
         /// JSON body, `-` for stdin, or `@file`.
         #[arg(long)]
         data: Option<String>,
+        /// Set a top-level request body field to a string value. Repeatable.
+        #[arg(short = 'f', long = "field", value_name = "KEY=VALUE", conflicts_with = "data")]
+        fields: Vec<String>,
+        /// Set a top-level request body field to a parsed JSON value
+        /// (`-F count=3`, `-F enabled=true`, `-F tags='["a"]'`). Repeatable.
+        #[arg(short = 'F', long = "field-json", value_name = "KEY=JSON", conflicts_with = "data")]
+        fields_json: Vec<String>,
         #[arg(long)]
         idempotency_key: Option<String>,
         #[arg(long)]
         dry_run: bool,
         #[arg(long)]
         no_wait: bool,
+        /// Follow page tokens (pageToken→nextPageToken, cursor→nextCursor)
+        /// until the list is exhausted, merging the pages into one result.
+        #[arg(long)]
+        paginate: bool,
         /// Fail when a completed response violates the embedded output contract.
         #[arg(long)]
         strict_output: bool,
@@ -232,6 +350,9 @@ pub(crate) enum HostCommand {
         timeout_seconds: u64,
         #[arg(long, value_enum, default_value_t = HostCallFormat::Json)]
         format: HostCallFormat,
+        /// Project the JSON output through a dot-path selector (e.g. `.data.id`).
+        #[arg(long, alias = "select", value_name = "PATH")]
+        query: Option<String>,
     },
     /// Check local configuration, TLS, readiness, credentials, and one safe RPC.
     Doctor {
@@ -239,6 +360,9 @@ pub(crate) enum HostCommand {
         offline: bool,
         #[arg(long, value_enum, default_value_t = HostSchemaFormat::Json)]
         format: HostSchemaFormat,
+        /// Project the JSON output through a dot-path selector.
+        #[arg(long, alias = "select", value_name = "PATH")]
+        query: Option<String>,
     },
     /// Stream Headless events as NDJSON with replay-cursor reconnects.
     Events {
@@ -248,6 +372,11 @@ pub(crate) enum HostCommand {
         events: Vec<String>,
         #[arg(long)]
         max_events: Option<u64>,
+        /// Project each emitted frame through a dot-path selector
+        /// (e.g. `--query .payload`). Frames that fail projection abort
+        /// the stream with an error.
+        #[arg(long, alias = "select", value_name = "PATH")]
+        query: Option<String>,
     },
     /// Read agent instructions embedded alongside the command catalog.
     Skills {
@@ -719,6 +848,10 @@ pub(crate) enum PluginCommand {
         /// Emit a machine-readable JSON report instead of a human table.
         #[arg(long)]
         json: bool,
+        /// Project the JSON report through a dot-path selector
+        /// (e.g. `--query '.plugins[].id'`). Requires `--json`.
+        #[arg(long, alias = "select", value_name = "PATH", requires = "json")]
+        query: Option<String>,
     },
     /// Ask a running cognia desktop instance to hot-reload a plugin.
     Reload {
@@ -737,6 +870,9 @@ pub(crate) enum PluginCommand {
         /// Emit a machine-readable JSON report instead of human prose.
         #[arg(long)]
         json: bool,
+        /// Project the JSON report through a dot-path selector. Requires `--json`.
+        #[arg(long, alias = "select", value_name = "PATH", requires = "json")]
+        query: Option<String>,
     },
     /// Check the build toolchain, desktop bridge, and (inside a plugin dir)
     /// the signing-key gitignore invariant + manifest lint.
@@ -748,13 +884,19 @@ pub(crate) enum PluginCommand {
         /// Emit a machine-readable JSON report instead of human prose.
         #[arg(long)]
         json: bool,
+        /// Project the JSON report through a dot-path selector
+        /// (e.g. `--query '.checks[].name'`). Requires `--json`.
+        #[arg(long, alias = "select", value_name = "PATH", requires = "json")]
+        query: Option<String>,
     },
     /// Watch the plugin crate for changes, rebuild on save, and (when
     /// a running cognia is discoverable) ping it to hot-reload in place.
     Dev {
         #[arg(long, default_value = ".")]
         path: PathBuf,
-        #[arg(long)]
+        /// Override the hot-reload origin. http(s) loopback only — the
+        /// endpoint's dev token is reused, so remote URLs are refused.
+        #[arg(long, value_name = "LOOPBACK_URL")]
         reload_url: Option<String>,
         /// Stable UUID used to correlate this process with the desktop Dev Session UI.
         #[arg(long)]
@@ -818,7 +960,11 @@ pub(crate) fn dispatch_pack(command: PackCommand, ui: &mut RuntimeUi) -> Result<
     }
 }
 
-pub(crate) fn dispatch_plugin(command: PluginCommand, ui: &mut RuntimeUi) -> Result<()> {
+pub(crate) fn dispatch_plugin(
+    command: PluginCommand,
+    endpoint_file: Option<&Path>,
+    ui: &mut RuntimeUi,
+) -> Result<()> {
     match command {
         PluginCommand::New {
             name,
@@ -1065,7 +1211,7 @@ pub(crate) fn dispatch_plugin(command: PluginCommand, ui: &mut RuntimeUi) -> Res
                 "running plugin install path={} json={json}",
                 path.display()
             ));
-            commands::install::run(path, ui)
+            commands::install::run(path, endpoint_file, ui)
         }
         PluginCommand::Uninstall {
             plugin_id,
@@ -1077,12 +1223,12 @@ pub(crate) fn dispatch_plugin(command: PluginCommand, ui: &mut RuntimeUi) -> Res
                 "running plugin uninstall plugin_id={} purge_data={} json={}",
                 plugin_id, purge_data, json
             ));
-            commands::uninstall::run(plugin_id, purge_data, ui)
+            commands::uninstall::run(plugin_id, purge_data, endpoint_file, ui)
         }
-        PluginCommand::List { json } => {
+        PluginCommand::List { json, query } => {
             ui.flags.json = json;
             ui.verbose(format!("running plugin list json={json}"));
-            commands::list::run(json, ui)
+            commands::list::run(json, query.as_deref(), endpoint_file, ui)
         }
         PluginCommand::Reload {
             bundle,
@@ -1099,17 +1245,17 @@ pub(crate) fn dispatch_plugin(command: PluginCommand, ui: &mut RuntimeUi) -> Res
                 plugin_id.as_deref().unwrap_or("<none>"),
                 json
             ));
-            commands::reload::run(bundle, plugin_id, ui)
+            commands::reload::run(bundle, plugin_id, endpoint_file, ui)
         }
-        PluginCommand::Status { json } => {
+        PluginCommand::Status { json, query } => {
             ui.flags.json = json;
             ui.verbose(format!("running plugin status json={json}"));
-            commands::status::run(json, ui)
+            commands::status::run(json, query.as_deref(), endpoint_file, ui)
         }
-        PluginCommand::Doctor { fix, json } => {
+        PluginCommand::Doctor { fix, json, query } => {
             ui.flags.json = json;
             ui.verbose(format!("running plugin doctor fix={fix} json={json}"));
-            commands::doctor::run(fix, json, ui)
+            commands::doctor::run(fix, json, query.as_deref(), endpoint_file, ui)
         }
         PluginCommand::Dev {
             path,
@@ -1126,7 +1272,7 @@ pub(crate) fn dispatch_plugin(command: PluginCommand, ui: &mut RuntimeUi) -> Res
                 once,
                 json
             ));
-            commands::dev::run(path, reload_url, session_id, once, ui)
+            commands::dev::run(path, reload_url, session_id, once, endpoint_file, ui)
         }
         PluginCommand::EmbedVersion {
             wasm,
@@ -1164,6 +1310,7 @@ mod tests {
                     plugin_id,
                     json,
                 },
+            ..
         } = cli.command
         else {
             panic!("expected plugin reload command");
@@ -1263,5 +1410,263 @@ mod tests {
             panic!("expected host call command");
         };
         assert!(!strict_output);
+    }
+
+    #[test]
+    fn host_connection_flags_parse_after_the_subcommand() {
+        // The flags are global: `host call X --server-url Y` must work as
+        // well as `host --server-url Y call X`.
+        let cli = Cli::try_parse_from([
+            "cognia",
+            "host",
+            "call",
+            "session_list",
+            "--server-url",
+            "https://127.0.0.1:9999",
+            "--data-dir",
+            "/tmp/data",
+        ])
+        .expect("global host flags should parse after the subcommand");
+        let TopCommand::Host {
+            server_url,
+            data_dir,
+            ..
+        } = cli.command
+        else {
+            panic!("expected host command");
+        };
+        assert_eq!(server_url, "https://127.0.0.1:9999");
+        assert_eq!(data_dir, Some(PathBuf::from("/tmp/data")));
+    }
+
+    #[test]
+    fn host_call_parses_field_flags_and_rejects_data_mixing() {
+        let cli = Cli::try_parse_from([
+            "cognia",
+            "host",
+            "call",
+            "session_list",
+            "-f",
+            "title=hi",
+            "--field-json",
+            "count=3",
+        ])
+        .expect("field flags should parse");
+        let TopCommand::Host {
+            command:
+                HostCommand::Call {
+                    fields,
+                    fields_json,
+                    ..
+                },
+            ..
+        } = cli.command
+        else {
+            panic!("expected host call command");
+        };
+        assert_eq!(fields, vec!["title=hi".to_string()]);
+        assert_eq!(fields_json, vec!["count=3".to_string()]);
+
+        assert!(
+            Cli::try_parse_from([
+                "cognia",
+                "host",
+                "call",
+                "session_list",
+                "--data",
+                "{}",
+                "-f",
+                "a=b"
+            ])
+            .is_err(),
+            "--data and -f must conflict"
+        );
+    }
+
+    #[test]
+    fn host_subcommands_parse_query_projection() {
+        let cli = Cli::try_parse_from([
+            "cognia",
+            "host",
+            "categories",
+            "--query",
+            ".categories[0].id",
+        ])
+        .expect("--query should parse");
+        let TopCommand::Host {
+            command: HostCommand::Categories { query, .. },
+            ..
+        } = cli.command
+        else {
+            panic!("expected host categories command");
+        };
+        assert_eq!(query.as_deref(), Some(".categories[0].id"));
+
+        // `--select` stays accepted as an alias.
+        let cli = Cli::try_parse_from(["cognia", "host", "schema", "x", "--select", ".a"])
+            .expect("--select alias should parse");
+        let TopCommand::Host {
+            command: HostCommand::Schema { query, .. },
+            ..
+        } = cli.command
+        else {
+            panic!("expected host schema command");
+        };
+        assert_eq!(query.as_deref(), Some(".a"));
+    }
+
+    #[test]
+    fn host_commands_filter_uses_search_flag() {
+        let cli = Cli::try_parse_from(["cognia", "host", "commands", "--search", "session"])
+            .expect("--search should parse");
+        let TopCommand::Host {
+            command: HostCommand::Commands { search, .. },
+            ..
+        } = cli.command
+        else {
+            panic!("expected host commands command");
+        };
+        assert_eq!(search.as_deref(), Some("session"));
+    }
+
+    #[test]
+    fn plugin_subcommands_accept_endpoint_file_anywhere() {
+        for argv in [
+            vec!["cognia", "plugin", "--endpoint-file", "/tmp/e.json", "list"],
+            vec!["cognia", "plugin", "list", "--endpoint-file", "/tmp/e.json"],
+            vec!["cognia", "plugin", "dev", "--path", ".", "--endpoint-file", "/tmp/e.json"],
+        ] {
+            let cli = Cli::try_parse_from(argv.clone())
+                .unwrap_or_else(|err| panic!("{argv:?} should parse: {err}"));
+            let TopCommand::Plugin { endpoint_file, .. } = cli.command else {
+                panic!("expected plugin command");
+            };
+            assert_eq!(endpoint_file, Some(PathBuf::from("/tmp/e.json")));
+        }
+    }
+
+    #[test]
+    fn open_parses_exclusive_surfaces_and_share_payload() {
+        let cli = Cli::try_parse_from(["cognia", "open", "--session", "abc"])
+            .expect("open --session");
+        let TopCommand::Open(args) = cli.command else {
+            panic!("expected open command");
+        };
+        assert_eq!(args.surface.session.as_deref(), Some("abc"));
+
+        // Two surface selectors conflict.
+        assert!(Cli::try_parse_from(["cognia", "open", "--session", "a", "--settings"]).is_err());
+        assert!(Cli::try_parse_from(["cognia", "open", ".", "--im"]).is_err());
+
+        // `--text`/`--url` are payload flags, not surfaces.
+        let cli = Cli::try_parse_from([
+            "cognia",
+            "open",
+            "--share",
+            "--text",
+            "hi",
+            "--url",
+            "https://example.com",
+        ])
+        .expect("share payload should parse");
+        let TopCommand::Open(args) = cli.command else {
+            panic!("expected open command");
+        };
+        assert!(args.surface.share);
+        assert_eq!(args.text.as_deref(), Some("hi"));
+
+        // Payload flags require --share.
+        assert!(Cli::try_parse_from(["cognia", "open", "--text", "hi"]).is_err());
+    }
+
+    #[test]
+    fn completions_and_status_parse() {
+        let cli = Cli::try_parse_from(["cognia", "completions", "bash"])
+            .expect("completions should parse");
+        let TopCommand::Completions { shell } = cli.command else {
+            panic!("expected completions command");
+        };
+        assert_eq!(shell, clap_complete::Shell::Bash);
+
+        let cli = Cli::try_parse_from(["cognia", "status", "--json"])
+            .expect("status should parse");
+        let TopCommand::Status { json, .. } = cli.command else {
+            panic!("expected status command");
+        };
+        assert!(json);
+    }
+
+    #[test]
+    fn paginate_and_events_query_parse() {
+        let cli = Cli::try_parse_from([
+            "cognia",
+            "host",
+            "call",
+            "session_list",
+            "--paginate",
+            "--format",
+            "json",
+        ])
+        .expect("paginated call should parse");
+        let TopCommand::Host {
+            command: HostCommand::Call { paginate, .. },
+            ..
+        } = cli.command
+        else {
+            panic!("expected host call");
+        };
+        assert!(paginate);
+
+        let cli = Cli::try_parse_from([
+            "cognia",
+            "host",
+            "events",
+            "--query",
+            ".payload",
+        ])
+        .expect("events query should parse");
+        let TopCommand::Host {
+            command: HostCommand::Events { query, .. },
+            ..
+        } = cli.command
+        else {
+            panic!("expected host events");
+        };
+        assert_eq!(query.as_deref(), Some(".payload"));
+    }
+
+    #[test]
+    fn bridge_query_requires_json() {
+        // `--query` without `--json` is rejected by clap, not silently ignored.
+        for args in [
+            vec!["cognia", "plugin", "list", "--query", ".plugins"],
+            vec!["cognia", "plugin", "status", "--query", ".running"],
+            vec!["cognia", "plugin", "doctor", "--query", ".checks"],
+            vec!["cognia", "status", "--query", ".bridge"],
+        ] {
+            assert!(
+                Cli::try_parse_from(&args).is_err(),
+                "expected rejection for {args:?}"
+            );
+        }
+
+        let cli = Cli::try_parse_from([
+            "cognia",
+            "plugin",
+            "list",
+            "--json",
+            "--query",
+            ".plugins[].id",
+        ])
+        .expect("plugin list query should parse");
+        let TopCommand::Plugin {
+            command: PluginCommand::List { json, query },
+            ..
+        } = cli.command
+        else {
+            panic!("expected plugin list");
+        };
+        assert!(json);
+        assert_eq!(query.as_deref(), Some(".plugins[].id"));
     }
 }
