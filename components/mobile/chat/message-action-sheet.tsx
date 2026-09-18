@@ -177,9 +177,12 @@ export function MessageActionSheet({
   // A branch snapshots the visible thread, so taking one mid-turn would copy a
   // half-written reply. Read the branch target's OWN slice — the sheet can be
   // opened on a message belonging to a session that is not the active one.
-  const branchSessionStreaming = useChatStore((s) =>
-    branchSessionId ? s.sessions[branchSessionId]?.status === "streaming" : false
-  )
+  const branchSessionStreaming = useChatStore((s) => {
+    const status = branchSessionId ? s.sessions[branchSessionId]?.status : undefined
+    // `awaiting_approval` counts: a send there steers too, and a snapshot or
+    // truncate would still freeze a half-written turn.
+    return status === "streaming" || status === "awaiting_approval"
+  })
   const commands = useMemo(
     () =>
       resolveMessageActionCommands({
@@ -553,7 +556,7 @@ export function MessageActionSheet({
               icon={<PencilIcon className="size-4" />}
               label={t("edit")}
               onClick={() => setEditText(text)}
-              disabled={busy || !text}
+              disabled={busy || !text || commandById.get("edit")?.disabled}
               testid="message-action-edit"
             />
           )}

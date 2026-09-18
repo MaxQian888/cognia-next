@@ -65,6 +65,12 @@ export interface MessageActionCommandContext {
    */
   canSelectText?: boolean
   canDelete?: boolean
+  /**
+   * The session is mid-turn (streaming or paused on an approval). Surfaces
+   * should feed the SESSION's status, not a per-row flag: commands gated on
+   * this rewrite or replay the transcript, which is unsafe while a turn is
+   * in flight regardless of which message they hang off.
+   */
   streaming?: boolean
 }
 
@@ -99,9 +105,13 @@ export function resolveMessageActionCommands(
   }
   if (context.role === "user" && context.canEdit) {
     // Both replay the same `onEditResend` path: "edit" opens the draft first,
-    // "resend" re-fires the recorded text unchanged. Resend is disabled while
-    // a turn is in flight — the replay would clobber the running stream.
-    commands.push({ id: "edit" }, { id: "resend", disabled: context.streaming })
+    // "resend" re-fires the recorded text unchanged. Disabled mid-turn — a
+    // send now would land as a steer, leaving the branch the edit just
+    // tagged with no replacement variant.
+    commands.push(
+      { id: "edit", disabled: context.streaming },
+      { id: "resend", disabled: context.streaming }
+    )
   }
   if (context.role === "assistant" && context.canRegenerate) {
     commands.push({ id: "regenerate", disabled: context.streaming })

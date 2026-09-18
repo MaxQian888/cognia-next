@@ -465,6 +465,13 @@ function MessageRendererInner({
     () => readChatTemplateRun((message as { metadata?: unknown }).metadata),
     [message]
   )
+  // Command gating is session-scoped — a resend/truncate mid-turn lands as a
+  // steer or rewrites history under a live stream — so it keys off the branch
+  // session's status, not this row's live-tail flag.
+  const sessionBusy = useChatStore((s) => {
+    const status = branchSessionId ? s.sessions[branchSessionId]?.status : undefined
+    return status === "streaming" || status === "awaiting_approval"
+  })
   const messageActionCommands = useMemo(
     () =>
       resolveMessageActionCommands({
@@ -479,7 +486,7 @@ function MessageRendererInner({
         canSaveAsMemory: Boolean(branchSessionId),
         canSaveAsIssue: Boolean(branchSessionId),
         canSelect: Boolean(selectionHost),
-        streaming: isStreaming,
+        streaming: isStreaming || sessionBusy,
       }),
     [
       branchSessionId,
@@ -487,6 +494,7 @@ function MessageRendererInner({
       handBackTargetId,
       isLastAssistant,
       isStreaming,
+      sessionBusy,
       message.role,
       messageShareContent.hasContent,
       onEditResend,
@@ -1050,6 +1058,7 @@ function MessageRendererInner({
                     tooltip={t("editTooltip")}
                     label={t("editLabel")}
                     onClick={startEdit}
+                    disabled={actionCommand("edit")?.disabled}
                   >
                     <PencilIcon className="size-3.5" />
                   </MessageAction>
@@ -1366,6 +1375,7 @@ function MessageRendererInner({
                     tooltip={t("editTooltip")}
                     label={t("editLabel")}
                     onClick={startEdit}
+                    disabled={actionCommand("edit")?.disabled}
                   >
                     <PencilIcon className="size-3.5" />
                   </MessageAction>

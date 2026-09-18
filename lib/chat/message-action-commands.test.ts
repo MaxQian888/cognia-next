@@ -76,14 +76,16 @@ describe("resend", () => {
     ).not.toContain("resend")
   })
 
-  // A replay mid-turn would clobber the running stream.
+  // A replay mid-turn would clobber the running stream — and both paths call
+  // the same editAndResend, whose branch tag a steer never consumes.
   it("is disabled while a turn is in flight", () => {
-    const command = resolveMessageActionCommands({
+    const commands = resolveMessageActionCommands({
       ...base,
       canEdit: true,
       streaming: true,
-    }).find((c) => c.id === "resend")
-    expect(command?.disabled).toBe(true)
+    })
+    expect(commands.find((c) => c.id === "resend")?.disabled).toBe(true)
+    expect(commands.find((c) => c.id === "edit")?.disabled).toBe(true)
   })
 })
 

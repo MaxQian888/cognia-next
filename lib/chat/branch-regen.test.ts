@@ -135,6 +135,31 @@ describe("tagEditSibling", () => {
     expect(merged[2].metadata).toMatchObject({ branchOwnerId: "u1" })
   })
 
+  it("does not re-parent a later variant of the same group when the original is re-edited", () => {
+    // Re-editing the ORIGINAL walks the tail past the newer variant. A sibling
+    // is an alternative, not tail content: stamping it `branchOwnerId` would
+    // hide its own subtree whenever the original is deselected — including
+    // while it is the selected variant (the emitted winner is not re-checked
+    // against rule 2, so the group would render its question with no tail).
+    const messages = [
+      msg("u1", "user", { branchGroupId: "edit::u1", branchIndex: 0 }),
+      msg("a1", "assistant", { branchOwnerId: "u1" }),
+      msg("u2", "user", { branchGroupId: "edit::u1", branchIndex: 1 }),
+      msg("a2", "assistant", { branchOwnerId: "u2" }),
+      msg("u3", "user"),
+      msg("a3", "assistant"),
+    ]
+    const { merged } = tagEditSibling(messages, 0)
+
+    // The other variant stays un-owned…
+    expect((merged[2].metadata as { branchOwnerId?: string }).branchOwnerId).toBeUndefined()
+    // …while real tail content still re-parents to the original.
+    expect(merged[4].metadata).toMatchObject({ branchOwnerId: "u1" })
+    expect(merged[5].metadata).toMatchObject({ branchOwnerId: "u1" })
+    // Nearer ancestors keep their ownership either way.
+    expect(merged[3].metadata).toMatchObject({ branchOwnerId: "u2" })
+  })
+
   it("handles editing the very last message (empty tail)", () => {
     const messages = [msg("u0", "user"), msg("a0", "assistant"), msg("u1", "user")]
     const { merged, nextIndex } = tagEditSibling(messages, 2)

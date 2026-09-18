@@ -133,8 +133,13 @@ export function tagEditSibling(
       } as UIMessage
     }
     // The tail now belongs to the original variant — unless it already hangs
-    // off a nearer sibling.
-    if (mm.branchOwnerId === undefined) mm.branchOwnerId = original.id
+    // off a nearer sibling. Other variants of THIS group are alternatives,
+    // not tail content: stamping them would hide their own subtree whenever
+    // the original is deselected (the emitted winner is not re-checked
+    // against rule 2, so the group would render its question with no tail).
+    if (mm.branchOwnerId === undefined && mm.branchGroupId !== groupId) {
+      mm.branchOwnerId = original.id
+    }
     return { ...m, metadata: mm } as UIMessage
   })
 

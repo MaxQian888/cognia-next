@@ -989,9 +989,13 @@ export async function handleEvent(
         if (turnComplete) pendingBranchOwnerRef.current.delete(sessionId)
         const ownerIndex = nextMessages.findIndex((m) => m.id === pendingOwner)
         if (ownerIndex >= 0) {
+          const preexisting = new Set(current.map((m) => m.id))
           let owned: UIMessage[] | null = null
           for (let i = ownerIndex + 1; i < nextMessages.length; i++) {
             const m = nextMessages[i]
+            // Rows already in the slice — e.g. a queued steer's optimistic
+            // bubble appended mid-turn — are not this turn's output.
+            if (preexisting.has(m.id)) continue
             const meta = (m as { metadata?: { branchOwnerId?: unknown } }).metadata
             if (meta?.branchOwnerId !== undefined) continue
             if (!owned) owned = nextMessages.slice()

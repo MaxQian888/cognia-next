@@ -526,6 +526,20 @@ describe("MessageActionSheet", () => {
     expect(screen.queryByTestId("message-action-resend")).not.toBeInTheDocument()
   })
 
+  it("disables edit and resend while the target session is mid-turn", () => {
+    // A send now would land as a steer and orphan the branch the edit just
+    // tagged — `awaiting_approval` steers the same way `streaming` does.
+    chatState.sessions = { s9: { status: "awaiting_approval" } }
+    const msg = {
+      ...makeMessage("send me again"),
+      role: "user" as const,
+      metadata: { sessionId: "s9" },
+    } as UIMessage
+    renderSheet(msg, jest.fn(), { onEditResend: jest.fn() })
+    expect(screen.getByTestId("message-action-resend")).toBeDisabled()
+    expect(screen.getByTestId("message-action-edit")).toBeDisabled()
+  })
+
   it("cancel returns to the action list without resending", () => {
     const onEditResend = jest.fn()
     renderSheet({ ...makeMessage("original"), role: "user" }, jest.fn(), { onEditResend })

@@ -458,6 +458,81 @@ describe("edit-as-branch owner stamping", () => {
     // Consumed at turn end — a stale owner would tag the next turn's rows.
     expect(owners.current.has("s9")).toBe(false)
   })
+
+  it("does not stamp rows that were already in the slice — a queued steer is not this turn's output", async () => {
+    // A steer typed while the edit turn streams lands in `messages` via
+    // `appendSteerMessage` — it sits after the replacement variant but was
+    // never produced by the turn. Owning it would hide the follow-up under
+    // the original branch while its eventual replies stay unowned.
+    const prior = [
+      {
+        id: "q0",
+        role: "user",
+        parts: [],
+        metadata: { branchGroupId: "e", branchIndex: 0 },
+      },
+      {
+        id: "q1",
+        role: "user",
+        parts: [],
+        metadata: { branchGroupId: "e", branchIndex: 1 },
+      },
+      {
+        id: "steer-1",
+        role: "user",
+        parts: [],
+        metadata: { steer: { entryId: "st1", state: "queued" } },
+      },
+    ]
+    useChatStore.setState({
+      sessions: {
+        s9: {
+          ...(useChatStore.getState().sessions.s9 ?? {}),
+          messages: prior,
+          status: "streaming",
+          pendingApprovals: [],
+        },
+      },
+      openSessionIds: ["s9"],
+      lastSendBySession: { s9: { content: "q", options: {}, attemptIndex: 0 } },
+    } as never)
+    applySdkEventMock.mockReturnValueOnce({
+      messages: [...prior, { id: "r1", role: "assistant", parts: [] }],
+      turnComplete: true,
+    })
+    const owners = ref(new Map<string, string>([["s9", "q1"]]))
+    const registry = new SessionCoalescingRegistry({
+      onCommit: () => {},
+      onPersist: () => {},
+      persistDelayMs: 0,
+    })
+
+    await handleEvent(
+      { type: "event", sessionId: "s9", event: { type: "result" } } as never,
+      ref<string | null>("s9"),
+      ref<string[]>([]),
+      ref(new Map<string, { groupId: string; index: number }>()),
+      owners,
+      ref(null),
+      {
+        messagesMirrorRef: ref(new Map()),
+        registry,
+        getExecutionHandle: () => undefined,
+      } as never
+    ).catch(() => {})
+
+    const messages = useChatStore.getState().sessions.s9?.messages ?? []
+    expect(messages.find((m) => m.id === "r1")?.metadata).toMatchObject({
+      branchOwnerId: "q1",
+    })
+    // The steer bubble keeps no owner — it belongs to whichever branch is
+    // current when it drains, not to the variant that happened to be live
+    // while it was typed.
+    expect(
+      (messages.find((m) => m.id === "steer-1")?.metadata as { branchOwnerId?: string })
+        ?.branchOwnerId
+    ).toBeUndefined()
+  })
 })
 
 describe("Router + Fusion turn wiring (ADR-0188)", () => {

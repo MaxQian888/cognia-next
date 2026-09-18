@@ -1561,6 +1561,19 @@ describe("edit flow", () => {
     render(<MessageRenderer message={assistantMsg("a-no-resend")} onEditResend={jest.fn()} />)
     expect(screen.queryByLabelText("resendTooltip")).toBeNull()
   })
+
+  it("disables edit and resend while the session is mid-turn", () => {
+    // Command gating is session-scoped: a replay now would land as a steer and
+    // orphan the branch the edit just tagged. The row's own live-tail flag is
+    // irrelevant — user rows never carry it.
+    useChatStore.setState({
+      activeSessionId: "sess-1",
+      sessions: { "sess-1": { status: "streaming" } },
+    } as never)
+    render(<MessageRenderer message={userMsg("e6", "hi")} onEditResend={jest.fn()} />)
+    expect(screen.getByLabelText("resendTooltip")).toBeDisabled()
+    expect(screen.getByLabelText("editTooltip")).toBeDisabled()
+  })
 })
 
 // ── speaker display ───────────────────────────────────────────────────────────
