@@ -64,6 +64,30 @@ const log = loggers.ui
  */
 const OverlaySideContext = createContext<"left" | "right">("right")
 
+/**
+ * Rail geometry: 36px targets under the panel radius, every glyph at 18px,
+ * hairline dividers cut to nub-length, and the active item carrying both the
+ * traveling tint and a detached bar on the window edge — so the selection
+ * reads at a glance instead of relying on a faint fill alone.
+ */
+const RAIL_BUTTON_CLASS = "size-9 rounded-panel transition-colors hover:bg-foreground/[0.05]"
+const RAIL_BUTTON_IDLE_CLASS = "text-muted-foreground hover:text-foreground"
+const RAIL_ICON_CLASS = "size-[18px]"
+const RAIL_SELECTION_TINT_CLASS = "absolute inset-0 rounded-panel bg-foreground/[0.07]"
+const RAIL_EDGE_BAR_CLASS = "h-5 w-[3px] rounded-pill bg-primary"
+/** From the button's own edge back to the column's window edge. */
+const RAIL_EDGE_BAR_OFFSET_PX = 10
+
+/**
+ * The edge bar detaches from the button and sits on the column's window edge
+ * — the opposite side from where overlays open.
+ */
+function railEdgeStyle(overlaySide: "left" | "right") {
+  return overlaySide === "right"
+    ? { left: -RAIL_EDGE_BAR_OFFSET_PX }
+    : { right: -RAIL_EDGE_BAR_OFFSET_PX }
+}
+
 interface Props {
   onCreateTeam: () => void
   onOpenSettings: () => void
@@ -179,15 +203,20 @@ export function GuildRail({
   // width — measured, not assumed, so a hidden rail (below `md`, or while the
   // sidebar hosts the navigation) counts as 0 without a second flag.
   const asideRef = useRef<HTMLElement | null>(null)
-  // Reports the rail's *rendered* width, so the title bar's outlets track the
-  // collapse frame for frame instead of jumping when it finishes. That is why
-  // the width animates on the `<aside>` itself rather than on a wrapper: a
-  // clipping wrapper would leave this measuring a full-width rail nobody can
-  // see. See `stores/ui/shell-columns-store.ts`.
-  useReportShellColumn("rail", asideRef)
   // Never collapse the Sheet's copy — there it is the drawer's leading column.
   const railCollapsed = variant === "rail" && collapsed
   const animatingCollapse = useEdgePanelTransition(railCollapsed, { element: asideRef })
+  // Reports the rail's *rendered* width — and where it is headed while it
+  // animates — so the title bar's outlets track the collapse instead of
+  // jumping when it finishes. That is why the width animates on the `<aside>`
+  // itself rather than on a wrapper: a clipping wrapper would leave this
+  // measuring a full-width rail nobody can see.
+  // See `stores/ui/shell-columns-store.ts`.
+  useReportShellColumn(
+    "rail",
+    asideRef,
+    animatingCollapse ? (railCollapsed ? 0 : GUILD_RAIL_WIDTH_PX) : null
+  )
 
   // Inside the mobile nav Sheet the rail is not on a window edge at all — it is
   // the drawer's leading column with the channel list to its right, so overlays
@@ -253,15 +282,15 @@ export function GuildRail({
         {/* Fixed-width column: keeps the icons from being squeezed toward each
             other as the aside's width animates — they are clipped, not
             crushed. Mirrors the conversation sidebar's inner layer. */}
-        <div className="flex h-full w-14 flex-col items-center py-2">
+        <div className="flex min-h-0 w-14 flex-1 flex-col items-center py-2.5">
           <ScrollArea className="w-full flex-1 [&_[data-slot=scroll-area-scrollbar]]:hidden">
-            <div className="flex flex-col items-center gap-2 px-2">
+            <div className="flex flex-col items-center gap-1.5 px-2">
               <PluginExtensionSlot
                 point="sidebar.left.top"
                 className="flex flex-col items-center gap-2 empty:hidden"
               />
-              <WorkspaceSwitcher />
-              <Separator className="my-1 w-8" aria-label={t("workspacesGroup")} />
+              <WorkspaceSwitcher className="size-9 rounded-panel bg-foreground/[0.06] text-foreground hover:bg-foreground/[0.09]" />
+              <Separator className="my-1.5 w-4" aria-label={t("workspacesGroup")} />
               <GuildContextMenu
                 target={{ kind: "dm" }}
                 unread={unread.dm}
@@ -276,7 +305,7 @@ export function GuildRail({
                   badgeLabel={unreadLabel}
                   testId="guild-dm"
                 >
-                  <MessagesSquareIcon className="size-5" />
+                  <MessagesSquareIcon className={RAIL_ICON_CLASS} />
                 </RailButton>
               </GuildContextMenu>
 
@@ -286,7 +315,7 @@ export function GuildRail({
                 tooltip={t("canvas")}
                 onClick={switchToCanvas}
               >
-                <PencilRulerIcon className="size-5" />
+                <PencilRulerIcon className={RAIL_ICON_CLASS} />
               </RailButton>
 
               {railContainers.map((c) => {
@@ -305,12 +334,12 @@ export function GuildRail({
                     onClick={() => switchToViewContainer(c.fullId)}
                     testId={`guild-view-container-${c.fullId}`}
                   >
-                    <ResolvedRailIcon name={c.def.icon} className="size-5" />
+                    <ResolvedRailIcon name={c.def.icon} className={RAIL_ICON_CLASS} />
                   </RailButton>
                 )
               })}
 
-              <Separator className="my-1 w-8" aria-label={t("featuresGroup")} />
+              <Separator className="my-1.5 w-4" aria-label={t("featuresGroup")} />
 
               {resolved.pinned.map((item) => (
                 <NavRailButton
@@ -337,10 +366,9 @@ export function GuildRail({
                       aria-label={t("more")}
                       data-testid="guild-more"
                       className={cn(
-                        "relative size-10 rounded-2xl transition-all hover:rounded-xl",
-                        overflowActive
-                          ? "rounded-xl text-foreground"
-                          : "text-muted-foreground hover:text-foreground"
+                        "relative",
+                        RAIL_BUTTON_CLASS,
+                        overflowActive ? "text-foreground" : RAIL_BUTTON_IDLE_CLASS
                       )}
                     >
                       {/* Same group as the rail buttons — "More" standing in for
@@ -348,9 +376,16 @@ export function GuildRail({
                       <MotionSelectionIndicator
                         groupId="guild-rail-selection"
                         active={overflowActive}
-                        className="absolute inset-0 rounded-xl bg-primary/10"
+                        className={RAIL_SELECTION_TINT_CLASS}
                       />
-                      <EllipsisIcon className="relative size-5" />
+                      {overflowActive ? (
+                        <span
+                          aria-hidden
+                          className={cn("absolute top-1/2 -translate-y-1/2", RAIL_EDGE_BAR_CLASS)}
+                          style={railEdgeStyle(overlaySide)}
+                        />
+                      ) : null}
+                      <EllipsisIcon className="relative size-[18px]" />
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent side={overlaySide} align="start" className="w-56 p-1">
@@ -402,9 +437,9 @@ export function GuildRail({
                 </Popover>
               )}
 
-              <Separator className="my-1 w-8" />
+              <Separator className="my-1.5 w-4" />
 
-              <ul className="flex flex-col items-center gap-2">
+              <ul className="flex flex-col items-center gap-1.5">
                 {(teams ?? []).map((team) => (
                   <li key={team.id}>
                     <GuildContextMenu
@@ -429,14 +464,14 @@ export function GuildRail({
                     onClick={handleCreateTeam}
                     testId="guild-create-team"
                   >
-                    <PlusIcon className="size-4" />
+                    <PlusIcon className={RAIL_ICON_CLASS} />
                   </RailButton>
                 </li>
               </ul>
             </div>
           </ScrollArea>
 
-          <Separator className="my-2 w-8" />
+          <Separator className="my-2 w-4" />
 
           <RailButton
             active={pathname === "/settings" || pathname.startsWith("/settings/")}
@@ -445,7 +480,7 @@ export function GuildRail({
             onClick={handleOpenSettings}
             testId="guild-open-settings"
           >
-            <SettingsIcon className="size-4" />
+            <SettingsIcon className={RAIL_ICON_CLASS} />
           </RailButton>
 
           <PluginExtensionSlot
@@ -502,7 +537,7 @@ function NavRailButton({
             onClick={onNavigate}
             testId={`guild-feature-${item.id}`}
           >
-            <item.Icon className="size-5" />
+            <item.Icon className={RAIL_ICON_CLASS} />
           </RailButton>
         </div>
       </ContextMenuTrigger>
@@ -569,9 +604,9 @@ function RailButton({
           style={style}
           data-testid={testId}
           className={cn(
-            "relative size-10 rounded-2xl transition-all hover:rounded-xl",
-            active && "rounded-xl text-foreground",
-            !active && "text-muted-foreground hover:text-foreground",
+            "relative",
+            RAIL_BUTTON_CLASS,
+            active ? "text-foreground" : RAIL_BUTTON_IDLE_CLASS,
             className
           )}
         >
@@ -581,8 +616,15 @@ function RailButton({
           <MotionSelectionIndicator
             groupId="guild-rail-selection"
             active={Boolean(active)}
-            className="absolute inset-0 rounded-xl bg-primary/10"
+            className={RAIL_SELECTION_TINT_CLASS}
           />
+          {active ? (
+            <span
+              aria-hidden
+              className={cn("absolute top-1/2 -translate-y-1/2", RAIL_EDGE_BAR_CLASS)}
+              style={railEdgeStyle(overlaySide)}
+            />
+          ) : null}
           <span className="relative flex items-center justify-center">{children}</span>
           {showBadge ? (
             // Corner pill, outside the icon's optical square so it never sits

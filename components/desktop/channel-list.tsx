@@ -484,23 +484,11 @@ export function ChannelList(props: Props) {
   // read and the swipe gesture below is the way in instead.
   const peekPreference = useUIStore((s) => s.sidebarPeekEnabled)
   const hasHover = useMediaQuery("(hover: hover) and (pointer: fine)")
-  // The rail's header renders into the title bar's start outlet when the
-  // workspace enables projection (`title-bar-outlets.tsx`), and stands down
-  // while collapsed so an invisible column leaves nothing in the bar. The bar
-  // sizes that outlet from the width reported below.
   // Which edge the sidebar takes — the same preference the nav rail follows
   // (`types/shell/sidebar.ts`), so the two chat columns stay together instead
   // of the navigation jumping sides when the user lands on `/`.
   const sidebarSide = useSettingsStore((s) => s.settings?.sidebarSide ?? DEFAULT_SIDEBAR_SIDE)
-  // The rail's header renders into the title bar's *start* outlet — the
-  // leading column's zone. On the right edge there is no such zone to take
-  // (the end zone belongs to the artifact dock's header), so the sidebar keeps
-  // its own 40px header there and the icon column stays beside it, unfolded.
-  const headerOutlet = useTitleBarProjection("start", {
-    active: !sidebarCollapsed && !isNarrow && sidebarSide === "left",
-  })
   const asideRef = useRef<HTMLElement | null>(null)
-  useReportShellColumn("sidebar", asideRef)
   // Enable the width transition ONLY for the brief collapse/expand animation —
   // never while the user drag-resizes (resize mutates the same `width`, and a
   // live transition would make the drag rubber-band). Shared with the nav rail,
@@ -508,6 +496,23 @@ export function ChannelList(props: Props) {
   // same reason — including the part where the flag has to be raised during
   // render so the class and the new width reach the DOM in one commit.
   const animatingCollapse = useEdgePanelTransition(sidebarCollapsed, { element: asideRef })
+  // The rail's header renders into the title bar's *start* outlet — the
+  // leading column's zone; on the right edge there is no such zone to take
+  // (the end zone belongs to the artifact dock's header), so the sidebar keeps
+  // its own 40px header there and the icon column stays beside it, unfolded.
+  // The bar sizes that outlet from the width reported below.
+  const headerOutlet = useTitleBarProjection("start", {
+    // Keep the header projected for the length of the collapse animation, not
+    // just while the rail is open: the bar's start outlet clips it
+    // progressively as the column beneath shrinks, which is what lets the
+    // workspace bar ride the gesture instead of vanishing on its first frame.
+    active: (!sidebarCollapsed || animatingCollapse) && !isNarrow && sidebarSide === "left",
+  })
+  useReportShellColumn(
+    "sidebar",
+    asideRef,
+    animatingCollapse ? (sidebarCollapsed ? 0 : width) : null
+  )
 
   // Armed only once the collapse has finished playing. Switching the inner
   // layer out of the flex row mid-collapse would fling the list sideways
@@ -646,7 +651,12 @@ export function ChannelList(props: Props) {
         onMouseEnter={peek.panelHandlers.onMouseEnter}
         onMouseLeave={peek.panelHandlers.onMouseLeave}
       >
-        <ChannelListBody {...props} onSelect={handleSelect} headerOutlet={headerOutlet} />
+        <ChannelListBody
+          {...props}
+          onSelect={handleSelect}
+          headerOutlet={headerOutlet}
+          collapsed={sidebarCollapsed}
+        />
       </SidebarPeekFrame>
       {!sidebarCollapsed && (
         <SidebarResizeHandle
@@ -732,6 +742,7 @@ function SidebarResizeHandle({
 
 function ChannelListBody({
   headerOutlet = null,
+  collapsed = false,
   surface = "rail",
   sessions,
   loading,
@@ -761,6 +772,15 @@ function ChannelListBody({
    * desktop rail passes one; the mobile Sheet keeps its header where it is.
    */
   headerOutlet?: HTMLElement | null
+  /**
+   * The desktop aside's collapse flag. The body needs it separately from
+   * `headerOutlet` because the header now stays projected through the collapse
+   * animation — `merged` is still true while the rail slides out — so the
+   * navigation-host claim can no longer read "collapsed" off `merged` going
+   * false. The Sheet never passes it: a drawer has no collapse state to
+   * release the icon rail over.
+   */
+  collapsed?: boolean
   /**
    * `rail` (default) — the desktop aside, which can be collapsed to a 0-width
    * column and is what the app-wide focus-search shortcut expands. `sheet` —
@@ -885,8 +905,14 @@ function ChannelListBody({
   // (`sidebarHostsNav`). The mobile Sheet, a collapsed rail (no outlet) and a
   // plugin view that replaces the list all leave the icon column in charge.
   const merged = headerOutlet !== null
+  // `merged` deliberately survives the collapse animation — the projected
+  // header stays in the bar while the outlet clips it — so the nav claim has
+  // to release on `sidebarCollapsed` itself, not on `merged` going false.
+  // Releasing at the gesture's start is what lets the icon rail grow beside
+  // the sidebar on the same clock; waiting for `merged` would pop a 56px
+  // column in one frame at the end of the motion.
   useSidebarNavHost(
-    merged && selectedGuild.kind !== "canvas" && selectedGuild.kind !== "plugin-view"
+    !collapsed && merged && selectedGuild.kind !== "canvas" && selectedGuild.kind !== "plugin-view"
   )
 
   // Filter the session list by the selected guild, on every grouping axis.

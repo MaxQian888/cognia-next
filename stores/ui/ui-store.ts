@@ -5,6 +5,7 @@ import { persist } from "zustand/middleware"
 import { persistLocalStorage } from "@/stores/persist-storage"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { nextNavEpoch } from "@/lib/ui/nav-epoch"
+import { runSidebarGesture } from "@/lib/desktop/sidebar-edge-transition"
 import type { SupportReportContext } from "@/lib/support-report/types"
 import {
   EMPTY_CONVERSATION_FILTERS,
@@ -405,16 +406,27 @@ export const useUIStore = create<UIState>()(
         }),
 
       sidebarCollapsed: false,
-      toggleSidebar: () =>
-        set((s) => {
-          const next = !s.sidebarCollapsed
-          // Plugin host: dispatch sidebar visibility change. Visible === !collapsed.
-          getPluginEventHooks().dispatchSidebarToggle(!next)
-          return { sidebarCollapsed: next }
-        }),
+      toggleSidebar: () => {
+        const next = !get().sidebarCollapsed
+        // The gesture animates the row toward the width the sidebar is headed
+        // for — `0` when collapsing, the persisted width when expanding.
+        runSidebarGesture(
+          () => {
+            set({ sidebarCollapsed: next })
+            // Plugin host: dispatch sidebar visibility change. Visible === !collapsed.
+            getPluginEventHooks().dispatchSidebarToggle(!next)
+          },
+          next ? 0 : get().sidebarWidth
+        )
+      },
       setSidebarCollapsed: (collapsed) => {
-        set({ sidebarCollapsed: collapsed })
-        getPluginEventHooks().dispatchSidebarToggle(!collapsed)
+        runSidebarGesture(
+          () => {
+            set({ sidebarCollapsed: collapsed })
+            getPluginEventHooks().dispatchSidebarToggle(!collapsed)
+          },
+          collapsed ? 0 : get().sidebarWidth
+        )
       },
 
       sidebarTeamsCollapsed: false,

@@ -131,8 +131,16 @@ export const CHROME_BUDGET = {
    * nothing until something is actually pending.
    */
   statusBar: 9,
-  /** `components/shell/guild-rail.tsx` — no teams, no plugin view containers. */
-  guildRail: 9,
+  /**
+   * `components/shell/guild-rail.tsx` — no teams, no plugin view containers.
+   *
+   * 9 → 10: `issues` joined the default pins alongside inbox/workflows/squads
+   * in `eb0b2861e` — a deliberate product move, since the tracker is a
+   * work-arrival destination like the inbox. The band's floor went with it:
+   * workspace switcher, DM, Canvas, four pinned features, "More",
+   * create-team, Settings.
+   */
+  guildRail: 10,
   /** `components/chat/chat-header.tsx` */
   chatHeader: 3,
   /**

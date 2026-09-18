@@ -268,13 +268,27 @@ test("the More button reflects the active state when on an overflow route", () =
   // The tint is a shared-layout indicator layer now, not a class on the button
   // — that is what lets it slide between rail buttons instead of blinking.
   const indicator = screen.getByTestId("guild-more").querySelector("span[aria-hidden]")
-  expect(indicator?.className).toContain("bg-primary/10")
+  expect(indicator?.className).toContain("bg-foreground/[0.07]")
 })
 
 test("only the active rail button carries the selection indicator", () => {
   pathname = "/workflows"
   render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
   expect(screen.getByLabelText("workflows").querySelector("span[aria-hidden]")).not.toBeNull()
+  expect(screen.getByLabelText("inbox").querySelector("span[aria-hidden]")).toBeNull()
+})
+
+test("the active rail button also draws the edge bar on the window edge", () => {
+  pathname = "/workflows"
+  render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+  const bar = [...screen.getByLabelText("workflows").querySelectorAll("span[aria-hidden]")].find(
+    (el) => el.className.includes("w-[3px]")
+  )
+  expect(bar).toBeDefined()
+  expect(bar?.className).toContain("bg-primary")
+  expect(bar?.className).toContain("rounded-pill")
+  // Left-docked rail: the bar hangs off the button's left edge, at the column's.
+  expect((bar as HTMLElement).style.left).toBe("-10px")
   expect(screen.getByLabelText("inbox").querySelector("span[aria-hidden]")).toBeNull()
 })
 

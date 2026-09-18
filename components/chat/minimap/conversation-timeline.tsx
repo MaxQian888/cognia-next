@@ -174,9 +174,20 @@ export const ConversationTimeline = memo(function ConversationTimeline({
     [turns.length, geom.positions, geom.activeIndex, bookmarkedIndices]
   )
 
-  const settings = useSettingsStore((s) => s.settings)
+  // Select only the timeline slice: the store replaces the whole `settings`
+  // object on every save, so selecting `s.settings` re-rendered this rail on
+  // unrelated writes (theme, providers, …). `conversationTimeline` keeps its
+  // reference across unrelated merges, so this only fires when it changes.
+  const timelineSettings = useSettingsStore((s) => s.settings?.conversationTimeline)
   const save = useSettingsStore((s) => s.save)
-  const expanded = settings?.conversationTimeline?.expanded ?? false
+  // Expand/collapse is optimistic. `save` goes through the serialized Dexie
+  // saveQueue — a read-modify-write queued behind every other pending settings
+  // write — so awaiting it before rendering made the toggle feel hung. The
+  // override flips the UI in the same commit; when the latest save settles the
+  // override clears back onto the persisted value (reverting on failure).
+  const [expandedOverride, setExpandedOverride] = useState<boolean | null>(null)
+  const expanded = expandedOverride ?? timelineSettings?.expanded ?? false
+  const expandedPersistSeq = useRef(0)
   const [scrub, setScrub] = useState<ScrubState | null>(null)
   const expandedScrollRef = useRef<HTMLDivElement>(null)
   const virtualizeExpanded = expanded && turns.length > EXPANDED_VIRTUALIZE_THRESHOLD
@@ -263,11 +274,21 @@ export const ConversationTimeline = memo(function ConversationTimeline({
       // while collapsing would strand the user at an empty rail with no way to
       // clear it. Collapsing drops the filter.
       if (!next) setOnlyBookmarked(false)
-      void save({
-        conversationTimeline: { ...(settings?.conversationTimeline ?? {}), expanded: next },
-      })
+      setExpandedOverride(next)
+      const seq = ++expandedPersistSeq.current
+      // `Promise.resolve` because tests mock `save` with a bare jest.fn().
+      void Promise.resolve(
+        save({
+          conversationTimeline: { ...(timelineSettings ?? {}), expanded: next },
+        })
+      )
+        .catch(() => undefined)
+        .finally(() => {
+          // A newer toggle owns the override now — let its save do the handoff.
+          if (seq === expandedPersistSeq.current) setExpandedOverride(null)
+        })
     },
-    [save, settings?.conversationTimeline]
+    [save, timelineSettings]
   )
 
   // The list owns the one jump implementation and publishes it; this used to
@@ -696,8 +717,12 @@ export const ConversationTimeline = memo(function ConversationTimeline({
             onClick={onRailClick}
             className="absolute inset-0 cursor-pointer bg-transparent transition-colors hover:bg-accent/30"
           >
-            {/* Viewport thumb — draggable, so a long conversation can be
-                scrubbed continuously instead of only jumped turn by turn. */}
+            {/* Viewport region — the "where you are" shade, VSCode-minimap
+                style: a translucent band across the whole lane BEHIND the
+                markers (they render later and stay visible inside it), so the
+                rail reads as one map — content + current view — rather than a
+                scrollbar pill stacked on a navigation strip. Still the drag
+                handle for continuous scrubbing. */}
             <span
               aria-hidden
               data-testid="timeline-viewport-thumb"
@@ -706,8 +731,10 @@ export const ConversationTimeline = memo(function ConversationTimeline({
               onPointerUp={onThumbPointerUp}
               onPointerCancel={onThumbPointerUp}
               className={cn(
-                "absolute inset-x-0.5 rounded-full bg-primary/20 group-hover:bg-primary/30",
-                dragging ? "cursor-grabbing bg-primary/40" : "cursor-grab"
+                "absolute inset-x-0 border-y transition-colors",
+                dragging
+                  ? "cursor-grabbing border-foreground/40 bg-foreground/20"
+                  : "cursor-grab border-foreground/20 bg-foreground/10 group-hover:border-foreground/30 group-hover:bg-foreground/15"
               )}
               style={{
                 top: `${geom.viewportTop * 100}%`,

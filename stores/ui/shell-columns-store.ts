@@ -31,6 +31,19 @@ export interface ShellColumnsState {
   /** Rendered border-box width per column, `0` while unmounted or collapsed. */
   widths: Record<ShellColumn, number>
   setColumnWidth: (column: ShellColumn, px: number) => void
+  /**
+   * Where an in-flight edge-panel gesture will land, per column, or `null`
+   * once it settles. Under a View Transition the DOM arrives at that width in
+   * one frame, so the live measurement can no longer tell the title bar where
+   * the column is *going* — the column publishes its resting width itself and
+   * the bar's outlets animate to it on the same clock instead of snapping to
+   * the post-gesture measurement mid-motion. `null` while nothing animates,
+   * which is also what keeps manual resizes tracking live measurements: a
+   * drag reports no target, so the outlets follow the pointer frame for frame
+   * instead of rubber-banding behind it.
+   */
+  targets: Record<ShellColumn, number | null>
+  setColumnTarget: (column: ShellColumn, px: number | null) => void
   /** True while the expanded sidebar is rendering the shell navigation rows. */
   sidebarHostsNav: boolean
   /**
@@ -52,6 +65,12 @@ export const useShellColumnsStore = create<ShellColumnsState>()((set) => ({
       const next = Math.max(0, Math.round(px))
       if (state.widths[column] === next) return state
       return { widths: { ...state.widths, [column]: next } }
+    }),
+  targets: { rail: null, sidebar: null, dock: null },
+  setColumnTarget: (column, px) =>
+    set((state) => {
+      if (state.targets[column] === px) return state
+      return { targets: { ...state.targets, [column]: px } }
     }),
   sidebarHostsNav: false,
   sidebarNavHostCount: 0,

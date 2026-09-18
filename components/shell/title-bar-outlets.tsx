@@ -42,15 +42,8 @@
  * the provider, so every hook degrades to "draw inline" there.
  */
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react"
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react"
+import { useIsomorphicLayoutEffect } from "@/hooks/use-isomorphic-layout-effect"
 
 export type TitleBarZone = "start" | "center" | "end" | "actions"
 
@@ -154,7 +147,12 @@ export function useTitleBarProjection(
   const outlet = ctx && inScope && active ? ctx.outlets[zone] : null
   const registerProjection = ctx?.registerProjection
 
-  useEffect(() => {
+  // A layout effect, deliberately: the bar's outlets size themselves off the
+  // projection count, and a passive effect would let the browser paint one
+  // frame where the column below is already animating but the outlet above it
+  // is still sized for the old state — the header then pops into the bar a
+  // frame after the gesture started instead of riding it.
+  useIsomorphicLayoutEffect(() => {
     if (!outlet || !registerProjection) return
     return registerProjection(zone)
   }, [outlet, registerProjection, zone])

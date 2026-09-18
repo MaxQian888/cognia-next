@@ -2289,6 +2289,119 @@ html[data-reduce-motion="true"]::view-transition-group(cognia-dock-panel) {
   }
 }
 
+/* The conversation sidebar's collapse/expand captures the whole shell row in
+   one View Transition — the rail aside, the sidebar, the workspace column and
+   the three title-bar outlets above them — so every part morphs between
+   snapshots on the same clock and no piece can run ahead of its neighbour
+   (before this, the outlets jumped on whichever frame their measured column
+   reported). The dock transition above also captures the two outlets its own
+   row changes, for the same reason (`cognia-dock-outlet-center` / `-end`).
+
+   Snapshot anchoring follows the edge that does not move during the gesture.
+   The sidebar's inner list is anchored to the aside's start edge — left in
+   LTR either way — so it always pins left. The rail's icons are anchored
+   inboard — right on a left rail, left on a right rail — and the workspace
+   column grows into the space the sidebar frees on `data-shell-edge`'s side
+   (published by
+   `lib/desktop/sidebar-edge-transition.ts`). The start outlet keeps its
+   window-edge anchor, the end outlet keeps its trailing-chrome anchor, and
+   the centre outlet's content is laid out from its leading edge. */
+::view-transition-group(cognia-dock-outlet-center),
+::view-transition-group(cognia-dock-outlet-end),
+::view-transition-group(cognia-shell-sidebar),
+::view-transition-group(cognia-shell-rail),
+::view-transition-group(cognia-shell-workspace),
+::view-transition-group(cognia-shell-outlet-start),
+::view-transition-group(cognia-shell-outlet-center),
+::view-transition-group(cognia-shell-outlet-end) {
+  animation-duration: calc(280ms * var(--motion-duration-scale, 1));
+  animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+::view-transition-old(cognia-dock-outlet-center),
+::view-transition-new(cognia-dock-outlet-center),
+::view-transition-old(cognia-dock-outlet-end),
+::view-transition-new(cognia-dock-outlet-end),
+::view-transition-old(cognia-shell-sidebar),
+::view-transition-new(cognia-shell-sidebar),
+::view-transition-old(cognia-shell-rail),
+::view-transition-new(cognia-shell-rail),
+::view-transition-old(cognia-shell-workspace),
+::view-transition-new(cognia-shell-workspace),
+::view-transition-old(cognia-shell-outlet-start),
+::view-transition-new(cognia-shell-outlet-start),
+::view-transition-old(cognia-shell-outlet-center),
+::view-transition-new(cognia-shell-outlet-center),
+::view-transition-old(cognia-shell-outlet-end),
+::view-transition-new(cognia-shell-outlet-end) {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: none;
+  overflow: clip;
+}
+
+::view-transition-old(cognia-shell-sidebar),
+::view-transition-new(cognia-shell-sidebar),
+::view-transition-old(cognia-shell-outlet-start),
+::view-transition-new(cognia-shell-outlet-start),
+::view-transition-old(cognia-shell-outlet-center),
+::view-transition-new(cognia-shell-outlet-center),
+::view-transition-old(cognia-dock-outlet-center),
+::view-transition-new(cognia-dock-outlet-center) {
+  object-position: left center;
+}
+
+::view-transition-old(cognia-shell-rail),
+::view-transition-new(cognia-shell-rail),
+::view-transition-old(cognia-shell-workspace),
+::view-transition-new(cognia-shell-workspace),
+::view-transition-old(cognia-shell-outlet-end),
+::view-transition-new(cognia-shell-outlet-end),
+::view-transition-old(cognia-dock-outlet-end),
+::view-transition-new(cognia-dock-outlet-end) {
+  object-position: right center;
+}
+
+/* Mirror the inboard anchors when the sidebar is pinned to the right edge. */
+html[data-shell-edge="right"]::view-transition-old(cognia-shell-rail),
+html[data-shell-edge="right"]::view-transition-new(cognia-shell-rail),
+html[data-shell-edge="right"]::view-transition-old(cognia-shell-workspace),
+html[data-shell-edge="right"]::view-transition-new(cognia-shell-workspace) {
+  object-position: left center;
+}
+
+html.reduce-motion::view-transition-group(cognia-dock-outlet-center),
+html.reduce-motion::view-transition-group(cognia-dock-outlet-end),
+html.reduce-motion::view-transition-group(cognia-shell-sidebar),
+html.reduce-motion::view-transition-group(cognia-shell-rail),
+html.reduce-motion::view-transition-group(cognia-shell-workspace),
+html.reduce-motion::view-transition-group(cognia-shell-outlet-start),
+html.reduce-motion::view-transition-group(cognia-shell-outlet-center),
+html.reduce-motion::view-transition-group(cognia-shell-outlet-end),
+html[data-reduce-motion="true"]::view-transition-group(cognia-dock-outlet-center),
+html[data-reduce-motion="true"]::view-transition-group(cognia-dock-outlet-end),
+html[data-reduce-motion="true"]::view-transition-group(cognia-shell-sidebar),
+html[data-reduce-motion="true"]::view-transition-group(cognia-shell-rail),
+html[data-reduce-motion="true"]::view-transition-group(cognia-shell-workspace),
+html[data-reduce-motion="true"]::view-transition-group(cognia-shell-outlet-start),
+html[data-reduce-motion="true"]::view-transition-group(cognia-shell-outlet-center),
+html[data-reduce-motion="true"]::view-transition-group(cognia-shell-outlet-end) {
+  animation-duration: 1ms !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:not([data-motion-respect="off"])::view-transition-group(cognia-dock-outlet-center),
+  html:not([data-motion-respect="off"])::view-transition-group(cognia-dock-outlet-end),
+  html:not([data-motion-respect="off"])::view-transition-group(cognia-shell-sidebar),
+  html:not([data-motion-respect="off"])::view-transition-group(cognia-shell-rail),
+  html:not([data-motion-respect="off"])::view-transition-group(cognia-shell-workspace),
+  html:not([data-motion-respect="off"])::view-transition-group(cognia-shell-outlet-start),
+  html:not([data-motion-respect="off"])::view-transition-group(cognia-shell-outlet-center),
+  html:not([data-motion-respect="off"])::view-transition-group(cognia-shell-outlet-end) {
+    animation-duration: 1ms !important;
+  }
+}
+
 /* Monaco editor flex-shrink fix (microsoft/monaco-editor#3393, #1482).
    Monaco creates a fixed-size internal div that prevents its flex parent
    from shrinking. Setting min-width: 0 on the wrapper section allows the

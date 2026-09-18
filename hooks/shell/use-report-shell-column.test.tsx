@@ -34,12 +34,17 @@ beforeAll(() => {
 beforeEach(() => {
   observers.length = 0
   width = 0
-  act(() => useShellColumnsStore.setState({ widths: { rail: 0, sidebar: 0, dock: 0 } }))
+  act(() =>
+    useShellColumnsStore.setState({
+      widths: { rail: 0, sidebar: 0, dock: 0 },
+      targets: { rail: null, sidebar: null, dock: null },
+    })
+  )
 })
 
-function Column({ column }: { column: "sidebar" | "dock" }) {
+function Column({ column, target = null }: { column: "sidebar" | "dock"; target?: number | null }) {
   const ref = useRef<HTMLDivElement | null>(null)
-  useReportShellColumn(column, ref)
+  useReportShellColumn(column, ref, target)
   return <div ref={ref} data-testid="col" />
 }
 
@@ -63,5 +68,28 @@ describe("useReportShellColumn", () => {
     width = 400
     render(<Column column="dock" />)
     expect(useShellColumnsStore.getState().widths).toEqual({ rail: 0, sidebar: 0, dock: 400 })
+  })
+
+  it("publishes the gesture target alongside the measurement and clears both on unmount", () => {
+    width = 296
+    const { rerender, unmount } = render(<Column column="sidebar" target={0} />)
+    expect(useShellColumnsStore.getState().widths.sidebar).toBe(296)
+    expect(useShellColumnsStore.getState().targets.sidebar).toBe(0)
+
+    // The gesture lands: the column hands its resting width to the bar, then
+    // releases the target so live measurements take over again.
+    rerender(<Column column="sidebar" target={296} />)
+    expect(useShellColumnsStore.getState().targets.sidebar).toBe(296)
+    rerender(<Column column="sidebar" target={null} />)
+    expect(useShellColumnsStore.getState().targets.sidebar).toBeNull()
+
+    unmount()
+    expect(useShellColumnsStore.getState().widths.sidebar).toBe(0)
+    expect(useShellColumnsStore.getState().targets.sidebar).toBeNull()
+  })
+
+  it("publishes no target at rest", () => {
+    render(<Column column="dock" />)
+    expect(useShellColumnsStore.getState().targets.dock).toBeNull()
   })
 })

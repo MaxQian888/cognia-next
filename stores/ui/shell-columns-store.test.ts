@@ -5,6 +5,7 @@ beforeEach(() => {
   act(() =>
     useShellColumnsStore.setState({
       widths: { rail: 0, sidebar: 0, dock: 0 },
+      targets: { rail: null, sidebar: null, dock: null },
       sidebarHostsNav: false,
       sidebarNavHostCount: 0,
     })
@@ -36,6 +37,27 @@ describe("useShellColumnsStore", () => {
     act(() => useShellColumnsStore.getState().setColumnWidth("sidebar", 300))
     const before = useShellColumnsStore.getState()
     act(() => useShellColumnsStore.getState().setColumnWidth("sidebar", 300.2))
+    expect(useShellColumnsStore.getState()).toBe(before)
+  })
+
+  it("publishes a gesture target per column and clears it independently of widths", () => {
+    const state = () => useShellColumnsStore.getState()
+    expect(state().targets).toEqual({ rail: null, sidebar: null, dock: null })
+
+    act(() => state().setColumnTarget("sidebar", 0))
+    expect(state().targets).toEqual({ rail: null, sidebar: 0, dock: null })
+    // A target is not a measurement: the rendered width stays untouched so a
+    // subscriber can always see both where the column is and where it lands.
+    expect(state().widths.sidebar).toBe(0)
+
+    act(() => state().setColumnTarget("sidebar", null))
+    expect(state().targets.sidebar).toBeNull()
+  })
+
+  it("is identity-stable when the target has not changed", () => {
+    act(() => useShellColumnsStore.getState().setColumnTarget("dock", 384))
+    const before = useShellColumnsStore.getState()
+    act(() => useShellColumnsStore.getState().setColumnTarget("dock", 384))
     expect(useShellColumnsStore.getState()).toBe(before)
   })
 

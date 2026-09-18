@@ -1,5 +1,5 @@
 import { createRef } from "react"
-import { render, screen, fireEvent, cleanup } from "@testing-library/react"
+import { render, screen, fireEvent, cleanup, act } from "@testing-library/react"
 import "@testing-library/jest-dom"
 import type { UIMessage } from "ai"
 import type { Virtualizer } from "@tanstack/react-virtual"
@@ -173,12 +173,14 @@ describe("ConversationTimeline", () => {
     expect(rail.querySelectorAll("span").length).toBeLessThanOrEqual(129)
   })
 
-  it("clicking the rail pins the timeline open (persists expanded=true)", () => {
+  it("clicking the rail pins the timeline open (persists expanded=true)", async () => {
     renderTimeline()
     fireEvent.click(screen.getByLabelText("expand"))
     expect(mockSave).toHaveBeenCalledWith({
       conversationTimeline: expect.objectContaining({ expanded: true }),
     })
+    // Flush the persistence handoff that clears the optimistic override.
+    await act(async () => {})
   })
 
   it("renders the expanded vertical timeline when pinned, with one entry per user turn", () => {
@@ -203,13 +205,40 @@ describe("ConversationTimeline", () => {
     expect(jumpButtons.length).toBeLessThanOrEqual(30)
   })
 
-  it("collapse button unpins the timeline (persists expanded=false)", () => {
+  it("collapse button unpins the timeline (persists expanded=false)", async () => {
     mockSettings = { conversationTimeline: { expanded: true } }
     renderTimeline()
     fireEvent.click(screen.getByLabelText("collapse"))
     expect(mockSave).toHaveBeenCalledWith({
       conversationTimeline: expect.objectContaining({ expanded: false }),
     })
+    await act(async () => {})
+  })
+
+  it("expands immediately without waiting for the settings save to resolve", async () => {
+    // `save` queues a Dexie read-modify-write behind every other pending
+    // settings write; the toggle must not wait on it. Keep this save pending
+    // and assert the panel is already open.
+    let resolveSave!: () => void
+    mockSave.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSave = resolve
+        })
+    )
+    renderTimeline()
+    fireEvent.click(screen.getByLabelText("expand"))
+    expect(screen.getByText("First question about the build")).toBeInTheDocument()
+    await act(async () => resolveSave())
+  })
+
+  it("reverts to the persisted state when the settings save fails", async () => {
+    mockSave.mockImplementationOnce(() => Promise.reject(new Error("disk full")))
+    renderTimeline()
+    fireEvent.click(screen.getByLabelText("expand"))
+    expect(screen.getByText("First question about the build")).toBeInTheDocument()
+    await act(async () => {})
+    expect(screen.queryByText("First question about the build")).not.toBeInTheDocument()
   })
 
   it("jumpTo uses the virtualizer when virtualized", () => {

@@ -50,6 +50,8 @@ import {
   useTitleBarOutletRef,
   useTitleBarProjectionState,
 } from "@/components/shell/title-bar-outlets"
+import { useEdgePanelTransition } from "@/hooks/shell/use-edge-panel-transition"
+import { SHELL_DOCK_TIMING_CLASS } from "@/lib/ui/shell-dock-motion"
 import { useShellColumnsStore } from "@/stores/ui/shell-columns-store"
 import { DEFAULT_SIDEBAR_SIDE } from "@/types/shell/sidebar"
 import { applyZoom, clampZoom, DEFAULT_ZOOM, ZOOM_STEP } from "@/lib/tauri/webview-zoom"
@@ -82,7 +84,7 @@ import { toast } from "sonner"
 import { useTranslations } from "next-intl"
 import { useTheme } from "next-themes"
 import { usePathname, useRouter } from "next/navigation"
-import { useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { TitleBarZone, type TitleBarItemContext } from "@/components/desktop/title-bar-zone"
 import { ShellLayoutDialog } from "@/components/shell/shell-layout-dialog"
@@ -236,13 +238,48 @@ export function TitleBar() {
   // that one is spatial, not cosmetic — the menus would otherwise sit over the
   // conversation rail's own column.
   const projected = useTitleBarProjectionState()
-  const startOutletRef = useTitleBarOutletRef("start")
-  const centerOutletRef = useTitleBarOutletRef("center")
-  const endOutletRef = useTitleBarOutletRef("end")
-  const actionsOutletRef = useTitleBarOutletRef("actions")
   const measuredRailPx = useShellColumnsStore((s) => s.widths.rail)
   const sidebarPx = useShellColumnsStore((s) => s.widths.sidebar)
   const dockPx = useShellColumnsStore((s) => s.widths.dock)
+  // Where an animating column will *settle*, when it is animating — under a
+  // View Transition the measured width is already the final one on the first
+  // frame, so the outlets size from the published target and slide on the same
+  // clock as the snapshot below them. `null` at rest and on every manual drag,
+  // which is what keeps a divider drag tracking the pointer live instead of
+  // rubber-banding behind it.
+  const railTargetPx = useShellColumnsStore((s) => s.targets.rail)
+  const sidebarTargetPx = useShellColumnsStore((s) => s.targets.sidebar)
+  const dockTargetPx = useShellColumnsStore((s) => s.targets.dock)
+  const railPx = railTargetPx ?? measuredRailPx
+  const sidebarEffPx = sidebarTargetPx ?? sidebarPx
+  const dockEffPx = dockTargetPx ?? dockPx
+  // Outlets settle like the edge panels above them do: when a projector stands
+  // down at the *end* of a collapse the outlet still holds a strip of bar, and
+  // hiding it on the same frame popped that strip back to the centre zone in
+  // one jolt. The edge-panel flag keeps it mounted for one more transition —
+  // to width 0 — then `hidden` takes it.
+  const startOutletElRef = useRef<HTMLElement | null>(null)
+  const endOutletElRef = useRef<HTMLElement | null>(null)
+  const startSettling = useEdgePanelTransition(projected.start, { element: startOutletElRef })
+  const endSettling = useEdgePanelTransition(projected.end, { element: endOutletElRef })
+  const registerStartOutlet = useTitleBarOutletRef("start")
+  const centerOutletRef = useTitleBarOutletRef("center")
+  const registerEndOutlet = useTitleBarOutletRef("end")
+  const actionsOutletRef = useTitleBarOutletRef("actions")
+  const startOutletRef = useCallback(
+    (el: HTMLElement | null) => {
+      startOutletElRef.current = el
+      registerStartOutlet(el)
+    },
+    [registerStartOutlet]
+  )
+  const endOutletRef = useCallback(
+    (el: HTMLElement | null) => {
+      endOutletElRef.current = el
+      registerEndOutlet(el)
+    },
+    [registerEndOutlet]
+  )
   const sidebarSide = useSettingsStore((s) => s.settings?.sidebarSide ?? DEFAULT_SIDEBAR_SIDE)
   const barRef = useRef<HTMLElement | null>(null)
   const leftChromeRef = useRef<HTMLDivElement | null>(null)
@@ -338,22 +375,23 @@ export function TitleBar() {
   // is the outermost column on `sidebarSide`, so the conversation rail begins
   // after it on the left, and the dock ends before it on the right.
   // Measured, like the sidebar and dock: the rail hides below `md` and while
-  // the expanded sidebar hosts the navigation, and reports 0 both times.
-  const railPx = guildRailCollapsed ? 0 : measuredRailPx
+  // the expanded sidebar hosts the navigation, and reports 0 both times — and
+  // while it is animating the *target* is the honest number, so a collapse
+  // never reads back a rail that is still on its way in.
   const railLeftPx = sidebarSide === "left" ? railPx : 0
   const railRightPx = sidebarSide === "right" ? railPx : 0
   // The conversation sidebar follows the same edge as the nav rail. On the
   // right it keeps its own header (the start zone is the *leading* column's,
   // and the bar has one of each), so it projects nothing — but it still sits
   // under the end zone, which has to span it the way it already spans the rail.
-  const sidebarRightPx = sidebarSide === "right" && !projected.start ? sidebarPx : 0
+  const sidebarRightPx = sidebarSide === "right" && !projected.start ? sidebarEffPx : 0
   // Must match the header's `pl-22` / `pl-2` below.
   const barPaddingLeftPx = isMac ? 88 : 8
   const columnStartPx = projected.start
-    ? Math.max(0, railLeftPx + sidebarPx - barPaddingLeftPx - leftChromePx)
+    ? Math.max(0, railLeftPx + sidebarEffPx - barPaddingLeftPx - leftChromePx)
     : 0
   const columnEndPx = projected.end
-    ? Math.max(0, railRightPx + sidebarRightPx + dockPx - rightChromePx)
+    ? Math.max(0, railRightPx + sidebarRightPx + dockEffPx - rightChromePx)
     : 0
   // Tracking the columns exactly is right until a column is wide enough to
   // starve the bar's own row. A workbench opened to its `wide` preset is half
@@ -1356,10 +1394,19 @@ export function TitleBar() {
         <div
           ref={startOutletRef}
           data-testid="title-bar-outlet-start"
+          data-title-bar-outlet="start"
           // `hidden` (the attribute) while nothing projects: an empty outlet is
-          // not a control, and must not read as one to the chrome budget.
-          hidden={!projected.start}
-          className="flex h-full min-w-0 shrink-0 items-center overflow-hidden"
+          // not a control, and must not read as one to the chrome budget. The
+          // settle keeps it mounted for the width-0 transition instead.
+          hidden={!projected.start && !startSettling}
+          className={cn(
+            "flex h-full min-w-0 shrink-0 items-center overflow-hidden",
+            // Armed while a column gesture has somewhere for this outlet to
+            // slide to, or while the outlet itself is settling out — never at
+            // rest, where a standing transition would lag manual resizes.
+            (startSettling || railTargetPx !== null || sidebarTargetPx !== null) &&
+              `transition-[width] ${SHELL_DOCK_TIMING_CLASS}`
+          )}
           style={{ width: startOutletPx }}
         />
 
@@ -1372,6 +1419,7 @@ export function TitleBar() {
           <div
             ref={centerOutletRef}
             data-testid="title-bar-outlet-center"
+            data-title-bar-outlet="center"
             hidden={!projected.center}
             className="flex h-full min-w-0 flex-1 items-center"
           />
@@ -1386,8 +1434,16 @@ export function TitleBar() {
         <div
           ref={endOutletRef}
           data-testid="title-bar-outlet-end"
-          hidden={!projected.end}
-          className="flex h-full min-w-0 shrink-0 items-center overflow-hidden"
+          data-title-bar-outlet="end"
+          hidden={!projected.end && !endSettling}
+          className={cn(
+            "flex h-full min-w-0 shrink-0 items-center overflow-hidden",
+            (endSettling ||
+              railTargetPx !== null ||
+              sidebarTargetPx !== null ||
+              dockTargetPx !== null) &&
+              `transition-[width] ${SHELL_DOCK_TIMING_CLASS}`
+          )}
           style={{ width: endOutletPx }}
         />
 
