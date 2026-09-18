@@ -41,6 +41,7 @@ import {
   type TwinRetrievedChunk,
 } from "./citations"
 import { emitFinishedSpan } from "@cognia/agent-trace/emitter"
+import { markSnapshotDelivered } from "@cognia/memory"
 import { artifactPartFromToolResult } from "@/lib/artifacts/tool-part"
 
 type Parts = UIMessage["parts"]
@@ -1643,6 +1644,7 @@ function appendSourcesToLastAssistant(
     twinDegraded?: boolean
     memoryBudget?: SourcesPart["memoryBudget"]
     memoryDegraded?: boolean
+    memorySnapshot?: SourcesPart["memorySnapshot"]
   }
 ): UIMessage[] {
   const wantDegraded = opts?.twinDegraded
@@ -1650,7 +1652,13 @@ function appendSourcesToLastAssistant(
   // A degraded twin/memory turn must still annotate the message even with zero
   // additions — that's the whole point of the warning. Only short-circuit when
   // there is genuinely nothing to do.
-  if (additions.length === 0 && !wantDegraded && !wantMemoryDegraded && !opts?.memoryBudget) {
+  if (
+    additions.length === 0 &&
+    !wantDegraded &&
+    !wantMemoryDegraded &&
+    !opts?.memoryBudget &&
+    !opts?.memorySnapshot
+  ) {
     return messages
   }
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -1675,6 +1683,9 @@ function appendSourcesToLastAssistant(
         ? existingPart?.memoryDegraded
         : wantMemoryDegraded || existingPart?.memoryDegraded
     const nextMemoryBudget = opts?.memoryBudget ?? existingPart?.memoryBudget
+    // Snapshot stickiness mirrors the budget's: only the memory merge writes
+    // it, and a retry of the same injection carries the same snapshot id.
+    const nextMemorySnapshot = opts?.memorySnapshot ?? existingPart?.memorySnapshot
     const sourcesUnchanged =
       merged.length === existingSources.length &&
       merged.every((s, idx) => s.id === existingSources[idx]?.id)
@@ -1687,7 +1698,9 @@ function appendSourcesToLastAssistant(
         existingPart.memoryBudget.used === nextMemoryBudget.used &&
         existingPart.memoryBudget.truncated === nextMemoryBudget.truncated)
     const memoryAnnotationsUnchanged =
-      Boolean(existingPart?.memoryDegraded) === Boolean(nextMemoryDegraded) && budgetUnchanged
+      Boolean(existingPart?.memoryDegraded) === Boolean(nextMemoryDegraded) &&
+      budgetUnchanged &&
+      existingPart?.memorySnapshot?.id === nextMemorySnapshot?.id
     // Idempotent guard — nothing to change in sources or any annotation.
     if (sourcesUnchanged && degradedUnchanged && memoryAnnotationsUnchanged) {
       return messages
@@ -1698,6 +1711,7 @@ function appendSourcesToLastAssistant(
       ...(nextDegraded ? { twinDegraded: true } : {}),
       ...(nextMemoryDegraded ? { memoryDegraded: true } : {}),
       ...(nextMemoryBudget ? { memoryBudget: nextMemoryBudget } : {}),
+      ...(nextMemorySnapshot ? { memorySnapshot: nextMemorySnapshot } : {}),
     }
     const nextParts =
       sourcesIdx >= 0
@@ -1722,6 +1736,11 @@ export interface MemorySourcesContext {
   budget?: { limit: number; used: number; truncated: boolean }
   /** True when retrieval degraded (BM25-only fallback or retrieval failure). */
   degraded?: boolean
+  /**
+   * `"prepared"` delivery receipt from `applyMemoryContext` — the merge below
+   * upgrades it to `delivered` as it lands on the sources part.
+   */
+  snapshot?: import("@cognia/memory").MemoryContextSnapshot
 }
 
 /**
@@ -1735,7 +1754,13 @@ export function mergeMemorySourcesIntoLastAssistant(
   memoryContext: MemorySourcesContext | undefined | null
 ): UIMessage[] {
   if (!memoryContext) return messages
-  if (memoryContext.retrievedMemories.length === 0 && !memoryContext.degraded) return messages
+  if (
+    memoryContext.retrievedMemories.length === 0 &&
+    !memoryContext.degraded &&
+    !memoryContext.snapshot
+  ) {
+    return messages
+  }
   const memorySources: SourcesPartItem[] = memoryContext.retrievedMemories.map((m) => ({
     id: `memory-${m.id}`,
     memoryRef: m.id,
@@ -1747,6 +1772,10 @@ export function mergeMemorySourcesIntoLastAssistant(
   return appendSourcesToLastAssistant(messages, memorySources, {
     memoryBudget: memorySources.length > 0 ? memoryContext.budget : undefined,
     memoryDegraded: memoryContext.degraded,
+    // Attaching IS the delivery: the receipt upgrades as it lands.
+    memorySnapshot: memoryContext.snapshot
+      ? markSnapshotDelivered(memoryContext.snapshot, Date.now())
+      : undefined,
   })
 }
 

@@ -33,6 +33,19 @@ jest.mock("@/lib/memory/lifecycle/enqueue-reconcile", () => ({
   noteMemoryVectorFailure: (...args: unknown[]) => mockNoteVectorFailure(...args),
 }))
 
+const mockReserve = jest.fn()
+const mockAwaitOp = jest.fn()
+const mockRecordOp = jest.fn()
+const mockReleaseOp = jest.fn()
+const mockRequestHash = jest.fn(async () => "req-hash")
+jest.mock("@/lib/db/memory-operations", () => ({
+  reserveMemoryOperation: (...args: unknown[]) => mockReserve(...(args as [])),
+  awaitMemoryOperation: (...args: unknown[]) => mockAwaitOp(...(args as [])),
+  recordMemoryOperation: (...args: unknown[]) => mockRecordOp(...(args as [])),
+  releaseMemoryOperation: (...args: unknown[]) => mockReleaseOp(...(args as [])),
+  memoryOperationRequestHash: (...args: unknown[]) => mockRequestHash(...(args as [])),
+}))
+
 const mockResolvePolicy = jest.fn()
 jest.mock("@/lib/memory/agent-policy", () => ({
   resolvePersistedAgentMemoryPolicy: (...args: unknown[]) => mockResolvePolicy(...args),
@@ -63,6 +76,10 @@ beforeEach(() => {
     canCreate: true,
     writableScopes: ["global", "workspace", "character", "agent"],
   })
+  mockReserve.mockResolvedValue({ state: "reserved" })
+  mockAwaitOp.mockResolvedValue(undefined)
+  mockRecordOp.mockResolvedValue(undefined)
+  mockReleaseOp.mockResolvedValue(undefined)
 })
 
 describe("clampImportance", () => {
@@ -361,5 +378,164 @@ describe("storeExternalMemory", () => {
         { channel: "mcp" }
       )
     ).rejects.toThrow(/may not create procedural/)
+  })
+
+  it("denies a target namespace outside the caller's authorized set", async () => {
+    const result = await storeExternalMemory(
+      { text: "fact", scope: "workspace", projectId: "p1" },
+      ATTRIBUTION,
+      {
+        principalId: "plugin:demo",
+        transport: "plugin",
+        namespaces: { projects: ["p-other"] },
+      }
+    )
+    expect(result).toEqual({ ok: false, reason: "unauthorized_namespace" })
+    expect(mockConsolidate).not.toHaveBeenCalled()
+  })
+
+  it("resolves policy from the caller binding — never the request's sessionId", async () => {
+    await storeExternalMemory({ text: "fact", source: { sessionId: "req-sess" } }, ATTRIBUTION, {
+      principalId: "plugin:demo",
+      transport: "plugin",
+      policyCharacterId: "agent-1",
+    })
+    expect(mockResolvePolicy).toHaveBeenCalledWith(
+      expect.objectContaining({ characterId: "agent-1", sessionId: undefined })
+    )
+  })
+
+  describe("operationId idempotency", () => {
+    it("reserves the key, executes, and records the receipt", async () => {
+      const result = await storeExternalMemory({ text: "fact", operationId: "op-1" }, ATTRIBUTION, {
+        principalId: "plugin:demo",
+        transport: "plugin",
+      })
+      expect(result.ok).toBe(true)
+      expect(mockRequestHash).toHaveBeenCalledWith("store", {
+        text: "fact",
+        importance: 7,
+      })
+      expect(mockReserve).toHaveBeenCalledWith({
+        principalId: "plugin:demo",
+        operationId: "op-1",
+        requestHash: "req-hash",
+        kind: "store",
+      })
+      expect(mockConsolidate).toHaveBeenCalledTimes(1)
+      expect(mockRecordOp).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "plugin:demo:op-1",
+          kind: "store",
+          requestHash: "req-hash",
+          memoryId: "mem_added",
+          resultCode: "ok",
+        })
+      )
+      expect(mockReleaseOp).not.toHaveBeenCalled()
+    })
+
+    it("replays a recorded receipt without re-running the consolidator", async () => {
+      mockReserve.mockResolvedValue({
+        state: "replay",
+        receipt: { memoryId: "mem_prior", resultCode: "ok" },
+      })
+      const result = await storeExternalMemory({ text: "fact", operationId: "op-1" }, ATTRIBUTION)
+      expect(result).toEqual({
+        ok: true,
+        stored: true,
+        consolidated: true,
+        memoryId: "mem_prior",
+        applied: [],
+      })
+      expect(mockConsolidate).not.toHaveBeenCalled()
+      expect(mockRecordOp).not.toHaveBeenCalled()
+    })
+
+    it("replays the receipt's recorded outcome, not a generic success shape", async () => {
+      // The first call degraded to a direct insert (`consolidated: false`) —
+      // the replay must answer the same, or the retry reports a write path
+      // that never ran.
+      mockReserve.mockResolvedValue({
+        state: "replay",
+        receipt: {
+          memoryId: "mem_prior",
+          resultCode: "ok",
+          resultConsolidated: false,
+          resultApplied: ["ADD"],
+        },
+      })
+      const result = await storeExternalMemory({ text: "fact", operationId: "op-1" }, ATTRIBUTION)
+      expect(result).toEqual({
+        ok: true,
+        stored: true,
+        consolidated: false,
+        memoryId: "mem_prior",
+        applied: ["ADD"],
+      })
+      expect(mockConsolidate).not.toHaveBeenCalled()
+    })
+
+    it("refuses the same operation id carrying a different request", async () => {
+      mockReserve.mockResolvedValue({ state: "conflict" })
+      const result = await storeExternalMemory({ text: "fact", operationId: "op-1" }, ATTRIBUTION)
+      expect(result).toEqual({ ok: false, reason: "idempotency_key_reused" })
+      expect(mockConsolidate).not.toHaveBeenCalled()
+    })
+
+    it("waits out an in-flight twin and replays its receipt", async () => {
+      mockReserve.mockResolvedValue({ state: "in_flight" })
+      mockAwaitOp.mockResolvedValue({ memoryId: "mem_twin", resultCode: "ok" })
+      const result = await storeExternalMemory({ text: "fact", operationId: "op-1" }, ATTRIBUTION)
+      expect(result).toEqual({
+        ok: true,
+        stored: true,
+        consolidated: true,
+        memoryId: "mem_twin",
+        applied: [],
+      })
+      expect(mockConsolidate).not.toHaveBeenCalled()
+    })
+
+    it("proceeds with its own execution when the in-flight wait times out", async () => {
+      mockReserve.mockResolvedValue({ state: "in_flight" })
+      mockAwaitOp.mockResolvedValue(undefined)
+      const result = await storeExternalMemory({ text: "fact", operationId: "op-1" }, ATTRIBUTION)
+      expect(result.ok).toBe(true)
+      expect(mockConsolidate).toHaveBeenCalledTimes(1)
+    })
+
+    it("releases the reservation on a denied store so a corrected retry is free", async () => {
+      mockGetSettings.mockResolvedValue({ memory: { enabled: false } })
+      const result = await storeExternalMemory({ text: "fact", operationId: "op-1" }, ATTRIBUTION)
+      expect(result).toEqual({ ok: false, reason: "disabled" })
+      expect(mockReleaseOp).toHaveBeenCalledWith("local-user", "op-1", "req-hash")
+      expect(mockRecordOp).not.toHaveBeenCalled()
+    })
+
+    it("releases the reservation when the consolidator NOOPs (nothing applied)", async () => {
+      mockConsolidate.mockResolvedValue({ applied: [{ op: "NOOP" }] })
+      const result = await storeExternalMemory(
+        { text: "already known", operationId: "op-1" },
+        ATTRIBUTION
+      )
+      expect(result).toMatchObject({ ok: true, stored: false })
+      expect(mockReleaseOp).toHaveBeenCalledWith("local-user", "op-1", "req-hash")
+      expect(mockRecordOp).not.toHaveBeenCalled()
+    })
+
+    it("releases the reservation when the store throws, so a retry skips the wait", async () => {
+      await expect(
+        storeExternalMemory({ text: "fact", scope: "workspace", operationId: "op-1" }, ATTRIBUTION)
+      ).rejects.toThrow("'projectId' is required")
+      expect(mockReleaseOp).toHaveBeenCalledWith("local-user", "op-1", "req-hash")
+      expect(mockRecordOp).not.toHaveBeenCalled()
+    })
+
+    it("skips the ledger entirely without an operationId", async () => {
+      await storeExternalMemory({ text: "fact" }, ATTRIBUTION)
+      expect(mockReserve).not.toHaveBeenCalled()
+      expect(mockRecordOp).not.toHaveBeenCalled()
+    })
   })
 })

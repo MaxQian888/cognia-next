@@ -41,6 +41,23 @@ describe("discoverExternalMemory", () => {
     expect(new Set(ids).size).toBe(ids.length)
   })
 
+  it("records every agent that reads a shared path in `consumers`", async () => {
+    // A project AGENTS.md is emitted by Codex AND OpenCode's root→cwd walks —
+    // one row, owner Codex (precedence), both recorded as consumers.
+    const fs = makeFs({ "/proj/AGENTS.md": 5 }, { "/proj": ["AGENTS.md"] })
+    const files = await discoverExternalMemory(ctx({ fs, roots: ["/proj"], cwd: "/proj" }))
+    const shared = files.find((f) => f.absPath === "/proj/AGENTS.md")
+    expect(shared?.agent).toBe("codex")
+    expect(shared?.consumers).toEqual(["codex", "opencode"])
+  })
+
+  it("stamps a single-agent file's consumers as just its owner", async () => {
+    const fs = makeFs({ "/Users/x/.claude/CLAUDE.md": 1 })
+    const files = await discoverExternalMemory(ctx({ fs }))
+    const claude = files.find((f) => f.absPath === "/Users/x/.claude/CLAUDE.md")
+    expect(claude?.consumers).toEqual(["claude-code"])
+  })
+
   it("orders scopes within an agent (user before project)", async () => {
     const fs = makeFs({
       "/Users/x/.claude/CLAUDE.md": 1,

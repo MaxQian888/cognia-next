@@ -739,6 +739,7 @@
               "geminiVoice",
               "humeVoice",
               "importedVscodeThemes",
+              "inlineQuestions",
               "instructions",
               "language",
               "lastInboxViewedAt",
@@ -8532,6 +8533,16 @@
       "properties": {
         "id": {
           "type": "string"
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Compare-and-swap guard — the write refuses a memory whose version has moved past this value."
+        },
+        "operationId": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Idempotency key for the memory operation ledger — a retried identical request replays its first result."
         }
       },
       "additionalProperties": false
@@ -8551,8 +8562,13 @@
           "type": "string",
           "enum": [
             "global",
-            "character"
+            "workspace",
+            "character",
+            "agent"
           ]
+        },
+        "characterId": {
+          "type": "string"
         },
         "pageSize": {
           "type": "integer",
@@ -8564,6 +8580,18 @@
           "type": "string",
           "minLength": 1,
           "description": "The nextPageToken of the previous page, handed back unchanged."
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "pathPattern": {
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -8595,6 +8623,18 @@
         },
         "characterId": {
           "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -8620,7 +8660,9 @@
           "type": "string",
           "enum": [
             "global",
-            "character"
+            "workspace",
+            "character",
+            "agent"
           ]
         },
         "characterId": {
@@ -8639,6 +8681,23 @@
           "items": {
             "type": "string"
           }
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "pathPattern": {
+          "type": "string"
+        },
+        "operationId": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Idempotency key for the memory operation ledger — a retried identical request replays its first result."
         }
       },
       "additionalProperties": false
@@ -8669,6 +8728,19 @@
         },
         "key": {
           "type": "string"
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Compare-and-swap guard — the write refuses a memory whose version has moved past this value."
+        },
+        "operationId": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Idempotency key for the memory operation ledger — a retried identical request replays its first result."
         }
       },
       "additionalProperties": false
@@ -10671,6 +10743,95 @@
               "additionalProperties": {
                 "type": "object",
                 "additionalProperties": true
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "citations": {
+          "type": "array",
+          "description": "The records this turn cites (ADR-0157): the context chips it sent plus typed `@…` tokens, as ContextRef entries ({ kind, id, label?, raw? }). The envelope inside `content` feeds the model; this field is what lets the persisted user row keep `metadata.mentions` so the citation gets a backlink.",
+          "items": {
+            "type": "object",
+            "required": [
+              "kind",
+              "id"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "file",
+                  "agent",
+                  "subagent",
+                  "member",
+                  "skill",
+                  "preset",
+                  "wfNode",
+                  "wfEdge",
+                  "doc",
+                  "entity"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "label": {
+                "type": "string"
+              },
+              "raw": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "promptPreamble": {
+          "type": "object",
+          "description": "What the context envelope in front of the typed text carries (ADR-0157): section kinds and reference titles, never bodies. Persisted as `metadata.promptPreamble` so the bubble can name the references.",
+          "required": [
+            "sections",
+            "references"
+          ],
+          "properties": {
+            "sections": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "reviewReceipts",
+                  "references",
+                  "webSearch"
+                ]
+              }
+            },
+            "references": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "title"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string"
+                  },
+                  "entityKind": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "href": {
+                    "type": "string"
+                  },
+                  "count": {
+                    "type": "number"
+                  }
+                },
+                "additionalProperties": false
               }
             }
           },

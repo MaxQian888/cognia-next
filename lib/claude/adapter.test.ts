@@ -1753,6 +1753,79 @@ describe("mergeMemorySourcesIntoLastAssistant", () => {
     expect(sources.memoryDegraded).toBe(true)
   })
 
+  it("stamps the delivery receipt onto the part, upgraded to delivered", () => {
+    const snapshot = {
+      id: "memctx:1000:abc",
+      createdAt: 1000,
+      reader: { characterId: "c1" },
+      memoryRefs: [{ id: "m1", version: 2 }],
+      contentHash: "abc",
+      budget: { limit: 900, used: 40, truncated: false },
+      degraded: false,
+      expiresAt: Date.now() + 60_000,
+      delivery: "prepared" as const,
+    }
+    const next = mergeMemorySourcesIntoLastAssistant(baseMessages, {
+      retrievedMemories: [{ id: "m1", type: "semantic", text: "fact", score: 0.5 }],
+      snapshot,
+    })
+    const sources = next[1].parts.find(
+      (p) => (p as { type?: string }).type === "sources"
+    ) as unknown as SourcesPart
+    expect(sources.memorySnapshot).toEqual({ ...snapshot, delivery: "delivered" })
+
+    // Re-merging the same prepared snapshot is idempotent by snapshot id.
+    const twice = mergeMemorySourcesIntoLastAssistant(next, {
+      retrievedMemories: [{ id: "m1", type: "semantic", text: "fact", score: 0.5 }],
+      snapshot,
+    })
+    expect(twice).toBe(next)
+  })
+
+  it("writes a snapshot-only merge — a receipt with zero sources is still a delivery", () => {
+    const snapshot = {
+      id: "memctx:1000:empty",
+      createdAt: 1000,
+      reader: {},
+      memoryRefs: [],
+      contentHash: "e",
+      budget: { limit: 900, used: 0, truncated: false },
+      degraded: false,
+      expiresAt: Date.now() + 60_000,
+      delivery: "prepared" as const,
+    }
+    const next = mergeMemorySourcesIntoLastAssistant(baseMessages, {
+      retrievedMemories: [],
+      snapshot,
+    })
+    const sources = next[1].parts.find(
+      (p) => (p as { type?: string }).type === "sources"
+    ) as unknown as SourcesPart
+    expect(sources.memorySnapshot?.delivery).toBe("delivered")
+  })
+
+  it("expires rather than delivers a past-TTL snapshot", () => {
+    const snapshot = {
+      id: "memctx:1000:stale",
+      createdAt: 1000,
+      reader: {},
+      memoryRefs: [],
+      contentHash: "s",
+      budget: { limit: 1, used: 0, truncated: false },
+      degraded: false,
+      expiresAt: 2000,
+      delivery: "prepared" as const,
+    }
+    const next = mergeMemorySourcesIntoLastAssistant(baseMessages, {
+      retrievedMemories: [],
+      snapshot,
+    })
+    const sources = next[1].parts.find(
+      (p) => (p as { type?: string }).type === "sources"
+    ) as unknown as SourcesPart
+    expect(sources.memorySnapshot?.delivery).toBe("expired")
+  })
+
   it("annotates a degraded turn even with zero recalled memories", () => {
     const next = mergeMemorySourcesIntoLastAssistant(baseMessages, {
       retrievedMemories: [],

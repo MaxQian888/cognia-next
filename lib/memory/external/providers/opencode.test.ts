@@ -41,6 +41,7 @@ describe("discoverOpencode", () => {
             piSessionDir: "",
             geminiDir: "",
             continueDir: "",
+            cursorDir: "",
           },
         })
       )

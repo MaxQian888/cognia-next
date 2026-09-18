@@ -138,6 +138,55 @@ describe("buildBackupStream", () => {
     ])
   })
 
+  it("streams retrieval tombstones under the same per-entity gating as their content", async () => {
+    const db = getDb()
+    await db.retrievalTombstones.bulkPut([
+      {
+        id: "tomb-mem",
+        entityType: "memory",
+        entityId: "mem_1",
+        corpusId: "memory",
+        createdAt: 10,
+        acknowledgedDeviceIds: ["dev-a"],
+        pendingDeviceIds: ["dev-b"],
+      },
+      {
+        id: "tomb-ckpt",
+        entityType: "compaction_checkpoint",
+        entityId: "ckpt_1",
+        corpusId: "sessions",
+        createdAt: 11,
+        acknowledgedDeviceIds: [],
+        pendingDeviceIds: [],
+      },
+    ])
+
+    const events = await collect(
+      readBackupStream(
+        buildBackupStream(
+          { includeSessions: false, includeApiKey: false, includeMemories: false },
+          { pageSize: 50, storage: null }
+        )
+      )
+    )
+    const tombstoneRows = events.flatMap((event) =>
+      event.kind === "chunk" && event.section === "retrievalTombstones" ? event.rows : []
+    )
+    // includeMemories:false + includeSessions:false leaves no tombstone slice.
+    expect(tombstoneRows).toEqual([])
+
+    const fullEvents = await collect(
+      readBackupStream(
+        buildBackupStream({ includeSessions: false, includeApiKey: false }, { storage: null })
+      )
+    )
+    const fullRows = fullEvents.flatMap((event) =>
+      event.kind === "chunk" && event.section === "retrievalTombstones" ? event.rows : []
+    )
+    // The memory tombstone streams; the checkpoint one stays gated off.
+    expect(fullRows).toEqual([expect.objectContaining({ id: "tomb-mem" })])
+  })
+
   it("emits a section for every catalog-bound portable payload field", async () => {
     const events = await collect(
       readBackupStream(

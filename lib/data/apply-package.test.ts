@@ -1456,3 +1456,213 @@ describe("applyBackupPackage — the desktop pet", () => {
     expect(summary.petProfileConflict).toBeUndefined()
   })
 })
+
+describe("applyBackupPackage — retrieval tombstones", () => {
+  function tombstone(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "tomb-mem_1",
+      entityType: "memory",
+      entityId: "mem_1",
+      corpusId: "memory",
+      createdAt: 10,
+      acknowledgedDeviceIds: ["dev-a"],
+      pendingDeviceIds: ["dev-b"],
+      ...overrides,
+    }
+  }
+
+  it("drops a resurrected memory row and its evidence instead of importing them", async () => {
+    const db = getDb()
+    const summary = await applyBackupPackage(
+      pkg({
+        memories: [
+          {
+            id: "mem_1",
+            scope: "global",
+            type: "semantic",
+            text: "deleted on another device",
+            tags: [],
+            importance: 5,
+            createdAt: 1,
+            updatedAt: 1,
+            lastAccessedAt: 1,
+            accessCount: 0,
+            version: 1,
+            status: "active",
+            pinned: false,
+            provenance: "user",
+            evidenceState: "supported",
+            reviewStatus: "verified",
+            contaminationState: "clean",
+            sensitivity: "normal",
+          },
+        ],
+        memoryEvidence: [
+          {
+            id: "mev_1",
+            memoryId: "mem_1",
+            kind: "message",
+            sourceId: "source_1",
+            contaminationState: "clean",
+            reviewed: true,
+            createdAt: 1,
+          },
+        ],
+        retrievalTombstones: [tombstone()],
+      }),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+
+    // The tombstone wins: the canonical row and its evidence never land.
+    expect(await db.memories.get("mem_1")).toBeUndefined()
+    expect(await db.memoryEvidence.get("mev_1")).toBeUndefined()
+    expect(await db.retrievalTombstones.get("tomb-mem_1")).toMatchObject({
+      entityType: "memory",
+      entityId: "mem_1",
+      pendingDeviceIds: ["dev-b"],
+    })
+    expect(summary.added.memories).toBeUndefined()
+    expect(summary.added.retrievalTombstones).toBe(1)
+  })
+
+  it("purges a surviving local copy of a tombstoned entity", async () => {
+    const db = getDb()
+    await db.memories.add({
+      id: "mem_1",
+      scope: "global",
+      type: "semantic",
+      text: "still here",
+      tags: [],
+      importance: 5,
+      createdAt: 1,
+      updatedAt: 1,
+      lastAccessedAt: 1,
+      accessCount: 0,
+      version: 1,
+      status: "active",
+      pinned: false,
+      provenance: "user",
+      evidenceState: "legacy",
+      reviewStatus: "unreviewed",
+      contaminationState: "unknown",
+      sensitivity: "unknown",
+    })
+    await db.memoryEvidence.add({
+      id: "mev_local",
+      memoryId: "mem_1",
+      kind: "message",
+      sourceId: "s",
+      contaminationState: "clean",
+      reviewed: false,
+      createdAt: 1,
+    })
+    await db.retrievalEncryptedContent.add({
+      id: "memory:mem_1:canonical",
+      entityType: "memory",
+      entityId: "mem_1",
+      corpusId: "memory",
+      kind: "canonical",
+      envelope: {
+        version: 1,
+        algorithm: "AES-256-GCM",
+        keyId: "k",
+        iv: "i",
+        ciphertext: "c",
+        aadHash: "a",
+      },
+      createdAt: 1,
+      updatedAt: 1,
+    })
+
+    await applyBackupPackage(pkg({ retrievalTombstones: [tombstone()] }), {
+      mergeStrategy: "overwrite",
+      includeSessions: false,
+      includeApiKey: false,
+    })
+
+    expect(await db.memories.get("mem_1")).toBeUndefined()
+    expect(await db.memoryEvidence.where("memoryId").equals("mem_1").count()).toBe(0)
+    expect(await db.retrievalEncryptedContent.get("memory:mem_1:canonical")).toBeUndefined()
+    expect(await db.retrievalTombstones.get("tomb-mem_1")).toBeDefined()
+  })
+
+  it("merges monotonically — acks union, pending drops acked, purge defers", async () => {
+    const db = getDb()
+    await db.retrievalTombstones.add({
+      id: "tomb-mem_1",
+      entityType: "memory",
+      entityId: "mem_1",
+      corpusId: "memory",
+      createdAt: 20,
+      acknowledgedDeviceIds: ["dev-b"],
+      pendingDeviceIds: [],
+      eligiblePurgeAt: 99,
+    })
+
+    await applyBackupPackage(
+      pkg({
+        retrievalTombstones: [
+          tombstone({
+            createdAt: 10,
+            acknowledgedDeviceIds: ["dev-a"],
+            pendingDeviceIds: ["dev-b", "dev-c"],
+          }),
+        ],
+      }),
+      { mergeStrategy: "skip", includeSessions: false, includeApiKey: false }
+    )
+
+    // `skip` merge strategy cannot weaken a deletion: acks still union, so
+    // dev-b leaves pending; a pending device defers the purge window.
+    const merged = await db.retrievalTombstones.get("tomb-mem_1")
+    expect(merged).toMatchObject({
+      createdAt: 10,
+      acknowledgedDeviceIds: ["dev-a", "dev-b"],
+      pendingDeviceIds: ["dev-c"],
+    })
+    expect(merged?.eligiblePurgeAt).toBeUndefined()
+  })
+
+  it("keeps purge eligibility when the merge leaves no pending devices", async () => {
+    const db = getDb()
+    await db.retrievalTombstones.add({
+      id: "tomb-mem_1",
+      entityType: "memory",
+      entityId: "mem_1",
+      corpusId: "memory",
+      createdAt: 20,
+      acknowledgedDeviceIds: ["dev-a"],
+      pendingDeviceIds: ["dev-b"],
+    })
+
+    await applyBackupPackage(
+      pkg({
+        retrievalTombstones: [
+          tombstone({
+            acknowledgedDeviceIds: ["dev-b"],
+            pendingDeviceIds: [],
+            eligiblePurgeAt: 77,
+          }),
+        ],
+      }),
+      { mergeStrategy: "skip", includeSessions: false, includeApiKey: false }
+    )
+
+    expect(await db.retrievalTombstones.get("tomb-mem_1")).toMatchObject({
+      acknowledgedDeviceIds: ["dev-a", "dev-b"],
+      pendingDeviceIds: [],
+      eligiblePurgeAt: 77,
+    })
+  })
+
+  it("rejects a malformed tombstone row", async () => {
+    await expect(
+      applyBackupPackage(pkg({ retrievalTombstones: [{ id: "x" } as never] }), {
+        mergeStrategy: "overwrite",
+        includeSessions: false,
+        includeApiKey: false,
+      })
+    ).rejects.toThrow(/tombstone/i)
+  })
+})

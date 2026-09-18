@@ -802,6 +802,64 @@ describe("buildBackupPackage — learned memory", () => {
     expect(pkg.payload.memoryJobs).toBeUndefined()
     expect(pkg.payload.memoryAuditEvents).toBeUndefined()
   })
+
+  it("exports retrieval tombstones so a restore cannot resurrect hard-deleted rows", async () => {
+    const db = getDb()
+    await db.retrievalTombstones.put({
+      id: "tomb-mem",
+      entityType: "memory",
+      entityId: "mem_1",
+      corpusId: "memory",
+      createdAt: 10,
+      acknowledgedDeviceIds: ["dev-a"],
+      pendingDeviceIds: ["dev-b"],
+      eligiblePurgeAt: 99,
+    })
+    await db.retrievalTombstones.put({
+      id: "tomb-ckpt",
+      entityType: "compaction_checkpoint",
+      entityId: "ckpt_1",
+      corpusId: "sessions",
+      createdAt: 11,
+      acknowledgedDeviceIds: [],
+      pendingDeviceIds: [],
+    })
+
+    const pkg = await buildBackupPackage(
+      { includeSessions: false, includeApiKey: false },
+      { storage: null }
+    )
+
+    // The memory tombstone travels; the checkpoint tombstone is gated by the
+    // session slice, which this export excludes.
+    expect(pkg.payload.retrievalTombstones).toEqual([
+      expect.objectContaining({
+        id: "tomb-mem",
+        entityType: "memory",
+        pendingDeviceIds: ["dev-b"],
+        eligiblePurgeAt: 99,
+      }),
+    ])
+  })
+
+  it("omits memory tombstones when the memory graph is excluded", async () => {
+    const db = getDb()
+    await db.retrievalTombstones.put({
+      id: "tomb-mem",
+      entityType: "memory",
+      entityId: "mem_1",
+      corpusId: "memory",
+      createdAt: 10,
+      acknowledgedDeviceIds: [],
+      pendingDeviceIds: ["dev-b"],
+    })
+
+    const pkg = await buildBackupPackage(
+      { includeSessions: false, includeApiKey: false, includeMemories: false },
+      { storage: null }
+    )
+    expect(pkg.payload.retrievalTombstones ?? []).toEqual([])
+  })
 })
 
 describe("the desktop pet", () => {

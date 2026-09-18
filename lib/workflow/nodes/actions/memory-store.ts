@@ -56,10 +56,23 @@ export async function runMemoryStore(ctx: StepExecutionContext): Promise<StepExe
     )
   }
 
-  const { storeMemoryCore } = await import("@/lib/memory/api/store-memory")
+  const [{ storeMemoryCore }, { workflowCaller }] = await Promise.all([
+    import("@/lib/memory/api/store-memory"),
+    import("@/lib/memory/api/caller"),
+  ])
+  // The run's trigger binding supplies the governing persona/session — never
+  // the node's `characterId`/`agentId` params, which name the memory's
+  // namespace and must not pick which Agent policy authorizes the write.
+  const binding = ctx.trigger.binding
+  const caller = {
+    ...workflowCaller(ctx.runId),
+    ...(binding?.sessionId ? { sessionId: binding.sessionId } : {}),
+    ...(binding?.characterId ? { policyCharacterId: binding.characterId } : {}),
+  }
   let result
   try {
     result = await storeMemoryCore({
+      caller,
       text: rawText,
       scope,
       characterId: params.characterId,

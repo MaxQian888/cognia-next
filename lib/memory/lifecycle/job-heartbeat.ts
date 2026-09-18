@@ -18,6 +18,12 @@ export interface MemoryJobHeartbeatDeps {
   intervalMs?: number
   now?: () => number
   /**
+   * The fencing epoch this worker claimed under. Presented on every renew so
+   * a claim that was reclaimed — even by the same worker id — stops the loop
+   * instead of silently renewing a row it no longer owns.
+   */
+  fencingEpoch?: number
+  /**
    * The lease is gone: it expired and another worker took the job, or a user
    * cancelled it. The caller must not write a completion after this.
    */
@@ -45,7 +51,7 @@ export function startMemoryJobHeartbeat(
   const schedule = () => {
     if (stopped) return
     timer = setTimeout(() => {
-      void renew(jobId, workerId, deps.now?.() ?? Date.now())
+      void renew(jobId, workerId, deps.now?.() ?? Date.now(), undefined, deps.fencingEpoch)
         .then((job) => {
           // `undefined` is the fence refusing us: not running, not ours, or
           // already expired. Either way we no longer own the job.

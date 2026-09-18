@@ -330,6 +330,10 @@ export async function claimMemoryJob(
       startedAt: job.startedAt ?? now,
       heartbeatAt: now,
       attempt: (job.attempt ?? 0) + 1,
+      // A NEW CLAIM IS A NEW EPOCH. `leaseOwner` alone cannot fence a stale
+      // worker when the SAME worker id reclaims its own expired lease — owner
+      // matches, so only the epoch separates the old claim from the new one.
+      fencingEpoch: (job.fencingEpoch ?? 0) + 1,
       leaseOwner: workerId,
       leaseExpiresAt: now + leaseTtlMs,
       nextAttemptAt: undefined,
@@ -398,6 +402,7 @@ export async function claimNextMemoryJob(
       startedAt: next.startedAt ?? now,
       heartbeatAt: now,
       attempt: (next.attempt ?? 0) + 1,
+      fencingEpoch: (next.fencingEpoch ?? 0) + 1,
       leaseOwner: workerId,
       leaseExpiresAt: now + leaseTtlMs,
       nextAttemptAt: undefined,
@@ -422,7 +427,7 @@ export async function finishMemoryJob(
   status: "succeeded" | "no_output" | "skipped" | "failed" | "cancelled",
   resultCode: string,
   now: number = Date.now(),
-  options: { workerId?: string } = {}
+  options: { workerId?: string; fencingEpoch?: number } = {}
 ): Promise<MemoryJobCompletion> {
   const db = getDb()
   const patch = {
@@ -443,6 +448,12 @@ export async function finishMemoryJob(
   return db.transaction("rw", db.memoryJobs, async () => {
     const job = await db.memoryJobs.get(id)
     if (!job || job.status !== "running" || job.leaseOwner !== options.workerId) return "lost"
+    // Fencing: when the caller presents the epoch it claimed under, a row now
+    // owned by a LATER claim refuses the completion — covering the case where
+    // the same worker id legitimately reclaimed its own expired lease.
+    if (options.fencingEpoch !== undefined && job.fencingEpoch !== options.fencingEpoch) {
+      return "lost"
+    }
     await db.memoryJobs.update(id, patch)
     return "finished"
   })
@@ -457,7 +468,8 @@ export async function heartbeatMemoryJob(
   id: string,
   workerId: string,
   now: number = Date.now(),
-  leaseTtlMs = MEMORY_JOB_LEASE_TTL_MS
+  leaseTtlMs = MEMORY_JOB_LEASE_TTL_MS,
+  fencingEpoch?: number
 ): Promise<MemoryJob | undefined> {
   const db = getDb()
   return db.transaction("rw", db.memoryJobs, async () => {
@@ -466,7 +478,11 @@ export async function heartbeatMemoryJob(
       !job ||
       job.status !== "running" ||
       job.leaseOwner !== workerId ||
-      (job.leaseExpiresAt ?? 0) < now
+      (job.leaseExpiresAt ?? 0) < now ||
+      // Epoch fencing: a worker renewing under an epoch a later claim replaced
+      // must see `undefined` — otherwise the SAME worker id re-claiming its
+      // expired lease would keep the stale loop alive forever.
+      (fencingEpoch !== undefined && job.fencingEpoch !== fencingEpoch)
     ) {
       return undefined
     }
@@ -553,7 +569,12 @@ export async function failMemoryJob(
   id: string,
   errorCode: string,
   now: number = Date.now(),
-  options: { maxRetries?: number; baseDelayMs?: number; workerId?: string } = {}
+  options: {
+    maxRetries?: number
+    baseDelayMs?: number
+    workerId?: string
+    fencingEpoch?: number
+  } = {}
 ): Promise<MemoryJobStatus> {
   const db = getDb()
   return db.transaction("rw", db.memoryJobs, async () => {
@@ -564,6 +585,11 @@ export async function failMemoryJob(
     // cancel silently did nothing.
     if (TERMINAL_MEMORY_JOB_STATUSES.includes(job.status)) return job.status
     if (options.workerId && job.leaseOwner !== options.workerId) return job.status
+    // Epoch fencing — see `finishMemoryJob`. A stale claim's error path must
+    // not schedule a retry on a row a newer claim owns.
+    if (options.fencingEpoch !== undefined && job.fencingEpoch !== options.fencingEpoch) {
+      return job.status
+    }
 
     const retryCount = job.retryCount + 1
     const maxRetries = options.maxRetries ?? 3
@@ -599,12 +625,17 @@ export async function failMemoryJob(
 export async function pruneMemoryGovernanceData(
   now: number = Date.now(),
   cap = 20_000
-): Promise<{ jobsDeleted: number; auditsDeleted: number; orphanEvidenceDeleted: number }> {
+): Promise<{
+  jobsDeleted: number
+  auditsDeleted: number
+  orphanEvidenceDeleted: number
+  operationsDeleted: number
+}> {
   const db = getDb()
   const dayMs = 24 * 60 * 60 * 1000
   return db.transaction(
     "rw",
-    [db.memoryJobs, db.memoryAuditEvents, db.memoryEvidence],
+    [db.memoryJobs, db.memoryAuditEvents, db.memoryEvidence, db.memoryOperations],
     async () => {
       const jobs = await db.memoryJobs.toArray()
       const jobsToDelete = new Set(
@@ -634,14 +665,24 @@ export async function pruneMemoryGovernanceData(
       const orphanEvidence = (await db.memoryEvidence.toArray())
         .filter((row) => !row.memoryId && row.createdAt < now - 30 * dayMs)
         .map((row) => row.id)
+      // Operation receipts only deduplicate retries — a replay past the
+      // succeeded-job window re-executes harmlessly, so 30 days bounds the
+      // ledger. This also frees `pending` reservations whose writer died
+      // mid-apply: a stale marker must not pin an operation id forever.
+      const operationIds = (await db.memoryOperations
+        .where("createdAt")
+        .below(now - 30 * dayMs)
+        .primaryKeys()) as string[]
 
       await db.memoryJobs.bulkDelete([...jobsToDelete])
       await db.memoryAuditEvents.bulkDelete(auditIds)
       await db.memoryEvidence.bulkDelete(orphanEvidence)
+      await db.memoryOperations.bulkDelete(operationIds)
       return {
         jobsDeleted: jobsToDelete.size,
         auditsDeleted: auditIds.length,
         orphanEvidenceDeleted: orphanEvidence.length,
+        operationsDeleted: operationIds.length,
       }
     }
   )

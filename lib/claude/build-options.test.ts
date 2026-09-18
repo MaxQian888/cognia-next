@@ -3775,6 +3775,38 @@ describe("resolveSendOptions — MCP subset", () => {
     })
     expect(opts.mcpServers).toEqual({ a: { command: "a" } })
   })
+
+  it("emits mcpDeclaredBy keyed by server name — file path > plugin manifest > settings", async () => {
+    mListMcp.mockResolvedValue([
+      { id: "a", name: "file-srv", declaredBy: "/proj/.mcp.json" },
+      { id: "b", name: "plugin-srv", pluginId: "weather-plugin" },
+      { id: "c", name: "ghost-srv", pluginId: "uninstalled-plugin" },
+      { id: "d", name: "store-srv" },
+      { id: "e", name: "builtin-srv", origin: "builtin" },
+    ])
+    mBuildMap.mockReturnValueOnce({
+      "file-srv": {},
+      "plugin-srv": {},
+      "ghost-srv": {},
+      "store-srv": {},
+      "builtin-srv": {},
+    })
+    const opts = await resolveSendOptions({})
+    expect(opts.mcpDeclaredBy).toEqual({
+      "file-srv": "/proj/.mcp.json",
+      // The mocked plugin store has no matching plugin → `plugin:<id>` locator.
+      "plugin-srv": "plugin:weather-plugin",
+      "ghost-srv": "plugin:uninstalled-plugin",
+      "store-srv": "settings",
+      "builtin-srv": "builtin",
+    })
+  })
+
+  it("omits mcpDeclaredBy when no servers are chosen", async () => {
+    mListMcp.mockResolvedValue([])
+    const opts = await resolveSendOptions({})
+    expect(opts.mcpDeclaredBy).toBeUndefined()
+  })
 })
 
 describe("resolveSendOptions — resume", () => {

@@ -19,6 +19,8 @@
 
 import type { MemoryScope, MemoryType } from "@/types/memory/memory"
 import { searchMemoriesExternal } from "@/lib/memory/api/search-memory"
+import { listMemoriesExternal, type MemoryReadDenyReason } from "@/lib/memory/api/read-memory"
+import { mcpCaller } from "@/lib/memory/api/caller"
 import { storeExternalMemory, type StoreMemoryCoreResult } from "@/lib/memory/api/store-memory"
 import {
   updateExternalMemory,
@@ -37,18 +39,6 @@ function requireText(value: string | undefined, field: string, max: number): str
   if (trimmed.length === 0) throw new Error(`${field} must not be empty`)
   if (trimmed.length > max) throw new Error(`${field} exceeds ${max} characters`)
   return trimmed
-}
-
-async function readsAllowed(): Promise<{ allowed: boolean; reason?: "disabled" | "temporary" }> {
-  const [{ getSettings }, { resolveMemoryConfig }] = await Promise.all([
-    import("@/lib/db/settings"),
-    import("@/types/memory/memory"),
-  ])
-  const settings = await getSettings().catch(() => undefined)
-  const config = resolveMemoryConfig(settings?.memory)
-  if (!config.enabled) return { allowed: false, reason: "disabled" }
-  if (config.temporary) return { allowed: false, reason: "temporary" }
-  return { allowed: true }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -70,21 +60,29 @@ export type MemorySearchResult =
   | { ok: true; hits: Array<{ memory: MemoryWireRow; relevance: number; score: number }> }
   | {
       ok: false
-      reason: "disabled" | "temporary" | "policy_denied" | "backend_unavailable"
+      reason:
+        | "disabled"
+        | "temporary"
+        | "policy_denied"
+        | "backend_unavailable"
+        | "unauthorized_namespace"
     }
 
 export async function memorySearch(input: MemorySearchInput): Promise<MemorySearchResult> {
   const query = requireText(input.query, "query", MAX_MEMORY_TEXT_CHARS)
-  const result = await searchMemoriesExternal({
-    query,
-    topK: input.k,
-    types: input.types,
-    characterId: input.characterId,
-    projectId: input.projectId,
-    agentId: input.agentId,
-    branch: input.branch,
-    path: input.path,
-  })
+  const result = await searchMemoriesExternal(
+    {
+      query,
+      topK: input.k,
+      types: input.types,
+      characterId: input.characterId,
+      projectId: input.projectId,
+      agentId: input.agentId,
+      branch: input.branch,
+      path: input.path,
+    },
+    mcpCaller()
+  )
   if (!result.ok) return result
   return {
     ok: true,
@@ -108,24 +106,12 @@ export interface MemoryListInput {
 }
 
 export type MemoryListResult =
-  { ok: true; memories: MemoryWireRow[] } | { ok: false; reason: "disabled" | "temporary" }
+  { ok: true; memories: MemoryWireRow[] } | { ok: false; reason: MemoryReadDenyReason }
 
 export async function memoryList(input: MemoryListInput): Promise<MemoryListResult> {
-  const gate = await readsAllowed()
-  if (!gate.allowed) return { ok: false, reason: gate.reason! }
-  const { listMemories } = await import("@/lib/db/memories")
-  const rows = await listMemories({
-    type: input.type,
-    scope: input.scope,
-    characterId: input.characterId,
-    projectId: input.projectId,
-    agentId: input.agentId,
-    branch: input.branch,
-    pathPattern: input.pathPattern,
-    status: "active",
-  })
-  const limit = Math.min(200, Math.max(1, input.limit ?? 50))
-  return { ok: true, memories: rows.slice(0, limit).map(toWireRow) }
+  const result = await listMemoriesExternal(input, mcpCaller())
+  if (!result.ok) return result
+  return { ok: true, memories: result.memories.map(toWireRow) }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -144,6 +130,8 @@ export interface MemoryStoreInput {
   key?: string
   importance?: number
   tags?: string[]
+  /** Idempotency key: a retried identical request replays its first result. */
+  operationId?: string
 }
 
 export async function memoryStore(input: MemoryStoreInput): Promise<StoreMemoryCoreResult> {
@@ -161,8 +149,10 @@ export async function memoryStore(input: MemoryStoreInput): Promise<StoreMemoryC
       key: input.key,
       importance: input.importance,
       tags: input.tags,
+      operationId: input.operationId,
     },
-    { channel: "mcp" }
+    { channel: "mcp" },
+    mcpCaller()
   )
 }
 
@@ -173,21 +163,43 @@ export interface MemoryUpdateInput {
   tags?: string[]
   key?: string
   pinned?: boolean
+  /** Compare-and-swap guard: refuse to patch a row that moved past this version. */
+  expectedVersion?: number
+  /** Idempotency key: a retried identical patch replays its first result. */
+  operationId?: string
 }
 
 export async function memoryUpdate(input: MemoryUpdateInput): Promise<MutateExternalMemoryResult> {
   const id = requireText(input.id, "id", 200)
   if (input.text !== undefined) requireText(input.text, "text", MAX_MEMORY_TEXT_CHARS)
-  return updateExternalMemory(id, {
-    text: input.text,
-    importance: input.importance,
-    tags: input.tags,
-    key: input.key,
-    pinned: input.pinned,
-  })
+  return updateExternalMemory(
+    id,
+    {
+      text: input.text,
+      importance: input.importance,
+      tags: input.tags,
+      key: input.key,
+      pinned: input.pinned,
+    },
+    {
+      caller: mcpCaller(),
+      expectedVersion: input.expectedVersion,
+      operationId: input.operationId,
+    }
+  )
 }
 
-export async function memoryForget(input: { id: string }): Promise<MutateExternalMemoryResult> {
+export interface MemoryForgetInput {
+  id: string
+  expectedVersion?: number
+  operationId?: string
+}
+
+export async function memoryForget(input: MemoryForgetInput): Promise<MutateExternalMemoryResult> {
   const id = requireText(input.id, "id", 200)
-  return forgetExternalMemory(id)
+  return forgetExternalMemory(id, {
+    caller: mcpCaller(),
+    expectedVersion: input.expectedVersion,
+    operationId: input.operationId,
+  })
 }

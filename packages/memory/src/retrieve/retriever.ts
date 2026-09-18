@@ -183,8 +183,21 @@ export interface MemoryRetrieverDeps {
   loadCandidates: (reader?: MemoryReaderContext | string) => Promise<Memory[]>
   /** Embed the query; absent → BM25-only. */
   embed?: (text: string) => Promise<number[]>
-  /** Vector search returning `{ id: vectorDocId, score }`; absent → BM25-only. */
-  vectorSearch?: (embedding: number[], topK: number) => Promise<{ id: string; score: number }[]>
+  /**
+   * Vector search returning `{ id: vectorDocId, score }`; absent → BM25-only.
+   *
+   * When `plan.vectorDocIds` is supplied the implementation MUST restrict its
+   * search to that set — the eligible corpus the reader is authorized for. An
+   * implementation that cannot enforce the scope must return `[]` rather than
+   * querying the global collection: unscoped hits can crowd the fused ranking
+   * with rows the reader may never see (starvation) and the post-filter then
+   * returns less than `topK` of legitimate results.
+   */
+  vectorSearch?: (
+    embedding: number[],
+    topK: number,
+    plan?: { vectorDocIds: readonly string[] }
+  ) => Promise<{ id: string; score: number }[]>
   /** Mark hits accessed (recency). Optional; failures are swallowed by the caller. */
   touch?: (memoryIds: string[]) => Promise<void>
   /**
@@ -497,7 +510,13 @@ export async function retrieveMemoriesWithOutcome(
     }
     if (embedding) {
       try {
-        const raw = await deps.vectorSearch(embedding, input.topK * OVERFETCH)
+        // The plan carries the eligible corpus down to the backend: when it can
+        // scope, ineligible rows cannot crowd the top-K; when it cannot, the
+        // contract says it returns [] and the post-filter still guarantees that
+        // nothing unauthorized maps through.
+        const raw = await deps.vectorSearch(embedding, input.topK * OVERFETCH, {
+          vectorDocIds: [...byVectorDocId.keys()],
+        })
         vectorHits = raw
           .map((h) => {
             const m = byVectorDocId.get(h.id)

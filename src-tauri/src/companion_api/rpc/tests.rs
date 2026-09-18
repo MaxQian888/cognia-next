@@ -4439,6 +4439,32 @@ fn memory_commands_are_classified_correctly() {
     }
 }
 
+/// Memory V2 caller binding: the operation ledger namespaces idempotency keys
+/// by principal, so every memory arm must bind the verified device id — a
+/// self-asserted `callerDeviceId` would let one device replay or poison
+/// another device's operations.
+#[test]
+fn memory_commands_bind_the_verified_caller() {
+    for name in [
+        "memory_search",
+        "memory_list",
+        "memory_store",
+        "memory_update",
+        "memory_forget",
+    ] {
+        assert!(
+            CALLER_DEVICE_ID_COMMANDS.contains(&name),
+            "{name} must bind callerDeviceId"
+        );
+        let args = inject_caller_device_id(name, json!({ "callerDeviceId": "spoofed" }), "real");
+        assert_eq!(
+            args.get("callerDeviceId").and_then(Value::as_str),
+            Some("real"),
+            "{name} must not honour a self-asserted caller"
+        );
+    }
+}
+
 #[test]
 fn classification_lists_are_subsets_of_known_commands() {
     for c in CONTROL_COMMANDS {

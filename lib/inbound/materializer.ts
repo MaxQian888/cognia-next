@@ -125,12 +125,17 @@ export async function materializeDraft(draft: InboundDraftRow): Promise<string> 
  */
 async function materializeLesson(draft: InboundDraftRow): Promise<string> {
   const { storeExternalMemory } = await import("@/lib/memory/api/store-memory")
+  const { localUserCaller } = await import("@/lib/memory/api/caller")
   const text = stripUntrustedEnvelope(materializableBody(draft)).trim()
   const tags = readStringArray(draft.metadata?.tags)
 
   const result = await storeExternalMemory(
     { text, type: "semantic", tags: tags.length > 0 ? tags : undefined },
-    { channel: "mcp" }
+    { channel: "mcp" },
+    // The review queue is a host-local surface: the operator approving the
+    // draft is the account owner, so the write binds that principal rather
+    // than running unattributed.
+    localUserCaller()
   )
   if (!result.ok) {
     // Surfaced verbatim so the review UI can tell "memory is off" apart from

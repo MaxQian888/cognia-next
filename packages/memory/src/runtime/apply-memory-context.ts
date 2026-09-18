@@ -21,6 +21,7 @@ import type {
 } from "../types/memory"
 import { retrieveMemories, type MemoryRetrieverDeps } from "../retrieve/retriever"
 import { assembleProceduralBlock } from "../procedural"
+import { buildMemoryContextSnapshot, type MemoryContextSnapshot } from "../types/context-snapshot"
 import { createContextManager } from "@cognia/rag/context-manager"
 import { hasNoLeakingPii } from "@cognia/redact"
 
@@ -49,6 +50,8 @@ export interface ApplyMemoryContextInput {
   enableQueryExpansion?: boolean
   /** Base recency half-life (days), from `MemoryConfig.decayHalfLifeDays`. */
   recencyHalfLifeDays?: number
+  /** Clock override for the snapshot's createdAt/expiresAt (tests). */
+  now?: number
   deps: ApplyMemoryContextDeps
 }
 
@@ -58,6 +61,8 @@ export interface AppliedMemory {
   text: string
   score: number
   relevance: number
+  /** Row version at read time — the snapshot binds deliveries to it. */
+  version?: number
   evidenceState: MemoryEvidenceState
   reviewStatus: MemoryReviewStatus
 }
@@ -70,6 +75,11 @@ export interface ApplyMemoryContextResult {
   withheldCount: number
   budget: { limit: number; used: number; truncated: boolean }
   degraded: boolean
+  /**
+   * Delivery receipt for this pass (`"prepared"`). The host upgrades it to
+   * `"delivered"` when the section actually lands on the wire.
+   */
+  snapshot: MemoryContextSnapshot
 }
 
 const RECALL_HEADING = "## What you remember about the user"
@@ -90,15 +100,6 @@ function overlapsTwin(memoryText: string, twinChunkTexts: string[]): boolean {
   return false
 }
 
-const EMPTY: ApplyMemoryContextResult = {
-  systemPromptSection: null,
-  retrievedMemories: [],
-  proceduralCount: 0,
-  withheldCount: 0,
-  budget: { limit: 0, used: 0, truncated: false },
-  degraded: false,
-}
-
 export async function applyMemoryContext(
   input: ApplyMemoryContextInput
 ): Promise<ApplyMemoryContextResult> {
@@ -106,6 +107,23 @@ export async function applyMemoryContext(
   const maxTokens = input.maxTokens ?? 900
   const tokenCounter = createContextManager({ maxTokens })
   const reader = input.reader ?? (input.characterId ? { characterId: input.characterId } : {})
+  const now = input.now ?? Date.now()
+  // Every outcome — empty, degraded, or delivered — carries the receipt, so a
+  // turn that injected nothing still leaves a falsifiable record.
+  const snapshotFor = (
+    sectionText: string,
+    refs: AppliedMemory[],
+    budget: { limit: number; used: number; truncated: boolean },
+    degraded: boolean
+  ) =>
+    buildMemoryContextSnapshot({
+      reader,
+      memoryRefs: refs.map((m) => ({ id: m.id, version: m.version })),
+      sectionText,
+      budget,
+      degraded,
+      now,
+    })
   try {
     const [retrieved, proceduralAll] = await Promise.all([
       query
@@ -143,6 +161,7 @@ export async function applyMemoryContext(
         text: r.memory.text,
         score: r.score,
         relevance: r.relevance,
+        version: r.memory.version,
         evidenceState: r.memory.evidenceState ?? "legacy",
         reviewStatus: r.memory.reviewStatus ?? "unreviewed",
       }))
@@ -184,15 +203,26 @@ export async function applyMemoryContext(
       recalled.length +
       activeProceduralCount -
       proceduralCount
+    const budget = { limit: maxTokens, used, truncated: withheldCount > 0 }
     return {
       systemPromptSection,
       retrievedMemories: recalled,
       proceduralCount,
       withheldCount,
-      budget: { limit: maxTokens, used, truncated: withheldCount > 0 },
+      budget,
       degraded: false,
+      snapshot: snapshotFor(systemPromptSection ?? "", recalled, budget, false),
     }
   } catch {
-    return { ...EMPTY, budget: { limit: maxTokens, used: 0, truncated: false }, degraded: true }
+    const budget = { limit: maxTokens, used: 0, truncated: false }
+    return {
+      systemPromptSection: null,
+      retrievedMemories: [],
+      proceduralCount: 0,
+      withheldCount: 0,
+      budget,
+      degraded: true,
+      snapshot: snapshotFor("", [], budget, true),
+    }
   }
 }

@@ -1776,6 +1776,11 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
         key: z.string().optional().describe("Stable dedupe key"),
         importance: z.number().int().min(1).max(10).optional().describe("1..10 (default 7)"),
         tags: z.array(z.string()).optional(),
+        operationId: z
+          .string()
+          .max(200)
+          .optional()
+          .describe("Idempotency key — a retried identical request replays its first result"),
       },
     },
     async (args, extra) =>
@@ -1796,6 +1801,7 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
             key: args.key,
             importance: args.importance,
             tags: args.tags,
+            operationId: args.operationId,
           }),
       })
   )
@@ -1820,6 +1826,17 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
         tags: z.array(z.string()).optional(),
         key: z.string().optional(),
         pinned: z.boolean().optional(),
+        expectedVersion: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe("Compare-and-swap guard — the write refuses a row whose version moved on"),
+        operationId: z
+          .string()
+          .max(200)
+          .optional()
+          .describe("Idempotency key — a retried identical patch replays its first result"),
       },
     },
     async (args, extra) =>
@@ -1835,6 +1852,8 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
             tags: args.tags,
             key: args.key,
             pinned: args.pinned,
+            expectedVersion: args.expectedVersion,
+            operationId: args.operationId,
           }),
       })
   )
@@ -1854,6 +1873,17 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
       },
       inputSchema: {
         id: z.string().describe("Memory id (from memory_search / memory_list)"),
+        expectedVersion: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe("Compare-and-swap guard — refuse when the row's version moved on"),
+        operationId: z
+          .string()
+          .max(200)
+          .optional()
+          .describe("Idempotency key — a retried identical request replays its first result"),
       },
     },
     async (args, extra) =>
@@ -1861,7 +1891,12 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
         tool: "memory_forget",
         scope: "memory:write",
         check: checkToolCall(await scopedSettings(settingsGetter, extra), "memory_forget"),
-        body: () => memoryForget({ id: args.id }),
+        body: () =>
+          memoryForget({
+            id: args.id,
+            expectedVersion: args.expectedVersion,
+            operationId: args.operationId,
+          }),
       })
   )
 }

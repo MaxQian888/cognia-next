@@ -90,7 +90,9 @@ describe("dispatchMemorySubcommand", () => {
     )
     mockForget.mockResolvedValue({ ok: true })
     const res = await dispatchMemorySubcommand(ctx({ args: "forget m1" }))
-    expect(mockForget).toHaveBeenCalledWith("m1")
+    expect(mockForget).toHaveBeenCalledWith("m1", {
+      caller: { principalId: "local-user", transport: "local-ui" },
+    })
     expect(res?.system).toMatch(/archived/)
   })
 

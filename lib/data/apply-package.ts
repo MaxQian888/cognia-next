@@ -66,6 +66,7 @@ import { deepStripSecrets } from "@/lib/settings/profile-transfer"
 import type {
   RetrievalEncryptedContentRow,
   RetrievalProfileRow,
+  RetrievalTombstoneRow,
 } from "@/lib/db/retrieval-control-types"
 import { importPortableRetrievalKeys, type PortableImportStore } from "./retrieval-key-backup"
 
@@ -124,6 +125,23 @@ export async function applyBackupPackage(
   const retrievalEncryptedContent = (env.retrievalEncryptedContent ?? []).flatMap((row) =>
     row.kind === "lexical_segment" ? [] : [validateRetrievalEncryptedContentRow(row)]
   )
+  const retrievalTombstones = (env.retrievalTombstones ?? []).map(validateRetrievalTombstoneRow)
+  // A tombstone is a deletion record: any memory row the package still carries
+  // under a tombstoned id is a resurrected copy, not data. Drop it (and its
+  // evidence) before the bundle merge so the tombstone always wins.
+  const tombstonedMemoryIds = new Set(
+    retrievalTombstones.filter((row) => row.entityType === "memory").map((row) => row.entityId)
+  )
+  const tombstonedEntityKeys = new Set(
+    retrievalTombstones.map((row) => `${row.entityType}:${row.entityId}`)
+  )
+  const importableMemories = (env.memories ?? []).filter((row) => !tombstonedMemoryIds.has(row.id))
+  const importableMemoryEvidence = (env.memoryEvidence ?? []).filter(
+    (row) => !row.memoryId || !tombstonedMemoryIds.has(row.memoryId)
+  )
+  const importableRetrievalContent = retrievalEncryptedContent.filter(
+    (row) => !tombstonedEntityKeys.has(`${row.entityType}:${row.entityId}`)
+  )
   summary.restoredRetrievalKeyProfiles = await importPortableRetrievalKeys(
     env.retrievalProfileDeks,
     opts.retrievalDekPassphrase,
@@ -178,6 +196,7 @@ export async function applyBackupPackage(
       db.memoryAuditEvents,
       db.retrievalProfiles,
       db.retrievalEncryptedContent,
+      db.retrievalTombstones,
       db.chatTemplates,
       db.scheduledTasks,
       db.petProfile,
@@ -708,9 +727,18 @@ export async function applyBackupPackage(
       // These tables form one referential bundle. The duplicate strategy
       // remaps every colliding id and then rewrites child references so
       // evidence, durable jobs, and audit history remain connected.
+      const droppedMemories = (env.memories?.length ?? 0) - importableMemories.length
+      if (droppedMemories > 0) {
+        summary.skipped["memories"] = (summary.skipped["memories"] ?? 0) + droppedMemories
+      }
+      const droppedEvidence = (env.memoryEvidence?.length ?? 0) - importableMemoryEvidence.length
+      if (droppedEvidence > 0) {
+        summary.skipped["memoryEvidence"] =
+          (summary.skipped["memoryEvidence"] ?? 0) + droppedEvidence
+      }
       await applyMemoryBundle({
-        memories: env.memories,
-        evidence: env.memoryEvidence,
+        memories: importableMemories,
+        evidence: importableMemoryEvidence,
         jobs: env.memoryJobs,
         audits: env.memoryAuditEvents,
         db,
@@ -734,13 +762,22 @@ export async function applyBackupPackage(
         respectBuiltIn: false,
       })
       await applyCollection<RetrievalEncryptedContentRow>({
-        rows: retrievalEncryptedContent,
+        rows: importableRetrievalContent,
         table: db.retrievalEncryptedContent,
         kind: "retrievalEncryptedContent",
         opts: retrievalOpts,
         summary,
         idPrefix: "retrieval-content",
         respectBuiltIn: false,
+      })
+      // Tombstones apply last and unconditionally of the merge strategy: the
+      // merge is monotonic (device ack sets union, never intersect) and each
+      // applied row purges whatever copy of the entity survived locally —
+      // which is the whole point of carrying them.
+      await applyRetrievalTombstones({
+        rows: retrievalTombstones,
+        db,
+        summary,
       })
 
       // --- sessions + messages + sessionState (off by default) -----------
@@ -900,6 +937,100 @@ function validateRetrievalEncryptedContentRow(
     },
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+  }
+}
+
+function validateRetrievalTombstoneRow(row: RetrievalTombstoneRow): RetrievalTombstoneRow {
+  const isStringArray = (value: unknown): value is string[] =>
+    Array.isArray(value) && value.every((entry) => typeof entry === "string")
+  if (
+    !row ||
+    typeof row !== "object" ||
+    !row.id ||
+    !row.entityType ||
+    !row.entityId ||
+    !row.corpusId ||
+    !Number.isFinite(row.createdAt) ||
+    !isStringArray(row.acknowledgedDeviceIds) ||
+    !isStringArray(row.pendingDeviceIds) ||
+    (row.eligiblePurgeAt !== undefined && !Number.isFinite(row.eligiblePurgeAt))
+  ) {
+    throw new Error("Retrieval tombstone backup row is invalid")
+  }
+  return {
+    id: row.id,
+    entityType: row.entityType,
+    entityId: row.entityId,
+    corpusId: row.corpusId,
+    createdAt: row.createdAt,
+    acknowledgedDeviceIds: [...row.acknowledgedDeviceIds],
+    pendingDeviceIds: [...row.pendingDeviceIds],
+    ...(row.eligiblePurgeAt !== undefined ? { eligiblePurgeAt: row.eligiblePurgeAt } : {}),
+  }
+}
+
+/**
+ * Merge two records of the same deletion. The merge is monotonic on purpose:
+ * `skip`/`overwrite` semantics would let an older package weaken a deletion
+ * the user already performed on another device.
+ * - ack sets union (either side having seen the delete counts);
+ * - pending sets union minus the merged acks;
+ * - `createdAt` keeps the earliest record of the deletion;
+ * - `eligiblePurgeAt` survives only while the merged row still has no pending
+ *   devices — a pending ack defers purge, matching `acknowledgeRetrievalTombstone`.
+ */
+function mergeRetrievalTombstone(
+  local: RetrievalTombstoneRow,
+  incoming: RetrievalTombstoneRow
+): RetrievalTombstoneRow {
+  const acknowledgedDeviceIds = [
+    ...new Set([...local.acknowledgedDeviceIds, ...incoming.acknowledgedDeviceIds]),
+  ].sort()
+  const pendingDeviceIds = [...new Set([...local.pendingDeviceIds, ...incoming.pendingDeviceIds])]
+    .filter((id) => !acknowledgedDeviceIds.includes(id))
+    .sort()
+  const eligiblePurgeAt =
+    pendingDeviceIds.length === 0
+      ? [local.eligiblePurgeAt, incoming.eligiblePurgeAt]
+          .filter((value): value is number => value !== undefined)
+          .sort((a, b) => a - b)[0]
+      : undefined
+  return {
+    ...incoming,
+    createdAt: Math.min(local.createdAt, incoming.createdAt),
+    acknowledgedDeviceIds,
+    pendingDeviceIds,
+    ...(eligiblePurgeAt !== undefined ? { eligiblePurgeAt } : {}),
+  }
+}
+
+/**
+ * Apply tombstones and enforce them: every row purges the surviving local
+ * copy of its entity — encrypted retrieval projections for any entity type,
+ * and for `entityType === "memory"` the canonical memory row plus its
+ * evidence, mirroring what `hardDeleteMemories` did on the source device.
+ * Without the purge step the tombstone would be a note nobody reads and the
+ * resurrected rows would re-index on the next generation build.
+ */
+async function applyRetrievalTombstones(args: {
+  rows: RetrievalTombstoneRow[]
+  db: CogniaDB
+  summary: ImportSummary
+}): Promise<void> {
+  const { rows, db, summary } = args
+  for (const row of rows) {
+    const existing = await db.retrievalTombstones.get(row.id)
+    await db.retrievalTombstones.put(existing ? mergeRetrievalTombstone(existing, row) : row)
+    incrementCounter(summary[existing ? "overwritten" : "added"], "retrievalTombstones")
+
+    await db.retrievalEncryptedContent
+      .where("[entityType+entityId]")
+      .equals([row.entityType, row.entityId])
+      .delete()
+    if (row.entityType === "memory") {
+      await db.memories.delete(row.entityId)
+      await db.memoryEvidence.where("memoryId").equals(row.entityId).delete()
+    }
   }
 }
 

@@ -1,12 +1,15 @@
 import { assessClaimSupport } from "./claim-support"
 import type { MemoryEvidence } from "../types/governance"
 
-type Cite = Pick<MemoryEvidence, "kind" | "validationStrategy" | "validationState">
+type Cite = Pick<MemoryEvidence, "kind" | "validationStrategy" | "validationState"> & {
+  sourceId?: string
+}
 
-const message = (state: MemoryEvidence["validationState"]): Cite => ({
+const message = (state: MemoryEvidence["validationState"], sourceId?: string): Cite => ({
   kind: "message",
   validationStrategy: "message-presence",
   validationState: state,
+  ...(sourceId ? { sourceId } : {}),
 })
 
 describe("assessClaimSupport", () => {
@@ -93,5 +96,44 @@ describe("assessClaimSupport", () => {
     ])
     expect(verdict.invalidate).toBe(false)
     expect(verdict.revoked).toBe(false)
+  })
+
+  it("counts N citations of the SAME source once — the strongest verdict wins", () => {
+    // A re-import or replayed job can leave several evidence rows pointing at
+    // the same message; support is bounded by distinct sources, not row count.
+    const grouped = assessClaimSupport([
+      message("valid", "msg:3"),
+      message("unvalidated", "msg:3"),
+      message("unvalidated", "msg:3"),
+    ])
+    const single = assessClaimSupport([message("valid", "msg:3")])
+    expect(grouped.support).toBe(single.support)
+    expect(grouped.counted).toBe(1)
+  })
+
+  it("keeps distinct sources additive", () => {
+    const two = assessClaimSupport([
+      message("unvalidated", "msg:1"),
+      message("unvalidated", "msg:2"),
+    ])
+    const one = assessClaimSupport([message("unvalidated", "msg:1")])
+    expect(two.support).toBeCloseTo(one.support * 2)
+    expect(two.counted).toBe(2)
+  })
+
+  it("never merges rows that carry no sourceId — an unprovable share is not one", () => {
+    // Rows without a source each stand alone: folding them together would be
+    // a silent undercount whenever the writer forgot to record provenance.
+    const ungrouped = assessClaimSupport([
+      message("unvalidated"),
+      message("unvalidated"),
+      message("unvalidated"),
+    ])
+    expect(ungrouped.counted).toBe(3)
+  })
+
+  it("still drops to zero on a revoked citation inside a shared-source group", () => {
+    const verdict = assessClaimSupport([message("valid", "msg:3"), message("revoked", "msg:3")])
+    expect(verdict).toMatchObject({ support: 0, revoked: true, invalidate: true })
   })
 })

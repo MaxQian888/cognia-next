@@ -58,6 +58,9 @@ export const BACKUP_PAYLOAD_DOMAIN: Record<keyof BackupPayloadV3, BackupShareDom
   localStorageSnapshots: "settings",
   sessions: "sessions",
   messages: "sessions",
+  // Tombstones travel with the memories they suppress — a shared backup must
+  // keep deletions deleted on the receiving device.
+  retrievalTombstones: "retrieval",
   sessionState: "sessions",
   scheduledTasks: "library",
   petProfile: "library",

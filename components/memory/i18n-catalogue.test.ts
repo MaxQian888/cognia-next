@@ -70,6 +70,8 @@ const DENIALS: Record<ManageMemoryDenial, true> = {
   pii_blocked: true,
   policy_denied: true,
   scope_denied: true,
+  unauthorized_namespace: true,
+  idempotency_key_reused: true,
 }
 
 const AUDIT_ACTIONS: Record<MemoryAuditAction, true> = {

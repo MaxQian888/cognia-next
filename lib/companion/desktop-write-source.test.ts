@@ -1927,7 +1927,8 @@ describe("dispatchCommand: memory_* (ADR-0069)", () => {
       hits: Array<{ memory: Record<string, unknown> }>
     }
     expect(mockMemorySearch).toHaveBeenCalledWith(
-      expect.objectContaining({ query: "pnpm", topK: 3 })
+      expect.objectContaining({ query: "pnpm", topK: 3 }),
+      expect.objectContaining({ transport: "companion" })
     )
     expect(result.ok).toBe(true)
     expect(result.hits[0].memory.id).toBe("m1")
@@ -1950,7 +1951,8 @@ describe("dispatchCommand: memory_* (ADR-0069)", () => {
     await dispatchCommand("memory_store", { text: "User prefers pnpm", importance: 9 })
     expect(mockMemoryStore).toHaveBeenCalledWith(
       expect.objectContaining({ text: "User prefers pnpm", importance: 9 }),
-      { channel: "rpc" }
+      { channel: "rpc" },
+      expect.objectContaining({ transport: "companion" })
     )
   })
 
@@ -1962,10 +1964,18 @@ describe("dispatchCommand: memory_* (ADR-0069)", () => {
     await dispatchCommand("memory_update", { id: "m1", text: "new", pinned: true })
     expect(mockMemoryUpdate).toHaveBeenCalledWith(
       "m1",
-      expect.objectContaining({ text: "new", pinned: true })
+      expect.objectContaining({ text: "new", pinned: true }),
+      expect.objectContaining({
+        caller: expect.objectContaining({ transport: "companion" }),
+      })
     )
     expect(await dispatchCommand("memory_forget", { id: "m1" })).toEqual({ ok: true })
-    expect(mockMemoryForget).toHaveBeenCalledWith("m1")
+    expect(mockMemoryForget).toHaveBeenCalledWith(
+      "m1",
+      expect.objectContaining({
+        caller: expect.objectContaining({ transport: "companion" }),
+      })
+    )
   })
 
   it("issue_apply_action validates, allowlists kinds and runs the board gate with the run state", async () => {

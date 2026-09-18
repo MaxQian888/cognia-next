@@ -168,6 +168,15 @@ export async function* buildBackupSections(
             ? options.includeSessions
             : includeCoreData)
     )
+    // Deletion records travel with the same per-entity gating as the content
+    // they guard — without them a restore resurrects hard-deleted entities.
+    yield* tableSections("retrievalTombstones", db.retrievalTombstones, iterate, (row) =>
+      row.entityType === "memory"
+        ? includeMemories
+        : row.entityType === "compaction_checkpoint"
+          ? options.includeSessions
+          : includeCoreData
+    )
     if (extras.encryption?.passphrase) {
       const envelopes = await exportPortableRetrievalKeys(
         extras.encryption.passphrase,

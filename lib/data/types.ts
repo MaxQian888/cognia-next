@@ -48,6 +48,7 @@ import type { PortableProfileDekEnvelopeV1 } from "@/lib/rag/profile-dek-store"
 import type {
   RetrievalEncryptedContentRow,
   RetrievalProfileRow,
+  RetrievalTombstoneRow,
 } from "@/lib/db/retrieval-control-types"
 
 /** Schema version currently emitted by `buildBackupPackage`. */
@@ -236,6 +237,16 @@ export interface BackupPayloadV3 {
    * segments remain derived and are rebuilt after restore. */
   retrievalProfiles?: RetrievalProfileRow[]
   retrievalEncryptedContent?: RetrievalEncryptedContentRow[]
+  /**
+   * Retrieval-plane deletion records (schema v163). Without these a restore
+   * resurrects what a hard delete removed: the surviving device still holds
+   * the memory row or its encrypted projection, and nothing in the package
+   * says "this entity was deleted". Tombstones travel so the importer can
+   * purge the surviving copies instead of reviving them. Merge on import is
+   * monotonic — device ack sets union, the tombstone itself is never dropped
+   * by a `skip` strategy.
+   */
+  retrievalTombstones?: RetrievalTombstoneRow[]
   /** Present only inside an encrypted backup. Each DEK is independently
    * wrapped by the same backup passphrase/auto-key as the outer package. */
   retrievalProfileDeks?: PortableProfileDekEnvelopeV1[]

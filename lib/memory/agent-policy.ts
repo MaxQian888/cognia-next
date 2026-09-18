@@ -41,13 +41,17 @@ export function resolveAgentMemoryPolicy(input: {
     externalContext: input.externalContext,
   })
   const globallyWritable = config.enabled && !config.temporary
-  const recallRequested = input.session?.memoryUse ?? operations.recall
-  const learnRequested = input.session?.memoryLearn ?? input.agentPolicy?.autoLearn ?? true
-  const canRecall = turn.canRecall && recallRequested
+  // Intersection, not `??` chains: the Agent's declared operations are a hard
+  // ceiling the session toggles can only narrow. `turn` already folds the
+  // session preference over the global default (`session?.memoryUse ??
+  // config.useMemory`), so the only thing left to apply here is the Agent's
+  // contract — a hard `recall: false` / `autoLearn: false` must survive a
+  // chat that has memory switched on.
+  const canRecall = turn.canRecall && operations.recall
   const canAutoLearn =
     turn.canLearn &&
     config.autoExtract &&
-    learnRequested &&
+    (input.agentPolicy?.autoLearn ?? true) &&
     operations.create &&
     writableScopes.length > 0
 
@@ -61,18 +65,26 @@ export function resolveAgentMemoryPolicy(input: {
     writableScopes,
     recallReason: canRecall
       ? "allowed"
-      : input.session?.memoryUse === false
-        ? "disabled_for_chat"
-        : !recallRequested || !operations.recall
+      : turn.recallReason === "temporary" || turn.recallReason === "disabled"
+        ? turn.recallReason
+        : !operations.recall
           ? "agent_policy"
-          : turn.recallReason,
+          : input.session?.memoryUse === false
+            ? "disabled_for_chat"
+            : turn.recallReason,
     learnReason: canAutoLearn
       ? "allowed"
-      : input.session?.memoryLearn === false
-        ? "disabled_for_chat"
-        : !learnRequested || !operations.create
+      : turn.learnReason === "temporary" || turn.learnReason === "disabled"
+        ? turn.learnReason
+        : !operations.create ||
+            input.agentPolicy?.autoLearn === false ||
+            writableScopes.length === 0
           ? "agent_policy"
-          : turn.learnReason,
+          : input.session?.memoryLearn === false
+            ? "disabled_for_chat"
+            : !config.autoExtract
+              ? "disabled"
+              : turn.learnReason,
   }
 }
 

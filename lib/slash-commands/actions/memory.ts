@@ -93,7 +93,8 @@ export async function dispatchMemorySubcommand(
         return { system: "Usage: `/memory forget <id>` — get ids from `/memory list`." }
       }
       const { forgetExternalMemory } = await import("@/lib/memory/api/mutate-memory")
-      const result = await forgetExternalMemory(rest)
+      const { localUserCaller } = await import("@/lib/memory/api/caller")
+      const result = await forgetExternalMemory(rest, { caller: localUserCaller() })
       if (!result.ok) {
         return result.reason === "not_found"
           ? { system: `No memory with id \`${rest}\` — check \`/memory list\`.` }

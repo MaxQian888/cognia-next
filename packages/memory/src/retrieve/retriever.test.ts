@@ -257,8 +257,11 @@ describe("retrieveMemories", () => {
     )
     expect(out.map((r) => r.memory.id)).toEqual(["sem"])
     expect(embed).not.toHaveBeenCalled()
-    // The vector leg ran with the caller-supplied vector.
-    expect(vectorSearch).toHaveBeenCalledWith([0.9, 0.8], expect.any(Number))
+    // The vector leg ran with the caller-supplied vector, scoped to the
+    // authorized candidate's vector doc id — never a global search.
+    expect(vectorSearch).toHaveBeenCalledWith([0.9, 0.8], expect.any(Number), {
+      vectorDocIds: ["vsem"],
+    })
   })
 
   it("runs the vector leg from a precomputed embedding even without deps.embed", async () => {
@@ -279,7 +282,9 @@ describe("retrieveMemories", () => {
       deps
     )
     expect(out.map((r) => r.memory.id)).toEqual(["sem"])
-    expect(vectorSearch).toHaveBeenCalledWith([0.9, 0.8], expect.any(Number))
+    expect(vectorSearch).toHaveBeenCalledWith([0.9, 0.8], expect.any(Number), {
+      vectorDocIds: ["vsem"],
+    })
   })
 
   it("applies the relevance floor (drops weak matches)", async () => {

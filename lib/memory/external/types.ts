@@ -29,7 +29,18 @@ export type ExternalMemoryScope = "user" | "managed" | "project" | "auto" | "glo
 export interface ExternalMemoryFile {
   /** Stable id (the path key) — also the React list key. */
   id: string
+  /**
+   * The OWNING agent — the row groups under it and its edit rules apply.
+   * Discovery keeps the first (precedence-ordered) claimant.
+   */
   agent: ExternalAgentId
+  /**
+   * Every agent that reads this file, owner first. Shared paths are real: a
+   * project `AGENTS.md` serves Codex AND OpenCode, and editing it rewrites
+   * both runtimes' context. `undefined` (hand-built fixtures, single-agent
+   * paths) means `[agent]`.
+   */
+  consumers?: ExternalAgentId[]
   scope: ExternalMemoryScope
   /** Absolute on-disk path. */
   absPath: string

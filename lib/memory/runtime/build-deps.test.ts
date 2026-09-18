@@ -145,6 +145,72 @@ describe("tryBuildMemoryDeps", () => {
     expect(deps!.vectorSearch).toBeUndefined()
   })
 
+  it("scopes the vector leg to the plan's allowlist and scores locally", async () => {
+    // The eligible-candidate allowlist replaces the global top-K query: only
+    // the authorized doc ids are fetched, then cosine-scored in-process —
+    // unauthorized rows can no longer crowd out the result window.
+    const getDocuments = jest.fn(async () => [
+      { id: "auth-close", embedding: [1, 0] },
+      { id: "auth-far", embedding: [0, 1] },
+    ])
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding, getDocuments },
+      embedding: { provider: "transformersjs", model: "x", apiKey: "" },
+    })
+    const deps = await tryBuildMemoryDeps(cfg())
+    const hits = await deps!.vectorSearch!([1, 0], 5, {
+      vectorDocIds: ["auth-close", "auth-far"],
+    })
+    expect(getDocuments).toHaveBeenCalledWith(MEMORY_VECTOR_COLLECTION, ["auth-close", "auth-far"])
+    expect(mockSearchByEmbedding).not.toHaveBeenCalled()
+    expect(hits[0].id).toBe("auth-close")
+    expect(hits[0].score).toBeCloseTo(1)
+    expect(hits[1].id).toBe("auth-far")
+    expect(hits[1].score).toBeCloseTo(0)
+  })
+
+  it("returns [] for an empty allowlist without touching the store", async () => {
+    const getDocuments = jest.fn()
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding, getDocuments },
+      embedding: { provider: "transformersjs", model: "x", apiKey: "" },
+    })
+    const deps = await tryBuildMemoryDeps(cfg())
+    expect(await deps!.vectorSearch!([1, 0], 5, { vectorDocIds: [] })).toEqual([])
+    expect(getDocuments).not.toHaveBeenCalled()
+    expect(mockSearchByEmbedding).not.toHaveBeenCalled()
+  })
+
+  it("drops unembedded or dimension-mismatched docs and respects topK", async () => {
+    const getDocuments = jest.fn(async () => [
+      { id: "no-vec" },
+      { id: "wrong-dims", embedding: [1, 0, 0] },
+      { id: "best", embedding: [1, 0] },
+      { id: "worst", embedding: [-1, 0] },
+    ])
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding, getDocuments },
+      embedding: { provider: "transformersjs", model: "x", apiKey: "" },
+    })
+    const deps = await tryBuildMemoryDeps(cfg())
+    const hits = await deps!.vectorSearch!([1, 0], 1, {
+      vectorDocIds: ["no-vec", "wrong-dims", "best", "worst"],
+    })
+    expect(hits).toEqual([{ id: "best", score: expect.closeTo(1) }])
+  })
+
+  it("keeps the global search for a plan-less (legacy) call", async () => {
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding, getDocuments: jest.fn() },
+      embedding: { provider: "transformersjs", model: "x", apiKey: "" },
+    })
+    const deps = await tryBuildMemoryDeps(cfg())
+    await deps!.vectorSearch!([0.1], 3)
+    expect(mockSearchByEmbedding).toHaveBeenCalledWith(MEMORY_VECTOR_COLLECTION, [0.1], {
+      limit: 3,
+    })
+  })
+
   it("reuses prebuilt twin deps and does not call tryBuildTwinDeps again", async () => {
     const prebuilt = {
       store: { searchByEmbedding: mockSearchByEmbedding },

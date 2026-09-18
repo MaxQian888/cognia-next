@@ -85,6 +85,7 @@ function job(id: string): MemoryJob {
     evidenceIds: [],
     queuedAt: 1,
     retryCount: 0,
+    fencingEpoch: 3,
   }
 }
 
@@ -111,8 +112,34 @@ describe("memory job lease handling", () => {
     const heartbeat = jest.fn(() => stop)
     const d = { ...deps([job("a")]), heartbeat }
     await drainMemoryJobs({ workerId: "w1" }, d)
-    expect(heartbeat).toHaveBeenCalledWith("a", "w1", expect.any(Function))
+    expect(heartbeat).toHaveBeenCalledWith("a", "w1", 3, expect.any(Function))
     expect(stop).toHaveBeenCalledTimes(1)
+  })
+
+  it("presents the claimed epoch to finish, fail, and the terminal skip", async () => {
+    const d = deps(
+      [job("a"), job("b"), job("terminal")],
+      jest.fn(async (j: MemoryJob) => {
+        if (j.id === "b") throw new Error("boom")
+        // Real terminal path: no sessionId → MemoryJobTerminalError → skipped.
+        if (j.id === "terminal") return processMemoryJob(j)
+        return { status: "succeeded" as const, resultCode: "done" }
+      }) as never
+    )
+    await drainMemoryJobs({}, d)
+    expect(d.finish).toHaveBeenCalledWith(
+      "a",
+      { status: "succeeded", resultCode: "done" },
+      "memory-job-worker",
+      3
+    )
+    expect(d.fail).toHaveBeenCalledWith("b", "memory_job_processing_failed", "memory-job-worker", 3)
+    expect(d.finish).toHaveBeenCalledWith(
+      "terminal",
+      { status: "skipped", resultCode: "session_missing" },
+      "memory-job-worker",
+      3
+    )
   })
 
   it("releases the lease even when the job throws", async () => {
@@ -129,10 +156,12 @@ describe("memory job lease handling", () => {
   // row that the new owner, or the user's cancel, now controls.
   it("writes no completion once the lease is lost mid-run", async () => {
     let lose: () => void = () => {}
-    const heartbeat = jest.fn((_id: string, _w: string, onLeaseLost: () => void) => {
-      lose = onLeaseLost
-      return jest.fn()
-    })
+    const heartbeat = jest.fn(
+      (_id: string, _w: string, _epoch: number | undefined, onLeaseLost: () => void) => {
+        lose = onLeaseLost
+        return jest.fn()
+      }
+    )
     const process = jest.fn(async () => {
       lose()
       return { status: "succeeded" as const, resultCode: "done" }
@@ -145,10 +174,12 @@ describe("memory job lease handling", () => {
 
   it("writes no failure once the lease is lost mid-run", async () => {
     let lose: () => void = () => {}
-    const heartbeat = jest.fn((_id: string, _w: string, onLeaseLost: () => void) => {
-      lose = onLeaseLost
-      return jest.fn()
-    })
+    const heartbeat = jest.fn(
+      (_id: string, _w: string, _epoch: number | undefined, onLeaseLost: () => void) => {
+        lose = onLeaseLost
+        return jest.fn()
+      }
+    )
     const process = jest.fn(async () => {
       lose()
       throw new Error("boom")
@@ -263,8 +294,18 @@ describe("memory job worker", () => {
     const d = deps([job("a"), job("b")])
     await expect(drainMemoryJobs({ workerId: "test" }, d)).resolves.toBe(2)
     expect(d.process).toHaveBeenCalledTimes(2)
-    expect(d.finish).toHaveBeenCalledWith("a", { status: "succeeded", resultCode: "done" }, "test")
-    expect(d.finish).toHaveBeenCalledWith("b", { status: "succeeded", resultCode: "done" }, "test")
+    expect(d.finish).toHaveBeenCalledWith(
+      "a",
+      { status: "succeeded", resultCode: "done" },
+      "test",
+      3
+    )
+    expect(d.finish).toHaveBeenCalledWith(
+      "b",
+      { status: "succeeded", resultCode: "done" },
+      "test",
+      3
+    )
   })
 
   it("fails a job and continues draining later work", async () => {
@@ -274,11 +315,12 @@ describe("memory job worker", () => {
       .mockResolvedValueOnce({ status: "succeeded", resultCode: "done" })
     const d = deps([job("a"), job("b")], process)
     await drainMemoryJobs({}, d)
-    expect(d.fail).toHaveBeenCalledWith("a", "memory_job_processing_failed", "memory-job-worker")
+    expect(d.fail).toHaveBeenCalledWith("a", "memory_job_processing_failed", "memory-job-worker", 3)
     expect(d.finish).toHaveBeenCalledWith(
       "b",
       { status: "succeeded", resultCode: "done" },
-      "memory-job-worker"
+      "memory-job-worker",
+      3
     )
   })
 
@@ -572,7 +614,8 @@ describe("memory job worker", () => {
           status: "skipped",
           resultCode: "project_missing",
         },
-        "memory-job-worker"
+        "memory-job-worker",
+        3
       )
     })
 
@@ -698,7 +741,8 @@ describe("memory job worker", () => {
           status: "skipped",
           resultCode: "source_missing",
         },
-        "memory-job-worker"
+        "memory-job-worker",
+        3
       )
       expect(d.fail).not.toHaveBeenCalled()
     })
@@ -729,7 +773,8 @@ describe("memory job worker", () => {
           status: "skipped",
           resultCode: "snapshot_changed",
         },
-        "memory-job-worker"
+        "memory-job-worker",
+        3
       )
       expect(d.fail).not.toHaveBeenCalled()
     })
@@ -761,7 +806,8 @@ describe("memory job worker", () => {
     expect(d.finish).toHaveBeenCalledWith(
       "terminal",
       { status: "skipped", resultCode: "session_missing" },
-      "memory-job-worker"
+      "memory-job-worker",
+      3
     )
     expect(d.fail).not.toHaveBeenCalled()
   })
@@ -828,7 +874,8 @@ describe("memory job worker", () => {
     expect(d.fail).toHaveBeenCalledWith(
       "missing",
       "transcript_checkpoint_unavailable",
-      "memory-job-worker"
+      "memory-job-worker",
+      3
     )
   })
 })

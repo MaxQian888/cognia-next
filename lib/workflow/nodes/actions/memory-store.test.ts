@@ -143,6 +143,7 @@ describe("runMemoryStore", () => {
 
     expect(result.output).toEqual({ stored: true, consolidated: true, applied: ["ADD"] })
     expect(mockStoreMemoryCore).toHaveBeenCalledWith({
+      caller: { principalId: "workflow:run1", transport: "workflow" },
       text: "User ships on Fridays",
       scope: "character",
       characterId: "char1",
@@ -215,6 +216,28 @@ describe("runMemoryStore", () => {
     await runMemoryStore(makeCtx({ text: "fact", importance: 42 }))
 
     expect(mockStoreMemoryCore).toHaveBeenCalledWith(expect.objectContaining({ importance: 42 }))
+  })
+
+  it("binds the governing persona/session from the trigger binding, not the params", async () => {
+    const ctx = {
+      ...makeCtx({ text: "x", characterId: "char-param", scope: "character" }),
+      trigger: {
+        kind: "trigger.manual",
+        payload: {},
+        binding: { sessionId: "sess-9", characterId: "char-bound" },
+      } as StepExecutionContext["trigger"],
+    }
+    await runMemoryStore(ctx)
+    expect(mockStoreMemoryCore).toHaveBeenCalledWith(
+      expect.objectContaining({
+        caller: {
+          principalId: "workflow:run1",
+          transport: "workflow",
+          sessionId: "sess-9",
+          policyCharacterId: "char-bound",
+        },
+      })
+    )
   })
 
   it("marks shared-core failures as non-retryable", async () => {

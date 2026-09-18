@@ -21,6 +21,12 @@ export interface MemoryWireRow {
   tags: string[]
   pinned: boolean
   provenance: Memory["provenance"]
+  /**
+   * Content version — external callers feed it back as `expectedVersion` for
+   * compare-and-swap updates. Not an auth token: it only proves the caller saw
+   * the row.
+   */
+  version: number
   createdAt: number
   updatedAt: number
 }
@@ -40,6 +46,7 @@ export function toMemoryWireRow(m: Memory): MemoryWireRow {
     tags: m.tags,
     pinned: m.pinned,
     provenance: m.provenance,
+    version: m.version,
     createdAt: m.createdAt,
     updatedAt: m.updatedAt,
   }

@@ -2243,6 +2243,16 @@ const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
     "external_agent_run_turn",
     "external_agent_cancel_run",
     "external_agent_resolve_decision",
+    // Long-term memory (ADR-0069, Memory V2 caller binding). The memory
+    // operation ledger namespaces idempotency keys by principal, so a retried
+    // `memory_store`/`memory_update`/`memory_forget` must be attributed to the
+    // verified device — a client-asserted id would let one device replay or
+    // poison another's operations.
+    "memory_search",
+    "memory_list",
+    "memory_store",
+    "memory_update",
+    "memory_forget",
 ];
 
 /// Inject (and overwrite) `callerDeviceId` into `args` for the commands in

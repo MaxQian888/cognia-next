@@ -44,6 +44,7 @@ describe("toMemoryWireRow", () => {
       provenance: "external",
       createdAt: 1,
       updatedAt: 2,
+      version: 2,
     })
     const asRecord = wire as unknown as Record<string, unknown>
     expect(asRecord.vectorDocId).toBeUndefined()

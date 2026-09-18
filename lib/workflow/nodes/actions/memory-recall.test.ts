@@ -16,6 +16,11 @@ jest.mock("@/lib/memory/retrieve/retriever", () => ({
   retrieveMemories: (...args: unknown[]) => mockRetrieveMemories(...(args as [])),
 }))
 
+const mockResolvePolicy = jest.fn()
+jest.mock("@/lib/memory/agent-policy", () => ({
+  resolvePersistedAgentMemoryPolicy: (...args: unknown[]) => mockResolvePolicy(...args),
+}))
+
 function makeCtx(params: Record<string, unknown>): StepExecutionContext {
   return {
     runId: "run1",
@@ -33,7 +38,14 @@ function makeCtx(params: Record<string, unknown>): StepExecutionContext {
 beforeEach(() => {
   jest.clearAllMocks()
   mockGetSettings.mockResolvedValue({ memory: { enabled: true } })
-  mockTryBuildMemoryDeps.mockResolvedValue({ loadCandidates: jest.fn() })
+  mockResolvePolicy.mockResolvedValue({
+    canRecall: true,
+    readableScopes: ["global", "workspace", "character", "agent"],
+  })
+  mockTryBuildMemoryDeps.mockResolvedValue({
+    loadCandidates: jest.fn(async () => []),
+    loadProcedural: jest.fn(async () => []),
+  })
   mockRetrieveMemories.mockResolvedValue([
     {
       memory: {
@@ -131,9 +143,59 @@ describe("runMemoryRecall", () => {
     mockGetSettings.mockResolvedValue({ memory: { enabled: false } })
     const ctx = makeCtx({ query: "q" })
     const result = await runMemoryRecall(ctx)
-    expect(result.output).toEqual({ entries: [], degraded: true, reason: "memory_disabled" })
+    expect(result.output).toEqual({ entries: [], degraded: true, reason: "disabled" })
     expect(ctx.log).toHaveBeenCalledWith("warn", expect.stringContaining("disabled"))
     expect(mockRetrieveMemories).not.toHaveBeenCalled()
+  })
+
+  it("degrades to an empty read when the acting Agent's policy denies recall", async () => {
+    mockResolvePolicy.mockResolvedValue({ canRecall: false, readableScopes: [] })
+    const result = await runMemoryRecall(makeCtx({ query: "q" }))
+    expect(result.output).toEqual({ entries: [], degraded: true, reason: "policy_denied" })
+    expect(mockRetrieveMemories).not.toHaveBeenCalled()
+  })
+
+  it("degrades in temporary mode — the run neither reads nor writes memory", async () => {
+    mockGetSettings.mockResolvedValue({ memory: { enabled: true, temporary: true } })
+    const result = await runMemoryRecall(makeCtx({ query: "q" }))
+    expect(result.output).toEqual({ entries: [], degraded: true, reason: "temporary" })
+    expect(mockRetrieveMemories).not.toHaveBeenCalled()
+  })
+
+  it("binds the policy subject from the trigger binding, not the node params", async () => {
+    const ctx = {
+      ...makeCtx({ query: "q", characterId: "char-param", scope: "character" }),
+      trigger: {
+        kind: "trigger.manual",
+        payload: {},
+        binding: { sessionId: "sess-1", characterId: "char-bound" },
+      } as StepExecutionContext["trigger"],
+    }
+    await runMemoryRecall(ctx)
+    // The governing Agent is the run's bound persona; `characterId` in params
+    // only narrows which namespace may be read.
+    expect(mockResolvePolicy).toHaveBeenCalledWith(
+      expect.objectContaining({ characterId: "char-bound", sessionId: "sess-1" })
+    )
+  })
+
+  it("drops hits outside the run's readable scopes after retrieval", async () => {
+    mockResolvePolicy.mockResolvedValue({ canRecall: true, readableScopes: ["global"] })
+    mockRetrieveMemories.mockResolvedValue([
+      {
+        memory: { id: "ok", text: "g", type: "semantic", scope: "global", importance: 7 },
+        relevance: 0.9,
+        score: 0.8,
+      },
+      {
+        memory: { id: "denied", text: "c", type: "semantic", scope: "character", importance: 7 },
+        relevance: 0.9,
+        score: 0.8,
+      },
+    ])
+    const result = await runMemoryRecall(makeCtx({ query: "q" }))
+    const entries = (result.output as { entries: Array<{ id: string }> }).entries
+    expect(entries.map((entry) => entry.id)).toEqual(["ok"])
   })
 
   it("degrades (no throw) when the backend is unavailable", async () => {

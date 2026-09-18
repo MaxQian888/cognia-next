@@ -133,6 +133,75 @@ describe("durable memory jobs", () => {
     })
   })
 
+  it("issues a new fencing epoch on every claim, including a same-worker reclaim", async () => {
+    await enqueueMemoryJob(draft)
+    const first = await claimNextMemoryJob("worker-1", 1_000, 50)
+    expect(first?.fencingEpoch).toBe(1)
+
+    // The SAME worker id legitimately reclaims its own expired lease — the
+    // owner string is identical, so only the epoch tells the claims apart.
+    const second = await claimNextMemoryJob("worker-1", 1_100, 50_000)
+    expect(second).toMatchObject({ leaseOwner: "worker-1", fencingEpoch: 2 })
+  })
+
+  it("refuses a completion carrying a stale epoch from a same-worker reclaim", async () => {
+    await enqueueMemoryJob(draft)
+    const first = await claimNextMemoryJob("worker-1", 1_000, 50)
+    const second = await claimNextMemoryJob("worker-1", 1_100, 50_000)
+
+    // The old claim's in-flight run finally finishes — owner matches, epoch
+    // does not, so the row must not be completed by the stale claim.
+    await expect(
+      finishMemoryJob("j1", "succeeded", "memories_applied", 2_000, {
+        workerId: "worker-1",
+        fencingEpoch: first!.fencingEpoch,
+      })
+    ).resolves.toBe("lost")
+    expect(await getMemoryJob("j1")).toMatchObject({ status: "running", fencingEpoch: 2 })
+
+    // The current claim still completes.
+    await expect(
+      finishMemoryJob("j1", "succeeded", "memories_applied", 2_100, {
+        workerId: "worker-1",
+        fencingEpoch: second!.fencingEpoch,
+      })
+    ).resolves.toBe("finished")
+  })
+
+  it("refuses a heartbeat under a stale epoch", async () => {
+    await enqueueMemoryJob(draft)
+    const first = await claimNextMemoryJob("worker-1", 1_000, 50)
+    await claimNextMemoryJob("worker-1", 1_100, 50_000)
+
+    await expect(
+      heartbeatMemoryJob("j1", "worker-1", 1_200, 50_000, first!.fencingEpoch)
+    ).resolves.toBeUndefined()
+    // The current epoch still renews.
+    await expect(heartbeatMemoryJob("j1", "worker-1", 1_200, 50_000, 2)).resolves.toMatchObject({
+      heartbeatAt: 1_200,
+    })
+  })
+
+  it("ignores a failure reported under a stale epoch", async () => {
+    await enqueueMemoryJob(draft)
+    const first = await claimNextMemoryJob("worker-1", 1_000, 50)
+    await claimNextMemoryJob("worker-1", 1_100, 50_000)
+
+    // The stale claim's error path must not schedule a retry on a row the
+    // newer claim owns.
+    await expect(
+      failMemoryJob("j1", "boom", 2_000, {
+        workerId: "worker-1",
+        fencingEpoch: first!.fencingEpoch,
+      })
+    ).resolves.toBe("running")
+    expect(await getMemoryJob("j1")).toMatchObject({
+      status: "running",
+      leaseOwner: "worker-1",
+      fencingEpoch: 2,
+    })
+  })
+
   it("refuses a completion for a job the user cancelled mid-run", async () => {
     await enqueueMemoryJob(draft)
     await claimNextMemoryJob("worker-1", 1_000, 50_000)
@@ -411,7 +480,39 @@ describe("insight readers", () => {
       jobsDeleted: 1,
       auditsDeleted: 1,
       orphanEvidenceDeleted: 0,
+      operationsDeleted: 0,
     })
+  })
+
+  it("prunes operation receipts past the retry window, freeing stale pending markers", async () => {
+    const dayMs = 24 * 60 * 60 * 1000
+    const now = 200 * dayMs
+    const { recordMemoryOperation, findMemoryOperation } = await import("./memory-operations")
+    const row = (id: string, createdAt: number, resultCode: string) => ({
+      id: `p1:${id}`,
+      principalId: "p1",
+      operationId: id,
+      kind: "store" as const,
+      requestHash: `h-${id}`,
+      memoryId: "m1",
+      resultCode,
+      resultVersion: 1,
+      createdAt,
+    })
+    await recordMemoryOperation(row("old-receipt", 1, "ok"))
+    // A pending marker whose writer died mid-apply must not pin the id forever.
+    await recordMemoryOperation(row("stale-pending", 1, "pending"))
+    await recordMemoryOperation(row("fresh", now - dayMs, "ok"))
+
+    await expect(pruneMemoryGovernanceData(now)).resolves.toEqual({
+      jobsDeleted: 0,
+      auditsDeleted: 0,
+      orphanEvidenceDeleted: 0,
+      operationsDeleted: 2,
+    })
+    expect(await findMemoryOperation("p1", "old-receipt")).toBeUndefined()
+    expect(await findMemoryOperation("p1", "stale-pending")).toBeUndefined()
+    expect(await findMemoryOperation("p1", "fresh")).toMatchObject({ resultCode: "ok" })
   })
 })
 

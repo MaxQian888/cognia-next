@@ -351,6 +351,15 @@ export interface SourcesPart {
    * BM25-only, or retrieval failed). Mirrors `twinDegraded` for memory.
    */
   memoryDegraded?: boolean
+  /**
+   * Delivery receipt for the memory-context injection: which rows, at which
+   * versions, rendered into which bytes (`contentHash`), and the load-ack
+   * state (`prepared` until the host attached it — landing on this part IS
+   * the delivery, so it is stamped `delivered`, or `expired` when the
+   * snapshot's TTL already lapsed). Persisted with the message, so "what did
+   * the model see" is auditable after the fact.
+   */
+  memorySnapshot?: import("@cognia/memory").MemoryContextSnapshot
 }
 
 export function isSourcesPart(part: unknown): part is SourcesPart {

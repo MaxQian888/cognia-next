@@ -7,14 +7,14 @@ import {
   MAX_MEMORY_TEXT_CHARS,
 } from "./memory"
 
-const mockGetSettings = jest.fn()
-jest.mock("@/lib/db/settings", () => ({
-  getSettings: () => mockGetSettings(),
-}))
-
 const mockSearchExternal = jest.fn()
 jest.mock("@/lib/memory/api/search-memory", () => ({
   searchMemoriesExternal: (...args: unknown[]) => mockSearchExternal(...(args as [])),
+}))
+
+const mockListExternal = jest.fn()
+jest.mock("@/lib/memory/api/read-memory", () => ({
+  listMemoriesExternal: (...args: unknown[]) => mockListExternal(...(args as [])),
 }))
 
 const mockStoreExternal = jest.fn()
@@ -29,10 +29,7 @@ jest.mock("@/lib/memory/api/mutate-memory", () => ({
   forgetExternalMemory: (...args: unknown[]) => mockForgetExternal(...(args as [])),
 }))
 
-const mockListMemories = jest.fn()
-jest.mock("@/lib/db/memories", () => ({
-  listMemories: (...args: unknown[]) => mockListMemories(...(args as [])),
-}))
+const MCP_CALLER = { principalId: "mcp:bridge", transport: "mcp" }
 
 const ROW = {
   id: "m1",
@@ -55,7 +52,6 @@ const ROW = {
 
 beforeEach(() => {
   jest.clearAllMocks()
-  mockGetSettings.mockResolvedValue({ memory: { enabled: true } })
   mockSearchExternal.mockResolvedValue({
     ok: true,
     hits: [{ memory: ROW, relevance: 0.9, score: 0.8 }],
@@ -68,11 +64,11 @@ beforeEach(() => {
   })
   mockUpdateExternal.mockResolvedValue({ ok: true })
   mockForgetExternal.mockResolvedValue({ ok: true })
-  mockListMemories.mockResolvedValue([ROW])
+  mockListExternal.mockResolvedValue({ ok: true, memories: [ROW] })
 })
 
 describe("memorySearch", () => {
-  it("validates the query and forwards options", async () => {
+  it("validates the query and forwards options under the mcp caller", async () => {
     await expect(memorySearch({ query: "  " })).rejects.toThrow(/must not be empty/)
     await memorySearch({
       query: "pnpm",
@@ -82,16 +78,19 @@ describe("memorySearch", () => {
       projectId: "p1",
       branch: "main",
     })
-    expect(mockSearchExternal).toHaveBeenCalledWith({
-      query: "pnpm",
-      topK: 3,
-      types: ["semantic"],
-      characterId: "c1",
-      projectId: "p1",
-      agentId: undefined,
-      branch: "main",
-      path: undefined,
-    })
+    expect(mockSearchExternal).toHaveBeenCalledWith(
+      {
+        query: "pnpm",
+        topK: 3,
+        types: ["semantic"],
+        characterId: "c1",
+        projectId: "p1",
+        agentId: undefined,
+        branch: "main",
+        path: undefined,
+      },
+      MCP_CALLER
+    )
   })
 
   it("strips internal plumbing fields from returned rows", async () => {
@@ -113,18 +112,20 @@ describe("memorySearch", () => {
 })
 
 describe("memoryList", () => {
-  it("lists active rows with a clamped limit", async () => {
-    const result = await memoryList({ limit: 999 })
-    expect(result.ok).toBe(true)
-    expect(mockListMemories).toHaveBeenCalledWith(expect.objectContaining({ status: "active" }))
+  it("delegates to the authorized external list under the mcp caller", async () => {
+    const result = await memoryList({ limit: 10 })
+    expect(result).toEqual({
+      ok: true,
+      memories: [expect.objectContaining({ id: "m1", version: 1 })],
+    })
+    expect(mockListExternal).toHaveBeenCalledWith({ limit: 10 }, MCP_CALLER)
   })
 
   it("returns policy blocks for disabled / temporary", async () => {
-    mockGetSettings.mockResolvedValue({ memory: { enabled: false } })
+    mockListExternal.mockResolvedValue({ ok: false, reason: "disabled" })
     expect(await memoryList({})).toEqual({ ok: false, reason: "disabled" })
-    mockGetSettings.mockResolvedValue({ memory: { enabled: true, temporary: true } })
+    mockListExternal.mockResolvedValue({ ok: false, reason: "temporary" })
     expect(await memoryList({})).toEqual({ ok: false, reason: "temporary" })
-    expect(mockListMemories).not.toHaveBeenCalled()
   })
 })
 
@@ -136,24 +137,57 @@ describe("memoryStore", () => {
     await memoryStore({ text: "User prefers pnpm", type: "episodic", importance: 9 })
     expect(mockStoreExternal).toHaveBeenCalledWith(
       expect.objectContaining({ text: "User prefers pnpm", type: "episodic", importance: 9 }),
-      { channel: "mcp" }
+      { channel: "mcp" },
+      MCP_CALLER
+    )
+  })
+
+  it("forwards the idempotency key", async () => {
+    await memoryStore({ text: "User prefers pnpm", operationId: "op-9" })
+    expect(mockStoreExternal).toHaveBeenCalledWith(
+      expect.objectContaining({ operationId: "op-9" }),
+      { channel: "mcp" },
+      MCP_CALLER
     )
   })
 })
 
 describe("memoryUpdate / memoryForget", () => {
-  it("validate ids and delegate", async () => {
+  it("validate ids and delegate with the caller context", async () => {
     await expect(memoryUpdate({ id: " " })).rejects.toThrow(/must not be empty/)
     await memoryUpdate({ id: "m1", text: "new", importance: 4 })
-    expect(mockUpdateExternal).toHaveBeenCalledWith("m1", {
-      text: "new",
-      importance: 4,
-      tags: undefined,
-      key: undefined,
-      pinned: undefined,
-    })
+    expect(mockUpdateExternal).toHaveBeenCalledWith(
+      "m1",
+      {
+        text: "new",
+        importance: 4,
+        tags: undefined,
+        key: undefined,
+        pinned: undefined,
+      },
+      { caller: MCP_CALLER, expectedVersion: undefined, operationId: undefined }
+    )
     await expect(memoryForget({ id: "" })).rejects.toThrow(/must not be empty/)
     expect(await memoryForget({ id: "m1" })).toEqual({ ok: true })
-    expect(mockForgetExternal).toHaveBeenCalledWith("m1")
+    expect(mockForgetExternal).toHaveBeenCalledWith("m1", {
+      caller: MCP_CALLER,
+      expectedVersion: undefined,
+      operationId: undefined,
+    })
+  })
+
+  it("forwards expectedVersion / operationId for CAS and idempotency", async () => {
+    await memoryUpdate({ id: "m1", text: "new", expectedVersion: 7, operationId: "op-1" })
+    expect(mockUpdateExternal).toHaveBeenCalledWith(
+      "m1",
+      expect.objectContaining({ text: "new" }),
+      { caller: MCP_CALLER, expectedVersion: 7, operationId: "op-1" }
+    )
+    await memoryForget({ id: "m1", expectedVersion: 3, operationId: "op-2" })
+    expect(mockForgetExternal).toHaveBeenCalledWith("m1", {
+      caller: MCP_CALLER,
+      expectedVersion: 3,
+      operationId: "op-2",
+    })
   })
 })

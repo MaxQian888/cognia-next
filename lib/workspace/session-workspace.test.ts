@@ -33,4 +33,17 @@ describe("resolveSessionWorkspace", () => {
     expect(resolveSessionWorkspace({}, projects, undefined)).toBeNull()
     expect(resolveSessionWorkspace({ projectId: "proj-a" }, [], "proj-a")).toBeNull()
   })
+
+  it("a bound session resolves from its executionContext, never the active workspace", () => {
+    // The durable binding is the workspace authority: a session bound to
+    // nothing must not borrow whichever project the UI is focused on.
+    expect(resolveSessionWorkspace({ executionContext: {} }, projects, "proj-a")).toBeNull()
+    expect(
+      resolveSessionWorkspace({ executionContext: { projectId: "proj-b" } }, projects, "proj-a")
+    ).toEqual({ id: "proj-b", name: "B" })
+    // A bound session pointing at a deleted workspace still resolves to null.
+    expect(
+      resolveSessionWorkspace({ executionContext: { projectId: "proj-gone" } }, projects, "proj-a")
+    ).toBeNull()
+  })
 })

@@ -26,12 +26,17 @@ import {
 } from "@/lib/memory/api/store-memory"
 import { searchMemoriesExternal, type ExternalMemoryHit } from "@/lib/memory/api/search-memory"
 import {
+  listMemoriesExternal,
+  getMemoryExternal,
+  countMemoriesExternal,
+} from "@/lib/memory/api/read-memory"
+import { pluginCaller } from "@/lib/memory/api/caller"
+import {
   updateExternalMemory,
   forgetExternalMemory,
   type MutateExternalMemoryResult,
   type UpdateExternalMemoryPatch,
 } from "@/lib/memory/api/mutate-memory"
-import { listMemories, getMemory, countActive } from "@/lib/db/memories"
 import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
 import { assertNoLeakingPii } from "./plugin-pii-gate"
 
@@ -83,72 +88,78 @@ export interface PluginMemoryAPI {
   /**
    * Store one durable fact (semantic/episodic only). Consolidates against
    * existing memories when a utility LLM is available. Throws `PluginPiiError`
-   * when the text trips the PII gate.
+   * when the text trips the PII gate. `input.operationId` makes the write
+   * idempotent — a retried identical request replays its first result.
    */
   store(input: PluginMemoryStoreInput): Promise<StoreMemoryCoreResult>
-  /** Patch text / importance / tags / key. Text patches are PII-gated. */
-  update(id: string, patch: UpdateExternalMemoryPatch): Promise<MutateExternalMemoryResult>
-  /** Soft-invalidate (kept for history; never a hard delete). */
-  forget(id: string): Promise<MutateExternalMemoryResult>
+  /**
+   * Patch text / importance / tags / key. Text patches are PII-gated.
+   * `opts.expectedVersion` is a compare-and-swap guard on the row's version;
+   * `opts.operationId` makes a retried identical patch replay its first result.
+   */
+  update(
+    id: string,
+    patch: UpdateExternalMemoryPatch,
+    opts?: { expectedVersion?: number; operationId?: string }
+  ): Promise<MutateExternalMemoryResult>
+  /**
+   * Soft-invalidate (kept for history; never a hard delete). Same CAS and
+   * idempotency options as `update`.
+   */
+  forget(
+    id: string,
+    opts?: { expectedVersion?: number; operationId?: string }
+  ): Promise<MutateExternalMemoryResult>
 }
 
 const DEFAULT_LIST_LIMIT = 100
 
-/** Reads are policy-gated too: memory off / temporary → nothing to read. */
-async function readsAllowed(): Promise<boolean> {
-  const [{ getSettings }, { resolveMemoryConfig }] = await Promise.all([
-    import("@/lib/db/settings"),
-    import("@/types/memory/memory"),
-  ])
-  const settings = await getSettings().catch(() => undefined)
-  const config = resolveMemoryConfig(settings?.memory)
-  return config.enabled && !config.temporary
-}
-
 /**
  * Create the Memory API for a plugin. Reads need `memory:read`; every
  * mutation needs `memory:write` (enforced via the PermissionGuard proxy).
+ *
+ * `pluginId` is bound by the plugin manager at factory time — it becomes the
+ * caller's `principalId`, so a plugin's idempotency keys, audit rows and (as
+ * the grant store lands) namespace grants are its own and cannot be asserted
+ * by another plugin.
  */
 export function createMemoryAPI(pluginId: string): PluginMemoryAPI {
+  const caller = pluginCaller(pluginId)
   const api: PluginMemoryAPI = {
     // reads
     search: async (query, opts) => {
-      const result = await searchMemoriesExternal({ query, ...opts })
+      const result = await searchMemoriesExternal({ query, ...opts }, caller)
       return result.ok ? result.hits : []
     },
     list: async (filter) => {
-      if (!(await readsAllowed())) return []
-      const rows = await listMemories({
-        type: filter?.type,
-        scope: filter?.scope,
-        characterId: filter?.characterId,
-        projectId: filter?.projectId,
-        agentId: filter?.agentId,
-        branch: filter?.branch,
-        pathPattern: filter?.pathPattern,
-        status: filter?.status ?? "active",
-      })
-      return rows.slice(0, Math.max(1, filter?.limit ?? DEFAULT_LIST_LIMIT))
+      const result = await listMemoriesExternal(
+        { ...filter, limit: Math.max(1, filter?.limit ?? DEFAULT_LIST_LIMIT) },
+        caller
+      )
+      return result.ok ? result.memories : []
     },
-    get: async (id) => {
-      if (!(await readsAllowed())) return undefined
-      return getMemory(id)
-    },
-    count: async (scope, characterId) => {
-      if (!(await readsAllowed())) return 0
-      return countActive(scope ?? "global", characterId)
-    },
+    get: (id) => getMemoryExternal(id, caller),
+    count: (scope, characterId) => countMemoriesExternal(scope ?? "global", caller, characterId),
 
     // mutations
     store: async (input) => {
       assertNoLeakingPii(pluginId, "ctx.memory.store", [input.text])
-      return storeExternalMemory(input, { channel: "plugin", pluginId })
+      return storeExternalMemory(input, { channel: "plugin", pluginId }, caller)
     },
-    update: async (id, patch) => {
+    update: async (id, patch, opts) => {
       assertNoLeakingPii(pluginId, "ctx.memory.update", [patch.text])
-      return updateExternalMemory(id, patch)
+      return updateExternalMemory(id, patch, {
+        caller,
+        expectedVersion: opts?.expectedVersion,
+        operationId: opts?.operationId,
+      })
     },
-    forget: (id) => forgetExternalMemory(id),
+    forget: (id, opts) =>
+      forgetExternalMemory(id, {
+        caller,
+        expectedVersion: opts?.expectedVersion,
+        operationId: opts?.operationId,
+      }),
   }
 
   return createGuardedAPI(pluginId, api, {

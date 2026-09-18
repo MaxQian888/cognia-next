@@ -27,6 +27,7 @@ import type {
   MemorySourceChannel,
   MemoryType,
 } from "@/types/memory/memory"
+import { memoryRowWithinNamespaces, type TrustedMemoryCaller } from "@cognia/memory/types/caller"
 import {
   consolidationOpMemoryId,
   type ConsolidationOp,
@@ -61,11 +62,30 @@ export interface StoreMemoryCoreInput {
   /** Agent whose CRUD/scope policy governs this write. */
   policyCharacterId?: string
   /**
+   * Host-bound session for policy resolution. Kept separate from
+   * `source.sessionId`: `source` is provenance (which conversation produced
+   * the fact), this is the session whose memory toggles the caller is bound
+   * to — external callers must not choose it themselves.
+   *
+   * `null` means "no session binding, explicitly": without it, an absent
+   * value falls back to `source.sessionId`, which would let a request pick
+   * the session whose toggles govern the write.
+   */
+  policySessionId?: string | null
+  /**
    * Why the caller chose this scope, from `resolveMemoryWriteTarget`. Persisted
    * so the inspector can explain a narrowed scope. Callers that already know
    * their exact target (workflow node, plugin, MCP, RPC) leave it unset.
    */
   scopeRationale?: string
+  /**
+   * Host-bound caller identity (`lib/memory/api/caller.ts`). When present, its
+   * `policyCharacterId` / `sessionId` govern policy resolution and a
+   * `namespaces` set constrains which namespace the write may land in —
+   * request fields can only narrow, never grant. Absent on in-process callers
+   * acting as the account owner (slash command, /remember).
+   */
+  caller?: TrustedMemoryCaller
 }
 
 export type StoreMemoryCoreResult =
@@ -81,7 +101,14 @@ export type StoreMemoryCoreResult =
     }
   | {
       ok: false
-      reason: "disabled" | "temporary" | "pii_blocked" | "policy_denied" | "scope_denied"
+      reason:
+        | "disabled"
+        | "temporary"
+        | "pii_blocked"
+        | "policy_denied"
+        | "scope_denied"
+        | "unauthorized_namespace"
+        | "idempotency_key_reused"
     }
 
 export function clampImportance(value: number | undefined): number {
@@ -110,6 +137,22 @@ export async function storeMemoryCore(input: StoreMemoryCoreInput): Promise<Stor
     )
   }
 
+  // A bound caller constrains the write's namespace — request fields narrow
+  // the caller's authorization set, they can never widen it.
+  if (
+    input.caller?.namespaces &&
+    !memoryRowWithinNamespaces(
+      {
+        projectId: input.projectId,
+        characterId: input.characterId,
+        agentId: input.agentId,
+      },
+      input.caller.namespaces
+    )
+  ) {
+    return { ok: false, reason: "unauthorized_namespace" }
+  }
+
   const [{ getSettings }, { resolveMemoryConfig }] = await Promise.all([
     import("@/lib/db/settings"),
     import("@/types/memory/memory"),
@@ -122,8 +165,25 @@ export async function storeMemoryCore(input: StoreMemoryCoreInput): Promise<Stor
     await import("@/lib/memory/agent-policy")
   const policy = await resolvePersistedAgentMemoryPolicy({
     config,
-    characterId: input.policyCharacterId ?? input.agentId ?? input.characterId,
-    sessionId: input.source?.sessionId,
+    // The governing Agent comes from the caller binding first — a request's
+    // `agentId`/`characterId` namespace fields are only the fallback for
+    // unbound in-process callers.
+    characterId:
+      input.caller?.policyCharacterId ??
+      input.policyCharacterId ??
+      input.agentId ??
+      input.characterId,
+    // Session binding precedence: an explicit `null` suppresses; a bound
+    // caller contributes ONLY its own sessionId — when it has none, the
+    // request's `source.sessionId` (caller-chosen provenance) must NOT leak
+    // in as the policy session. Only caller-less in-process writes inherit
+    // provenance, matching the pre-binding behavior.
+    sessionId:
+      input.policySessionId === null
+        ? undefined
+        : input.caller
+          ? (input.caller.sessionId ?? undefined)
+          : (input.policySessionId ?? input.source?.sessionId),
   })
   if (!policy.canCreate) return { ok: false, reason: "policy_denied" }
   if (!scopeAllowedByAgentMemoryPolicy(policy, "create", scope)) {
@@ -356,36 +416,159 @@ export interface StoreExternalMemoryInput {
   importance?: number
   tags?: string[]
   source?: { sessionId?: string }
-  policyCharacterId?: string
+  /**
+   * Idempotency key, unique per caller principal. A retried store with the
+   * same request returns the recorded outcome instead of consolidating a
+   * second time; the same key with a DIFFERENT request is refused
+   * (`idempotency_key_reused`).
+   */
+  operationId?: string
 }
 
 /**
  * The external-surface wrapper: provenance `external`, block-only PII gate,
  * semantic/episodic only. Used by the plugin API, MCP handler, and RPC bridge.
+ *
+ * `caller` is the host-bound identity (`lib/memory/api/caller.ts`): its
+ * `policyCharacterId` / `sessionId` govern policy resolution, and when it
+ * carries a `namespaces` set the target namespace must sit inside it — a
+ * request can never write a memory into a namespace the caller was not
+ * authorized for.
  */
 export async function storeExternalMemory(
   input: StoreExternalMemoryInput,
-  attribution: MemoryAttribution
+  attribution: MemoryAttribution,
+  caller?: TrustedMemoryCaller
 ): Promise<StoreMemoryCoreResult> {
   if ((input.type as MemoryType | undefined) === "procedural") {
     throw new Error("memory store: external surfaces may not create procedural memories.")
   }
-  return storeMemoryCore({
-    text: input.text,
-    type: input.type ?? "semantic",
-    scope: input.scope,
-    characterId: input.characterId,
-    projectId: input.projectId,
-    agentId: input.agentId,
-    branch: input.branch,
-    pathPattern: input.pathPattern,
-    key: input.key,
-    importance: input.importance,
-    tags: input.tags,
-    provenance: "external",
-    piiGate: "block",
-    source: input.source,
-    policyCharacterId: input.policyCharacterId,
-    attribution,
-  })
+  if (
+    caller?.namespaces &&
+    !memoryRowWithinNamespaces(
+      {
+        projectId: input.projectId,
+        characterId: input.characterId,
+        agentId: input.agentId,
+      },
+      caller.namespaces
+    )
+  ) {
+    return { ok: false, reason: "unauthorized_namespace" }
+  }
+
+  // Idempotent replay + mutual exclusion: the create cannot share
+  // `runMemoryMutation`'s transaction (the consolidator runs async work), so
+  // the operation key is RESERVED before executing — a concurrent identical
+  // call observes `in_flight` and waits for our receipt instead of running a
+  // second consolidation. A recorded receipt replays; a conflicting one
+  // refuses.
+  const principalId = caller?.principalId ?? "local-user"
+  const operationId = input.operationId
+  let requestHash: string | undefined
+  if (operationId) {
+    const { reserveMemoryOperation, awaitMemoryOperation, memoryOperationRequestHash } =
+      await import("@/lib/db/memory-operations")
+    const { operationId: _operationId, ...request } = input
+    // Hash the EFFECTIVE request, not the raw payload — the core trims text
+    // and tags and clamps importance before apply, so requests differing only
+    // in those normalizations are the same operation, not a conflict.
+    requestHash = await memoryOperationRequestHash("store", {
+      ...request,
+      text: request.text.trim(),
+      importance: clampImportance(request.importance),
+      ...(request.tags ? { tags: request.tags.map((t) => t.trim()).filter(Boolean) } : {}),
+    })
+    // Replay the receipt's RECORDED outcome, not a generic success shape — a
+    // first call that degraded to a direct insert must still answer
+    // `consolidated: false` on the retry.
+    const replay = (receipt: {
+      memoryId: string
+      resultConsolidated?: boolean
+      resultApplied?: string[]
+    }) => ({
+      ok: true as const,
+      stored: true,
+      consolidated: receipt.resultConsolidated ?? true,
+      ...(receipt.memoryId ? { memoryId: receipt.memoryId } : {}),
+      applied: (receipt.resultApplied ?? []) as ConsolidationOp["op"][],
+    })
+    const reservation = await reserveMemoryOperation({
+      principalId,
+      operationId,
+      requestHash,
+      kind: "store",
+    })
+    if (reservation.state === "conflict") {
+      return { ok: false, reason: "idempotency_key_reused" }
+    }
+    if (reservation.state === "replay") return replay(reservation.receipt)
+    if (reservation.state === "in_flight") {
+      // The twin of this request is applying right now — wait for its receipt
+      // and replay it. A timeout means the other caller crashed mid-apply:
+      // proceed and let the consolidator's dedupe settle the overlap.
+      const settled = await awaitMemoryOperation(principalId, operationId)
+      if (settled) return replay(settled)
+    }
+  }
+
+  let result: StoreMemoryCoreResult
+  try {
+    result = await storeMemoryCore({
+      text: input.text,
+      type: input.type ?? "semantic",
+      scope: input.scope,
+      characterId: input.characterId,
+      projectId: input.projectId,
+      agentId: input.agentId,
+      branch: input.branch,
+      pathPattern: input.pathPattern,
+      key: input.key,
+      importance: input.importance,
+      tags: input.tags,
+      provenance: "external",
+      piiGate: "block",
+      source: input.source,
+      // The caller binding drives policy resolution inside the core: a bound
+      // caller without a sessionId yields NO policy session — the request's
+      // `source.sessionId` provenance can never substitute for it.
+      caller,
+      attribution,
+    })
+  } catch (error) {
+    // A thrown store left no receipt, so the reservation must go too —
+    // otherwise the pending row pins the key and every retry pays the
+    // in-flight wait before re-entering here.
+    if (operationId && requestHash) {
+      const { releaseMemoryOperation } = await import("@/lib/db/memory-operations")
+      await releaseMemoryOperation(principalId, operationId, requestHash).catch(() => undefined)
+    }
+    throw error
+  }
+
+  // Record only an APPLIED operation — a denied or failed store leaves no
+  // side effect, so its id stays free for the caller's corrected retry. The
+  // reservation is released on that path so the pending marker never pins
+  // the key.
+  if (operationId && requestHash) {
+    const { recordMemoryOperation, releaseMemoryOperation } =
+      await import("@/lib/db/memory-operations")
+    if (result.ok && result.stored) {
+      await recordMemoryOperation({
+        id: `${principalId}:${operationId}`,
+        principalId,
+        operationId,
+        kind: "store",
+        requestHash,
+        memoryId: result.memoryId ?? "",
+        resultCode: "ok",
+        resultConsolidated: result.consolidated,
+        resultApplied: result.applied,
+        createdAt: Date.now(),
+      }).catch(() => undefined)
+    } else {
+      await releaseMemoryOperation(principalId, operationId, requestHash).catch(() => undefined)
+    }
+  }
+  return result
 }

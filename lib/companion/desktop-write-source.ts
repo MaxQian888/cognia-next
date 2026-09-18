@@ -1260,16 +1260,20 @@ async function memorySearchRpc(payload: Record<string, unknown>): Promise<unknow
     throw new Error("memory_search.query is required")
   }
   const { searchMemoriesExternal } = await import("@/lib/memory/api/search-memory")
-  const result = await searchMemoriesExternal({
-    query,
-    topK: typeof payload.k === "number" ? payload.k : undefined,
-    types: payload.types as never,
-    characterId: payload.characterId as string | undefined,
-    projectId: payload.projectId as string | undefined,
-    agentId: payload.agentId as string | undefined,
-    branch: payload.branch as string | undefined,
-    path: payload.path as string | undefined,
-  })
+  const { companionCaller } = await import("@/lib/memory/api/caller")
+  const result = await searchMemoriesExternal(
+    {
+      query,
+      topK: typeof payload.k === "number" ? payload.k : undefined,
+      types: payload.types as never,
+      characterId: payload.characterId as string | undefined,
+      projectId: payload.projectId as string | undefined,
+      agentId: payload.agentId as string | undefined,
+      branch: payload.branch as string | undefined,
+      path: payload.path as string | undefined,
+    },
+    companionCaller(payload.callerDeviceId as string | undefined)
+  )
   if (!result.ok) return result
   const { toMemoryWireRow } = await import("@/lib/memory/api/wire")
   return {
@@ -1283,30 +1287,31 @@ async function memorySearchRpc(payload: Record<string, unknown>): Promise<unknow
 }
 
 async function memoryListRpc(payload: Record<string, unknown>): Promise<unknown> {
-  const [{ getSettings: loadSettings }, { resolveMemoryConfig }] = await Promise.all([
-    import("@/lib/db/settings"),
-    import("@/types/memory/memory"),
-  ])
-  const settings = await loadSettings().catch(() => undefined)
-  const config = resolveMemoryConfig(settings?.memory)
-  if (!config.enabled) return { ok: false, reason: "disabled" }
-  if (config.temporary) return { ok: false, reason: "temporary" }
-  const [{ listMemories }, { toMemoryWireRow }] = await Promise.all([
-    import("@/lib/db/memories"),
-    import("@/lib/memory/api/wire"),
-  ])
-  const rows = await listMemories({
-    type: payload.type as never,
-    scope: payload.scope as never,
-    characterId: payload.characterId as string | undefined,
-    projectId: payload.projectId as string | undefined,
-    agentId: payload.agentId as string | undefined,
-    branch: payload.branch as string | undefined,
-    pathPattern: payload.pathPattern as string | undefined,
-    status: "active",
-  })
-  const limit = Math.min(200, Math.max(1, typeof payload.limit === "number" ? payload.limit : 50))
-  return { ok: true, memories: rows.slice(0, limit).map(toMemoryWireRow) }
+  const { listMemoriesExternal } = await import("@/lib/memory/api/read-memory")
+  const { companionCaller } = await import("@/lib/memory/api/caller")
+  const result = await listMemoriesExternal(
+    {
+      type: payload.type as never,
+      scope: payload.scope as never,
+      characterId: payload.characterId as string | undefined,
+      projectId: payload.projectId as string | undefined,
+      agentId: payload.agentId as string | undefined,
+      branch: payload.branch as string | undefined,
+      pathPattern: payload.pathPattern as string | undefined,
+      // The published schema names this `pageSize`; `limit` stays accepted for
+      // clients built against the older wire shape.
+      limit:
+        typeof payload.limit === "number"
+          ? payload.limit
+          : typeof payload.pageSize === "number"
+            ? payload.pageSize
+            : undefined,
+    },
+    companionCaller(payload.callerDeviceId as string | undefined)
+  )
+  if (!result.ok) return result
+  const { toMemoryWireRow } = await import("@/lib/memory/api/wire")
+  return { ok: true, memories: result.memories.map(toMemoryWireRow) }
 }
 
 async function memoryStoreRpc(payload: Record<string, unknown>): Promise<unknown> {
@@ -1315,6 +1320,7 @@ async function memoryStoreRpc(payload: Record<string, unknown>): Promise<unknown
     throw new Error("memory_store.text is required")
   }
   const { storeExternalMemory } = await import("@/lib/memory/api/store-memory")
+  const { companionCaller } = await import("@/lib/memory/api/caller")
   return storeExternalMemory(
     {
       text,
@@ -1328,8 +1334,10 @@ async function memoryStoreRpc(payload: Record<string, unknown>): Promise<unknown
       key: payload.key as string | undefined,
       importance: typeof payload.importance === "number" ? payload.importance : undefined,
       tags: payload.tags as string[] | undefined,
+      operationId: payload.operationId as string | undefined,
     },
-    { channel: "rpc" }
+    { channel: "rpc" },
+    companionCaller(payload.callerDeviceId as string | undefined)
   )
 }
 
@@ -1339,13 +1347,23 @@ async function memoryUpdateRpc(payload: Record<string, unknown>): Promise<unknow
     throw new Error("memory_update.id is required")
   }
   const { updateExternalMemory } = await import("@/lib/memory/api/mutate-memory")
-  return updateExternalMemory(id, {
-    text: payload.text as string | undefined,
-    importance: typeof payload.importance === "number" ? payload.importance : undefined,
-    tags: payload.tags as string[] | undefined,
-    key: payload.key as string | undefined,
-    pinned: typeof payload.pinned === "boolean" ? payload.pinned : undefined,
-  })
+  const { companionCaller } = await import("@/lib/memory/api/caller")
+  return updateExternalMemory(
+    id,
+    {
+      text: payload.text as string | undefined,
+      importance: typeof payload.importance === "number" ? payload.importance : undefined,
+      tags: payload.tags as string[] | undefined,
+      key: payload.key as string | undefined,
+      pinned: typeof payload.pinned === "boolean" ? payload.pinned : undefined,
+    },
+    {
+      caller: companionCaller(payload.callerDeviceId as string | undefined),
+      expectedVersion:
+        typeof payload.expectedVersion === "number" ? payload.expectedVersion : undefined,
+      operationId: payload.operationId as string | undefined,
+    }
+  )
 }
 
 async function memoryForgetRpc(payload: Record<string, unknown>): Promise<unknown> {
@@ -1354,7 +1372,13 @@ async function memoryForgetRpc(payload: Record<string, unknown>): Promise<unknow
     throw new Error("memory_forget.id is required")
   }
   const { forgetExternalMemory } = await import("@/lib/memory/api/mutate-memory")
-  return forgetExternalMemory(id)
+  const { companionCaller } = await import("@/lib/memory/api/caller")
+  return forgetExternalMemory(id, {
+    caller: companionCaller(payload.callerDeviceId as string | undefined),
+    expectedVersion:
+      typeof payload.expectedVersion === "number" ? payload.expectedVersion : undefined,
+    operationId: payload.operationId as string | undefined,
+  })
 }
 
 async function characterUpsert(payload: Record<string, unknown>): Promise<{ character: unknown }> {

@@ -25,6 +25,11 @@
  * - `code-location` contributes nothing. It is recorded but deliberately not
  *   checkable on every shell (mobile and web cannot stat a path), so counting it
  *   would make the same claim stronger on desktop than on a phone.
+ * - Evidence derived from the SAME source counts once. A claim's support is
+ *   bounded by how many distinct sources still stand behind it, so N rows all
+ *   citing `message:3` — a re-import, a replayed job, a second citation of the
+ *   same excerpt — contribute the strongest single verdict among them, not N
+ *   times the weight.
  *
  * Pure: no I/O, no clock.
  */
@@ -75,15 +80,28 @@ function weightOf(
  * restored memories on the first sweep after an import.
  */
 export function assessClaimSupport(
-  evidence: readonly Pick<MemoryEvidence, "kind" | "validationStrategy" | "validationState">[]
+  evidence: readonly (Pick<MemoryEvidence, "kind" | "validationStrategy" | "validationState"> & {
+    sourceId?: string
+  })[]
 ): ClaimSupportVerdict {
   if (evidence.length === 0) {
     return { support: 0, counted: 0, revoked: false, staleness: "unknown", invalidate: false }
   }
 
   const revoked = evidence.some((item) => stateOf(item) === "revoked")
-  const support = revoked ? 0 : evidence.reduce((total, item) => total + weightOf(item), 0)
-  const counted = evidence.filter((item) => weightOf(item) > 0).length
+  // Fold rows citing the same source down to that source's strongest verdict.
+  // Rows without a `sourceId` each form their own group — we cannot prove they
+  // share a source, and treating them as one would be a silent undercount.
+  const bestWeightBySource = new Map<string, number>()
+  evidence.forEach((item, index) => {
+    const key = item.sourceId || `__row_${index}`
+    const weight = weightOf(item)
+    if (weight > (bestWeightBySource.get(key) ?? 0)) bestWeightBySource.set(key, weight)
+  })
+  const support = revoked
+    ? 0
+    : [...bestWeightBySource.values()].reduce((total, weight) => total + weight, 0)
+  const counted = [...bestWeightBySource.values()].filter((weight) => weight > 0).length
 
   if (support <= CLAIM_SUPPORT_INVALIDATE_AT) {
     return { support, counted, revoked, staleness: "expired", invalidate: true }

@@ -87,7 +87,16 @@ export type ManageMemoryResult =
   | {
       ok: false
       reason:
-        "not_found" | "disabled" | "temporary" | "pii_blocked" | "policy_denied" | "scope_denied"
+        | "not_found"
+        | "disabled"
+        | "temporary"
+        | "pii_blocked"
+        | "policy_denied"
+        | "scope_denied"
+        // The store path's wider failure surface passes through unchanged —
+        // `manage` never produces these, but a type-level remap would lie.
+        | "idempotency_key_reused"
+        | "unauthorized_namespace"
     }
 
 export async function manageMemory(command: ManageMemoryCommand): Promise<ManageMemoryResult> {

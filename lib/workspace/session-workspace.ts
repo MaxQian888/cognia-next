@@ -14,7 +14,12 @@ import type { Project } from "@/types"
  * `resolveSessionProjectId` (`lib/db/project-scope.ts`) for exactly this reason;
  * this is its in-memory twin for the send path and the panels.
  *
- * Precedence: the session's `projectId` → the active workspace → none.
+ * Precedence: the session's `projectId` → the active workspace → none. A
+ * session carrying a durable `executionContext` binding resolves ONLY from the
+ * binding (`executionContext.projectId`, repaired onto the row by
+ * `repairManagedContextProjectId`): a bound session that names no project has
+ * no workspace — falling back to whatever the UI is focused on would let a
+ * bound turn inherit a project the binding never authorized.
  *
  * A session that names a workspace which is not in `projects` (deleted, or not
  * loaded yet) resolves to `null` rather than falling back to the active one.
@@ -24,13 +29,17 @@ import type { Project } from "@/types"
  * the user never picked.
  */
 export function resolveSessionWorkspace<T extends Pick<Project, "id">>(
-  session: { projectId?: string } | null | undefined,
+  session:
+    { projectId?: string; executionContext?: { projectId?: string } | null } | null | undefined,
   projects: readonly T[],
   activeProjectId?: string | null
 ): T | null {
-  if (session?.projectId) {
-    return projects.find((candidate) => candidate.id === session.projectId) ?? null
+  const bound = session?.executionContext
+  const sessionProjectId = session?.projectId || bound?.projectId
+  if (sessionProjectId) {
+    return projects.find((candidate) => candidate.id === sessionProjectId) ?? null
   }
+  if (bound) return null
   if (!activeProjectId) return null
   return projects.find((candidate) => candidate.id === activeProjectId) ?? null
 }

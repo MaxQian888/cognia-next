@@ -168,11 +168,35 @@ export async function tryBuildMemoryDeps(
             transport: embeddingTransport,
           })
         ).embedding
-      deps.vectorSearch = async (vector, topK) => {
-        const hits = await backend.store.searchByEmbedding!(MEMORY_VECTOR_COLLECTION, vector, {
-          limit: topK,
-        })
-        return hits.map((h) => ({ id: h.id, score: h.score }))
+      deps.vectorSearch = async (vector, topK, plan) => {
+        const scopedIds = plan?.vectorDocIds
+        if (scopedIds === undefined) {
+          // No plan: a legacy caller that did not compute an eligible corpus.
+          // Global search is the documented behaviour for that shape — the
+          // scoped path below is what the retriever uses.
+          const hits = await backend.store.searchByEmbedding!(MEMORY_VECTOR_COLLECTION, vector, {
+            limit: topK,
+          })
+          return hits.map((h) => ({ id: h.id, score: h.score }))
+        }
+        if (scopedIds.length === 0) return []
+        // The plan is an allowlist of doc ids, but `PayloadFilter` matches on
+        // payload metadata and the doc id is not a payload field — no
+        // provider-side filter can express "only these ids". So the scoped
+        // path fetches exactly the authorized vectors and scores them locally
+        // rather than querying the global collection and post-filtering (the
+        // starvation bug this replaces: unauthorized rows crowded the top-K
+        // before the filter could run).
+        const docs = await backend.store.getDocuments(MEMORY_VECTOR_COLLECTION, [...scopedIds])
+        const { cosineSimilarity } = await import("@cognia/provider-embedding/embedding-utils")
+        return docs
+          .filter(
+            (doc): doc is typeof doc & { embedding: number[] } =>
+              Array.isArray(doc.embedding) && doc.embedding.length === vector.length
+          )
+          .map((doc) => ({ id: doc.id, score: cosineSimilarity(vector, doc.embedding) }))
+          .sort((left, right) => right.score - left.score)
+          .slice(0, topK)
       }
     }
   } catch {

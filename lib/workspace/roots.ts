@@ -9,7 +9,7 @@ import type { WorkspaceRoot } from "@/types/workspace"
  */
 
 /** The primary root (the cwd), or undefined for a rootless workspace. */
-export function primaryRootOf(project: Pick<Project, "roots">): WorkspaceRoot | undefined {
+export function primaryRootOf(project: { roots?: WorkspaceRoot[] }): WorkspaceRoot | undefined {
   return project.roots?.find((r) => r.isPrimary) ?? project.roots?.[0]
 }
 
@@ -26,13 +26,13 @@ export function resolveSessionProjectRoot(
 }
 
 /** Non-primary root paths (forwarded as additionalDirectories). */
-export function additionalDirsOf(project: Pick<Project, "roots">): string[] {
+export function additionalDirsOf(project: { roots?: WorkspaceRoot[] }): string[] {
   const primary = primaryRootOf(project)
   return (project.roots ?? []).filter((r) => r !== primary).map((r) => r.path)
 }
 
 /** Every root path, primary first. */
-export function allRootPaths(project: Pick<Project, "roots">): string[] {
+export function allRootPaths(project: { roots?: WorkspaceRoot[] }): string[] {
   const primary = primaryRootOf(project)
   if (!primary) return []
   return [primary.path, ...additionalDirsOf(project)]

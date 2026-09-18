@@ -45,35 +45,69 @@ export async function runMemoryRecall(ctx: StepExecutionContext): Promise<StepEx
     throw nonRetryable("action.memory.recall: 'agentId' is required when scope is 'agent'")
   }
 
-  const [{ getSettings }, { resolveMemoryConfig }] = await Promise.all([
-    import("@/lib/db/settings"),
-    import("@/types/memory/memory"),
+  const [{ authorizeMemoryRead, narrowReaderToCaller }, { workflowCaller }] = await Promise.all([
+    import("@/lib/memory/api/read-memory"),
+    import("@/lib/memory/api/caller"),
   ])
-  const settings = await getSettings().catch(() => undefined)
-  const config = resolveMemoryConfig(settings?.memory)
-  if (!config.enabled) {
-    ctx.log("warn", "action.memory.recall: long-term memory is disabled — returning no entries.")
-    return { output: { entries: [], degraded: true, reason: "memory_disabled" } }
+  // The run's trigger binding supplies the governing persona/session — the
+  // node's `characterId`/`agentId` params only narrow the namespace read.
+  const binding = ctx.trigger.binding
+  const caller = {
+    ...workflowCaller(ctx.runId),
+    ...(binding?.sessionId ? { sessionId: binding.sessionId } : {}),
+    ...(binding?.characterId ? { policyCharacterId: binding.characterId } : {}),
+  }
+  const authorized = await authorizeMemoryRead(caller)
+  if (!authorized.ok) {
+    // Disabled / temporary / policy-denied all degrade to an empty read — a
+    // workflow run must not fail just because memory is unavailable.
+    ctx.log(
+      "warn",
+      `action.memory.recall: memory read denied (${authorized.reason}) — returning no entries.`
+    )
+    return { output: { entries: [], degraded: true, reason: authorized.reason } }
+  }
+  const { config, read } = authorized
+  const reader = narrowReaderToCaller(
+    {
+      characterId: scope === "character" ? params.characterId : undefined,
+      projectId: params.projectId,
+      agentId: scope === "agent" ? params.agentId : undefined,
+      branch: params.branch,
+      path: params.path,
+    },
+    caller
+  )
+  if (!reader) {
+    ctx.log(
+      "warn",
+      "action.memory.recall: requested namespace outside the run's authorization — returning no entries."
+    )
+    return { output: { entries: [], degraded: true, reason: "unauthorized_namespace" } }
   }
 
   const { tryBuildMemoryDeps } = await import("@/lib/memory/runtime/build-deps")
-  const deps = await tryBuildMemoryDeps(config)
-  if (!deps) {
+  const baseDeps = await tryBuildMemoryDeps(config)
+  if (!baseDeps) {
     ctx.log("warn", "action.memory.recall: memory backend unavailable — returning no entries.")
     return { output: { entries: [], degraded: true, reason: "backend_unavailable" } }
+  }
+  // Candidates are authorized before scoring; hits are re-checked after, the
+  // same defense-in-depth the external search surface applies. (Procedural
+  // lines are not part of recall — the retriever only reads `loadCandidates`.)
+  const deps = {
+    ...baseDeps,
+    loadCandidates: async (candidateReader: Parameters<typeof baseDeps.loadCandidates>[0]) =>
+      (await baseDeps.loadCandidates(candidateReader)).filter((memory) =>
+        read.isAuthorized(memory)
+      ),
   }
 
   const { retrieveMemories } = await import("@/lib/memory/retrieve/retriever")
   const hits = await retrieveMemories(
     {
       queryText: query,
-      reader: {
-        characterId: scope === "character" ? params.characterId : undefined,
-        projectId: params.projectId,
-        agentId: scope === "agent" ? params.agentId : undefined,
-        branch: params.branch,
-        path: params.path,
-      },
+      reader,
       topK: params.topK ?? 6,
       relevanceFloor: params.relevanceFloor ?? 0.1,
       types: params.types,
@@ -84,15 +118,17 @@ export async function runMemoryRecall(ctx: StepExecutionContext): Promise<StepEx
 
   return {
     output: {
-      entries: hits.map((h) => ({
-        id: h.memory.id,
-        text: h.memory.text,
-        type: h.memory.type,
-        scope: h.memory.scope,
-        importance: h.memory.importance,
-        relevance: h.relevance,
-        score: h.score,
-      })),
+      entries: hits
+        .filter((h) => read.isAuthorized(h.memory))
+        .map((h) => ({
+          id: h.memory.id,
+          text: h.memory.text,
+          type: h.memory.type,
+          scope: h.memory.scope,
+          importance: h.memory.importance,
+          relevance: h.relevance,
+          score: h.score,
+        })),
       degraded: false,
     },
   }

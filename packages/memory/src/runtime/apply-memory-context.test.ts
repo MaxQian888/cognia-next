@@ -61,6 +61,44 @@ describe("applyMemoryContext", () => {
     expect(res.retrievedMemories.map((m) => m.id)).toEqual(["hit"])
   })
 
+  it("returns a prepared snapshot binding the delivered rows at their versions", async () => {
+    const res = await applyMemoryContext({
+      userMessage: "pnpm",
+      ...base,
+      now: 42_000,
+      deps: deps({
+        loadCandidates: async () => [mem("The user prefers pnpm", { id: "hit", version: 7 })],
+      }),
+    })
+    expect(res.snapshot.delivery).toBe("prepared")
+    expect(res.snapshot.createdAt).toBe(42_000)
+    expect(res.snapshot.expiresAt).toBeGreaterThan(42_000)
+    expect(res.snapshot.memoryRefs).toEqual([{ id: "hit", version: 7 }])
+    expect(res.snapshot.degraded).toBe(false)
+    // The receipt binds the exact bytes the model was shown.
+    expect(res.snapshot.contentHash).toMatch(/^[0-9a-z]+$/)
+    // An empty pass still issues a receipt — "nothing was injected" is a fact.
+    const resEmpty = await applyMemoryContext({ userMessage: "zzz", ...base, deps: deps() })
+    expect(resEmpty.snapshot.delivery).toBe("prepared")
+    expect(resEmpty.snapshot.memoryRefs).toEqual([])
+    expect(resEmpty.snapshot.id).toMatch(/^memctx:/)
+  })
+
+  it("marks the snapshot degraded when retrieval throws", async () => {
+    const res = await applyMemoryContext({
+      userMessage: "x",
+      ...base,
+      deps: deps({
+        loadCandidates: async () => {
+          throw new Error("db down")
+        },
+      }),
+    })
+    expect(res.degraded).toBe(true)
+    expect(res.snapshot.degraded).toBe(true)
+    expect(res.snapshot.delivery).toBe("prepared")
+  })
+
   it("only recalls semantic/episodic (procedural goes to its own block)", async () => {
     const res = await applyMemoryContext({
       userMessage: "pnpm",

@@ -98,6 +98,7 @@ export async function buildBackupPackage(
     memoryAuditEvents,
     retrievalProfiles,
     retrievalEncryptedContent,
+    retrievalTombstones,
     plugins,
     pluginPermissions,
     pluginReviews,
@@ -148,6 +149,9 @@ export async function buildBackupPackage(
     includeCoreData || opts.includeSessions
       ? readTable(db.retrievalEncryptedContent)
       : Promise.resolve([]),
+    includeCoreData || opts.includeSessions
+      ? readTable(db.retrievalTombstones)
+      : Promise.resolve([]),
     readTable(db.plugins),
     readTable(db.pluginPermissions),
     readTable(db.pluginReviews),
@@ -194,6 +198,17 @@ export async function buildBackupPackage(
           ? opts.includeSessions
           : includeCoreData)
   )
+  // Tombstones follow the same per-entity gating as the content they guard: a
+  // memory tombstone belongs to the memory slice, a checkpoint tombstone to
+  // the session slice. Dropping them here is what used to let a restore
+  // resurrect hard-deleted rows.
+  const portableRetrievalTombstones = retrievalTombstones.filter((row) =>
+    row.entityType === "memory"
+      ? includeMemories
+      : row.entityType === "compaction_checkpoint"
+        ? opts.includeSessions
+        : includeCoreData
+  )
 
   const payload: BackupPayloadV3 = {
     settings,
@@ -227,10 +242,17 @@ export async function buildBackupPackage(
     twinDrafts,
     twinJobs,
     ...(includeMemories ? { memories, memoryEvidence, memoryJobs, memoryAuditEvents } : {}),
-    ...(includeCoreData || portableRetrievalContent.length > 0
+    // The tombstone slice is gated on ITS OWN emptiness too: an export with
+    // memories but no encrypted projections (retrieval sync never ran) must
+    // still carry its tombstones, or the restore resurrects deleted rows —
+    // the bug this field exists to prevent.
+    ...(includeCoreData ||
+    portableRetrievalContent.length > 0 ||
+    portableRetrievalTombstones.length > 0
       ? {
           retrievalProfiles,
           retrievalEncryptedContent: portableRetrievalContent,
+          retrievalTombstones: portableRetrievalTombstones,
         }
       : {}),
     plugins: filteredPlugins,

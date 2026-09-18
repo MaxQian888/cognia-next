@@ -202,6 +202,17 @@ export interface MemoryJob {
   leaseOwner?: string
   leaseExpiresAt?: number
   heartbeatAt?: number
+  /**
+   * Monotonic claim counter, incremented on every `claimMemoryJob` /
+   * `claimNextMemoryJob`. A worker finishing a job must present the epoch it
+   * claimed under; a stale epoch means a different claim owns the row now and
+   * the completion is refused.
+   *
+   * `leaseOwner` alone cannot express this: when the SAME worker id reclaims
+   * an expired lease, owner still matches, so only the epoch separates the
+   * old claim from the new one. Not indexed — no schema cost.
+   */
+  fencingEpoch?: number
   attempt?: number
   maxAttempts?: number
   cancellationRequestedAt?: number
@@ -296,4 +307,47 @@ export interface MemoryAuditEvent {
   createdAt: number
   /** Structured counters/identifiers only; never memory or transcript text. */
   metadata?: Record<string, string | number | boolean>
+}
+
+/**
+ * Idempotent-mutation receipt for external surfaces.
+ *
+ * One row per applied `(principalId, operationId)` pair — `id` is the
+ * composite `${principalId}:${operationId}`, so a retry that lands the same
+ * operation id on the same principal replays the recorded outcome instead of
+ * re-applying the write. `requestHash` binds the receipt to the exact request
+ * body: reusing an operation id with a different request is a caller bug and
+ * is refused, not silently replayed.
+ *
+ * Only APPLIED operations get a row. A denied or conflicted request left no
+ * side effect, so nothing needs remembering — the retry simply evaluates
+ * again. This is what keeps a `version_conflict` answer from sticking to an
+ * operation id forever.
+ */
+export interface MemoryOperationRow {
+  /** `${principalId}:${operationId}` — the dedupe identity. */
+  id: string
+  /** The `TrustedMemoryCaller.principalId` that performed the mutation. */
+  principalId: string
+  /** Caller-supplied idempotency key, unique per principal. */
+  operationId: string
+  kind: "store" | "update" | "forget"
+  /** djb2 hash of the canonical request payload (`memoryOperationRequestHash`). */
+  requestHash: string
+  /** The memory row the operation applied to. */
+  memoryId: string
+  /** Outcome code, e.g. `"ok"`. */
+  resultCode: string
+  /** The row's `version` after the operation applied. */
+  resultVersion?: number
+  /**
+   * `store`-kind receipts record the outcome fields the first call returned,
+   * so a replay answers the SAME result rather than a generic success shape —
+   * `consolidated: false` on the original (degraded insert path) must not
+   * come back `true` on a retry.
+   */
+  resultConsolidated?: boolean
+  /** The consolidator ops the first call reported (`["ADD"]`, `["NOOP"]`, …). */
+  resultApplied?: string[]
+  createdAt: number
 }

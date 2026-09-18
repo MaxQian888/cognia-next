@@ -31,11 +31,21 @@ import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 
 export interface MemoryJobWorkerDeps {
   claimNext: (workerId: string) => Promise<MemoryJob | undefined>
-  finish: (id: string, outcome: MemoryJobProcessOutcome, workerId: string) => Promise<unknown>
-  fail: (id: string, code: string, workerId: string) => Promise<unknown>
+  finish: (
+    id: string,
+    outcome: MemoryJobProcessOutcome,
+    workerId: string,
+    fencingEpoch?: number
+  ) => Promise<unknown>
+  fail: (id: string, code: string, workerId: string, fencingEpoch?: number) => Promise<unknown>
   process: (job: MemoryJob) => Promise<MemoryJobProcessOutcome>
   /** Keeps the lease alive while `process` runs. Returns its own stopper. */
-  heartbeat?: (jobId: string, workerId: string, onLeaseLost: () => void) => () => void
+  heartbeat?: (
+    jobId: string,
+    workerId: string,
+    fencingEpoch: number | undefined,
+    onLeaseLost: () => void
+  ) => () => void
 }
 
 export interface MemoryJobProcessOutcome {
@@ -59,7 +69,7 @@ export async function drainMemoryJobs(
     const job = await deps.claimNext(workerId)
     if (!job) break
     let lost = false
-    const stopHeartbeat = deps.heartbeat?.(job.id, workerId, () => {
+    const stopHeartbeat = deps.heartbeat?.(job.id, workerId, job.fencingEpoch, () => {
       lost = true
     })
     try {
@@ -67,18 +77,24 @@ export async function drainMemoryJobs(
       // A lost lease is not an error. The extraction may already have written
       // memories, and the worker that stole the job will redo the work, which
       // the consolidator dedupes. What must NOT happen is overwriting the row
-      // that the new owner (or the user's cancel) now controls.
-      if (!lost) await deps.finish(job.id, outcome, workerId)
+      // that the new owner (or the user's cancel) now controls — the epoch is
+      // what keeps that guarantee when the same worker id reclaimed the row.
+      if (!lost) await deps.finish(job.id, outcome, workerId, job.fencingEpoch)
     } catch (error) {
       if (error instanceof MemoryJobTerminalError) {
         if (!lost)
-          await deps.finish(job.id, { status: "skipped", resultCode: error.code }, workerId)
+          await deps.finish(
+            job.id,
+            { status: "skipped", resultCode: error.code },
+            workerId,
+            job.fencingEpoch
+          )
         processed += 1
         continue
       }
       const code =
         error instanceof MemoryJobProcessingError ? error.code : "memory_job_processing_failed"
-      if (!lost) await deps.fail(job.id, code, workerId)
+      if (!lost) await deps.fail(job.id, code, workerId, job.fencingEpoch)
     } finally {
       stopHeartbeat?.()
     }
@@ -695,10 +711,14 @@ async function defaultRepairNamespaces(): Promise<unknown> {
 
 const defaultWorkerDeps: MemoryJobWorkerDeps = {
   claimNext: claimNextMemoryJob,
-  finish: (id, outcome, workerId) =>
-    finishMemoryJob(id, outcome.status, outcome.resultCode, Date.now(), { workerId }),
-  fail: (id, code, workerId) => failMemoryJob(id, code, Date.now(), { workerId }),
+  finish: (id, outcome, workerId, fencingEpoch) =>
+    finishMemoryJob(id, outcome.status, outcome.resultCode, Date.now(), {
+      workerId,
+      fencingEpoch,
+    }),
+  fail: (id, code, workerId, fencingEpoch) =>
+    failMemoryJob(id, code, Date.now(), { workerId, fencingEpoch }),
   process: processMemoryJob,
-  heartbeat: (jobId, workerId, onLeaseLost) =>
-    startMemoryJobHeartbeat(jobId, workerId, { onLeaseLost }),
+  heartbeat: (jobId, workerId, fencingEpoch, onLeaseLost) =>
+    startMemoryJobHeartbeat(jobId, workerId, { fencingEpoch, onLeaseLost }),
 }

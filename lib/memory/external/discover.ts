@@ -49,10 +49,18 @@ export async function discoverExternalMemory(ctx: DiscoverCtx): Promise<External
   // Codex wins because it also owns the `AGENTS.override.md` sibling.
   // Pi is last: it reads the same AGENTS.md/CLAUDE.md the others do, but only
   // contributes its own SYSTEM.md / APPEND_SYSTEM.md, so it can never steal a
-  // shared row from the provider that owns it.
+  // shared row from the provider that owns it. Losing claimants are not
+  // dropped — they accumulate into `consumers` so the row still records every
+  // runtime the file feeds.
   for (const file of [...claude, ...codex, ...opencode, ...pi]) {
-    // First writer wins; providers already emit precedence-ordered entries.
-    if (!byKey.has(file.id)) byKey.set(file.id, file)
+    const existing = byKey.get(file.id)
+    if (!existing) {
+      // First writer wins; providers already emit precedence-ordered entries.
+      byKey.set(file.id, file.consumers ? file : { ...file, consumers: [file.agent] })
+      continue
+    }
+    const consumers = existing.consumers ?? [existing.agent]
+    if (!consumers.includes(file.agent)) existing.consumers = [...consumers, file.agent]
   }
   return [...byKey.values()].sort(compareFiles)
 }

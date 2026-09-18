@@ -129,7 +129,9 @@ describe("lesson materialization", () => {
       // Envelope stripped: the memory subsystem applies its own fencing on
       // retrieval, and a doubly-fenced body renders as literal tag text.
       expect.objectContaining({ text: "body-d1", type: "semantic", tags: ["rust"] }),
-      { channel: "mcp" }
+      { channel: "mcp" },
+      // Operator-approved inbound lessons run as the account owner.
+      { principalId: "local-user", transport: "local-ui" }
     )
   })
 

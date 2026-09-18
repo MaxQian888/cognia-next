@@ -133,7 +133,9 @@ describe("resolveSendOptions memory injection", () => {
     expect(opts.systemPrompt).toContain("character pnpm preference")
   })
 
-  it("lets a session recall override beat the Agent default but not the global master switch", async () => {
+  it("treats the Agent recall deny as a hard veto — a session toggle cannot revive it", async () => {
+    // `operations.recall:false` is the character author's contract; a
+    // session's `memoryUse:true` may only ever NARROW, never widen.
     const character = {
       ...baseCharacter,
       memoryPolicy: {
@@ -150,7 +152,7 @@ describe("resolveSendOptions memory injection", () => {
       memoryDeps: deps({ loadCandidates: async () => [mem("pnpm fact")] }),
       memoryUserMessage: "pnpm",
     }
-    expect((await resolveSendOptions(common)).systemPrompt).toContain("pnpm fact")
+    expect((await resolveSendOptions(common)).systemPrompt).not.toContain("pnpm fact")
     expect(
       (
         await resolveSendOptions({
@@ -207,6 +209,12 @@ describe("resolveSendOptions memory injection", () => {
     expect(opts.systemPrompt).toContain("The user prefers pnpm")
     expect(opts.memoryContext?.retrievedMemories.map((m) => m.id)).toEqual(["hit"])
     expect(opts.memoryContext?.degraded).toBe(false)
+    // The delivery receipt rides along — the chat hook stamps it `delivered`.
+    expect(opts.memoryContext?.snapshot).toMatchObject({
+      delivery: "prepared",
+      degraded: false,
+      memoryRefs: [{ id: "hit", version: 1 }],
+    })
   })
 
   it("injects the procedural block", async () => {

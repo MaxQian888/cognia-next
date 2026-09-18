@@ -1980,6 +1980,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
             withheldCount: result.withheldCount,
             budget: result.budget,
             degraded: result.degraded,
+            // Delivery receipt — `mergeMemorySourcesIntoLastAssistant` upgrades
+            // it to `delivered` as it lands on the assistant message.
+            snapshot: result.snapshot,
           }
         }
       } catch {
@@ -2840,6 +2843,27 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       } else {
         opts.mcpServers = await buildMcpServerMapResolved(chosen)
       }
+
+      // `declared_by` locators for hook tool_provenance — same keys as the
+      // wire map above. File-loaded rows carry `declaredBy` from the loader;
+      // store rows resolve to the plugin's manifest path (or `plugin:<id>`
+      // when the plugin isn't loaded), `"builtin"` for host-contributed
+      // servers, `"settings"` for everything else the store declares.
+      const declaredBy: Record<string, string> = {}
+      let pluginPaths: Record<string, { path?: string } | undefined> | undefined
+      for (const srv of chosen) {
+        if (typeof srv.declaredBy === "string" && srv.declaredBy) {
+          declaredBy[srv.name] = srv.declaredBy
+        } else if (srv.pluginId) {
+          pluginPaths ??= (await import("@/stores/plugin-runtime")).usePluginStore.getState()
+            .plugins
+          const path = pluginPaths[srv.pluginId]?.path
+          declaredBy[srv.name] = path ? `${path}/plugin.json` : `plugin:${srv.pluginId}`
+        } else {
+          declaredBy[srv.name] = srv.origin === "builtin" ? "builtin" : "settings"
+        }
+      }
+      opts.mcpDeclaredBy = declaredBy
     }
   } catch (err) {
     // Non-fatal — just skip MCP for this turn.

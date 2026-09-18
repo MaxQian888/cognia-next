@@ -15,6 +15,8 @@
 // Type contracts
 export * from "./types/memory"
 export * from "./types/governance"
+export * from "./types/caller"
+export * from "./types/context-snapshot"
 
 // LLM contract + JSON helper (vendored; concrete client stays app-side)
 export * from "./llm"

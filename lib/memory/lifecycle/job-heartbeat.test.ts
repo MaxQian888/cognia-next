@@ -24,9 +24,23 @@ describe("startMemoryJobHeartbeat", () => {
       now: () => 1_000,
     })
     await tick(100)
-    expect(mockHeartbeat).toHaveBeenCalledWith("j1", "w1", 1_000)
+    expect(mockHeartbeat).toHaveBeenCalledWith("j1", "w1", 1_000, undefined, undefined)
     await tick(100)
     expect(mockHeartbeat).toHaveBeenCalledTimes(2)
+    stop()
+  })
+
+  it("presents the claimed fencing epoch on every renew", async () => {
+    const stop = startMemoryJobHeartbeat("j1", "w1", {
+      heartbeat: mockHeartbeat as never,
+      intervalMs: 100,
+      now: () => 1_000,
+      fencingEpoch: 7,
+    })
+    await tick(100)
+    expect(mockHeartbeat).toHaveBeenCalledWith("j1", "w1", 1_000, undefined, 7)
+    await tick(100)
+    expect(mockHeartbeat).toHaveBeenLastCalledWith("j1", "w1", 1_000, undefined, 7)
     stop()
   })
 
