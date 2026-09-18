@@ -65,8 +65,9 @@ test("enable and disable use the host bridge and update account setup and model 
   const manifest = readManifest()
   const settings = { [providerId]: { providerId, enabled: true, defaultModel: "kimi-for-coding" } }
   expect(getSubscriptionProvider(providerId)).toBeUndefined()
-  for (const entry of manifest.subscriptionProviders ?? [])
-    bridge.registerEntry(entry, { pluginId })
+  // Same widening the dispatch loop applies: it can only prove `id` is present.
+  const entries: ReadonlyArray<{ id: string }> = manifest.subscriptionProviders ?? []
+  for (const entry of entries) bridge.registerEntry(entry, { pluginId })
   expect(getSubscriptionProvider(providerId)).toMatchObject({
     name: "Kimi Code",
     source: "plugin",

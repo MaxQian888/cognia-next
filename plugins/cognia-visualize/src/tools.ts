@@ -1,4 +1,4 @@
-import { definePluginTool, type PluginTool } from "@cognia/plugin-sdk"
+import { definePluginTool, type PluginToolRegistration } from "@cognia/plugin-sdk"
 import type { VisualizationSpec } from "./model"
 import { createVisualizeRuntime, type VisualizePluginContext } from "./runtime"
 
@@ -58,7 +58,7 @@ const specSchema = {
   additionalProperties: false,
 } as const
 
-export function createVisualizeTools(ctx: VisualizePluginContext): PluginTool[] {
+export function createVisualizeTools(ctx: VisualizePluginContext): PluginToolRegistration[] {
   const runtime = createVisualizeRuntime(ctx)
   return [
     definePluginTool({

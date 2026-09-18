@@ -1,9 +1,11 @@
-import type { Artifact } from "@cognia/plugin-sdk"
+import type { Artifact, PluginFilesAPI } from "@cognia/plugin-sdk"
 import { createVisualization, VISUALIZATION_ARTIFACT_KIND } from "./model"
 import { createVisualizeRuntime } from "./runtime"
 
 function createCtx(artifacts: Map<string, Artifact>) {
-  const save = jest.fn(async () => ({ saved: true }))
+  const save = jest.fn(async (_options: Parameters<PluginFilesAPI["save"]>[0]) => ({
+    saved: true,
+  }))
   const ctx = {
     pluginId: "cognia-visualize",
     artifact: {

@@ -1,3 +1,4 @@
+import type { PluginToolRegistration } from "@cognia/plugin-sdk"
 import definition from "./index"
 import { getPipelineDb } from "./db/runtime"
 import { ZHIHU_ROLE_PACK } from "./characters/pack"
@@ -18,7 +19,7 @@ function buildCtx(withDexie = true) {
   const disposeNode = jest.fn()
   const registerNode = jest.fn(() => disposeNode)
   const toolDisposers: jest.Mock[] = []
-  const registerTool = jest.fn(() => {
+  const registerTool = jest.fn((_tool: PluginToolRegistration) => {
     const d = jest.fn()
     toolDisposers.push(d)
     return d

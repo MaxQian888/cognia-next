@@ -264,9 +264,9 @@ describe("StrixPanel scan lifecycle", () => {
     const user = userEvent.setup()
     const { registerRunController, syncExecutionRun, showToast, setBadge } = fullRuntime()
     mockedRunScan.mockImplementation(async (_opts, deps) => {
-      deps.onRun(run({ status: "running", endedAt: undefined }))
-      deps.onConsole("strix is scanning…")
-      deps.onRun(run({ status: "done", findingsCount: 2 }))
+      deps.onRun?.(run({ status: "running", endedAt: undefined }))
+      deps.onConsole?.("strix is scanning…")
+      deps.onRun?.(run({ status: "done", findingsCount: 2 }))
       return run({ status: "done", findingsCount: 2 })
     })
 

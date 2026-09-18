@@ -19,6 +19,8 @@ interface MockWidget {
   checkBox?: boolean
   radioButton?: boolean
   pushButton?: boolean
+  combo?: boolean
+  multiSelect?: boolean
   exportValue?: string
   buttonValue?: string
   fieldValue?: unknown

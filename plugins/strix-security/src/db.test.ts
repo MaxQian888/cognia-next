@@ -214,7 +214,7 @@ describe("suppression rules", () => {
 })
 
 describe("markInterruptedRuns", () => {
-  const runRow = (over: Partial<StrixRun>): StrixRun => ({
+  const runRow = (over: Partial<StrixRun>): StrixRun & Record<string, unknown> => ({
     runId: "r",
     target: "t",
     startedAt: 0,
@@ -253,7 +253,7 @@ describe("markInterruptedRuns", () => {
 })
 
 describe("runs + findings tables", () => {
-  const runRow = (over: Partial<StrixRun>): StrixRun => ({
+  const runRow = (over: Partial<StrixRun>): StrixRun & Record<string, unknown> => ({
     runId: "r",
     target: "t",
     startedAt: 0,

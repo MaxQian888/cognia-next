@@ -14,6 +14,7 @@ import type {
   PreflightStatus,
   ScanOptions,
   StrixFinding,
+  StrixRun,
   SuppressionRule,
 } from "./types"
 import { PANEL_ID } from "./ids"

@@ -1,4 +1,4 @@
-import type { PluginContext } from "@cognia/plugin-sdk"
+import type { CreateArtifactOptions, PluginContext } from "@cognia/plugin-sdk"
 
 import { persistReport } from "./artifacts"
 import type { DeepResearchResult } from "./types"
@@ -24,7 +24,7 @@ function ctx(artifact?: Partial<PluginContext["artifact"]>): PluginContext {
 
 describe("persistReport", () => {
   it("saves the report as a plugin-owned markdown document and returns the id", async () => {
-    const createArtifact = jest.fn(async () => "art-1")
+    const createArtifact = jest.fn(async (_options: CreateArtifactOptions) => "art-1")
     const id = await persistReport(ctx({ createArtifact }), report, {
       sessionId: "s-1",
       messageId: "m-1",
@@ -63,7 +63,7 @@ describe("persistReport", () => {
   })
 
   it("omits absent routing keys rather than sending explicit undefined", async () => {
-    const createArtifact = jest.fn(async () => "a")
+    const createArtifact = jest.fn(async (_options: CreateArtifactOptions) => "a")
     await persistReport(ctx({ createArtifact }), report)
     const arg = createArtifact.mock.calls[0][0]
     expect(arg).not.toHaveProperty("sessionId")

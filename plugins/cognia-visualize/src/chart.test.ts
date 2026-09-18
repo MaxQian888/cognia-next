@@ -1,7 +1,15 @@
 import { buildChartSvg, visualizationColumns } from "./chart"
-import { createVisualization, VISUALIZATION_PROFILES, type VisualizationProfile } from "./model"
+import {
+  createVisualization,
+  VISUALIZATION_PROFILES,
+  type VisualizationDatum,
+  type VisualizationProfile,
+} from "./model"
 
-function spec(profile: VisualizationProfile, data = [{ label: "Q1", value: 10 }]) {
+function spec(
+  profile: VisualizationProfile,
+  data: VisualizationDatum[] = [{ label: "Q1", value: 10 }]
+) {
   return createVisualization({ title: "Demo", profile, data })
 }
 

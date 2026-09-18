@@ -1,3 +1,4 @@
+import type { PluginToolRegistration } from "@cognia/plugin-sdk"
 import definition, { manifest } from "./index"
 import { VISUALIZE_TOOL_NAMES } from "./tools"
 
@@ -9,13 +10,13 @@ function createCtx() {
       registerRenderer: jest.fn(() => disposers.renderer),
       listArtifacts: jest.fn(() => []),
     },
-    agent: { registerTool: jest.fn(() => jest.fn()) },
+    agent: { registerTool: jest.fn((_tool: PluginToolRegistration) => jest.fn()) },
     export: { registerExporter: jest.fn(() => disposers.exporter) },
     i18n: {
       registerTranslations: jest.fn(),
       t: (key: string) => key,
       getCurrentLocale: () => "en",
-      onLocaleChange: jest.fn(() => disposers.locale),
+      onLocaleChange: jest.fn((_listener: () => void) => disposers.locale),
     },
     logger: { info: jest.fn() },
   }

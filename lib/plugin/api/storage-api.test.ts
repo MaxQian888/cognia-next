@@ -6,7 +6,12 @@
 import "fake-indexeddb/auto"
 import { getDb, __resetDbForTesting } from "@/lib/db/schema"
 import { upsertPlugin } from "@/lib/db/plugins"
-import { serializeSources, restoreMultiSnapshot } from "@/cli/src/db/snapshot"
+import {
+  serializeSources,
+  restoreMultiSnapshot,
+  type DbLike,
+  type SnapshotSource,
+} from "@/cli/src/db/snapshot"
 let headless = false
 jest.mock("@/lib/platform/detect", () => ({
   ...jest.requireActual("@/lib/platform/detect"),
@@ -328,7 +333,14 @@ describe("Headless durable plugin storage", () => {
     })
     await api.setSecure("encrypted", { sensitive: "fixture" })
     const db = getDb()
-    const sources = [{ name: "CogniaDB", db: { verno: db.verno, tables: [db.plugins] } }]
+    // Dexie's `Table` overloads don't satisfy `DbTableLike`'s `unknown[]` params —
+    // production makes the same runtime-honest cast in `resolveSourcesFactory`.
+    const sources: SnapshotSource[] = [
+      {
+        name: "CogniaDB",
+        db: { verno: db.verno, tables: [db.plugins] } as unknown as DbLike,
+      },
+    ]
     const snapshot = JSON.parse(JSON.stringify(await serializeSources(sources)))
     await db.plugins.clear()
     localStorageMock.clear()
