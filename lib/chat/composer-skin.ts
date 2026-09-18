@@ -331,3 +331,50 @@ export function resolveToolbarLayout(
   if (proposed === "folded") return "folded"
   return "embedded"
 }
+
+/**
+ * Fold tiers — how much of the toolbar roster the measured pane width can
+ * hold without shaving a label into "A…". A different axis from
+ * {@link COMPACT_TOOLBAR_PX}: that constant decides which LAYOUT a skin may
+ * keep; this ladder decides how much of the roster ANY layout spells out
+ * inline, and in what form.
+ *
+ * Priority order (least essential folds first — the per-turn answers "which
+ * model / how deep / what may it do" are the last to give up their words):
+ *
+ *  - tier 0 (≥ `labelled`): the full roster, every chip labelled.
+ *  - tier 1 (≥ `packed`):   preset, sandbox and the plugin slots fold behind
+ *    "⋯"; the session-cost badge switches to its short `$x.xx` form.
+ *  - tier 2 (≥ `glyphs`):   effort / fusion / permission go icon-only, the
+ *    runtime chip drops its name, and Agent mode joins "⋯".
+ *  - tier 3 (≥ `tight`):    fusion and session cost fold into "⋯" (both render
+ *    their full form inside the popover); the model chip narrows.
+ *  - tier 4 (< `tight`):    the context indicator drops its percentage and
+ *    keeps only the ring.
+ *
+ * The edges are deliberately conservative: a chip whose label still fits
+ * stays labelled, and what folds is always reachable in the SAME "⋯"
+ * disclosure — nothing is ever dropped outright.
+ */
+export type ToolbarFoldTier = 0 | 1 | 2 | 3 | 4
+
+export const TOOLBAR_FOLD_PX = {
+  /** ≥ this width the full labelled roster fits without shaving. */
+  labelled: 720,
+  /** ≥ this width labels stay; ambient + plugin affordances fold. */
+  packed: 520,
+  /** ≥ this width per-turn chips go icon-only; mode + runtime name fold. */
+  glyphs: 380,
+  /** ≥ this width cost folds; below it the context ring stands alone. */
+  tight: 300,
+} as const
+
+export function resolveToolbarFoldTier(toolbarWidth: number): ToolbarFoldTier {
+  // `0` means "not measured yet" — render the widest form rather than
+  // flashing a packed row on first paint (same rule as the layout resolver).
+  if (toolbarWidth <= 0 || toolbarWidth >= TOOLBAR_FOLD_PX.labelled) return 0
+  if (toolbarWidth >= TOOLBAR_FOLD_PX.packed) return 1
+  if (toolbarWidth >= TOOLBAR_FOLD_PX.glyphs) return 2
+  if (toolbarWidth >= TOOLBAR_FOLD_PX.tight) return 3
+  return 4
+}

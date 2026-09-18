@@ -280,6 +280,10 @@ export const ANIME_EFFORT_CSS = String.raw`
 }
 .aef-trigger {
   height: 1.75rem;
+  /* The surface hands this control a fixed-width box, not a measurement —
+     fill it and no further, or a content-sized trigger paints past its right
+     edge over the next toolbar control. */
+  width: 100%;
   min-width: 0;
   gap: .45rem;
   border-radius: var(--radius-control);
@@ -316,6 +320,9 @@ export const ANIME_EFFORT_CSS = String.raw`
   box-shadow: 0 0 12px color-mix(in oklab, var(--aef-accent) 45%, transparent);
 }
 .aef-trigger-value {
+  /* A flex item's floor is its own content — without this the label holds
+     the trigger open past the surface instead of reaching the ellipsis. */
+  min-width: 0;
   max-width: 6rem;
   overflow: hidden;
   font-weight: inherit;

@@ -41,9 +41,15 @@ interface EffortChipProps {
   /** Disable interaction while a turn is in flight. */
   disabled?: boolean
   className?: string
+  /**
+   * Icon-only form for a toolbar that has run out of label room. The level
+   * still reads through the aria-label (and the popover on open) — the word
+   * is the only thing given up. Set by the toolbar's fold tier.
+   */
+  glyph?: boolean
 }
 
-export function EffortChip({ session, disabled, className }: EffortChipProps) {
+export function EffortChip({ session, disabled, className, glyph }: EffortChipProps) {
   const t = useTranslations("chat.composer.effort")
   const surface = useEffortSurface(session)
   const [open, setOpen] = useState(false)
@@ -80,7 +86,13 @@ export function EffortChip({ session, disabled, className }: EffortChipProps) {
           aria-label={t("triggerAria", { level: t(`level.${current}` as "level.off") })}
           data-testid="effort-chip"
           data-level={current}
-          className={cn("gap-1", ultra && "text-effort-ultra hover:text-effort-ultra", className)}
+          data-glyph={glyph || undefined}
+          className={cn(
+            "gap-1",
+            ultra && "text-effort-ultra hover:text-effort-ultra",
+            glyph && "w-7 justify-center px-0",
+            className
+          )}
         >
           {/* Both halves are keyed by tier so React remounts them and their
               entrance re-fires: this chip is often the only part of the control
@@ -95,9 +107,11 @@ export function EffortChip({ session, disabled, className }: EffortChipProps) {
             )}
             aria-hidden
           />
-          <span key={`label-${current}`} className="effort-value-rise truncate">
-            {t(`level.${current}` as "level.off")}
-          </span>
+          {glyph ? null : (
+            <span key={`label-${current}`} className="effort-value-rise truncate">
+              {t(`level.${current}` as "level.off")}
+            </span>
+          )}
         </Button>
       }
     >

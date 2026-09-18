@@ -21,7 +21,7 @@
       "entry": "src/index.tsx",
       "export": "AnimeEffortControl",
       "priority": 18,
-      "minWidth": 76,
+      "minWidth": 112,
       "maxWidth": 118,
       "labelKey": "control.label"
     }

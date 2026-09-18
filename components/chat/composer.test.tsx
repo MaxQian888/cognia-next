@@ -96,6 +96,10 @@ jest.mock("@/lib/db/chat-drafts", () => ({
   getDraft: jest.fn(async () => undefined),
   setDraftDebounced: jest.fn(() => undefined),
 }))
+const trackEventMock = jest.fn()
+jest.mock("@/lib/telemetry/events/track-event", () => ({
+  trackEvent: (...a: unknown[]) => trackEventMock(...a),
+}))
 jest.mock("./composer/voice-controls", () => ({
   VoiceControls: () => null,
 }))
@@ -1194,10 +1198,44 @@ describe("Composer — references staged before a conversation exists", () => {
         references: [{ kind: "entity", entityKind: "issue", title: "Broker race" }],
       },
     })
+    // Reference telemetry carries the kind set and the stale count — ids,
+    // enums and numbers, never titles or bodies. It fires once the send has
+    // resolved, so it is awaited rather than read inline.
+    await waitFor(() =>
+      expect(trackEventMock).toHaveBeenCalledWith("chat.reference.sent", {
+        kinds: "entity",
+        staleCount: 0,
+      })
+    )
     // Consumed by exactly this turn.
     await waitFor(() =>
       expect(composerReadSlice(useChatStore.getState(), null).contextSelections).toEqual([])
     )
+  })
+
+  it("does not emit reference telemetry on a plain send", async () => {
+    const onSend = jest.fn(async (..._args: unknown[]) => undefined)
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <Composer
+          placement="hero"
+          session={null}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={onSend}
+          onStop={async () => undefined}
+        />
+      </Wrapper>
+    )
+    const ta = document.querySelector("textarea") as HTMLTextAreaElement
+    fireEvent.change(ta, { target: { value: "no references here" } })
+    await act(async () => {
+      fireEvent.click(document.querySelector('button[aria-label="Send"]') as HTMLButtonElement)
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1))
+    expect(trackEventMock).not.toHaveBeenCalledWith("chat.reference.sent", expect.anything())
   })
 })
 

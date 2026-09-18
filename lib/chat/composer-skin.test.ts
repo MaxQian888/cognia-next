@@ -4,8 +4,10 @@ import {
   COMPOSER_SKINS,
   DEFAULT_COMPOSER_SKIN,
   MOBILE_MIN_TOUCH_PX,
+  TOOLBAR_FOLD_PX,
   composerSkinVars,
   resolveComposerSkin,
+  resolveToolbarFoldTier,
   resolveToolbarLayout,
   toolbarSitsInBox,
   type ComposerSkinId,
@@ -168,6 +170,45 @@ describe("skin proposes, width disposes", () => {
     // width 0 means "not measured yet"; degrading here would flash a compact
     // layout on first paint and then snap back.
     expect(resolveToolbarLayout("expanded", 0)).toBe("expanded")
+  })
+})
+
+describe("the fold ladder", () => {
+  it("renders the full labelled roster at or above the widest rung", () => {
+    expect(resolveToolbarFoldTier(TOOLBAR_FOLD_PX.labelled)).toBe(0)
+    expect(resolveToolbarFoldTier(900)).toBe(0)
+  })
+
+  it("keeps the widest form before the pane has been measured", () => {
+    // width 0 means "not measured yet" — a compact first paint would snap
+    // back the moment ResizeObserver reported, same rule as the layout
+    // resolver above.
+    expect(resolveToolbarFoldTier(0)).toBe(0)
+    expect(resolveToolbarFoldTier(-1)).toBe(0)
+  })
+
+  it("folds the ambient tail first and the per-turn answers last", () => {
+    expect(resolveToolbarFoldTier(TOOLBAR_FOLD_PX.labelled - 1)).toBe(1)
+    expect(resolveToolbarFoldTier(TOOLBAR_FOLD_PX.packed)).toBe(1)
+    expect(resolveToolbarFoldTier(TOOLBAR_FOLD_PX.packed - 1)).toBe(2)
+    expect(resolveToolbarFoldTier(TOOLBAR_FOLD_PX.glyphs)).toBe(2)
+    expect(resolveToolbarFoldTier(TOOLBAR_FOLD_PX.glyphs - 1)).toBe(3)
+    expect(resolveToolbarFoldTier(TOOLBAR_FOLD_PX.tight)).toBe(3)
+    expect(resolveToolbarFoldTier(TOOLBAR_FOLD_PX.tight - 1)).toBe(4)
+    expect(resolveToolbarFoldTier(0)).toBe(0)
+  })
+
+  it("is monotonic — a narrower pane never earns MORE inline controls", () => {
+    for (let w = 200; w <= 800; w += 25) {
+      expect(resolveToolbarFoldTier(w - 25)).toBeGreaterThanOrEqual(resolveToolbarFoldTier(w))
+    }
+  })
+
+  it("answers a different question than the layout threshold", () => {
+    // COMPACT_TOOLBAR_PX decides WHICH arrangement a skin keeps; this ladder
+    // decides how much of the roster that arrangement spells out. A rail at
+    // 350px is still a rail — with fold tier 3 on its roster.
+    expect(TOOLBAR_FOLD_PX.tight).toBeLessThan(COMPACT_TOOLBAR_PX)
   })
 })
 

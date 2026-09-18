@@ -46,6 +46,12 @@ interface FusionModeChipProps {
   /** Disable interaction while a turn is in flight. */
   disabled?: boolean
   className?: string
+  /**
+   * Icon-only form for a toolbar that has run out of label room. A non-auto
+   * mode still reads through the aria-label and the amber flag; the word is
+   * the only thing given up. Set by the toolbar's fold tier.
+   */
+  glyph?: boolean
 }
 
 export function FusionModeChip({
@@ -53,6 +59,7 @@ export function FusionModeChip({
   builtinRuntime,
   disabled,
   className,
+  glyph,
 }: FusionModeChipProps) {
   const t = useTranslations("routerFusion.modePicker")
   const gate = useSettingsStore((state) => routerFusionGate(state.settings, "chat"))
@@ -79,6 +86,7 @@ export function FusionModeChip({
           className={cn(
             "gap-1",
             tripped && mode !== "auto" && "text-amber-600 dark:text-amber-400",
+            glyph && "w-7 justify-center px-0",
             className
           )}
         >
@@ -88,7 +96,7 @@ export function FusionModeChip({
             <Route className="size-3.5 shrink-0 opacity-70" aria-hidden />
           )}
           {/* Label only when not the default, like the other shape chips. */}
-          {mode !== "auto" ? <span className="truncate">{label}</span> : null}
+          {mode !== "auto" && !glyph ? <span className="truncate">{label}</span> : null}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="top" className="w-72" data-testid="fusion-mode-menu">

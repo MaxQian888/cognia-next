@@ -36,9 +36,17 @@ interface Props {
   /** Caller supplies the i18n-formatted tokens label so the badge stays a
    *  pure presentation component without taking a translations namespace. */
   tokensLabel: (input: string, output: string) => string
+  /**
+   * Short form for a toolbar that has run out of label room: just the dollar
+   * figure (or the compact token pair before the first billed turn). The full
+   * breakdown is still one click away in the same popover. Set by the
+   * toolbar's fold tier — NOT by the viewport, which knows nothing about how
+   * wide the pane holding this badge is.
+   */
+  compact?: boolean
 }
 
-export function SessionCostBadge({ sessionId, inMemoryUsage, tokensLabel }: Props) {
+export function SessionCostBadge({ sessionId, inMemoryUsage, tokensLabel, compact }: Props) {
   const t = useTranslations("chat.sessionCost")
 
   // Live read of every persisted row for this session. `useLiveQuery` returns
@@ -62,17 +70,31 @@ export function SessionCostBadge({ sessionId, inMemoryUsage, tokensLabel }: Prop
           variant="ghost"
           size="sm"
           className={cn(
-            "hidden h-auto items-center gap-1 px-1 py-0.5 text-xs font-normal text-muted-foreground sm:inline-flex",
+            "inline-flex h-auto items-center gap-1 px-1 py-0.5 text-xs font-normal text-muted-foreground",
             "hover:bg-muted/50 focus-visible:bg-muted/50"
           )}
           aria-label={t("trigger")}
           data-testid="session-cost-trigger"
+          data-compact={compact || undefined}
         >
           <CircleDollarSignIcon className="size-3.5" />
-          <span title={t("tokensTitle", { input: inputs, output: outputs })}>
-            {tokensLabel(formatTokens(inputs), formatTokens(outputs))}
-          </span>
-          {cost > 0 && <span className="font-mono">· ${cost.toFixed(4)}</span>}
+          {compact ? (
+            <span
+              className="font-mono"
+              title={t("tokensTitle", { input: inputs, output: outputs })}
+            >
+              {cost > 0
+                ? `$${cost.toFixed(2)}`
+                : tokensLabel(formatTokens(inputs), formatTokens(outputs))}
+            </span>
+          ) : (
+            <>
+              <span title={t("tokensTitle", { input: inputs, output: outputs })}>
+                {tokensLabel(formatTokens(inputs), formatTokens(outputs))}
+              </span>
+              {cost > 0 && <span className="font-mono">· ${cost.toFixed(4)}</span>}
+            </>
+          )}
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-72 max-w-[calc(100vw-2rem)] space-y-3 text-xs">

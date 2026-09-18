@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { act, render, screen, fireEvent } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { useChatExecutor } from "@/components/agent/composition/use-chat-executor"
 import { BottomToolbar, TOOLBAR_CHIP } from "./bottom-toolbar"
 import {
@@ -38,13 +38,15 @@ jest.mock("@/components/agent/composition/use-chat-executor", () => ({
 jest.mock("@/components/agent/composition/composition-chip", () => ({
   CompositionChip: (props: Record<string, unknown>) => {
     Object.assign(lastSelectorProps, props)
-    return <div data-testid="composition-chip" />
+    return <div data-testid="composition-chip" data-layout={String(props.layout)} />
   },
 }))
 jest.mock("@/components/agent/mode/runtime-selector", () => ({
   AgentRuntimeSelector: (props: Record<string, unknown>) => {
     Object.assign(lastSelectorProps, props)
-    return <div data-testid="agent-runtime-selector" />
+    return (
+      <div data-testid="agent-runtime-selector" data-dense={props.dense ? "true" : undefined} />
+    )
   },
 }))
 // The sandbox indicator now renders inline on the wide row, so it mounts in
@@ -59,7 +61,13 @@ jest.mock("../permission-mode-indicator", () => ({
   // stub rendered last.
   PermissionModeIndicator: (props: Record<string, unknown>) => {
     Object.assign(lastSelectorProps, props)
-    return <div data-testid="permission-mode-indicator" className={String(props.className ?? "")} />
+    return (
+      <div
+        data-testid="permission-mode-indicator"
+        className={String(props.className ?? "")}
+        data-glyph={props.glyph ? "true" : undefined}
+      />
+    )
   },
 }))
 jest.mock("./web-search-toggle", () => ({
@@ -187,15 +195,17 @@ jest.mock("./credential-badge", () => ({
     movedControlsVisible ? <div data-testid="composer-credential-badge" /> : null,
 }))
 jest.mock("@/components/chat/session-cost-badge-live", () => ({
-  SessionCostBadgeLive: () => <div data-testid="session-cost-badge" />,
+  SessionCostBadgeLive: (props: { compact?: boolean }) => (
+    <div data-testid="session-cost-badge" data-compact={props.compact || undefined} />
+  ),
 }))
 
 // The Router + Fusion mode chip renders nothing while Router + Fusion is off,
 // which is the shipped default; its own suite covers when it shows.
 let fusionChipVisible = false
-const fusionChipProps: Array<{ builtinRuntime: boolean; disabled?: boolean }> = []
+const fusionChipProps: Array<{ builtinRuntime: boolean; disabled?: boolean; glyph?: boolean }> = []
 jest.mock("./fusion-mode-chip", () => ({
-  FusionModeChip: (props: { builtinRuntime: boolean; disabled?: boolean }) => {
+  FusionModeChip: (props: { builtinRuntime: boolean; disabled?: boolean; glyph?: boolean }) => {
     fusionChipProps.push(props)
     return fusionChipVisible ? <div data-testid="fusion-mode-chip" /> : null
   },
@@ -307,6 +317,24 @@ describe("BottomToolbar — session-kind branching", () => {
     expect(screen.getByTestId("composition-chip")).toBeInTheDocument()
   })
 
+  // The original screenshot's overlap: a long squad name rendered inside a
+  // plain inline `<span>`, where `truncate` has no flex context to clip in —
+  // the text painted straight over the status cluster. `inline-flex` on the
+  // wrapper is what makes the inner `min-w-0 truncate` real.
+  it("keeps a long squad name inside its own chip box", () => {
+    ;(useChatExecutor as jest.Mock).mockReturnValue({
+      squadId: "squad-1",
+      squadName: "A very long review crew name that used to spill over the runtime chip",
+    })
+    render(<BottomToolbar session={session} />)
+    const chip = screen.getByTestId("composer-executor-summary")
+    expect(chip.className).toContain("inline-flex")
+    expect(chip.className).toContain("max-w-[11rem]")
+    const label = chip.querySelector<HTMLElement>(".truncate")
+    expect(label).not.toBeNull()
+    expect(label!.className).toContain("min-w-0")
+  })
+
   // Effort qualifies the model, so its chip sits directly after the model chip
   // — and on the permanent row rather than only inside the model popover, which
   // is where it was unreachable and unreadable.
@@ -344,6 +372,24 @@ describe("BottomToolbar — session-kind branching", () => {
       expect(screen.queryByTestId("plugin-effort-dial")).toBeNull()
       expect(screen.getByTestId("effort-chip")).toBeInTheDocument()
     } finally {
+      clearAllMockExtensions()
+    }
+  })
+
+  // A crashed dial is the same as no dial: the contribution's empty surface
+  // must not hold the seat while the host chip stays suppressed.
+  it("restores the thinking-level chip when the effort plugin crashes", async () => {
+    const BrokenDial = () => {
+      throw new Error("dial crash")
+    }
+    registerMockExtension("chat.input.effort", BrokenDial as never)
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      render(<BottomToolbar session={session} />)
+      await waitFor(() => expect(screen.getByTestId("effort-chip")).toBeInTheDocument())
+      expect(screen.queryByTestId("plugin-effort-dial")).toBeNull()
+    } finally {
+      errorSpy.mockRestore()
       clearAllMockExtensions()
     }
   })
@@ -402,13 +448,22 @@ describe("BottomToolbar — session-kind branching", () => {
     expect(TOOLBAR_CHIP).not.toContain("shrink-0")
   })
 
-  // ...except the two whose labels are already short. Shaving "Auto" to "A…"
-  // buys 30px and costs the word; the model id next to them is the string worth
-  // ellipsizing, and below the compact threshold the row re-packs anyway.
-  it("pins the short-labelled chips against shrinking", () => {
+  // ...and that rule now covers EVERY chip, including the two that used to be
+  // pinned. `shrink-0` is what let the group paint over the status cluster the
+  // moment it hit its floor — and shaving "Auto" to "A…" is no longer the
+  // fallback either: below the glyphs fold tier these chips switch to
+  // icon-only forms, so no label ever has to die mid-word.
+  it("lets every chip give up width — the fold ladder, not `shrink-0`, protects the labels", () => {
     render(<BottomToolbar session={session} />)
-    expect(screen.getByTestId("permission-mode-indicator").className).toContain("shrink-0")
-    expect(screen.getByTestId("effort-chip").className).toContain("shrink-0")
+    // Token compare, not substring: the shadcn button base carries
+    // `[&_svg]:shrink-0` to pin the ICON, which is fine — the chip itself must
+    // be the thing that yields.
+    const classes = (el: HTMLElement) => el.className.split(/\s+/)
+    for (const id of ["permission-mode-indicator", "effort-chip"] as const) {
+      const el = screen.getByTestId(id)
+      expect(classes(el)).toContain("shrink")
+      expect(classes(el)).not.toContain("shrink-0")
+    }
   })
 
   // The wide branch is the one the user stares at all day, so it carries the
@@ -463,14 +518,17 @@ describe("BottomToolbar — narrow-width More menu", () => {
 
   // Every width shows the SAME roster — the branches differ only in how the row
   // is packed. That is what keeps each control mounted in exactly one place:
-  // wide lays them out, narrow folds the tail into "⋯".
-  it("shows the same controls wide as compact, differing only in packing", () => {
+  // wide lays them out, narrower folds the tail into "⋯" in stages.
+  it("shows the same controls at every width, differing only in packing", () => {
     mockToolbarWidth = 600
     const wide = render(<BottomToolbar session={session} />)
     expect(screen.getByTestId("permission-mode-indicator")).toBeInTheDocument()
     expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
     expect(screen.getByTestId("composition-chip")).toBeInTheDocument()
-    expect(screen.queryByTestId("composer-toolbar-more")).toBeNull()
+    // Tier 1 already folds the ambient tail — preset, sandbox, plugin slots sit
+    // behind "⋯" — while every per-turn answer stays inline and labelled.
+    fireEvent.click(screen.getByTestId("composer-toolbar-more"))
+    expect(screen.getByTestId("sandbox-shield")).toBeInTheDocument()
     wide.unmount()
 
     mockToolbarWidth = 300
@@ -519,6 +577,110 @@ describe("BottomToolbar — narrow-width More menu", () => {
     const { container } = render(<BottomToolbar session={session} />)
     expect((container.firstChild as HTMLElement).className).toContain("min-w-0")
     expect(screen.getByTestId("composer-status-cluster").className).toContain("shrink-0")
+  })
+})
+
+// ── The fold ladder ────────────────────────────────────────────────────────
+//
+// `resolveToolbarFoldTier` maps the measured width to a rung; these tests pin
+// what each rung means on the row. Same roster at every tier — what changes is
+// how each control is spelled: labelled, icon-only, or inside the "⋯"
+// disclosure in its full form. The resolver's own boundary table lives in
+// `lib/chat/composer-skin.test.ts`.
+describe("BottomToolbar — the fold ladder", () => {
+  it("keeps the full labelled roster inline at tier 0", () => {
+    mockToolbarWidth = 900
+    render(<BottomToolbar session={session} />)
+    expect(screen.getByTestId("composer-footer")).toHaveAttribute("data-toolbar-tier", "0")
+    expect(screen.queryByTestId("composer-toolbar-more")).toBeNull()
+    // The sandbox state is an ambient read-out: inline at this width, not
+    // behind a menu the user would have to open to learn it.
+    expect(screen.getByTestId("composer-status-cluster")).toContainElement(
+      screen.getByTestId("sandbox-shield")
+    )
+  })
+
+  it("folds preset, sandbox and the plugin affordances at tier 1", () => {
+    mockToolbarWidth = 600
+    movedControlsVisible = true
+    try {
+      render(<BottomToolbar session={session} />)
+      expect(screen.getByTestId("composer-footer")).toHaveAttribute("data-toolbar-tier", "1")
+      // The per-turn answers and the session shape stay labelled and inline;
+      // only the ambient tail folds.
+      expect(screen.getByTestId("composition-chip")).toBeInTheDocument()
+      expect(screen.getByTestId("agent-runtime-selector")).not.toHaveAttribute("data-dense")
+      expect(screen.queryByTestId("composer-preset-chip")).toBeNull()
+      fireEvent.click(screen.getByTestId("composer-toolbar-more"))
+      expect(screen.getByTestId("composer-preset-chip")).toBeInTheDocument()
+      expect(screen.getByTestId("sandbox-shield")).toBeInTheDocument()
+      // ...and the session-cost badge switched to its short `$x.xx` form.
+      expect(screen.getByTestId("session-cost-badge")).toHaveAttribute("data-compact", "true")
+    } finally {
+      movedControlsVisible = false
+    }
+  })
+
+  it("glyphs the per-turn chips and folds Agent mode at tier 2", () => {
+    mockToolbarWidth = 450
+    render(<BottomToolbar session={session} />)
+    expect(screen.getByTestId("composer-footer")).toHaveAttribute("data-toolbar-tier", "2")
+    // The runtime chip drops its name — a dense glyph joins the status
+    // cluster — and the mode chip folds into "⋯" in its combined form.
+    expect(screen.getByTestId("agent-runtime-selector")).toHaveAttribute("data-dense", "true")
+    expect(screen.getByTestId("effort-chip")).toHaveAttribute("data-glyph", "true")
+    expect(screen.getByTestId("permission-mode-indicator")).toHaveAttribute("data-glyph", "true")
+    expect(fusionChipProps.at(-1)).toMatchObject({ glyph: true })
+    expect(screen.queryByTestId("composition-chip")).toBeNull()
+    fireEvent.click(screen.getByTestId("composer-toolbar-more"))
+    expect(screen.getByTestId("composition-chip")).toHaveAttribute("data-layout", "combined")
+  })
+
+  it("folds fusion and the session-cost badge at tier 3, fully labelled inside", () => {
+    mockToolbarWidth = 340
+    fusionChipVisible = true
+    try {
+      render(<BottomToolbar session={session} />)
+      expect(screen.getByTestId("composer-footer")).toHaveAttribute("data-toolbar-tier", "3")
+      expect(screen.queryByTestId("fusion-mode-chip")).toBeNull()
+      expect(screen.queryByTestId("session-cost-badge")).toBeNull()
+      fireEvent.click(screen.getByTestId("composer-toolbar-more"))
+      // Both render their FULL form inside the disclosure — a glyph in a menu
+      // teaches nothing.
+      expect(screen.getByTestId("fusion-mode-chip")).toBeInTheDocument()
+      expect(fusionChipProps.at(-1)).toMatchObject({ glyph: false })
+      expect(screen.getByTestId("session-cost-badge")).not.toHaveAttribute("data-compact")
+    } finally {
+      fusionChipVisible = false
+    }
+  })
+
+  // The fold must not smuggle a control the send path would ignore onto the
+  // row through the menu: a Squad runs each member's own model, so fusion is
+  // hidden inline AND in the disclosure.
+  it("never offers fusion inside the disclosure on a Squad-bound conversation", () => {
+    mockToolbarWidth = 340
+    fusionChipVisible = true
+    ;(useChatExecutor as jest.Mock).mockReturnValue({ squadId: "sq1", squadName: "Team" })
+    try {
+      render(<BottomToolbar session={session} />)
+      fireEvent.click(screen.getByTestId("composer-toolbar-more"))
+      expect(screen.queryByTestId("fusion-mode-chip")).toBeNull()
+    } finally {
+      fusionChipVisible = false
+    }
+  })
+
+  it("keeps the whole roster reachable through the disclosure at tier 4", () => {
+    mockToolbarWidth = 280
+    render(<BottomToolbar session={session} />)
+    expect(screen.getByTestId("composer-footer")).toHaveAttribute("data-toolbar-tier", "4")
+    // The ring-only assertion on the indicator itself lives in its own suite;
+    // here the contract is that the roster still resolves through the
+    // disclosure — nothing is dropped.
+    fireEvent.click(screen.getByTestId("composer-toolbar-more"))
+    expect(screen.getByTestId("composition-chip")).toBeInTheDocument()
+    expect(screen.getByTestId("session-cost-badge")).toBeInTheDocument()
   })
 })
 

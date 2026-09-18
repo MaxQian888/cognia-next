@@ -82,7 +82,16 @@ describe("<ToolDecisionContent />", () => {
 
   it("shows the honest terminal notice for an interrupted decision", () => {
     render(<ToolDecisionContent approval={approval({ status: "interrupted" })} />)
-    expect(screen.getByTestId("approval-interrupted-notice")).toBeInTheDocument()
+    expect(screen.getByTestId("approval-interrupted-notice")).toHaveTextContent("interruptedNotice")
+  })
+
+  it("names the superseded cause for a decision replaced by a new instruction", () => {
+    render(
+      <ToolDecisionContent
+        approval={approval({ status: "interrupted", interruptReason: "superseded" })}
+      />
+    )
+    expect(screen.getByTestId("approval-interrupted-notice")).toHaveTextContent("supersededNotice")
   })
 
   /**

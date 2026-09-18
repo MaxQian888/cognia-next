@@ -26,9 +26,11 @@ interface Props {
   /** Caller supplies the i18n-formatted tokens label so the badge stays a
    *  pure presentation component without taking a translations namespace. */
   tokensLabel: (input: string, output: string) => string
+  /** Short form — see {@link SessionCostBadge}. Set by the toolbar's fold tier. */
+  compact?: boolean
 }
 
-export function SessionCostBadgeLive({ sessionId, tokensLabel }: Props) {
+export function SessionCostBadgeLive({ sessionId, tokensLabel, compact }: Props) {
   // Cheap usage signature instead of an O(n) aggregate in the selector: the
   // old selector walked every message on EVERY store set (each streamed
   // frame), even when `useShallow` then bailed the render. Usage only moves
@@ -44,7 +46,14 @@ export function SessionCostBadgeLive({ sessionId, tokensLabel }: Props) {
     [messageCount, latestUsage]
   )
   if (!usage) return null
-  return <SessionCostBadge sessionId={sessionId} inMemoryUsage={usage} tokensLabel={tokensLabel} />
+  return (
+    <SessionCostBadge
+      sessionId={sessionId}
+      inMemoryUsage={usage}
+      tokensLabel={tokensLabel}
+      compact={compact}
+    />
+  )
 }
 
 /**

@@ -171,4 +171,71 @@ describe("PluginExtensionSlotWithOverflow", () => {
     })
     errorSpy.mockRestore()
   })
+
+  it("restores the fallback when every contribution crashes", async () => {
+    const ext = makeExt("broken", 1, "Broken")
+    ext.component = () => {
+      throw new Error("effort crash")
+    }
+    ;(getExtensionsForPoint as jest.Mock).mockReturnValue([ext])
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {})
+    const { container } = render(
+      <PluginExtensionSlotWithOverflow
+        point={POINT}
+        limit={1}
+        overflowLabel="More"
+        fallback={<span>builtin-effort</span>}
+      />
+    )
+
+    await waitFor(() => expect(screen.getByText("builtin-effort")).toBeInTheDocument())
+    expect(container.querySelector('[data-plugin-root="p1"]')).not.toBeInTheDocument()
+    errorSpy.mockRestore()
+  })
+
+  it("keeps a crashed contribution's box when the host declared no fallback", async () => {
+    const ext = makeExt("broken", 1, "Broken")
+    ext.component = () => {
+      throw new Error("menu crash")
+    }
+    ;(getExtensionsForPoint as jest.Mock).mockReturnValue([ext])
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {})
+    const { container } = render(
+      <PluginExtensionSlotWithOverflow point={POINT} limit={1} overflowLabel="More" />
+    )
+
+    await waitFor(() =>
+      expect(recordPluginPointDiagnostic).toHaveBeenCalledWith(
+        "p1",
+        expect.objectContaining({ pointId: "broken" })
+      )
+    )
+    const root = container.querySelector('[data-plugin-root="p1"]')
+    expect(root).toBeInTheDocument()
+    expect(root).toBeEmptyDOMElement()
+    errorSpy.mockRestore()
+  })
+
+  it("renders surviving contributions when a sibling crashes", async () => {
+    const broken = makeExt("broken", 100, "Broken")
+    broken.component = () => {
+      throw new Error("sibling crash")
+    }
+    const alive = makeExt("alive", 10, "Alive")
+    ;(getExtensionsForPoint as jest.Mock).mockReturnValue([broken, alive])
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {})
+    const { container } = render(
+      <PluginExtensionSlotWithOverflow point={POINT} limit={2} overflowLabel="More" />
+    )
+
+    await waitFor(() =>
+      expect(recordPluginPointDiagnostic).toHaveBeenCalledWith(
+        "p1",
+        expect.objectContaining({ pointId: "broken" })
+      )
+    )
+    expect(screen.getByText("Alive")).toBeInTheDocument()
+    expect(container.querySelector('[data-plugin-surface="broken"]')).not.toBeInTheDocument()
+    errorSpy.mockRestore()
+  })
 })

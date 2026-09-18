@@ -53,6 +53,7 @@ import {
 } from "@/lib/chat/mentions/entity-sources"
 import { refreshSelectionFreshness } from "@/lib/chat/mentions/selection-freshness"
 import { contextSelectionIdentity } from "@/lib/chat/mentions/selection-identity"
+import { trackEvent } from "@/lib/telemetry/events/track-event"
 import { refreshMessageExcerpt } from "@/lib/chat/selection/message-excerpt"
 import {
   isMessageSetReference,
@@ -111,6 +112,18 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
           pass.selections.forEach((selection, index) => {
             if (selection !== staged[index]) {
               useChatStore.getState().replaceContextSelection(index, selection, composerSessionId)
+            }
+            // The badge is a render product, so the event fires where the flag
+            // is WRITTEN — once per stale transition, not once per render.
+            const was = staged[index]
+            if (
+              selection.kind === "entity" &&
+              selection.stale &&
+              !(was?.kind === "entity" && was.stale)
+            ) {
+              void trackEvent("chat.reference.stale_shown", {
+                entityKind: selection.entityKind,
+              })
             }
           })
         })

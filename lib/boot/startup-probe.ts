@@ -27,7 +27,7 @@ const defaultDependencies: StartupProbeDependencies = {
 /**
  * Lightweight main-profile probe. Optional runtimes remain dormant when they
  * have no work, while configured connectors, schedules, memory jobs, and
- * third-party startup plugins retain their background semantics.
+ * enabled startup plugins retain their background semantics.
  */
 export async function probeConfiguredBootCapabilities(
   dependencies: StartupProbeDependencies = defaultDependencies
@@ -60,7 +60,13 @@ export async function probeConfiguredBootCapabilities(
 
   if (
     plugins.some((plugin) => {
-      if (!plugin.enabled || plugin.source === "builtin") return false
+      // `enabled` is the opt-in signal for every source: built-ins are
+      // discovered with `enabled: false`, so a true flag only ever comes from
+      // the user toggling the plugin on. An enabled built-in that asks for
+      // startup activation (e.g. `cognia-anime-effort`'s composer dial) needs
+      // the runtime booted on `/` exactly like a marketplace plugin does —
+      // otherwise its row says enabled while the contribution never mounts.
+      if (!plugin.enabled) return false
       const events = (plugin.manifest as { activationEvents?: unknown } | undefined)
         ?.activationEvents
       return (

@@ -13,15 +13,16 @@
 // on both desktop and mobile.
 //
 // The "⋯" overflow is a PACKING device, not a tier: it exists only where the
-// row genuinely cannot hold the roster (mobile / the narrow workflow sidebar).
-// On a wide composer the remaining session-shape controls — Agent mode, the
-// sandbox indicator, plugin slots — render inline, because collapsing them
-// there hid state the user is expected to read at a glance (which mode, is the
-// sandbox on) behind a button with no affordance for what it contains.
+// row genuinely cannot hold the roster. What folds is decided by the fold
+// ladder (`resolveToolbarFoldTier` in `lib/chat/composer-skin.ts`): the
+// measured width maps to a tier, and each tier surrenders the next-least-
+// essential controls — first into a glyph form on the row, then into the
+// disclosure. Folding never drops a control; the same element renders its
+// full labelled form inside the popover.
 //
-// Two rules keep that inline roster from turning back into the wall of text it
-// was (nine labelled chips, the last of which painted over its neighbour on an
-// 832px reading column):
+// Two rules keep the inline roster from turning back into the wall of text it
+// was (nine labelled chips, the last of which painted over its neighbour on
+// an 832px reading column):
 //
 //  1. **Labels are earned by not being default.** A control sitting on its
 //     shipped value is a glyph with a tooltip; the moment it holds something
@@ -29,10 +30,12 @@
 //     system-prompt preset chip both work this way, so a stock session reads
 //     `model · thinking · permission ┆ Standard ▾ 🤖 ✨` instead of repeating
 //     "Claude SDK" and "No preset" under every turn.
-//  2. **Everything shrinks.** Every chip is `min-w-0 shrink` (the shadcn button
-//     base is `shrink-0`), so a long provider model id ellipsizes inside its
-//     own box. Without it the group shrank, its `shrink-0` children did not,
-//     and they overflowed the group's box to paint on top of the next control.
+//  2. **Every label can give up room.** A text-bearing chip is `min-w-0 shrink`
+//     (the shadcn button base is `shrink-0`), so a squeezed row ellipsizes
+//     labels inside their own boxes instead of letting them paint over the
+//     next control — which is what `shrink-0` chips did the moment their group
+//     hit its floor. Anything that cannot ellipsize (glyph chips, the status
+//     cluster) is bounded to a fixed footprint instead.
 //
 // Every zone boundary carries a hairline: per-turn answers (model, thinking,
 // permission) | session shape (mode, runtime, preset) | plugin actions |
@@ -66,7 +69,11 @@ import { useRuntimeRefForSession } from "@/stores/agent/agent-runtime-store"
 import { PluginExtensionSlotWithOverflow } from "@/components/plugins/plugin-extension-slot-with-overflow"
 import { PluginQuickActionsMenu } from "./plugin-quick-actions-menu"
 import { WorkflowBottomToolbar } from "./workflow-bottom-toolbar"
-import { resolveToolbarLayout, type ComposerToolbarLayout } from "@/lib/chat/composer-skin"
+import {
+  resolveToolbarFoldTier,
+  resolveToolbarLayout,
+  type ComposerToolbarLayout,
+} from "@/lib/chat/composer-skin"
 import { ComposerPresetChip } from "./preset-chip"
 import { ComposerCredentialBadge } from "./credential-badge"
 import { SessionCostBadgeLive } from "@/components/chat/session-cost-badge-live"
@@ -173,23 +180,45 @@ function GenericBottomToolbar({
   // roster whatever the user chose.
   const proposedLayout: ComposerToolbarLayout = variant === "default" ? "detached" : variant
   const layout = resolveToolbarLayout(proposedLayout, toolbarWidth)
-  /** Any arrangement that sits INSIDE the composer box rather than below it. */
-  const inBox = layout !== "detached"
-  const compact = toolbarWidth > 0 && toolbarWidth < COMPACT_TOOLBAR_PX
+  // The fold ladder — WHICH controls the width can still hold, and in what
+  // form. `resolveToolbarFoldTier`'s doc lists the rungs; these booleans are
+  // only their spellings for this row. What folds always lands in the same
+  // "⋯" disclosure, in its full labelled form.
+  const tier = resolveToolbarFoldTier(toolbarWidth)
   const onBuiltinRuntime = runtimeRef.kind === "builtin"
   const tierActive = !onBuiltinRuntime
+
+  /** The per-turn chips run icon-only — the words cost more than they teach. */
+  const glyphChips = tier >= 2
+  /** Mode + runtime keep their own zone left of the status cluster. */
+  const shapeInline = tier <= 1
+  /** Preset, sandbox and the plugin slots fold behind "⋯". */
+  const sessionFolded = tier >= 1
+  /** Agent mode joins the "⋯" group. */
+  const modeFolded = tier >= 2
+  /** The Router + Fusion chip joins the "⋯" group — but never on a Squad-bound
+      conversation, whose members each run their own models: the fold must not
+      offer there a control the send path would ignore. */
+  const fusionFolded = tier >= 3 && !executor.squadId
+  /** The session-cost badge joins the "⋯" group (full form inside). */
+  const costFolded = tier >= 3
+  /** Session cost stays inline but drops to the `$x.xx` short form. */
+  const costShort = tier === 1 || tier === 2
+  /** The context indicator drops its percentage and keeps only the ring. */
+  const ringOnly = tier >= 4
 
   // Runtime AND the external agent it dispatches to are one choice in one
   // dropdown (see `runtime-selector.tsx`) — there is no second "which agent"
   // control to place, and no way to sit on an external lane with nothing
   // selected.
-  const runtimeControl = (
+  //
+  // `dense` glyphs the name away on every lane; inside the "⋯" popover there
+  // is always room for the word, so the menu form is never dense.
+  const runtimeChip = (dense: boolean) => (
     <AgentRuntimeSelector
       disabled={isStreaming}
       className={TOOLBAR_CHIP}
-      // The same measurement the rest of this row lays itself out by, so the
-      // chip collapses with its neighbours instead of on a rule of its own.
-      dense={compact}
+      dense={dense}
       // The chip names the sidecar runtime that will really serve the turn, and
       // that is derived from the provider, so it has to be told which one.
       providerId={providerId}
@@ -206,9 +235,9 @@ function GenericBottomToolbar({
   // session running Minimal/Code/Creator as "General Assistant", because those
   // presets have no `AgentModeConfig` to look up.
   //
-  // On the wide row the preset sits directly on the toolbar and the axes get
-  // their own button; inside the "⋯" overflow there is no row to spread over,
-  // so both packings collapse into the single chip.
+  // On the row the preset sits directly on the toolbar and the axes get their
+  // own button (`split`); inside the "⋯" overflow there is no row to spread
+  // over, so both packings collapse into the single `combined` chip.
   //
   // Mounted on an external runtime too WHEN A SQUAD IS BOUND. The executor axis
   // is not the mode axis: `use-claude-chat-controller` branches to
@@ -217,18 +246,18 @@ function GenericBottomToolbar({
   // an external agent. Hiding the chip there hid the only control that could
   // undo it, leaving a conversation permanently routed to a Squad with nothing
   // on screen saying so.
-  const modeControl =
+  const modeChip = (inMenu: boolean) =>
     onBuiltinRuntime || executor.squadId ? (
       <CompositionChip
         sessionId={session?.id}
         disabled={isStreaming}
-        layout={compact || inBox ? "combined" : "split"}
+        layout={inMenu ? "combined" : "split"}
       />
     ) : null
 
-  // Passive indicator, not a control — it belongs beside the context ring
-  // rather than inside a menu the user has to open to learn whether this turn
-  // is sandboxed.
+  // Passive indicator, not a control — at tier 0 it sits beside the context
+  // ring rather than inside a menu the user has to open to learn whether this
+  // turn is sandboxed.
   const sandboxIndicator = <SandboxShield session={session} />
 
   // Plugin-contributed composer actions. Each renders arbitrary plugin UI,
@@ -259,18 +288,60 @@ function GenericBottomToolbar({
     </>
   )
 
+  /* `chat.input.effort` REPLACES this chip rather than sitting beside it: a
+     plugin dial and the host chip write the same two session fields, and two
+     controls for one value on one row is a question the user should never
+     have to ask ("which of these wins?"). `min-w-0`, not `shrink-0`: a dial is
+     plugin-authored UI and must never be allowed to paint past the group's
+     box. */
+  const effortDialSlot = (glyphForm: boolean) => (
+    <PluginExtensionSlotWithOverflow
+      point="chat.input.effort"
+      limit={1}
+      className="flex min-w-0 items-center"
+      overflowLabel={t("pluginExtensionOverflow")}
+      fallback={
+        <EffortChip
+          session={session}
+          disabled={isStreaming}
+          glyph={glyphForm}
+          className={cn(TOOLBAR_CHIP, "max-w-[7.5rem]")}
+        />
+      }
+    />
+  )
+
+  // How the turn runs under Router + Fusion (ADR-0188): Auto, Direct, Cascade
+  // or Panel. Self-hides while Router + Fusion chat is off.
+  const fusionChip = (inMenu: boolean) => (
+    <FusionModeChip
+      session={session}
+      builtinRuntime={onBuiltinRuntime}
+      disabled={isStreaming}
+      glyph={!inMenu && glyphChips}
+      className={cn(TOOLBAR_CHIP, "max-w-[7.5rem]")}
+    />
+  )
+
+  const permissionChip = (inMenu: boolean) => (
+    <PermissionModeIndicator
+      onCycle={(next) => setPermissionMode(next, composerSessionId)}
+      disabled={isStreaming}
+      glyph={!inMenu && glyphChips}
+      className={TOOLBAR_CHIP}
+    />
+  )
+
   // The per-turn answers: which model, how deeply it thinks, what it may do
   // without asking. These three change between one send and the next, so they
-  // are the only group that is always labelled in full.
+  // are the last to surrender their labels — at tier 2 they go glyph-only
+  // rather than folding outright.
   //
   // Every control wears the same quiet chip (`TOOLBAR_CHIP`): no fill, no
-  // border, hover-only affordance, and shrinkable so a long model id
-  // ellipsizes instead of spilling over its neighbour.
-  const runConfigGroup = (
-    <div
-      className="flex min-w-0 flex-nowrap items-center gap-0.5"
-      data-testid="composer-execution-controls"
-    >
+  // border, hover-only affordance, and shrinkable so a squeezed row ellipsizes
+  // labels instead of letting them spill over the next zone.
+  const runConfigChildren = (inMenu: boolean) => (
+    <>
       {/* A Squad answers "which model, how deeply" per teammate, from each
           member's own configuration. Leaving the two pickers on the row would
           offer a choice this turn does not take — the shape of the old team
@@ -278,62 +349,49 @@ function GenericBottomToolbar({
           selector silently rendered nothing. Say so instead. */}
       {executor.squadId ? (
         <span
-          className={cn(TOOLBAR_CHIP, "max-w-[11rem] cursor-default")}
+          // `inline-flex` is load-bearing: the inner `truncate` only clips
+          // inside a flex/grid parent. As a plain inline span the squad name
+          // ignored the `max-w` and painted over the status cluster.
+          className={cn(
+            TOOLBAR_CHIP,
+            "inline-flex max-w-[11rem] cursor-default items-center gap-1"
+          )}
           title={tComposition("runsOnSquad")}
           data-testid="composer-executor-summary"
         >
           <UsersIcon aria-hidden className="size-3.5 shrink-0 opacity-70" />
-          <span className="truncate">{executor.squadName ?? tComposition("squadMissing")}</span>
+          <span className="min-w-0 truncate">
+            {executor.squadName ?? tComposition("squadMissing")}
+          </span>
         </span>
       ) : (
         <>
           <ModelPicker
             session={session}
             disabled={isStreaming}
-            className={cn(TOOLBAR_CHIP, "max-w-[11rem]")}
+            className={cn(TOOLBAR_CHIP, !inMenu && tier >= 3 ? "max-w-[7rem]" : "max-w-[11rem]")}
           />
           {/* Thinking level sits immediately after the model because it qualifies
           it — the pair reads as one answer to "how deeply will this run". It
           self-hides on a surface with no depth control, which is why it can
           live on the permanent row rather than behind the overflow. */}
-          {/* The two short labels hold their ground: "Auto" abbreviated to "A…"
-          teaches nothing, and the model id beside them is the only string on
-          this side long enough to be worth ellipsizing. Below the compact
-          threshold the whole row re-packs instead of shaving letters. */}
-          {/* `chat.input.effort` REPLACES this chip rather than sitting beside
-          it: a plugin dial and the host chip write the same two session
-          fields, and two controls for one value on one row is a question the
-          user should never have to ask ("which of these wins?"). */}
-          <PluginExtensionSlotWithOverflow
-            point="chat.input.effort"
-            limit={1}
-            className="flex shrink-0 items-center"
-            overflowLabel={t("pluginExtensionOverflow")}
-            fallback={
-              <EffortChip
-                session={session}
-                disabled={isStreaming}
-                className={cn(TOOLBAR_CHIP, "max-w-[7.5rem] shrink-0")}
-              />
-            }
-          />
-          {/* How the turn runs under Router + Fusion (ADR-0188): Auto, Direct,
-          Cascade or Panel. Self-hides while Router + Fusion chat is off. */}
-          <FusionModeChip
-            session={session}
-            builtinRuntime={onBuiltinRuntime}
-            disabled={isStreaming}
-            className={cn(TOOLBAR_CHIP, "max-w-[7.5rem] shrink-0")}
-          />
+          {effortDialSlot(!inMenu && glyphChips)}
+          {fusionFolded && !inMenu ? null : fusionChip(inMenu)}
         </>
       )}
-      <PermissionModeIndicator
-        onCycle={(next) => setPermissionMode(next, composerSessionId)}
-        disabled={isStreaming}
-        className={cn(TOOLBAR_CHIP, "shrink-0")}
-      />
+      {permissionChip(inMenu)}
+    </>
+  )
+
+  const runConfigGroup = (
+    <div
+      className="flex min-w-0 flex-nowrap items-center gap-0.5"
+      data-testid="composer-execution-controls"
+    >
+      {runConfigChildren(false)}
     </div>
   )
+
   // The system-prompt preset shapes the session the way the mode and runtime
   // beside it do, so it joins them on the right of the hairline (it moved down
   // from the chat header, which is title-bar chrome now). Self-hides without
@@ -341,79 +399,100 @@ function GenericBottomToolbar({
   const presetControl = session ? (
     <ComposerPresetChip session={session} disabled={isStreaming} className={TOOLBAR_CHIP} />
   ) : null
+
   // Ambient session status that used to crowd the header: what this session
-  // has cost, and the one credential state that would stop the next send.
-  const sessionStatus = session ? (
-    <>
+  // has cost, and the one credential state that would stop the next send. The
+  // badge's short form is the tier's doing, not a media query — the viewport
+  // knows nothing about how wide this pane is.
+  const costBadge = (compactForm: boolean) =>
+    session ? (
       <SessionCostBadgeLive
         sessionId={session.id}
         tokensLabel={(input, output) => tHeader("tokensLabel", { input, output })}
+        compact={compactForm}
       />
-      <ComposerCredentialBadge onOpenSettings={onOpenProviderSettings} />
-    </>
+    ) : null
+  const credentialBadge = session ? (
+    <ComposerCredentialBadge onOpenSettings={onOpenProviderSettings} />
   ) : null
-  // Session shape — how the agent is composed, where it executes, and which
-  // system prompt it carries. Set once per conversation rather than per turn,
-  // so this side of the hairline is where the "label only when non-default"
-  // rule does its work: on a stock session it is one labelled chip and two
-  // glyphs.
-  const shapeGroup = (
-    <div
-      // Yields width three times as fast as the per-turn group beside it: when
-      // the pane narrows, "Standard" giving up letters costs less than the
-      // model id and the permission mode doing the same.
-      className="flex min-w-0 shrink-[3] flex-nowrap items-center gap-0.5"
-      data-testid="composer-shape-controls"
-    >
-      {modeControl}
-      {runtimeControl}
-      {presetControl}
-    </div>
-  )
 
-  const contextIndicator = (
+  const contextChip = (ringOnlyForm: boolean) => (
     <ContextUsageIndicator
       modelId={modelId}
       providerId={providerId}
       sdkUsage={sdkUsage}
+      ringOnly={ringOnlyForm}
       triggerClassName={cn(TOOLBAR_CHIP, "shrink-0 px-1.5")}
     />
   )
 
-  // `focus` folds nearly everything. It is the one skin allowed to hide the
-  // per-turn group inline — but hiding is not dropping: the same controls are
-  // one click away in the same disclosure the narrow layouts already use.
-  const foldedOverflow = (
+  // Narrow packing only. A Popover, not a DropdownMenu: the agent-mode
+  // selector and the plugin slots own their own overlays, and re-mounting
+  // those inside a `DropdownMenuItem` desyncs their open state. Every folded
+  // control renders its FULL labelled form inside — there is always room in a
+  // popover, and a glyph in a menu teaches nothing.
+  const foldGroups = (ambientOnRail: boolean) => (
+    <div className="flex flex-col gap-2">
+      {fusionFolded && <div className="flex flex-wrap items-center gap-2">{fusionChip(true)}</div>}
+      <div className="flex flex-wrap items-center gap-2 empty:hidden">
+        {presetControl}
+        {modeFolded && modeChip(true)}
+        {sandboxIndicator}
+      </div>
+      {costFolded && !ambientOnRail && (
+        <div className="flex flex-wrap items-center gap-2 empty:hidden">{costBadge(false)}</div>
+      )}
+      <div className="flex flex-wrap items-center gap-2 empty:hidden">{pluginSlots}</div>
+    </div>
+  )
+  const detachedMenu = (ambientOnRail: boolean) => (
+    <ToolbarMoreMenu label={t("moreControls")} active={tierActive} disabled={isStreaming}>
+      {foldGroups(ambientOnRail)}
+    </ToolbarMoreMenu>
+  )
+
+  // The in-box layouts pack the same tail unconditionally — that is their
+  // design, not the tier's — so this menu exists at every width and the tiers
+  // only add to it.
+  const packedMenu = (
     <ToolbarMoreMenu label={t("moreControls")} active={tierActive} disabled={isStreaming}>
       <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-2">{runConfigGroup}</div>
+        {fusionFolded && (
+          <div className="flex flex-wrap items-center gap-2">{fusionChip(true)}</div>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           {presetControl}
-          {modeControl}
-          {runtimeControl}
+          {modeChip(true)}
           {sandboxIndicator}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {sessionStatus}
-          {contextIndicator}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">{pluginSlots}</div>
+        {costFolded && (
+          <div className="flex flex-wrap items-center gap-2 empty:hidden">{costBadge(false)}</div>
+        )}
+        <div className="flex flex-wrap items-center gap-2 empty:hidden">{pluginSlots}</div>
       </div>
     </ToolbarMoreMenu>
   )
 
-  // Narrow packing only. A Popover, not a DropdownMenu: the agent-mode selector
-  // and the plugin slots own their own overlays, and re-mounting those inside a
-  // `DropdownMenuItem` desyncs their open state.
-  const overflow = (
+  // `focus` folds nearly everything. It is the one skin allowed to hide the
+  // per-turn group inline — but hiding is not dropping: the same controls are
+  // one click away in the same disclosure the narrow layouts already use, in
+  // their full labelled forms.
+  const foldedMenu = (
     <ToolbarMoreMenu label={t("moreControls")} active={tierActive} disabled={isStreaming}>
       <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-2">{runConfigChildren(true)}</div>
         <div className="flex flex-wrap items-center gap-2">
           {presetControl}
-          {modeControl}
+          {modeChip(true)}
+          {runtimeChip(false)}
           {sandboxIndicator}
         </div>
-        <div className="flex flex-wrap items-center gap-2">{pluginSlots}</div>
+        <div className="flex flex-wrap items-center gap-2">
+          {costBadge(false)}
+          {credentialBadge}
+          {contextChip(false)}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 empty:hidden">{pluginSlots}</div>
       </div>
     </ToolbarMoreMenu>
   )
@@ -433,21 +512,22 @@ function GenericBottomToolbar({
           disabled={isStreaming}
           className={cn(TOOLBAR_CHIP, "max-w-[9rem]")}
         />
-        <span className="ml-auto flex shrink-0 items-center pl-2">{foldedOverflow}</span>
+        <span className="ml-auto flex shrink-0 items-center pl-2">{foldedMenu}</span>
       </div>
     )
   }
 
-  // Both narrow layouts pack the tail into "⋯"; the wide one lays it out.
   // `rail` is `embedded` in a quieter voice: same roster, same order,
   // monospace so it reads as a status line rather than a control strip.
   //
-  // Same three zones as the wide row, for the same reason: sitting INSIDE the
-  // box this run shares its line with the attach cluster and the send button,
-  // and packing every chip against the right edge (`justify-end`) left a dead
-  // gap the width of half the composer between the "+" and the model picker,
-  // with the ambient numbers crowding the send key. Controls start where the
-  // icons end; the read-only tail is pinned right by the auto margin.
+  // Same three zones as the detached row, for the same reason: sitting INSIDE
+  // the box this run shares its line with the attach cluster and the send
+  // button, and packing every chip against the right edge (`justify-end`)
+  // left a dead gap the width of half the composer between the "+" and the
+  // model picker, with the ambient numbers crowding the send key. Controls
+  // start where the icons end; the read-only tail is pinned right by the auto
+  // margin. The fold ladder still applies inside — chips glyph and the cost
+  // badge folds as the pane narrows.
   if (layout === "embedded" || layout === "rail") {
     return (
       <div
@@ -458,134 +538,115 @@ function GenericBottomToolbar({
         )}
         data-testid="composer-toolbar-embedded"
         data-toolbar-layout={layout}
+        data-toolbar-tier={tier}
       >
         {runConfigGroup}
         <ToolbarDivider />
-        {runtimeControl}
+        {runtimeChip(glyphChips)}
         <div
-          className={cn("ml-auto flex shrink-0 items-center gap-0.5 pl-2", ZONE_RULE)}
+          className={cn("ms-auto flex shrink-0 items-center gap-0.5 ps-2", ZONE_RULE)}
           data-testid="composer-status-cluster"
         >
-          {sessionStatus}
-          {contextIndicator}
-          {overflow}
+          {!costFolded && costBadge(costShort)}
+          {credentialBadge}
+          {contextChip(ringOnly)}
+          {packedMenu}
         </div>
       </div>
     )
   }
 
-  // Compact (mobile / narrow workflow sidebar): ONE row, with the tail of the
-  // roster folded behind `⋯` instead of wrapped onto a line of its own.
-  //
-  // `layout` can no longer BE `expanded` here — `resolveToolbarLayout` already
-  // downgraded it if the pane is this narrow — but the guard stays so the two
-  // width checks cannot drift apart.
-  if (compact && layout !== "expanded") {
-    return (
-      <div
-        ref={rootRef}
-        className="mt-2 flex min-w-0 flex-nowrap items-center gap-x-1 px-1 text-[11px] text-muted-foreground"
-        data-testid="composer-footer"
-        data-toolbar-layout="compact"
-      >
-        {leading}
-        {runConfigGroup}
-        {/* Same three zones as the wide row, packed tighter. This used to be a
-            second FLEX ROW below the controls, on the theory that two honest
-            rows beat one row of stubs. On the phone welcome screen that theory
-            broke down: the left half of the second row is always empty, so the
-            cost was a full 28px band carrying three glyph-sized read-outs and
-            nothing else, directly under the box the user is about to type in.
-            The measured content is ~317px inside a 375px phone's 319px
-            composer, so the row fits, and the only labels that give up letters
-            when it does not are the model id and the composition preset (every
-            short-labelled chip is pinned `shrink-0`). */}
-        <div
-          className="ms-auto flex shrink-0 items-center gap-x-0.5 ps-1"
-          data-testid="composer-status-cluster"
-        >
-          {runtimeControl}
-          {sessionStatus}
-          {contextIndicator}
-          {overflow}
-        </div>
-      </div>
-    )
-  }
-
-  // Wide (web / desktop): one row, three zones — per-turn config, one hairline,
-  // session shape, then the ambient status cluster pinned right by `ml-auto`.
-  // Nothing is collapsed here — the row has the space once the default-valued
-  // chips are glyphs, and a "⋯" that hides the active Agent mode costs a click
-  // to answer a question the user asks on every turn.
-  const wideRow = (
+  // Detached (web / desktop, and every narrow pane that keeps the classic
+  // skin): ONE row under the box. Narrowing is absorbed by the fold ladder —
+  // the zones surrender in priority order into the same "⋯" disclosure —
+  // never by a second row: a folded tail only ever held three read-only
+  // glyphs against an empty left half, 28px of chrome under the composer on
+  // the surface with the least room for it. And never by `shrink-0` labels:
+  // a chip that cannot ellipsize overflows its group and paints over the next
+  // zone, which is the overlap this ladder exists to prevent.
+  const detachedRow = (ambientOnRail: boolean) => (
     <div
       ref={rootRef}
       className="mt-2 flex min-w-0 flex-nowrap items-center gap-x-1 px-1 text-[11px] text-muted-foreground"
       data-testid="composer-footer"
+      data-toolbar-layout="detached"
+      data-toolbar-tier={tier}
     >
       {leading}
       {runConfigGroup}
-      <ToolbarDivider />
-      {shapeGroup}
-      <div
-        className={cn("flex shrink-0 items-center gap-1 empty:hidden", ZONE_RULE)}
-        // A data attribute, not a test id: the chrome budget counts an empty
-        // test-id'd element as a control stub, and this zone is empty by default.
-        data-toolbar-zone="plugins"
-      >
-        {pluginSlots}
-      </div>
+      {/* Session shape — how the agent is composed, where it executes, and
+          which system prompt it carries. Set once per conversation rather
+          than per turn, so this side of the hairline is where the "label only
+          when non-default" rule does its work. From tier 2 down the zone
+          dissolves: the runtime chip joins the status cluster as a glyph and
+          the rest fold into "⋯". */}
+      {shapeInline && (
+        <>
+          <ToolbarDivider />
+          <div
+            // Yields width three times as fast as the per-turn group beside
+            // it: when the pane narrows, "Standard" giving up letters costs
+            // less than the model id and the permission mode doing the same.
+            className="flex min-w-0 shrink-[3] flex-nowrap items-center gap-0.5"
+            data-testid="composer-shape-controls"
+          >
+            {modeChip(false)}
+            {runtimeChip(false)}
+            {!sessionFolded && presetControl}
+          </div>
+        </>
+      )}
+      {!sessionFolded && (
+        <div
+          className={cn("flex shrink-0 items-center gap-1 empty:hidden", ZONE_RULE)}
+          // A data attribute, not a test id: the chrome budget counts an empty
+          // test-id'd element as a control stub, and this zone is empty by
+          // default.
+          data-toolbar-zone="plugins"
+        >
+          {pluginSlots}
+        </div>
+      )}
       {/* Read-only ambient state, pinned right by the auto margin and opened
           by its own rule so it reads as a separate zone rather than as the
-          tail of whichever control happens to sit last on the left. */}
+          tail of whichever control happens to sit last on the left. The
+          cluster stays `shrink-0` — everything inside it is a bounded glyph
+          or a tier-capped short form, so it can no longer swallow the row the
+          way the labelled version did. */}
       <div
-        className={cn("ml-auto flex shrink-0 items-center gap-0.5 pl-3 empty:hidden", ZONE_RULE)}
+        className={cn("ms-auto flex shrink-0 items-center gap-0.5 ps-1.5 empty:hidden", ZONE_RULE)}
         data-testid="composer-status-cluster"
       >
-        {sessionStatus}
-        {contextIndicator}
-        {sandboxIndicator}
+        {!shapeInline && runtimeChip(true)}
+        {!ambientOnRail && !costFolded && costBadge(costShort)}
+        {!ambientOnRail && credentialBadge}
+        {!ambientOnRail && contextChip(ringOnly)}
+        {!sessionFolded && sandboxIndicator}
+        {sessionFolded && detachedMenu(ambientOnRail)}
       </div>
     </div>
   )
 
-  if (layout !== "expanded") return wideRow
+  if (layout !== "expanded") return detachedRow(false)
 
-  // `full`: the same roster, plus the ambient numbers the wide row pins to its
-  // right edge given a rail of their own. Nothing new is mounted — the cluster
-  // above already carries cost and context; this only stops them competing with
-  // the controls for the one row's width.
+  // `full`: the same roster, plus the ambient numbers given a rail of their
+  // own so they stop competing with the controls for the one row's width.
+  // The rail — not the row's cluster — is where cost, credential and context
+  // live in this layout, at full verbosity regardless of tier.
   return (
-    <div className="flex min-w-0 flex-col" data-toolbar-layout="expanded">
-      {wideRow}
+    <div className="flex min-w-0 flex-col" data-toolbar-layout="expanded" data-toolbar-tier={tier}>
+      {detachedRow(true)}
       <div
         className="flex min-w-0 items-center gap-2 px-1 pt-0.5 font-mono text-[10px] text-muted-foreground/80"
         data-testid="composer-ambient-rail"
       >
-        {sessionStatus}
-        {contextIndicator}
+        {costBadge(false)}
+        {credentialBadge}
+        {contextChip(false)}
       </div>
     </div>
   )
 }
-
-/**
- * Below this measured width, drop to the compact ROSTER.
- *
- * 384 → 520: the wide row needs about 520px before the only chips with long
- * labels (the model id, the composition preset) are shaved past reading, and
- * past that point every other chip starts giving up letters too, which is how a
- * 420px pane ended up rendering "A…" and "Def…".
- *
- * What changes below the threshold is WHICH controls are laid out, not how many
- * lines they take: the compact branch folds the composition chip and the
- * advanced controls behind `⋯`, which is what buys back the width. It used to
- * also wrap into two rows, and that second row only ever held three read-only
- * glyphs against an empty left half — 28px of chrome under the composer for
- * numbers nobody was reading on an empty welcome screen.
- */
-const COMPACT_TOOLBAR_PX = 520
 
 /**
  * The one chip style every toolbar control wears. Overrides each control's

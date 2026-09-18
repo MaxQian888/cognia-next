@@ -56,6 +56,49 @@ describe("SessionCostBadge — collapsed", () => {
     render(<SessionCostBadge sessionId="s1" inMemoryUsage={{}} tokensLabel={tokens} />)
     expect(screen.getByTestId("session-cost-trigger")).toHaveTextContent("Tokens 0/0")
   })
+
+  // The badge used to hide below the `sm` viewport breakpoint — useless on a
+  // narrow sidebar inside a wide window. Visibility is now the toolbar fold
+  // tier's call; the badge itself just renders.
+  it("renders at every viewport — width is the container's business, not a media query's", () => {
+    render(
+      <SessionCostBadge
+        sessionId="s1"
+        inMemoryUsage={{ inputTokens: 5, outputTokens: 2, totalCostUsd: 0.01 }}
+        tokensLabel={tokens}
+      />
+    )
+    const trigger = screen.getByTestId("session-cost-trigger")
+    expect(trigger.className).toContain("inline-flex")
+    expect(trigger.className).not.toContain("hidden")
+  })
+
+  it("renders the compact `$x.xx` form when the toolbar fold tier is short on room", () => {
+    render(
+      <SessionCostBadge
+        sessionId="s1"
+        inMemoryUsage={{ inputTokens: 1500, outputTokens: 700, totalCostUsd: 0.1234 }}
+        tokensLabel={tokens}
+        compact
+      />
+    )
+    const trigger = screen.getByTestId("session-cost-trigger")
+    expect(trigger).toHaveAttribute("data-compact", "true")
+    expect(trigger).toHaveTextContent("$0.12")
+    expect(trigger).not.toHaveTextContent("Tokens")
+  })
+
+  it("falls back to the compact token pair in the short form before the first billed turn", () => {
+    render(
+      <SessionCostBadge
+        sessionId="s1"
+        inMemoryUsage={{ inputTokens: 1500, outputTokens: 700, totalCostUsd: 0 }}
+        tokensLabel={tokens}
+        compact
+      />
+    )
+    expect(screen.getByTestId("session-cost-trigger")).toHaveTextContent("Tokens 1.5k/700")
+  })
 })
 
 describe("SessionCostBadge — popover with persisted rows", () => {

@@ -43,6 +43,7 @@ import {
   selectComposerReplyTo,
   selectComposerWebSearchOn,
   useChatStore,
+  useComposerContextSelections,
   useComposerEphemeralSkillIds,
   useComposerPermissionMode,
   type ChatStatus as StoreChatStatus,
@@ -77,6 +78,7 @@ import {
 import { isVideoDescriptor } from "@/lib/chat/attachments/video/classify"
 import type { NativeVideoVerdict } from "@/lib/chat/attachments/video/delivery-gate"
 import { isVideoPreprocessSettings } from "@/lib/chat/attachments/video/settings"
+import { isContextSelectionRef } from "@/lib/chat/mentions/selection-guard"
 import { applyOrder } from "@/lib/chat/attachments/reorder"
 import { StagedAttachmentsProvider, useStagedAttachments } from "./composer/staged-attachment-store"
 import { useAttachmentIntake } from "./composer/hooks/use-attachment-intake"
@@ -2448,6 +2450,9 @@ function ComposerInner(props: InnerProps) {
 
   // ── Per-session draft persistence (Phase 3.2) ─────────────────────────
   const [draftHydratedFor, setDraftHydratedFor] = useState<string | null>(null)
+  // Subscribed (not just read at send) so the save effect below re-fires when
+  // a chip is staged or removed — the chips are part of the draft now.
+  const draftContextSelections = useComposerContextSelections(sessionId)
   const pendingComposerIntent = useComposerIntentStore((state) =>
     sessionId ? state.pendingBySession[sessionId] : undefined
   )
@@ -2559,6 +2564,28 @@ function ComposerInner(props: InnerProps) {
         if (reminders.length > 0) {
           toast.info(tDraftRef.current("toast", { count: reminders.length }))
         }
+        // Context chips come back too — each ref carries its own snapshot and
+        // fingerprint, so staging needs no re-read of the source. Rows can come
+        // from another build, so each entry is shape-checked first and a
+        // malformed one reads as absent. Freshness is then re-checked so a
+        // record edited while the draft sat shows its `stale` flag rather than
+        // presenting the old body as current.
+        const storedSelections = (row?.contextSelections ?? []).filter(isContextSelectionRef)
+        if (storedSelections.length > 0) {
+          void refreshSelectionFreshness(storedSelections)
+            .then(({ selections }) => {
+              if (cancelled) return
+              for (const selection of selections) {
+                useChatStore.getState().addContextSelection(selection, sessionId)
+              }
+            })
+            .catch(() => {
+              if (cancelled) return
+              for (const selection of storedSelections) {
+                useChatStore.getState().addContextSelection(selection, sessionId)
+              }
+            })
+        }
         setDraftHydratedFor(sessionId)
       })
       .catch(() => {
@@ -2643,6 +2670,10 @@ function ComposerInner(props: InnerProps) {
         // Passed on every save (never omitted) so removing the last link
         // actually clears the stored map — omission means "preserve".
         foldedLinks,
+        // Same contract: every save carries the live chip list, so unstaging
+        // the last chip clears the stored selections instead of leaving them
+        // to resurrect on the next reload.
+        contextSelections: draftContextSelections,
       })
     } catch {
       // Dexie unavailable (e.g., SSR / tests without fake-indexeddb) — drafts are best-effort.
@@ -2657,6 +2688,7 @@ function ComposerInner(props: InnerProps) {
     persistDrafts,
     effectiveBinding,
     foldedLinks,
+    draftContextSelections,
   ])
 
   // Auto-resize textarea (JS fallback for browsers without field-sizing:content
@@ -3731,6 +3763,15 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         await onSend(content, attachmentResult.manifest, templateRun, turnMetadata)
       } else {
         await onSend(content, attachmentResult.manifest, templateRun)
+      }
+      if (citations.length > 0) {
+        // `kinds` is a sorted set joined with `+` — an enum-shaped string like
+        // `entity+file`, never a title or anything the user typed.
+        const kinds = [...new Set(citations.map((ref) => ref.kind))].sort().join("+")
+        void trackEvent("chat.reference.sent", {
+          kinds,
+          staleCount: contextSelections.filter((sel) => sel.kind === "entity" && sel.stale).length,
+        })
       }
       if (replyTo) useChatStore.getState().setReplyTo(null, session?.id ?? null)
       if (session?.kind === "team" && session.teamId) clearComposerTyping(session.id)

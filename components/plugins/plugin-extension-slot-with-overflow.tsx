@@ -1,6 +1,6 @@
 "use client"
 
-import { useSyncExternalStore, type ReactNode } from "react"
+import { useState, useSyncExternalStore, type ReactNode } from "react"
 import { MoreHorizontalIcon } from "lucide-react"
 import { PluginSurface } from "@/components/plugins/plugin-surface"
 import { Button } from "@/components/ui/button"
@@ -18,6 +18,8 @@ import {
   getExtensionPointFormFactor,
   type CanonicalExtensionPoint,
 } from "@/lib/plugin/contracts/plugin-points"
+
+const EMPTY_FAILED_IDS: ReadonlySet<string> = new Set()
 
 interface Props {
   point: CanonicalExtensionPoint
@@ -46,17 +48,37 @@ export function PluginExtensionSlotWithOverflow({
   fallback,
 }: Props) {
   useSyncExternalStore(subscribeExtensionChanges, getExtensionRevision, () => 0)
+  const [failedIds, setFailedIds] = useState<ReadonlySet<string>>(EMPTY_FAILED_IDS)
 
   const all = getExtensionsForPoint(point)
   const ordered = [...all].sort((a, b) => (b.options.priority ?? 0) - (a.options.priority ?? 0))
 
-  if (ordered.length === 0) {
+  // A crashed compact surface renders nothing but still counts here, so
+  // without this filter the contribution's dead declared-width box both ate
+  // the row's space and suppressed the host's fallback — the `chat.input.effort`
+  // slot would blank the built-in chip whenever the plugin dial failed. When
+  // every contribution failed, the fallback (if the host declared one) is the
+  // honest thing to show. Slots without a fallback keep the dead boxes: their
+  // width is a deliberate layout-stability contract (see the e2e compact-crash
+  // case), and an empty row has nothing better to display.
+  const visible = ordered.filter((ext) => !failedIds.has(ext.id))
+  const display = visible.length === 0 && fallback === undefined ? ordered : visible
+
+  if (display.length === 0) {
     return fallback ? <>{fallback}</> : null
   }
 
-  const inline = ordered.slice(0, limit)
-  const overflow = ordered.slice(limit)
+  const inline = display.slice(0, limit)
+  const overflow = display.slice(limit)
   const formFactor = getExtensionPointFormFactor(point)
+
+  const markFailed = (extensionId: string) =>
+    setFailedIds((previous) => {
+      if (previous.has(extensionId)) return previous
+      const next = new Set(previous)
+      next.add(extensionId)
+      return next
+    })
 
   return (
     <div
@@ -74,6 +96,7 @@ export function PluginExtensionSlotWithOverflow({
           formFactor={formFactor}
           minWidth={ext.options.minWidth}
           maxWidth={ext.options.maxWidth}
+          onSilentFailure={() => markFailed(ext.id)}
         >
           <ext.component pluginId={ext.pluginId} extensionId={ext.id} formFactor={formFactor} />
         </PluginSurface>
@@ -100,6 +123,7 @@ export function PluginExtensionSlotWithOverflow({
                 formFactor={formFactor}
                 minWidth={ext.options.minWidth}
                 maxWidth={ext.options.maxWidth}
+                onSilentFailure={() => markFailed(ext.id)}
               >
                 <ext.component
                   pluginId={ext.pluginId}

@@ -18,7 +18,15 @@ const DISPLAY_CONTENTS: CSSProperties = { display: "contents" }
  * containers"). Hosts that genuinely need the host layout preserved say so with
  * `container={false}`.
  */
-const QUERY_CONTAINER_ONLY: CSSProperties = { display: "block", containerType: "inline-size" }
+const QUERY_CONTAINER_ONLY: CSSProperties = {
+  display: "block",
+  containerType: "inline-size",
+  // A `container-type` element's contents cannot size it, so in a flex row
+  // this box has no width source and collapses to 0 — while its children
+  // keep painting their intrinsic width over whatever the host renders next.
+  // The declared box bounds the paint instead of letting it bleed.
+  overflow: "hidden",
+}
 const widthHintStyles = new Map<string, CSSProperties>()
 
 function surfaceStyle(
@@ -34,8 +42,21 @@ function surfaceStyle(
   if (cached) return cached
   const style: CSSProperties = {
     display: "block",
+    // The same containment collapse makes `min-width`/`max-width` alone
+    // toothless in a flex row (their percentage fallbacks resolve to 0, and
+    // content never feeds `flex-basis: auto`), so the row granted the
+    // surface 0px and the plugin painted past it. `flex-basis` is the one
+    // width source the row can honour unconditionally: grant the declared
+    // floor — the width the plugin said it needs — and let `flex-shrink`
+    // squeeze below it when the host genuinely runs out. A block host
+    // ignores the basis and stretches within the same min/max bounds.
+    flexBasis: `${minWidth ?? maxWidth}px`,
     minWidth: minWidth === undefined ? undefined : `min(${minWidth}px, 100%)`,
     maxWidth: maxWidth === undefined ? "100%" : `min(${maxWidth}px, 100%)`,
+    // Under that squeeze the surface ends up narrower than its content;
+    // clip rather than bleed. `container={false}` keeps `overflow: visible`
+    // — it exists for panels whose positioned descendants must escape.
+    overflow: container ? "hidden" : undefined,
     containerType: container ? "inline-size" : undefined,
   }
   widthHintStyles.set(key, style)
@@ -59,6 +80,12 @@ export interface PluginSurfaceProps {
    * absolutely positioned descendants.
    */
   container?: boolean
+  /**
+   * Notified when the compact boundary removes a crashed child — the signal a
+   * slot needs to count the contribution as absent (and fall back) rather than
+   * keep a dead declared-width box.
+   */
+  onSilentFailure?: () => void
   className?: string
   children: ReactNode
 }
@@ -71,6 +98,12 @@ interface BoundaryProps {
   diagnosticMessage: (errorMessage: string) => string
   compactDiagnosticHint: string
   retryDiagnosticHint: string
+  /**
+   * Fires only when the boundary swallows the crash — the compact form factors
+   * that render `null`. Panel/block surfaces keep a visible diagnostic card
+   * with retry, so the contribution is still present and this stays silent.
+   */
+  onSilentFailure?: () => void
   children: ReactNode
 }
 
@@ -152,6 +185,9 @@ export class PluginSurfaceBoundary extends Component<BoundaryProps, BoundaryStat
         })
       }
     )
+    if (this.props.formFactor === "icon" || this.props.formFactor === "row") {
+      this.props.onSilentFailure?.()
+    }
   }
 
   private retry = (): void => {
@@ -177,6 +213,7 @@ export function PluginSurface({
   maxWidth,
   variant = "default",
   container = true,
+  onSilentFailure,
   className,
   children,
 }: PluginSurfaceProps) {
@@ -201,6 +238,7 @@ export function PluginSurface({
         }
         compactDiagnosticHint={diagnosticT("compactHint")}
         retryDiagnosticHint={diagnosticT("retryHint")}
+        onSilentFailure={onSilentFailure}
       >
         {children}
       </PluginSurfaceBoundary>

@@ -365,6 +365,22 @@ describe("ContextUsageIndicator — SDK-authoritative usage", () => {
     expect(screen.getByTestId("context-ring")).toHaveAttribute("data-muted", "true")
   })
 
+  // Fold tier 4 is the last rung on the ladder: the read-out narrows to the
+  // ring alone. The percentage still lands in the aria-label — and one click
+  // away in the panel.
+  it("shrinks to the bare ring when the toolbar fold tier is out of label room", () => {
+    act(() => {
+      useChatStore
+        .getState()
+        .replaceMessages([assistantWithUsage("a-1", { inputTokens: 200, outputTokens: 100 })])
+    })
+    render(<ContextUsageIndicator modelId="claude-sonnet-4-6" ringOnly />)
+    const trigger = screen.getByTestId("context-trigger")
+    expect(trigger).not.toHaveTextContent("%")
+    expect(screen.getByTestId("context-ring")).toBeInTheDocument()
+    expect(trigger.getAttribute("aria-label")).toContain("contextUsageAria")
+  })
+
   it("sizes the window from the window the external agent itself reported", () => {
     act(() => {
       useChatStore

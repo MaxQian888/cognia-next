@@ -109,6 +109,18 @@ describe("FusionModeChip", () => {
     )
   })
 
+  // The toolbar's fold tier 2 glyphs every per-turn chip — a non-auto mode
+  // still reads through the icon flag and the accessible name.
+  it("drops a non-default mode's label but keeps the flag in glyph form", () => {
+    useChatFusionModeStore.getState().setMode("s1", "cascade")
+    render(<FusionModeChip session={session} builtinRuntime glyph />)
+    const chip = screen.getByTestId("fusion-mode-chip")
+    expect(chip).toHaveAttribute("data-mode", "cascade")
+    expect(chip).not.toHaveTextContent("Cascade")
+    expect(chip).toHaveAccessibleName("Router + Fusion run mode: Cascade")
+    expect(chip.className).toContain("w-7")
+  })
+
   it("cannot be opened while a turn is in flight", () => {
     render(<FusionModeChip session={session} builtinRuntime disabled />)
     expect(screen.getByTestId("fusion-mode-chip")).toBeDisabled()

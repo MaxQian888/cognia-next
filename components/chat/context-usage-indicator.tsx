@@ -98,6 +98,13 @@ interface ContextUsageIndicatorProps {
   /** Extra classes for the trigger button (e.g. `ml-auto` on the generic toolbar). */
   triggerClassName?: string
   /**
+   * Ring-only form for a toolbar that has run out of label room: the
+   * percentage gives way to the ring alone. The figure still reads through
+   * the aria-label and the hover card — the digits are the only thing given
+   * up. Set by the toolbar's fold tier.
+   */
+  ringOnly?: boolean
+  /**
    * SDK-authoritative context usage (from the live `getContextUsage()` control
    * method). When present, the true window size + occupancy + per-category
    * breakdown replace the message-derived estimate. Absent → estimate path.
@@ -110,6 +117,7 @@ export function ContextUsageIndicator({
   providerId,
   maxTokens,
   triggerClassName,
+  ringOnly,
   sdkUsage,
 }: ContextUsageIndicatorProps) {
   const t = useTranslations("chat.composer.toolbar")
@@ -246,9 +254,11 @@ export function ContextUsageIndicator({
                 : t("windowUnknown")
             }
           >
-            <span className="font-medium">
-              {win.reported ? percent.format(win.fraction) : UNKNOWN}
-            </span>
+            {ringOnly ? null : (
+              <span className="font-medium">
+                {win.reported ? percent.format(win.fraction) : UNKNOWN}
+              </span>
+            )}
             <ContextRing fraction={win.reported ? win.fraction : 0} muted={!win.reported} />
           </Button>
         </ContextTrigger>

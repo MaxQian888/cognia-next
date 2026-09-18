@@ -29,7 +29,7 @@ jest.mock("./composer/voice-controls", () => ({
   VoiceControls: () => null,
 }))
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Composer } from "./composer"
@@ -320,5 +320,94 @@ describe("Composer — per-session draft persistence", () => {
     // And the empty session must not have inherited the previous draft's text.
     const bled = await getDb().chatDrafts.get("ses_no_draft")
     expect(bled?.text ?? "").toBe("")
+  })
+})
+
+describe("Composer — context chips in drafts", () => {
+  const chip = {
+    kind: "entity" as const,
+    entityKind: "memory" as const,
+    entityId: "mem_1",
+    title: "Prefers pnpm",
+    snapshot: "the approved body",
+    comment: "",
+    capturedAt: 1_000,
+  }
+
+  const sessionSelections = (sessionId: string) =>
+    useChatStore.getState().sessions[sessionId]?.contextSelections ?? []
+
+  // A chip holds the snapshot and fingerprint itself, so restoring needs no
+  // re-read of the source — the draft alone brings the reference back.
+  it("restores the staged chips of a chips-only draft", async () => {
+    await setDraft("ses_chips", "", [], { contextSelections: [chip] })
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <Composer
+          session={mkSession({ id: "ses_chips" })}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={async () => undefined}
+          onStop={async () => undefined}
+        />
+      </Wrapper>
+    )
+    await waitFor(() =>
+      expect(sessionSelections("ses_chips").map((s) => s.title)).toEqual(["Prefers pnpm"])
+    )
+  })
+
+  it("skips a stored entry that is not a ContextSelectionRef", async () => {
+    await setDraft("ses_bad_chips", "", [], {
+      contextSelections: [chip, { kind: "entity" }] as never,
+    })
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <Composer
+          session={mkSession({ id: "ses_bad_chips" })}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={async () => undefined}
+          onStop={async () => undefined}
+        />
+      </Wrapper>
+    )
+    await waitFor(() => expect(sessionSelections("ses_bad_chips")).toHaveLength(1))
+    expect(sessionSelections("ses_bad_chips")[0].title).toBe("Prefers pnpm")
+  })
+
+  // The save effect subscribes to the chip list: staging a chip without typing
+  // still lands in Dexie, and unstaging the last one clears it there.
+  it("persists a staged chip and clears it when unstaged", async () => {
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <Composer
+          session={mkSession({ id: "ses_live_chips" })}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={async () => undefined}
+          onStop={async () => undefined}
+        />
+      </Wrapper>
+    )
+    act(() => useChatStore.getState().addContextSelection(chip, "ses_live_chips"))
+    await waitFor(
+      async () => {
+        const row = await getDb().chatDrafts.get("ses_live_chips")
+        expect(row?.contextSelections?.map((s) => s.title)).toEqual(["Prefers pnpm"])
+      },
+      { timeout: 2000 }
+    )
+    act(() => useChatStore.getState().clearContextSelections("ses_live_chips"))
+    await waitFor(
+      async () => {
+        const row = await getDb().chatDrafts.get("ses_live_chips")
+        expect(row?.contextSelections ?? []).toEqual([])
+      },
+      { timeout: 2000 }
+    )
   })
 })

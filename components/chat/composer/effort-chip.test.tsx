@@ -133,6 +133,25 @@ describe("label", () => {
     expect(screen.getByTestId("effort-chip")).toHaveTextContent("High")
   })
 
+  // The toolbar's fold tier 2 trades the word for the glyph — the tier still
+  // reads through the accessible name and the panel on open.
+  it("drops the label but keeps the tier in glyph form", () => {
+    render(<EffortChip session={session} glyph />)
+    const chip = screen.getByTestId("effort-chip")
+    expect(chip).toHaveAttribute("data-glyph", "true")
+    expect(chip).not.toHaveTextContent("Extra")
+    expect(chip.querySelector(".effort-value-rise")).toBeNull()
+    expect(chip.querySelector(".effort-glyph-pulse")).not.toBeNull()
+    expect(screen.getByLabelText("Thinking level: Extra")).toBeInTheDocument()
+  })
+
+  it("keeps the label when glyph is unset", () => {
+    render(<EffortChip session={session} />)
+    const chip = screen.getByTestId("effort-chip")
+    expect(chip).not.toHaveAttribute("data-glyph")
+    expect(chip).toHaveTextContent("Extra")
+  })
+
   it("marks the ultracode tier so it reads as a change in kind", () => {
     render(<EffortChip session={{ ...session, thinkingLevel: "ultracode" }} />)
     const chip = screen.getByTestId("effort-chip")

@@ -23,6 +23,12 @@ import {
   type CanonicalExtensionPoint,
   type PluginPointFormFactor,
 } from "@/lib/plugin/contracts/plugin-points"
+import {
+  ensureBootCapability,
+  getBootCapabilitySnapshot,
+  isBootCapabilityRequested,
+  subscribeBootCapabilities,
+} from "@/lib/boot/capabilities"
 
 /** Hoisted so the slot wrapper's style prop keeps a stable identity. */
 const INLINE_SIZE_CONTAINER = { containerType: "inline-size" } as const
@@ -54,6 +60,18 @@ export function PluginExtensionSlot({ point, className, limit, fallback, context
   // Also re-render when context keys flip, so `when`-gated extensions
   // (ExtensionOptions.when) appear/disappear live as app state changes.
   useSyncExternalStore(subscribeContextKeys, getContextKeyRevision, () => 0)
+  // Lazy activation also follows the capability request: the startup probe
+  // resolves asynchronously, so a slot can mount before `plugin-runtime` is
+  // even requested. When the request lands (or is already there in the eager
+  // profile) the effect re-runs and the `onView` event fires once the runtime
+  // reports ready — instead of hitting an uninitialized `getPluginManager`,
+  // being swallowed below, and losing the event for the rest of the session.
+  useSyncExternalStore(
+    subscribeBootCapabilities,
+    getBootCapabilitySnapshot,
+    getBootCapabilitySnapshot
+  )
+  const runtimeRequested = isBootCapabilityRequested("plugin-runtime")
 
   // Lazy activation: a plugin gated on `onView:<point>` activates the first
   // time a slot for that point mounts. Fire-and-forget — the manager dedups
@@ -63,8 +81,12 @@ export function PluginExtensionSlot({ point, className, limit, fallback, context
   useEffect(() => {
     let cancelled = false
     void import("@/lib/plugin/core/manager")
-      .then(({ getPluginManager }) => {
+      .then(async ({ getPluginManager }) => {
         if (cancelled) return undefined
+        if (runtimeRequested) {
+          await ensureBootCapability("plugin-runtime")
+          if (cancelled) return undefined
+        }
         return getPluginManager().handleActivationEvent(`onView:${point}`)
       })
       .catch(() => {
@@ -73,7 +95,7 @@ export function PluginExtensionSlot({ point, className, limit, fallback, context
     return () => {
       cancelled = true
     }
-  }, [point])
+  }, [point, runtimeRequested])
 
   const all = getExtensionsForPoint(point)
   const ordered = [...all].sort((a, b) => (b.options.priority ?? 0) - (a.options.priority ?? 0))

@@ -35,7 +35,7 @@ jest.mock("@cognia/plugin-sdk/api/effort-surface", () => {
   }
 })
 
-import definition, { AnimeEffortControl } from "./index"
+import definition, { AnimeEffortControl, ANIME_EFFORT_CSS } from "./index"
 
 type Ctx = Parameters<NonNullable<typeof definition.activate>>[0]
 
@@ -375,5 +375,18 @@ describe("AnimeEffortControl — a context that arrives late", () => {
         "low"
       )
     )
+  })
+})
+
+describe("AnimeEffortControl — the box it is handed", () => {
+  it("fills the granted surface and lets the label ellipsize under it", () => {
+    // The host's surface is a fixed-width box (the manifest's declared band),
+    // not a measurement — a content-sized trigger paints past its edge over
+    // the next toolbar control, and a label without `min-width: 0` holds the
+    // trigger open before it can reach the ellipsis. Both regressions have
+    // shipped; pin the contract.
+    expect(ANIME_EFFORT_CSS).toMatch(/\.aef-trigger\s*\{[^}]*\bwidth:\s*100%/)
+    expect(ANIME_EFFORT_CSS).toMatch(/\.aef-trigger\s*\{[^}]*\bmin-width:\s*0/)
+    expect(ANIME_EFFORT_CSS).toMatch(/\.aef-trigger-value\s*\{[^}]*\bmin-width:\s*0/)
   })
 })

@@ -35,6 +35,60 @@ it("requests runtimes only for configured background work", async () => {
   ])
 })
 
+it("requests plugin-runtime for a user-enabled built-in startup plugin", async () => {
+  const capabilities = await probeConfiguredBootCapabilities({
+    getDatabase: () =>
+      ({
+        plugins: {
+          toArray: async () => [
+            {
+              enabled: true,
+              source: "builtin",
+              manifest: { activationEvents: ["startup"] },
+            },
+          ],
+        },
+        adapterInstances: { toArray: async () => [] },
+        memoryJobs: { toArray: async () => [] },
+        twinJobs: { toArray: async () => [] },
+        chatGoals: { filter: () => ({ count: async () => 0 }) },
+      }) as never,
+    listScheduledTasks: async () => [],
+    getTwinRuntimeSettings: async () => ({ workerEnabled: false }),
+  })
+
+  expect(capabilities).toEqual(["plugin-runtime"])
+})
+
+it.each([
+  ["a disabled built-in startup plugin", { enabled: false, source: "builtin" }],
+  [
+    "an enabled built-in without startup activation",
+    {
+      enabled: true,
+      source: "builtin",
+      manifest: { activationEvents: ["onView:chat.input.menu"] },
+    },
+  ],
+])("requests no runtime for %s", async (_label, plugin) => {
+  const capabilities = await probeConfiguredBootCapabilities({
+    getDatabase: () =>
+      ({
+        plugins: {
+          toArray: async () => [{ manifest: { activationEvents: ["startup"] }, ...plugin }],
+        },
+        adapterInstances: { toArray: async () => [] },
+        memoryJobs: { toArray: async () => [] },
+        twinJobs: { toArray: async () => [] },
+        chatGoals: { filter: () => ({ count: async () => 0 }) },
+      }) as never,
+    listScheduledTasks: async () => [],
+    getTwinRuntimeSettings: async () => ({ workerEnabled: false }),
+  })
+
+  expect(capabilities).toEqual([])
+})
+
 it("keeps main startup light when no optional background work is configured", async () => {
   const capabilities = await probeConfiguredBootCapabilities({
     getDatabase: () =>

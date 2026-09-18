@@ -59,12 +59,14 @@ describe("PluginSurface", () => {
   it.each(["icon", "row"] satisfies PluginSurfaceFormFactor[])(
     "silently removes a crashed %s surface while reporting it",
     async (formFactor) => {
+      const onSilentFailure = jest.fn()
       const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {})
       const { container } = render(
         <PluginSurface
           pluginId="acme.reference"
           surfaceId={`surface-${formFactor}`}
           formFactor={formFactor}
+          onSilentFailure={onSilentFailure}
         >
           <Boom />
         </PluginSurface>
@@ -72,6 +74,7 @@ describe("PluginSurface", () => {
 
       expect(screen.queryByRole("alert")).not.toBeInTheDocument()
       expect(container.querySelector('[data-plugin-root="acme.reference"]')).toBeEmptyDOMElement()
+      expect(onSilentFailure).toHaveBeenCalledTimes(1)
       await waitFor(() => {
         expect(recordPluginPointDiagnostic).toHaveBeenCalledWith(
           "acme.reference",
@@ -99,6 +102,7 @@ describe("PluginSurface", () => {
     async (formFactor) => {
       let shouldThrow = true
       const Recoverable = () => <Boom enabled={shouldThrow} />
+      const onSilentFailure = jest.fn()
       const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {})
       render(
         <PluginSurface
@@ -106,6 +110,7 @@ describe("PluginSurface", () => {
           pluginName="Reference Plugin"
           surfaceId={`surface-${formFactor}`}
           formFactor={formFactor}
+          onSilentFailure={onSilentFailure}
         >
           <Recoverable />
         </PluginSurface>
@@ -113,6 +118,9 @@ describe("PluginSurface", () => {
 
       expect(screen.getByRole("alert")).toHaveTextContent("Reference Plugin")
       expect(screen.getByRole("alert")).toHaveTextContent("reference crash")
+      // A visible retryable card means the contribution is still present — the
+      // silent-removal signal must not fire.
+      expect(onSilentFailure).not.toHaveBeenCalled()
       await waitFor(() =>
         expect(recordPluginPointDiagnostic).toHaveBeenCalledWith(
           "acme.reference",
@@ -154,6 +162,10 @@ describe("PluginSurface", () => {
     expect(root().style.containerType).toBe("inline-size")
     expect(root().style.minWidth).toBe("")
     expect(root().style.maxWidth).toBe("")
+    // Containment hides the contents from layout, so a flex row collapses
+    // this box to 0px; clipping keeps them from painting over the next host
+    // control instead of fixing the width (nothing was declared).
+    expect(root().style.overflow).toBe("hidden")
     rerender(
       <PluginSurface
         pluginId="acme.reference"
@@ -167,8 +179,12 @@ describe("PluginSurface", () => {
     )
     expect(root().style.display).toBe("block")
     expect(root().style.containerType).toBe("inline-size")
+    // `flex-basis` is the width source a flex row can honour — the same
+    // containment collapse resolves the min/max percentages to 0.
+    expect(root().style.flexBasis).toBe("320px")
     expect(root().style.minWidth).toBe("min(320px, 100%)")
     expect(root().style.maxWidth).toBe("min(640px, 100%)")
+    expect(root().style.overflow).toBe("hidden")
   })
 
   it("supports one-sided width hints and reuses cached styles", () => {
@@ -180,6 +196,7 @@ describe("PluginSurface", () => {
     const root = () => container.querySelector<HTMLElement>("[data-plugin-surface]")!
     expect(root().style.minWidth).toBe("")
     expect(root().style.maxWidth).toBe("min(240px, 100%)")
+    expect(root().style.flexBasis).toBe("240px")
 
     rerender(
       <PluginSurface pluginId="acme.reference" surfaceId="slot" formFactor="row" minWidth={120}>
@@ -188,6 +205,7 @@ describe("PluginSurface", () => {
     )
     expect(root().style.minWidth).toBe("min(120px, 100%)")
     expect(root().style.maxWidth).toBe("100%")
+    expect(root().style.flexBasis).toBe("120px")
 
     rerender(
       <PluginSurface pluginId="acme.reference" surfaceId="slot" formFactor="row" minWidth={120}>
@@ -246,6 +264,9 @@ describe("PluginSurface", () => {
     expect(root()?.style.containerType).toBe("")
     expect(root()?.style.minWidth).toBe("min(320px, 100%)")
     expect(root()?.style.maxWidth).toBe("min(640px, 100%)")
+    // The opt-out keeps `overflow: visible` — it exists for panels whose
+    // positioned descendants must escape the box.
+    expect(root()?.style.overflow).toBe("")
 
     // With no hints the opt-out gets the host layout back untouched, which is
     // the reason context panels ask for it — containment re-anchors absolutely

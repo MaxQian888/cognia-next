@@ -14,6 +14,10 @@ jest.mock("@/lib/chat/mentions/message-reference", () => {
 })
 const toastErrorMock = jest.fn()
 jest.mock("sonner", () => ({ toast: { error: (m: string) => toastErrorMock(m) } }))
+const trackEventMock = jest.fn()
+jest.mock("@/lib/telemetry/events/track-event", () => ({
+  trackEvent: (...a: unknown[]) => trackEventMock(...a),
+}))
 
 const refreshFreshnessMock = jest.fn()
 jest.mock("@/lib/chat/mentions/selection-freshness", () => ({
@@ -511,6 +515,40 @@ describe("stale snapshots", () => {
     await waitFor(() =>
       expect((useChatStore.getState().contextSelections[0] as { stale?: boolean }).stale).toBe(true)
     )
+  })
+
+  // The badge is a render product; the event is emitted where the stale flag is
+  // written so it fires once per transition, not once per render or per focus.
+  it("emits chat.reference.stale_shown once per stale transition", async () => {
+    act(() => useChatStore.getState().addContextSelection(staleSel()))
+    const staged = useChatStore.getState().contextSelections
+    refreshFreshnessMock.mockResolvedValue({
+      selections: [{ ...staged[0], stale: true }],
+      changed: true,
+    })
+    render(<ArtifactSelectionChips />)
+    await waitFor(() =>
+      expect(trackEventMock).toHaveBeenCalledWith("chat.reference.stale_shown", {
+        entityKind: "memory",
+      })
+    )
+    expect(trackEventMock).toHaveBeenCalledTimes(1)
+
+    // A second check that keeps it stale is not a new showing.
+    act(() => {
+      window.dispatchEvent(new Event("focus"))
+    })
+    await waitFor(() => expect(refreshFreshnessMock).toHaveBeenCalledTimes(2))
+    expect(trackEventMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not emit stale_shown for a chip that was already stale", async () => {
+    act(() => useChatStore.getState().addContextSelection(staleSel({ stale: true })))
+    const staged = useChatStore.getState().contextSelections
+    refreshFreshnessMock.mockResolvedValue({ selections: staged, changed: false })
+    render(<ArtifactSelectionChips />)
+    await waitFor(() => expect(refreshFreshnessMock).toHaveBeenCalledTimes(1))
+    expect(trackEventMock).not.toHaveBeenCalledWith("chat.reference.stale_shown", expect.anything())
   })
 
   it("re-reads the body and the fingerprint when refresh is clicked", async () => {
