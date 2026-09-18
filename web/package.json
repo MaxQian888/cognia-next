@@ -31,7 +31,7 @@
   "devDependencies": {
     "@lobehub/icons-static-svg": "^1.94.0",
     "@tailwindcss/postcss": "^4.3.3",
-    "@types/node": "^26.2.0",
+    "@types/node": "^26.5.1",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "tailwindcss": "^4.3.3",
