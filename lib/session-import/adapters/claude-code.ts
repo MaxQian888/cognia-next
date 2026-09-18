@@ -17,6 +17,7 @@ import { joinPath } from "@/lib/claude/instructions/paths"
 import type { ImportedConversation } from "@/lib/data/importers/types"
 import type { StoredMessage } from "@cognia/agent-config-types"
 import { walkFiles } from "../fs"
+import { everyBudget, mapBounded } from "../pacing"
 import { scanFileSummaries } from "../scan"
 import { buildImportedSessionGraph } from "../graph"
 import { importedUsageMetadata } from "../usage"
@@ -706,16 +707,67 @@ async function readJsonFiles(
     return values
   }
   if (!(await input.fs.exists(root))) return values
-  const files = await walkFiles(input.fs, root, (name) => accept(name))
-  for (const path of files) {
+  const files = await walkFiles(input.fs, root, accept)
+  const budget = everyBudget()
+  const loaded = await mapBounded(files, 8, async (path) => {
+    await budget()
     try {
       const value = record(JSON.parse(await input.fs.readTextFile(path)))
-      if (value) values.push({ path, value })
+      return value ? { path, value } : null
     } catch {
       // One team/task artifact must not sink the transcript import.
+      return null
     }
+  })
+  for (const item of loaded) {
+    if (item) values.push(item)
   }
   return values
+}
+
+interface ClaudeTeamCorpus {
+  configs: Array<{ path: string; value: Record<string, unknown> }>
+  taskFiles: Array<{ path: string; value: Record<string, unknown> }>
+}
+
+async function collectClaudeTeamCorpus(input: SessionScanInput): Promise<ClaudeTeamCorpus> {
+  const base = input.roots?.claudeConfigDir || (input.home ? joinPath(input.home, ".claude") : "")
+  if (!base && !input.pickedFiles?.length) {
+    return { configs: [], taskFiles: [] }
+  }
+  const configs = await readJsonFiles(
+    input,
+    joinPath(base, "teams"),
+    (path) => path.replace(/\\/g, "/").includes("/teams/") && path.endsWith("config.json")
+  )
+  // Read the whole tasks tree once; the per-team narrowing happens at
+  // snapshot time on the full paths, so it can be reused across refs.
+  const taskFiles = await readJsonFiles(input, joinPath(base, "tasks"), (path) =>
+    path.toLowerCase().endsWith(".json")
+  )
+  return { configs, taskFiles }
+}
+
+/**
+ * Team/task artifact reads, cached on the `SessionScanInput`. `parseGraph`
+ * needs a snapshot per ref, and every ref used to re-walk and re-read all of
+ * `~/.claude/teams` and `~/.claude/tasks` — K refs meant K passes. Weakly
+ * keyed like `collectSessions` in `opencode.ts`: fresh scan → fresh input →
+ * no staleness.
+ */
+const claudeTeamCorpusCache = new WeakMap<SessionScanInput, Promise<ClaudeTeamCorpus>>()
+
+function claudeTeamCorpus(input: SessionScanInput): Promise<ClaudeTeamCorpus> {
+  const cached = claudeTeamCorpusCache.get(input)
+  if (cached) return cached
+  // Evict a FAILED read so the next attempt actually retries — a rejected
+  // promise left in the cache would poison every later ref on this input.
+  const guarded = collectClaudeTeamCorpus(input).catch((error: unknown) => {
+    claudeTeamCorpusCache.delete(input)
+    throw error
+  })
+  claudeTeamCorpusCache.set(input, guarded)
+  return guarded
 }
 
 async function loadClaudeTeamSnapshot(
@@ -723,15 +775,7 @@ async function loadClaudeTeamSnapshot(
   nativeSessionId: string,
   cwd?: string
 ): Promise<ClaudeTeamSnapshot> {
-  const base = input.roots?.claudeConfigDir || (input.home ? joinPath(input.home, ".claude") : "")
-  if (!base && !input.pickedFiles?.length) {
-    return { members: [], tasks: [], taskOwnerById: new Map() }
-  }
-  const configs = await readJsonFiles(
-    input,
-    joinPath(base, "teams"),
-    (path) => path.replace(/\\/g, "/").includes("/teams/") && path.endsWith("config.json")
-  )
+  const { configs, taskFiles } = await claudeTeamCorpus(input)
   const matching = configs.filter(({ value }) => {
     if (stringValue(value.leadSessionId) === nativeSessionId) return true
     if (cwd && stringValue(value.cwd) === cwd) return true
@@ -752,30 +796,27 @@ async function loadClaudeTeamSnapshot(
       })
       .filter((name): name is string => Boolean(name))
   )
-  const taskFiles = await readJsonFiles(
-    input,
-    joinPath(base, "tasks"),
-    (path) =>
-      path.toLowerCase().endsWith(".json") &&
-      [...teamNames].some((team) => path.replace(/\\/g, "/").includes(`/tasks/${team}/`))
-  )
   const taskOwnerById = new Map<string, string>()
-  const tasks = taskFiles.map(({ value, path }) => {
-    const taskId = stringValue(value.id) || fileStem(path.replace(/\.json$/i, ".jsonl"))
-    const owner = stringValue(value.owner)
-    if (owner) taskOwnerById.set(taskId, owner)
-    return {
-      taskId,
-      description: stringValue(value.description) || stringValue(value.subject),
-      summary: stringValue(value.activeForm),
-      status: taskStatus(value.status),
-      background: value.background === true || undefined,
-      parentTaskId: stringValue(value.parentTaskId),
-      dependencies: Array.isArray(value.blockedBy)
-        ? value.blockedBy.filter((item): item is string => typeof item === "string")
-        : undefined,
-    }
-  })
+  const tasks = taskFiles
+    .filter(({ path }) =>
+      [...teamNames].some((team) => path.replace(/\\/g, "/").includes(`/tasks/${team}/`))
+    )
+    .map(({ value, path }) => {
+      const taskId = stringValue(value.id) || fileStem(path.replace(/\.json$/i, ".jsonl"))
+      const owner = stringValue(value.owner)
+      if (owner) taskOwnerById.set(taskId, owner)
+      return {
+        taskId,
+        description: stringValue(value.description) || stringValue(value.subject),
+        summary: stringValue(value.activeForm),
+        status: taskStatus(value.status),
+        background: value.background === true || undefined,
+        parentTaskId: stringValue(value.parentTaskId),
+        dependencies: Array.isArray(value.blockedBy)
+          ? value.blockedBy.filter((item): item is string => typeof item === "string")
+          : undefined,
+      }
+    })
   return { members, tasks, taskOwnerById }
 }
 
@@ -832,6 +873,103 @@ function addTeamMembers(
 
 import { claudeCodeCodec } from "@/lib/session-import/codecs/claude-code-codec"
 
+/**
+ * `parseSession` and `parseGraph` share one transcript read+parse. The graph
+ * path needs the `ParsedSession` (native id, cwd, recorded events, losses) in
+ * addition to the conversation — it used to read and parse the file a second
+ * time to get them, doubling per-ref cost on multi-MB transcripts.
+ */
+async function parseClaudeConversation(
+  ref: SessionRef,
+  input: SessionScanInput
+): Promise<{ conversation: ImportedConversation; parsed: ParsedSession }> {
+  let content: string
+  if (input.pickedFiles?.length) {
+    const picked = input.pickedFiles.find((f) => f.path === ref.locator)
+    content = picked?.content ?? ""
+  } else {
+    content = await input.fs.readTextFile(ref.locator)
+  }
+  const parsed = parseClaudeTranscript(content, ref.locator)
+  const conversation = toConversation(parsed)
+  const childArtifacts: Array<{ content: string; locator: string }> = []
+  const addChildArtifacts = (): ImportedConversation[] => {
+    const grouped = new Map<string, ParsedSession[]>()
+    for (const artifact of childArtifacts) {
+      const child = parseClaudeTranscript(artifact.content, artifact.locator)
+      const existing = grouped.get(child.originalSessionId)
+      if (existing) existing.push(child)
+      else grouped.set(child.originalSessionId, [child])
+    }
+    return [...grouped.values()].flatMap((segments) => {
+      const ordered = segments.toSorted((a, b) => a.createdAt - b.createdAt)
+      const first = ordered[0]
+      if (!first) return []
+      const nestedId = importedSessionId("claude-code", first.originalSessionId)
+      const messages = ordered
+        .flatMap((segment) => segment.messages)
+        .map((message, index) => ({
+          ...message,
+          id: importedMessageId(nestedId, index),
+          sessionId: nestedId,
+        }))
+      if (messages.length === 0) return []
+      const nested = toConversation({
+        ...first,
+        messages,
+        nestedConversations: ordered.flatMap((segment) => segment.nestedConversations),
+        updatedAt: Math.max(...ordered.map((segment) => segment.updatedAt)),
+      })
+      nested.session.kind = "subagent"
+      nested.session.branchSeed = undefined
+      nested.session.parentSessionId = conversation.session.id
+      nested.session.importRelation = {
+        kind: "subagent",
+        parentNativeSessionId: parsed.originalSessionId,
+      }
+      nested.session.importRuntimeBinding = {
+        presetId: "claude-code",
+        nativeSessionId: first.originalSessionId,
+        cwd: first.cwd,
+      }
+      return [nested]
+    })
+  }
+
+  if (input.pickedFiles?.length) {
+    const childPrefix = `${ref.locator.replace(/\.jsonl$/i, "")}/subagents/`.replace(/\\/g, "/")
+    for (const file of input.pickedFiles) {
+      if (file.path.replace(/\\/g, "/").startsWith(childPrefix)) {
+        childArtifacts.push({ content: file.content, locator: file.path })
+      }
+    }
+  } else {
+    const childDir = joinPath(ref.locator.replace(/\.jsonl$/i, ""), "subagents")
+    if (await input.fs.exists(childDir)) {
+      const files = await walkFiles(input.fs, childDir, (name) =>
+        name.toLowerCase().endsWith(".jsonl")
+      )
+      const children = await mapBounded(files, 8, async (file) => {
+        try {
+          return { content: await input.fs.readTextFile(file), locator: file }
+        } catch {
+          // Preserve the parent and other children if one transcript is corrupt.
+          return null
+        }
+      })
+      for (const child of children) {
+        if (child) childArtifacts.push(child)
+      }
+    }
+  }
+
+  const independent = addChildArtifacts()
+  if (independent.length > 0) {
+    conversation.nested = [...(conversation.nested ?? []), ...independent]
+  }
+  return { conversation, parsed }
+}
+
 export const claudeCodeSessionSource: AgentSessionSourceAdapter = {
   codec: claudeCodeCodec,
   id: "claude-code",
@@ -879,95 +1017,18 @@ export const claudeCodeSessionSource: AgentSessionSourceAdapter = {
   },
 
   async parseSession(ref: SessionRef, input: SessionScanInput) {
-    let content: string
-    if (input.pickedFiles?.length) {
-      const picked = input.pickedFiles.find((f) => f.path === ref.locator)
-      content = picked?.content ?? ""
-    } else {
-      content = await input.fs.readTextFile(ref.locator)
-    }
-    const parsed = parseClaudeTranscript(content, ref.locator)
-    const conversation = toConversation(parsed)
-    const childArtifacts: Array<{ content: string; locator: string }> = []
-    const addChildArtifacts = (): ImportedConversation[] => {
-      const grouped = new Map<string, ParsedSession[]>()
-      for (const artifact of childArtifacts) {
-        const child = parseClaudeTranscript(artifact.content, artifact.locator)
-        const existing = grouped.get(child.originalSessionId)
-        if (existing) existing.push(child)
-        else grouped.set(child.originalSessionId, [child])
-      }
-      return [...grouped.values()].flatMap((segments) => {
-        const ordered = segments.toSorted((a, b) => a.createdAt - b.createdAt)
-        const first = ordered[0]
-        if (!first) return []
-        const nestedId = importedSessionId("claude-code", first.originalSessionId)
-        const messages = ordered
-          .flatMap((segment) => segment.messages)
-          .map((message, index) => ({
-            ...message,
-            id: importedMessageId(nestedId, index),
-            sessionId: nestedId,
-          }))
-        if (messages.length === 0) return []
-        const nested = toConversation({
-          ...first,
-          messages,
-          nestedConversations: ordered.flatMap((segment) => segment.nestedConversations),
-          updatedAt: Math.max(...ordered.map((segment) => segment.updatedAt)),
-        })
-        nested.session.kind = "subagent"
-        nested.session.branchSeed = undefined
-        nested.session.parentSessionId = conversation.session.id
-        nested.session.importRelation = {
-          kind: "subagent",
-          parentNativeSessionId: parsed.originalSessionId,
-        }
-        nested.session.importRuntimeBinding = {
-          presetId: "claude-code",
-          nativeSessionId: first.originalSessionId,
-          cwd: first.cwd,
-        }
-        return [nested]
-      })
-    }
-
-    if (input.pickedFiles?.length) {
-      const childPrefix = `${ref.locator.replace(/\.jsonl$/i, "")}/subagents/`.replace(/\\/g, "/")
-      for (const file of input.pickedFiles) {
-        if (file.path.replace(/\\/g, "/").startsWith(childPrefix)) {
-          childArtifacts.push({ content: file.content, locator: file.path })
-        }
-      }
-    } else {
-      const childDir = joinPath(ref.locator.replace(/\.jsonl$/i, ""), "subagents")
-      if (await input.fs.exists(childDir)) {
-        const files = await walkFiles(input.fs, childDir, (name) =>
-          name.toLowerCase().endsWith(".jsonl")
-        )
-        for (const file of files) {
-          try {
-            childArtifacts.push({ content: await input.fs.readTextFile(file), locator: file })
-          } catch {
-            // Preserve the parent and other children if one transcript is corrupt.
-          }
-        }
-      }
-    }
-
-    const independent = addChildArtifacts()
-    if (independent.length > 0) {
-      conversation.nested = [...(conversation.nested ?? []), ...independent]
-    }
-    return conversation
+    return (await parseClaudeConversation(ref, input)).conversation
   },
-  async parseGraph(ref: SessionRef, input: SessionScanInput) {
-    const conversation = await this.parseSession(ref, input)
-    const content = input.pickedFiles?.length
-      ? (input.pickedFiles.find((file) => file.path === ref.locator)?.content ?? "")
-      : await input.fs.readTextFile(ref.locator)
-    const parsed = parseClaudeTranscript(content, ref.locator)
-    const snapshot = await loadClaudeTeamSnapshot(input, parsed.originalSessionId, parsed.cwd)
+  async parseGraph(ref: SessionRef, input: SessionScanInput, opts?: { singleFile?: boolean }) {
+    // One transcript read+parse serves both the conversation and the
+    // canonical enrichment below — no second pass over the file.
+    const { conversation, parsed } = await parseClaudeConversation(ref, input)
+    // `singleFile` (fs-watch path): skip the teams/tasks dirs — a transcript
+    // append must not re-walk them, and team members persist from the import
+    // that created them.
+    const snapshot = opts?.singleFile
+      ? { members: [], tasks: [], taskOwnerById: new Map<string, string>() }
+      : await loadClaudeTeamSnapshot(input, parsed.originalSessionId, parsed.cwd)
     addTeamMembers(conversation, snapshot, parsed)
     const transcriptTasks = tasksFromTranscript(conversation)
     const tasks = new Map(

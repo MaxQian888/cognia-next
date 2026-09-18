@@ -6,10 +6,19 @@
 // sessions the user actually imports.
 
 import { walkFiles } from "./fs"
+import { everyBudget, mapBounded } from "./pacing"
 import type { PickedSessionFile, SessionScanInput, SessionSummary } from "./types"
 
 /** A file's raw content → its summary, or null when it holds no session. */
 export type SummarizeFile = (content: string, locator: string) => SessionSummary | null
+
+/**
+ * In-flight `readTextFile` calls during a corpus scan. Each read is a Tauri
+ * IPC whose cost is mostly transit, so eight lanes cut a serial scan's
+ * wall time roughly eight-fold while keeping buffered file bodies bounded —
+ * the old unbounded `Promise.all` pattern held the whole corpus at once.
+ */
+const SCAN_READ_LANES = 8
 
 /**
  * List summaries for a per-file source, from either the desktop walk or the
@@ -23,9 +32,11 @@ export async function scanFileSummaries(
   summarize: SummarizeFile
 ): Promise<SessionSummary[]> {
   const summaries: SessionSummary[] = []
+  const budget = everyBudget()
 
   if (input.pickedFiles?.length) {
     for (const file of pickedMatching(input.pickedFiles, accept)) {
+      await budget()
       const summary = summarize(file.content, file.path)
       if (summary) summaries.push(summary)
     }
@@ -34,15 +45,18 @@ export async function scanFileSummaries(
 
   for (const root of roots) {
     const files = await walkFiles(input.fs, root, accept)
-    for (const file of files) {
+    const scanned = await mapBounded(files, SCAN_READ_LANES, async (file) => {
+      await budget()
       let content: string
       try {
         content = await input.fs.readTextFile(file)
       } catch {
         // Skip an unreadable transcript rather than sinking the whole scan.
-        continue
+        return null
       }
-      const summary = summarize(content, file)
+      return summarize(content, file)
+    })
+    for (const summary of scanned) {
       if (summary) summaries.push(summary)
     }
   }

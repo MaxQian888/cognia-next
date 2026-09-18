@@ -83,6 +83,7 @@ describe("session-import runner", () => {
       piSessionDir: "",
       geminiDir: "",
       continueDir: "",
+      cursorDir: "",
     }
     const resolved = await resolveScanInput({ fs, roots })
     expect(resolved.roots).toBe(roots)

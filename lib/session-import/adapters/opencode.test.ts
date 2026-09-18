@@ -231,6 +231,7 @@ describe("opencodeSessionSource", () => {
       piSessionDir: "",
       geminiDir: "",
       continueDir: "",
+      cursorDir: "",
     })
     expect(scanned[0]).toBe("/xdg/data/opencode")
     expect(scanned).toContain("/home/u/.local/share/opencode")
@@ -245,6 +246,7 @@ describe("opencodeSessionSource", () => {
         piSessionDir: "",
         geminiDir: "",
         continueDir: "",
+        cursorDir: "",
       })
     ).toEqual(["/xdg/data/opencode"])
   })
@@ -259,6 +261,7 @@ describe("opencodeSessionSource", () => {
       piSessionDir: "",
       geminiDir: "",
       continueDir: "",
+      cursorDir: "",
     })
     expect(scanned.filter((r) => r === "/home/u/.local/share/opencode")).toHaveLength(1)
   })
@@ -273,6 +276,7 @@ describe("opencodeSessionSource", () => {
       piSessionDir: "",
       geminiDir: "",
       continueDir: "",
+      cursorDir: "",
       opencodePlatformDataDir: "E:\\Profiles\\u\\Roaming\\opencode",
     })
     expect(scanned).toEqual(

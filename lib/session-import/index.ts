@@ -6,6 +6,7 @@ import type { ImportedConversation } from "@/lib/data/importers/types"
 import { resolveHome } from "@/lib/memory/external/home"
 import { resolveVendorRoots } from "@/lib/agent-roots"
 import { realSessionFs } from "./fs"
+import { everyBudget } from "./pacing"
 import { buildImportedSessionGraph } from "./graph"
 import { getSessionSource, getSessionSources } from "./registry"
 import type {
@@ -150,7 +151,8 @@ export async function listAllSessions(input: SessionScanInput): Promise<SessionS
 async function parseRefConversations(
   ref: SessionRef,
   input: SessionScanInput,
-  projectId?: string
+  projectId?: string,
+  singleFile = false
 ): Promise<{
   conversations: ImportedConversation[]
   canonicalNodes: ImportedSessionGraphNode[]
@@ -159,7 +161,9 @@ async function parseRefConversations(
   const source = getSessionSource(ref.sourceId)
   if (!source) return { conversations: [], canonicalNodes: [], parsed: false }
   try {
-    const richGraph = source.parseGraph ? await source.parseGraph(ref, input) : undefined
+    const richGraph = source.parseGraph
+      ? await source.parseGraph(ref, input, { singleFile })
+      : undefined
     const conv = richGraph ? undefined : await source.parseSession(ref, input)
     const legacyGraph = conv
       ? buildImportedSessionGraph(conv, {
@@ -363,7 +367,7 @@ export async function importSessions(
   /** Session-level provenance and fidelity; unlike lossBySource this preserves graph identity. */
   details: import("./types").SessionImportDetail[]
 }> {
-  const { signal, onProgress, onRefParsed, chunkSize = DEFAULT_IMPORT_CHUNK } = opts
+  const { signal, onProgress, onRefParsed, chunkSize = DEFAULT_IMPORT_CHUNK, singleFile } = opts
   const total = refs.length
   const size = Math.max(1, chunkSize)
 
@@ -388,9 +392,14 @@ export async function importSessions(
     onProgress?.({ phase: "writing", done: flushed, total })
   }
 
+  // Corpus-cached adapters make the per-ref stretch mostly synchronous graph
+  // work — a resolved-promise await never reaches a paint. Yield on a time
+  // budget so progress ticks and input handling stay alive over a long run.
+  const budget = everyBudget()
   for (const ref of refs) {
     if (signal?.aborted) break
-    const parsedRef = await parseRefConversations(ref, input, projectId)
+    await budget()
+    const parsedRef = await parseRefConversations(ref, input, projectId, singleFile)
     const conversations = parsedRef.conversations
     buffer.push(...conversations)
     if (parsedRef.parsed) onRefParsed?.(ref)

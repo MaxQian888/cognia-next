@@ -12,6 +12,7 @@ import type {
 } from "@cognia/agent-config-types/canonical-session"
 
 import { walkFiles } from "../fs"
+import { everyBudget, mapBounded } from "../pacing"
 import { buildImportedSessionGraph } from "../graph"
 import {
   buildMessage,
@@ -539,25 +540,42 @@ async function collectArtifacts(
       }
     }
   }
+  const budget = everyBudget()
   for (const root of config.roots(input.home)) {
     const files = await walkFiles(input.fs, root, (name) => extensionAccepted(config, name))
-    for (const locator of files) {
+    // Bounded read lanes: every read is a Tauri IPC, so a serial loop pays
+    // one round-trip latency per artifact.
+    const loaded = await mapBounded(files, ARTIFACT_READ_LANES, async (locator) => {
+      await budget()
       try {
-        artifacts.push({ locator, content: await input.fs.readTextFile(locator) })
+        return { locator, content: await input.fs.readTextFile(locator) }
       } catch {
         // One locked or concurrently-written artifact does not sink the scan.
+        return null
       }
+    })
+    for (const artifact of loaded) {
+      if (artifact) artifacts.push(artifact)
     }
   }
   return artifacts
 }
+
+/**
+ * In-flight artifact reads during corpus collection — same IPC-latency
+ * overlap as `SCAN_READ_LANES` in `scan.ts`, bounded so buffered bodies
+ * stay small.
+ */
+const ARTIFACT_READ_LANES = 8
 
 async function collectParsed(
   config: PortableSourceConfig,
   input: SessionScanInput
 ): Promise<PortableParsedSession[]> {
   const sessions = new Map<string, PortableParsedSession>()
+  const budget = everyBudget()
   for (const artifact of await collectArtifacts(config, input)) {
+    await budget()
     for (const incoming of parsePortableAgentArtifact(config, artifact.content, artifact.locator)) {
       const current = sessions.get(incoming.originalSessionId)
       if (!current) {
@@ -622,6 +640,29 @@ function attachTree(
 export function createPortableAgentSessionSource(
   config: PortableSourceConfig
 ): AgentSessionSourceAdapter {
+  /**
+   * Whole-corpus parse, cached on the `SessionScanInput`. `listSessions`,
+   * `parseSession`, and `parseGraph` all need the same artifact set, and one
+   * import run reuses a single input for every ref — without the cache each
+   * of the K selected refs re-walked and re-parsed the entire source corpus
+   * (the O(K × corpus) freeze). Keyed weakly like `collectSessions` in
+   * `opencode.ts`: a fresh scan builds a fresh input, so nothing goes stale.
+   */
+  const parsedCache = new WeakMap<SessionScanInput, Promise<PortableParsedSession[]>>()
+
+  const collectParsedCached = (input: SessionScanInput): Promise<PortableParsedSession[]> => {
+    const cached = parsedCache.get(input)
+    if (cached) return cached
+    // Evict a FAILED pass so the next attempt actually retries — a rejected
+    // promise left in the cache would poison every later ref on this input.
+    const guarded = collectParsed(config, input).catch((error: unknown) => {
+      parsedCache.delete(input)
+      throw error
+    })
+    parsedCache.set(input, guarded)
+    return guarded
+  }
+
   return {
     id: config.id,
     displayName: config.displayName,
@@ -646,7 +687,7 @@ export function createPortableAgentSessionSource(
       return looks ? "maybe" : "no"
     },
     async listSessions(input: SessionScanInput): Promise<SessionSummary[]> {
-      const sessions = await collectParsed(config, input)
+      const sessions = await collectParsedCached(input)
       const known = new Set(sessions.map((session) => session.originalSessionId))
       return sessions
         .filter(
@@ -670,7 +711,7 @@ export function createPortableAgentSessionSource(
         .sort((a, b) => b.updatedAt - a.updatedAt)
     },
     async parseSession(ref: SessionRef, input: SessionScanInput): Promise<ImportedConversation> {
-      const sessions = await collectParsed(config, input)
+      const sessions = await collectParsedCached(input)
       const found = sessions.find((session) => session.originalSessionId === ref.originalSessionId)
       if (!found) {
         return toConversation(config, {
@@ -689,7 +730,7 @@ export function createPortableAgentSessionSource(
       return attachTree(config, found, sessions)
     },
     async parseGraph(ref: SessionRef, input: SessionScanInput) {
-      const sessions = await collectParsed(config, input)
+      const sessions = await collectParsedCached(input)
       const found = sessions.find((session) => session.originalSessionId === ref.originalSessionId)
       const conversation = found
         ? attachTree(config, found, sessions)

@@ -450,6 +450,7 @@ describe("claudeCodeSessionSource", () => {
       piSessionDir: "",
       geminiDir: "",
       continueDir: "",
+      cursorDir: "",
     }
     expect(claudeCodeSessionSource.scanRoots("/home/u", roots)).toEqual([
       "/relocated/claude/projects",

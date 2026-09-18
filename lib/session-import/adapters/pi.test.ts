@@ -590,6 +590,7 @@ describe("piSessionSource", () => {
       piSessionDir: "/relocated/pi-agent/sessions",
       geminiDir: "",
       continueDir: "",
+      cursorDir: "",
     }
     expect(piSessionSource.scanRoots("/home/u", roots)).toEqual(["/relocated/pi-agent/sessions"])
     // A blank resolution falls back to the home-relative default.

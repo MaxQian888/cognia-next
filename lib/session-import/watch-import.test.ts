@@ -53,11 +53,73 @@ describe("runWatchImport", () => {
     expect(importSessions).toHaveBeenCalledWith(
       [{ sourceId: "claude-code", originalSessionId: "", locator: changedPath }],
       input,
-      "proj"
+      "proj",
+      // `singleFile` keeps the adapter's graph build from re-scanning the
+      // whole corpus to find children — the narrowing this test asserts.
+      { singleFile: true }
     )
     // The whole point: the full history is never re-scanned.
     expect(listAllSessions).not.toHaveBeenCalled()
     expect(listSessionsForSource).not.toHaveBeenCalled()
+  })
+
+  it("coalesces same-path bursts into one import; different paths run serially", async () => {
+    detectSourceForPath.mockReturnValue({ id: "claude-code", summarizeFile: () => null })
+    // Hold the first import open so the following calls land mid-flight.
+    let release!: () => void
+    importSessions.mockImplementationOnce(
+      () => new Promise((resolve) => (release = () => resolve({ sessions: 1, messages: 1 })))
+    )
+
+    const p1 = runWatchImport({ changedPath: "/p/a.jsonl" })
+    // Let job 1 reach `importSessions` before the burst lands — a same-path
+    // call only coalesces with a QUEUED job or queues a trailing run while one
+    // is in-flight; without this the deferred doesn't exist at `release()`.
+    await new Promise((r) => setTimeout(r, 0))
+    const p2 = runWatchImport({ changedPath: "/p/a.jsonl" }) // same path → queues
+    const p3 = runWatchImport({ changedPath: "/p/a.jsonl" }) // same path → joins p2's job
+    const p4 = runWatchImport({ changedPath: "/p/b.jsonl" }) // different path → own job
+    release()
+    const [r1, r2, r3, r4] = await Promise.all([p1, p2, p3, p4])
+
+    // p1 (in-flight) + one merged a.jsonl run (p2≡p3) + b.jsonl = 3 imports.
+    expect(importSessions).toHaveBeenCalledTimes(3)
+    expect(r2).toBe(r3)
+    expect(r4).toEqual({ sessions: 1, messages: 2 })
+    expect(r1).toEqual({ sessions: 1, messages: 1 })
+  })
+
+  it("a same-path event during an in-flight import queues a trailing run", async () => {
+    detectSourceForPath.mockReturnValue({ id: "claude-code", summarizeFile: () => null })
+    let release!: () => void
+    importSessions
+      .mockImplementationOnce(
+        () => new Promise((resolve) => (release = () => resolve({ sessions: 1, messages: 1 })))
+      )
+      .mockImplementation(async () => ({ sessions: 1, messages: 1 }))
+
+    const p1 = runWatchImport({ changedPath: "/p/a.jsonl" })
+    await new Promise((r) => setTimeout(r, 0))
+    const p2 = runWatchImport({ changedPath: "/p/a.jsonl" }) // lands while p1 runs
+    release()
+    await Promise.all([p1, p2])
+    // The trailing edge is preserved: the second event got its own import.
+    expect(importSessions).toHaveBeenCalledTimes(2)
+  })
+
+  it("a queued import rejection reaches its caller without stalling the queue", async () => {
+    detectSourceForPath.mockReturnValue({ id: "claude-code", summarizeFile: () => null })
+    importSessions
+      .mockRejectedValueOnce(new Error("disk gone"))
+      .mockImplementation(async () => ({ sessions: 1, messages: 1 }))
+
+    await expect(runWatchImport({ changedPath: "/p/a.jsonl" })).rejects.toThrow("disk gone")
+    // The next job still drains after a failure.
+    await expect(runWatchImport({ changedPath: "/p/b.jsonl" })).resolves.toEqual({
+      sessions: 1,
+      messages: 1,
+    })
+    expect(importSessions).toHaveBeenCalledTimes(2)
   })
 
   it("re-scans ONLY the changed source when it has no per-file summary", async () => {

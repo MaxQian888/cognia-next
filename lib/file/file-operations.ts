@@ -68,10 +68,29 @@ export async function exists(path: string): Promise<boolean> {
 }
 
 export async function readDir(path: string): Promise<string[]> {
+  return (await readDirEntries(path)).map((entry) => entry.name)
+}
+
+/**
+ * Read a directory returning entries WITH their file-type flag. `plugin-fs`
+ * `readDir` already reports `isFile`/`isDirectory` per entry — keeping it lets
+ * a recursive walk skip a separate `stat` IPC per entry (the difference
+ * between O(dirs) and O(entries) round-trips on large trees). Symlinks report
+ * `isFile: undefined` so callers fall back to `stat` for those entries only,
+ * preserving the previous stat-follows-symlink semantics.
+ */
+export async function readDirEntries(
+  path: string
+): Promise<Array<{ name: string; isFile?: boolean }>> {
   if (isTauri()) {
     const fs = await import("@tauri-apps/plugin-fs")
     const entries = await fs.readDir(path)
-    return entries.map((entry) => entry.name).filter((n): n is string => typeof n === "string")
+    return entries
+      .filter((entry): entry is typeof entry & { name: string } => typeof entry.name === "string")
+      .map((entry) => ({
+        name: entry.name,
+        isFile: entry.isSymlink ? undefined : entry.isFile,
+      }))
   }
   return []
 }

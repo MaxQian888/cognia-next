@@ -21,6 +21,7 @@ import {
   writeTextFile,
   exists,
   readDir,
+  readDirEntries,
   readBinaryFile,
   writeBinaryFile,
   removeFile,
@@ -59,6 +60,20 @@ describe("file-operations in Tauri", () => {
   it("readDir returns only string names", async () => {
     fsMock.readDir.mockResolvedValue([{ name: "a" }, { name: undefined }, { name: "b" }])
     await expect(readDir("/d")).resolves.toEqual(["a", "b"])
+  })
+
+  it("readDirEntries keeps entry types; symlinks stay undefined for stat fallback", async () => {
+    fsMock.readDir.mockResolvedValue([
+      { name: "f.jsonl", isFile: true, isDirectory: false, isSymlink: false },
+      { name: "sub", isFile: false, isDirectory: true, isSymlink: false },
+      { name: "link", isFile: false, isDirectory: false, isSymlink: true },
+      { name: undefined, isFile: true },
+    ])
+    await expect(readDirEntries("/d")).resolves.toEqual([
+      { name: "f.jsonl", isFile: true },
+      { name: "sub", isFile: false },
+      { name: "link", isFile: undefined },
+    ])
   })
 
   it("readBinaryFile returns bytes", async () => {
@@ -176,6 +191,10 @@ describe("file-operations in the browser", () => {
 
   it("readDir returns an empty list", async () => {
     await expect(readDir("/d")).resolves.toEqual([])
+  })
+
+  it("readDirEntries returns an empty list in web mode", async () => {
+    await expect(readDirEntries("/d")).resolves.toEqual([])
   })
 
   it("readBinaryFile fetches bytes", async () => {

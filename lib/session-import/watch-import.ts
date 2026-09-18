@@ -18,6 +18,33 @@ import type { SessionSummary } from "./types"
 
 const EMPTY = { sessions: 0, messages: 0 }
 
+interface WatchImportResult {
+  sessions: number
+  messages: number
+}
+
+interface WatchImportJob {
+  opts: { changedPath?: string; projectId?: string }
+  resolve: (result: WatchImportResult) => void
+  reject: (error: unknown) => void
+}
+
+/**
+ * Serialized, path-coalesced queue for watch-triggered imports.
+ *
+ * The fs-watch fires per change burst and an active agent appends constantly;
+ * without this, every event spawned a CONCURRENT `runWatchImport` — several
+ * imports parsing the same file and racing `applyImported` writes at once.
+ * Calls for the same path while one is queued collapse into a single run
+ * (the file is re-read anyway, so a queued re-import sees the newest bytes);
+ * different paths queue FIFO. A same-path event arriving while its import is
+ * RUNNING queues a fresh run, which observes state newer than the in-flight
+ * read — the trailing edge is preserved, never dropped.
+ */
+const watchJobQueue: WatchImportJob[] = []
+const pendingWatchJobs = new Map<string | undefined, Promise<WatchImportResult>>()
+let watchDrainActive = false
+
 /**
  * Per-source, per-session `updatedAt` values already re-imported by the watcher,
  * for sources that have no `summarizeFile` and therefore cannot be narrowed to
@@ -31,9 +58,14 @@ const EMPTY = { sessions: 0, messages: 0 }
  */
 const watermarks = new Map<string, Map<string, string>>()
 
-/** Drop the per-source watermarks. Tests only. */
+/** Drop the per-source watermarks and any queued watch jobs. Tests only. */
 export function __resetWatchWatermarksForTesting(): void {
   watermarks.clear()
+  watchJobQueue.length = 0
+  pendingWatchJobs.clear()
+  // Tests that abandon a drain mid-flight (e.g. an unreleased deferred) must
+  // not poison the queue for the next test.
+  watchDrainActive = false
 }
 
 /**
@@ -87,9 +119,49 @@ function recordImportedSessions(sourceId: string, summaries: SessionSummary[]): 
  * merge guard), so a session the user already continued in Cognia is never
  * clobbered and re-imports are idempotent.
  */
-export async function runWatchImport(
+export function runWatchImport(
   opts: { changedPath?: string; projectId?: string } = {}
-): Promise<{ sessions: number; messages: number }> {
+): Promise<WatchImportResult> {
+  const key = opts.changedPath
+  const pending = pendingWatchJobs.get(key)
+  if (pending) return pending
+  const promise = new Promise<WatchImportResult>((resolve, reject) => {
+    watchJobQueue.push({ opts, resolve, reject })
+  })
+  pendingWatchJobs.set(key, promise)
+  kickWatchDrain()
+  return promise
+}
+
+function kickWatchDrain(): void {
+  if (watchDrainActive) return
+  watchDrainActive = true
+  void drainWatchJobs().finally(() => {
+    watchDrainActive = false
+    // A job pushed in the narrow window between the drain's last queue check
+    // and this flag clearing would otherwise sit unprocessed forever.
+    if (watchJobQueue.length > 0) kickWatchDrain()
+  })
+}
+
+async function drainWatchJobs(): Promise<void> {
+  while (watchJobQueue.length > 0) {
+    const job = watchJobQueue.shift()!
+    // Free the key BEFORE running: a fresh event for this path during the run
+    // must queue a follow-up, not attach to the in-flight (older) read.
+    pendingWatchJobs.delete(job.opts.changedPath)
+    try {
+      job.resolve(await runWatchImportNow(job.opts))
+    } catch (error) {
+      job.reject(error)
+    }
+  }
+}
+
+async function runWatchImportNow(opts: {
+  changedPath?: string
+  projectId?: string
+}): Promise<WatchImportResult> {
   const input = await resolveScanInput()
 
   if (opts.changedPath) {
@@ -97,8 +169,11 @@ export async function runWatchImport(
     if (source) {
       if (source.summarizeFile) {
         // One-file-one-session: re-parse just the changed transcript.
+        // `singleFile` keeps `parseGraph` from undoing the narrowing — Codex's
+        // graph build otherwise walks+parses the whole corpus to find
+        // children, so every transcript append would cost a full rescan.
         const ref = { sourceId: source.id, originalSessionId: "", locator: opts.changedPath }
-        return importSessions([ref], input, opts.projectId)
+        return importSessions([ref], input, opts.projectId, { singleFile: true })
       }
       // Watched source without a per-file summary (a dir — or a single SQLite
       // file — may hold many sessions): re-scan only this source, then

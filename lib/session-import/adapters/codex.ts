@@ -34,6 +34,8 @@ import type {
 } from "@cognia/agent-config-types/canonical-session"
 import type { UsageInfo } from "@/lib/claude/adapter"
 import { scanFileSummaries } from "../scan"
+import { walkFiles } from "../fs"
+import { everyBudget, mapBounded } from "../pacing"
 import { buildImportedSessionGraph } from "../graph"
 import { importedUsageMetadata } from "../usage"
 import {
@@ -928,14 +930,137 @@ function isCodexToolError(output: unknown): boolean {
   return false
 }
 
+function parseRolloutLine(line: string): RolloutLine | null {
+  try {
+    return JSON.parse(line) as RolloutLine
+  } catch {
+    return null
+  }
+}
+
+/** First valid `timestamp` on a head/tail line — rollouts append in order. */
+function edgeTimestamp(lines: string[], fromEnd: boolean): number {
+  for (let i = 0; i < lines.length; i++) {
+    const rec = parseRolloutLine(lines[fromEnd ? lines.length - 1 - i : i])
+    if (!rec?.timestamp) continue
+    const ms = Date.parse(rec.timestamp)
+    if (!Number.isNaN(ms)) return ms
+  }
+  return 0
+}
+
 /**
  * Cheap single-pass summary of a Codex rollout — pulls title, count, timestamps
  * and cwd WITHOUT building any `StoredMessage`. `messageCount` counts the
  * response items that would each emit a turn (message / reasoning / tool call /
  * compaction marker), mirroring the full parse closely enough for the row
  * subtitle while skipping all the allocation `parseCodexRollout` does.
+ *
+ * Two-tier scan: `"type":"…"` substring markers count and collect the handful
+ * of lines the summary actually reads, so only ~5 records per file are
+ * JSON.parsed instead of every line — on a multi-GB corpus this is the
+ * difference between a scan that is mostly JSON.parse and one that is mostly
+ * substring search. Files the markers can't see (spaced or non-rollout JSON)
+ * fall back to the per-line parse, so nothing is silently mis-summarised.
  */
 export function summarizeCodexFile(content: string, locator: string): SessionSummary | null {
+  const lines = content.split("\n")
+  // Corpus-level gates: a marker absent from the whole file can never match a
+  // line, so its per-line scan is skipped entirely — an absent marker costs
+  // a full-line scan otherwise, which is what made naive per-line `includes`
+  // as expensive as `JSON.parse`.
+  const hasMeta = content.includes('"type":"session_meta"')
+  const hasCompacted = content.includes('"type":"compacted"')
+  const metaLines: string[] = []
+  const messageLines: string[] = []
+  const head: string[] = []
+  const tail: string[] = []
+  let count = 0
+  for (const raw of lines) {
+    const line = raw.trim()
+    if (!line) continue
+    if (head.length < 4) head.push(line)
+    tail.push(line)
+    if (tail.length > 4) tail.shift()
+    // A `compacted` record embeds whole message objects inside
+    // `replacement_history`, so it must win over the response_item checks.
+    if (hasMeta && line.includes('"type":"session_meta"')) {
+      metaLines.push(line)
+      continue
+    }
+    if (hasCompacted && line.includes('"type":"compacted"')) {
+      count += 1
+      continue
+    }
+    if (!line.includes('"type":"response_item"')) continue
+    if (line.includes('"type":"message"')) {
+      count += 1
+      messageLines.push(line)
+    } else if (
+      line.includes('"type":"reasoning"') ||
+      line.includes('"type":"function_call"') ||
+      line.includes('"type":"custom_tool_call"')
+    ) {
+      count += 1
+    }
+  }
+  if (count === 0) return summarizeCodexFileSlow(lines, locator)
+
+  let sessionId = ""
+  let cwd: string | undefined
+  let firstUserText = ""
+  let sourceVersion: string | undefined
+  let relationKind: CanonicalSessionRelationKind | undefined
+  let parentNativeSessionId: string | undefined
+  for (const line of metaLines) {
+    const rec = parseRolloutLine(line)
+    const payload = rec?.payload ?? {}
+    sessionId = asString(payload.id) || asString(payload.session_id) || sessionId
+    cwd = asString(payload.cwd) || cwd
+    sourceVersion = asString(payload.cli_version) || sourceVersion
+    const forkedFrom = asString(payload.forked_from_id)
+    const parentThread =
+      asString(payload.parent_thread_id) || nestedString(payload.source, "parent_thread_id")
+    if (forkedFrom) {
+      relationKind = "fork"
+      parentNativeSessionId = forkedFrom
+    } else if (parentThread) {
+      relationKind = "subagent"
+      parentNativeSessionId = parentThread
+    }
+  }
+  for (const line of messageLines) {
+    const rec = parseRolloutLine(line)
+    const payload = rec?.payload ?? {}
+    if (asString(payload.role) === "assistant") continue
+    const text = messageText(payload)
+    if (text) {
+      firstUserText = text
+      break
+    }
+  }
+  const createdAt = edgeTimestamp(head, false)
+  const updatedAt = edgeTimestamp(tail, true)
+  return {
+    ref: { sourceId: "codex", originalSessionId: sessionId || locator, locator },
+    title: deriveTitle(firstUserText, "Codex session"),
+    sourceId: "codex",
+    messageCount: count,
+    updatedAt: updatedAt || createdAt || Date.now(),
+    cwd,
+    sourceVersion: sourceVersion || codexSessionSource.verifiedVersion,
+    relationKind,
+    ...(parentNativeSessionId ? { parentNativeSessionId } : {}),
+  }
+}
+
+/**
+ * Per-line `JSON.parse` fallback for files the marker scan reads as empty —
+ * spaced or otherwise non-compact serialisation the `"type":"…"` substrings
+ * cannot see. Runs only when the fast path counted nothing, so the cost is
+ * paid exclusively by unusual files.
+ */
+function summarizeCodexFileSlow(lines: string[], locator: string): SessionSummary | null {
   let sessionId = ""
   let cwd: string | undefined
   let firstUserText = ""
@@ -944,15 +1069,10 @@ export function summarizeCodexFile(content: string, locator: string): SessionSum
   let count = 0
   let sourceVersion: string | undefined
   let relationKind: CanonicalSessionRelationKind | undefined
-  for (const line of content.split("\n")) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    let rec: RolloutLine
-    try {
-      rec = JSON.parse(trimmed) as RolloutLine
-    } catch {
-      continue
-    }
+  let parentNativeSessionId: string | undefined
+  for (const line of lines) {
+    const rec = parseRolloutLine(line.trim())
+    if (!rec) continue
     if (rec.timestamp) {
       const ms = Date.parse(rec.timestamp)
       if (!Number.isNaN(ms)) {
@@ -965,12 +1085,15 @@ export function summarizeCodexFile(content: string, locator: string): SessionSum
       sessionId = asString(payload.id) || asString(payload.session_id) || sessionId
       cwd = asString(payload.cwd) || cwd
       sourceVersion = asString(payload.cli_version) || sourceVersion
-      if (asString(payload.forked_from_id)) relationKind = "fork"
-      else if (
-        asString(payload.parent_thread_id) ||
-        nestedString(payload.source, "parent_thread_id")
-      ) {
+      const forkedFrom = asString(payload.forked_from_id)
+      const parentThread =
+        asString(payload.parent_thread_id) || nestedString(payload.source, "parent_thread_id")
+      if (forkedFrom) {
+        relationKind = "fork"
+        parentNativeSessionId = forkedFrom
+      } else if (parentThread) {
         relationKind = "subagent"
+        parentNativeSessionId = parentThread
       }
       continue
     }
@@ -1003,6 +1126,7 @@ export function summarizeCodexFile(content: string, locator: string): SessionSum
     cwd,
     sourceVersion: sourceVersion || codexSessionSource.verifiedVersion,
     relationKind,
+    ...(parentNativeSessionId ? { parentNativeSessionId } : {}),
   }
 }
 
@@ -1054,14 +1178,74 @@ async function scanCodexSummaries(input: SessionScanInput): Promise<SessionSumma
   )
 }
 
-async function parseCodexArtifacts(input: SessionScanInput): Promise<ParsedSession[]> {
-  const summaries = await scanCodexSummaries(input)
-  const parsed: ParsedSession[] = []
-  for (const summary of summaries) {
-    const content = await readRolloutContent(summary.ref, input)
-    parsed.push(parseCodexRollout(content, summary.ref.locator))
+/**
+ * Locators of every rollout artifact in scope for `input` — the picked batch
+ * when present, else every `.jsonl` under the Codex sessions root.
+ */
+async function codexArtifactLocators(input: SessionScanInput): Promise<string[]> {
+  if (input.pickedFiles?.length) {
+    return input.pickedFiles
+      .filter((file) => file.name.toLowerCase().endsWith(".jsonl"))
+      .map((file) => file.path)
   }
-  return parsed
+  const locators: string[] = []
+  for (const root of codexSessionSource.scanRoots(input.home, input.roots)) {
+    locators.push(
+      ...(await walkFiles(input.fs, root, (name) => name.toLowerCase().endsWith(".jsonl")))
+    )
+  }
+  return locators
+}
+
+/**
+ * In-flight rollout reads during the corpus pass — same IPC-latency overlap
+ * as `SCAN_READ_LANES` in `scan.ts`, still bounded so buffered bodies stay
+ * small.
+ */
+const CORPUS_READ_LANES = 8
+
+async function collectCodexArtifacts(input: SessionScanInput): Promise<ParsedSession[]> {
+  const locators = await codexArtifactLocators(input)
+  const budget = everyBudget()
+  const parsed = await mapBounded(locators, CORPUS_READ_LANES, async (locator) => {
+    await budget()
+    try {
+      const candidate = parseCodexRollout(
+        await readRolloutContent({ sourceId: "codex", originalSessionId: "", locator }, input),
+        locator
+      )
+      // Mirror the old summarize-then-parse gate: a file with no importable
+      // turns was never part of the artifact set.
+      return candidate.messages.length > 0 ? candidate : null
+    } catch {
+      // One locked or concurrently-written rollout does not sink the graph.
+      return null
+    }
+  })
+  return parsed.filter((item): item is ParsedSession => item !== null)
+}
+
+/**
+ * Whole-corpus parse, cached on the `SessionScanInput`. One import run reuses
+ * the same input for every ref, so this turns the old O(refs × corpus)
+ * re-scan+re-parse into a single pass per run — the difference between a
+ * bounded import and a hard-frozen renderer on multi-GB histories. Keyed
+ * weakly like `collectSessions` in `opencode.ts`: a fresh scan builds a fresh
+ * input, so there is no staleness across runs and nothing to invalidate.
+ */
+const codexArtifactsCache = new WeakMap<SessionScanInput, Promise<ParsedSession[]>>()
+
+function parseCodexArtifacts(input: SessionScanInput): Promise<ParsedSession[]> {
+  const cached = codexArtifactsCache.get(input)
+  if (cached) return cached
+  // Evict a FAILED read so the next attempt actually retries — a rejected
+  // promise left in the cache would poison every later ref on this input.
+  const guarded = collectCodexArtifacts(input).catch((error: unknown) => {
+    codexArtifactsCache.delete(input)
+    throw error
+  })
+  codexArtifactsCache.set(input, guarded)
+  return guarded
 }
 
 function rootOf(selected: ParsedSession, byId: ReadonlyMap<string, ParsedSession>): ParsedSession {
@@ -1152,16 +1336,14 @@ export const codexSessionSource: AgentSessionSourceAdapter = {
   summarizeFile: summarizeCodexFile,
 
   async listSessions(input: SessionScanInput) {
+    // The children filter used to `Promise.all` a full `parseCodexRollout`
+    // over every file — a second complete corpus read+parse, all of it in
+    // flight at once — just to learn each file's parent id. `summarizeCodexFile`
+    // now carries `parentNativeSessionId`, so the filter is pure memory.
     const summaries = await scanCodexSummaries(input)
-    const parsed = await Promise.all(
-      summaries.map(async (summary) =>
-        parseCodexRollout(await readRolloutContent(summary.ref, input), summary.ref.locator)
-      )
-    )
-    const nativeIds = new Set(parsed.map((session) => session.originalSessionId))
+    const nativeIds = new Set(summaries.map((summary) => summary.ref.originalSessionId))
     return summaries.filter(
-      (_, index) =>
-        !parsed[index].parentNativeSessionId || !nativeIds.has(parsed[index].parentNativeSessionId!)
+      (summary) => !summary.parentNativeSessionId || !nativeIds.has(summary.parentNativeSessionId)
     )
   },
 
@@ -1169,13 +1351,33 @@ export const codexSessionSource: AgentSessionSourceAdapter = {
     const content = await readRolloutContent(ref, input)
     return toConversation(parseCodexRollout(content, ref.locator))
   },
-  async parseGraph(ref: SessionRef, input: SessionScanInput) {
-    const selected = parseCodexRollout(await readRolloutContent(ref, input), ref.locator)
-    const artifacts = await parseCodexArtifacts(input)
-    if (!artifacts.some((item) => item.originalSessionId === selected.originalSessionId)) {
-      artifacts.push(selected)
-    }
+  async parseGraph(ref: SessionRef, input: SessionScanInput, opts?: { singleFile?: boolean }) {
+    // `singleFile` (fs-watch path): graph just the changed rollout. Children
+    // are skipped — their own file events import them — so one append does
+    // not cost a full corpus scan+parse.
+    const artifacts = opts?.singleFile
+      ? [parseCodexRollout(await readRolloutContent(ref, input), ref.locator)]
+      : await parseCodexArtifacts(input)
     const parsedById = new Map(artifacts.map((item) => [item.originalSessionId, item]))
+    // The selected session is almost always already in the cached artifact
+    // pass — re-reading + re-parsing its file (up to hundreds of MB) per ref
+    // was the second half of the freeze. Only a ref the scan didn't produce
+    // (e.g. a watch event on a file created mid-run) falls back to a direct
+    // read.
+    let selected = ref.originalSessionId ? parsedById.get(ref.originalSessionId) : undefined
+    if (!selected) {
+      // singleFile: artifacts[0] is this ref's own parse — reuse it. Corpus
+      // mode: the ref wasn't in the scan (stale summary, or a picked file
+      // outside the roots) — read it directly rather than substitute another
+      // corpus member.
+      selected =
+        (opts?.singleFile ? artifacts[0] : undefined) ??
+        parseCodexRollout(await readRolloutContent(ref, input), ref.locator)
+      if (!parsedById.has(selected.originalSessionId)) {
+        artifacts.push(selected)
+        parsedById.set(selected.originalSessionId, selected)
+      }
+    }
     const root = rootOf(selected, parsedById)
     const children = new Map<string, ParsedSession[]>()
     for (const item of artifacts) {

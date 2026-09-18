@@ -39,6 +39,14 @@ export interface PickedSessionFile {
 export interface SessionFs {
   exists(path: string): Promise<boolean>
   readDir(path: string): Promise<string[]>
+  /**
+   * OPTIONAL directory entries with their file-type flag. When present,
+   * `walkFiles` uses it instead of a `stat` call per entry — on desktop each
+   * `stat` is a separate Tauri IPC, so the entry form turns an O(entries)
+   * round-trip walk into O(dirs). `isFile` may be undefined (e.g. symlinks),
+   * which tells the walker to fall back to `stat` for that entry only.
+   */
+  readDirEntries?(path: string): Promise<Array<{ name: string; isFile?: boolean }>>
   stat(path: string): Promise<{ size: number; isFile: boolean }>
   readTextFile(path: string): Promise<string>
 }
@@ -94,6 +102,14 @@ export interface SessionSummary {
   /** Optional source-derived relationship/lifecycle preview for the picker. */
   relationKind?: import("@cognia/agent-config-types/canonical-session").CanonicalSessionRelationKind
   lifecycleStatus?: import("@cognia/agent-config-types/canonical-session").CanonicalSessionLifecycleStatus
+  /**
+   * Upstream parent session id when the source records one (Codex's
+   * `parent_thread_id`/`forked_from_id`). Lets a scan filter child sessions
+   * out of the top-level list WITHOUT a full `parseSession` per file — the
+   * previous Codex scan re-read and re-parsed every rollout just to learn
+   * this one field.
+   */
+  parentNativeSessionId?: string
 }
 
 /** Likelihood a batch of picked files came from this source (auto-detect). */
@@ -231,8 +247,18 @@ export interface AgentSessionSourceAdapter {
   /**
    * Optional rich parser. When present it is authoritative and `parseSession`
    * remains only the backwards-compatible plugin/legacy surface.
+   *
+   * `opts.singleFile` narrows the call to the ref's own artifact: the fs-watch
+   * live-sync path sets it so one changed transcript does NOT trigger a
+   * corpus-wide scan+parse (Codex's graph build walks every rollout to find
+   * children — fine once per import run, fatal per fs event). Adapters
+   * without cross-session enrichment may ignore it.
    */
-  parseGraph?(ref: SessionRef, input: SessionScanInput): Promise<ImportedSessionGraph>
+  parseGraph?(
+    ref: SessionRef,
+    input: SessionScanInput,
+    opts?: { singleFile?: boolean }
+  ): Promise<ImportedSessionGraph>
   /**
    * OPTIONAL incremental usage scan (ADR-0165).
    *
@@ -298,6 +324,12 @@ export interface ImportOptions {
    * instead of buffering the whole selection into one giant transaction.
    */
   chunkSize?: number
+  /**
+   * Each ref is parsed from its own file only — set by the fs-watch live-sync
+   * path, where one changed transcript must not re-scan the source's whole
+   * corpus. Forwarded to `parseGraph`; see {@link AgentSessionSourceAdapter.parseGraph}.
+   */
+  singleFile?: boolean
 }
 
 export type { ImportedConversation } from "@/lib/data/importers/types"
