@@ -60,7 +60,11 @@ jest.mock("@/lib/native/external-agent", () => ({
   }),
 }))
 
-import { CodexAppServerAdapter, type CodexAppServerStatus } from "./codex-app-server-client"
+import {
+  CodexAppServerAdapter,
+  parseCodexCliVersion,
+  type CodexAppServerStatus,
+} from "./codex-app-server-client"
 import { loggers } from "@cognia/logging"
 import { LOG_VALUE_MAX_CHARS, truncateForLog } from "@cognia/logging/truncate"
 
@@ -555,6 +559,149 @@ describe("CodexAppServerAdapter", () => {
       expect(deltas).toEqual(["Answer."])
       // No message_start envelope for the commentary item.
       expect(starts).toEqual(["f1"])
+    })
+
+    it("buffers async-question deltas and emits them on async_questions at item/completed", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      const it = iterator(adapter, session.id, userMessage("hi"))
+      const first = it.next()
+      feed("item/started", {
+        threadId: "thr_1",
+        item: { id: "q1", type: "agentMessage", delivery: "async" },
+      })
+      feed("item/agentMessage/delta", { threadId: "thr_1", itemId: "q1", delta: "Two quick " })
+      feed("item/agentMessage/delta", { threadId: "thr_1", itemId: "q1", delta: "questions:" })
+      feed("item/completed", {
+        threadId: "thr_1",
+        item: {
+          id: "q1",
+          type: "agentMessage",
+          delivery: "async",
+          text: "Two quick questions:",
+          questions: [
+            { title: "Which file?", options: ["a.ts", "b.ts"] },
+            { title: "Any constraints?", options: null },
+          ],
+        },
+      })
+      feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
+
+      const deltas: string[] = []
+      const asyncEvents: Array<{
+        messageId?: string
+        text?: string
+        questions: Array<{ title: string; options?: string[] }>
+      }> = []
+      const ends: string[] = []
+      let r = await first
+      while (!r.done) {
+        if (r.value.type === "message_delta") {
+          deltas.push((r.value as { delta: { text: string } }).delta.text)
+        }
+        if (r.value.type === "async_questions") {
+          const v = r.value as {
+            messageId?: string
+            text?: string
+            questions: Array<{ title: string; options?: string[] }>
+          }
+          asyncEvents.push({ messageId: v.messageId, text: v.text, questions: v.questions })
+        }
+        if (r.value.type === "message_end" && r.value.messageId) ends.push(r.value.messageId)
+        r = await it.next()
+      }
+      // No text deltas — the prose rides on the event so the card shows it once.
+      expect(deltas).toEqual([])
+      expect(asyncEvents).toEqual([
+        {
+          messageId: "q1",
+          text: "Two quick questions:",
+          questions: [
+            { title: "Which file?", options: ["a.ts", "b.ts"] },
+            // `options: null` on the wire drops to absent — free-text question.
+            { title: "Any constraints?" },
+          ],
+        },
+      ])
+      expect(ends).toContain("q1")
+    })
+
+    it("emits async_questions without text when the item already streamed (delivery only on completed)", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      const it = iterator(adapter, session.id, userMessage("hi"))
+      const first = it.next()
+      feed("item/started", {
+        threadId: "thr_1",
+        item: { id: "q2", type: "agentMessage" },
+      })
+      feed("item/agentMessage/delta", { threadId: "thr_1", itemId: "q2", delta: "Pick:" })
+      feed("item/completed", {
+        threadId: "thr_1",
+        item: {
+          id: "q2",
+          type: "agentMessage",
+          delivery: "async",
+          text: "Pick:",
+          questions: [{ title: "Which one?", options: null }],
+        },
+      })
+      feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
+
+      const deltas: string[] = []
+      const asyncEvents: Array<{ text?: string; questions: unknown[] }> = []
+      let r = await first
+      while (!r.done) {
+        if (r.value.type === "message_delta") {
+          deltas.push((r.value as { delta: { text: string } }).delta.text)
+        }
+        if (r.value.type === "async_questions") {
+          const v = r.value as { text?: string; questions: unknown[] }
+          asyncEvents.push({ text: v.text, questions: v.questions })
+        }
+        r = await it.next()
+      }
+      // The question text already reached the user as a delta — the event
+      // carries questions only so the card doesn't print it twice.
+      expect(deltas).toEqual(["Pick:"])
+      expect(asyncEvents).toEqual([{ text: undefined, questions: [{ title: "Which one?" }] }])
+    })
+
+    it("degrades a delivery:async item with no questions to an ordinary message", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      const it = iterator(adapter, session.id, userMessage("hi"))
+      const first = it.next()
+      feed("item/started", {
+        threadId: "thr_1",
+        item: { id: "q3", type: "agentMessage", delivery: "async" },
+      })
+      feed("item/agentMessage/delta", { threadId: "thr_1", itemId: "q3", delta: "FYI " })
+      feed("item/completed", {
+        threadId: "thr_1",
+        item: {
+          id: "q3",
+          type: "agentMessage",
+          delivery: "async",
+          text: "FYI only",
+          questions: null,
+        },
+      })
+      feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
+
+      const deltas: string[] = []
+      let sawAsync = false
+      let r = await first
+      while (!r.done) {
+        if (r.value.type === "message_delta") {
+          deltas.push((r.value as { delta: { text: string } }).delta.text)
+        }
+        if (r.value.type === "async_questions") sawAsync = true
+        r = await it.next()
+      }
+      expect(sawAsync).toBe(false)
+      // Buffered deltas land whole on completion — the prose is never dropped.
+      expect(deltas).toEqual(["FYI "])
     })
 
     it("inserts a separator on item/reasoning/summaryPartAdded", async () => {
@@ -1234,6 +1381,89 @@ describe("CodexAppServerAdapter", () => {
       const reply = lastWritten((m) => m.id === 72 && m.result !== undefined)
       expect(reply?.result).toEqual({ answers: { q1: { answers: [] } } })
       expect(events.some((e) => e.type === "permission_response")).toBe(true)
+    })
+
+    it("emits async_questions for isBlocking:false and resolves the request via respondToPermission", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession({ permissionMode: "default" })
+      const it = iterator(adapter, session.id, userMessage("ask me"))
+      const first = it.next()
+      feedServerRequest(74, "item/tool/requestUserInput", {
+        threadId: "thr_1",
+        turnId: "turn_1",
+        itemId: "q-async",
+        isBlocking: false,
+        questions: [
+          {
+            id: "q1",
+            header: "Region",
+            question: "Which region?",
+            options: [{ label: "us-east" }, { label: "eu-west" }],
+          },
+          { id: "q2", question: "Token?", isSecret: true },
+        ],
+      })
+      let event: { type: string; requestId?: string; questions?: unknown[] } | undefined
+      let r = await first
+      while (!r.done) {
+        if (r.value.type === "async_questions") {
+          event = r.value
+          await adapter.respondToPermission(session.id, {
+            requestId: "q-async",
+            granted: true,
+            answers: { q1: ["eu-west"], q2: ["s3cret"] },
+          })
+          feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
+        }
+        // A non-blocking request must never surface the blocking card.
+        expect(r.value.type).not.toBe("permission_request")
+        r = await it.next()
+      }
+      expect(event).toMatchObject({
+        type: "async_questions",
+        messageId: "q-async",
+        requestId: "q-async",
+        questions: [
+          { id: "q1", title: "Region", options: ["us-east", "eu-west"] },
+          { id: "q2", title: "Token?", secret: true },
+        ],
+      })
+      const reply = lastWritten((m) => m.id === 74 && m.result !== undefined)
+      expect(reply?.result).toEqual({
+        answers: { q1: { answers: ["eu-west"] }, q2: { answers: ["s3cret"] } },
+      })
+    })
+
+    it("settles a non-blocking requestUserInput when serverRequest/resolved arrives", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession({ permissionMode: "default" })
+      const it = iterator(adapter, session.id, userMessage("ask me"))
+      const first = it.next()
+      feedServerRequest(75, "item/tool/requestUserInput", {
+        threadId: "thr_1",
+        itemId: "q-closed",
+        isBlocking: false,
+        questions: [{ id: "q1", question: "Still there?" }],
+      })
+      let sawClose = false
+      let r = await first
+      while (!r.done) {
+        if (r.value.type === "async_questions") {
+          feed("serverRequest/resolved", { threadId: "thr_1", requestId: 75 })
+          feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
+        }
+        if (
+          r.value.type === "permission_response" &&
+          r.value.response?.requestId === "q-closed" &&
+          r.value.response?.reason === "resolved_elsewhere"
+        ) {
+          sawClose = true
+        }
+        r = await it.next()
+      }
+      expect(sawClose).toBe(true)
+      const reply = lastWritten((m) => m.id === 75 && m.result !== undefined)
+      expect(reply?.result).toEqual({ answers: { q1: { answers: [] } } })
     })
 
     it("cancels pending requests when serverRequest/resolved arrives", async () => {
@@ -3320,6 +3550,272 @@ describe("CodexAppServerAdapter", () => {
     })
   })
 
+  describe("0.151+ wire surface", () => {
+    it("carries serviceTierForTurn, turnTrigger, and additionalContext on turn/start", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      const it = adapter
+        .prompt(session.id, userMessage("hi"), {
+          serviceTier: "fast",
+          turnTrigger: "automation",
+          additionalContext: {
+            automation_info: { kind: "application", value: "job-42" },
+            page_state: { kind: "untrusted", value: "tab:3" },
+          },
+        })
+        [Symbol.asyncIterator]()
+      const first = it.next()
+      await Promise.resolve()
+      const turn = lastWritten((m) => m.method === "turn/start")!
+      expect(turn.params).toMatchObject({
+        serviceTierForTurn: "fast",
+        turnTrigger: "automation",
+        additionalContext: {
+          automation_info: { kind: "application", value: "job-42" },
+          page_state: { kind: "untrusted", value: "tab:3" },
+        },
+      })
+      // No sticky tier was configured — only the per-turn override lands.
+      expect(turn.params).not.toHaveProperty("serviceTier")
+      feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
+      let r = await first
+      while (!r.done) r = await it.next()
+    })
+
+    it("sends sticky serviceTier + threadSource on thread/start via codexOptions", async () => {
+      const adapter = await connectedAdapter()
+      await adapter.createSession({
+        metadata: { codexOptions: { serviceTier: "flex", threadSource: "ci-nightly" } },
+      })
+      const start = lastWritten((m) => m.method === "thread/start")!
+      expect(start.params).toMatchObject({ serviceTier: "flex", threadSource: "ci-nightly" })
+    })
+
+    it("omits the 0.151 fields entirely when the server is a known-old version", async () => {
+      responders["initialize"] = () => ({ userAgent: "codex-cli-rs/0.150.4 (test)" })
+      const adapter = await connectedAdapter()
+      await adapter.createSession({
+        metadata: { codexOptions: { serviceTier: "flex", threadSource: "ci" } },
+      })
+      const start = lastWritten((m) => m.method === "thread/start")!
+      expect(start.params).not.toHaveProperty("serviceTier")
+      expect(start.params).not.toHaveProperty("threadSource")
+
+      const session = adapter.getSession("thr_1")!
+      const it = adapter
+        .prompt(session.id, userMessage("hi"), { serviceTier: "fast", turnTrigger: "automation" })
+        [Symbol.asyncIterator]()
+      const first = it.next()
+      await Promise.resolve()
+      const turn = lastWritten((m) => m.method === "turn/start")!
+      expect(turn.params).not.toHaveProperty("serviceTier")
+      expect(turn.params).not.toHaveProperty("serviceTierForTurn")
+      expect(turn.params).not.toHaveProperty("turnTrigger")
+      feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
+      let r = await first
+      while (!r.done) r = await it.next()
+    })
+
+    it("sends excludeTurns on resume/fork when includeHistory is false", async () => {
+      responders["thread/resume"] = () => ({ thread: { id: "thr_1" } })
+      responders["thread/fork"] = () => ({ thread: { id: "thr_2" } })
+      const adapter = await connectedAdapter()
+      await adapter.resumeSession("thr_1", { includeHistory: false })
+      const resume = lastWritten((m) => m.method === "thread/resume")!
+      expect(resume.params).toMatchObject({ threadId: "thr_1", excludeTurns: true })
+      const session = await adapter.forkSession("thr_1", { includeHistory: false })
+      expect(session.id).toBe("thr_2")
+      const fork = lastWritten((m) => m.method === "thread/fork")!
+      expect(fork.params).toMatchObject({ threadId: "thr_1", excludeTurns: true })
+    })
+
+    it("keeps default resume hydration untouched when includeHistory is unset", async () => {
+      responders["thread/resume"] = () => ({
+        thread: {
+          id: "thr_1",
+          turns: [
+            { items: [{ id: "u1", type: "userMessage", content: [{ type: "text", text: "hi" }] }] },
+          ],
+        },
+      })
+      const adapter = await connectedAdapter()
+      const session = await adapter.resumeSession("thr_1")
+      const resume = lastWritten((m) => m.method === "thread/resume")!
+      expect(resume.params).not.toHaveProperty("excludeTurns")
+      expect(session.messages?.length).toBeGreaterThan(0)
+    })
+
+    it("folds a requested 'ultra' effort onto the model's advertised ladder", async () => {
+      responders["model/list"] = () => ({
+        data: [
+          {
+            id: "gpt-5.2-codex",
+            displayName: "Codex",
+            isDefault: true,
+            supportedReasoningEfforts: [
+              { reasoningEffort: "low" },
+              { reasoningEffort: "medium" },
+              { reasoningEffort: "high" },
+              { reasoningEffort: "xhigh" },
+              { reasoningEffort: "max" },
+            ],
+          },
+        ],
+      })
+      const adapter = await connectedAdapter()
+      await adapter.listModels()
+      const session = await adapter.createSession({
+        metadata: { reasoningEffort: "ultra" },
+      })
+      const it = adapter.prompt(session.id, userMessage("hi"))[Symbol.asyncIterator]()
+      const first = it.next()
+      await Promise.resolve()
+      // Model tops out at `max` — `ultra` folds down instead of being rejected.
+      expect(lastWritten((m) => m.method === "turn/start")!.params).toMatchObject({
+        effort: "max",
+      })
+      feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
+      let r = await first
+      while (!r.done) r = await it.next()
+    })
+
+    it("passes 'ultra' straight through when the model advertises it", async () => {
+      responders["model/list"] = () => ({
+        data: [
+          {
+            id: "gpt-6-astra",
+            displayName: "Astra",
+            isDefault: true,
+            supportedReasoningEfforts: [{ reasoningEffort: "high" }, { reasoningEffort: "ultra" }],
+          },
+        ],
+      })
+      const adapter = await connectedAdapter()
+      await adapter.listModels()
+      const session = await adapter.createSession({ metadata: { reasoningEffort: "ultra" } })
+      const it = adapter.prompt(session.id, userMessage("hi"))[Symbol.asyncIterator]()
+      const first = it.next()
+      await Promise.resolve()
+      expect(lastWritten((m) => m.method === "turn/start")!.params).toMatchObject({
+        effort: "ultra",
+      })
+      feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
+      let r = await first
+      while (!r.done) r = await it.next()
+    })
+  })
+
+  describe("sendExternalMessage", () => {
+    it("starts a toolOutput turn with empty user input and streams its events", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      const it = adapter
+        .sendExternalMessage(session.id, {
+          toolName: "github-connector",
+          namespace: "connectors",
+          content: "PR #42 was merged",
+        })
+        [Symbol.asyncIterator]()
+      const first = it.next()
+      await Promise.resolve()
+      const turn = lastWritten((m) => m.method === "turn/start")!
+      expect(turn.params).toMatchObject({
+        threadId: "thr_1",
+        input: [],
+        toolOutput: {
+          name: "github-connector",
+          namespace: "connectors",
+          output: "PR #42 was merged",
+        },
+      })
+      feed("item/completed", {
+        threadId: "thr_1",
+        item: { id: "a1", type: "agentMessage", text: "noted" },
+      })
+      feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
+      const types: string[] = []
+      let r = await first
+      while (!r.done) {
+        types.push(r.value.type)
+        r = await it.next()
+      }
+      expect(types).toContain("message_end")
+      expect(types[types.length - 1]).toBe("done")
+    })
+
+    it("joins an active turn without claiming a second turn slot", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      const it = iterator(adapter, session.id, userMessage("start"))
+      const first = it.next()
+      feed("turn/started", { threadId: "thr_1", turn: { id: "turn_1" } })
+      await Promise.resolve()
+
+      // While the turn runs, an external message folds in via a second
+      // turn/start carrying toolOutput — admission resolves immediately.
+      const join = adapter
+        .sendExternalMessage(session.id, { toolName: "slack", content: "deploy finished" })
+        [Symbol.asyncIterator]()
+      const joinResult = await join.next()
+      expect(joinResult.done).toBe(true)
+      const joins = writes
+        .map((w) => JSON.parse(w) as Record<string, unknown>)
+        .filter((m) => m.method === "turn/start")
+      expect(joins).toHaveLength(2)
+      expect(joins[1].params).toMatchObject({
+        input: [],
+        toolOutput: { name: "slack", output: "deploy finished" },
+      })
+      // The running turn still owns the session — its events keep streaming.
+      feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
+      let r = await first
+      while (!r.done) r = await it.next()
+    })
+
+    it("refuses on a known-old CLI and validates toolName", async () => {
+      responders["initialize"] = () => ({ userAgent: "codex-cli-rs/0.150.4 (test)" })
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      const join = adapter
+        .sendExternalMessage(session.id, { toolName: "x", content: "y" })
+        [Symbol.asyncIterator]()
+      await expect(join.next()).rejects.toThrow(/0\.151/)
+      const blank = adapter
+        .sendExternalMessage(session.id, { toolName: "  ", content: "y" })
+        [Symbol.asyncIterator]()
+      await expect(blank.next()).rejects.toThrow(/toolName/)
+    })
+
+    it("carries structured function-output content items", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      const it = adapter
+        .sendExternalMessage(session.id, {
+          toolName: "vision",
+          content: [
+            { type: "input_text", text: "see attached" },
+            { type: "input_image", image_url: "https://img.example/x.png" },
+          ],
+        })
+        [Symbol.asyncIterator]()
+      const first = it.next()
+      await Promise.resolve()
+      const turn = lastWritten((m) => m.method === "turn/start")!
+      expect(turn.params).toMatchObject({
+        toolOutput: {
+          name: "vision",
+          output: [
+            { type: "input_text", text: "see attached" },
+            { type: "input_image", image_url: "https://img.example/x.png" },
+          ],
+        },
+      })
+      feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
+      let r = await first
+      while (!r.done) r = await it.next()
+    })
+  })
+
   describe("session config options", () => {
     it("synthesizes effort + sandbox options and applies setConfigOption", async () => {
       responders["model/list"] = () => ({
@@ -4211,3 +4707,20 @@ describe("native 0.154.0 request regressions", () => {
   },
   30000
 )
+
+describe("parseCodexCliVersion", () => {
+  it("extracts the server semver from the first userAgent product token", () => {
+    expect(
+      parseCodexCliVersion("cognia/0.154.0 (Mac OS 26.5.2; arm64) ghostty/1.3.1 (cognia; 1.0.0)")
+    ).toEqual([0, 154, 0])
+    expect(parseCodexCliVersion("codex-cli-rs/0.151.2 (x86_64-unknown-linux-gnu)")).toEqual([
+      0, 151, 2,
+    ])
+  })
+
+  it("returns undefined for partial or missing versions", () => {
+    expect(parseCodexCliVersion("codex-cli/1.0")).toBeUndefined()
+    expect(parseCodexCliVersion(undefined)).toBeUndefined()
+    expect(parseCodexCliVersion("")).toBeUndefined()
+  })
+})

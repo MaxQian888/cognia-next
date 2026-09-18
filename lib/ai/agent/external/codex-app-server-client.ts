@@ -52,6 +52,7 @@ import type {
   ExternalAgentCompactionOptions,
 } from "./session-capabilities"
 import type {
+  ExternalAgentAsyncQuestion,
   ExternalAgentConfig,
   ExternalAgentSession,
   ExternalAgentMessage,
@@ -76,6 +77,9 @@ const log = loggers.agent
 /** Active health-probe timeout — mirrors the ACP adapter's 5s ping. */
 const HEALTH_PROBE_TIMEOUT_MS = 5000
 const COMPACTION_COMPLETION_TIMEOUT_MS = 120_000
+
+/** Minimum CLI for the 0.151 wire surface — the SDK pins ExternalMessage there. */
+const CODEX_0151_FLOOR = [0, 151, 0] as const
 
 // ============================================================================
 // Codex app-server wire types (local — kept out of the public type surface)
@@ -132,6 +136,19 @@ const COMPACTION_COMPLETION_TIMEOUT_MS = 120_000
 //   `badRequest` / `sandboxError` but no policy-refusal variant, so a request
 //   that violates them must be caught BEFORE it is sent.
 
+/**
+ * Parse the CLI version out of the `initialize` `userAgent`. The server
+ * reports `<clientName>/<codexVersion> (<os>; <arch>) <term>/<ver> …` — the
+ * first product token's version is Codex's own. Returns undefined when the
+ * string carries no semver (dev builds, wrappers, test doubles).
+ */
+export function parseCodexCliVersion(
+  userAgent: string | undefined
+): [number, number, number] | undefined {
+  const m = userAgent?.match(/^[^\s/]+\/(\d+)\.(\d+)\.(\d+)(?:\s|$|[^\d.])/)
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : undefined
+}
+
 /** A user input item for `thread/start` / `turn/start`. */
 type CodexUserInput =
   | { type: "text"; text: string }
@@ -139,6 +156,44 @@ type CodexUserInput =
   | { type: "localImage"; path: string }
   | { type: "audio"; url: string }
   | { type: "localAudio"; path: string }
+
+// The 0.151+ wire surface (verified in the 0.154.0 schema dump): `toolOutput`,
+// `additionalContext`, `serviceTier`/`serviceTierForTurn`, `turnTrigger`,
+// `threadSource`, `excludeTurns`. Params cannot be probe-cached like methods,
+// so emission is version-gated by the `initialize` userAgent — see
+// {@link CodexAppServerAdapter.codexVersionAtLeast}.
+
+/** Responses-compatible content items inside a function-call output body. */
+export type CodexFunctionCallOutputContentItem =
+  | { type: "input_text"; text: string }
+  | {
+      type: "input_image"
+      image_url: string
+      detail?: "auto" | "low" | "high" | "original" | null
+    }
+  | { type: "input_audio"; audio_url: string }
+  | { type: "encrypted_content"; encrypted_content: string }
+
+/**
+ * `toolOutput` on `turn/start` — how an untrusted external message reaches a
+ * turn (SDK `ExternalMessage`, CLI ≥ 0.151). It is preserved in history as
+ * function output, carries tool-level authority only, and never grants user
+ * authorization. On an active turn the server folds it in like a steer.
+ */
+export interface CodexExternalMessage {
+  /** Name of the tool delivering the content (the function-output `name`). */
+  toolName: string
+  /** Optional namespace qualifier for the delivering tool. */
+  namespace?: string
+  /** Text, or Responses-compatible function-output content items. */
+  content: string | CodexFunctionCallOutputContentItem[]
+}
+
+/** One `additionalContext` fragment (`{kind, value}`) keyed by a source id. */
+export type CodexAdditionalContext = Record<
+  string,
+  { kind: "untrusted" | "application"; value: string }
+>
 
 /** Approval decision enums (camelCase on the wire). */
 type CodexCommandDecision = "accept" | "acceptForSession" | "decline" | "cancel"
@@ -186,6 +241,10 @@ export interface CodexSessionOptions {
   writableRoots?: string[]
   defaultReasoningEffort?: string
   reasoningSummary?: string
+  /** Sticky service tier (`serviceTier` on thread + turn requests). ≥0.151. */
+  serviceTier?: string
+  /** Analytics source classification (`threadSource` on start/fork). ≥0.151. */
+  threadSource?: string
 }
 
 /** `model/list` entry (v2 `Model`). */
@@ -265,6 +324,13 @@ interface CodexThreadItem {
   content?: unknown
   summary?: unknown
   phase?: string
+  /**
+   * `delivery: "async"` marks an agentMessage that carries non-blocking user
+   * questions (`questions`) instead of final-answer prose — the turn keeps
+   * running and the user answers in a later ordinary turn.
+   */
+  delivery?: string | null
+  questions?: unknown
   // commandExecution
   command?: string
   cwd?: string
@@ -462,6 +528,11 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   // `agentMessage` itemId → MessagePhase ("commentary" | "final_answer") from
   // item/started, so deltas (which carry no phase) can route to thinking.
   private itemPhases = new Map<string, string>()
+  // `delivery: "async"` agentMessage item ids — their deltas are buffered into
+  // `asyncItemText` instead of streamed, so the question prose lands once on
+  // the `async_questions` event at item/completed rather than as a text part.
+  private asyncItems = new Set<string>()
+  private asyncItemText = new Map<string, string>()
   // Full model catalog cached from `model/list` (drives effort options).
   private modelCache: CodexModelInfo[] = []
   private mcpRefreshes = new Map<string, Promise<CodexMcpServerStatus[]>>()
@@ -495,6 +566,10 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   private statusListeners = new Set<(status: CodexAppServerStatus) => void>()
 
   private serverInfo?: { userAgent?: string; codexHome?: string; platformOs?: string }
+  /** Parsed CLI version from `userAgent` (`<name>/<semver> …`); undefined when unparseable. */
+  private serverVersion?: [number, number, number]
+  /** Feature names already warned about for a known-old server (warn once each). */
+  private warned0151 = new Set<string>()
 
   // --------------------------------------------------------------------------
   // Connection lifecycle
@@ -556,6 +631,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
         codexHome: result?.codexHome,
         platformOs: result?.platformOs,
       }
+      this.serverVersion = parseCodexCliVersion(result?.userAgent)
       this.peer.sendNotification("initialized")
       this.clearSessionExtensionSupportCache()
       // Best-effort account + rate-limit snapshot for the status card; older
@@ -732,9 +808,19 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       pending.resolve(this.cancelApprovalResponse(pending))
     }
     this.pendingApprovals.clear()
-    for (const [, pending] of this.pendingUserInputs) {
+    for (const [id, pending] of this.pendingUserInputs) {
       if (pending.timer) clearTimeout(pending.timer)
       pending.resolve({ answers: emptyAnswersFor(pending.questions) })
+      // An `isBlocking:false` waiter may be displayed as an inline card that
+      // only leaves its answerable state on `permission_response` — emit it so
+      // the card closes instead of offering an answer that can never arrive.
+      if (!pending.sessionId) continue
+      this.emit(pending.sessionId, {
+        type: "permission_response",
+        sessionId: pending.sessionId,
+        timestamp: new Date(),
+        response: { requestId: id, granted: false, reason: "cancelled" },
+      })
     }
     this.pendingUserInputs.clear()
     for (const [, pending] of this.pendingMcpElicitations) {
@@ -774,6 +860,8 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     this.streamedItems.clear()
     this.sentSystemPrompt.clear()
     this.itemPhases.clear()
+    this.asyncItems.clear()
+    this.asyncItemText.clear()
     this.modelCache = []
     this.mcpRefreshes.clear()
     this.accountRevision += 1
@@ -854,6 +942,10 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       options?.mcpServers
     )
     if (config) params.config = config
+    const serviceTier = readString(metadata.serviceTier)
+    if (serviceTier && this.emit0151Param("serviceTier")) params.serviceTier = serviceTier
+    const threadSource = readString(metadata.threadSource)
+    if (threadSource && this.emit0151Param("threadSource")) params.threadSource = threadSource
 
     // A managed Codex can forbid the sandbox mode or approval policy this
     // request carries. Checked HERE rather than on the way back: 0.150.1 has no
@@ -961,6 +1053,12 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     }
     if (defaults?.reasoningSummary && metadata.reasoningSummary === undefined) {
       metadata.reasoningSummary = defaults.reasoningSummary
+    }
+    if (defaults?.serviceTier && metadata.serviceTier === undefined) {
+      metadata.serviceTier = defaults.serviceTier
+    }
+    if (defaults?.threadSource && metadata.threadSource === undefined) {
+      metadata.threadSource = defaults.threadSource
     }
     return metadata
   }
@@ -1179,6 +1277,13 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     if (systemPrompt) params.developerInstructions = systemPrompt
     const config = withCodexMcpServers(undefined, options?.mcpServers)
     if (config) params.config = config
+    const serviceTier = readString(metadata.serviceTier)
+    if (serviceTier && this.emit0151Param("serviceTier")) params.serviceTier = serviceTier
+    // SDK `include_turns`: `false` means metadata-only resume — the thread
+    // keeps full model context, the response just carries no turns.
+    if (options?.includeHistory === false && this.emit0151Param("excludeTurns")) {
+      params.excludeTurns = true
+    }
 
     if (this.configRequirementsRead) await this.awaitConfigRequirements()
     assertCodexRequestAllowed(
@@ -1242,6 +1347,13 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     if (systemPrompt) params.developerInstructions = systemPrompt
     const config = withCodexMcpServers(undefined, options?.mcpServers)
     if (config) params.config = config
+    const serviceTier = readString(metadata.serviceTier)
+    if (serviceTier && this.emit0151Param("serviceTier")) params.serviceTier = serviceTier
+    const threadSource = readString(metadata.threadSource)
+    if (threadSource && this.emit0151Param("threadSource")) params.threadSource = threadSource
+    if (options?.includeHistory === false && this.emit0151Param("excludeTurns")) {
+      params.excludeTurns = true
+    }
     if (this.configRequirementsRead) await this.awaitConfigRequirements()
     assertCodexRequestAllowed(
       { sandbox: readString(params.sandbox), approvalPolicy: readString(params.approvalPolicy) },
@@ -1409,6 +1521,30 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     this.updateSession(sessionId, { status: "executing" })
     ;(session.messages ?? (session.messages = [])).push(message)
 
+    const input = this.buildTurnInput(sessionId, message, options)
+
+    // turn/start is a request that resolves once the turn is created; the
+    // actual streaming arrives via turn/* + item/* notifications. We fire it
+    // and let the notification stream drive completion.
+    yield* this.driveTurnEvents(sessionId, session, options, true, (fail) => {
+      void this.startTurn(sessionId, input, options).catch(fail)
+    })
+  }
+
+  /**
+   * Shared turn pump: registers the session listener, fires `start` once the
+   * listener is live (notifications can race the admission response), then
+   * yields events until `done` / a fatal `error` / the abort signal. `ownsTurn`
+   * decides whether teardown flips the session back to idle — a message that
+   * JOINED an active turn must not; the running turn owns the status.
+   */
+  private async *driveTurnEvents(
+    sessionId: string,
+    session: ExternalAgentSession,
+    options: ExternalAgentExecutionOptions | undefined,
+    ownsTurn: boolean,
+    start: (fail: (error: unknown) => void) => void
+  ): AsyncIterable<ExternalAgentEvent> {
     const queue: ExternalAgentEvent[] = []
     let resolveNext: (() => void) | null = null
     let isDone = false
@@ -1430,21 +1566,17 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     }
     this.addSessionListener(sessionId, listener)
 
-    const input = this.buildTurnInput(sessionId, message, options)
+    const fail = (err: unknown) =>
+      listener({
+        type: "error",
+        sessionId,
+        timestamp: new Date(),
+        error: err instanceof Error ? err.message : String(err),
+        recoverable: false,
+      })
 
     try {
-      // turn/start is a request that resolves once the turn is created; the
-      // actual streaming arrives via turn/* + item/* notifications. We fire it
-      // and let the notification stream drive completion.
-      void this.startTurn(sessionId, input).catch((err) => {
-        listener({
-          type: "error",
-          sessionId,
-          timestamp: new Date(),
-          error: err instanceof Error ? err.message : String(err),
-          recoverable: false,
-        })
-      })
+      start(fail)
 
       while (!isDone) {
         if (queue.length > 0) {
@@ -1469,12 +1601,69 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       if (error && !sawDone) throw error
     } finally {
       this.removeSessionListener(sessionId, listener)
-      if (this._sessions.get(sessionId) === session)
+      if (ownsTurn && this._sessions.get(sessionId) === session)
         this.updateSession(sessionId, { status: "idle" })
     }
   }
 
-  private async startTurn(sessionId: string, input: CodexUserInput[]): Promise<void> {
+  /**
+   * Deliver an untrusted external message — `toolOutput` on `turn/start` (the
+   * SDK's `ExternalMessage`; Codex CLI ≥ 0.151). The content carries
+   * tool-level authority only: below user and developer instructions, and it
+   * grants no user authorization. It is preserved in history as function
+   * output, never as a user message.
+   *
+   * With no turn in flight this STARTS a turn and the returned stream is the
+   * turn's own event stream — same contract as {@link prompt}. With a turn
+   * already active the server folds the message in like a steer: admission is
+   * awaited and the stream then ends — the running turn's own consumers keep
+   * carrying the outcome.
+   */
+  async *sendExternalMessage(
+    sessionId: string,
+    message: CodexExternalMessage,
+    options?: ExternalAgentExecutionOptions
+  ): AsyncIterable<ExternalAgentEvent> {
+    const session = this._sessions.get(sessionId)
+    if (!session) throw new Error(`Session not found: ${sessionId}`)
+    if (!this.peer) throw new Error("Not connected to Codex app-server")
+    const toolName = message.toolName?.trim()
+    if (!toolName) {
+      throw new Error("ExternalMessage.toolName must be a nonempty string")
+    }
+    if (this.codexVersionAtLeast(CODEX_0151_FLOOR) === false) {
+      throw new Error(
+        `ExternalMessage requires Codex CLI >=${CODEX_0151_FLOOR.join(".")} (connected: ${this.serverInfo?.userAgent ?? "unknown"})`
+      )
+    }
+    const toolOutput: Record<string, unknown> = {
+      name: toolName,
+      ...(message.namespace !== undefined ? { namespace: message.namespace } : {}),
+      output: message.content,
+    }
+    if (this.startingTurns.has(sessionId) || this.activeTurns.has(sessionId)) {
+      // The server folds a toolOutput turn/start into the running turn — no
+      // startingTurns slot, no activeTurns overwrite: the active turn owns
+      // both. Admission is the whole call.
+      await this.peer.sendRequest("turn/start", {
+        threadId: sessionId,
+        input: [],
+        toolOutput,
+      })
+      return
+    }
+    this.updateSession(sessionId, { status: "executing" })
+    yield* this.driveTurnEvents(sessionId, session, options, true, (fail) => {
+      void this.startTurn(sessionId, [], options, toolOutput).catch(fail)
+    })
+  }
+
+  private async startTurn(
+    sessionId: string,
+    input: CodexUserInput[],
+    options?: ExternalAgentExecutionOptions,
+    toolOutput?: Record<string, unknown>
+  ): Promise<void> {
     if (!this.peer) throw new Error("Not connected to Codex app-server")
     const starting: PendingTurnStart = {
       cancelled: false,
@@ -1511,6 +1700,28 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       if (effort) params.effort = effort
       const summary = readString(session?.metadata?.reasoningSummary)
       if (summary) params.summary = summary
+      if (toolOutput) params.toolOutput = toolOutput
+      // 0.151+ surface: sticky `serviceTier` comes from session metadata;
+      // `serviceTierForTurn` is the per-execution override (SDK
+      // `turn_service_tier`) — it applies only when this request starts the
+      // turn and never mutates the thread's tier.
+      const serviceTier = readString(session?.metadata?.serviceTier)
+      if (serviceTier && this.emit0151Param("serviceTier")) params.serviceTier = serviceTier
+      const serviceTierForTurn = readString(options?.serviceTier)
+      if (serviceTierForTurn && this.emit0151Param("serviceTierForTurn")) {
+        params.serviceTierForTurn = serviceTierForTurn
+      }
+      const turnTrigger =
+        readString(options?.turnTrigger) ?? readString(session?.metadata?.turnTrigger)
+      if (turnTrigger && this.emit0151Param("turnTrigger")) params.turnTrigger = turnTrigger
+      const additionalContext = options?.additionalContext
+      if (
+        additionalContext &&
+        Object.keys(additionalContext).length > 0 &&
+        this.emit0151Param("additionalContext")
+      ) {
+        params.additionalContext = additionalContext
+      }
       // Read from the LIVE session, so a mid-session `/mode bypassPermissions`
       // (which only mutates `session.permissionMode` via `setSessionMode`) relaxes
       // the sandbox on the very next turn instead of waiting for a reconnect.
@@ -1580,19 +1791,32 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
    * turn is active or the server predates the method; callers fall back to
    * their queue-and-replay path in that case.
    */
-  async steerTurn(sessionId: string, text: string): Promise<void> {
+  async steerTurn(
+    sessionId: string,
+    text: string,
+    opts?: { additionalContext?: CodexAdditionalContext }
+  ): Promise<void> {
     if (!this.peer) throw new Error("Not connected to Codex app-server")
     const expectedTurnId = this.activeTurns.get(sessionId)
     if (!expectedTurnId) throw new Error("No active turn to steer")
     if (this.unsupportedMethods.has("turn/steer")) {
       throw new Error("turn/steer is not supported by this Codex version")
     }
+    const params: Record<string, unknown> = {
+      threadId: sessionId,
+      expectedTurnId,
+      input: [{ type: "text", text }],
+    }
+    // 0.151+: ephemeral context fragments merged when the steer carries input.
+    if (
+      opts?.additionalContext &&
+      Object.keys(opts.additionalContext).length > 0 &&
+      this.emit0151Param("additionalContext")
+    ) {
+      params.additionalContext = opts.additionalContext
+    }
     try {
-      const result = await this.peer.sendRequest<{ turnId?: string }>("turn/steer", {
-        threadId: sessionId,
-        expectedTurnId,
-        input: [{ type: "text", text }],
-      })
+      const result = await this.peer.sendRequest<{ turnId?: string }>("turn/steer", params)
       if (result?.turnId) this.activeTurns.set(sessionId, result.turnId)
     } catch (error) {
       if (isExternalAgentMethodNotFoundError(error)) {
@@ -1959,6 +2183,12 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
         const itemId = readString(p.itemId) ?? "agent"
         const delta = readString(p.delta) ?? readString(readObject(p.delta)?.text) ?? ""
         if (delta) {
+          // Async-question prose rides to the card whole on item/completed;
+          // streaming it here too would print every question twice.
+          if (this.asyncItems.has(itemId)) {
+            this.asyncItemText.set(itemId, (this.asyncItemText.get(itemId) ?? "") + delta)
+            return
+          }
           this.streamedItems.add(itemId)
           // Commentary is user-visible mid-turn narration, not model
           // reasoning. Keep it on its own event track so the final answer stays
@@ -2161,6 +2391,10 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
         // Register the message phase so phase-less deltas can route
         // commentary separately. Commentary items emit no message_start.
         if (typeof item.phase === "string") this.itemPhases.set(id, item.phase)
+        // `delivery` is present on item/started when the server knows upfront
+        // the message is an async-question block; some versions only stamp it
+        // on item/completed, which the completed branch handles symmetrically.
+        if (item.delivery === "async") this.asyncItems.add(id)
         if (item.phase === "commentary") return
         this.emit(sessionId, {
           type: "message_start",
@@ -2267,6 +2501,48 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       case "agentMessage": {
         const phase = readString(item.phase) ?? this.itemPhases.get(id)
         const text = readString(item.text) ?? extractText(item.content)
+        // `delivery: "async"` — the item carries non-blocking user questions.
+        // Its deltas were buffered (or, when delivery only arrived here, may
+        // already have streamed); either way the questions land on the
+        // `async_questions` event, not in a permission-style request. With no
+        // usable `questions` payload the item degrades to an ordinary message
+        // so its prose is never swallowed.
+        if (item.delivery === "async" || this.asyncItems.has(id)) {
+          const buffered = this.asyncItemText.get(id)
+          const streamed = this.streamedItems.has(id)
+          this.asyncItems.delete(id)
+          this.asyncItemText.delete(id)
+          this.itemPhases.delete(id)
+          const questions = parseAsyncQuestions(item.questions)
+          if (questions.length > 0) {
+            this.emit(sessionId, {
+              type: "async_questions",
+              sessionId,
+              timestamp: new Date(),
+              messageId: id,
+              questions,
+              ...(streamed ? {} : { text: buffered ?? text }),
+            })
+          } else {
+            const prose = buffered ?? (!streamed ? text : undefined)
+            if (prose) {
+              this.emit(sessionId, {
+                type: "message_delta",
+                sessionId,
+                timestamp: new Date(),
+                messageId: id,
+                delta: { type: "text", text: prose },
+              })
+            }
+          }
+          this.emit(sessionId, {
+            type: "message_end",
+            sessionId,
+            timestamp: new Date(),
+            messageId: id,
+          })
+          return
+        }
         // Commentary text is mid-turn narration. Emit it on its dedicated
         // track and skip the final-answer message_start/end envelope.
         if (phase === "commentary") {
@@ -2531,6 +2807,13 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
    * `{ answers: { [id]: { answers: [...] } } }`. When `autoResolutionMs` is set
    * the request self-resolves with empty answers (server-side auto-resolution)
    * once the window elapses.
+   *
+   * `isBlocking: false` (0.154) is the same wire request with a different
+   * promise: the turn does NOT wait, so the blocking approval card is the
+   * wrong surface. The questions go out as `async_questions` carrying the
+   * request id — the inline card answers by resolving this very RPC with the
+   * structured `{answers}` reply, while a user who never answers still settles
+   * the waiter via `serverRequest/resolved` or session teardown.
    */
   private handleRequestUserInput(
     params: Record<string, unknown>,
@@ -2544,6 +2827,40 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     }
 
     const autoResolutionMs = readNumber(params.autoResolutionMs)
+    const nonBlocking = params.isBlocking === false
+    if (nonBlocking) {
+      return new Promise((resolve) => {
+        const pending: PendingUserInput = { resolve, sessionId, questions, rpcId }
+        if (autoResolutionMs && autoResolutionMs > 0) {
+          pending.timer = setTimeout(() => {
+            if (!this.pendingUserInputs.has(requestId)) return
+            this.pendingUserInputs.delete(requestId)
+            resolve({ answers: emptyAnswersFor(questions) })
+            this.emit(sessionId, {
+              type: "permission_response",
+              sessionId,
+              timestamp: new Date(),
+              response: { requestId, granted: false, reason: "auto_resolved" },
+            })
+          }, autoResolutionMs)
+        }
+        this.pendingUserInputs.set(requestId, pending)
+        this.emit(sessionId, {
+          type: "async_questions",
+          sessionId,
+          timestamp: new Date(),
+          messageId: requestId,
+          requestId,
+          questions: questions.map((q) => ({
+            id: q.id,
+            title: q.header || q.question,
+            ...(q.options?.length ? { options: q.options.map((o) => o.label) } : {}),
+            ...(q.isSecret ? { secret: true } : {}),
+          })),
+        })
+      })
+    }
+
     const first = questions[0]
     const request: AcpPermissionRequest = {
       id: requestId,
@@ -3074,7 +3391,8 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     if (names.includes(requested)) return requested
     // Rank against the app's own ordering so "deepest supported at or below"
     // is meaningful even when the two vocabularies only partly overlap.
-    const order = ["minimal", "low", "medium", "high", "xhigh", "max"]
+    // `ultra` (0.154+: proactive multi-agent effort) ranks above `max`.
+    const order = ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
     const wanted = order.indexOf(requested)
     if (wanted < 0) return names[names.length - 1]
     // Pick by rank, not by report order — the server lists efforts in whatever
@@ -3535,6 +3853,44 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     return this.serverInfo
   }
 
+  /** The connected CLI's version tuple, when the userAgent carried one. */
+  getServerVersion(): [number, number, number] | undefined {
+    return this.serverVersion ? [...this.serverVersion] : undefined
+  }
+
+  /**
+   * Tuple-compare the connected CLI version. `undefined` = the userAgent had
+   * no semver (dev builds, wrappers, test doubles) — callers treat it as
+   * "unknown", never as "old".
+   */
+  codexVersionAtLeast(min: readonly [number, number, number]): boolean | undefined {
+    const v = this.serverVersion
+    if (!v) return undefined
+    for (let i = 0; i < 3; i++) {
+      if (v[i] !== min[i]) return v[i] > min[i]
+    }
+    return true
+  }
+
+  /**
+   * The 0.151+ params surface (`toolOutput`, `additionalContext`,
+   * `serviceTier`/`serviceTierForTurn`, `turnTrigger`, `threadSource`,
+   * `excludeTurns`). Params cannot be `-32601`-probed like methods, so a
+   * KNOWN-old server gets the field omitted plus one warning per feature; an
+   * unparseable version is trusted (the wire fails honestly if it truly is
+   * old) so dev builds are not fenced out.
+   */
+  private emit0151Param(feature: string): boolean {
+    const supported = this.codexVersionAtLeast(CODEX_0151_FLOOR)
+    if (supported === false && !this.warned0151.has(feature)) {
+      this.warned0151.add(feature)
+      log.warn(`Codex CLI <0.151 cannot carry ${feature}; the field is omitted`, {
+        userAgent: this.serverInfo?.userAgent,
+      })
+    }
+    return supported !== false
+  }
+
   private applyMcpStatus(params: Record<string, unknown>): void {
     const servers = Array.isArray(params.servers)
       ? (params.servers as CodexMcpServerStatus[])
@@ -3695,6 +4051,24 @@ function readNumber(value: unknown): number | undefined {
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return readObject(value)
+}
+
+/**
+ * `AsyncUserInputQuestion[]` from the wire — `{ title, options?: string[] }`.
+ * Options is `null` on the wire for free-text-only questions; entries without
+ * a usable title are dropped rather than rendered blank.
+ */
+function parseAsyncQuestions(raw: unknown): ExternalAgentAsyncQuestion[] {
+  if (!Array.isArray(raw)) return []
+  return raw.flatMap((entry) => {
+    const obj = readObject(entry)
+    const title = readString(obj?.title)?.trim()
+    if (!title) return []
+    const options = Array.isArray(obj?.options)
+      ? obj.options.filter((o): o is string => typeof o === "string" && o.trim().length > 0)
+      : undefined
+    return [{ title, ...(options?.length ? { options } : {}) }]
+  })
 }
 
 /** Extract plain text from an agentMessage/reasoning `content` array or string. */

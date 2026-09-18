@@ -126,6 +126,7 @@ pub const APP_SETTINGS_MOBILE_ALLOWED_KEYS: &[&str] = &[
     "geminiVoice",
     "humeVoice",
     "importedVscodeThemes",
+    "inlineQuestions",
     "instructions",
     "language",
     "lastInboxViewedAt",

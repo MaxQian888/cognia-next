@@ -23,8 +23,11 @@
 
 import type { UIMessage } from "ai"
 import type {
+  ExternalAgentAsyncQuestion,
+  ExternalAgentAsyncQuestionsEvent,
   ExternalAgentEvent,
   ExternalAgentCommentaryDeltaEvent,
+  ExternalAgentPermissionResponseEvent,
   ExternalAgentHookFireEvent,
   ExternalAgentMessageDeltaEvent,
   ExternalAgentThinkingEvent,
@@ -48,6 +51,30 @@ interface MutablePart {
   [key: string]: unknown
 }
 
+export interface ExternalAgentPartsOptions {
+  /**
+   * Render `async_questions` events as an interactive inline card. Opt-in via
+   * `AppSettings.inlineQuestions` — when absent/false the same event degrades
+   * to a plain text part so the agent's question is never swallowed.
+   */
+  inlineQuestions?: boolean
+  /**
+   * Chat-session id the parts belong to (the event's own `sessionId` is the
+   * agent's native session, not this one). Stamped onto the card's data so an
+   * answer can be sent back even when the message renders in a pane that is
+   * not the focused session.
+   */
+  sessionId?: string
+  /**
+   * Chat-side registry key for an `async_questions` event whose `requestId`
+   * backs a pending server request (`chat-decision-bridge`'s
+   * `registerExternalQuestionTarget` already ran). Stamped as
+   * `data.requestId`; the card resolves it via `resolveExternalQuestion`
+   * instead of sending a user message.
+   */
+  questionRequestId?: string
+}
+
 /**
  * Apply a single event to `parts` and return the next array. Pure; never
  * mutates the input. When the event has no parts-side effect, the input
@@ -55,7 +82,8 @@ interface MutablePart {
  */
 export function applyExternalAgentEventToParts(
   parts: readonly Part[],
-  event: ExternalAgentEvent
+  event: ExternalAgentEvent,
+  options?: ExternalAgentPartsOptions
 ): Part[] {
   switch (event.type) {
     case "message_delta":
@@ -64,6 +92,8 @@ export function applyExternalAgentEventToParts(
       return applyThinking(parts, event as ExternalAgentThinkingEvent)
     case "commentary_delta":
       return applyCommentaryDelta(parts, event as ExternalAgentCommentaryDeltaEvent)
+    case "async_questions":
+      return applyAsyncQuestions(parts, event as ExternalAgentAsyncQuestionsEvent, options)
     case "tool_use_start":
       return applyToolUseStart(parts, event as ExternalAgentToolUseStartEvent)
     case "tool_call_update":
@@ -74,6 +104,8 @@ export function applyExternalAgentEventToParts(
       return applyToolResult(parts, event as ExternalAgentToolResultEvent)
     case "hook_fire":
       return applyHookFire(parts, event as ExternalAgentHookFireEvent)
+    case "permission_response":
+      return applyPermissionResponse(parts, event as ExternalAgentPermissionResponseEvent)
     default:
       return parts as Part[]
   }
@@ -100,10 +132,13 @@ function applyHookFire(parts: readonly Part[], event: ExternalAgentHookFireEvent
  * Convenience helper for tests / callers with a full event stream — applies
  * events in order and returns the final parts array.
  */
-export function buildPartsFromExternalAgentEvents(events: readonly ExternalAgentEvent[]): Part[] {
+export function buildPartsFromExternalAgentEvents(
+  events: readonly ExternalAgentEvent[],
+  options?: ExternalAgentPartsOptions
+): Part[] {
   let parts: Part[] = []
   for (const event of events) {
-    parts = applyExternalAgentEventToParts(parts, event)
+    parts = applyExternalAgentEventToParts(parts, event, options)
   }
   return parts
 }
@@ -158,6 +193,92 @@ function applyCommentaryDelta(
   }
   if (index < 0) return [...parts, next as unknown as Part]
   return [...parts.slice(0, index), next as unknown as Part, ...parts.slice(index + 1)]
+}
+
+/**
+ * Non-blocking questions (Codex `delivery: "async"` agent messages). With the
+ * `inlineQuestions` opt-in the event becomes a `data-async-questions` card the
+ * user answers later with an ordinary chat turn — no waiter is resolved and
+ * the turn keeps running. Without it the same payload degrades to text, which
+ * is also what an agent emitting `delivery:"async"` with no questions means.
+ */
+function applyAsyncQuestions(
+  parts: readonly Part[],
+  event: ExternalAgentAsyncQuestionsEvent,
+  options?: ExternalAgentPartsOptions
+): Part[] {
+  const questions = (event.questions ?? []).filter(
+    (q): q is ExternalAgentAsyncQuestion =>
+      typeof q?.title === "string" && q.title.trim().length > 0
+  )
+  if (options?.inlineQuestions !== true || questions.length === 0) {
+    let text = event.text ?? asyncQuestionsText(questions)
+    // A synthesized question list is a new block, not a continuation of the
+    // prose a preceding text part holds — keep the merge readable.
+    if (!event.text && text && (parts[parts.length - 1] as MutablePart)?.type === "text") {
+      text = `\n\n${text}`
+    }
+    return text ? appendToOrCreateLast(parts, "text", text) : (parts as Part[])
+  }
+  const part: MutablePart = {
+    type: "data-async-questions",
+    data: {
+      ...(event.messageId ? { itemId: event.messageId } : {}),
+      ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+      // `requestId` (chat-side registry key) is only stamped when a delivery
+      // target was actually registered — its presence is what switches the
+      // card from "answer with a user message" to "resolve the pending RPC".
+      // `responseRequestId` keeps the raw wire id so a later
+      // `permission_response` can find and close this part.
+      ...(options.questionRequestId
+        ? { requestId: options.questionRequestId, responseRequestId: event.requestId }
+        : {}),
+      ...(event.text ? { text: event.text } : {}),
+      questions,
+      // `answers` is the card's record of what was already sent back — it
+      // persists with the part so a transcript reload doesn't re-offer a
+      // question that was answered before the restart.
+      answers: {},
+    },
+  }
+  return [...parts, part as unknown as Part]
+}
+
+/**
+ * A pending `requestUserInput` waiter settled — locally answered, resolved
+ * elsewhere (`serverRequest/resolved`), auto-resolved, or torn down. Mark the
+ * matching card closed so it stops offering answers that can no longer
+ * arrive. Matches on the raw wire requestId, which is what the adapter echoes
+ * back in `response.requestId`.
+ */
+function applyPermissionResponse(
+  parts: readonly Part[],
+  event: ExternalAgentPermissionResponseEvent
+): Part[] {
+  const responseRequestId = event.response?.requestId
+  if (!responseRequestId) return parts as Part[]
+  const index = parts.findIndex((p) => {
+    const data = (p as MutablePart).data as Record<string, unknown> | undefined
+    return (
+      (p as MutablePart).type === "data-async-questions" &&
+      data?.responseRequestId === responseRequestId
+    )
+  })
+  if (index < 0) return parts as Part[]
+  const part = parts[index] as MutablePart
+  const data = (part.data as Record<string, unknown>) ?? {}
+  if (data.closed === true) return parts as Part[]
+  const next: MutablePart = { ...part, data: { ...data, closed: true } }
+  return [...parts.slice(0, index), next as unknown as Part, ...parts.slice(index + 1)]
+}
+
+/** Plain-text rendering of the question list for the opt-out path. */
+function asyncQuestionsText(questions: readonly { title: string; options?: string[] }[]): string {
+  const lines = questions.map((q) => {
+    const opts = q.options?.length ? ` (${q.options.join(" / ")})` : ""
+    return `- ${q.title}${opts}`
+  })
+  return lines.join("\n")
 }
 
 function appendToOrCreateLast(

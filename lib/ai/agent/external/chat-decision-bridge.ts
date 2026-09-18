@@ -45,6 +45,7 @@ import type {
   AcpElicitationResponse,
   AcpPermissionOption,
   AcpPermissionResponse,
+  ExternalAgentAsyncQuestionsEvent,
   ExternalAgentElicitationRequestEvent,
   ExternalAgentPermissionRequestEvent,
 } from "@/types/agent/external-agent"
@@ -192,6 +193,79 @@ export function registerExternalApproval(params: {
 /** The recorded target for a chat-side requestId, if it is still pending. */
 export function getExternalApprovalTarget(requestId: string): ExternalApprovalTarget | undefined {
   return targets.get(requestId)
+}
+
+/**
+ * Record where an `async_questions` card's answer must go, when the event
+ * backs a pending server request (`event.requestId`, Codex `requestUserInput`
+ * with `isBlocking: false`). No `PendingApproval` is pushed — the inline card
+ * IS the surface — but the target shares the registry so the answer lands on
+ * the same channel an approval card would have used.
+ *
+ * Returns the chat-side requestId the card stores on its part data, or `null`
+ * when the event carries nothing to answer with (a plain `delivery:"async"`
+ * message — those are answered by an ordinary user turn instead).
+ */
+export function registerExternalQuestionTarget(params: {
+  agentId: string
+  chatSessionId: string
+  event: ExternalAgentAsyncQuestionsEvent
+  /** See `ExternalApprovalTarget.remoteDecisionId`. */
+  remoteDecisionId?: string
+}): string | null {
+  const { agentId, chatSessionId, event, remoteDecisionId } = params
+  if (!event.requestId) return null
+  const requestId = externalApprovalRequestId(agentId, event.requestId)
+  targets.set(requestId, {
+    agentId,
+    externalSessionId: event.sessionId || chatSessionId,
+    responseRequestId: event.requestId,
+    chatSessionId,
+    ...(remoteDecisionId ? { remoteDecisionId } : {}),
+  })
+  return requestId
+}
+
+/**
+ * Answer one RPC-backed async question. `answers` is `questionId → texts`
+ * (the `requestUserInput` response shape); `granted: true` keeps the wire
+ * reply on the answered path rather than the denied one.
+ *
+ * Resolves the WHOLE request — `requestUserInput` takes a single `{answers}`
+ * reply covering every question it asked — so once one answer lands the card
+ * is settled and remaining questions can only be read, not answered.
+ *
+ * Returns false when the id is unknown (already resolved elsewhere, or the
+ * session ended); the card then marks itself closed rather than reporting a
+ * send failure for an answer that could never have arrived.
+ */
+export async function resolveExternalQuestion(
+  requestId: string,
+  answers: Record<string, string[]>
+): Promise<boolean> {
+  const target = targets.get(requestId)
+  if (!target) return false
+  const response: AcpPermissionResponse = {
+    requestId: target.responseRequestId,
+    granted: true,
+    answers,
+  }
+  if (target.remoteDecisionId) {
+    // The remote decision channel carries an ApprovalDecision, not an answers
+    // map — a host-run question cannot be answered this way. The caller never
+    // registers remote targets for questions (the card renders the
+    // message-answer variant instead), so reaching this line means the run
+    // moved mid-flight; report unresolved rather than silently dropping it.
+    return false
+  }
+  const { getExternalAgentManager } = await import("./manager")
+  await getExternalAgentManager().respondToPermission(
+    target.agentId,
+    target.externalSessionId,
+    response
+  )
+  targets.delete(requestId)
+  return true
 }
 
 /**

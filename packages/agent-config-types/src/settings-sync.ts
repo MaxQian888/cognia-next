@@ -116,6 +116,7 @@ export const SETTINGS_SYNC = {
   capture: { category: "desktop-only" },
   composerAssistance: { category: "desktop-only" },
   composerBehavior: { category: "shared" },
+  inlineQuestions: { category: "shared" },
   agentPermissions: { category: "desktop-only" },
   conversationTimeline: { category: "shared" },
   conversationSidebar: { category: "shared" },

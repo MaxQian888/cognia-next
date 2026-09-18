@@ -1,6 +1,7 @@
 import type {
   AcpElicitationRequest,
   AcpPermissionOption,
+  ExternalAgentAsyncQuestionsEvent,
   ExternalAgentElicitationRequestEvent,
   ExternalAgentPermissionRequestEvent,
 } from "@/types/agent/external-agent"
@@ -16,9 +17,11 @@ import {
   elicitationCancelResponse,
   registerExternalApproval,
   registerExternalElicitation,
+  registerExternalQuestionTarget,
   releaseExternalApprovals,
   resolveExternalApproval,
   resolveExternalElicitation,
+  resolveExternalQuestion,
   toPermissionResponse,
 } from "./chat-decision-bridge"
 
@@ -344,6 +347,79 @@ describe("registerExternalElicitation", () => {
   })
 })
 
+describe("async question targets (requestUserInput isBlocking:false)", () => {
+  const questionsEvent = (requestId?: string): ExternalAgentAsyncQuestionsEvent =>
+    ({
+      type: "async_questions",
+      timestamp: new Date(),
+      sessionId: "ext-session",
+      messageId: "item-1",
+      ...(requestId ? { requestId } : {}),
+      questions: [{ id: "q1", title: "Region?" }],
+    }) as ExternalAgentAsyncQuestionsEvent
+
+  it("registers a target without pushing an approval and returns the chat-side key", () => {
+    const requestId = registerExternalQuestionTarget({
+      agentId: "agent-a",
+      chatSessionId: "chat-1",
+      event: questionsEvent("wire-9"),
+    })
+    expect(requestId).toBe(externalApprovalRequestId("agent-a", "wire-9"))
+    expect(getExternalApprovalTarget(requestId!)).toMatchObject({
+      agentId: "agent-a",
+      externalSessionId: "ext-session",
+      responseRequestId: "wire-9",
+      chatSessionId: "chat-1",
+    })
+  })
+
+  it("returns null for message-answer events with no pending request", () => {
+    expect(
+      registerExternalQuestionTarget({
+        agentId: "a",
+        chatSessionId: "chat-1",
+        event: questionsEvent(),
+      })
+    ).toBeNull()
+  })
+
+  it("answers the pending request with the structured answers map", async () => {
+    const requestId = registerExternalQuestionTarget({
+      agentId: "agent-a",
+      chatSessionId: "chat-1",
+      event: questionsEvent("wire-9"),
+    })!
+    mockLocalPermission.mockResolvedValueOnce(undefined)
+    await expect(resolveExternalQuestion(requestId, { q1: ["eu-west"] })).resolves.toBe(true)
+    expect(mockLocalPermission).toHaveBeenCalledWith("agent-a", "ext-session", {
+      requestId: "wire-9",
+      granted: true,
+      answers: { q1: ["eu-west"] },
+    })
+    expect(getExternalApprovalTarget(requestId)).toBeUndefined()
+  })
+
+  it("reports unknown ids without dispatching — the card closes, not errors", async () => {
+    await expect(resolveExternalQuestion("external-agent:a:gone", { q1: ["x"] })).resolves.toBe(
+      false
+    )
+    expect(mockLocalPermission).not.toHaveBeenCalled()
+  })
+
+  it("refuses remote targets — the decision channel cannot carry answers", async () => {
+    const requestId = registerExternalQuestionTarget({
+      agentId: "a",
+      chatSessionId: "chat-1",
+      event: questionsEvent("wire-remote"),
+      remoteDecisionId: "host-decision",
+    })!
+    await expect(resolveExternalQuestion(requestId, { q1: ["x"] })).resolves.toBe(false)
+    expect(mockLocalPermission).not.toHaveBeenCalled()
+    // The target stays — nothing answered it.
+    expect(getExternalApprovalTarget(requestId)).toBeDefined()
+  })
+})
+
 describe("elicitationCancelResponse", () => {
   // The agent reads `decline` as a deliberate "no" and `cancel` as "the user
   // walked away". A turn that ended with the question still on screen is the
@@ -360,9 +436,13 @@ describe("elicitationCancelResponse", () => {
 })
 
 const mockLocalElicitation = jest.fn()
+const mockLocalPermission = jest.fn()
 const mockRemoteElicitation = jest.fn()
 jest.mock("./manager", () => ({
-  getExternalAgentManager: () => ({ respondToElicitation: mockLocalElicitation }),
+  getExternalAgentManager: () => ({
+    respondToElicitation: mockLocalElicitation,
+    respondToPermission: mockLocalPermission,
+  }),
 }))
 jest.mock("./remote-run-client", () => ({
   resolveRemoteElicitation: (...args: unknown[]) => mockRemoteElicitation(...args),

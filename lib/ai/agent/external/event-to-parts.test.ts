@@ -403,6 +403,200 @@ describe("buildPartsFromExternalAgentEvents — integration", () => {
   })
 })
 
+describe("applyExternalAgentEventToParts — async_questions", () => {
+  const questions = [
+    { title: "Which file should I edit?", options: ["a.ts", "b.ts"] },
+    { title: "Any constraints?" },
+  ]
+
+  it("renders an interactive card part when inline questions are enabled", () => {
+    const parts = applyExternalAgentEventToParts(
+      [],
+      ev({ type: "async_questions", messageId: "item-9", questions }),
+      { inlineQuestions: true, sessionId: "chat-1" }
+    )
+    expect(parts).toHaveLength(1)
+    expect(parts[0]).toMatchObject({
+      type: "data-async-questions",
+      data: {
+        itemId: "item-9",
+        sessionId: "chat-1",
+        questions,
+        answers: {},
+      },
+    })
+  })
+
+  it("carries the unstreamed question prose on the card data", () => {
+    const parts = applyExternalAgentEventToParts(
+      [],
+      ev({
+        type: "async_questions",
+        messageId: "item-9",
+        text: "Two things before I continue:",
+        questions,
+      }),
+      { inlineQuestions: true, sessionId: "chat-1" }
+    )
+    expect(parts[0]).toMatchObject({
+      type: "data-async-questions",
+      data: { text: "Two things before I continue:" },
+    })
+  })
+
+  it("degrades to a plain text part when the opt-in is off", () => {
+    const parts = applyExternalAgentEventToParts(
+      [],
+      ev({ type: "async_questions", messageId: "item-9", text: "Pick one:", questions }),
+      { inlineQuestions: false, sessionId: "chat-1" }
+    )
+    expect(parts).toHaveLength(1)
+    expect(parts[0]).toMatchObject({ type: "text", text: "Pick one:" })
+  })
+
+  it("synthesizes the question list as text when nothing streamed and the card is off", () => {
+    const parts = applyExternalAgentEventToParts(
+      [],
+      ev({ type: "async_questions", messageId: "item-9", questions })
+      // no options object at all — the feature is opt-in, so absent means off
+    )
+    expect(parts).toHaveLength(1)
+    expect(parts[0]).toMatchObject({
+      type: "text",
+      text: "- Which file should I edit? (a.ts / b.ts)\n- Any constraints?",
+    })
+  })
+
+  it("appends the degraded text to a preceding text part like a normal delta", () => {
+    let parts = applyExternalAgentEventToParts(
+      [],
+      ev({ type: "message_delta", delta: { type: "text", text: "Before that," } })
+    )
+    parts = applyExternalAgentEventToParts(
+      parts,
+      ev({ type: "async_questions", questions: [{ title: "ok?" }] }),
+      { inlineQuestions: false }
+    )
+    expect(parts).toHaveLength(1)
+    expect((parts[0] as { text: string }).text).toBe("Before that,\n\n- ok?")
+  })
+
+  it("leaves parts untouched when the event carries neither text nor questions", () => {
+    const parts = applyExternalAgentEventToParts(
+      [],
+      ev({ type: "async_questions", questions: [] }),
+      { inlineQuestions: true }
+    )
+    expect(parts).toEqual([])
+  })
+
+  it("drops title-less question entries instead of rendering blanks", () => {
+    const parts = applyExternalAgentEventToParts(
+      [],
+      ev({
+        type: "async_questions",
+        questions: [{ title: " " }, { title: "Real?" }] as never,
+      }),
+      { inlineQuestions: true }
+    )
+    expect(parts[0]).toMatchObject({
+      type: "data-async-questions",
+      data: { questions: [{ title: "Real?" }] },
+    })
+  })
+
+  it("stamps the chat-side request key and raw wire id for RPC-backed questions", () => {
+    // `requestUserInput` with isBlocking:false — the card resolves the pending
+    // RPC rather than sending a user message, and `responseRequestId` is how a
+    // later permission_response finds this part.
+    const parts = applyExternalAgentEventToParts(
+      [],
+      ev({
+        type: "async_questions",
+        messageId: "item-9",
+        requestId: "q-item-9",
+        questions: [
+          { id: "q1", title: "Region?", options: ["us-east"] },
+          { id: "q2", title: "Token?", secret: true },
+        ],
+      }),
+      { inlineQuestions: true, sessionId: "chat-1", questionRequestId: "external-agent:a:q-item-9" }
+    )
+    expect(parts[0]).toMatchObject({
+      type: "data-async-questions",
+      data: {
+        requestId: "external-agent:a:q-item-9",
+        responseRequestId: "q-item-9",
+        questions: [
+          { id: "q1", title: "Region?", options: ["us-east"] },
+          { id: "q2", title: "Token?", secret: true },
+        ],
+      },
+    })
+  })
+
+  it("omits the request key when no target was registered (remote lane)", () => {
+    const parts = applyExternalAgentEventToParts(
+      [],
+      ev({
+        type: "async_questions",
+        requestId: "q-remote",
+        questions: [{ title: "?" }],
+      }),
+      { inlineQuestions: true, sessionId: "chat-1" }
+    )
+    expect(parts[0]).toMatchObject({ type: "data-async-questions" })
+    const data = (parts[0] as { data: Record<string, unknown> }).data
+    expect(data.requestId).toBeUndefined()
+    expect(data.responseRequestId).toBeUndefined()
+  })
+
+  it("marks the card closed when its request resolves elsewhere", () => {
+    let parts = applyExternalAgentEventToParts(
+      [],
+      ev({
+        type: "async_questions",
+        requestId: "q-item-9",
+        questions: [{ id: "q1", title: "Region?" }],
+      }),
+      { inlineQuestions: true, sessionId: "chat-1", questionRequestId: "external-agent:a:q-item-9" }
+    )
+    parts = applyExternalAgentEventToParts(
+      parts,
+      ev({
+        type: "permission_response",
+        response: { requestId: "q-item-9", granted: false, reason: "resolved_elsewhere" },
+      })
+    )
+    expect(parts).toHaveLength(1)
+    expect(parts[0]).toMatchObject({
+      type: "data-async-questions",
+      data: { closed: true },
+    })
+  })
+
+  it("ignores permission_response for requests no card is waiting on", () => {
+    let parts = applyExternalAgentEventToParts(
+      [],
+      ev({
+        type: "async_questions",
+        requestId: "q-item-9",
+        questions: [{ id: "q1", title: "Region?" }],
+      }),
+      { inlineQuestions: true, questionRequestId: "external-agent:a:q-item-9" }
+    )
+    parts = applyExternalAgentEventToParts(
+      parts,
+      ev({
+        type: "permission_response",
+        response: { requestId: "unrelated", granted: true },
+      })
+    )
+    const data = (parts[0] as { data: Record<string, unknown> }).data
+    expect(data.closed).toBeUndefined()
+  })
+})
+
 describe("applyExternalAgentEventToParts — hook_fire", () => {
   it("appends an inline hook-notice part carrying the decision", () => {
     const parts = applyExternalAgentEventToParts(
