@@ -34,6 +34,11 @@ jest.mock("@/lib/claude/plugin-tool-ipc", () => ({
 jest.mock("@/stores/settings/settings-store", () => ({
   useSettingsStore: { getState: () => ({ settings: {} }) },
 }))
+jest.mock("@/lib/ai/finish-reason-retry", () => ({
+  ...jest.requireActual("@/lib/ai/finish-reason-retry"),
+  // Real classification; zeroed delay so retry tests don't wait on backoff.
+  finishRetryDelayMs: jest.fn(() => 0),
+}))
 let mockPiiSafe = true
 let mockPiiResults: boolean[] = []
 jest.mock("@cognia/redact", () => ({
@@ -84,12 +89,13 @@ function routingPlan(): RoutingPlan {
   }
 }
 
-function fakeStream(parts: unknown[], usage?: unknown) {
+function fakeStream(parts: unknown[], usage?: unknown, finishReason = "stop") {
   return (() => ({
     stream: (async function* () {
       for (const p of parts) yield p
     })(),
     usage: Promise.resolve(usage ?? { promptTokens: 3, completionTokens: 7 }),
+    finishReason: Promise.resolve(finishReason),
   })) as never
 }
 
@@ -497,5 +503,69 @@ describe("runStandaloneTurn", () => {
     expect(serialized).toContain("web_search")
     expect(serialized).toContain("tool_result")
     expect(events.at(-1)).toEqual({ type: "session_ended", sessionId: "s1" })
+  })
+
+  it("retries the same provider when the stream finishes on network_error with no output", async () => {
+    const impl = jest
+      .fn()
+      .mockImplementationOnce(fakeStream([{ type: "start" }], undefined, "network_error"))
+      .mockImplementationOnce(fakeStream([{ type: "text-delta", text: "ok" }], undefined, "stop"))
+    const { events, promise } = run({ streamTextImpl: impl as never })
+    await promise
+
+    expect(impl).toHaveBeenCalledTimes(2)
+    expect(events.at(-1)).toEqual({ type: "session_ended", sessionId: "s1" })
+  })
+
+  it("surfaces an error once same-provider finish retries are exhausted", async () => {
+    const impl = jest
+      .fn()
+      .mockImplementation(fakeStream([{ type: "start" }], undefined, "network_error"))
+    const { events, promise } = run({ streamTextImpl: impl as never })
+    await promise
+
+    // 1 initial attempt + FINISH_RETRY_MAX_ATTEMPTS retries, then a real error.
+    expect(impl).toHaveBeenCalledTimes(3)
+    const ended = events.at(-1)
+    expect(ended?.type).toBe("session_ended")
+    expect((ended as { error?: string }).error).toContain("network_error")
+  })
+
+  it("accepts partial output instead of retrying when a delta was already committed", async () => {
+    const impl = jest
+      .fn()
+      .mockImplementation(
+        fakeStream([{ type: "text-delta", text: "partial" }], undefined, "unknown")
+      )
+    const { events, promise } = run({ streamTextImpl: impl as never })
+    await promise
+
+    expect(impl).toHaveBeenCalledTimes(1)
+    expect(events.at(-1)).toEqual({ type: "session_ended", sessionId: "s1" })
+  })
+
+  it("does not retry a definitive stop finish", async () => {
+    const impl = jest.fn().mockImplementation(fakeStream([{ type: "start" }], undefined, "stop"))
+    const { events, promise } = run({ streamTextImpl: impl as never })
+    await promise
+
+    expect(impl).toHaveBeenCalledTimes(1)
+    expect(events.at(-1)).toEqual({ type: "session_ended", sessionId: "s1" })
+  })
+
+  it("falls back to the next routing candidate after same-provider retries fail", async () => {
+    const impl = jest
+      .fn()
+      .mockImplementation(fakeStream([{ type: "start" }], undefined, "network_error"))
+    const { events, promise } = run({
+      sendOptions: { routingPlan: routingPlan() } as SendOptions,
+      streamTextImpl: impl as never,
+    })
+    await promise
+
+    // anthropic: 1 + 2 retries, then openai: 1 + 2 retries → all non-answer.
+    expect(impl).toHaveBeenCalledTimes(6)
+    const ended = events.at(-1)
+    expect((ended as { error?: string }).error).toContain("network_error")
   })
 })

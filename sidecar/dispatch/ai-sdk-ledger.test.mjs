@@ -212,18 +212,26 @@ test("an explicit pre-output 429 is booked failed and retried as a new reserved 
   session.closeInput()
 })
 
-test("a timeout with no output is UNKNOWN and never retried", async () => {
+test("a timeout with no output is UNKNOWN, retried within the transport budget", async () => {
+  let granted = 0
   const { events, stream, session } = harness({
     sendOptions: { ledger: STAMP },
     script: [{ events: [{ type: "error", error: new Error("socket hang up") }], usage: null }],
+    // The renderer bumps attemptNo per grant; attempt 2 hits the budget.
+    decide: () => ({ decision: "granted", attemptNo: ++granted }),
   })
   await waitFor(events, ended)
   const results = events.filter((e) => e.type === "call_attempt_result")
   assert.deepEqual(
     results.map((r) => [r.status, r.errorClass]),
-    [["unknown", "timeout_after_send"]]
+    [
+      ["unknown", "timeout_after_send"],
+      ["unknown", "timeout_after_send"],
+    ]
   )
-  assert.equal(stream.calls.length, 1)
+  assert.equal(stream.calls.length, 2)
+  // The turn still fails once the budget is spent — retried, never free.
+  assert.ok(events.find(ended)?.error)
   session.closeInput()
 })
 

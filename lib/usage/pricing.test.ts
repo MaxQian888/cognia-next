@@ -56,6 +56,41 @@ describe("mergePricingLayers", () => {
     // cache-only is still null because there is no prompt/completion anchor
     expect(mergePricingLayers([{ cachedInputPer1M: 0.3 }])).toBeNull()
   })
+
+  it("drops non-finite rates so malformed leaves cannot NaN a cost", () => {
+    // A user-edited custom-pricing JSON can carry NaN/Infinity through
+    // settings; those must not shadow a valid lower-priority layer.
+    const merged = mergePricingLayers([
+      { promptPer1M: Number.NaN, completionPer1M: Number.POSITIVE_INFINITY },
+      { promptPer1M: 2, completionPer1M: 4, cachedInputPer1M: 1 },
+    ])
+    expect(merged).toMatchObject({
+      promptPer1M: 2,
+      completionPer1M: 4,
+      cachedInputPer1M: 1,
+    })
+  })
+
+  it("drops non-finite unit + per-request rates too", () => {
+    const merged = mergePricingLayers([
+      {
+        promptPer1M: 1,
+        completionPer1M: 2,
+        perContainerHourUsd: Number.NaN,
+        perRequestUsd: { web_search: Number.POSITIVE_INFINITY, code_execution: 0.05 },
+      },
+    ])
+    expect(merged?.perContainerHourUsd).toBeUndefined()
+    expect(merged?.perRequestUsd).toEqual({ code_execution: 0.05 })
+  })
+
+  it("drops non-finite rates inside a CNY layer before conversion", () => {
+    const merged = mergePricingLayers([
+      { promptPer1M: Number.NaN, completionPer1M: 14.5, currency: "CNY" },
+    ])
+    expect(merged?.promptPer1M).toBeUndefined()
+    expect(merged?.completionPer1M).toBeCloseTo(2, 6)
+  })
 })
 
 describe("resolveModelPricingUsd", () => {

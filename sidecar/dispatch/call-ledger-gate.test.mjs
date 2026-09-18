@@ -7,6 +7,7 @@ import {
   createCallLedgerGate,
   drainSideCallStream,
   estimatePromptTokens,
+  isDefinitiveRefusal,
   isLedgerStamp,
   isRetryableBeforeOutput,
   rawUsageFromAiSdk,
@@ -188,8 +189,15 @@ test("classifies call errors by what they say about billing", () => {
   assert.equal(classifyCallError(new Error("socket hang up")), "timeout_after_send")
   assert.equal(classifyCallError(new Error("x"), { aborted: true }), "cancelled")
   assert.equal(isRetryableBeforeOutput("rate_limited"), true)
-  assert.equal(isRetryableBeforeOutput("timeout_after_send"), false)
+  // Sent-but-silent is retried (watchdog timeout, socket hangup) — the attempt
+  // is still booked UNKNOWN, retried ≠ assumed free.
+  assert.equal(isRetryableBeforeOutput("timeout_after_send"), true)
   assert.equal(isRetryableBeforeOutput("refusal"), false)
+  // Bookkeeping split: a retried timeout was possibly charged, so it is not a
+  // definitive refusal — it reports UNKNOWN, unlike a pre-processing refusal.
+  assert.equal(isDefinitiveRefusal("timeout_after_send"), false)
+  assert.equal(isDefinitiveRefusal("rate_limited"), true)
+  assert.equal(isDefinitiveRefusal("auth"), true)
 })
 
 test("estimates prompt tokens conservatively", () => {

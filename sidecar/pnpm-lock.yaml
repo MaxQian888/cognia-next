@@ -56,15 +56,9 @@ importers:
       '@cognia/redact':
         specifier: link:../packages/redact
         version: link:../packages/redact
-      '@langfuse/client':
-        specifier: 5.10.1
-        version: 5.10.1(@opentelemetry/api@1.9.1)
       '@langfuse/otel':
         specifier: 5.10.1
         version: 5.10.1(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))
-      '@langfuse/tracing':
-        specifier: 5.10.1
-        version: 5.10.1(@opentelemetry/api@1.9.1)
       '@langfuse/vercel-ai-sdk':
         specifier: 5.10.1
         version: 5.10.1(@opentelemetry/api@1.9.1)(ai@7.0.59(zod@4.4.3))(zod@4.4.3)
@@ -408,11 +402,6 @@ packages:
   '@js-sdsl/ordered-map@4.4.2':
     resolution: {integrity: sha512-iUKgm52T8HOE/makSxjqoWhe95ZJA1/G1sYsGev2JDKUSS14KAgg1LHb+Ba+IPow0xflbnSkOsZcO08C7w1gYw==}
 
-  '@langfuse/client@5.10.1':
-    resolution: {integrity: sha512-isfMUbb55mXnp5EjIKnKmdB6aVxy+jPYK65RkaLdi2xveUbifVeov9kAwHQN6lWtzkR/ssSk6+JwvTCLaPcvTQ==}
-    peerDependencies:
-      '@opentelemetry/api': ^1.9.0
-
   '@langfuse/core@5.10.1':
     resolution: {integrity: sha512-W8UArizWSy1DdeLGTsTwJwl7bkA7OQQcGZW8RtoopXyJZ93O0rwG7wzzeiZjhjpj5OtWOUTEaJuNkwOrF31UDw==}
     peerDependencies:
@@ -426,12 +415,6 @@ packages:
       '@opentelemetry/core': ^2.0.1
       '@opentelemetry/exporter-trace-otlp-http': '>=0.202.0 <1.0.0'
       '@opentelemetry/sdk-trace-base': ^2.0.1
-
-  '@langfuse/tracing@5.10.1':
-    resolution: {integrity: sha512-m2kK4D0MsH8g4Og6KpnlYk8NLdQTYe0JR5M4KKpfNj99XXLlbdpXE/g3uJSqkcrWFhpiIb+3cyS9+uV6wQ6WtA==}
-    engines: {node: '>=20'}
-    peerDependencies:
-      '@opentelemetry/api': ^1.9.0
 
   '@langfuse/vercel-ai-sdk@5.10.1':
     resolution: {integrity: sha512-F+y5sLpeOEEO0uCLcZUHS5qvt0vF07SCnOu4oD7c1N5y9NwMADx0dbNh4804HGnEqqDDQAABtP9p9w+HHE6REQ==}
@@ -1235,10 +1218,6 @@ packages:
   msgpackr@2.1.0:
     resolution: {integrity: sha512-p/pBCVO63CsvvpkomUnNNag6+n38rULuDA6HHe70o2gtC8ODI52foF/4ko2qQcp6OiErJXTmrZeXmsGGHsIQNQ==}
 
-  mustache@4.2.0:
-    resolution: {integrity: sha512-71ippSywq5Yb7/tVYyGbkBggbU8H3u5Rz56fH60jGFgr8uHwxs+aSKeqmluIVzM0m0kB7xQjKS6qPfd0b2ZoqQ==}
-    hasBin: true
-
   negotiator@1.0.0:
     resolution: {integrity: sha512-8Ofs/AUQh8MaEcrlq5xOX0CQ9ypTF5dl78mjlMNfOK08fzpgTHQRQPBxcPlEtIw0yRpws+Zo/3r+5WRby7u3Gg==}
     engines: {node: '>= 0.6'}
@@ -1869,13 +1848,6 @@ snapshots:
 
   '@js-sdsl/ordered-map@4.4.2': {}
 
-  '@langfuse/client@5.10.1(@opentelemetry/api@1.9.1)':
-    dependencies:
-      '@langfuse/core': 5.10.1(@opentelemetry/api@1.9.1)
-      '@langfuse/tracing': 5.10.1(@opentelemetry/api@1.9.1)
-      '@opentelemetry/api': 1.9.1
-      mustache: 4.2.0
-
   '@langfuse/core@5.10.1(@opentelemetry/api@1.9.1)':
     dependencies:
       '@opentelemetry/api': 1.9.1
@@ -1887,11 +1859,6 @@ snapshots:
       '@opentelemetry/core': 2.10.0(@opentelemetry/api@1.9.1)
       '@opentelemetry/exporter-trace-otlp-http': 0.221.0(@opentelemetry/api@1.9.1)
       '@opentelemetry/sdk-trace-base': 2.10.0(@opentelemetry/api@1.9.1)
-
-  '@langfuse/tracing@5.10.1(@opentelemetry/api@1.9.1)':
-    dependencies:
-      '@langfuse/core': 5.10.1(@opentelemetry/api@1.9.1)
-      '@opentelemetry/api': 1.9.1
 
   '@langfuse/vercel-ai-sdk@5.10.1(@opentelemetry/api@1.9.1)(ai@7.0.59(zod@4.4.3))(zod@4.4.3)':
     dependencies:
@@ -2701,8 +2668,6 @@ snapshots:
   msgpackr@2.1.0:
     optionalDependencies:
       msgpackr-extract: 3.0.4
-
-  mustache@4.2.0: {}
 
   negotiator@1.0.0: {}
 

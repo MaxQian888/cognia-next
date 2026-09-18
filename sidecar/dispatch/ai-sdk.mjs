@@ -26,6 +26,11 @@ import {
   refusalSessionEnded,
   runLedgeredSideCall,
 } from "./call-ledger-gate.mjs"
+import {
+  STREAM_IDLE_TIMEOUT_MS,
+  StreamIdleTimeoutError,
+  withIdleTimeout,
+} from "./stream-watchdog.mjs"
 import { makeLazyLspResolver } from "./lsp-resolver-factory.mjs"
 import { makeLazyCodeGraphResolver } from "./codegraph-resolver-factory.mjs"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
@@ -50,6 +55,16 @@ import { buildMcpLogEvent } from "./mcp-log.mjs"
 // older is summarized. Matches the Anthropic SDK's "keep the tail" behavior.
 // Used only as the fallback when `sendOptions.compaction.keepRecent` is absent.
 const COMPACT_KEEP_RECENT_MESSAGES = 6
+
+// Bounded retries for a transport/stream failure before any output was
+// produced — the non-ledger counterpart of the reserved-attempt budget.
+const MAX_TRANSPORT_RETRIES = 2
+
+// Consecutive legs allowed to end on an unmapped finishReason ("other" /
+// "unknown") while still producing fresh output. Beyond that the model is
+// treated as done — a provider that always reports "other" must not spin
+// the loop forever.
+const MAX_UNKNOWN_FINISH_CONTINUES = 3
 
 // After this many accumulated frozen summaries, collapse them all into one
 // (a bounded, one-time prefix-cache break) instead of appending another.
@@ -342,6 +357,7 @@ export function dispatchAiSdk({
   hostRpc,
   streamText: streamTextOverride,
   buildMcpTools: buildMcpToolsOverride,
+  streamIdleTimeoutMs,
 }) {
   // Code-level protocol adapters round-trip through the renderer; the host
   // resolves `protocol_adapter_*` against this Map (per-session, like
@@ -1340,6 +1356,12 @@ export function dispatchAiSdk({
       // a refusal that ended the turn.
       let ledgerLegIndex = 0
       let ledgerRefusal = null
+      // Non-ledger calls get the same bounded pre-output retry as reserved
+      // transport attempts (opencode v1.18.17: capped retries + jitter).
+      let transportRetries = 0
+      // Unknown finishReasons keep the loop going — bounded so a provider that
+      // always ends "other" can't spin the turn forever (opencode v1.18.21).
+      let unknownFinishContinues = 0
       // eslint-disable-next-line no-constant-condition
       while (true) {
         currentLegStepInputTokens = 0
@@ -1491,28 +1513,46 @@ export function dispatchAiSdk({
         // The closing `finish` part carries the leg's finishReason — the signal
         // that decides whether to continue the agent loop.
         let finishReason = null
-        for await (const evt of result.fullStream) {
-          if (cancelled) break
-          if (evt?.type === "error") streamError = evt.error
-          if (evt?.type === "finish") finishReason = evt.finishReason ?? finishReason
-          if (evt?.type === "finish-step") {
-            recordCompletedStepUsage(evt.usage ?? evt.totalUsage)
+        try {
+          // Idle-gap bound on the event stream (default 5 min, the provider
+          // timeout the webview fetch wrapper applies too). `streamIdleTimeoutMs`
+          // is a dispatch-level override so tests don't wait out the real bound.
+          for await (const evt of withIdleTimeout(
+            result.fullStream,
+            streamIdleTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS
+          )) {
+            if (cancelled) break
+            if (evt?.type === "error") streamError = evt.error
+            if (evt?.type === "finish") finishReason = evt.finishReason ?? finishReason
+            if (evt?.type === "finish-step") {
+              recordCompletedStepUsage(evt.usage ?? evt.totalUsage)
+            }
+            // NB: the PostToolUse review no longer intercepts here — it runs at
+            // the tool EXECUTE layer (see `reviewToolOutput`), so tool-result
+            // events already carry the reviewed output the model will see.
+            const out = adapter.handle(evt)
+            flushAdapter(out)
+            if (evt?.type === "text-delta") {
+              legText += evt.text ?? evt.textDelta ?? evt.delta ?? ""
+            }
+            if (
+              evt?.type === "text-delta" ||
+              evt?.type === "reasoning-delta" ||
+              evt?.type === "tool-call" ||
+              evt?.type === "tool-input-start"
+            ) {
+              legProducedOutput = true
+            }
           }
-          // NB: the PostToolUse review no longer intercepts here — it runs at
-          // the tool EXECUTE layer (see `reviewToolOutput`), so tool-result
-          // events already carry the reviewed output the model will see.
-          const out = adapter.handle(evt)
-          flushAdapter(out)
-          if (evt?.type === "text-delta") {
-            legText += evt.text ?? evt.textDelta ?? evt.delta ?? ""
-          }
-          if (
-            evt?.type === "text-delta" ||
-            evt?.type === "reasoning-delta" ||
-            evt?.type === "tool-call" ||
-            evt?.type === "tool-input-start"
-          ) {
-            legProducedOutput = true
+        } catch (err) {
+          // The watchdog's idle-timeout is routed through the normal error
+          // classification (it lands as timeout_after_send). Anything else the
+          // iterator throws keeps propagating to the turn-level catch — the
+          // cancellation path there must not be re-classified as a stream error.
+          if (err instanceof StreamIdleTimeoutError) {
+            if (!streamError) streamError = err
+          } else {
+            throw err
           }
         }
         // Seal this leg's streamed text/reasoning deltas into the canonical full
@@ -1522,20 +1562,32 @@ export function dispatchAiSdk({
         flushAdapter(adapter.sealAssistant())
         assistantText += legText
 
-        // Router + Fusion: a call the provider refused before producing anything
-        // is booked as a failed attempt; an explicit, retryable refusal may use
-        // the next transport attempt as a NEW reserved call. A call that was sent
-        // and simply never answered is UNKNOWN and is never retried.
-        if (openLedgerAttempt && streamError && !legProducedOutput && !cancelled) {
+        // A call the provider refused before producing anything may be retried.
+        // Under Router + Fusion the failed reserved attempt is reported and a
+        // NEW reservation is used; an unreserved call retries within the same
+        // bounded transport budget. In both cases a call that was sent and
+        // simply never answered (`timeout_after_send`, e.g. the stream watchdog
+        // or a socket hangup) is still booked as UNKNOWN — it is retried, but
+        // never assumed free.
+        if (streamError && !legProducedOutput && !cancelled) {
           const errorClass = classifyCallError(streamError)
           const retryable = isRetryableBeforeOutput(errorClass)
-          const attemptNo = openLedgerAttempt.attemptNo
-          reportOpenAttempt({
-            status: errorClass === "timeout_after_send" ? "unknown" : "failed",
-            errorClass,
-            reason: errorToMessage(streamError),
-          })
-          if (retryable && attemptNo < ledgerGate.transportAttempts) {
+          if (openLedgerAttempt) {
+            const attemptNo = openLedgerAttempt.attemptNo
+            reportOpenAttempt({
+              status: errorClass === "timeout_after_send" ? "unknown" : "failed",
+              errorClass,
+              reason: errorToMessage(streamError),
+            })
+            if (retryable && attemptNo < ledgerGate.transportAttempts) {
+              const { retryAfterMs } = extractHttpErrorMeta(streamError)
+              await new Promise((resolve) =>
+                setTimeout(resolve, Math.min(Math.max(retryAfterMs ?? 1000, 0), 30_000))
+              )
+              if (!cancelled) continue
+            }
+          } else if (retryable && transportRetries < MAX_TRANSPORT_RETRIES) {
+            transportRetries += 1
             const { retryAfterMs } = extractHttpErrorMeta(streamError)
             await new Promise((resolve) =>
               setTimeout(resolve, Math.min(Math.max(retryAfterMs ?? 1000, 0), 30_000))
@@ -1699,9 +1751,23 @@ export function dispatchAiSdk({
 
         // Continue the agent loop when the model stopped because it hit the
         // per-leg step cap with more tool calls pending, OR when we cut the leg
-        // short to re-project a tool image (the model must see it next). Anything
-        // else ends the turn here.
-        if (finishReason === "tool-calls" || injectedToolImages) {
+        // short to re-project a tool image (the model must see it next), OR when
+        // the leg ended on a finishReason the SDK can't map — opencode v1.18.21
+        // found providers whose novel finish values silently truncate a reply;
+        // the leg's messages were already appended to `conversation` above, so
+        // continuing picks up where the truncated answer left off. The unknown
+        // branch requires FRESH output — an empty leg means the model is done
+        // (or stuck), and continuing would just burn requests. Anything else
+        // ends the turn here.
+        const unknownFinish = finishReason === "unknown" || finishReason === "other"
+        if (
+          finishReason === "tool-calls" ||
+          injectedToolImages ||
+          (unknownFinish &&
+            legProducedOutput &&
+            unknownFinishContinues < MAX_UNKNOWN_FINISH_CONTINUES)
+        ) {
+          unknownFinishContinues = unknownFinish ? unknownFinishContinues + 1 : 0
           stepsUsed += legStepsCharged
           if (stepsUsed >= maxStepsBudget) {
             cappedWhileBusy = true

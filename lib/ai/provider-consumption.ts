@@ -29,6 +29,9 @@ import { createFireworks } from "@ai-sdk/fireworks"
 import { createDeepInfra } from "@ai-sdk/deepinfra"
 import type { LanguageModelV4 } from "@ai-sdk/provider"
 
+import { getStreamingFetch } from "@/lib/runtime/streaming-fetch"
+import { withProviderTimeouts } from "@/lib/runtime/provider-timeout-fetch"
+
 import {
   LOCAL_PROVIDER_URLS,
   getOpenAICompatibleURL,
@@ -559,9 +562,12 @@ export function createFeatureProviderClient(config: FeatureClientConfig) {
   if (apiKey) settings.apiKey = apiKey
   if (baseURL) settings.baseURL = baseURL
   // `fetch` + `headers` are standard AI SDK `ProviderSettings` fields accepted
-  // by every create*() factory below; they default to undefined (global fetch)
-  // so non-standalone callers are unaffected.
-  if (fetchImpl) settings.fetch = fetchImpl
+  // by every create*() factory below. Whatever fetch performs the request —
+  // caller-injected or the streaming default — is bounded by provider
+  // timeouts so a stalled request can never hang a turn forever. The
+  // caller's fetch still performs the request; the wrapper only bounds it.
+  const baseFetch = fetchImpl ?? getStreamingFetch()
+  if (baseFetch) settings.fetch = withProviderTimeouts(baseFetch)
   if (headers) settings.headers = headers
 
   // DeepSeek has a first-party AI SDK adapter that understands its native
@@ -613,7 +619,7 @@ export function createFeatureProviderClient(config: FeatureClientConfig) {
           : {}),
         ...(bedrock?.region ? { region: bedrock.region } : {}),
         ...(baseURL ? { baseURL } : bedrock?.baseURL ? { baseURL: bedrock.baseURL } : {}),
-        ...(fetchImpl ? { fetch: fetchImpl } : {}),
+        ...(baseFetch ? { fetch: withProviderTimeouts(baseFetch) } : {}),
         ...(headers ? { headers } : {}),
       })
     case "openai":

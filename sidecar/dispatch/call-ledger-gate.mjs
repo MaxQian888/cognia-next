@@ -132,9 +132,36 @@ const CONFIGURATION_ERRORS = new Set([
   "AI_InvalidPromptError",
 ])
 
-/** Only explicit pre-processing refusals may be retried as a NEW ledgered attempt. */
+/**
+ * Errors safe to retry as a NEW attempt while the call produced no output.
+ * `timeout_after_send` joined the retryable set when the stream watchdog
+ * landed (it is also what a socket hangup mid-request classifies as): the
+ * provider produced nothing we saw, so one more attempt is worth it. The
+ * ledger still books the interrupted attempt UNKNOWN — retried, never free.
+ */
 export function isRetryableBeforeOutput(errorClass) {
-  return errorClass === "rate_limited" || errorClass === "server_error" || errorClass === "not_sent"
+  return (
+    errorClass === "rate_limited" ||
+    errorClass === "server_error" ||
+    errorClass === "not_sent" ||
+    errorClass === "timeout_after_send"
+  )
+}
+
+/**
+ * Errors that prove the provider refused BEFORE doing billable work — every
+ * retryable class except `timeout_after_send` (which may have been sent and
+ * charged) plus explicit rejections (`auth`, `invalid_request`). Bookkeeping
+ * uses this, not the retry predicate: a retried timeout is still UNKNOWN.
+ */
+export function isDefinitiveRefusal(errorClass) {
+  return (
+    errorClass === "rate_limited" ||
+    errorClass === "server_error" ||
+    errorClass === "not_sent" ||
+    errorClass === "auth" ||
+    errorClass === "invalid_request"
+  )
 }
 
 /** Conservative prompt size for the reservation: one token per three characters. */
@@ -331,12 +358,7 @@ export async function runLedgeredSideCall(gate, request, send, options = {}) {
       ...attempt,
       // Refused before processing: failed, nothing billed. Anything else was
       // sent and never answered: UNKNOWN, never free.
-      status:
-        isRetryableBeforeOutput(errorClass) ||
-        errorClass === "auth" ||
-        errorClass === "invalid_request"
-          ? "failed"
-          : "unknown",
+      status: isDefinitiveRefusal(errorClass) ? "failed" : "unknown",
       errorClass,
       reason: error instanceof Error ? error.message : String(error),
     })
@@ -347,10 +369,7 @@ export async function runLedgeredSideCall(gate, request, send, options = {}) {
     const errorClass = classifyCallError(outcome.error, {
       aborted: options.isCancelled?.() === true,
     })
-    const refusedBeforeProcessing =
-      isRetryableBeforeOutput(errorClass) ||
-      errorClass === "auth" ||
-      errorClass === "invalid_request"
+    const refusedBeforeProcessing = isDefinitiveRefusal(errorClass)
     gate.report({
       ...attempt,
       status: usage || refusedBeforeProcessing ? "failed" : "unknown",

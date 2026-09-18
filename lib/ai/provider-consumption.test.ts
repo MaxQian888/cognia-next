@@ -755,6 +755,7 @@ describe("createFeatureProviderClient / createFeatureProviderModel", () => {
     expect(createAlibaba).toHaveBeenCalledWith({
       apiKey: "dashscope-key",
       baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      fetch: expect.any(Function), // timeout-wrapped streaming fetch
     })
     expect(createOpenAI).not.toHaveBeenCalled()
   })
@@ -777,6 +778,7 @@ describe("createFeatureProviderClient / createFeatureProviderModel", () => {
     expect(factory).toHaveBeenCalledWith({
       apiKey: `${providerId}-key`,
       baseURL: `https://${providerId}.example/v1`,
+      fetch: expect.any(Function), // timeout-wrapped streaming fetch
     })
     expect(createOpenAI).not.toHaveBeenCalled()
   })
@@ -794,6 +796,7 @@ describe("createFeatureProviderClient / createFeatureProviderModel", () => {
     expect(createOpenAI).toHaveBeenCalledWith({
       apiKey: "deepseek-key",
       baseURL: "https://deepseek-relay.example/v1",
+      fetch: expect.any(Function), // timeout-wrapped streaming fetch
     })
     expect(createDeepSeek).not.toHaveBeenCalled()
   })
@@ -833,12 +836,14 @@ describe("createFeatureProviderClient / createFeatureProviderModel", () => {
     expect(createAmazonBedrock).toHaveBeenNthCalledWith(1, {
       apiKey: "bedrock-key",
       region: "us-east-1",
+      fetch: expect.any(Function), // timeout-wrapped streaming fetch
     })
     expect(createAmazonBedrock).toHaveBeenNthCalledWith(2, {
       accessKeyId: "AKIAEXAMPLE",
       secretAccessKey: "secret",
       sessionToken: "session",
       region: "eu-west-1",
+      fetch: expect.any(Function),
     })
   })
 
@@ -995,27 +1000,40 @@ describe("provider client fetch/headers seam (standalone BYOK)", () => {
     (createAnthropic as jest.Mock).mock.calls.at(-1)?.[0] as
       { fetch?: unknown; headers?: unknown } | undefined
 
-  it("threads custom fetch + headers into the AI SDK provider settings", () => {
-    const customFetch = (() => undefined) as unknown as typeof globalThis.fetch
+  it("threads custom fetch + headers into the AI SDK provider settings", async () => {
+    const customFetch = jest
+      .fn<Promise<Response>, [RequestInfo | URL, RequestInit | undefined]>()
+      .mockResolvedValue(new Response(null, { status: 200 }))
     createFeatureProviderClient({
       ...anthropicBase,
       fetch: customFetch,
       headers: { "anthropic-dangerous-direct-browser-access": "true" },
     })
-    expect(lastSettings()?.fetch).toBe(customFetch)
+    // The provider timeout wrapper sits between the SDK and the caller's
+    // fetch — assert the custom fetch still performs the request.
+    const settingsFetch = lastSettings()?.fetch as typeof globalThis.fetch
+    await settingsFetch("https://api.test/v1", {})
+    expect(customFetch).toHaveBeenCalledWith(
+      "https://api.test/v1",
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    )
     expect(lastSettings()?.headers).toEqual({
       "anthropic-dangerous-direct-browser-access": "true",
     })
   })
 
-  it("omits fetch/headers by default (back-compat — global fetch)", () => {
+  it("wraps the global fetch with provider timeouts by default", () => {
     createFeatureProviderClient(anthropicBase)
-    expect(lastSettings()?.fetch).toBeUndefined()
+    // Default callers get the timeout-bounded streaming fetch rather than a
+    // bare `undefined` (global fetch) so a stalled provider can't hang a turn.
+    expect(typeof lastSettings()?.fetch).toBe("function")
     expect(lastSettings()?.headers).toBeUndefined()
   })
 
-  it("createFeatureProviderModel forwards transport fetch/headers", () => {
-    const customFetch = (() => undefined) as unknown as typeof globalThis.fetch
+  it("createFeatureProviderModel forwards transport fetch/headers", async () => {
+    const customFetch = jest
+      .fn<Promise<Response>, [RequestInfo | URL, RequestInit | undefined]>()
+      .mockResolvedValue(new Response(null, { status: 200 }))
     createFeatureProviderModel(
       {
         kind: "resolved",
@@ -1029,7 +1047,9 @@ describe("provider client fetch/headers seam (standalone BYOK)", () => {
       },
       { fetch: customFetch, headers: { "x-test": "1" } }
     )
-    expect(lastSettings()?.fetch).toBe(customFetch)
+    const settingsFetch = lastSettings()?.fetch as typeof globalThis.fetch
+    await settingsFetch("https://api.test/v1", {})
+    expect(customFetch).toHaveBeenCalled()
     expect(lastSettings()?.headers).toEqual({ "x-test": "1" })
   })
 })

@@ -1621,6 +1621,180 @@ test("dispatchAiSdk surfaces a provider error that arrives AFTER partial text (k
   assert.match(lastText, /Here is part of the answer/)
 })
 
+test("dispatchAiSdk retries a stalled stream via the idle watchdog, then recovers", async () => {
+  // A provider that holds the connection open but stops sending used to park
+  // the turn forever. The watchdog bounds the idle gap; the resulting
+  // timeout_after_send is retryable while nothing was produced, so the next
+  // attempt (scripted to answer normally) completes the turn.
+  const { events, emit } = captureEmit()
+  let calls = 0
+  const flaky = () => {
+    calls += 1
+    if (calls === 1) {
+      return {
+        fullStream: (async function* () {
+          yield { type: "stream-start", warnings: [] }
+          await new Promise(() => {}) // provider goes silent mid-stream
+        })(),
+        usage: Promise.resolve({}),
+        response: Promise.resolve({ id: "r0", messages: [] }),
+        steps: Promise.resolve([{}]),
+      }
+    }
+    return {
+      fullStream: (async function* () {
+        yield { type: "text-delta", text: "recovered" }
+        yield { type: "finish", finishReason: "stop" }
+      })(),
+      usage: Promise.resolve({}),
+      response: Promise.resolve({ id: "r1", messages: [] }),
+      steps: Promise.resolve([{}]),
+    }
+  }
+  dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-4o-mini",
+      providerCredentials: { apiKey: "sk", protocol: "openai" },
+    },
+    emit,
+    log: () => {},
+    streamText: flaky,
+    streamIdleTimeoutMs: 30,
+  })
+  await new Promise((resolve) => {
+    const tick = () => {
+      if (events.some((e) => e.type === "session_ended")) return resolve()
+      setTimeout(tick, 10)
+    }
+    tick()
+  })
+  const ended = events.find((e) => e.type === "session_ended")
+  assert.equal(ended.error, undefined, "the retried turn completes cleanly")
+  assert.equal(calls, 2, "one retry attempt after the watchdog timeout")
+})
+
+test("dispatchAiSdk ends the turn with an error once stream retries are spent", async () => {
+  const { events, emit } = captureEmit()
+  let calls = 0
+  const alwaysStalls = () => {
+    calls += 1
+    return {
+      fullStream: (async function* () {
+        await new Promise(() => {}) // never produces an event
+      })(),
+      usage: Promise.resolve({}),
+      response: Promise.resolve({ id: `r${calls}`, messages: [] }),
+      steps: Promise.resolve([{}]),
+    }
+  }
+  dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-4o-mini",
+      providerCredentials: { apiKey: "sk", protocol: "openai" },
+    },
+    emit,
+    log: () => {},
+    streamText: alwaysStalls,
+    streamIdleTimeoutMs: 30,
+  })
+  await new Promise((resolve) => {
+    const tick = () => {
+      if (events.some((e) => e.type === "session_ended")) return resolve()
+      setTimeout(tick, 10)
+    }
+    tick()
+  })
+  assert.equal(calls, 3, "1 initial attempt + MAX_TRANSPORT_RETRIES (2) retries")
+  const ended = events.find((e) => e.type === "session_ended")
+  assert.match(ended.error, /no events for 30ms/)
+})
+
+test("dispatchAiSdk continues the loop on an unknown finishReason that produced output", async () => {
+  // opencode v1.18.21: a provider reporting a finishReason the SDK can't map
+  // used to truncate the answer mid-generation. The truncated leg is already
+  // in the conversation, so the next leg continues it.
+  const { events, emit } = captureEmit()
+  let calls = 0
+  const twoLegs = () => {
+    calls += 1
+    return {
+      fullStream: (async function* () {
+        yield { type: "text-delta", text: calls === 1 ? "first-half" : " second-half" }
+        yield { type: "finish", finishReason: calls === 1 ? "other" : "stop" }
+      })(),
+      usage: Promise.resolve({}),
+      response: Promise.resolve({ id: `r${calls}`, messages: [] }),
+      steps: Promise.resolve([{}]),
+    }
+  }
+  dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-4o-mini",
+      providerCredentials: { apiKey: "sk", protocol: "openai" },
+    },
+    emit,
+    log: () => {},
+    streamText: twoLegs,
+  })
+  await new Promise((resolve) => {
+    const tick = () => {
+      if (events.some((e) => e.type === "session_ended")) return resolve()
+      setTimeout(tick, 10)
+    }
+    tick()
+  })
+  assert.equal(calls, 2, "the unknown-finish leg is followed by a continuation leg")
+  const ended = events.find((e) => e.type === "session_ended")
+  assert.equal(ended.error, undefined)
+})
+
+test("dispatchAiSdk does not spin on an unknown finishReason with no output", async () => {
+  const { events, emit } = captureEmit()
+  let calls = 0
+  const emptyUnknown = () => {
+    calls += 1
+    return {
+      fullStream: (async function* () {
+        yield { type: "finish", finishReason: "other" }
+      })(),
+      usage: Promise.resolve({}),
+      response: Promise.resolve({ id: `r${calls}`, messages: [] }),
+      steps: Promise.resolve([{}]),
+    }
+  }
+  dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s1",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-4o-mini",
+      providerCredentials: { apiKey: "sk", protocol: "openai" },
+    },
+    emit,
+    log: () => {},
+    streamText: emptyUnknown,
+  })
+  await new Promise((resolve) => {
+    const tick = () => {
+      if (events.some((e) => e.type === "session_ended")) return resolve()
+      setTimeout(tick, 10)
+    }
+    tick()
+  })
+  // An empty leg that ends "other" means the model is done — continuing would
+  // only burn requests on a provider stuck returning nothing.
+  assert.equal(calls, 1)
+})
+
 test("closeInput cancels in-flight turn and ends session", async () => {
   const { events, emit } = captureEmit()
   // A stream that yields a tiny delta, then sleeps forever.

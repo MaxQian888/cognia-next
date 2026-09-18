@@ -31,6 +31,11 @@ import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { resolveStandaloneProvider } from "./resolve-standalone-provider"
 import { createSdkEventMapper } from "./sdk-event-mapper"
 import { buildStandaloneTools, STANDALONE_MAX_STEPS } from "./standalone-tools"
+import {
+  FINISH_RETRY_MAX_ATTEMPTS,
+  finishRetryDelayMs,
+  isRetryableFinishReason,
+} from "@/lib/ai/finish-reason-retry"
 
 export interface StandaloneTurnParams {
   sessionId: string
@@ -91,8 +96,15 @@ export async function runStandaloneTurn(params: StandaloneTurnParams): Promise<v
     let candidate = controller?.begin()
     let lastError: unknown
     let fallbackAttempt = false
+    // Same-provider retries on a non-answer finish (network_error / unknown /
+    // other). Distinct from routing fallback: a retry never consumes a
+    // candidate, and it only runs while nothing was committed to the UI —
+    // a retry after committed output would duplicate visible content.
+    let finishRetries = 0
+    let retrySameCandidate = false
 
     do {
+      retrySameCandidate = false
       const providerId = candidate?.providerId ?? sendOptions.provider
       const resolution = resolveStandaloneProvider(settings, providerId)
       if (resolution.kind !== "resolved") {
@@ -153,14 +165,37 @@ export async function runStandaloneTurn(params: StandaloneTurnParams): Promise<v
             : {}),
         })
 
+        let committedOutput = false
         for await (const part of result.stream) {
           if (signal.aborted) break
           throwStreamPartError(part)
-          if (commitsRoutingAttempt(part)) controller?.commit()
+          if (commitsRoutingAttempt(part)) {
+            committedOutput = true
+            controller?.commit()
+          }
           for (const env of mapper.handle(part)) {
             await emit({ type: "event", sessionId, event: env })
           }
         }
+
+        // Non-answer finish reasons (network_error, error, and the SDK's
+        // catch-all other/unknown where novel vendor values land) mean the
+        // provider never gave a definitive stop. With nothing committed, a
+        // bounded same-provider retry is safe; once retries are spent the
+        // error path below can still advance to the next routing candidate.
+        const finishReason = await Promise.resolve(result.finishReason).catch(() => undefined)
+        if (!committedOutput && !signal.aborted && isRetryableFinishReason(finishReason)) {
+          if (finishRetries < FINISH_RETRY_MAX_ATTEMPTS) {
+            finishRetries += 1
+            await new Promise((resolve) => setTimeout(resolve, finishRetryDelayMs(finishRetries)))
+            retrySameCandidate = true
+            continue
+          }
+          throw new Error(
+            `Provider stream ended with finish reason "${finishReason ?? "unknown"}" and produced no output.`
+          )
+        }
+
         for (const env of mapper.sealAssistant()) {
           await emit({ type: "event", sessionId, event: env })
         }
@@ -177,8 +212,9 @@ export async function runStandaloneTurn(params: StandaloneTurnParams): Promise<v
         if (signal.aborted) throw error
         candidate = controller?.failAndAdvance() ?? null
         fallbackAttempt = Boolean(candidate)
+        if (fallbackAttempt) finishRetries = 0 // a fresh candidate gets a fresh budget
       }
-    } while (candidate)
+    } while (candidate || retrySameCandidate)
 
     throw (
       lastError ??

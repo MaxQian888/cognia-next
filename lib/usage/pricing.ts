@@ -121,13 +121,13 @@ function toUsd(p: Partial<ModelPricing> | undefined): Partial<ModelPricing> | un
   const out: Partial<ModelPricing> = { currency: "USD" }
   for (const f of PRICING_FIELDS) {
     const v = p[f]
-    if (typeof v === "number") out[f] = v / rate
+    if (typeof v === "number" && Number.isFinite(v)) out[f] = v / rate
   }
   for (const f of UNIT_PRICING_FIELDS) {
     const v = p[f]
     // A free-unit allowance is a COUNT, not a price — converting it would
     // silently shrink the included quota for CNY-denominated catalogs.
-    if (typeof v === "number") {
+    if (typeof v === "number" && Number.isFinite(v)) {
       out[f] = f === "freeContainerHoursPerMonth" ? v : v / rate
     }
   }
@@ -215,17 +215,19 @@ export function mergePricingLayers(
     if (!layer) continue
     for (const f of PRICING_FIELDS) {
       const v = layer[f]
-      if (merged[f] === undefined && typeof v === "number") merged[f] = v
+      // Number.isFinite, not typeof: NaN/±Infinity are `number`s that would
+      // poison the merged layer and every cost derived from it.
+      if (merged[f] === undefined && Number.isFinite(v)) merged[f] = v
     }
     for (const f of UNIT_PRICING_FIELDS) {
       const v = layer[f]
-      if (mergedUnits[f] === undefined && typeof v === "number") mergedUnits[f] = v
+      if (mergedUnits[f] === undefined && Number.isFinite(v)) mergedUnits[f] = v
     }
     // Per-tool rates merge key-by-key like the scalar fields, so a custom
     // override of one server tool still inherits the catalog's rates for the
     // others.
     for (const [tool, price] of Object.entries(layer.perRequestUsd ?? {})) {
-      if (mergedRequests[tool] === undefined && typeof price === "number") {
+      if (mergedRequests[tool] === undefined && Number.isFinite(price)) {
         mergedRequests[tool] = price
       }
     }
