@@ -175,6 +175,7 @@
   "memoryAuditEvents": "metadata-only",
   "memoryEvidence": "encrypted-content",
   "memoryJobs": "metadata-only",
+  "memoryOperations": "metadata-only",
   "mentionLinkState": "metadata-only",
   "mentionLinks": "metadata-only",
   "messageMedia": "metadata-only",

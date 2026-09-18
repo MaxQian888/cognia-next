@@ -332,7 +332,12 @@ import type {
   SiteVersionRow,
 } from "@/types/sites"
 import type { Memory } from "@/types/memory/memory"
-import type { MemoryAuditEvent, MemoryEvidence, MemoryJob } from "@/types/memory/governance"
+import type {
+  MemoryAuditEvent,
+  MemoryEvidence,
+  MemoryJob,
+  MemoryOperationRow,
+} from "@/types/memory/governance"
 import type {
   PetProfile,
   PetActivityRow,
@@ -347,6 +352,10 @@ import { rootsFromLegacy } from "@/lib/workspace/roots"
 import { isTauri } from "@/lib/platform/detect"
 import { createEncryptedContentMiddleware } from "./encrypted-content-middleware"
 import { activateAccountContentCipher } from "@/lib/accounts/content-cipher"
+import {
+  setNotificationNamespaceAccount,
+  getNotificationIdentity,
+} from "@/lib/notifications/identity-cache"
 import { getActiveBrowserVault } from "@/lib/runtime/browser-vault"
 import type { ChatTemplateRow } from "./chat-templates"
 import type {
@@ -408,7 +417,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 226
+export const CURRENT_SCHEMA_VERSION = 228
 
 /**
  * The complete current Dexie schema, declared as ONE version.
@@ -483,7 +492,7 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
     "&id, [platform+remoteUserId], [adapterId+remoteUserId], remoteUserId, platform, lastSeenAt",
   inboundLedger: "&id, [adapterId+namespace+platformMessageId], adapterId, receivedAt, namespace",
   outboundQueue:
-    "&id, conversationKey, [conversationKey+createdAt], [conversationKey+orderSeq], status, nextAttemptAt, idempotencyKey, [adapterId+status], createdAt, [status+nextAttemptAt], [status+claimedAt], projectId, [projectId+status], updatedAt",
+    "&id, conversationKey, [conversationKey+createdAt], [conversationKey+orderSeq], status, nextAttemptAt, idempotencyKey, &notificationOperationKey, [adapterId+status], createdAt, [status+nextAttemptAt], [status+claimedAt], projectId, [projectId+status], updatedAt",
   conversationOverrides:
     "&id, &conversationKey, sessionId, pinned, archived, updatedAt, status, [status+updatedAt], *labelIds, nextResponseDueAt, assigneeKind, projectId",
   connectorAudit:
@@ -546,7 +555,7 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   petActivityLog: "++id, kind, ts, [kind+ts]",
   petAchievements: "&id, unlockedAt",
   notifications:
-    "&id, createdAt, updatedAt, source, level, readState, dedupeKey, groupKey, snoozedUntil, expiresAt, [readState+createdAt], [source+createdAt]",
+    "&id, createdAt, updatedAt, source, level, readState, dedupeKey, groupKey, snoozedUntil, expiresAt, logicalKey, scopeKey, [readState+createdAt], [source+createdAt]",
   evalDatasetVersions: "&id, datasetId, [datasetId+version], tag, createdAt",
   evalRunCaseResults: "&id, runId, [runId+caseId], caseId",
   subscriptionBalance: "++localId, fetchedAt, accountId, [providerKey+accountId]",
@@ -629,6 +638,8 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   memoryJobs:
     "&id, dedupeKey, status, kind, sessionId, projectId, queuedAt, nextAttemptAt, leaseExpiresAt, heartbeatAt, [status+queuedAt]",
   memoryAuditEvents: "&id, memoryId, sessionId, action, createdAt, [memoryId+createdAt]",
+  // v228 — idempotent-mutation receipts keyed `${principalId}:${operationId}`.
+  memoryOperations: "&id, memoryId, createdAt",
   petSpritePacks: "&id, displayName, createdAt",
   connectorConversationStates:
     "&conversationKey, adapterId, activationStatus, expiresAt, updatedAt",
@@ -943,6 +954,29 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   // for a timeline and fatal for a memoized value a resumed handler must get
   // back byte for byte.
   botRunSteps: "&id, runId, [runId+name], status, updatedAt",
+  // v227 — Notification V2 (extends ADR-0042; see cognia-notifications-v2
+  // design). Durable multi-target routing, governed delivery intents +
+  // append-only attempts, serialized publications, projection work, policy
+  // state, timers, digest members, and immutable run-result summaries.
+  // `notifications` / `outboundQueue` above gained their V2 index columns
+  // (logicalKey / scopeKey / notificationOperationKey) in the same bump.
+  notificationTargets:
+    "&id, scopeKey, [scopeKey+enabledKey], enabledKey, addressFingerprint, updatedAt",
+  notificationSubscriptions:
+    "&id, scopeKey, principalId, [scopeKey+enabledKey], enabledKey, *targetIds, updatedAt",
+  notificationProjectionWork:
+    "&id, scopeKey, &subjectKey, runId, state, [state+retryAt], leaseExpiresAt, updatedAt",
+  runResultSummaries: "&id, scopeKey, runId, &[runId+revision], revision, createdAt",
+  notificationPublications: "&id, scopeKey, notificationId, &slotKey, state, updatedAt",
+  notificationDeliveryIntents:
+    "&id, scopeKey, &operationKey, notificationId, logicalKey, targetId, status, [status+nextAttemptAt], slotKey, publicationId, outboundJobId, createdAt, updatedAt",
+  notificationDeliveryAttempts:
+    "&id, intentId, [intentId+attemptIndex], outboundJobId, outcome, createdAt",
+  notificationPolicyState: "&id, scopeKey, factKey, stateKind, [scopeKey+factKey], updatedAt",
+  notificationTimers:
+    "&id, scopeKey, kind, state, dueAt, [state+dueAt], factKey, intentId, aggregateKey",
+  notificationAggregateMembers:
+    "&id, scopeKey, aggregateKey, [aggregateKey+bucketOpenedAt], notificationId, flushedAt",
 }
 
 let databaseConnectionSequence = 0
@@ -1464,6 +1498,42 @@ export class CogniaDB extends Dexie {
   botEventDeliveries!: Table<import("./bot-types").BotEventDeliveryRow, string>
   botRunSteps!: Table<import("./bot-types").BotRunStepRow, string>
 
+  // v227 — Notification V2 durable rows. Types live in
+  // `types/notifications/{target,subscription,delivery,decision,result}.ts`;
+  // the DB access modules are `lib/db/notifications*.ts` and
+  // `lib/db/notification-*.ts`.
+  notificationTargets!: Table<import("@/types/notifications/target").NotificationTarget, string>
+  notificationSubscriptions!: Table<
+    import("@/types/notifications/subscription").NotificationSubscription,
+    string
+  >
+  notificationProjectionWork!: Table<
+    import("@/types/notifications/delivery").NotificationProjectionWork,
+    string
+  >
+  runResultSummaries!: Table<import("@/types/notifications/result").RunResultSummary, string>
+  notificationPublications!: Table<
+    import("@/types/notifications/delivery").NotificationPublication,
+    string
+  >
+  notificationDeliveryIntents!: Table<
+    import("@/types/notifications/delivery").NotificationDeliveryIntent,
+    string
+  >
+  notificationDeliveryAttempts!: Table<
+    import("@/types/notifications/delivery").NotificationDeliveryAttempt,
+    string
+  >
+  notificationPolicyState!: Table<
+    import("@/types/notifications/decision").NotificationPolicyStateRow,
+    string
+  >
+  notificationTimers!: Table<import("@/types/notifications/delivery").NotificationTimer, string>
+  notificationAggregateMembers!: Table<
+    import("@/types/notifications/delivery").NotificationAggregateMember,
+    string
+  >
+
   constructor(name = LEGACY_COGNIA_DB_NAME, connectionOwner = "unspecified") {
     super(name)
     if (name.startsWith("cognia-account-")) {
@@ -1617,6 +1687,8 @@ export class CogniaDB extends Dexie {
   memoryEvidence!: Table<MemoryEvidence, string>
   memoryJobs!: Table<MemoryJob, string>
   memoryAuditEvents!: Table<MemoryAuditEvent, string>
+  // v228 — external-mutation idempotency receipts. See `lib/db/memory-operations.ts`.
+  memoryOperations!: Table<MemoryOperationRow, string>
   // v163 — Shared Memory/RAG control plane.
   retrievalProfiles!: Table<RetrievalProfileRow, string>
   retrievalGenerations!: Table<RetrievalGenerationRow, string>
@@ -2148,12 +2220,25 @@ export function activateAccountDatabase(accountId: string, targetId?: string): v
   if (vault?.accountId === accountId) {
     activateAccountContentCipher(vault.createContentCipher(nextName))
   }
+  // Prime the notification scope identity synchronously — the Run Journal's
+  // commit-time touch reads it inside a Dexie transaction (no await allowed),
+  // and account DB activation ALWAYS precedes any run write to it. This is
+  // the same namespace+account `primeNotificationScope` resolves async; the
+  // authority host is filled in by that full prime later.
+  setNotificationNamespaceAccount(nextName, accountId)
   if (_activeDatabaseName === nextName && _db?.name === nextName) return
   _activeDatabaseName = nextName
   closeCachedDb()
 }
 
 export function clearAccountDatabaseSelection(): void {
+  // Reset the scope namespace to the legacy db, but PRESERVE the account — a
+  // db de-selection changes where rows live, not who owns them, so the last
+  // primed accountId stays the right scope owner until the next activation.
+  setNotificationNamespaceAccount(
+    LEGACY_COGNIA_DB_NAME,
+    getNotificationIdentity()?.accountId ?? "local"
+  )
   if (_activeDatabaseName === null && _db?.name === LEGACY_COGNIA_DB_NAME) return
   _activeDatabaseName = null
   closeCachedDb()

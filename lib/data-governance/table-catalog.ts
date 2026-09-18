@@ -224,6 +224,7 @@ export const CORE_TABLE_NAMES = [
   "memoryAuditEvents",
   "memoryEvidence",
   "memoryJobs",
+  "memoryOperations",
   "messageMedia",
   "messageMediaRefs",
   "messageSyncClock",
@@ -1123,6 +1124,14 @@ const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> =
     executorId: "memoryGovernance",
     reason:
       "ADR-0115 content-free audit retention. The ledger carries only actions, reasons and counters, so 180 days is the window a user needs to answer why a memory exists. Also the only bound on a table registered as very-large.",
+  },
+  memoryOperations: {
+    mode: "ttl",
+    days: 30,
+    enforcement: "central",
+    executorId: "memoryGovernance",
+    reason:
+      "Idempotency receipts exist to deduplicate retries; a retry that arrives past the succeeded-job window re-executes harmlessly (CAS still guards, and the consolidator dedupes identical text). `pruneMemoryGovernanceData` drops rows older than 30 days — including abandoned `pending` reservations, whose keys must be freed once the writer that held them is gone.",
   },
   retrievalJobs: {
     mode: "ttl",

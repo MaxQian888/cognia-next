@@ -76,7 +76,7 @@ schemaIt("v226 adds message revision metadata and backfills the previous layout"
   const upgraded = new CogniaDB(name)
   try {
     await upgraded.open()
-    expect(upgraded.verno).toBe(226)
+    expect(upgraded.verno).toBe(CURRENT_SCHEMA_VERSION)
     expect(
       await upgraded.workflowRuns.where("[syncActivityAt+id]").above([8, ""]).primaryKeys()
     ).toEqual(["old-run"])
@@ -119,6 +119,116 @@ schemaIt(
       expect((await upgraded.sessions.get("private"))?.title).toBe("Existing private conversation")
     } finally {
       await upgraded.delete()
+    }
+  }
+)
+
+schemaIt(
+  "v227 adds the Notification V2 tables and notification/outbound indexes without disturbing existing rows",
+  async () => {
+    const name = `cognia-notifications-v2-${Date.now()}`
+    await Dexie.delete(name)
+    const previous = new Dexie(name)
+    const previousSchema = { ...CURRENT_SCHEMA }
+    // Strip every v227 addition so the legacy database is the pre-V2 shape.
+    for (const table of [
+      "notificationTargets",
+      "notificationSubscriptions",
+      "notificationProjectionWork",
+      "runResultSummaries",
+      "notificationPublications",
+      "notificationDeliveryIntents",
+      "notificationDeliveryAttempts",
+      "notificationPolicyState",
+      "notificationTimers",
+      "notificationAggregateMembers",
+    ]) {
+      delete previousSchema[table]
+    }
+    previousSchema.notifications = previousSchema
+      .notifications!.replace(", logicalKey", "")
+      .replace(", scopeKey", "")
+    previousSchema.outboundQueue = previousSchema.outboundQueue!.replace(
+      ", &notificationOperationKey",
+      ""
+    )
+    previous.version(226).stores(previousSchema)
+    await previous.open()
+    await previous.table("notifications").put({
+      id: "legacy-n",
+      source: "system",
+      level: "info",
+      title: "before v2",
+      createdAt: 1,
+      updatedAt: 1,
+      readState: "unseen",
+      count: 1,
+      directed: false,
+      deliveredVia: [],
+    })
+    await previous.table("outboundQueue").put(
+      makeOutboundRow("legacy-job", {
+        status: "pending",
+        nextAttemptAt: 0,
+      })
+    )
+    previous.close()
+
+    const upgraded = new CogniaDB(name)
+    try {
+      await upgraded.open()
+      expect(upgraded.verno).toBe(CURRENT_SCHEMA_VERSION)
+      // Every new store exists with its primary key.
+      for (const table of [
+        "notificationTargets",
+        "notificationSubscriptions",
+        "notificationProjectionWork",
+        "runResultSummaries",
+        "notificationPublications",
+        "notificationDeliveryIntents",
+        "notificationDeliveryAttempts",
+        "notificationPolicyState",
+        "notificationTimers",
+        "notificationAggregateMembers",
+      ] as const) {
+        expect(upgraded.table(table).schema.primKey.keyPath).toBe("id")
+      }
+      // The unique operation/slot keys are real unique indexes.
+      expect(
+        upgraded.notificationDeliveryIntents.schema.indexes.find((i) => i.name === "operationKey")
+          ?.unique
+      ).toBe(true)
+      expect(
+        upgraded.notificationPublications.schema.indexes.find((i) => i.name === "slotKey")?.unique
+      ).toBe(true)
+      expect(
+        upgraded.notificationProjectionWork.schema.indexes.find((i) => i.name === "subjectKey")
+          ?.unique
+      ).toBe(true)
+      expect(
+        upgraded.runResultSummaries.schema.indexes.find((i) => i.name === "[runId+revision]")
+          ?.unique
+      ).toBe(true)
+      expect(
+        upgraded.outboundQueue.schema.indexes.find((i) => i.name === "notificationOperationKey")
+          ?.unique
+      ).toBe(true)
+      // The notifications table gained its V2 lookup columns.
+      expect(upgraded.notifications.schema.indexes.map((i) => i.name)).toEqual(
+        expect.arrayContaining(["logicalKey", "scopeKey"])
+      )
+      // Pre-existing rows survive untouched — V2 columns stay absent, never
+      // backfilled to a fabricated empty string.
+      const legacy = await upgraded.notifications.get("legacy-n")
+      expect(legacy?.title).toBe("before v2")
+      expect(legacy?.logicalKey).toBeUndefined()
+      expect(legacy?.scopeKey).toBeUndefined()
+      const job = await upgraded.outboundQueue.get("legacy-job")
+      expect(job?.status).toBe("pending")
+      expect(job?.notificationOperationKey).toBeUndefined()
+    } finally {
+      upgraded.close()
+      await Dexie.delete(name)
     }
   }
 )
