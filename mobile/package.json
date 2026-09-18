@@ -35,7 +35,7 @@
     "@capacitor/splash-screen": "^8.0.2",
     "@capacitor/status-bar": "^8.0.3",
     "@capacitor/toast": "^8.0.1",
-    "@capgo/capacitor-native-biometric": "^8.6.4",
+    "@capgo/capacitor-native-biometric": "^8.6.7",
     "@capgo/capacitor-navigation-bar": "^8.2.6",
     "capacitor-native-settings": "^8.2.0",
     "capacitor-secure-storage-plugin": "^0.13.0",
