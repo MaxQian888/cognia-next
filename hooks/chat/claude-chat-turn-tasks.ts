@@ -19,7 +19,7 @@ import type { PlanStatus } from "@/types/agent/plan"
 import { updateMessageMetadata } from "@/lib/db/messages"
 import { getSession, updateSession } from "@/lib/db/sessions"
 import { runTurnMemory } from "@/lib/memory/run-turn-memory"
-import type { SendContent, SendOptions } from "@cognia/agent-config-types"
+import type { MessageReplyTo, SendContent, SendOptions } from "@cognia/agent-config-types"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import type { UIMessage } from "ai"
@@ -254,6 +254,10 @@ export type SendFn = (
     sessionId?: string
     steerDrain?: boolean
     webSearchContext?: SendOptions["webSearchContext"]
+    /** Drained steer entries keep the turn metadata they were typed with. */
+    replyTo?: MessageReplyTo
+    promptPreamble?: import("@/lib/chat/prompt-preamble").PromptPreambleSummary
+    citations?: readonly import("@/lib/chat/mentions/types").ContextRef[]
   }
 ) => Promise<void>
 

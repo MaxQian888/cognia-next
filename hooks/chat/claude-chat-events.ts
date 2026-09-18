@@ -84,6 +84,7 @@ import {
   buildRouterFusionRunMetadata,
   buildRoutingRunMetadata,
 } from "@/lib/chat/message-run-metadata"
+import { turnAgentStamp } from "@/lib/claude/turn-agent-mode"
 import { type AgentExecutionHandle } from "@/lib/ai/agent/execution/agent-execution-handle"
 import { attachInteractiveGrounding } from "@/lib/rag/chat-grounding"
 import { attachCheckpointCapture, captureCompactionCheckpoint } from "@/lib/rag/compaction-runtime"
@@ -191,11 +192,14 @@ export function sliceMessages(sessionId: string): UIMessage[] {
 export function drainSteerVia(sessionId: string, sendRef: React.MutableRefObject<SendFn | null>) {
   maybeDrainSteer(
     sessionId,
-    (payload, webSearchContext) =>
+    (payload, webSearchContext, replyTo, references) =>
       void sendRef.current?.(payload, undefined, {
         sessionId,
         steerDrain: true,
         webSearchContext,
+        ...(replyTo ? { replyTo } : {}),
+        ...(references?.citations ? { citations: references.citations } : {}),
+        ...(references?.promptPreamble ? { promptPreamble: references.promptPreamble } : {}),
       })
   )
 }
@@ -236,6 +240,10 @@ export async function tryAutoModeDecision(
         client: judgeClient,
         locale: settings?.language,
         pluginRules: getPluginCommandRulesets(),
+        // The judge cache is scoped to this session's instruction epoch — a
+        // mid-turn steer bumps it, so a verdict reached under the instruction
+        // the user just redirected away from is never reused.
+        contextKey: evt.sessionId,
       }),
       new Promise<null>((resolve) => {
         setTimeout(() => resolve(null), AUTO_MODE_DECISION_TIMEOUT_MS)
@@ -1144,6 +1152,7 @@ export async function handleEvent(
             finishReason: result?.subtype,
             routing: last?.options ? buildRoutingRunMetadata(last.options) : undefined,
             routerFusion: buildRouterFusionRunMetadata(last?.options, routerFusionSummary),
+            agent: turnAgentStamp(sessionId),
           })
         )
         nextMessages = attachInteractiveGrounding(nextMessages, last?.options)

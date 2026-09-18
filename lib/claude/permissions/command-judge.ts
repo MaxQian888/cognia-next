@@ -37,6 +37,14 @@ export interface JudgeOptions {
   cwd?: string
   /** UI locale so the rationale matches the user (e.g. "zh-CN"). */
   locale?: string
+  /**
+   * Scope the verdict to the instruction context it was reached under (the
+   * session id in practice). A mid-turn steer supersedes that context —
+   * {@link invalidateJudgeContext} bumps the context's epoch, so a command the
+   * running turn retries after a redirect is judged fresh instead of silently
+   * reusing the "safe" verdict the previous instruction produced.
+   */
+  contextKey?: string
 }
 
 const CACHE_TTL_MS = 5 * 60 * 1000
@@ -48,9 +56,34 @@ interface CacheEntry {
 }
 const cache = new Map<string, CacheEntry>()
 
-/** Test seam — clear the memoization cache. */
+/**
+ * Per-context judgement epoch, embedded in the cache key. Bumping it orphans
+ * every verdict cached under the context in O(1) — the stale entries then age
+ * out on TTL/`evict` rather than needing a scan.
+ */
+const contextEpochs = new Map<string, number>()
+
+/**
+ * Invalidate every verdict cached under a context. Call when a new user
+ * instruction reaches the session (a live or queued steer): the commands the
+ * turn goes on to run are judged under the new instruction, not the one the
+ * verdict was cached for. Compaction deliberately does NOT call this — review
+ * evidence is meant to survive a context boundary.
+ */
+export function invalidateJudgeContext(contextKey: string): void {
+  if (!contextKey) return
+  contextEpochs.set(contextKey, (contextEpochs.get(contextKey) ?? 0) + 1)
+}
+
+function cacheKey(command: string, contextKey: string | undefined): string {
+  if (!contextKey) return command
+  return `${contextKey}#${contextEpochs.get(contextKey) ?? 0}::${command}`
+}
+
+/** Test seam — clear the memoization cache and every context epoch. */
 export function __resetJudgeCache(): void {
   cache.clear()
+  contextEpochs.clear()
 }
 
 const SYSTEM_PROMPT =
@@ -89,7 +122,8 @@ export async function judgeCommandSafety(
   const trimmed = (command ?? "").trim()
   if (!trimmed) return null
 
-  const cached = cache.get(trimmed)
+  const key = cacheKey(trimmed, opts.contextKey)
+  const cached = cache.get(key)
   if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.value
 
   // Never send a command carrying secrets / PII to the model.
@@ -118,7 +152,7 @@ export async function judgeCommandSafety(
     result = null
   }
 
-  cache.set(trimmed, { at: Date.now(), value: result })
+  cache.set(key, { at: Date.now(), value: result })
   evict()
   return result
 }

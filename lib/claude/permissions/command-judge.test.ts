@@ -1,4 +1,4 @@
-import { judgeCommandSafety, __resetJudgeCache } from "./command-judge"
+import { judgeCommandSafety, invalidateJudgeContext, __resetJudgeCache } from "./command-judge"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 
 function mockClient(response: string): LlmClient & { complete: jest.Mock } {
@@ -60,6 +60,53 @@ describe("judgeCommandSafety", () => {
   it("caches by command so the model is queried once", async () => {
     const client = mockClient('{"safe": true, "risk": "low", "reason": "ok"}')
     await judgeCommandSafety(client, "npm test")
+    await judgeCommandSafety(client, "npm test")
+    expect(client.complete).toHaveBeenCalledTimes(1)
+  })
+
+  it("scopes the cache to the instruction context — another session re-judges", async () => {
+    const client = mockClient('{"safe": true, "risk": "low", "reason": "ok"}')
+    await judgeCommandSafety(client, "npm test", { contextKey: "sess-a" })
+    await judgeCommandSafety(client, "npm test", { contextKey: "sess-b" })
+    expect(client.complete).toHaveBeenCalledTimes(2)
+    // Same context hits the cache.
+    await judgeCommandSafety(client, "npm test", { contextKey: "sess-a" })
+    expect(client.complete).toHaveBeenCalledTimes(2)
+  })
+
+  it("re-judges after the context is invalidated (new instruction supersedes)", async () => {
+    const client = mockClient('{"safe": true, "risk": "low", "reason": "ok"}')
+    await judgeCommandSafety(client, "npm test", { contextKey: "sess-a" })
+    invalidateJudgeContext("sess-a")
+    await judgeCommandSafety(client, "npm test", { contextKey: "sess-a" })
+    expect(client.complete).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps verdicts across compaction — invalidating is instruction-driven, not context-size", async () => {
+    const client = mockClient('{"safe": true, "risk": "low", "reason": "ok"}')
+    await judgeCommandSafety(client, "npm test", { contextKey: "sess-a" })
+    // No invalidateJudgeContext call: a compaction boundary does not touch the
+    // epoch, so the cached verdict still serves the post-compaction turn.
+    await judgeCommandSafety(client, "npm test", { contextKey: "sess-a" })
+    expect(client.complete).toHaveBeenCalledTimes(1)
+  })
+
+  it("invalidating one context leaves others cached", async () => {
+    const client = mockClient('{"safe": true, "risk": "low", "reason": "ok"}')
+    await judgeCommandSafety(client, "npm test", { contextKey: "sess-a" })
+    await judgeCommandSafety(client, "npm test", { contextKey: "sess-b" })
+    invalidateJudgeContext("sess-a")
+    await judgeCommandSafety(client, "npm test", { contextKey: "sess-a" })
+    await judgeCommandSafety(client, "npm test", { contextKey: "sess-b" })
+    expect(client.complete).toHaveBeenCalledTimes(3)
+  })
+
+  it("leaves context-free calls keyed by the bare command", async () => {
+    const client = mockClient('{"safe": true, "risk": "low", "reason": "ok"}')
+    await judgeCommandSafety(client, "npm test")
+    // A context-keyed call does not read the bare entry, and invalidating an
+    // unrelated context cannot evict it either.
+    invalidateJudgeContext("sess-a")
     await judgeCommandSafety(client, "npm test")
     expect(client.complete).toHaveBeenCalledTimes(1)
   })

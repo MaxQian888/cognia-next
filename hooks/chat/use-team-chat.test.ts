@@ -202,6 +202,8 @@ interface ChatStateLike {
     text: string
     blocks?: unknown[]
     webSearchContext?: unknown
+    citations?: unknown[]
+    promptPreamble?: unknown
   }>
   /** Per-session status override surfaced through the `sessions` getter. */
   statusBySession: Record<string, string | undefined>
@@ -3380,6 +3382,40 @@ describe("remote room mutation rejection", () => {
 })
 
 describe("companion steer admission", () => {
+  it("forwards a drained entry's citations and preamble to room_send", async () => {
+    // The queue copy is the only carrier when the HOST rebuilds the row —
+    // without it the remote drain persists a user message with no
+    // `metadata.mentions` and the citation never reaches the backlink index.
+    isTauriMock.mockReturnValue(false)
+    const pairing = jest.requireMock("@/lib/platform/web-companion")
+      .hasWebCompanionTarget as jest.Mock
+    pairing.mockReturnValue(true)
+    const sendRoomTurn = jest.requireMock("@/lib/companion/room-send-client")
+      .sendRoomTurn as jest.Mock
+    sendRoomTurn.mockResolvedValue({ accepted: true })
+    const citations = [{ kind: "entity", id: "session:s9", label: "Sprint planning" }]
+    const promptPreamble = {
+      sections: ["references"],
+      references: [{ kind: "entity", entityKind: "session", title: "Sprint planning" }],
+    }
+    chatState.steerQueue = [{ id: "queued-entry", text: "follow-up", citations, promptPreamble }]
+    try {
+      const { result, unmount } = renderHook(() => useTeamChat())
+      await act(async () => {
+        result.current.flushSteer("team-1")
+      })
+      await waitFor(() =>
+        expect(sendRoomTurn).toHaveBeenCalledWith(
+          expect.objectContaining({ sessionId: "team-1", citations, promptPreamble })
+        )
+      )
+      unmount()
+    } finally {
+      pairing.mockReturnValue(false)
+      chatState.steerQueue = []
+    }
+  })
+
   it.each(["accepted", "refused", "rejected"] as const)(
     "marks the queued message only after Host admission: %s",
     async (outcome) => {

@@ -58,6 +58,42 @@ export function buildWorkingSetPostCompaction(
   }
 }
 
+/**
+ * The branch THIS TURN's checkout is on.
+ *
+ * The session's `executionContext` is authoritative: for a managed worktree
+ * the branch was pinned when the binding was materialized. Failing that, the
+ * session's own checkout root is queried directly — deliberately NOT the git
+ * store's `status.branch`, which tracks the UI-active project and answers for
+ * the wrong workspace when a background pane keeps streaming after a project
+ * switch or a connector/scheduler leg runs with no UI focus at all. The store
+ * is only consulted when it verifiably describes this turn's root.
+ */
+async function resolveMemoryBranch(
+  session: ChatSession | null | undefined,
+  turnProject: { roots?: import("@/types/workspace").WorkspaceRoot[] } | null
+): Promise<string | undefined> {
+  const context = session?.executionContext
+  if (context?.branch) return context.branch
+  const root =
+    context?.worktreePath ||
+    context?.projectRoot ||
+    (turnProject ? primaryRootOf(turnProject)?.path : undefined)
+  if (!root) return undefined
+  const gitState = useGitStore.getState()
+  if (gitState.rootDir === root) return gitState.status?.branch ?? undefined
+  try {
+    const { gitStatus } = await import("@/lib/git/commands")
+    const status = await gitStatus(root)
+    return status.branch || undefined
+  } catch {
+    // A root the git bridge cannot see (remote target off-Tauri, vanished
+    // checkout) yields NO branch context — branch-restricted memories stay
+    // out rather than leaking in under a guessed branch.
+    return undefined
+  }
+}
+
 export async function buildSendOptions(
   session: ChatSession | null | undefined,
   userMessage?: string,
@@ -301,7 +337,7 @@ export async function buildSendOptions(
     session?.workingSet,
     checkpointInstructions
   )
-  const memoryBranch = useGitStore.getState().status?.branch ?? undefined
+  const memoryBranch = await resolveMemoryBranch(session, turnProject)
   const primaryRoot = turnProject ? primaryRootOf(turnProject)?.path : undefined
   const referencedMemoryPath =
     primaryRoot && referencedPaths

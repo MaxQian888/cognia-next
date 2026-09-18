@@ -51,6 +51,8 @@ import {
   setSteerMessageState,
   steerArmed,
 } from "./steer-runtime"
+import { supersedePendingApprovals } from "./approval-supersede"
+import { invalidateJudgeContext } from "@/lib/claude/permissions/command-judge"
 import {
   drainSessionPeerMessages,
   registerSessionPeerRuntime,
@@ -68,10 +70,12 @@ import {
   buildCompletedRunMetadata,
   buildRoutingRunMetadata,
 } from "@/lib/chat/message-run-metadata"
+import { turnAgentStamp } from "@/lib/claude/turn-agent-mode"
 import {
   maybeDrainBackgroundResults,
   registerBackgroundReplaySend,
 } from "./background-result-runtime"
+import { registerChatSendBridge } from "./chat-send-bridge"
 import { tagBranchSiblings, tagEditSibling } from "@/lib/chat/branch-regen"
 import {
   approveTool,
@@ -168,9 +172,9 @@ import {
 import { useAgentExecutionHandleDirectory } from "@/components/providers/agent-execution-handle-provider"
 import { useGitStore } from "@/stores/git/git-store"
 import { refreshGitStatus } from "@/lib/git/load"
-import { buildChatMentionTargets } from "@/lib/claude/agents/chat-mention-targets"
-import { resolveMentions } from "@/lib/chat/mentions/resolve-mentions"
-import { mergeContextRefs } from "@/lib/chat/mentions/merge-refs"
+import { chatMentionResolvers } from "@/lib/claude/agents/chat-mention-targets"
+import { resolveTurnContextRefs } from "@/lib/chat/mentions/resolve-mentions"
+import { isTranscriptEntityRefId } from "@/lib/collab/shared-reference-scan"
 import type { ChatTemplateRun } from "@/lib/chat/template/run"
 import {
   dispatchChatError as dispatchPluginChatError,
@@ -237,6 +241,14 @@ import {
   stopFusionChatTurn,
 } from "./router-fusion-chat-turn"
 
+/**
+ * Sessions whose live shared send already warned about embedded references.
+ * Once per session is deliberate: every send carrying a `@chat:`/`@msg:`
+ * snapshot publishes it to every member, but a toast per message is spam —
+ * the first one is when the user can still change their mind cheaply.
+ */
+const sharedReferenceWarnedSessions = new Set<string>()
+
 export function resolveChatTurnAttemptIdentity(input: {
   sessionId: string
   runId: string
@@ -264,6 +276,7 @@ export function useClaudeChat() {
   const tRouting = useTranslations("providers.routingView")
   const tInlineErr = useTranslations("chat.inlineError")
   const tVideo = useTranslations("chat.composer.attachments.video")
+  const tCollab = useTranslations("chatCollaboration")
   // The active session id is captured per-render via a ref so the long-lived
   // event handler always sees the freshest value without resubscribing.
   const activeRef = useRef<string | null>(null)
@@ -844,7 +857,34 @@ export function useClaudeChat() {
                 ).parts
           )
         }
-        await sendSharedSessionMessage(sharedTarget, message)
+        // A shared turn still cites what its chips/tokens named. The local row
+        // is written by the sync projection of this very event, so the
+        // citations must ride the event payload or no member — sender
+        // included — ever gets a backlink.
+        const sharedMentions = resolveTurnContextRefs(
+          shared.content,
+          chatMentionResolvers(),
+          callOptions?.citations ?? selectComposerCitedRefs(store.getState(), sessionId)
+        )
+        const sharedMetadata = {
+          ...(sharedMentions.length > 0 ? { mentions: sharedMentions } : {}),
+          ...(callOptions?.promptPreamble ? { promptPreamble: callOptions.promptPreamble } : {}),
+        }
+        // A snapshot embedded in this message publishes the quoted
+        // conversation's text to every member — including ones who could not
+        // open the source. Warn once so the first send is an informed choice.
+        if (
+          !sharedReferenceWarnedSessions.has(sessionId) &&
+          sharedMentions.some((ref) => ref.kind === "entity" && isTranscriptEntityRefId(ref.id))
+        ) {
+          sharedReferenceWarnedSessions.add(sessionId)
+          toast.info(tCollab("shareReferencesLiveToast"))
+        }
+        await sendSharedSessionMessage(sharedTarget, {
+          id: message.id,
+          parts: message.parts,
+          ...(Object.keys(sharedMetadata).length > 0 ? { metadata: sharedMetadata } : {}),
+        })
         return
       }
 
@@ -875,6 +915,20 @@ export function useClaudeChat() {
           const blocks = steerBlocksOf(content)
           if (!text && blocks.length === 0) return
 
+          // A new instruction supersedes the context the pending approvals
+          // were asked under (Codex 0.154 parity): deny each through its own
+          // channel so the waiter resolves, then let the turn continue under
+          // the new instruction. The judge cache is re-armed too — a "safe"
+          // verdict reached under the old instruction must not auto-approve
+          // the retried command under this one. Awaited so the denial lands
+          // before the steer text the model reads next.
+          invalidateJudgeContext(sessionId)
+          try {
+            await supersedePendingApprovals(sessionId, { getExecutionHandle })
+          } catch (err) {
+            console.warn("approval supersede failed", err)
+          }
+
           // Show it immediately, in the user's own words. The model-facing
           // framing (`STEER_PREFIX`) is added only on the replay payload; the
           // transcript renders the original text via `stripSteerPrefix`. The
@@ -883,9 +937,19 @@ export function useClaudeChat() {
           const entryId = crypto.randomUUID()
           const steerMeta: SteerMessageMeta = { entryId, state: "queued" }
           const optimistic = makeUserMessage(content)
+          // The normal send path's reference stamp, applied here too: a steer
+          // still cites what its chips/tokens named, whether it is delivered
+          // live, replayed from the queue, or never delivered at all.
+          const steerMentions = resolveTurnContextRefs(
+            content,
+            chatMentionResolvers(),
+            callOptions?.citations ?? selectComposerCitedRefs(store.getState(), sessionId)
+          )
           ;(optimistic as { metadata?: Record<string, unknown> }).metadata = {
             ...((optimistic as { metadata?: Record<string, unknown> }).metadata ?? {}),
             steer: steerMeta,
+            ...(steerMentions.length > 0 ? { mentions: steerMentions } : {}),
+            ...(callOptions?.promptPreamble ? { promptPreamble: callOptions.promptPreamble } : {}),
           }
 
           const externalAgentId = sessionExternalLane(sessionId)
@@ -902,7 +966,14 @@ export function useClaudeChat() {
             try {
               const queued = await enqueueHostStateIntentIfAvailable({
                 sessionId,
-                action: { kind: "turn.steer", text },
+                action: {
+                  kind: "turn.steer",
+                  text,
+                  ...(steerMentions.length > 0 ? { mentions: steerMentions } : {}),
+                  ...(callOptions?.promptPreamble
+                    ? { promptPreamble: callOptions.promptPreamble }
+                    : {}),
+                },
               })
               if (queued) {
                 appendSteerMessage(sessionId, optimistic)
@@ -983,6 +1054,12 @@ export function useClaudeChat() {
             text,
             blocks: blocks.length > 0 ? blocks : undefined,
             webSearchContext: callOptions?.webSearchContext,
+            ...(callOptions?.replyTo ? { replyTo: callOptions.replyTo } : {}),
+            // The queue copy rides a replay onto whichever writer persists the
+            // row — locally redundant (the optimistic bubble has them) but the
+            // only carrier when a remote drain rebuilds the turn.
+            ...(steerMentions.length > 0 ? { citations: steerMentions } : {}),
+            ...(callOptions?.promptPreamble ? { promptPreamble: callOptions.promptPreamble } : {}),
           })
           return
         }
@@ -1340,29 +1417,20 @@ export function useClaudeChat() {
       // here — a documented v1 narrowing, not a routing change (routing still
       // uses the full union in resolveTargetAgentId below).
       // Parsed from the TYPED text only. An `@path` inside a referenced message
-      // or a fetched page is quoted material, not a mention this turn made.
-      const mentionSourceText =
-        typeof effectiveContent === "string"
-          ? stripPromptPreamble(effectiveContent)
-          : effectiveContent
-              .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")
-              .map((b, index) => (index === 0 ? stripPromptPreamble(b.text) : b.text))
-              .join("\n")
-      const parsedMentionRefs = mentionSourceText.includes("@")
-        ? resolveMentions(mentionSourceText, {
-            resolveAgentHandle: (name) => {
-              const hit = buildChatMentionTargets().find((t) => t.handle === name)
-              return hit ? { kind: "subagent", id: hit.handle, label: hit.name } : null
-            },
-          })
-        : []
+      // or a fetched page is quoted material, not a mention this turn made —
+      // `resolveTurnContextRefs` strips the envelope before scanning.
       // Chip-style picks (a staged remote document, a staged memory / issue /
       // plan / conversation / artifact) leave NO token behind, so re-parsing the
-      // text can never recover them — this list is their only route in. Read
-      // before the composer clears it, which it does after `onSend` resolves.
+      // text can never recover them — `callOptions.citations` is their only
+      // route in. Read before the composer clears it, which it does after
+      // `onSend` resolves.
       const citedRefs =
         callOptions?.citations ?? selectComposerCitedRefs(store.getState(), sessionId)
-      const mentionRefs = mergeContextRefs(parsedMentionRefs, citedRefs)
+      const mentionRefs = resolveTurnContextRefs(
+        effectiveContent,
+        chatMentionResolvers(),
+        citedRefs
+      )
       if (mentionRefs.length > 0) {
         ;(userMsg as { metadata?: Record<string, unknown> }).metadata = {
           ...((userMsg as { metadata?: Record<string, unknown> }).metadata ?? {}),
@@ -1468,6 +1536,10 @@ export function useClaudeChat() {
               messageId: userMsg.id,
               text: providerText,
               attachments: [],
+              ...(mentionRefs.length > 0 ? { mentions: mentionRefs } : {}),
+              ...(callOptions?.promptPreamble
+                ? { promptPreamble: callOptions.promptPreamble }
+                : {}),
             },
           })
           if (queued) {
@@ -2582,8 +2654,12 @@ export function useClaudeChat() {
             : null
           const { applyExternalAgentEventToParts } =
             await import("@/lib/ai/agent/external/event-to-parts")
-          const { registerExternalApproval, registerExternalElicitation, toPermissionResponse } =
-            await import("@/lib/ai/agent/external/chat-decision-bridge")
+          const {
+            registerExternalApproval,
+            registerExternalElicitation,
+            registerExternalQuestionTarget,
+            toPermissionResponse,
+          } = await import("@/lib/ai/agent/external/chat-decision-bridge")
           const { useExternalElicitationStore } =
             await import("@/stores/agent/external-elicitation-store")
 
@@ -2757,7 +2833,33 @@ export function useClaudeChat() {
               useExternalElicitationStore.getState().remove(sessionId, event.elicitationId)
               return
             }
-            const nextParts = applyExternalAgentEventToParts(assistantParts, event)
+            // `async_questions` is opt-in UI: off, the same event degrades
+            // to a plain text part rather than rendering an answer card.
+            // Read per event so a mid-turn settings flip takes effect.
+            const inlineQuestions =
+              useSettingsStore.getState().settings?.inlineQuestions?.enabled === true
+            // An `async_questions` event with a `requestId` backs a pending
+            // server request (Codex `requestUserInput` + `isBlocking:false`):
+            // the card's answer must resolve that RPC, not arrive as a chat
+            // message. Register the delivery target so the card can call
+            // `resolveExternalQuestion` with the chat-side key stamped into
+            // the part's data. Skipped when the feature is off — a degraded
+            // text part has no way to resolve, so the entry would only leak —
+            // and on host-lane runs, whose remote decision channel cannot
+            // carry an answers map.
+            const questionRequestId =
+              event.type === "async_questions" && event.requestId && inlineQuestions && !remoteRunId
+                ? registerExternalQuestionTarget({
+                    agentId: extAgentId,
+                    chatSessionId: sessionId,
+                    event,
+                  })
+                : null
+            const nextParts = applyExternalAgentEventToParts(assistantParts, event, {
+              inlineQuestions,
+              sessionId,
+              ...(questionRequestId ? { questionRequestId } : {}),
+            })
             if (nextParts !== assistantParts) {
               assistantParts = nextParts as UIMessage["parts"]
               chatTurnPerformance.markFirstResponse(sessionId)
@@ -3059,6 +3161,7 @@ export function useClaudeChat() {
               completedAt,
               reportedDurationMs: result.duration,
               routing: buildRoutingRunMetadata(sendOptions),
+              agent: turnAgentStamp(sessionId),
             })
           )
           // The agent's own token accounting — including the context occupancy
@@ -3439,6 +3542,7 @@ export function useClaudeChat() {
       tRouting,
       tInlineErr,
       tVideo,
+      tCollab,
       registry,
       releaseExternalToolHost,
       enqueueClaudeEvent,
@@ -3599,6 +3703,16 @@ export function useClaudeChat() {
   useEffect(() => {
     return registerBackgroundReplaySend((framedText, sessionId) => {
       void sendRef.current?.(framedText, undefined, { sessionId })
+    })
+  }, [])
+
+  // Same bridge for surfaces that answer the agent with an ordinary user
+  // message — currently the inline async-question card (`data-async-questions`
+  // parts). One registration covers every session: the callback carries the
+  // target sessionId.
+  useEffect(() => {
+    return registerChatSendBridge((text, targetSessionId) => {
+      void sendRef.current?.(text, undefined, { sessionId: targetSessionId })
     })
   }, [])
 

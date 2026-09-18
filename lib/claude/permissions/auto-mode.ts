@@ -58,6 +58,12 @@ export interface EvaluateAutoArgs {
   cwd?: string
   /** UI locale forwarded to the model judge for its rationale. */
   locale?: string
+  /**
+   * Instruction context the model judge scopes its verdict cache to (the
+   * session id). A new instruction mid-turn calls `invalidateJudgeContext`,
+   * so verdicts reached under the superseded instruction are not reused.
+   */
+  contextKey?: string
 }
 
 const ASK_DEFAULT: AutoDecision = {
@@ -77,6 +83,7 @@ export async function evaluateAutoDecision({
   client,
   cwd,
   locale,
+  contextKey,
 }: EvaluateAutoArgs): Promise<AutoDecision> {
   if (!config.enabled) return ASK_DEFAULT
 
@@ -90,15 +97,17 @@ export async function evaluateAutoDecision({
     }
   }
 
-  // 2. Deterministic classifier — decisive on allow / deny.
-  const cls = classifyCommand(command)
+  // 2. Deterministic classifier — decisive on allow / deny. `cwd` anchors the
+  // classifier's `cd`-chain tracking: `cd / && rm -rf ./etc` must resolve
+  // `./etc` against `/`, not the workspace root.
+  const cls = classifyCommand(command, { cwd })
   if (cls.verdict === "allow" || cls.verdict === "deny") {
     return { decision: cls.verdict, source: "rule", reason: cls.reason, matched: cls.matched }
   }
 
   // 3. Uncertain (classifier said "ask"). Optionally consult the small model.
   if (config.mode === "rules+model" && client) {
-    const judged = await judgeCommandSafety(client, command, { cwd, locale })
+    const judged = await judgeCommandSafety(client, command, { cwd, locale, contextKey })
     if (judged) {
       if (judged.risk === "high") {
         return config.denyOnHighRisk

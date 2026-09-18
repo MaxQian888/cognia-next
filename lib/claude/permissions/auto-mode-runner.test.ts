@@ -1,5 +1,5 @@
 import { runAutoModeForTool } from "./auto-mode-runner"
-import { __resetJudgeCache } from "./command-judge"
+import { __resetJudgeCache, invalidateJudgeContext } from "./command-judge"
 import type { AppSettings } from "@cognia/agent-config-types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 
@@ -86,6 +86,26 @@ describe("runAutoModeForTool", () => {
     })
     expect(out?.decision).toBe("allow")
     expect(out?.source).toBe("model")
+  })
+
+  it("threads contextKey into the judge cache — a mid-turn steer re-judges", async () => {
+    const client = {
+      complete: jest.fn(async () => '{"safe":true,"risk":"low","reason":"ok"}'),
+    } as unknown as LlmClient
+    const args = {
+      toolName: "Bash",
+      input: { command: "git push" },
+      settings: settings({ autoApprove: { enabled: true, mode: "rules+model" } }),
+      client,
+      contextKey: "sess-1",
+    }
+    await runAutoModeForTool(args)
+    await runAutoModeForTool(args)
+    expect(client.complete).toHaveBeenCalledTimes(1)
+    // The new instruction supersedes the verdict's instruction context.
+    invalidateJudgeContext("sess-1")
+    await runAutoModeForTool(args)
+    expect(client.complete).toHaveBeenCalledTimes(2)
   })
 
   it("merges plugin-contributed rules below the user rules", async () => {

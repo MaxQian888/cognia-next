@@ -362,7 +362,7 @@ describe("stale dismissal", () => {
           source: "run",
           kind: "run-approval",
           runId: "r",
-          interrupt: { id: "i", type: "approval" },
+          interrupt: { id: "i", runId: "r", type: "tool_approval" },
         }),
         staleItem({ id: "run:missing", source: "run", kind: "run-approval", runId: "missing" }),
       ]
@@ -648,7 +648,15 @@ describe("mergeRows liveness and clearing ids", () => {
       runId: "r",
       openedAt: NOW,
       stale: true,
-      interrupt: { id: "i", type: "approval" },
+      interrupt: {
+        id: "i",
+        runId: "r",
+        type: "tool_approval",
+        status: "pending",
+        title: "Approval",
+        expiresAt: NOW + 60_000,
+        createdAt: NOW,
+      },
     } as AttentionItem
     const row = project([detached], [item]).rows[0]
     expect(row.owner).toMatchObject({ kind: "run", runId: "r", interruptId: "i" })

@@ -73,7 +73,12 @@ jest.mock("@/lib/runtime/standalone-mode", () => ({
 }))
 
 import { registerCaptureResponder } from "@/lib/connectors/hitl/approval-registry"
-import { handleEvent, isArtifactAutoCreateEnabled, isTeamSubSession } from "./claude-chat-events"
+import {
+  drainSteerVia,
+  handleEvent,
+  isArtifactAutoCreateEnabled,
+  isTeamSubSession,
+} from "./claude-chat-events"
 import { SessionCoalescingRegistry } from "./stream-coalescing"
 import { useChatStore } from "@/stores/chat"
 import { clearSidecarLogTrail } from "@/lib/chat/sidecar-log-trail"
@@ -108,6 +113,40 @@ describe("Claude chat event seam", () => {
   it("exports event routing and filters team sub-sessions", () => {
     expect(typeof handleEvent).toBe("function")
     expect(isTeamSubSession("team::char::member")).toBe(true)
+  })
+
+  it("replays a drained steer with the citations and preamble it was typed with", () => {
+    // The queued entry is the only carrier of the reference metadata on a
+    // replay — the optimistic bubble was appended when the steer was typed.
+    const citations = [{ kind: "entity" as const, id: "session:s9", label: "Sprint" }]
+    const promptPreamble = {
+      sections: ["references" as const],
+      references: [{ kind: "entity" as const, entityKind: "session" as const, title: "Sprint" }],
+    }
+    useChatStore.setState({
+      sessions: {
+        s7: {
+          ...(useChatStore.getState().sessions.s7 ?? {}),
+          messages: [],
+          status: "idle",
+          pendingApprovals: [],
+          steerQueue: [{ id: "q1", text: "next", citations, promptPreamble }],
+        },
+      },
+    } as never)
+    const sendRef = { current: jest.fn(async () => undefined) }
+    drainSteerVia("s7", sendRef)
+    expect(sendRef.current).toHaveBeenCalledWith(
+      expect.anything(),
+      undefined,
+      expect.objectContaining({
+        sessionId: "s7",
+        steerDrain: true,
+        citations,
+        promptPreamble,
+      })
+    )
+    useChatStore.getState().clearSteerQueue("s7")
   })
 })
 

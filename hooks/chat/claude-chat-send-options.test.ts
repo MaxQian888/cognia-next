@@ -1,6 +1,7 @@
 import { buildSendOptions, buildWorkingSetPostCompaction } from "./claude-chat-send-options"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import { useProjectStore } from "@/stores/project/project-store"
+import { useGitStore } from "@/stores/git/git-store"
 import { createOnboardingRequest } from "@/lib/onboarding/request"
 
 jest.mock("@/lib/claude/build-options", () => ({
@@ -36,7 +37,11 @@ jest.mock("@/stores/chat", () => ({
     [],
 }))
 jest.mock("@/stores/git/git-store", () => ({
-  useGitStore: { getState: () => ({ status: null }) },
+  useGitStore: { getState: jest.fn(() => ({ status: null, rootDir: undefined })) },
+}))
+const mockGitStatus = jest.fn()
+jest.mock("@/lib/git/commands", () => ({
+  gitStatus: (...args: unknown[]) => mockGitStatus(...args),
 }))
 jest.mock("@/lib/workspace/trust-gate", () => ({
   resolveWorkspaceTrustForSend: jest.fn(async () => ({ restricted: false, trustedRoots: [] })),
@@ -245,6 +250,74 @@ describe("Claude chat send-option seam", () => {
       })
     )
   })
+  describe("memory branch binding", () => {
+    const lastOptions = () => jest.mocked(resolveSendOptions).mock.calls.at(-1)?.[0]
+
+    beforeEach(() => {
+      mockGitStatus.mockReset()
+      jest.mocked(useGitStore.getState).mockReturnValue({
+        status: { branch: "ui-active-branch" },
+        rootDir: "/repos/a",
+      } as never)
+    })
+
+    it("prefers the execution-context branch pinned at binding time", async () => {
+      await buildSendOptions({
+        id: "s1",
+        projectId: "proj-b",
+        executionContext: {
+          location: "managedWorktree",
+          projectId: "proj-b",
+          projectRoot: "/repos/b",
+          taskWorkspace: { taskId: "t", workspaceKey: "w" },
+          branch: "agent/run-42",
+          worktreePath: "/wt/run-42",
+        },
+      } as never)
+      expect(lastOptions()?.memoryBranch).toBe("agent/run-42")
+      // The bound answer must not consult the UI store or the git bridge.
+      expect(mockGitStatus).not.toHaveBeenCalled()
+    })
+
+    it("queries the bound worktree when the context carries no branch", async () => {
+      mockGitStatus.mockResolvedValue({ branch: "worktree/leg" })
+      await buildSendOptions({
+        id: "s1",
+        projectId: "proj-b",
+        executionContext: {
+          location: "managedWorktree",
+          projectId: "proj-b",
+          projectRoot: "/repos/b",
+          taskWorkspace: { taskId: "t", workspaceKey: "w" },
+          worktreePath: "/wt/run-42",
+        },
+      } as never)
+      expect(mockGitStatus).toHaveBeenCalledWith("/wt/run-42")
+      expect(lastOptions()?.memoryBranch).toBe("worktree/leg")
+    })
+
+    it("uses the git store only when its root IS the turn root", async () => {
+      await buildSendOptions({ id: "s1", projectId: "proj-a" } as never)
+      expect(mockGitStatus).not.toHaveBeenCalled()
+      expect(lastOptions()?.memoryBranch).toBe("ui-active-branch")
+    })
+
+    it("queries the session's project root rather than a mismatched UI store", async () => {
+      // The UI-active project is A but the session belongs to B — the store's
+      // "ui-active-branch" describes a different checkout and must be ignored.
+      mockGitStatus.mockResolvedValue({ branch: "session-b-branch" })
+      await buildSendOptions({ id: "s1", projectId: "proj-b" } as never)
+      expect(mockGitStatus).toHaveBeenCalledWith("/repos/b")
+      expect(lastOptions()?.memoryBranch).toBe("session-b-branch")
+    })
+
+    it("supplies no branch rather than guessing when the bound root is unreadable", async () => {
+      mockGitStatus.mockRejectedValue(new Error("not a repo"))
+      await buildSendOptions({ id: "s1", projectId: "proj-b" } as never)
+      expect(lastOptions()?.memoryBranch).toBeUndefined()
+    })
+  })
+
   describe("workspace attribution", () => {
     beforeEach(() => {
       jest.mocked(resolveSendOptions).mockClear()

@@ -82,6 +82,14 @@ const interruptSessionMock = jest.fn().mockResolvedValue(undefined)
 const steerSessionMock = jest.fn().mockRejectedValue(new Error("input_closed"))
 const closeSessionIpcMock = jest.fn().mockResolvedValue(undefined)
 const approveToolMock = jest.fn().mockResolvedValue(undefined)
+// Real module otherwise — only the epoch bump is asserted, and a stubbed
+// `judgeCommandSafety` returning null keeps the auto-mode tier a safe no-op.
+const invalidateJudgeContextMock = jest.fn()
+jest.mock("@/lib/claude/permissions/command-judge", () => ({
+  invalidateJudgeContext: (...a: unknown[]) => invalidateJudgeContextMock(...a),
+  judgeCommandSafety: jest.fn(async () => null),
+  __resetJudgeCache: jest.fn(),
+}))
 
 jest.mock("@/lib/claude/ipc", () => ({
   approveTool: (...a: unknown[]) => approveToolMock(...a),
@@ -423,13 +431,27 @@ const PARTS_EVENTS = new Set([
   // delta and assert one appended character per event.
   "text",
 ])
-jest.mock("@/lib/ai/agent/external/event-to-parts", () => ({
-  applyExternalAgentEventToParts: (parts: unknown, event: unknown) => {
-    const type = (event as { type?: string } | undefined)?.type
-    if (type && !PARTS_EVENTS.has(type)) return parts as unknown[]
-    return [...((parts as unknown[]) ?? []), { type: "text", text: "x", state: "streaming" }]
-  },
-}))
+jest.mock("@/lib/ai/agent/external/event-to-parts", () => {
+  const actual = jest.requireActual<typeof import("@/lib/ai/agent/external/event-to-parts")>(
+    "@/lib/ai/agent/external/event-to-parts"
+  )
+  return {
+    applyExternalAgentEventToParts: (parts: unknown, event: unknown, options?: unknown) => {
+      const type = (event as { type?: string } | undefined)?.type
+      // Delegate to the real projection so the inlineQuestions gate and the
+      // card part's session stamping are exercised end-to-end.
+      if (type === "async_questions") {
+        return actual.applyExternalAgentEventToParts(
+          parts as never,
+          event as never,
+          options as never
+        )
+      }
+      if (type && !PARTS_EVENTS.has(type)) return parts as unknown[]
+      return [...((parts as unknown[]) ?? []), { type: "text", text: "x", state: "streaming" }]
+    },
+  }
+})
 
 const startSquadRunMock = jest.fn<Promise<StartSquadRunResult>, [StartSquadRunInput]>()
 const stopSquadWatchMock = jest.fn()
@@ -686,6 +708,7 @@ const settingsState = {
     alwaysAllowTools: [] as string[],
     artifacts: { autoCreate: false },
     agentPermissions: undefined as { toolRules?: Record<string, unknown> } | undefined,
+    inlineQuestions: undefined as { enabled?: boolean } | undefined,
   },
   toggleAlwaysAllow: jest.fn().mockResolvedValue(undefined),
   save: jest.fn().mockResolvedValue(undefined),
@@ -766,9 +789,11 @@ jest.mock("./router-fusion-chat-turn", () => ({
 const beginSharedSessionRunMock = jest.fn(
   async (..._args: unknown[]) => ({ kind: "private" }) as unknown
 )
+const sendSharedSessionMessageMock = jest.fn(async (..._args: unknown[]) => undefined)
 jest.mock("@/lib/collab/shared-run-coordinator", () => ({
   ...jest.requireActual("@/lib/collab/shared-run-coordinator"),
   beginSharedSessionRun: (...args: unknown[]) => beginSharedSessionRunMock(...args),
+  sendSharedSessionMessage: (...args: unknown[]) => sendSharedSessionMessageMock(...args),
 }))
 const isCostBudgetConfiguredMock = jest.fn(() => false)
 const enforceCostBudgetMock = jest.fn(async (..._args: unknown[]) => ({
@@ -927,6 +952,9 @@ beforeEach(() => {
   chatState.setSessionActiveBranch.mockClear()
   chatState.pushApproval.mockClear()
   chatState.clearApproval.mockClear()
+  chatState.markApprovalInterrupted.mockClear()
+  invalidateJudgeContextMock.mockClear()
+  approveToolMock.mockClear().mockResolvedValue(undefined)
   chatState.closeSession.mockClear()
   chatState.setPendingCommandOverrides.mockClear()
   chatState.clearEphemeralSkillIds.mockClear()
@@ -1707,6 +1735,120 @@ describe("useClaudeChat — actions", () => {
       JSON.stringify(call[1])
     )
     expect(reported.join("\n")).not.toContain("hiccup")
+  })
+
+  it("renders an inline answer card for async questions when the setting is on", async () => {
+    // Codex `delivery: "async"` agentMessage → `async_questions` event →
+    // interactive card part, stamped with the CHAT session id so an answer
+    // from a background pane still lands in the right conversation.
+    settingsState.settings.inlineQuestions = { enabled: true }
+    try {
+      useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+      chatState.activeSessionId = "sess-1"
+      executeOnExternalAgentMock.mockImplementation(
+        async (_text: string, opts: { onEvent: (e: unknown) => void }) => {
+          opts.onEvent({
+            type: "async_questions",
+            sessionId: "native-1",
+            messageId: "q1",
+            questions: [{ title: "Which file?", options: ["a.ts", "b.ts"] }],
+          })
+          return { success: true, finalResponse: "done" }
+        }
+      )
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      subscribers.forEach((sub) => sub(chatState))
+      await act(async () => {
+        await result.current.send("hi")
+      })
+      const written = chatState.replaceSessionMessages.mock.calls.flatMap(
+        (call) => call[1] as Array<{ parts: Array<Record<string, unknown>> }>
+      )
+      const card = written
+        .flatMap((m) => m.parts)
+        .find((p) => p?.type === "data-async-questions") as
+        { data: Record<string, unknown> } | undefined
+      expect(card?.data).toMatchObject({
+        itemId: "q1",
+        sessionId: "sess-1",
+        questions: [{ title: "Which file?", options: ["a.ts", "b.ts"] }],
+      })
+    } finally {
+      settingsState.settings.inlineQuestions = undefined
+    }
+  })
+
+  it("registers an RPC-backed question and stamps the card with the chat-side key", async () => {
+    // requestUserInput isBlocking:false — the event carries the wire requestId.
+    // The card must get the namespaced registry key (requestId) plus the raw
+    // wire id (responseRequestId) so resolveExternalQuestion / a later
+    // permission_response can find it.
+    settingsState.settings.inlineQuestions = { enabled: true }
+    try {
+      useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+      chatState.activeSessionId = "sess-1"
+      executeOnExternalAgentMock.mockImplementation(
+        async (_text: string, opts: { onEvent: (e: unknown) => void }) => {
+          opts.onEvent({
+            type: "async_questions",
+            sessionId: "native-1",
+            messageId: "q-item",
+            requestId: "q-item",
+            questions: [{ id: "q1", title: "Region?", options: ["us-east"] }],
+          })
+          return { success: true, finalResponse: "done" }
+        }
+      )
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      subscribers.forEach((sub) => sub(chatState))
+      await act(async () => {
+        await result.current.send("hi")
+      })
+      const written = chatState.replaceSessionMessages.mock.calls.flatMap(
+        (call) => call[1] as Array<{ parts: Array<Record<string, unknown>> }>
+      )
+      const card = written
+        .flatMap((m) => m.parts)
+        .find((p) => p?.type === "data-async-questions") as
+        { data: Record<string, unknown> } | undefined
+      expect(card?.data?.responseRequestId).toBe("q-item")
+      expect(typeof card?.data?.requestId).toBe("string")
+      expect((card?.data?.requestId as string).startsWith("external-agent:")).toBe(true)
+    } finally {
+      settingsState.settings.inlineQuestions = undefined
+    }
+  })
+
+  it("degrades async questions to plain text when the setting is off", async () => {
+    settingsState.settings.inlineQuestions = { enabled: false }
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    chatState.activeSessionId = "sess-1"
+    executeOnExternalAgentMock.mockImplementation(
+      async (_text: string, opts: { onEvent: (e: unknown) => void }) => {
+        opts.onEvent({
+          type: "async_questions",
+          sessionId: "native-1",
+          messageId: "q1",
+          questions: [{ title: "Which file?" }],
+        })
+        return { success: true, finalResponse: "done" }
+      }
+    )
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    subscribers.forEach((sub) => sub(chatState))
+    await act(async () => {
+      await result.current.send("hi")
+    })
+    const written = chatState.replaceSessionMessages.mock.calls.flatMap(
+      (call) => call[1] as Array<{ role: string; parts: Array<Record<string, unknown>> }>
+    )
+    const parts = written.filter((m) => m.role === "assistant").flatMap((m) => m.parts)
+    expect(parts.some((p) => p?.type === "data-async-questions")).toBe(false)
+    const text = parts.find((p) => p?.type === "text") as { text: string } | undefined
+    expect(text?.text).toContain("Which file?")
   })
 
   it("reuses a verified imported native session on the external lane", async () => {
@@ -3672,6 +3814,55 @@ describe("useClaudeChat — goal loop wiring (ADR-0019)", () => {
     expect(sendPromptMock).not.toHaveBeenCalled()
   })
 
+  // A new instruction while a tool ask is up supersedes the ask (Codex 0.154
+  // parity): the waiter is denied through its own channel, the card is marked
+  // `superseded`, and the steer still reaches the running turn.
+  it("supersedes a pending approval when the user steers mid-ask", async () => {
+    chatState.status = "awaiting_approval"
+    chatState.pendingApprovals = [
+      {
+        sessionId: "sess-1",
+        requestId: "req-pending",
+        toolUseID: "tu-1",
+        toolName: "Bash",
+        input: { command: "rm -rf ./dist" },
+        status: "pending",
+      },
+    ]
+    steerSessionMock.mockResolvedValue({ accepted: true })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("actually don't delete anything")
+    })
+    expect(approveToolMock).toHaveBeenCalledWith(
+      "sess-1",
+      "req-pending",
+      "deny",
+      expect.stringContaining("superseded")
+    )
+    expect(chatState.markApprovalInterrupted).toHaveBeenCalledWith(
+      "req-pending",
+      "sess-1",
+      "superseded"
+    )
+    // The instruction still steers the now-unblocked turn.
+    expect(steerSessionMock).toHaveBeenCalledWith("sess-1", "actually don't delete anything")
+  })
+
+  it("re-arms the session's judge context on a mid-turn instruction", async () => {
+    // Behavioural proof lives in command-judge.test.ts (epoch bump forces a
+    // fresh verdict); this asserts the send path actually calls it.
+    chatState.status = "streaming"
+    steerSessionMock.mockResolvedValue({ accepted: true })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("change of plan")
+    })
+    expect(invalidateJudgeContextMock).toHaveBeenCalledWith("sess-1")
+  })
+
   it("persists an attached HostState steer before accepting its optimistic bubble", async () => {
     chatState.status = "streaming"
     enqueueHostStateIntentMock.mockResolvedValueOnce({ id: "steer-action", status: "pending" })
@@ -3706,6 +3897,119 @@ describe("useClaudeChat — goal loop wiring (ADR-0019)", () => {
     expect(chatState.enqueueSteer).toHaveBeenCalledWith(
       "sess-1",
       expect.objectContaining({ text: "and add tests" })
+    )
+  })
+
+  // A steer cites what its chips/tokens named too — the bubble keeps
+  // `metadata.mentions` for the backlink index and the queue entry carries
+  // `citations` so a remote drain can rebuild the row's references.
+  it("stamps a steer's citations on the bubble and the queue entry", async () => {
+    chatState.status = "streaming"
+    steerSessionMock.mockRejectedValue(new Error("input_closed"))
+    const citations = [{ kind: "entity" as const, id: "issue:i1", label: "Broker race" }]
+    const promptPreamble: import("@/lib/chat/prompt-preamble").PromptPreambleSummary = {
+      sections: ["references"],
+      references: [{ kind: "entity", entityKind: "issue", title: "Broker race" }],
+    }
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("follow up on this", undefined, {
+        citations,
+        promptPreamble,
+      })
+    })
+    const appended = chatState.replaceSessionMessages.mock.calls.at(-1)?.[1] as Array<{
+      metadata?: { mentions?: unknown[]; promptPreamble?: unknown }
+    }>
+    expect(appended.at(-1)?.metadata?.mentions).toEqual(citations)
+    expect(appended.at(-1)?.metadata?.promptPreamble).toEqual(promptPreamble)
+    expect(chatState.enqueueSteer).toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({ citations, promptPreamble })
+    )
+  })
+
+  it("stamps citations on a live-delivered steer too", async () => {
+    chatState.status = "streaming"
+    steerSessionMock.mockResolvedValue({ accepted: true })
+    const citations = [{ kind: "entity" as const, id: "session:s9", label: "Sprint planning" }]
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("check that thread", undefined, { citations })
+    })
+    expect(steerSessionMock).toHaveBeenCalledWith("sess-1", "check that thread")
+    const appended = chatState.replaceSessionMessages.mock.calls.at(-1)?.[1] as Array<{
+      metadata?: { mentions?: unknown[] }
+    }>
+    expect(appended.at(-1)?.metadata?.mentions).toEqual(citations)
+  })
+
+  // The shared transcript's local row is written by the sync projection of
+  // the `message.created` event — the citations must ride the event payload or
+  // no member, sender included, ever gets a backlink.
+  it("publishes a shared-session send with its reference metadata on the event", async () => {
+    chatState.activeSessionId = "sess-shared"
+    chatState.openSessionIds = ["sess-shared"]
+    getSessionMock.mockResolvedValue({
+      id: "sess-shared",
+      title: "Shared",
+      model: "sonnet",
+      collaboration: {
+        orgId: "org_1",
+        workspaceId: "ws_1",
+        sessionId: "shared_1",
+        policyRevision: 1,
+        syncCursor: 0,
+      },
+    })
+    const citations = [{ kind: "entity" as const, id: "session:s9", label: "Sprint planning" }]
+    const promptPreamble: import("@/lib/chat/prompt-preamble").PromptPreambleSummary = {
+      sections: ["references"],
+      references: [{ kind: "entity", entityKind: "session", title: "Sprint planning" }],
+    }
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("see this thread", undefined, { citations, promptPreamble })
+    })
+    expect(sendSharedSessionMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "sess-shared" }),
+      expect.objectContaining({ metadata: { mentions: citations, promptPreamble } })
+    )
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    // A transcript reference going out over a shared link gets the once-per-
+    // session heads-up — the snapshot publishes to members who may not be able
+    // to open the source.
+    expect(toastInfo).toHaveBeenCalledWith(
+      "This message embeds a snapshot of another conversation — everyone here can read it."
+    )
+  })
+
+  it("sends no reference metadata on a plain shared-session message", async () => {
+    chatState.activeSessionId = "sess-shared-plain"
+    chatState.openSessionIds = ["sess-shared-plain"]
+    getSessionMock.mockResolvedValue({
+      id: "sess-shared-plain",
+      title: "Shared",
+      model: "sonnet",
+      collaboration: {
+        orgId: "org_1",
+        workspaceId: "ws_1",
+        sessionId: "shared_2",
+        policyRevision: 1,
+        syncCursor: 0,
+      },
+    })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("nothing cited")
+    })
+    expect(sendSharedSessionMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "sess-shared-plain" }),
+      expect.not.objectContaining({ metadata: expect.anything() })
     )
   })
 

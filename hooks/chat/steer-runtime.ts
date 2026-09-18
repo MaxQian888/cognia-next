@@ -20,12 +20,14 @@
  * message-state transitions — live here and are shared by both.
  */
 
-import { useChatStore, type ChatStatus } from "@/stores/chat"
+import { useChatStore, type ChatStatus, type SteerEntry } from "@/stores/chat"
 import { buildSteerPayload, steerMetaOf, type SteerState } from "@/lib/claude/steer"
 import { persistMessages } from "@/lib/db/messages"
 import type { MessageReplyTo, SendContent, SendOptions } from "@cognia/agent-config-types"
 import type { UIMessage } from "ai"
-import { promptPreambleOfParts } from "@/lib/chat/prompt-preamble"
+import { promptPreambleOfParts, type PromptPreambleSummary } from "@/lib/chat/prompt-preamble"
+import { mergeContextRefs } from "@/lib/chat/mentions/merge-refs"
+import type { ContextRef } from "@/lib/chat/mentions/types"
 
 /** Sessions whose imminent settle must drain the steer queue even if the turn
  * ended via interrupt/error (set by `interruptAndSteer`). A natural clean end
@@ -258,6 +260,40 @@ export function discardPendingSteer(sessionId: string, entryId: string): void {
 }
 
 /**
+ * The reference fields a drained steer turn carries: every queued entry's
+ * citations merged into one list, and their envelope summaries folded into
+ * one — the drained payload is a single turn, so it claims every record any
+ * of its entries cited.
+ *
+ * The replay needs these on a REMOTE lane (a companion's `room_send` drain),
+ * where the host writes the persisted row from what the RPC carries. Locally
+ * each entry's optimistic bubble already holds the same metadata.
+ */
+export interface SteerDrainReferences {
+  citations?: ContextRef[]
+  promptPreamble?: PromptPreambleSummary
+}
+
+function mergeSteerReferences(queue: readonly SteerEntry[]): SteerDrainReferences | undefined {
+  const citations = mergeContextRefs(
+    [],
+    queue.flatMap((entry) => entry.citations ?? [])
+  )
+  const summaries = queue.flatMap((entry) => (entry.promptPreamble ? [entry.promptPreamble] : []))
+  if (citations.length === 0 && summaries.length === 0) return undefined
+  const promptPreamble: PromptPreambleSummary | undefined = summaries.length
+    ? {
+        sections: [...new Set(summaries.flatMap((summary) => summary.sections))],
+        references: summaries.flatMap((summary) => summary.references),
+      }
+    : undefined
+  return {
+    ...(citations.length ? { citations } : {}),
+    ...(promptPreamble ? { promptPreamble } : {}),
+  }
+}
+
+/**
  * Replay a session's queued steer messages as one fresh, framed turn. No-op
  * when the queue is empty. Called only once the turn has settled (idle/error),
  * so `send`'s busy-gate sees a non-streaming session and won't re-enqueue it.
@@ -273,7 +309,8 @@ export function maybeDrainSteer(
   replay: (
     content: SendContent,
     webSearchContext?: SendOptions["webSearchContext"],
-    replyTo?: MessageReplyTo
+    replyTo?: MessageReplyTo,
+    references?: SteerDrainReferences
   ) => void | Promise<boolean>,
   awaitAdmission = false
 ): void {
@@ -298,9 +335,8 @@ export function maybeDrainSteer(
   const payload = buildSteerPayload(queue)
   const webSearchContext = mergeSteerWebSearchContexts(queue.map((entry) => entry.webSearchContext))
   const replyTo = queue.find((entry) => entry.replyTo)?.replyTo
-  const outcome = replyTo
-    ? replay(payload, webSearchContext, replyTo)
-    : replay(payload, webSearchContext)
+  const references = mergeSteerReferences(queue)
+  const outcome = replay(payload, webSearchContext, replyTo, references)
   if (awaitAdmission) {
     const settle = (accepted: boolean) =>
       patchSteerMessages(sessionId, (meta) => drained.has(meta.entryId), {

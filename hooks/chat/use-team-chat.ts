@@ -155,6 +155,10 @@ export function useTeamChat() {
           ...(opts?.targetMemberIds && opts.targetMemberIds.length > 0
             ? { targetMemberIds: [...opts.targetMemberIds] }
             : {}),
+          ...(opts?.promptPreamble ? { promptPreamble: opts.promptPreamble } : {}),
+          ...(opts?.citations && opts.citations.length > 0
+            ? { citations: [...opts.citations] }
+            : {}),
         })
         if (!result.accepted) throw new Error("room_send was not accepted")
         return true
@@ -198,11 +202,13 @@ export function useTeamChat() {
     (sessionId: string) => {
       maybeDrainSteer(
         sessionId,
-        (payload, webSearchContext, replyTo) =>
+        (payload, webSearchContext, replyTo, references) =>
           sendViaHost(sessionId, payload, {
             steerDrain: true,
             webSearchContext,
             ...(replyTo ? { replyTo } : {}),
+            ...(references?.citations ? { citations: references.citations } : {}),
+            ...(references?.promptPreamble ? { promptPreamble: references.promptPreamble } : {}),
           }),
         true
       )

@@ -4,6 +4,8 @@
 
 import type { SendOptions } from "@cognia/agent-config-types"
 import type { UIMessage } from "ai"
+import type { ContextRef } from "@/lib/chat/mentions/types"
+import type { PromptPreambleSummary } from "@/lib/chat/prompt-preamble"
 
 type WebSearchContext = SendOptions["webSearchContext"]
 
@@ -15,6 +17,8 @@ interface SliceLike {
     blocks?: unknown[]
     webSearchContext?: WebSearchContext
     replyTo?: { messageId: string; preview: string }
+    citations?: ContextRef[]
+    promptPreamble?: PromptPreambleSummary
   }>
   messages?: UIMessage[]
 }
@@ -469,10 +473,63 @@ describe("maybeDrainSteer", () => {
 
     maybeDrainSteer("s1", replay)
 
-    expect(replay).toHaveBeenCalledWith(expect.anything(), {
-      provider: "tavily",
-      results: [first.results[0], second.results[1]],
+    expect(replay).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        provider: "tavily",
+        results: [first.results[0], second.results[1]],
+      },
+      undefined,
+      undefined
+    )
+  })
+
+  it("merges every drained entry's citations and preamble summaries", () => {
+    const citationA: ContextRef = { kind: "entity", id: "session:sa", label: "Sprint planning" }
+    const citationB: ContextRef = { kind: "file", id: "file:src/x.ts", label: "x.ts" }
+    state.sessions["s1"] = {
+      steerQueue: [
+        {
+          id: "a",
+          text: "first",
+          citations: [citationA],
+          promptPreamble: {
+            sections: ["references"],
+            references: [{ kind: "entity", entityKind: "session", title: "Sprint planning" }],
+          },
+        },
+        {
+          id: "b",
+          text: "second",
+          citations: [citationB],
+          promptPreamble: {
+            sections: ["references", "reviewReceipts"],
+            references: [{ kind: "entity", entityKind: "message", title: "m1" }],
+          },
+        },
+      ],
+    }
+    const replay = jest.fn()
+
+    maybeDrainSteer("s1", replay)
+
+    expect(replay.mock.calls[0][3]).toEqual({
+      citations: [citationA, citationB],
+      promptPreamble: {
+        sections: ["references", "reviewReceipts"],
+        references: [
+          { kind: "entity", entityKind: "session", title: "Sprint planning" },
+          { kind: "entity", entityKind: "message", title: "m1" },
+        ],
+      },
     })
+  })
+
+  it("passes no references when no queued entry cited anything", () => {
+    state.sessions["s1"] = { steerQueue: [{ id: "a", text: "first" }] }
+    const replay = jest.fn()
+    maybeDrainSteer("s1", replay)
+    expect(replay.mock.calls[0][3]).toBeUndefined()
   })
 
   it("marks the drained entries applied before dispatching the replay", () => {

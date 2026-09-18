@@ -22,6 +22,12 @@ export interface RunAutoModeArgs {
   locale?: string
   /** Plugin-contributed command rulesets (lower precedence than user rules). */
   pluginRules?: Ruleset[]
+  /**
+   * Session the permission request belongs to — scopes the model judge's
+   * verdict cache so a mid-turn steer invalidates verdicts reached under the
+   * superseded instruction.
+   */
+  contextKey?: string
 }
 
 /**
@@ -38,6 +44,7 @@ export async function runAutoModeForTool({
   cwd,
   locale,
   pluginRules = [],
+  contextKey,
 }: RunAutoModeArgs): Promise<AutoDecision | null> {
   const command = extractCommand(toolName, input)
   if (command == null) return null
@@ -56,5 +63,5 @@ export async function runAutoModeForTool({
   const rules: Ruleset[] = [...pluginRules]
   if (userRules && Object.keys(userRules).length > 0) rules.push({ Bash: userRules })
 
-  return evaluateAutoDecision({ command, config, rules, client, cwd, locale })
+  return evaluateAutoDecision({ command, config, rules, client, cwd, locale, contextKey })
 }
