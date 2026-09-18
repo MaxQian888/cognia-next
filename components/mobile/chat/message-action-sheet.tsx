@@ -24,6 +24,7 @@ import {
   QuoteIcon,
   RefreshCcwIcon,
   LinkIcon,
+  SendHorizontalIcon,
   Share2Icon,
   ScissorsIcon,
   SquareIcon,
@@ -291,6 +292,22 @@ export function MessageActionSheet({
     onOpenChange(false)
   }
 
+  // The touch sibling of the hover bar's resend button: same `onEditResend`
+  // replay, skipping the draft step "Edit" opens.
+  const onResendRow = async () => {
+    if (!message || !onEditResend || !text) return
+    setBusy(true)
+    try {
+      await onEditResend(message, text)
+      onOpenChange(false)
+    } catch (err) {
+      void notify("error")
+      toast.error(t("editFailed", { message: err instanceof Error ? err.message : String(err) }))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const onEditSubmit = async () => {
     if (!message || !onEditResend || editText === null) return
     const trimmed = editText.trim()
@@ -538,6 +555,15 @@ export function MessageActionSheet({
               onClick={() => setEditText(text)}
               disabled={busy || !text}
               testid="message-action-edit"
+            />
+          )}
+          {commandById.has("resend") && onEditResend && (
+            <Row
+              icon={<SendHorizontalIcon className="size-4" />}
+              label={t("resend")}
+              onClick={() => void onResendRow()}
+              disabled={busy || !text || commandById.get("resend")?.disabled}
+              testid="message-action-resend"
             />
           )}
           {commandById.has("regenerate") && onRegenerate && (

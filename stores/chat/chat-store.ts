@@ -19,7 +19,7 @@ import { getSubagentApprovalRoute } from "@/lib/claude/agents/subagent-approval-
 import { useApprovalJournalStore, toPersistedApproval } from "@/stores/agent/approval-journal-store"
 import { IDLE_TIMING, nextRunTiming, type RunTiming } from "@/lib/claude/run-status"
 import { nextToolTimestamps } from "@/lib/claude/run-record"
-import { useSyncExternalStore } from "react"
+import { useMemo, useSyncExternalStore } from "react"
 import { getExecutionBroker, DEFAULT_AI_TURN_LIMIT } from "@/lib/execution/broker"
 
 export type ChatStatus = "idle" | "streaming" | "awaiting_approval" | "error"
@@ -1483,11 +1483,31 @@ export function selectIsAtStreamCap(
 
 const EMPTY_MESSAGES: UIMessage[] = []
 const EMPTY_APPROVALS: PendingApproval[] = []
+const EMPTY_BRANCH_SELECTION: Record<string, string> = {}
 
 /** Read a single session's slice (or a stable default when absent). */
 export function useSessionMessages(sessionId: string | null): UIMessage[] {
   return useChatStore((s) =>
     sessionId ? (s.sessions[sessionId]?.messages ?? EMPTY_MESSAGES) : EMPTY_MESSAGES
+  )
+}
+/**
+ * The session's messages projected to the visible thread — sibling variants
+ * from regenerating a reply or editing a question collapse to the selected
+ * one, and messages hanging off a hidden sibling go with it
+ * ({@link selectVisibleMessages}). {@link useSessionMessages} is the raw
+ * store; anything rendering the transcript wants this one.
+ */
+export function useSessionVisibleMessages(sessionId: string | null): UIMessage[] {
+  const messages = useSessionMessages(sessionId)
+  const activeBranchByGroup = useChatStore((s) =>
+    sessionId
+      ? (s.sessions[sessionId]?.activeBranchByGroup ?? EMPTY_BRANCH_SELECTION)
+      : EMPTY_BRANCH_SELECTION
+  )
+  return useMemo(
+    () => selectVisibleMessages(messages, activeBranchByGroup),
+    [messages, activeBranchByGroup]
   )
 }
 export function useSessionStatus(sessionId: string | null): ChatStatus {

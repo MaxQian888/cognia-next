@@ -266,6 +266,13 @@ export class RoomRunner {
   private readonly coalescing: SessionCoalescingRegistry
   private readonly subCtx = new Map<string, SubResolverCtx>()
   private readonly pendingBranchTags = new Map<string, PendingBranchTag>()
+  /**
+   * The replacement user message an edit-as-branch turn just appended, keyed by
+   * team session. Every message the turn writes is stamped `branchOwnerId` to
+   * it, so flipping the navigator back to the original hides this turn's
+   * replies along with the variant they answer.
+   */
+  private readonly pendingEditOwners = new Map<string, string>()
   private readonly pendingWebSearch = new Map<string, SendOptions["webSearchContext"]>()
   private readonly lastUserContent = new Map<string, SendContent>()
   /** Per member sub-session: the activity last published and its stale timer. */
@@ -360,6 +367,7 @@ export class RoomRunner {
     } finally {
       if (this.acquiredTurns.delete(sessionId)) this.deps.execution.releaseChatLease(sessionId)
       this.pendingBranchTags.delete(sessionId)
+      this.pendingEditOwners.delete(sessionId)
       this.pendingWebSearch.delete(sessionId)
       this.activeTurns.delete(sessionId)
       if (this.drainAfterTurn.delete(sessionId)) this.drainSteerInto(sessionId)
@@ -495,6 +503,12 @@ export class RoomRunner {
           branchIndex: opts.branchTag.index,
         }
         sinks.messages.setActiveBranch(sessionId, opts.branchTag.groupId, userMsg.id)
+        // Everything this turn appends belongs to the replacement variant —
+        // stamp it as the owner so the other sibling keeps its own tail.
+        this.pendingEditOwners.set(sessionId, userMsg.id)
+      } else {
+        // A normal send must never inherit the previous turn's owner.
+        this.pendingEditOwners.delete(sessionId)
       }
       const before = sinks.messages.read(sessionId) ?? (await deps.db.listMessages(sessionId))
       const after = [...before, userMsg]
@@ -701,6 +715,7 @@ export class RoomRunner {
       const hadError = sinks.status.get(sessionId) === "error"
       const wasInterrupted = this.interrupted.has(sessionId)
       this.pendingBranchTags.delete(sessionId)
+      this.pendingEditOwners.delete(sessionId)
       this.pendingWebSearch.delete(sessionId)
       for (const sub of [...this.memberStops]) {
         if (decodeSubSession(sub)?.teamSessionId === sessionId) this.memberStops.delete(sub)
@@ -1537,10 +1552,17 @@ export class RoomRunner {
           ctx?.onRoutingCommit?.()
         }
         const pendingBranch = this.pendingBranchTags.get(teamSessionId)
+        const pendingEditOwner = this.pendingEditOwners.get(teamSessionId)
         let tagged = nextMessages.map((m) => {
           if (existingIds.has(m.id)) return m
-          if (m.role !== "assistant") return m
-          let extra: Record<string, unknown> = { senderId, ...(ctx?.extraMetadata ?? {}) }
+          if (m.role !== "assistant") {
+            return pendingEditOwner ? withMetadata(m, { branchOwnerId: pendingEditOwner }) : m
+          }
+          let extra: Record<string, unknown> = {
+            senderId,
+            ...(ctx?.extraMetadata ?? {}),
+            ...(pendingEditOwner ? { branchOwnerId: pendingEditOwner } : {}),
+          }
           if (pendingBranch) {
             const ord = pendingBranch.seenByMember.get(senderId) ?? 0
             pendingBranch.seenByMember.set(senderId, ord + 1)

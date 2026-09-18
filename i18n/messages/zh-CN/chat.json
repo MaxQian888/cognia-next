@@ -1763,6 +1763,8 @@
     "regenerateTooltip": "重新生成",
     "rerunTemplateLabel": "重跑这条消息",
     "rerunTemplateTooltip": "换个参数重跑",
+    "resendLabel": "重新发送",
+    "resendTooltip": "重新发送这条消息",
     "saveAsMemoryDone": "已把“{title}”存为待审记忆草稿。",
     "saveAsMemoryEmpty": "这条回复里没有可保存的内容。",
     "saveAsMemoryFailed": "保存失败：{reason}",

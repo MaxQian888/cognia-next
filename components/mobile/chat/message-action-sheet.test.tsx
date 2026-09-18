@@ -138,6 +138,7 @@ const messages = {
       shareFailed: "Share failed: {message}",
       branch: "Branch conversation",
       regenerate: "Regenerate reply",
+      resend: "Resend",
       delete: "Delete message",
       deleteConfirmTitle: "Delete this message?",
       deleteConfirmDescription: "Removes it everywhere.",
@@ -502,6 +503,27 @@ describe("MessageActionSheet", () => {
       target: { value: "   " },
     })
     expect(screen.getByTestId("message-action-edit-send")).toBeDisabled()
+  })
+
+  it("resends the recorded text from the Resend row without opening the edit pane", async () => {
+    const onEditResend = jest.fn().mockResolvedValue(undefined)
+    const onOpenChange = jest.fn()
+    const message = { ...makeMessage("send me again"), role: "user" as const }
+    renderSheet(message, onOpenChange, { onEditResend })
+
+    fireEvent.click(screen.getByTestId("message-action-resend"))
+
+    await waitFor(() => {
+      expect(onEditResend).toHaveBeenCalledWith(message, "send me again")
+    })
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+    // The draft box never opened.
+    expect(screen.queryByTestId("message-action-edit-input")).not.toBeInTheDocument()
+  })
+
+  it("hides the resend row when onEditResend is not provided", () => {
+    renderSheet(makeMessage("hello"), jest.fn())
+    expect(screen.queryByTestId("message-action-resend")).not.toBeInTheDocument()
   })
 
   it("cancel returns to the action list without resending", () => {

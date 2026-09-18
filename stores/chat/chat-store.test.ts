@@ -14,6 +14,7 @@ import {
   selectStreamingCount,
   selectIsAtStreamCap,
   useSessionMessages,
+  useSessionVisibleMessages,
   useSessionStatus,
   useSessionErrorMessage,
   useSessionPendingApprovals,
@@ -1266,6 +1267,49 @@ describe("useChatStore", () => {
       expect(renderHook(() => useSessionPendingApprovals(null)).result.current).toEqual([])
       expect(renderHook(() => useSessionMessagesLoading(null)).result.current).toBe(false)
       expect(renderHook(() => useSessionMessagesLoadError(null)).result.current).toBeNull()
+    })
+
+    it("useSessionVisibleMessages projects the selected branch and reacts to switching", () => {
+      // The transcript seam `editAndResend` relies on: the raw slice keeps both
+      // siblings, the visible thread shows one — the edited variant in the
+      // original's slot — and the navigator flips between whole tails.
+      const sibling = (id: string, index: number): UIMessage =>
+        ({
+          id,
+          role: "user",
+          parts: [],
+          metadata: { branchGroupId: "e1", branchIndex: index },
+        }) as unknown as UIMessage
+      const owned = (id: string, ownerId: string): UIMessage =>
+        ({
+          id,
+          role: "assistant",
+          parts: [],
+          metadata: { branchOwnerId: ownerId },
+        }) as unknown as UIMessage
+      act(() => {
+        useChatStore.getState().setActiveSession("A")
+        useChatStore
+          .getState()
+          .setSessionMessages("A", [
+            sibling("q0", 0),
+            owned("r0", "q0"),
+            sibling("q1", 1),
+            owned("r1", "q1"),
+          ])
+      })
+      const { result } = renderHook(() => useSessionVisibleMessages("A"))
+      expect(result.current.map((m) => m.id)).toEqual(["q1", "r1"])
+      act(() => useChatStore.getState().setSessionActiveBranch("A", "e1", "q0"))
+      expect(result.current.map((m) => m.id)).toEqual(["q0", "r0"])
+      // Raw view is untouched — both variants remain in the store.
+      expect(useChatStore.getState().sessions.A.messages.map((m) => m.id)).toEqual([
+        "q0",
+        "r0",
+        "q1",
+        "r1",
+      ])
+      expect(renderHook(() => useSessionVisibleMessages(null)).result.current).toEqual([])
     })
 
     it("useSessionPendingApprovals / loading / loadError read the slice", () => {

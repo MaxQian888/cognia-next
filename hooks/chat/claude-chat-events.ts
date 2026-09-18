@@ -303,6 +303,7 @@ export async function handleEvent(
   activeRef: React.MutableRefObject<string | null>,
   allowListRef: React.MutableRefObject<string[]>,
   pendingBranchTagRef: React.MutableRefObject<Map<string, { groupId: string; index: number }>>,
+  pendingBranchOwnerRef: React.MutableRefObject<Map<string, string>>,
   sendRef: React.MutableRefObject<SendFn | null>,
   coalescing: StreamCoalescing
 ) {
@@ -443,6 +444,11 @@ export async function handleEvent(
       // success, error, and abort all land here). A fallback retry below
       // re-begins against the next provider in the chain.
       useInFlightStore.getState().settle(evt.sessionId)
+      // Turn-scoped branch bookkeeping dies with the turn — even one that
+      // ended without a `result` to consume it. A stale entry would stamp the
+      // NEXT unrelated turn's first message.
+      pendingBranchTagRef.current.delete(evt.sessionId)
+      pendingBranchOwnerRef.current.delete(evt.sessionId)
       // Cancel any backstop deny still pending for a remote-routed approval
       // on this session (Remote Session Control).
       clearApprovalBackstops(evt.sessionId)
@@ -970,6 +976,34 @@ export async function handleEvent(
               .getState()
               .setSessionActiveBranch(sessionId, pendingTag.groupId, stamped.id)
           }
+        }
+      }
+
+      // Edit-as-branch: the replacement user message owns every message its
+      // turn appends, so flipping the navigator back to the original hides the
+      // new turn's replies along with the variant they answer
+      // (`selectVisibleMessages` rule 2). `pendingBranchTagRef` covers the
+      // regenerate sibling; this covers everything else the turn writes.
+      const pendingOwner = pendingBranchOwnerRef.current.get(sessionId)
+      if (pendingOwner) {
+        if (turnComplete) pendingBranchOwnerRef.current.delete(sessionId)
+        const ownerIndex = nextMessages.findIndex((m) => m.id === pendingOwner)
+        if (ownerIndex >= 0) {
+          let owned: UIMessage[] | null = null
+          for (let i = ownerIndex + 1; i < nextMessages.length; i++) {
+            const m = nextMessages[i]
+            const meta = (m as { metadata?: { branchOwnerId?: unknown } }).metadata
+            if (meta?.branchOwnerId !== undefined) continue
+            if (!owned) owned = nextMessages.slice()
+            owned[i] = {
+              ...m,
+              metadata: {
+                ...(meta as Record<string, unknown> | undefined),
+                branchOwnerId: pendingOwner,
+              },
+            } as UIMessage
+          }
+          if (owned) nextMessages = owned
         }
       }
 

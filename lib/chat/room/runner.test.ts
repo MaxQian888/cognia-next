@@ -807,6 +807,22 @@ describe("regenerate and edit", () => {
       branchIndex: 1,
     })
   })
+
+  it("hangs the edit turn's replies off the replacement variant", async () => {
+    // Without the owner stamp, flipping the navigator back to the original
+    // question would still show the answer the EDITED turn produced.
+    const w = createWorld({ team: { members: [{ characterId: "a" }] } })
+    w.seed([{ id: "u-0", role: "user", parts: [{ type: "text", text: "typo" }] } as Msg])
+    await w.runner.editAndResend(ROOM, "u-0", "fixed")
+    await flush()
+    const messages = w.db.get(ROOM)!
+    const replacement = messages.filter((m) => m.role === "user")[1]
+    const reply = messages.find((m) => m.role === "assistant")
+    expect(reply?.metadata).toMatchObject({
+      senderId: "a",
+      branchOwnerId: replacement.id,
+    })
+  })
 })
 
 describe("editing a turn that carried references", () => {

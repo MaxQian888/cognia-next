@@ -2808,6 +2808,48 @@ describe("useClaudeChat — actions", () => {
     expect(sendPromptMock).toHaveBeenCalled()
   })
 
+  it("editAndResend stamps the new turn's replies with the edited variant as branch owner", async () => {
+    // The original keeps its own tail via `tagEditSibling`, but the reply the
+    // RESEND produces must hang off the replacement too — otherwise flipping
+    // the navigator back to the original shows the new answer under it.
+    const adapterMock = jest.requireMock("@/lib/claude/adapter") as {
+      applySdkEvent: jest.Mock
+    }
+    chatState.messages = [
+      { id: "u-1", role: "user", parts: [{ type: "text", text: "original" }] },
+      { id: "a-1", role: "assistant", parts: [{ type: "text", text: "reply" }] },
+    ]
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.editAndResend("u-1", "edited")
+    })
+
+    // `makeUserMessage` is mocked to id "u1" — that is the replacement variant
+    // the just-sent turn owns.
+    const appended = [
+      ...(chatState.messages as object[]),
+      { id: "a-2", role: "assistant", parts: [{ type: "text", text: "new reply" }] },
+    ]
+    adapterMock.applySdkEvent.mockReturnValueOnce({ messages: appended, turnComplete: true })
+    await act(async () => {
+      _messageCallback?.({ type: "event", sessionId: "sess-1", event: { type: "result" } })
+    })
+    await flush()
+
+    const written = chatState.replaceSessionMessages.mock.calls.at(-1)?.[1] as Array<{
+      id: string
+      metadata?: Record<string, unknown>
+    }>
+    expect(written.find((m) => m.id === "a-2")?.metadata).toMatchObject({
+      branchOwnerId: "u1",
+    })
+    // The pre-existing tail stays owned by the ORIGINAL sibling.
+    expect(written.find((m) => m.id === "a-1")?.metadata).toMatchObject({
+      branchOwnerId: "u-1",
+    })
+  })
+
   it("editAndResend is a no-op when the message is not in the thread", async () => {
     chatState.messages = []
     const { result } = renderHook(() => useClaudeChat())

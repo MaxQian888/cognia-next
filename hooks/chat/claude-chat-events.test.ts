@@ -95,6 +95,7 @@ describe("Claude chat event seam", () => {
           { current: null },
           { current: [] },
           { current: new Map() },
+          { current: new Map() },
           { current: null },
           undefined as never
         )
@@ -154,6 +155,7 @@ describe("pre-search source folding", () => {
       { current: "s1" },
       { current: [] },
       { current: new Map() },
+      { current: new Map() },
       { current: null },
       {
         messagesMirrorRef: { current: new Map() },
@@ -207,6 +209,7 @@ describe("pre-search source folding", () => {
       { current: "s5" },
       { current: [] },
       { current: new Map() },
+      { current: new Map() },
       { current: null },
       {
         messagesMirrorRef: { current: new Map() },
@@ -250,6 +253,7 @@ describe("sidecar log frames", () => {
       ref<string | null>("s1"),
       ref<string[]>([]),
       ref(new Map<string, { groupId: string; index: number }>()),
+      ref(new Map<string, string>()),
       ref(null),
       {
         messagesMirrorRef: ref(new Map()),
@@ -344,6 +348,7 @@ describe("project-history evidence folding", () => {
       { current: sessionId },
       { current: [] },
       { current: new Map() },
+      { current: new Map() },
       { current: null },
       {
         messagesMirrorRef: { current: new Map() },
@@ -379,6 +384,79 @@ describe("project-history evidence folding", () => {
     await runTurn("s4")
     expect(mergeProjectHistorySourcesMock).toHaveBeenCalledTimes(1)
     expect(drainProjectHistoryEvidence("s4")).toEqual([])
+  })
+})
+
+describe("edit-as-branch owner stamping", () => {
+  const ref = <T>(value: T) => ({ current: value }) as React.MutableRefObject<T>
+
+  it("stamps branchOwnerId on messages the resend turn appends, then releases the owner", async () => {
+    // The slice already holds the edit's tagged base: original sibling + its
+    // owned tail, then the replacement variant. Everything the turn appends
+    // past the replacement must hang off it, or flipping the navigator back
+    // to the original would still show the new turn's answer.
+    const prior = [
+      {
+        id: "q0",
+        role: "user",
+        parts: [],
+        metadata: { branchGroupId: "e", branchIndex: 0 },
+      },
+      { id: "r0", role: "assistant", parts: [], metadata: { branchOwnerId: "q0" } },
+      {
+        id: "q1",
+        role: "user",
+        parts: [],
+        metadata: { branchGroupId: "e", branchIndex: 1 },
+      },
+    ]
+    useChatStore.setState({
+      sessions: {
+        s9: {
+          ...(useChatStore.getState().sessions.s9 ?? {}),
+          messages: prior,
+          status: "streaming",
+          pendingApprovals: [],
+        },
+      },
+      openSessionIds: ["s9"],
+      lastSendBySession: { s9: { content: "q", options: {}, attemptIndex: 0 } },
+    } as never)
+    applySdkEventMock.mockReturnValueOnce({
+      messages: [...prior, { id: "r1", role: "assistant", parts: [] }],
+      turnComplete: true,
+    })
+    const owners = ref(new Map<string, string>([["s9", "q1"]]))
+    const registry = new SessionCoalescingRegistry({
+      onCommit: () => {},
+      onPersist: () => {},
+      persistDelayMs: 0,
+    })
+
+    await handleEvent(
+      { type: "event", sessionId: "s9", event: { type: "result" } } as never,
+      ref<string | null>("s9"),
+      ref<string[]>([]),
+      ref(new Map<string, { groupId: string; index: number }>()),
+      owners,
+      ref(null),
+      {
+        messagesMirrorRef: ref(new Map()),
+        registry,
+        getExecutionHandle: () => undefined,
+      } as never
+    ).catch(() => {})
+
+    const messages = useChatStore.getState().sessions.s9?.messages ?? []
+    expect(messages.find((m) => m.id === "r1")?.metadata).toMatchObject({
+      branchOwnerId: "q1",
+    })
+    // Rows that already hang off the OTHER sibling keep their owner.
+    expect(messages.find((m) => m.id === "r0")?.metadata).toMatchObject({
+      branchOwnerId: "q0",
+    })
+    // Consumed at turn end — a stale owner would tag the next turn's rows.
+    expect(owners.current.has("s9")).toBe(false)
   })
 })
 
@@ -423,6 +501,7 @@ describe("Router + Fusion turn wiring (ADR-0188)", () => {
       ref<string | null>(sessionId),
       ref<string[]>([]),
       ref(new Map<string, { groupId: string; index: number }>()),
+      ref(new Map<string, string>()),
       ref(null),
       {
         messagesMirrorRef: ref(new Map()),

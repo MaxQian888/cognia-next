@@ -1763,6 +1763,8 @@
     "regenerateTooltip": "Regenerate",
     "rerunTemplateLabel": "Re-run this message",
     "rerunTemplateTooltip": "Re-run with different values",
+    "resendLabel": "Resend",
+    "resendTooltip": "Resend this message",
     "saveAsMemoryDone": "Saved “{title}” as a pending memory draft.",
     "saveAsMemoryEmpty": "There is nothing readable in this reply to save.",
     "saveAsMemoryFailed": "Could not save it: {reason}",

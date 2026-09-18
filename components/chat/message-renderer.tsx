@@ -127,6 +127,7 @@ import {
   CircleDotIcon,
   RefreshCcwIcon,
   Repeat2Icon,
+  SendHorizontalIcon,
   Share2Icon,
   MoreHorizontalIcon,
   QuoteIcon,
@@ -1054,6 +1055,18 @@ function MessageRendererInner({
                   </MessageAction>
                 )}
 
+                {hasActionCommand("resend") && onEditResend && (
+                  <MessageAction
+                    tooltip={t("resendTooltip")}
+                    label={t("resendLabel")}
+                    onClick={() => void onEditResend(message.id, extractText(message))}
+                    disabled={actionCommand("resend")?.disabled}
+                    data-testid="message-resend"
+                  >
+                    <SendHorizontalIcon className="size-3.5" />
+                  </MessageAction>
+                )}
+
                 {hasActionCommand("reply") && (
                   <MessageAction
                     tooltip={t("replyTooltip")}
@@ -1355,6 +1368,18 @@ function MessageRendererInner({
                     onClick={startEdit}
                   >
                     <PencilIcon className="size-3.5" />
+                  </MessageAction>
+                )}
+
+                {hasActionCommand("resend") && onEditResend && (
+                  <MessageAction
+                    tooltip={t("resendTooltip")}
+                    label={t("resendLabel")}
+                    onClick={() => void onEditResend(message.id, extractText(message))}
+                    disabled={actionCommand("resend")?.disabled}
+                    data-testid="message-resend"
+                  >
+                    <SendHorizontalIcon className="size-3.5" />
                   </MessageAction>
                 )}
 

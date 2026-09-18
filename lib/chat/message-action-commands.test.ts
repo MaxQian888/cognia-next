@@ -61,6 +61,32 @@ describe("resolveMessageActionCommands", () => {
   })
 })
 
+describe("resend", () => {
+  const base = { role: "user" as const, hasContent: true, hasSession: true }
+
+  it("is offered next to edit on a user turn that can replay", () => {
+    const ids = resolveMessageActionCommands({ ...base, canEdit: true }).map((c) => c.id)
+    expect(ids).toEqual(expect.arrayContaining(["edit", "resend"]))
+  })
+
+  it("is absent without the edit capability or on an assistant turn", () => {
+    expect(resolveMessageActionCommands(base).map((c) => c.id)).not.toContain("resend")
+    expect(
+      resolveMessageActionCommands({ ...base, role: "assistant", canEdit: true }).map((c) => c.id)
+    ).not.toContain("resend")
+  })
+
+  // A replay mid-turn would clobber the running stream.
+  it("is disabled while a turn is in flight", () => {
+    const command = resolveMessageActionCommands({
+      ...base,
+      canEdit: true,
+      streaming: true,
+    }).find((c) => c.id === "resend")
+    expect(command?.disabled).toBe(true)
+  })
+})
+
 describe("rerunTemplate", () => {
   const base = { role: "user" as const, hasContent: true, hasSession: true }
 

@@ -1548,6 +1548,19 @@ describe("edit flow", () => {
     fireEvent.keyDown(textarea, { key: "Escape" })
     expect(screen.queryByRole("textbox")).toBeNull()
   })
+
+  it("resends the recorded text without opening the draft box", () => {
+    const onEditResend = jest.fn()
+    render(<MessageRenderer message={userMsg("e5", "send me again")} onEditResend={onEditResend} />)
+    fireEvent.click(screen.getByLabelText("resendTooltip"))
+    expect(onEditResend).toHaveBeenCalledWith("e5", "send me again")
+    expect(screen.queryByRole("textbox")).toBeNull()
+  })
+
+  it("does not offer resend on an assistant turn", () => {
+    render(<MessageRenderer message={assistantMsg("a-no-resend")} onEditResend={jest.fn()} />)
+    expect(screen.queryByLabelText("resendTooltip")).toBeNull()
+  })
 })
 
 // ── speaker display ───────────────────────────────────────────────────────────

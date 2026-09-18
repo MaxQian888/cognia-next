@@ -367,6 +367,13 @@ export function useClaudeChat() {
    * fired from another session doesn't taint the active turn.
    */
   const pendingBranchTagRef = useRef<Map<string, { groupId: string; index: number }>>(new Map())
+  /**
+   * The replacement user message an edit-as-branch send just appended, keyed by
+   * sessionId. `handleEvent` stamps it as `branchOwnerId` on every message the
+   * turn writes, so flipping the navigator back to the original hides the new
+   * turn's replies along with the variant they answer. Consumed at turn end.
+   */
+  const pendingBranchOwnerRef = useRef<Map<string, string>>(new Map())
 
   /**
    * Holds the latest `send` so the module-scope `handleEvent` can dispatch a
@@ -616,11 +623,19 @@ export function useClaudeChat() {
         // A prior failure must not break the chain for later events.
         .catch(() => {})
         .then(() =>
-          handleEvent(evt, activeRef, allowListRef, pendingBranchTagRef, sendRef, {
-            messagesMirrorRef,
-            registry,
-            getExecutionHandle,
-          })
+          handleEvent(
+            evt,
+            activeRef,
+            allowListRef,
+            pendingBranchTagRef,
+            pendingBranchOwnerRef,
+            sendRef,
+            {
+              messagesMirrorRef,
+              registry,
+              getExecutionHandle,
+            }
+          )
         )
         .catch((err) => {
           console.error("handleEvent failed", err)
@@ -1384,6 +1399,12 @@ export function useClaudeChat() {
         store
           .getState()
           .setSessionActiveBranch(sessionId, callOptions.branchTag.groupId, userMsg.id)
+        // Everything this turn appends belongs to the replacement variant —
+        // stamp it as the owner so the other sibling keeps its own tail.
+        pendingBranchOwnerRef.current.set(sessionId, userMsg.id)
+      } else {
+        // A normal send must never inherit the previous turn's owner.
+        pendingBranchOwnerRef.current.delete(sessionId)
       }
       // Both flags mean "the user turn is already in the transcript": a
       // regenerate re-issues an existing one, a steer drain replays entries that

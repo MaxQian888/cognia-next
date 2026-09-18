@@ -7,6 +7,7 @@ export type MessageActionCommandId =
   | "shareCard"
   | "bookmark"
   | "edit"
+  | "resend"
   | "regenerate"
   | "readAloud"
   | "branch"
@@ -96,7 +97,12 @@ export function resolveMessageActionCommands(
       { id: "truncate", disabled: context.streaming, destructive: true }
     )
   }
-  if (context.role === "user" && context.canEdit) commands.push({ id: "edit" })
+  if (context.role === "user" && context.canEdit) {
+    // Both replay the same `onEditResend` path: "edit" opens the draft first,
+    // "resend" re-fires the recorded text unchanged. Resend is disabled while
+    // a turn is in flight — the replay would clobber the running stream.
+    commands.push({ id: "edit" }, { id: "resend", disabled: context.streaming })
+  }
   if (context.role === "assistant" && context.canRegenerate) {
     commands.push({ id: "regenerate", disabled: context.streaming })
   }

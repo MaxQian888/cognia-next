@@ -56,7 +56,7 @@ import {
   useChatStore,
   useSessionHasMessages,
   useSessionStatus,
-  useSessionMessages,
+  useSessionVisibleMessages,
   useSessionErrorMessage,
   useSessionErrorDiagnostic,
   useSessionMessagesLoading,
@@ -1005,7 +1005,7 @@ function ChatMessages({
   ) => Promise<RewindFilesResult>
   useCompanionTranscript: boolean
 }) {
-  const messages = useSessionMessages(sessionId)
+  const messages = useSessionVisibleMessages(sessionId)
   const status = useSessionStatus(sessionId)
   useEffect(() => {
     if (!sessionId || status !== "idle") return

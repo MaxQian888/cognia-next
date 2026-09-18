@@ -146,6 +146,7 @@ jest.mock("@/stores/chat", () => ({
     { getState: () => storeState, subscribe: () => () => {} }
   ),
   useSessionMessages: () => storeState.messages,
+  useSessionVisibleMessages: () => storeState.messages,
   useSessionStatus: () => storeState.status,
   useSessionErrorMessage: () => storeState.errorMessage,
   useSessionErrorDiagnostic: () => storeState.errorDiagnostic,
