@@ -16,10 +16,11 @@
  * - **Wall-clock deadline, not an accumulating `setTimeout`.** A backgrounded or
  *   throttled tab may never fire its timer on schedule; on every visibility or
  *   focus regain we recompute against `Date.now()` and lock immediately if the
- *   idle window has already elapsed. Activity handlers only stamp a timestamp
- *   (cheap even under `pointermove`), and the single armed timer re-arms for the
- *   remainder when it finds fresh activity, so continuous use never churns
- *   timers.
+ *   idle window has already elapsed — still interrupting a live turn first, so
+ *   it records an interrupt instead of being torn down mid-write. Activity
+ *   handlers only stamp a timestamp (cheap even under `pointermove`), and the
+ *   single armed timer re-arms for the remainder when it finds fresh activity,
+ *   so continuous use never churns timers.
  *
  * - **Bounded run deferral.** A streaming or approval-waiting local turn may
  *   delay the first idle deadline by one additional lock window. At the second
@@ -36,6 +37,13 @@
  *   browser has a real local account backed by the Browser Vault, and locking it
  *   is exactly as meaningful there.
  *
+ * - **Never armed in a development build.** `pnpm dev` / `pnpm tauri dev`
+ *   spend most of their life backgrounded behind an editor, which reads as
+ *   pure idle — the lock bought no security there (the dev-local account's
+ *   password is a bundle constant) and cost a prompt every idle window.
+ *   `NEXT_PUBLIC_ACCOUNT_GATE=1`, the same flag that forces the real password
+ *   gate in dev, re-arms the timer so the lock stays testable.
+ *
  * Inert until the user sets a non-zero timeout in Settings → Account → Security.
  */
 
@@ -49,6 +57,20 @@ import { useSettingsStore } from "@/stores/settings"
 
 const ACTIVITY_EVENTS = ["pointerdown", "keydown", "pointermove", "wheel", "touchstart"] as const
 
+/**
+ * Is the idle lock meaningful in this build?
+ *
+ * Written against `process.env` literals so Next's build-time inlining folds
+ * the development branch away — a computed lookup would leave it in the
+ * production bundle. `NODE_ENV === "development"` is what `next dev` sets for
+ * both `pnpm dev` and `pnpm tauri dev`; every shipped artifact (static export
+ * for the desktop/mobile shells, the E2E build) is `production` and still arms.
+ */
+function autoLockAppliesInThisBuild(): boolean {
+  if (process.env.NEXT_PUBLIC_ACCOUNT_GATE === "1") return true
+  return process.env.NODE_ENV !== "development"
+}
+
 export function useAutoLockOnIdle(): void {
   const minutes = useSettingsStore((s) => s.settings?.accountAutoLockMinutes ?? 0)
   const unlockedAccountId = useAccountStore((s) => s.unlockedAccountId)
@@ -57,6 +79,7 @@ export function useAutoLockOnIdle(): void {
 
   useEffect(() => {
     if (typeof window === "undefined") return
+    if (!autoLockAppliesInThisBuild()) return
     if (minutes <= 0 || !unlockedAccountId) return
     if (isSecondaryOverlayRole(getPetWindowRole())) return
 
@@ -90,7 +113,10 @@ export function useAutoLockOnIdle(): void {
       clearTimer()
       const remaining = windowMs - (Date.now() - lastActivityRef.current)
       if (remaining <= 0) {
-        lockNow()
+        // The deadline passed while we were away, so lock now — but still route
+        // through `lockNow` with the live blockers so a running turn gets its
+        // interrupt recorded instead of being torn down silently.
+        lockNow(blockingSessionIds())
         return
       }
       timerRef.current = setTimeout(onExpire, remaining)

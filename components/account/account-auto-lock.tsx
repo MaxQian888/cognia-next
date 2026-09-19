@@ -7,8 +7,9 @@ import { useAutoLockOnIdle } from "@/hooks/account/use-auto-lock-on-idle"
  * call a second, divergent copy of this hook directly; there is now one hook and
  * one mount.
  *
- * Self-gates (unlocked account + a positive timeout + not an overlay window + no
- * running local turn) inside the hook, so it is safe to mount unconditionally.
+ * Self-gates (unlocked account + a positive timeout + not an overlay window +
+ * not a development build) inside the hook, so it is safe to mount
+ * unconditionally.
  */
 export function AccountAutoLock() {
   useAutoLockOnIdle()

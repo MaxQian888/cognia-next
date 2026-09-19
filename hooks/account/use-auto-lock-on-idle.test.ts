@@ -45,6 +45,17 @@ jest.mock("@/stores/account/account-store", () => ({
 
 const FIVE_MINUTES = 5 * 60_000
 
+const ORIGINAL_NODE_ENV = process.env.NODE_ENV
+const ORIGINAL_ACCOUNT_GATE = process.env.NEXT_PUBLIC_ACCOUNT_GATE
+
+// `ProcessEnv.NODE_ENV` is typed readonly in this repo, and jest.replaceProperty
+// cannot create a missing key — assign through a mutable view instead.
+function setEnv(key: string, value: string | undefined): void {
+  const env = process.env as Record<string, string | undefined>
+  if (value === undefined) delete env[key]
+  else env[key] = value
+}
+
 beforeEach(() => {
   jest.useFakeTimers()
   jest.setSystemTime(new Date("2026-01-01T00:00:00Z"))
@@ -61,6 +72,8 @@ beforeEach(() => {
 afterEach(() => {
   jest.runOnlyPendingTimers()
   jest.useRealTimers()
+  setEnv("NODE_ENV", ORIGINAL_NODE_ENV)
+  setEnv("NEXT_PUBLIC_ACCOUNT_GATE", ORIGINAL_ACCOUNT_GATE)
 })
 
 describe("useAutoLockOnIdle", () => {
@@ -108,6 +121,43 @@ describe("useAutoLockOnIdle", () => {
       // which is exactly what a backgrounded tab does.
       jest.setSystemTime(Date.now() + FIVE_MINUTES + 1_000)
       window.dispatchEvent(new Event("focus"))
+    })
+
+    expect(lockMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("interrupts a live turn before locking when a backgrounded window returns past the deadline", async () => {
+    mockSessions = { s1: { status: "streaming" } }
+    renderHook(() => useAutoLockOnIdle())
+
+    await act(async () => {
+      jest.setSystemTime(Date.now() + FIVE_MINUTES + 1_000)
+      window.dispatchEvent(new Event("focus"))
+      await Promise.resolve()
+    })
+
+    expect(interruptSessionMock).toHaveBeenCalledWith("s1")
+    expect(lockMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("never arms in a development build — debugging reads as pure idle", () => {
+    setEnv("NODE_ENV", "development")
+    renderHook(() => useAutoLockOnIdle())
+
+    act(() => {
+      jest.advanceTimersByTime(FIVE_MINUTES * 4)
+    })
+
+    expect(lockMock).not.toHaveBeenCalled()
+  })
+
+  it("still arms in a development build when the account gate is forced on", () => {
+    setEnv("NODE_ENV", "development")
+    setEnv("NEXT_PUBLIC_ACCOUNT_GATE", "1")
+    renderHook(() => useAutoLockOnIdle())
+
+    act(() => {
+      jest.advanceTimersByTime(FIVE_MINUTES)
     })
 
     expect(lockMock).toHaveBeenCalledTimes(1)
