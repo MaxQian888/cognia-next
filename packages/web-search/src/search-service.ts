@@ -36,6 +36,12 @@ export interface UnifiedSearchOptions extends SearchOptions {
   fallbackEnabled?: boolean
   providerSettings?: Partial<Record<SearchProviderType, SearchProviderSettings>>
   /**
+   * Host-level defaults (Settings → Search → Behavior). Lowest precedence: a
+   * provider's own `defaultOptions` override them, and the remaining call-time
+   * fields override both.
+   */
+  baseOptions?: SearchOptions
+  /**
    * Max EXTRA attempts per provider on a transient failure (network / 429 / 5xx),
    * beyond the first try. Each extra attempt rotates to the next key in the
    * provider's pool (when multi-key) and waits an exponential backoff. Default 2.
@@ -55,6 +61,19 @@ export interface UnifiedSearchOptions extends SearchOptions {
 const DEFAULT_MAX_RETRIES = 2
 
 /**
+ * Copy `o` dropping keys whose value is `undefined`. Call-time options are
+ * always emitted fully populated (often with `undefined` placeholders); a
+ * naive spread would clobber provider `defaultOptions` with those undefineds.
+ */
+export function stripUndefined<T extends object>(o: T): Partial<T> {
+  const out: Partial<T> = {}
+  for (const [key, value] of Object.entries(o)) {
+    if (value !== undefined) (out as Record<string, unknown>)[key] = value
+  }
+  return out
+}
+
+/**
  * Unified search function. Searches using the specified provider or falls
  * back to alternatives. Increments per-provider usage stats via the
  * settings store on every attempt (success or failure).
@@ -68,6 +87,7 @@ export async function search(
     preferredProviders,
     fallbackEnabled = true,
     providerSettings,
+    baseOptions,
     maxRetries = DEFAULT_MAX_RETRIES,
     retryBackoffMs,
     abortSignal,
@@ -114,12 +134,19 @@ export async function search(
 
   for (const providerConfig of providersToTry) {
     const startTime = Date.now()
+    // Precedence: host-level baseOptions < provider defaultOptions < call-time
+    // fields (undefineds stripped so they don't clobber either lower rung).
+    const effective: SearchOptions = {
+      ...(baseOptions ?? {}),
+      ...stripUndefined(providerConfig.defaultOptions ?? {}),
+      ...stripUndefined(searchOptions),
+    }
     try {
-      const result = await attemptProviderWithRotation(query, providerConfig, searchOptions, retry)
-      health.recordResult(providerConfig.providerId, true)
+      const result = await attemptProviderWithRotation(query, providerConfig, effective, retry)
+      health.recordResult(providerConfig.providerId, true, Date.now() - startTime)
       void recordUsage(providerConfig.providerId, Date.now() - startTime, true)
-      const filteredResult = filterResponseByIncludedDomains(result, searchOptions.includeDomains)
-      if (filteredResult.results.length > 0 || !hasDomainConstraint(searchOptions.includeDomains)) {
+      const filteredResult = filterResponseByIncludedDomains(result, effective.includeDomains)
+      if (filteredResult.results.length > 0 || !hasDomainConstraint(effective.includeDomains)) {
         return filteredResult
       }
       lastDomainFilteredResponse = filteredResult
@@ -397,6 +424,40 @@ export async function testProviderConnection(
   } catch {
     return false
   }
+}
+
+export interface ProviderKeyTestResult {
+  /** 0 = primary key, 1.. = position in `apiKeys` (after dedupe/blank removal). */
+  index: number
+  ok: boolean
+  /** Last 4 chars, for display. */
+  keyHint: string
+}
+
+/**
+ * Test every key in a provider's rotation pool, sequentially — a parallel
+ * fan-out would read as a burst to the provider's rate limiter. Returns one
+ * row per key so the settings UI can show which backups are dead rather than
+ * only validating the primary.
+ */
+export async function testProviderKeyPool(
+  provider: SearchProviderType,
+  settings: SearchProviderSettings
+): Promise<ProviderKeyTestResult[]> {
+  const pool = buildKeyPool(settings)
+  // buildKeyPool drops a blank primary; an unconfigured provider still gets a
+  // single row so the caller can show "the primary key failed/is missing".
+  const keys = pool.length > 0 ? pool : [settings.apiKey]
+  const results: ProviderKeyTestResult[] = []
+  for (let index = 0; index < keys.length; index++) {
+    const key = keys[index]
+    results.push({
+      index,
+      ok: await testProviderConnection(provider, key, settings),
+      keyHint: key.slice(-4),
+    })
+  }
+  return results
 }
 
 /**

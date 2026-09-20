@@ -47,6 +47,7 @@
     "@cognia/provider-types": "workspace:*",
     "@cognia/redact": "workspace:*",
     "@cognia/security-findings": "workspace:*",
-    "@cognia/vector": "workspace:*"
+    "@cognia/vector": "workspace:*",
+    "@cognia/web-search": "workspace:*"
   }
 }

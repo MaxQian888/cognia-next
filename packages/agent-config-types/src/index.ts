@@ -14,6 +14,7 @@ export * from "./message-room-primitives"
 import type {
   SearchProviderType,
   SearchProviderSettings,
+  SearchProviderHealthSettings,
   SearchType,
   SearchDepth,
   SearchRecency,
@@ -5047,6 +5048,14 @@ export interface AppSettings {
   searchCacheEnabled?: boolean
   searchCacheTTL?: number
   searchCacheMaxEntries?: number
+
+  /**
+   * Per-provider circuit-breaker tuning (Settings → Web search →
+   * Performance). Persisted config only — the breaker state itself is
+   * in-memory and resets on reload. See `ProviderHealth` in
+   * `@cognia/web-search/provider-health`.
+   */
+  searchProviderHealth?: SearchProviderHealthSettings
 
   /** Safe-search filter level. */
   searchSafeSearchEnabled?: boolean

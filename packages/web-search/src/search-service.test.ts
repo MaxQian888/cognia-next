@@ -62,7 +62,9 @@ import {
   search,
   searchWithProvider,
   setSearchUsageReporter,
+  stripUndefined,
   testProviderConnection,
+  testProviderKeyPool,
   aggregateSearch,
 } from "./search-service"
 import { getProviderHealth, resetProviderHealth } from "./provider-health"
@@ -286,6 +288,100 @@ describe("search()", () => {
     expect(routeSearchMock).toHaveBeenCalledTimes(1)
     expect(routeSearchMock.mock.calls[0][1]).toBe("perplexity")
   })
+
+  it("feeds the success latency into the circuit breaker's avgLatency", async () => {
+    routeSearchMock.mockResolvedValueOnce({
+      provider: "tavily",
+      query: "q",
+      results: [],
+      responseTime: 1,
+    })
+    await search("q", {
+      provider: "tavily",
+      providerSettings: { tavily: makeSettings("tavily") },
+    })
+    const snap = getProviderHealth().snapshot("tavily")
+    expect(snap.avgLatency).toBeGreaterThanOrEqual(0)
+    expect(getProviderHealth().snapshotAll(["tavily"]).tavily.totalSuccesses).toBe(1)
+  })
+})
+
+describe("search() option precedence", () => {
+  const ok = (provider: SearchProviderSettings["providerId"]): SearchResponse => ({
+    provider,
+    query: "q",
+    results: [],
+    responseTime: 1,
+  })
+
+  it("merges baseOptions < provider defaultOptions < call-time overrides", async () => {
+    routeSearchMock.mockResolvedValueOnce(ok("tavily"))
+    await search("q", {
+      provider: "tavily",
+      providerSettings: {
+        tavily: makeSettings("tavily", {
+          defaultOptions: { searchType: "news", maxResults: 3 },
+        }),
+      },
+      baseOptions: { searchType: "general", maxResults: 5, searchDepth: "advanced" },
+      // Call-time fields win over both lower rungs — but only where defined.
+      searchType: "images",
+    })
+    const options = routeSearchMock.mock.calls[0][3] as Record<string, unknown>
+    expect(options).toMatchObject({
+      searchType: "images", // call-time beats provider default + base
+      maxResults: 3, // provider defaultOptions beats base
+      searchDepth: "advanced", // untouched by upper rungs → base survives
+    })
+  })
+
+  it("call-time fields set to undefined do not clobber provider defaults or base", async () => {
+    routeSearchMock.mockResolvedValueOnce(ok("tavily"))
+    await search("q", {
+      provider: "tavily",
+      providerSettings: {
+        tavily: makeSettings("tavily", { defaultOptions: { searchType: "news" } }),
+      },
+      baseOptions: { maxResults: 7 },
+      // Hosts emit fully-populated option objects with undefined placeholders.
+      searchType: undefined,
+      maxResults: undefined,
+    })
+    const options = routeSearchMock.mock.calls[0][3] as Record<string, unknown>
+    expect(options.searchType).toBe("news")
+    expect(options.maxResults).toBe(7)
+  })
+
+  it("domain filtering reads the effective per-attempt options, not only call-time", async () => {
+    routeSearchMock.mockResolvedValueOnce({
+      provider: "tavily",
+      query: "q",
+      results: [
+        { title: "On-domain", url: "https://docs.example.com/a", content: "x", score: 1 },
+        { title: "Off-domain", url: "https://other.test/b", content: "y", score: 0.5 },
+      ],
+      responseTime: 1,
+    })
+    const r = await search("q", {
+      provider: "tavily",
+      providerSettings: {
+        tavily: makeSettings("tavily", {
+          defaultOptions: { includeDomains: ["example.com"] },
+        }),
+      },
+      baseOptions: { searchType: "general" },
+    })
+    expect(r.results.map((item) => item.url)).toEqual(["https://docs.example.com/a"])
+  })
+})
+
+describe("stripUndefined", () => {
+  it("drops undefined-valued keys and keeps everything else", () => {
+    expect(
+      stripUndefined({ a: 1, b: undefined, c: false, d: null, e: 0 } as Record<string, unknown>)
+    ).toEqual({ a: 1, c: false, d: null, e: 0 })
+    expect(stripUndefined({})).toEqual({})
+  })
 })
 
 describe("search() retry + key rotation", () => {
@@ -430,6 +526,64 @@ describe("testProviderConnection", () => {
     expect(await testProviderConnection("nope" as SearchProviderSettings["providerId"], "k")).toBe(
       false
     )
+  })
+})
+
+describe("testProviderKeyPool", () => {
+  beforeEach(() => {
+    tavilyTest.mockReset()
+  })
+
+  it("tests every key in the pool sequentially, primary first", async () => {
+    const order: string[] = []
+    tavilyTest.mockImplementation(async (key: string) => {
+      order.push(key)
+      return key !== "key-B"
+    })
+    const results = await testProviderKeyPool(
+      "tavily",
+      makeSettings("tavily", { apiKey: "key-A", apiKeys: ["key-B", "key-C"] })
+    )
+    // Sequential: each call observed after the previous resolved.
+    expect(order).toEqual(["key-A", "key-B", "key-C"])
+    expect(results).toEqual([
+      { index: 0, ok: true, keyHint: "ey-A" },
+      { index: 1, ok: false, keyHint: "ey-B" },
+      { index: 2, ok: true, keyHint: "ey-C" },
+    ])
+    for (const call of tavilyTest.mock.calls) {
+      expect(call[0]).toEqual(expect.any(String))
+    }
+  })
+
+  it("dedupes the pool and drops blank entries (buildKeyPool semantics)", async () => {
+    tavilyTest.mockResolvedValue(true)
+    const results = await testProviderKeyPool(
+      "tavily",
+      makeSettings("tavily", { apiKey: "key-A", apiKeys: ["key-A", "  ", "key-B"] })
+    )
+    expect(tavilyTest).toHaveBeenCalledTimes(2)
+    expect(results.map((r) => r.keyHint)).toEqual(["ey-A", "ey-B"])
+  })
+
+  it("falls back to the primary key when the pool is empty", async () => {
+    tavilyTest.mockResolvedValue(false)
+    const results = await testProviderKeyPool(
+      "tavily",
+      makeSettings("tavily", { apiKey: "", apiKeys: [] })
+    )
+    expect(results).toEqual([{ index: 0, ok: false, keyHint: "" }])
+  })
+
+  it("passes the provider settings through (google needs cx)", async () => {
+    googleTest.mockReset().mockResolvedValue(true)
+    const results = await testProviderKeyPool(
+      "google",
+      makeSettings("google", { apiKey: "g-key", apiKeys: ["g-backup"], cx: "engine" })
+    )
+    expect(googleTest).toHaveBeenNthCalledWith(1, "g-key", "engine")
+    expect(googleTest).toHaveBeenNthCalledWith(2, "g-backup", "engine")
+    expect(results.every((r) => r.ok)).toBe(true)
   })
 })
 

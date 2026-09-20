@@ -267,6 +267,7 @@ export const SETTINGS_SYNC = {
   searchCacheEnabled: { category: "desktop-only" },
   searchCacheTTL: { category: "desktop-only" },
   searchCacheMaxEntries: { category: "desktop-only" },
+  searchProviderHealth: { category: "desktop-only" },
   searchSafeSearchEnabled: { category: "desktop-only" },
   searchSafeSearchLevel: { category: "desktop-only" },
   sourceVerificationSettings: { category: "desktop-only" },

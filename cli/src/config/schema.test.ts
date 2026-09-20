@@ -464,4 +464,51 @@ describe("searchConfigSchema", () => {
     expect(searchConfigSchema.safeParse({ maxResults: 0 }).success).toBe(false)
     expect(searchConfigSchema.safeParse({ safeSearch: "maximum" }).success).toBe(false)
   })
+
+  it("accepts a partial providerHealth block and rejects out-of-range values", () => {
+    expect(
+      searchConfigSchema.safeParse({
+        providerHealth: { enabled: false, failureThreshold: 5, cooldownMs: 60_000 },
+      }).success
+    ).toBe(true)
+    expect(
+      searchConfigSchema.safeParse({ providerHealth: { failureThreshold: 0 } }).success
+    ).toBe(false)
+    expect(
+      searchConfigSchema.safeParse({ providerHealth: { failureThreshold: 11 } }).success
+    ).toBe(false)
+    expect(
+      searchConfigSchema.safeParse({ providerHealth: { cooldownMs: 4999 } }).success
+    ).toBe(false)
+    expect(
+      searchConfigSchema.safeParse({ providerHealth: { cooldownMs: 600_001 } }).success
+    ).toBe(false)
+    // Strict: unknown keys rejected.
+    expect(
+      searchConfigSchema.safeParse({ providerHealth: { halfOpenProbes: 2 } }).success
+    ).toBe(false)
+  })
+
+  it("accepts per-provider defaultOptions and stays strict", () => {
+    expect(
+      searchConfigSchema.safeParse({
+        providers: {
+          tavily: {
+            enabled: true,
+            defaultOptions: { searchType: "news", maxResults: 3, includeDomains: ["x.com"] },
+          },
+        },
+      }).success
+    ).toBe(true)
+    expect(
+      searchConfigSchema.safeParse({
+        providers: { tavily: { defaultOptions: { searchType: "semantic" } } },
+      }).success
+    ).toBe(false)
+    expect(
+      searchConfigSchema.safeParse({
+        providers: { tavily: { defaultOptions: { bogus: 1 } } },
+      }).success
+    ).toBe(false)
+  })
 })

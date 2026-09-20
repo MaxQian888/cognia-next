@@ -41,6 +41,7 @@ import type {
   SessionKind,
 } from "@cognia/agent-config-types"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
+import { normalizeSearchProviderHealthSettings } from "@cognia/web-search/types"
 
 import { resolveBuiltinProcessSandbox } from "../runtime/sandbox/builtin-process-sandbox"
 
@@ -177,6 +178,7 @@ export function buildSearchAppSettings(config: ResolvedConfig): Partial<AppSetti
         enabled: provider.enabled ?? Boolean(provider.apiKey),
         priority: provider.priority ?? index + 1,
         ...(provider.cx ? { cx: provider.cx } : {}),
+        ...(provider.defaultOptions ? { defaultOptions: provider.defaultOptions } : {}),
       },
     ])
   ) as AppSettings["searchProviders"]
@@ -206,6 +208,11 @@ export function buildSearchAppSettings(config: ResolvedConfig): Partial<AppSetti
     ...(search.cacheEnabled != null ? { searchCacheEnabled: search.cacheEnabled } : {}),
     ...(search.cacheTTL != null ? { searchCacheTTL: search.cacheTTL } : {}),
     ...(search.cacheMaxEntries != null ? { searchCacheMaxEntries: search.cacheMaxEntries } : {}),
+    // Only when configured — an absent block leaves the AppSettings field
+    // undefined and the breaker runs on library defaults.
+    ...(search.providerHealth
+      ? { searchProviderHealth: normalizeSearchProviderHealthSettings(search.providerHealth) }
+      : {}),
     ...(Object.keys(searchProviders ?? {}).length > 0 ? { searchProviders } : {}),
   }
 }

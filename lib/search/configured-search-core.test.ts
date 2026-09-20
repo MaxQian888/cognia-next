@@ -1,3 +1,11 @@
+// The precedence tests run the real `search()` against a mocked router so the
+// option merge is observable without a provider HTTP call.
+const routeSearchMock = jest.fn()
+jest.mock("@cognia/web-search/search-type-router", () => ({
+  ...jest.requireActual("@cognia/web-search/search-type-router"),
+  routeSearch: (...args: unknown[]) => routeSearchMock(...args),
+}))
+
 import type { AppSettings } from "@cognia/agent-config-types"
 import type { SearchResponse } from "@cognia/web-search/types"
 
@@ -8,6 +16,9 @@ const cacheSetConfigMock = jest.fn()
 const piiGateMock = jest.fn()
 
 jest.mock("@cognia/web-search/search-service", () => ({
+  // Keep the real module's helpers (stripUndefined feeds the cache key); only
+  // `search` itself is stubbed so no provider call leaves the process.
+  ...jest.requireActual("@cognia/web-search/search-service"),
   search: (...args: unknown[]) => searchMock(...args),
 }))
 
@@ -28,6 +39,7 @@ jest.mock("@cognia/redact", () => {
 })
 
 import { searchWithSettings } from "./configured-search-core"
+import { getProviderHealth, resetProviderHealth } from "@cognia/web-search/provider-health"
 
 const response: SearchResponse = {
   provider: "tavily",
@@ -74,9 +86,13 @@ describe("searchWithSettings", () => {
       provider: "tavily",
       fallbackEnabled: true,
       maxRetries: 3,
-      maxResults: 7,
-      searchType: "news",
-      safeSearch: "strict",
+      // Stored defaults now ride `baseOptions` (the lowest precedence rung),
+      // not the flat call-time fields.
+      baseOptions: {
+        maxResults: 7,
+        searchType: "news",
+        safeSearch: "strict",
+      },
     })
   })
 
@@ -193,8 +209,78 @@ describe("searchWithSettings", () => {
       expect.objectContaining({
         provider: undefined,
         preferredProviders: ["exa", "tavily"],
-        includeDomains: ["wikipedia.org", "docs.example.com"],
+        baseOptions: expect.objectContaining({
+          includeDomains: ["wikipedia.org", "docs.example.com"],
+        }),
       })
     )
+    // The selected domains moved into baseOptions — they are no longer a
+    // call-time field, so a provider's own defaultOptions can still beat them.
+  })
+})
+
+describe("searchWithSettings — provider defaultOptions + breaker config", () => {
+  beforeEach(() => {
+    resetProviderHealth()
+    routeSearchMock.mockReset().mockResolvedValue(response)
+  })
+
+  it("pushes the normalized persisted breaker config into the shared breaker", async () => {
+    const setConfigSpy = jest.spyOn(getProviderHealth(), "setConfig")
+    await searchWithSettings("q", {
+      settings: settings({
+        searchProviderHealth: { enabled: true, failureThreshold: 99, cooldownMs: 1 },
+      }),
+    })
+    // Clamped to SEARCH_PROVIDER_HEALTH_LIMITS on the way in.
+    expect(setConfigSpy).toHaveBeenCalledWith({
+      enabled: true,
+      failureThreshold: 10,
+      cooldownMs: 5000,
+    })
+    setConfigSpy.mockRestore()
+  })
+
+  it("applies the library defaults when settings carry no health block", async () => {
+    const setConfigSpy = jest.spyOn(getProviderHealth(), "setConfig")
+    await searchWithSettings("q", { settings: settings() })
+    expect(setConfigSpy).toHaveBeenCalledWith({
+      enabled: true,
+      failureThreshold: 3,
+      cooldownMs: 30_000,
+    })
+    setConfigSpy.mockRestore()
+  })
+
+  it("lets a provider's defaultOptions beat the global default and lose to a call-time override", async () => {
+    const core = jest.requireActual("@cognia/web-search/search-service") as {
+      search: (query: string, options: unknown) => Promise<unknown>
+    }
+    searchMock.mockImplementation(core.search)
+
+    const withProviderDefaults = settings({
+      defaultSearchType: "general",
+      searchCacheEnabled: false,
+      searchProviders: {
+        tavily: {
+          providerId: "tavily",
+          apiKey: "key",
+          enabled: true,
+          priority: 1,
+          defaultOptions: { searchType: "news" },
+        },
+      } as AppSettings["searchProviders"],
+    })
+
+    await searchWithSettings("q", { settings: withProviderDefaults })
+    // routeSearch(query, provider, settings, options) — options is arg 3.
+    expect(routeSearchMock.mock.calls[0][3]).toMatchObject({ searchType: "news" })
+
+    routeSearchMock.mockClear()
+    await searchWithSettings("q", {
+      settings: withProviderDefaults,
+      options: { searchType: "images" },
+    })
+    expect(routeSearchMock.mock.calls[0][3]).toMatchObject({ searchType: "images" })
   })
 })

@@ -866,6 +866,9 @@ importers:
       '@cognia/vector':
         specifier: workspace:*
         version: link:../packages/vector
+      '@cognia/web-search':
+        specifier: workspace:*
+        version: link:../packages/web-search
 
   docs:
     dependencies:

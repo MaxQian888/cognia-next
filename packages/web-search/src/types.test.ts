@@ -1,9 +1,12 @@
 import {
   SEARCH_PROVIDERS,
+  DEFAULT_SEARCH_PROVIDER_HEALTH_SETTINGS,
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
   DEFAULT_SOURCE_VERIFICATION_SETTINGS,
+  SEARCH_PROVIDER_HEALTH_LIMITS,
   isProviderConfigured,
   getEnabledProviders,
+  normalizeSearchProviderHealthSettings,
   validateApiKey,
   createDefaultSearchUsageEntry,
   createDefaultSearchUsageStats,
@@ -215,5 +218,71 @@ describe("research source types", () => {
     const legacy: LegacyCustomSearchSource = { id: "old", name: "old.example.com" }
     expect(source.domain).toBe("docs.example.com")
     expect(legacy.domain).toBeUndefined()
+  })
+})
+
+describe("normalizeSearchProviderHealthSettings", () => {
+  it("returns the defaults for absent/empty input", () => {
+    expect(normalizeSearchProviderHealthSettings()).toEqual(
+      DEFAULT_SEARCH_PROVIDER_HEALTH_SETTINGS
+    )
+    expect(normalizeSearchProviderHealthSettings(null)).toEqual(
+      DEFAULT_SEARCH_PROVIDER_HEALTH_SETTINGS
+    )
+    expect(normalizeSearchProviderHealthSettings({})).toEqual(
+      DEFAULT_SEARCH_PROVIDER_HEALTH_SETTINGS
+    )
+  })
+
+  it("fills missing fields from defaults and keeps valid ones", () => {
+    expect(normalizeSearchProviderHealthSettings({ enabled: false })).toEqual({
+      enabled: false,
+      failureThreshold: DEFAULT_SEARCH_PROVIDER_HEALTH_SETTINGS.failureThreshold,
+      cooldownMs: DEFAULT_SEARCH_PROVIDER_HEALTH_SETTINGS.cooldownMs,
+    })
+    expect(
+      normalizeSearchProviderHealthSettings({ failureThreshold: 5, cooldownMs: 60_000 })
+    ).toEqual({ enabled: true, failureThreshold: 5, cooldownMs: 60_000 })
+  })
+
+  it("clamps out-of-range values to the published limits", () => {
+    expect(
+      normalizeSearchProviderHealthSettings({ failureThreshold: 0, cooldownMs: 1 })
+    ).toEqual({
+      enabled: true,
+      failureThreshold: SEARCH_PROVIDER_HEALTH_LIMITS.failureThreshold.min,
+      cooldownMs: SEARCH_PROVIDER_HEALTH_LIMITS.cooldownMs.min,
+    })
+    expect(
+      normalizeSearchProviderHealthSettings({
+        failureThreshold: 99,
+        cooldownMs: Number.MAX_SAFE_INTEGER,
+      })
+    ).toEqual({
+      enabled: true,
+      failureThreshold: SEARCH_PROVIDER_HEALTH_LIMITS.failureThreshold.max,
+      cooldownMs: SEARCH_PROVIDER_HEALTH_LIMITS.cooldownMs.max,
+    })
+  })
+
+  it("rounds fractional values", () => {
+    expect(
+      normalizeSearchProviderHealthSettings({ failureThreshold: 2.6, cooldownMs: 30_000.4 })
+    ).toEqual({ enabled: true, failureThreshold: 3, cooldownMs: 30_000 })
+  })
+
+  it("coerces non-finite and wrong-typed values back to the default", () => {
+    expect(
+      normalizeSearchProviderHealthSettings({
+        failureThreshold: Number.NaN,
+        cooldownMs: Number.POSITIVE_INFINITY,
+      })
+    ).toEqual(DEFAULT_SEARCH_PROVIDER_HEALTH_SETTINGS)
+    expect(
+      normalizeSearchProviderHealthSettings({
+        failureThreshold: "3" as unknown as number,
+        cooldownMs: undefined,
+      })
+    ).toEqual(DEFAULT_SEARCH_PROVIDER_HEALTH_SETTINGS)
   })
 })

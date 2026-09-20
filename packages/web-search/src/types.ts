@@ -686,3 +686,57 @@ export interface SearchProviderHealth {
   circuitBreakerOpen: boolean
   lastChecked: number
 }
+
+/**
+ * Persisted circuit-breaker settings (Settings → Web search → Performance).
+ * Runtime state itself is in-memory only.
+ */
+export interface SearchProviderHealthSettings {
+  enabled: boolean
+  failureThreshold: number
+  cooldownMs: number
+}
+
+export const DEFAULT_SEARCH_PROVIDER_HEALTH_SETTINGS: SearchProviderHealthSettings = {
+  enabled: true,
+  failureThreshold: 3,
+  cooldownMs: 30_000,
+}
+
+export const SEARCH_PROVIDER_HEALTH_LIMITS = {
+  failureThreshold: { min: 1, max: 10 },
+  cooldownMs: { min: 5_000, max: 600_000 },
+} as const
+
+function clampInt(value: unknown, min: number, max: number, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback
+  return Math.min(max, Math.max(min, Math.round(value)))
+}
+
+/**
+ * Fill defaults, round, and clamp a persisted/partial health-settings blob to
+ * the supported ranges. Non-finite or wrong-typed values fall back to the
+ * default for that field.
+ */
+export function normalizeSearchProviderHealthSettings(
+  input?: Partial<SearchProviderHealthSettings> | null
+): SearchProviderHealthSettings {
+  return {
+    enabled:
+      typeof input?.enabled === "boolean"
+        ? input.enabled
+        : DEFAULT_SEARCH_PROVIDER_HEALTH_SETTINGS.enabled,
+    failureThreshold: clampInt(
+      input?.failureThreshold,
+      SEARCH_PROVIDER_HEALTH_LIMITS.failureThreshold.min,
+      SEARCH_PROVIDER_HEALTH_LIMITS.failureThreshold.max,
+      DEFAULT_SEARCH_PROVIDER_HEALTH_SETTINGS.failureThreshold
+    ),
+    cooldownMs: clampInt(
+      input?.cooldownMs,
+      SEARCH_PROVIDER_HEALTH_LIMITS.cooldownMs.min,
+      SEARCH_PROVIDER_HEALTH_LIMITS.cooldownMs.max,
+      DEFAULT_SEARCH_PROVIDER_HEALTH_SETTINGS.cooldownMs
+    ),
+  }
+}

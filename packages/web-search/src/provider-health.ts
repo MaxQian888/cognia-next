@@ -14,6 +14,7 @@
  */
 
 import type { SearchProviderType, SearchProviderHealth } from "./types"
+import { DEFAULT_SEARCH_PROVIDER_HEALTH_SETTINGS } from "./types"
 
 export type CircuitState = "closed" | "open" | "half-open"
 
@@ -26,10 +27,22 @@ export interface ProviderHealthConfig {
   enabled: boolean
 }
 
+/** Derived from the persisted-settings default so the two can never drift. */
 export const DEFAULT_PROVIDER_HEALTH_CONFIG: ProviderHealthConfig = {
-  failureThreshold: 3,
-  cooldownMs: 30_000,
-  enabled: true,
+  ...DEFAULT_SEARCH_PROVIDER_HEALTH_SETTINGS,
+}
+
+/**
+ * One row of the `snapshotAll` report: the shared `SearchProviderHealth`
+ * diagnostics shape plus the raw counters and circuit position a Performance
+ * panel needs to render "why is this provider parked".
+ */
+export interface ProviderHealthRow extends SearchProviderHealth {
+  circuitState: CircuitState
+  cooldownRemainingMs: number
+  totalFailures: number
+  totalSuccesses: number
+  consecutiveFailures: number
 }
 
 interface ProviderState {
@@ -38,10 +51,18 @@ interface ProviderState {
   openedAt: number | null
   totalFailures: number
   totalSuccesses: number
+  /** Sum of success latencies (ms); `snapshot` derives `avgLatency` from it. */
+  totalSuccessLatency: number
 }
 
 function emptyState(): ProviderState {
-  return { consecutiveFailures: 0, openedAt: null, totalFailures: 0, totalSuccesses: 0 }
+  return {
+    consecutiveFailures: 0,
+    openedAt: null,
+    totalFailures: 0,
+    totalSuccesses: 0,
+    totalSuccessLatency: 0,
+  }
 }
 
 /** Per-provider circuit breaker. Injectable clock for deterministic tests. */
@@ -59,6 +80,11 @@ export class ProviderHealth {
     this.config = { ...this.config, ...config }
   }
 
+  /** The live config (a copy — mutating the result changes nothing). */
+  getConfig(): ProviderHealthConfig {
+    return { ...this.config }
+  }
+
   private state(provider: string): ProviderState {
     let s = this.states.get(provider)
     if (!s) {
@@ -68,14 +94,21 @@ export class ProviderHealth {
     return s
   }
 
-  /** Record the outcome of a provider call. Opens the circuit past the threshold. */
-  recordResult(provider: string, ok: boolean): void {
+  /**
+   * Record the outcome of a provider call. Opens the circuit past the
+   * threshold. `latencyMs` (finite, ≥ 0) feeds `snapshot().avgLatency`;
+   * anything else is ignored so a missing timer never skews the average.
+   */
+  recordResult(provider: string, ok: boolean, latencyMs?: number): void {
     if (!this.config.enabled) return
     const s = this.state(provider)
     if (ok) {
       s.consecutiveFailures = 0
       s.openedAt = null
       s.totalSuccesses += 1
+      if (typeof latencyMs === "number" && Number.isFinite(latencyMs) && latencyMs >= 0) {
+        s.totalSuccessLatency += latencyMs
+      }
       return
     }
     s.consecutiveFailures += 1
@@ -95,6 +128,14 @@ export class ProviderHealth {
   /** True only while the circuit is open AND still within its cooldown. */
   isOpen(provider: string): boolean {
     return this.config.enabled && this.circuitState(provider) === "open"
+  }
+
+  /** Milliseconds left in the open-circuit cooldown; 0 when not open. */
+  cooldownRemainingMs(provider: string): number {
+    if (!this.isOpen(provider)) return 0
+    const openedAt = this.states.get(provider)?.openedAt
+    if (openedAt == null) return 0
+    return Math.max(0, this.config.cooldownMs - (this.now() - openedAt))
   }
 
   /**
@@ -127,11 +168,32 @@ export class ProviderHealth {
             : successRate < 0.5
               ? "degraded"
               : "healthy",
-      avgLatency: 0,
+      avgLatency:
+        s && s.totalSuccesses > 0 ? Math.round(s.totalSuccessLatency / s.totalSuccesses) : 0,
       successRate,
       circuitBreakerOpen: open,
       lastChecked: this.now(),
     }
+  }
+
+  /**
+   * One row per known provider id — the Performance panel's data source.
+   * Providers with no recorded traffic still get a row (`status: "unknown"`).
+   */
+  snapshotAll(providerIds: readonly string[]): Record<string, ProviderHealthRow> {
+    const out: Record<string, ProviderHealthRow> = {}
+    for (const providerId of providerIds) {
+      const s = this.states.get(providerId) ?? emptyState()
+      out[providerId] = {
+        ...this.snapshot(providerId),
+        circuitState: this.circuitState(providerId),
+        cooldownRemainingMs: this.cooldownRemainingMs(providerId),
+        totalFailures: s.totalFailures,
+        totalSuccesses: s.totalSuccesses,
+        consecutiveFailures: s.consecutiveFailures,
+      }
+    }
+    return out
   }
 
   reset(provider?: string): void {

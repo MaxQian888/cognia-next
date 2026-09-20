@@ -6,12 +6,18 @@
 
 import type { AppSettings } from "@cognia/agent-config-types"
 import { hasNoLeakingPii, redactText } from "@cognia/redact"
+import { getProviderHealth } from "@cognia/web-search/provider-health"
 import { getSearchCache } from "@cognia/web-search/search-cache"
 import { normalizeCustomSearchSource, SEARCH_SOURCES } from "@cognia/web-search/search-constants"
 import { optimizeSearchQuery } from "@cognia/web-search/search-query-optimizer"
-import { search, type UnifiedSearchOptions } from "@cognia/web-search/search-service"
+import {
+  search,
+  stripUndefined,
+  type UnifiedSearchOptions,
+} from "@cognia/web-search/search-service"
 import { applySourceVerificationPolicy } from "@cognia/web-search/source-verification"
 import {
+  normalizeSearchProviderHealthSettings,
   SEARCH_PROVIDERS,
   type SearchOptions,
   type SearchProviderType,
@@ -80,18 +86,37 @@ export async function searchWithSettings(
   const provider =
     overrides.provider ??
     (preferredProviders.length === 0 ? settings?.defaultSearchProvider : undefined)
+  // Host-level defaults ride `baseOptions` (the lowest precedence rung inside
+  // `search()`), NOT the call-time spread: a provider's own `defaultOptions`
+  // must still beat them, and only the remaining `...overrides` fields count
+  // as caller intent.
+  const baseOptions = defaultSearchOptions(settings)
   const searchOptions: UnifiedSearchOptions = {
-    ...defaultSearchOptions(settings),
     ...overrides,
     provider,
     providerSettings: overrides.providerSettings ?? settings?.searchProviders,
     fallbackEnabled: overrides.fallbackEnabled ?? settings?.searchFallbackEnabled ?? true,
     maxRetries: overrides.maxRetries ?? settings?.searchMaxRetries,
     preferredProviders,
+    baseOptions,
   }
+
+  // Push the persisted circuit-breaker settings into the shared breaker on
+  // every call — this is the single funnel both CLI and renderer searches pass
+  // through, so an install missing the field gets the defaults here. Above the
+  // cache read so the breaker is configured even when the call short-circuits.
+  getProviderHealth().setConfig(
+    normalizeSearchProviderHealthSettings(settings?.searchProviderHealth)
+  )
 
   const cacheable = request.useCache !== false && settings?.searchCacheEnabled !== false
   const cache = getSearchCache()
+  // The shared cache key reads flat SearchOptions fields only, so the base
+  // defaults have to be folded back under the call-time fields here — a
+  // changed default would otherwise hit an entry produced under the old one.
+  // `stripUndefined` mirrors the merge inside `search()`: an explicit
+  // `undefined` in the overrides must not shadow a real base default.
+  const cacheKeyOptions = { ...baseOptions, ...stripUndefined(searchOptions) }
   const applyVerification = (response: SearchResponse): SearchResponse => {
     const filteredResults = applySourceVerificationPolicy(
       response.results,
@@ -106,11 +131,11 @@ export async function searchWithSettings(
       ...(settings?.searchCacheTTL ? { defaultTTL: settings.searchCacheTTL } : {}),
       ...(settings?.searchCacheMaxEntries ? { maxSize: settings.searchCacheMaxEntries } : {}),
     })
-    const cached = cache.get(query, provider, searchOptions)
+    const cached = cache.get(query, provider, cacheKeyOptions)
     if (cached) return applyVerification(cached)
   }
 
   const response = await search(query, searchOptions)
-  if (cacheable) cache.set(query, response, provider, searchOptions)
+  if (cacheable) cache.set(query, response, provider, cacheKeyOptions)
   return applyVerification(response)
 }

@@ -13,10 +13,12 @@ import {
 } from "@cognia/agent-config-types"
 import { DEFAULT_TTS_SETTINGS, normalizeTTSProvider } from "@cognia/tts/types"
 import {
+  DEFAULT_SEARCH_PROVIDER_HEALTH_SETTINGS,
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
   DEFAULT_SOURCE_VERIFICATION_SETTINGS,
   SEARCH_PROVIDERS,
   createDefaultSearchUsageStats,
+  normalizeSearchProviderHealthSettings,
 } from "@cognia/web-search/types"
 import { normalizeCustomSearchSource, SEARCH_SOURCES } from "@cognia/web-search/search-constants"
 import { DEFAULT_APPEARANCE_SLICE, DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
@@ -190,6 +192,7 @@ export const DEFAULTS: AppSettings = {
   searchCacheEnabled: true,
   searchCacheTTL: 10 * 60 * 1000,
   searchCacheMaxEntries: 500,
+  searchProviderHealth: { ...DEFAULT_SEARCH_PROVIDER_HEALTH_SETTINGS },
   searchSafeSearchEnabled: true,
   searchSafeSearchLevel: "moderate",
   sourceVerificationSettings: { ...DEFAULT_SOURCE_VERIFICATION_SETTINGS },
@@ -323,6 +326,9 @@ export async function getSettings(): Promise<AppSettings> {
     customCssEnabled: row.customCssEnabled ?? false,
     importedVscodeThemes: row.importedVscodeThemes ?? [],
     networkProxy: { ...DEFAULT_NETWORK_PROXY_SETTINGS, ...(row.networkProxy ?? {}) },
+    // Normalize so rows written before the breaker settings existed (or with
+    // out-of-range values) read back as a complete, clamped config.
+    searchProviderHealth: normalizeSearchProviderHealthSettings(row.searchProviderHealth),
     webTools: { ...(row.webTools ?? {}), enabled: row.webTools?.enabled ?? true },
     cliBridge: { autoSync: row.cliBridge?.autoSync ?? false },
     updates: { ...DEFAULT_UPDATE_SETTINGS, ...(row.updates ?? {}) },

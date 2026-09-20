@@ -224,6 +224,7 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
     "searchCacheEnabled",
     "searchCacheTTL",
     "searchCacheMaxEntries",
+    "searchProviderHealth",
     "searchSafeSearchEnabled",
     "searchSafeSearchLevel",
     "sourceVerificationSettings",

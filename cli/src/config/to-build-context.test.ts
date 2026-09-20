@@ -106,6 +106,50 @@ describe("toBuildContext — session + appSettings shaping", () => {
     })
   })
 
+  it("projects providerHealth normalized, only when configured", () => {
+    const withHealth = toBuildContext({
+      sessionId: "s-health",
+      now: NOW,
+      config: cfg({
+        search: { providerHealth: { enabled: false, failureThreshold: 7, cooldownMs: 45_000 } },
+      }),
+    })
+    expect(withHealth.appSettings?.searchProviderHealth).toEqual({
+      enabled: false,
+      failureThreshold: 7,
+      cooldownMs: 45_000,
+    })
+
+    const without = toBuildContext({
+      sessionId: "s-nohealth",
+      now: NOW,
+      config: cfg({ search: { maxResults: 5 } }),
+    })
+    expect(without.appSettings?.searchProviderHealth).toBeUndefined()
+  })
+
+  it("projects a provider's defaultOptions into searchProviders", () => {
+    const ctx = toBuildContext({
+      sessionId: "s-defopts",
+      now: NOW,
+      config: cfg({
+        search: {
+          providers: {
+            tavily: {
+              apiKey: "k",
+              enabled: true,
+              defaultOptions: { searchType: "news", maxResults: 3 },
+            },
+          },
+        },
+      }),
+    })
+    expect(ctx.appSettings?.searchProviders?.tavily).toMatchObject({
+      providerId: "tavily",
+      defaultOptions: { searchType: "news", maxResults: 3 },
+    })
+  })
+
   it("falls back to the default base prompt when none is configured", () => {
     const ctx = toBuildContext({
       sessionId: "s1",

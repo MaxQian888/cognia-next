@@ -86,6 +86,43 @@ describe("getSettings", () => {
     })
   })
 
+  it("ships the circuit-breaker defaults on a fresh install", async () => {
+    expect((await getSettings()).searchProviderHealth).toEqual({
+      enabled: true,
+      failureThreshold: 3,
+      cooldownMs: 30_000,
+    })
+  })
+
+  it("normalizes a persisted health block back inside the supported ranges", async () => {
+    await getDb().settings.put({
+      id: "singleton",
+      permissionMode: "default",
+      alwaysAllowTools: [],
+      searchProviderHealth: { enabled: "yes", failureThreshold: 99, cooldownMs: -1 },
+    } as unknown as Awaited<ReturnType<typeof getSettings>>)
+
+    expect((await getSettings()).searchProviderHealth).toEqual({
+      enabled: true,
+      failureThreshold: 10,
+      cooldownMs: 5_000,
+    })
+  })
+
+  it("backfills the health block for a row saved before the field existed", async () => {
+    await getDb().settings.put({
+      id: "singleton",
+      permissionMode: "default",
+      alwaysAllowTools: [],
+    } as unknown as Awaited<ReturnType<typeof getSettings>>)
+
+    expect((await getSettings()).searchProviderHealth).toEqual({
+      enabled: true,
+      failureThreshold: 3,
+      cooldownMs: 30_000,
+    })
+  })
+
   it("normalizes legacy research sources and removes the retired DuckDuckGo choice", async () => {
     await getDb().settings.put({
       id: "singleton",

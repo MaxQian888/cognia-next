@@ -8,7 +8,13 @@
  */
 
 import type { SearchProviderSettings, SearchProviderType } from "./types"
-import { testProviderConnection as testProviderConnectionDirect } from "./search-service"
+import {
+  testProviderConnection as testProviderConnectionDirect,
+  testProviderKeyPool as testProviderKeyPoolDirect,
+  type ProviderKeyTestResult,
+} from "./search-service"
+
+export type { ProviderKeyTestResult }
 
 export async function testProviderConnection(
   provider: SearchProviderType,
@@ -16,4 +22,11 @@ export async function testProviderConnection(
   providerSettings?: Partial<SearchProviderSettings>
 ): Promise<boolean> {
   return testProviderConnectionDirect(provider, apiKey, providerSettings)
+}
+
+export async function testProviderKeyPool(
+  provider: SearchProviderType,
+  settings: SearchProviderSettings
+): Promise<ProviderKeyTestResult[]> {
+  return testProviderKeyPoolDirect(provider, settings)
 }

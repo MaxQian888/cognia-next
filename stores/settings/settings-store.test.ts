@@ -6,6 +6,7 @@ import {
   createDefaultSearchUsageEntry,
   createDefaultSearchUsageStats,
 } from "@cognia/web-search/types"
+import { getProviderHealth, resetProviderHealth } from "@cognia/web-search/provider-health"
 
 // ---- Mocks ----
 
@@ -1741,6 +1742,87 @@ describe("setSearchProviderEnabled / ApiKey / Priority / Settings", () => {
       enabled: true,
       priority: 4,
     })
+  })
+})
+
+// ---- Provider circuit breaker ----
+
+describe("setSearchProviderHealthSettings", () => {
+  beforeEach(() => {
+    // The breaker is a process-wide singleton — drop it so a prior test's
+    // setConfig can't leak into this one.
+    resetProviderHealth()
+  })
+
+  it("normalizes+clamps the patch, applies it to the live breaker, and persists it", async () => {
+    useSettingsStore.setState({ settings: baseSettings() })
+    dbSettings.saveSettings.mockImplementation(async (patch) => baseSettings(patch))
+    const setConfigSpy = jest.spyOn(getProviderHealth(), "setConfig")
+
+    await act(async () => {
+      await useSettingsStore
+        .getState()
+        .setSearchProviderHealthSettings({ failureThreshold: 99, cooldownMs: 1 })
+    })
+
+    const expected = { enabled: true, failureThreshold: 10, cooldownMs: 5000 }
+    expect(setConfigSpy).toHaveBeenCalledWith(expected)
+    expect(getProviderHealth().getConfig()).toEqual(expected)
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({ searchProviderHealth: expected })
+    expect(useSettingsStore.getState().settings?.searchProviderHealth).toEqual(expected)
+  })
+
+  it("merges over the persisted value instead of replacing it", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({
+        searchProviderHealth: { enabled: false, failureThreshold: 5, cooldownMs: 60_000 },
+      }),
+    })
+    dbSettings.saveSettings.mockImplementation(async (patch) => baseSettings(patch))
+
+    await act(async () => {
+      await useSettingsStore.getState().setSearchProviderHealthSettings({ cooldownMs: 120_000 })
+    })
+
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      searchProviderHealth: { enabled: false, failureThreshold: 5, cooldownMs: 120_000 },
+    })
+    expect(getProviderHealth().getConfig()).toEqual({
+      enabled: false,
+      failureThreshold: 5,
+      cooldownMs: 120_000,
+    })
+  })
+})
+
+describe("resetSearchProviderHealth", () => {
+  beforeEach(() => {
+    resetProviderHealth()
+  })
+
+  it("clears runtime breaker state without touching persistence", async () => {
+    const health = getProviderHealth()
+    health.recordResult("tavily", false)
+    health.recordResult("tavily", false)
+    health.recordResult("tavily", false)
+    expect(health.snapshotAll(["tavily"]).tavily.consecutiveFailures).toBeGreaterThan(0)
+
+    useSettingsStore.getState().resetSearchProviderHealth("tavily")
+
+    expect(health.snapshotAll(["tavily"]).tavily.consecutiveFailures).toBe(0)
+    expect(health.circuitState("tavily")).toBe("closed")
+    expect(dbSettings.saveSettings).not.toHaveBeenCalled()
+  })
+
+  it("clears every provider when no id is given", () => {
+    const health = getProviderHealth()
+    health.recordResult("tavily", false)
+    health.recordResult("exa", false)
+
+    useSettingsStore.getState().resetSearchProviderHealth()
+
+    expect(health.snapshotAll(["tavily", "exa"]).tavily.consecutiveFailures).toBe(0)
+    expect(health.snapshotAll(["tavily", "exa"]).exa.consecutiveFailures).toBe(0)
   })
 })
 

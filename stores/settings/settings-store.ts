@@ -67,6 +67,7 @@ import type {
   CustomSearchSource,
   SafeSearchLevel,
   SearchDepth,
+  SearchProviderHealthSettings,
   SearchProviderSettings,
   SearchProviderType,
   SearchRecency,
@@ -78,7 +79,9 @@ import {
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
   createDefaultSearchUsageEntry,
   createDefaultSearchUsageStats,
+  normalizeSearchProviderHealthSettings,
 } from "@cognia/web-search/types"
+import { getProviderHealth } from "@cognia/web-search/provider-health"
 import {
   clearProviderKey,
   HOST_KEY_PRESENT,
@@ -259,6 +262,14 @@ interface SettingsState {
   setSearchCacheEnabled: (v: boolean) => Promise<void>
   setSearchCacheTTL: (ms: number) => Promise<void>
   setSearchCacheMaxEntries: (n: number) => Promise<void>
+
+  // Provider circuit breaker — persisted config, applied to the shared
+  // in-memory breaker immediately (no reload needed).
+  setSearchProviderHealthSettings: (
+    patch: Partial<SearchProviderHealthSettings>
+  ) => Promise<void>
+  /** Clear in-memory breaker state for one provider (or all). No persistence. */
+  resetSearchProviderHealth: (providerId?: SearchProviderType) => void
 
   // Safety
   setSearchSafeSearchEnabled: (v: boolean) => Promise<void>
@@ -1151,6 +1162,22 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
     setSearchCacheMaxEntries: async (searchCacheMaxEntries) => {
       const next = await saveSettings({ searchCacheMaxEntries })
       set({ settings: next })
+    },
+
+    // Provider circuit breaker
+    setSearchProviderHealthSettings: async (patch) => {
+      const searchProviderHealth = normalizeSearchProviderHealthSettings({
+        ...get().settings?.searchProviderHealth,
+        ...patch,
+      })
+      // Apply now so the very next search honors it; `configured-search-core`
+      // re-pushes the persisted value per call, so the two never drift.
+      getProviderHealth().setConfig(searchProviderHealth)
+      const next = await saveSettings({ searchProviderHealth })
+      set({ settings: next })
+    },
+    resetSearchProviderHealth: (providerId) => {
+      getProviderHealth().reset(providerId)
     },
 
     // Safety

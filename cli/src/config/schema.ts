@@ -638,6 +638,25 @@ const searchProviderConfigSchema = z
     cx: z.string().min(1).optional(),
     enabled: z.boolean().optional(),
     priority: z.number().int().positive().optional(),
+    /**
+     * Per-provider defaults, applied between the global search defaults and
+     * the call's explicit options (see `SearchProviderSettings.defaultOptions`
+     * in `@cognia/web-search`).
+     */
+    defaultOptions: z
+      .object({
+        searchType: z.enum(["general", "news", "academic", "images", "videos"]).optional(),
+        searchDepth: z.enum(["basic", "advanced", "deep"]).optional(),
+        recency: z.enum(["day", "week", "month", "year", "any"]).optional(),
+        maxResults: z.number().int().min(1).max(50).optional(),
+        includeAnswer: z.boolean().optional(),
+        country: z.string().min(1).optional(),
+        language: z.string().min(1).optional(),
+        includeDomains: z.array(z.string().min(1)).optional(),
+        excludeDomains: z.array(z.string().min(1)).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
 
@@ -709,6 +728,19 @@ export const searchConfigSchema = z
     cacheEnabled: z.boolean().optional(),
     cacheTTL: z.number().int().positive().optional(),
     cacheMaxEntries: z.number().int().positive().optional(),
+    /**
+     * Circuit-breaker tuning for the shared provider-health breaker. Bounds
+     * mirror `SEARCH_PROVIDER_HEALTH_LIMITS` in `@cognia/web-search`; the
+     * projection in `to-build-context` normalizes through the same helper.
+     */
+    providerHealth: z
+      .object({
+        enabled: z.boolean().optional(),
+        failureThreshold: z.number().int().min(1).max(10).optional(),
+        cooldownMs: z.number().int().min(5000).max(600000).optional(),
+      })
+      .strict()
+      .optional(),
     providers: searchProvidersSchema.optional(),
   })
   .strict()
