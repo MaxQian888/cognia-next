@@ -15,6 +15,12 @@ jest.mock("./search-defaults-settings", () => ({
 jest.mock("./search-cache-settings", () => ({
   SearchCacheSettings: () => <div data-testid="leaf-cache" />,
 }))
+jest.mock("./search-reliability-settings", () => ({
+  SearchReliabilitySettings: () => <div data-testid="leaf-reliability" />,
+}))
+jest.mock("./search-provider-health-panel", () => ({
+  SearchProviderHealthPanel: () => <div data-testid="leaf-health" />,
+}))
 jest.mock("./search-safety-settings", () => ({
   SearchSafetySettings: () => <div data-testid="leaf-safety" />,
 }))
@@ -69,9 +75,17 @@ describe("search-sections config", () => {
     expect(screen.getByTestId("leaf-verification")).toBeInTheDocument()
   })
 
-  it("composes diagnostics from usage and compare", () => {
+  it("composes performance from cache and reliability", () => {
+    const Performance = SEARCH_SECTIONS.find((s) => s.id === "performance")!.Component
+    render(<Performance />)
+    expect(screen.getByTestId("leaf-cache")).toBeInTheDocument()
+    expect(screen.getByTestId("leaf-reliability")).toBeInTheDocument()
+  })
+
+  it("composes diagnostics from health, usage and compare", () => {
     const Diagnostics = SEARCH_SECTIONS.find((s) => s.id === "diagnostics")!.Component
     render(<Diagnostics />)
+    expect(screen.getByTestId("leaf-health")).toBeInTheDocument()
     expect(screen.getByTestId("leaf-usage")).toBeInTheDocument()
     expect(screen.getByTestId("leaf-compare")).toBeInTheDocument()
   })

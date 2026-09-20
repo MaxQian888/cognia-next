@@ -19,7 +19,7 @@ import {
   isProviderConfigured,
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
 } from "@cognia/web-search/types"
-import { testProviderConnection } from "@cognia/web-search/provider-test"
+import { testProviderKeyPool } from "@cognia/web-search/provider-test"
 import { SearchProviderCard, type ProviderTestState } from "./search-provider-card"
 import { createLogger } from "@cognia/logging"
 import { useSecretReveal } from "@/hooks/use-secret-reveal"
@@ -32,7 +32,11 @@ const FEATURE_FILTERS = [
   { key: "aiAnswer", labelKey: "features.aiAnswer" },
   { key: "newsSearch", labelKey: "features.news" },
   { key: "imageSearch", labelKey: "features.images" },
+  { key: "videoSearch", labelKey: "features.videos" },
   { key: "academicSearch", labelKey: "features.academic" },
+  { key: "recencyFilter", labelKey: "features.recencyFilter" },
+  { key: "domainFilter", labelKey: "features.domainFilter" },
+  { key: "countryFilter", labelKey: "features.countryFilter" },
   { key: "contentExtraction", labelKey: "features.contentExtraction" },
 ] as const
 
@@ -127,19 +131,27 @@ export function SearchProviderGrid() {
       }))
       log.info("provider_test_started", { providerId })
       try {
-        const isValid = await testProviderConnection(
-          providerId,
-          apiKey,
-          providerId === "google" ? { cx: searchProviders[providerId]?.cx } : undefined
-        )
-        if (isValid) {
-          log.info("provider_test_succeeded", { providerId })
+        // Test the whole rotation pool, not just the primary — a dead backup
+        // key only surfaces mid-search otherwise. The full settings row goes in
+        // so provider-specific requirements (google's `cx`) still apply.
+        const keyResults = await testProviderKeyPool(providerId, {
+          ...DEFAULT_SEARCH_PROVIDER_SETTINGS[providerId],
+          ...searchProviders[providerId],
+        })
+        const primaryOk = keyResults[0]?.ok === true
+        const failedKeys = keyResults.filter((r) => !r.ok).length
+        if (primaryOk) {
+          log.info("provider_test_succeeded", { providerId, keys: keyResults.length, failedKeys })
         } else {
-          log.info("provider_test_failed", { providerId })
+          log.info("provider_test_failed", { providerId, keys: keyResults.length, failedKeys })
         }
         setTestStates((prev) => ({
           ...prev,
-          [providerId]: { testing: false, result: isValid ? "success" : "error" },
+          [providerId]: {
+            testing: false,
+            result: primaryOk ? "success" : "error",
+            keyResults,
+          },
         }))
       } catch (err) {
         log.error("provider_test_failed", err, { providerId })

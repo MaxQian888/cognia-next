@@ -1,0 +1,20 @@
+{
+  "avgLatency": "{ms} ms",
+  "breakerDisabled": "熔断器已在「性能」中停用",
+  "circuitClosed": "—",
+  "circuitOpen": "已断开 · 剩余 {seconds} 秒",
+  "circuitProbing": "探测中",
+  "counters": "{ok} 成功 / {failed} 失败",
+  "description": "各 Provider 的实时熔断状态（内存态，重载后重置）。",
+  "empty": "尚未配置任何 Provider。",
+  "reset": "重置",
+  "resetAll": "全部重置",
+  "status": {
+    "degraded": "降级",
+    "healthy": "正常",
+    "unhealthy": "异常",
+    "unknown": "未知"
+  },
+  "successRate": "{percent}%",
+  "title": "Provider 健康"
+}

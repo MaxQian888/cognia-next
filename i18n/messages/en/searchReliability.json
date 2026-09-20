@@ -1,0 +1,8 @@
+{
+  "cooldown": "Cooldown",
+  "cooldownSeconds": "{seconds} s",
+  "description": "Skip a provider that keeps failing instead of retrying it on every search.",
+  "failureThreshold": "Failure threshold",
+  "failureThresholdDesc": "Consecutive failures before a provider is paused for the cooldown.",
+  "title": "Provider circuit breaker"
+}

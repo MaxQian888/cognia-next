@@ -1,0 +1,20 @@
+{
+  "avgLatency": "{ms} ms",
+  "breakerDisabled": "Breaker disabled in Performance",
+  "circuitClosed": "—",
+  "circuitOpen": "Open · {seconds}s left",
+  "circuitProbing": "Probing",
+  "counters": "{ok} ok / {failed} failed",
+  "description": "Live circuit-breaker state per provider (in-memory; resets on reload).",
+  "empty": "No providers configured yet.",
+  "reset": "Reset",
+  "resetAll": "Reset all",
+  "status": {
+    "degraded": "Degraded",
+    "healthy": "Healthy",
+    "unhealthy": "Unhealthy",
+    "unknown": "Unknown"
+  },
+  "successRate": "{percent}%",
+  "title": "Provider health"
+}

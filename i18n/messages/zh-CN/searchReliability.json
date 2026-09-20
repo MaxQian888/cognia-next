@@ -1,0 +1,8 @@
+{
+  "cooldown": "冷却时间",
+  "cooldownSeconds": "{seconds} 秒",
+  "description": "当某个 Provider 持续失败时自动跳过它，避免每次搜索都浪费一次请求。",
+  "failureThreshold": "失败阈值",
+  "failureThresholdDesc": "连续失败达到该次数后暂停调用此 Provider，直到冷却结束。",
+  "title": "Provider 熔断器"
+}

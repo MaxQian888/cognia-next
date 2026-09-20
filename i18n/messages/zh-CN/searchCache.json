@@ -7,6 +7,7 @@
   "hits": "命中",
   "maxEntries": "最大条目数",
   "misses": "未命中",
+  "refresh": "刷新",
   "title": "缓存",
   "ttl": "有效期",
   "ttlMinutes": "{minutes} 分钟"

@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
-import { testProviderConnection } from "@cognia/web-search/provider-test"
+import { testProviderKeyPool } from "@cognia/web-search/provider-test"
 
 const mocks = {
   setSearchProviderEnabled: jest.fn(),
@@ -13,19 +13,25 @@ jest.mock("@/stores/settings", () => ({
 }))
 
 jest.mock("@cognia/web-search/provider-test", () => ({
-  testProviderConnection: jest.fn(),
+  testProviderKeyPool: jest.fn(),
 }))
 
 jest.mock("./search-provider-card", () => ({
   SearchProviderCard: ({
     providerId,
     onTestConnection,
+    onToggleExpand,
+    onToggleKey,
   }: {
     providerId: string
     onTestConnection: () => void
+    onToggleExpand: () => void
+    onToggleKey: () => void
   }) => (
     <div data-testid={`card-${providerId}`}>
       <button onClick={onTestConnection}>{`test-${providerId}`}</button>
+      <button onClick={onToggleExpand}>{`expand-${providerId}`}</button>
+      <button onClick={onToggleKey}>{`key-${providerId}`}</button>
     </div>
   ),
 }))
@@ -128,13 +134,51 @@ describe("SearchProviderGrid", () => {
     expect(screen.getByTestId("card-tavily")).toBeInTheDocument()
   })
 
-  it("runs a provider connection test", async () => {
-    ;(testProviderConnection as jest.Mock).mockResolvedValueOnce(true)
+  it("tests the whole key pool and reports on the primary", async () => {
+    ;(testProviderKeyPool as jest.Mock).mockResolvedValueOnce([
+      { index: 0, ok: true, keyHint: "k" },
+    ])
     render(<SearchProviderGrid />)
     fireEvent.click(screen.getByText("test-tavily"))
     await waitFor(() =>
-      expect(testProviderConnection).toHaveBeenCalledWith("tavily", "k", undefined)
+      expect(testProviderKeyPool).toHaveBeenCalledWith(
+        "tavily",
+        expect.objectContaining({ providerId: "tavily", apiKey: "k" })
+      )
     )
-    expect(mockLogInfo).toHaveBeenCalledWith("provider_test_succeeded", { providerId: "tavily" })
+    expect(mockLogInfo).toHaveBeenCalledWith(
+      "provider_test_succeeded",
+      expect.objectContaining({ providerId: "tavily", keys: 1, failedKeys: 0 })
+    )
+  })
+
+  it("marks the test failed when the primary key fails even if backups pass", async () => {
+    ;(testProviderKeyPool as jest.Mock).mockResolvedValueOnce([
+      { index: 0, ok: false, keyHint: "k" },
+      { index: 1, ok: true, keyHint: "k2" },
+    ])
+    render(<SearchProviderGrid />)
+    fireEvent.click(screen.getByText("test-tavily"))
+    await waitFor(() =>
+      expect(mockLogInfo).toHaveBeenCalledWith(
+        "provider_test_failed",
+        expect.objectContaining({ providerId: "tavily", keys: 2, failedKeys: 1 })
+      )
+    )
+  })
+
+  it("expand and key-visibility toggles do not throw", () => {
+    render(<SearchProviderGrid />)
+    fireEvent.click(screen.getByText("expand-tavily"))
+    fireEvent.click(screen.getByText("key-tavily"))
+    expect(screen.getByTestId("card-tavily")).toBeInTheDocument()
+  })
+
+  it("narrows the list via the added videoSearch feature filter", () => {
+    render(<SearchProviderGrid />)
+    fireEvent.click(screen.getByText("features.videos"))
+    // Serper advertises videoSearch; tavily does not.
+    expect(screen.getByTestId("card-serper")).toBeInTheDocument()
+    expect(screen.queryByTestId("card-tavily")).not.toBeInTheDocument()
   })
 })

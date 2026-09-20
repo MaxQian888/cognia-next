@@ -6,6 +6,8 @@ import { SettingsDivider } from "@/components/settings/common/settings-section"
 import { SearchGlobalSettings } from "./search-global-settings"
 import { SearchDefaultsSettings } from "./search-defaults-settings"
 import { SearchCacheSettings } from "./search-cache-settings"
+import { SearchReliabilitySettings } from "./search-reliability-settings"
+import { SearchProviderHealthPanel } from "./search-provider-health-panel"
 import { SearchSafetySettings } from "./search-safety-settings"
 import { SourceVerificationSettings } from "./source-verification-settings"
 import { SearchProviderGrid } from "./search-provider-grid"
@@ -70,9 +72,21 @@ function SafetySection() {
   )
 }
 
+function PerformanceSection() {
+  return (
+    <div className="space-y-6">
+      <SearchCacheSettings />
+      <SettingsDivider />
+      <SearchReliabilitySettings />
+    </div>
+  )
+}
+
 function DiagnosticsSection() {
   return (
     <div className="space-y-6">
+      <SearchProviderHealthPanel />
+      <SettingsDivider />
       <SearchUsagePanel />
       <SettingsDivider />
       <SearchProviderCompare />
@@ -124,7 +138,7 @@ export const SEARCH_SECTIONS: SearchSectionDef[] = [
     labelKey: "nav.performance",
     descKey: "nav.performanceDesc",
     icon: <Database className="h-4 w-4" />,
-    Component: SearchCacheSettings,
+    Component: PerformanceSection,
   },
   {
     id: "diagnostics",

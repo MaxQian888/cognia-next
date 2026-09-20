@@ -103,6 +103,54 @@ export const ConnectionError: Story = {
   },
 }
 
+// Pool test with a dead backup key → per-key list under the status line.
+export const KeyPoolResults: Story = {
+  args: {
+    isExpanded: true,
+    testState: {
+      testing: false,
+      result: "success",
+      keyResults: [
+        { index: 0, ok: true, keyHint: "7890" },
+        { index: 1, ok: false, keyHint: "dead" },
+      ],
+    },
+  },
+  beforeEach: () => {
+    resetStore(useSettingsStore)
+    seedStore(useSettingsStore, {
+      settings: makeSearchAppSettings({
+        searchProviders: makeProviders({
+          tavily: {
+            apiKey: "tvly-demo-key-1234567890",
+            apiKeys: ["tvly-backup-key-dead"],
+            enabled: true,
+          },
+        }),
+      }),
+    })
+  },
+}
+
+// Per-provider defaultOptions → "2 overrides" badge on the editor header.
+export const WithDefaultOverrides: Story = {
+  args: { isExpanded: true },
+  beforeEach: () => {
+    resetStore(useSettingsStore)
+    seedStore(useSettingsStore, {
+      settings: makeSearchAppSettings({
+        searchProviders: makeProviders({
+          tavily: {
+            apiKey: "tvly-demo-key-1234567890",
+            enabled: true,
+            defaultOptions: { searchType: "news", maxResults: 10 },
+          },
+        }),
+      }),
+    })
+  },
+}
+
 // Google exposes an extra "cx" (Programmable Search Engine ID) field.
 export const GoogleProvider: Story = {
   args: { providerId: "google", isExpanded: true, showKey: true },

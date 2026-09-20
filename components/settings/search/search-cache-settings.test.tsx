@@ -59,13 +59,22 @@ jest.mock("@cognia/logging", () => ({
 }))
 
 jest.mock("@/components/ui/slider", () => ({
-  Slider: ({ value, onValueChange }: { value: number[]; onValueChange: (v: number[]) => void }) => (
+  Slider: ({
+    value,
+    onValueChange,
+    onValueCommit,
+  }: {
+    value: number[]
+    onValueChange: (v: number[]) => void
+    onValueCommit?: (v: number[]) => void
+  }) => (
     <input
       role="slider"
       type="number"
       aria-valuenow={value?.[0] ?? 0}
       value={value?.[0] ?? 0}
       onChange={(e) => onValueChange([Number(e.target.value)])}
+      onBlur={(e) => onValueCommit?.([Number(e.target.value)])}
     />
   ),
 }))
@@ -149,6 +158,24 @@ describe("SearchCacheSettings", () => {
     expect(cacheClearMock).toHaveBeenCalled()
   })
 
+  it("refresh button re-reads the cache stats", () => {
+    settings = { searchCacheEnabled: true }
+    render(<SearchCacheSettings />)
+    cacheGetStatsMock.mockReturnValue({ size: 9, maxSize: 100, hits: 8, misses: 0, hitRate: 1 })
+    fireEvent.click(screen.getByLabelText("refresh"))
+    expect(screen.getByText("100%")).toBeInTheDocument()
+    expect(screen.getByText(/9\/100/)).toBeInTheDocument()
+  })
+
+  it("provider select shows catalog names, not raw ids", () => {
+    settings = {
+      searchCacheEnabled: true,
+      searchProviders: { tavily: { providerId: "tavily", enabled: true } },
+    }
+    render(<SearchCacheSettings />)
+    expect(screen.getByText("Tavily")).toBeInTheDocument()
+  })
+
   it("clears only entries owned by the selected provider", () => {
     settings = {
       searchCacheEnabled: true,
@@ -159,6 +186,24 @@ describe("SearchCacheSettings", () => {
     fireEvent.click(screen.getByText("clearCache"))
     expect(cacheInvalidateProviderMock).toHaveBeenCalledWith("tavily")
     expect(cacheClearMock).not.toHaveBeenCalled()
+  })
+
+  it("slider changes persist TTL and max entries and reconfigure the cache", () => {
+    settings = { searchCacheEnabled: true }
+    render(<SearchCacheSettings />)
+    const sliders = screen.getAllByRole("slider")
+    fireEvent.change(sliders[0], { target: { value: "120000" } })
+    expect(setTTLMock).toHaveBeenCalledWith(120000)
+    expect(cacheSetConfigMock).toHaveBeenCalledWith({ defaultTTL: 120000 })
+    fireEvent.blur(sliders[0], { target: { value: "120000" } })
+    expect(mockLogInfo).toHaveBeenCalledWith("cache_ttl_changed", { ttlMs: 120000 })
+    fireEvent.change(sliders[1], { target: { value: "800" } })
+    expect(setMaxEntriesMock).toHaveBeenCalledWith(800)
+    expect(cacheSetConfigMock).toHaveBeenCalledWith({ maxSize: 800 })
+    fireEvent.blur(sliders[1], { target: { value: "800" } })
+    expect(mockLogInfo).toHaveBeenCalledWith("cache_max_entries_changed", {
+      maxEntries: 800,
+    })
   })
 
   it("logs cache_enabled_changed when toggled", () => {

@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect } from "react"
 import { useTranslations } from "next-intl"
-import { Trash2 } from "lucide-react"
+import { RefreshCw, Trash2 } from "lucide-react"
 import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
 import { Button } from "@/components/ui/button"
@@ -18,7 +18,11 @@ import {
 import { SettingsToggle } from "@/components/settings/common/settings-section"
 import { useSettingsStore } from "@/stores/settings"
 import { getSearchCache } from "@cognia/web-search/search-cache"
-import { DEFAULT_SEARCH_PROVIDER_SETTINGS, type SearchProviderType } from "@cognia/web-search/types"
+import {
+  DEFAULT_SEARCH_PROVIDER_SETTINGS,
+  SEARCH_PROVIDERS,
+  type SearchProviderType,
+} from "@cognia/web-search/types"
 import { createLogger } from "@cognia/logging"
 
 const log = createLogger("settings.search.cache")
@@ -41,6 +45,14 @@ export function SearchCacheSettings() {
   const refreshStats = useCallback(() => {
     setStats(getSearchCache().getStats())
   }, [])
+
+  // Stats are a live view of the module-level cache singleton — poll while the
+  // panel is mounted so hit rate and size stay current without a reload. The
+  // setState sits inside the interval callback, not the effect body.
+  useEffect(() => {
+    const id = setInterval(refreshStats, 5_000)
+    return () => clearInterval(id)
+  }, [refreshStats])
 
   const handleClearCache = useCallback(() => {
     const sizeBefore = getSearchCache().getStats().size
@@ -149,12 +161,21 @@ export function SearchCacheSettings() {
                   {tc("allProviders")}
                 </SelectItem>
                 {Object.keys(searchProviders).map((p) => (
-                  <SelectItem key={p} value={p} className="text-xs capitalize">
-                    {p}
+                  <SelectItem key={p} value={p} className="text-xs">
+                    {SEARCH_PROVIDERS[p as SearchProviderType]?.name ?? p}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={refreshStats}
+              aria-label={tc("refresh")}
+              className="h-8 w-8"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+            </Button>
             <Button variant="outline" size="sm" onClick={handleClearCache} className="text-xs">
               <Trash2 className="h-3.5 w-3.5 mr-1" />
               {tc("clearCache")}

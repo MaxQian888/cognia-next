@@ -108,6 +108,41 @@ export const SETTING_CONTROLS: SettingControl[] = [
     settingKey: "defaultSearchProvider",
     keywords: ["tavily", "exa", "brave", "搜索引擎"],
   },
+  {
+    id: "search-fallback",
+    sectionId: "search",
+    labelKey: "searchFallback",
+    settingKey: "searchFallbackEnabled",
+    keywords: ["fallback", "failover", "降级", "回退"],
+  },
+  {
+    id: "search-cache",
+    sectionId: "search",
+    labelKey: "searchCache",
+    settingKey: "searchCacheEnabled",
+    keywords: ["cache", "ttl", "缓存", "结果缓存"],
+  },
+  {
+    id: "search-safe-search",
+    sectionId: "search",
+    labelKey: "searchSafeSearch",
+    settingKey: "searchSafeSearchEnabled",
+    keywords: ["safe search", "moderate", "strict", "安全搜索", "内容过滤"],
+  },
+  {
+    id: "search-source-verification",
+    sectionId: "search",
+    labelKey: "searchSourceVerification",
+    settingKey: "sourceVerificationSettings",
+    keywords: ["source verification", "credibility", "trusted domains", "来源验证", "可信度"],
+  },
+  {
+    id: "search-provider-health",
+    sectionId: "search",
+    labelKey: "searchProviderHealth",
+    settingKey: "searchProviderHealth",
+    keywords: ["circuit breaker", "reliability", "cooldown", "熔断", "健康", "冷却"],
+  },
   // speech
   {
     id: "tts-enabled",

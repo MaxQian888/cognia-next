@@ -32,13 +32,17 @@ import {
 } from "@cognia/web-search/types"
 import { cn } from "@/lib/utils"
 import { createLogger } from "@cognia/logging"
+import type { ProviderKeyTestResult } from "@cognia/web-search/provider-test"
 import { ApiKeyPoolInput } from "./_shared/api-key-pool-input"
+import { ProviderDefaultsEditor } from "./_shared/provider-defaults-editor"
 
 const log = createLogger("settings.search.provider")
 
 export interface ProviderTestState {
   testing: boolean
   result: "success" | "error" | null
+  /** Per-key results when the whole rotation pool was tested (index 0 = primary). */
+  keyResults?: ProviderKeyTestResult[]
 }
 
 interface SearchProviderCardProps {
@@ -199,6 +203,28 @@ export function SearchProviderCard({
                   <AlertCircle className="h-3.5 w-3.5" /> {t("connectionFailed")}
                 </p>
               )}
+              {testState.keyResults && testState.keyResults.length > 1 && (
+                <div className="space-y-0.5">
+                  <p className="text-[10px] text-muted-foreground">{t("keyPoolResults")}</p>
+                  {testState.keyResults.map((row) => (
+                    <p
+                      key={row.index}
+                      className={cn(
+                        "flex items-center gap-1 text-xs",
+                        row.ok ? "text-green-600" : "text-destructive"
+                      )}
+                    >
+                      {row.ok ? (
+                        <Check className="h-3 w-3" />
+                      ) : (
+                        <AlertCircle className="h-3 w-3" />
+                      )}
+                      {row.index === 0 ? t("keyPrimary") : t("keyBackup", { n: row.index })}
+                      <span className="text-muted-foreground">…{row.keyHint}</span>
+                    </p>
+                  ))}
+                </div>
+              )}
               {settings?.apiKey && !isValidKey && (
                 <p className="flex items-center gap-1 text-xs text-amber-600">
                   <AlertCircle className="h-3.5 w-3.5" /> {t("invalidKeyFormat")}
@@ -314,6 +340,19 @@ export function SearchProviderCard({
               </div>
             </div>
 
+            {/* Per-provider defaultOptions — override the global Behavior defaults */}
+            <ProviderDefaultsEditor
+              providerId={providerId}
+              value={settings?.defaultOptions}
+              onChange={(defaultOptions) => {
+                log.info("provider_overrides_changed", {
+                  providerId,
+                  keys: Object.keys(defaultOptions ?? {}),
+                })
+                void setSearchProviderSettings(providerId, { defaultOptions })
+              }}
+            />
+
             {/* Features + Pricing */}
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex flex-wrap gap-1">
@@ -332,6 +371,11 @@ export function SearchProviderCard({
                     {t("features.images")}
                   </Badge>
                 )}
+                {config.features.videoSearch && (
+                  <Badge variant="secondary" className="text-[10px]">
+                    {t("features.videos")}
+                  </Badge>
+                )}
                 {config.features.academicSearch && (
                   <Badge variant="secondary" className="text-[10px]">
                     {t("features.academic")}
@@ -345,6 +389,11 @@ export function SearchProviderCard({
                 {config.features.domainFilter && (
                   <Badge variant="secondary" className="text-[10px]">
                     {t("features.domainFilter")}
+                  </Badge>
+                )}
+                {config.features.countryFilter && (
+                  <Badge variant="secondary" className="text-[10px]">
+                    {t("features.countryFilter")}
                   </Badge>
                 )}
                 {config.features.contentExtraction && (
