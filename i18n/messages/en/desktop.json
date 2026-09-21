@@ -69,6 +69,7 @@
       "unpinSuccess": "{count, plural, one {Unpinned # conversation} other {Unpinned # conversations}}"
     },
     "cancel": "Cancel",
+    "chatsEmpty": "No chats yet — start one",
     "clearSearch": "Clear search",
     "collapseSidebar": "Collapse conversation list",
     "collapseTeams": "Collapse teams",
@@ -100,7 +101,11 @@
         "workspace": "Workspace"
       }
     },
+    "groupEmpty": "No conversations yet",
     "groupOther": "Other",
+    "groupShowAll": "Show all {count}",
+    "groupShowLess": "Show less",
+    "groupShowMore": "Show {count} more",
     "listActions": "List actions",
     "metadata": {
       "agent": "Agent",
@@ -114,6 +119,7 @@
     "moveFolderUp": "Move folder up",
     "newChat": "New chat",
     "newConversation": "New conversation",
+    "newConversationIn": "New conversation in {name}",
     "newFolder": "New folder",
     "newFolderName": "New folder",
     "openSessions": "Open sessions",
@@ -125,6 +131,7 @@
     "searchMessageContent": "Search message content",
     "searchPlaceholder": "Search chats…",
     "searchShortcutHint": "Press / to search",
+    "searchToggleAria": "Search this list",
     "searchTruncated": "Some results may be hidden — refine your search.",
     "searchingMessages": "Searching messages…",
     "sectionPinned": "Pinned",
@@ -191,6 +198,14 @@
     "bots": "Bots",
     "browser": "Browser",
     "canvas": "Canvas",
+    "categories": {
+      "agents": "Agents",
+      "explore": "Explore",
+      "insights": "Insights",
+      "spaces": "Spaces",
+      "system": "System",
+      "you": "You"
+    },
     "createTeam": "Create team",
     "customize": {
       "behaviour": "Behaviour",
@@ -237,6 +252,10 @@
     "me": "Me",
     "memory": "Memory",
     "more": "More",
+    "moreCount": "{count, plural, one {# feature} other {# features}}",
+    "moreFilterClear": "Clear filter",
+    "moreFilterEmpty": "No features match “{query}”.",
+    "moreFilterPlaceholder": "Filter features…",
     "moveTeamDown": "Move down",
     "moveTeamUp": "Move up",
     "navigation": "Navigation",
@@ -574,6 +593,13 @@
     "handoffStatus": "Device handoff status",
     "moveToFolder": "Move to folder",
     "openInCodexApp": "Open in Codex app",
+    "codexHandoffPiiBlocked": "Sensitive information was detected in the handoff. Remove or redact it before exporting.",
+    "codexHandoffUnsupported": "Some content cannot be transferred. Save browser-only attachments as files and retry.",
+    "codexHandoffPending": "The Codex import outcome is pending. Check Codex App before retrying; your source task is preserved.",
+    "codexHandoffTargetMissing": "The linked Codex task is not available locally. Open it in Codex App and retry importing.",
+    "returnFromCodexApp": "Bring back from Codex App",
+    "returnedFromCodexApp": "Imported the latest Codex snapshot as a linked conversation.",
+    "returnFromCodexAppFailed": "Could not import the linked Codex task.",
     "openInCodexAppFailed": "Couldn't open this task in the Codex app.",
     "openInTerminal": "Open in terminal",
     "openInTerminalFailed": "Could not export this session for the terminal",
@@ -612,7 +638,11 @@
       "title": "Top bar",
       "workbench": "Workbench"
     },
-    "title": "Shell layout"
+    "title": "Shell layout",
+    "webTitleBar": {
+      "label": "Show the top bar",
+      "description": "A browser tab already has its own chrome, so the bar is off by default — each column draws its own header, and search and commands stay on ⌘K / Ctrl+K. The item list below is the layout the bar comes back with."
+    }
   },
   "shellLayoutNotice": {
     "description": "Panel toggles, theme, zoom and language now live in the Views menu in the title bar. The pet, OCR and clipboard buttons moved there too. Press ⌘B to show or hide the conversation list.",
@@ -631,6 +661,11 @@
     "standingCloud": "Cognia Cloud",
     "standingLocal": "On this device",
     "standingOrg": "Organization member",
+    "themeAria": "Switch theme",
+    "themeDark": "Dark",
+    "themeLight": "Light",
+    "themeNow": "Theme: {theme}",
+    "themeSystem": "System",
     "usage": "Usage",
     "usageLeft": "{percent}% left"
   },

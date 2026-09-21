@@ -1,7 +1,10 @@
 {
   "searchFailed": "联网搜索失败：{message}",
   "searchedVia": "通过 {provider} 搜索 — {count} 条结果",
-  "tooltipDisabled": "请前往设置 → 联网搜索 启用并配置 Provider",
+  "setupNoProvider": "未配置搜索 Provider — 前往 设置 → 联网搜索 配置",
+  "setupSwitchOff": "联网搜索已关闭 — 前往 设置 → 联网搜索 开启",
+  "setupToolsOff": "联网工具已停用 — 前往 设置 → 内置工具 启用",
+  "goToSettings": "前往设置",
   "tooltipOff": "联网搜索：关闭",
   "tooltipOn": "联网搜索：开启 — 使用 {provider}"
 }

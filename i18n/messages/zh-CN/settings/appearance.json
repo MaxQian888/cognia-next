@@ -667,6 +667,9 @@
   },
   "personalization": {
     "description": "聊天欢迎页如何称呼你、展示多少内容。",
+    "hintsHelp": "会在欢迎页输入框里逐条打字展示，按 Tab 直接补全。留空则使用自动生成的建议。",
+    "hintsLabel": "欢迎页输入提示",
+    "hintsPlaceholder": "每行一条提示…",
     "nameLabel": "你的称呼",
     "namePlaceholder": "例如 Max",
     "restoreSections": "恢复已隐藏的欢迎区块",
@@ -929,10 +932,11 @@
     "galleryTitle": "图库",
     "generator": {
       "accent": "生成的强调色",
-      "action": "生成匹配主题",
+      "action": "生成并应用",
       "applyTuning": "应用建议值",
       "created": "已创建并启用匹配的明暗双主题。",
-      "description": "在本地提取图片强调色，并生成可读的明暗双主题。",
+      "createdWithTuning": "已生成并启用匹配主题，建议的不透明度与模糊也已应用。",
+      "description": "提取壁纸配色生成明暗双主题，并自动套用建议的不透明度与模糊。",
       "error": "无法分析这张图片，壁纸设置未受影响。",
       "secondary": "生成的辅助色",
       "themeName": "{name} 配色",

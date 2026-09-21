@@ -267,7 +267,7 @@
         "fileTab": "File",
         "fullSize": "Full size",
         "imageHint": "Downscaled to at most {maxEdge}px on the long edge before sending.",
-        "modelHint": "This is exactly what the model receives.",
+        "modelHint": "Preview of the processed attachment. Large text is sent as relevant excerpts; the full extraction remains available to read as needed.",
         "modelTab": "Model view",
         "ocrDetail": "View per-page result",
         "ocrRun": "Run OCR",
@@ -284,7 +284,8 @@
         "unsupportedType": "Unsupported file type",
         "videoTooLarge": "Too large to process",
         "videoUndecodable": "Can't decode this video here",
-        "videoUnprocessed": "This video wasn't processed"
+        "videoUnprocessed": "This video wasn't processed",
+        "audioUnprocessed": "Transcribe this audio before sending."
       },
       "removeAria": "Remove {filename}",
       "reorderAria": "Reorder {filename}",
@@ -370,7 +371,21 @@
         },
         "strategyLabel": "Pick frames"
       },
-      "videoSizeExceeded": "{count, plural, =1 {1 video is} other {# videos are}} over {max} MB and can't be processed here."
+      "videoSizeExceeded": "{count, plural, =1 {1 video is} other {# videos are}} over {max} MB and can't be processed here.",
+      "processing": {
+        "audioPlayer": "Play {filename}",
+        "modelHint": "Choose a transcription model for audio, or a vision model for images.",
+        "cloudNotice": "Processing sends this media to the selected provider and may incur usage charges. Results remain source material, not instructions.",
+        "transcribe": "Transcribe audio",
+        "describe": "Describe images",
+        "progress": "Processed {processed} of {total}",
+        "cancel": "Cancel processing",
+        "retry": "Retry extraction",
+        "failed": "Processing did not complete. Check the selected model and provider, then retry.",
+        "audioRequired": "Transcribe this audio before sending.",
+        "partial": "This is a partial representation. Unprocessed pages, audio, or unsampled video content are not included.",
+        "rejected": "{count} attachment(s) need processing. Retry or remove them before sending."
+      }
     },
     "camera": {
       "captureAria": "Take or attach a photo",
@@ -484,12 +499,17 @@
       "label": "Follow-up suggestions"
     },
     "ghostAccept": "Accept",
-    "ghostAcceptHint": "Tab",
-    "ghostCycleHint": "Alt+] / Alt+[ to cycle",
+    "ghostCardAriaLabel": "Completion suggestion",
+    "ghostCardCandidate": "Candidate {index}",
+    "ghostCardCycle": "to cycle",
+    "ghostCardFailed": "Suggestion failed",
+    "ghostCardRetry": "Retry",
+    "ghostCardSuggestion": "Suggestion",
+    "ghostCardSuggesting": "Suggesting…",
+    "ghostCardThinking": "Thinking…",
     "ghostDismiss": "Dismiss suggestion",
     "ghostManualHint": "Alt+\\ ask the agent",
     "ghostManualPending": "Asking the agent…",
-    "ghostPosition": "{index} of {total}",
     "ghostSourceAgent": "From the agent",
     "ghostSourceAi": "Suggested",
     "ghostSourceCommand": "Command",
@@ -847,6 +867,20 @@
       "latestTurn": "Latest turn",
       "modelTooltip": "Active model · change in Settings → API Key",
       "moreControls": "More controls",
+      "moreMenu": {
+        "context": "Context",
+        "cost": "Cost",
+        "credential": "API key",
+        "mode": "Agent mode",
+        "model": "Model",
+        "permission": "Permissions",
+        "plugins": "Plugins",
+        "preset": "Preset",
+        "routing": "Routing",
+        "runtime": "Runtime",
+        "sandbox": "Sandbox",
+        "thinking": "Thinking"
+      },
       "noUsageYet": "No turn has completed yet — token counts appear after the first reply.",
       "pluginExtensionOverflow": "More plugin actions",
       "quickActions": "Plugin quick actions",
@@ -879,7 +913,8 @@
         "generic": "Voice input failed. Please try again.",
         "noMicrophone": "No microphone available. Check your audio devices.",
         "noSpeech": "No speech detected. Try speaking closer to the microphone.",
-        "permissionDenied": "Microphone access denied. Allow microphone access for this app, then try again."
+        "permissionDenied": "Microphone access denied. Allow microphone access for this app, then try again.",
+        "unsupported": "Voice typing isn't supported in this environment."
       },
       "grantMicAccess": "Allow microphone access",
       "languageLabel": "Language",
@@ -1026,6 +1061,29 @@
   },
   "empty": {
     "brandAlt": "Cognia",
+    "characterEntry": "Chat as a character",
+    "contextBar": {
+      "appliesToNew": "Applies to the next new conversation.",
+      "branch": "Branch",
+      "currentBranch": "Current branch",
+      "envDefault": "Workspace default",
+      "envDefaultNamed": "Default · {name}",
+      "envLabel": "Environment",
+      "envNone": "No environment",
+      "moreOptions": "More run context options",
+      "notifyChannel": "Send via",
+      "notifyChannelAuto": "Auto (bound account)",
+      "notifyIm": "IM notify",
+      "notifyImDone": "Notify via IM when done",
+      "notifyNoChannels": "No bound IM conversations yet — connect a bot under Settings → Connectors first.",
+      "notifyOn": {
+        "attention": "Needs input",
+        "done": "On done",
+        "error": "On error"
+      },
+      "notifyWhen": "Notify when",
+      "repoLabel": "Repository"
+    },
     "dismiss": "Hide this section",
     "execution": {
       "baseLabel": "Base",
@@ -1045,7 +1103,17 @@
       "pullRequestNumberLabel": "Pull request number",
       "repositoryLabel": "Repository",
       "repositoryPlaceholder": "owner/repository",
-      "worktree": "Worktree"
+      "worktree": "Worktree",
+      "worktreeAuto": "Auto-named",
+      "worktreeAutoHint": "The host names the worktree",
+      "worktreeManual": "Custom name",
+      "worktreeManualHint": "You pick the worktree branch name",
+      "worktreeNameInvalid": "Not a valid branch name",
+      "worktreeNameLabel": "Worktree name",
+      "worktreeNamePlaceholder": "e.g. feat/login",
+      "worktreeNameTaken": "A branch with this name already exists",
+      "worktreeOff": "Off",
+      "worktreeOffHint": "Run directly in the checkout"
     },
     "greeting": {
       "afternoon": "Good afternoon",
@@ -1053,6 +1121,16 @@
       "morning": "Good morning",
       "named": "{greeting}, {name}",
       "night": "Working late"
+    },
+    "hints": {
+      "h1": "Summarize what changed in this repo this week.",
+      "h2": "Run the project's tests and explain any failures.",
+      "h3": "Draft a changelog entry from the recent commits.",
+      "h4": "Review the staged diff and flag anything risky.",
+      "h5": "Schedule a weekly code-review summary for Monday at 9am.",
+      "h6": "Find where session retries are handled and explain it.",
+      "h7": "Turn my unread inbox messages into a prioritized list.",
+      "h8": "Sketch a workflow that summarizes new issues every morning."
     },
     "illustrationAlt": "A connected workspace for chat, code, documents, and automation",
     "newChat": "New chat",
@@ -1118,7 +1196,17 @@
     "loading": "Loading {name}…",
     "pdfFallback": "PDF preview is unavailable.",
     "preview": "Preview",
-    "source": "Source"
+    "source": {
+      "download": "Download original",
+      "remove": "Remove source",
+      "removeTitle": "Remove this attachment source?",
+      "removeDescription": "This removes the stored original and searchable extraction from this conversation, and invalidates memory claims based on it. Existing message text and previews remain in history.",
+      "cancel": "Cancel",
+      "confirm": "Remove source",
+      "unavailable": "Original unavailable on this device",
+      "removed": "Source removed",
+      "failed": "Unable to access the attachment source. Please try again."
+    }
   },
   "grounding": {
     "supported": "Retrieved evidence supports the answer's claims.",
@@ -1494,6 +1582,11 @@
     "zoomIn": "Zoom in",
     "zoomOut": "Zoom out"
   },
+  "imNotify": {
+    "attention": "{title} needs your input",
+    "done": "{title} finished",
+    "error": "{title} ran into an error"
+  },
   "imported": {
     "diverged": "{source} moved on",
     "divergedHint": "This conversation has also changed in {source} since Cognia took ownership of it. Cognia does not merge the two — the copy you are reading is Cognia's. Click to dismiss.",
@@ -1503,6 +1596,7 @@
     "canonicalState": "{count, plural, one {# preserved task, plan, history, or Agent event} other {# preserved tasks, plans, history items, and Agent events}}",
     "resume": "Resume",
     "resumeErrors": {
+      "runtime-ambiguous": "Multiple connected agents match this source. Disconnect other instances before resuming.",
       "binding-missing": "The source did not provide a native session ID.",
       "cwd-missing": "The original working directory no longer exists.",
       "handshake-failed": "The original agent could not resume this session.",

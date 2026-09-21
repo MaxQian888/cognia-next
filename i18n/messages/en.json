@@ -6183,7 +6183,7 @@
           "fileTab": "File",
           "fullSize": "Full size",
           "imageHint": "Downscaled to at most {maxEdge}px on the long edge before sending.",
-          "modelHint": "This is exactly what the model receives.",
+          "modelHint": "Preview of the processed attachment. Large text is sent as relevant excerpts; the full extraction remains available to read as needed.",
           "modelTab": "Model view",
           "ocrDetail": "View per-page result",
           "ocrRun": "Run OCR",
@@ -6193,7 +6193,22 @@
           "redactedNote": "Highlighted spans were redacted before sending.",
           "tokens": "{tokens} tokens"
         },
+        "processing": {
+          "audioPlayer": "Play {filename}",
+          "audioRequired": "Transcribe this audio before sending.",
+          "cancel": "Cancel processing",
+          "cloudNotice": "Processing sends this media to the selected provider and may incur usage charges. Results remain source material, not instructions.",
+          "describe": "Describe images",
+          "failed": "Processing did not complete. Check the selected model and provider, then retry.",
+          "modelHint": "Choose a transcription model for audio, or a vision model for images.",
+          "partial": "This is a partial representation. Unprocessed pages, audio, or unsampled video content are not included.",
+          "progress": "Processed {processed} of {total}",
+          "rejected": "{count} attachment(s) need processing. Retry or remove them before sending.",
+          "retry": "Retry extraction",
+          "transcribe": "Transcribe audio"
+        },
         "rejectReason": {
+          "audioUnprocessed": "Transcribe this audio before sending.",
           "empty": "No readable text found",
           "notDataUrl": "Couldn't read this file",
           "parseFailed": "Couldn't parse this file",
@@ -6400,12 +6415,17 @@
         "label": "Follow-up suggestions"
       },
       "ghostAccept": "Accept",
-      "ghostAcceptHint": "Tab",
-      "ghostCycleHint": "Alt+] / Alt+[ to cycle",
+      "ghostCardAriaLabel": "Completion suggestion",
+      "ghostCardCandidate": "Candidate {index}",
+      "ghostCardCycle": "to cycle",
+      "ghostCardFailed": "Suggestion failed",
+      "ghostCardRetry": "Retry",
+      "ghostCardSuggesting": "Suggesting…",
+      "ghostCardSuggestion": "Suggestion",
+      "ghostCardThinking": "Thinking…",
       "ghostDismiss": "Dismiss suggestion",
       "ghostManualHint": "Alt+\\ ask the agent",
       "ghostManualPending": "Asking the agent…",
-      "ghostPosition": "{index} of {total}",
       "ghostSourceAgent": "From the agent",
       "ghostSourceAi": "Suggested",
       "ghostSourceCommand": "Command",
@@ -6763,6 +6783,20 @@
         "latestTurn": "Latest turn",
         "modelTooltip": "Active model · change in Settings → API Key",
         "moreControls": "More controls",
+        "moreMenu": {
+          "context": "Context",
+          "cost": "Cost",
+          "credential": "API key",
+          "mode": "Agent mode",
+          "model": "Model",
+          "permission": "Permissions",
+          "plugins": "Plugins",
+          "preset": "Preset",
+          "routing": "Routing",
+          "runtime": "Runtime",
+          "sandbox": "Sandbox",
+          "thinking": "Thinking"
+        },
         "noUsageYet": "No turn has completed yet — token counts appear after the first reply.",
         "pluginExtensionOverflow": "More plugin actions",
         "quickActions": "Plugin quick actions",
@@ -6795,7 +6829,8 @@
           "generic": "Voice input failed. Please try again.",
           "noMicrophone": "No microphone available. Check your audio devices.",
           "noSpeech": "No speech detected. Try speaking closer to the microphone.",
-          "permissionDenied": "Microphone access denied. Allow microphone access for this app, then try again."
+          "permissionDenied": "Microphone access denied. Allow microphone access for this app, then try again.",
+          "unsupported": "Voice typing isn't supported in this environment."
         },
         "grantMicAccess": "Allow microphone access",
         "languageLabel": "Language",
@@ -6942,6 +6977,29 @@
     },
     "empty": {
       "brandAlt": "Cognia",
+      "characterEntry": "Chat as a character",
+      "contextBar": {
+        "appliesToNew": "Applies to the next new conversation.",
+        "branch": "Branch",
+        "currentBranch": "Current branch",
+        "envDefault": "Workspace default",
+        "envDefaultNamed": "Default · {name}",
+        "envLabel": "Environment",
+        "envNone": "No environment",
+        "moreOptions": "More run context options",
+        "notifyChannel": "Send via",
+        "notifyChannelAuto": "Auto (bound account)",
+        "notifyIm": "IM notify",
+        "notifyImDone": "Notify via IM when done",
+        "notifyNoChannels": "No bound IM conversations yet — connect a bot under Settings → Connectors first.",
+        "notifyOn": {
+          "attention": "Needs input",
+          "done": "On done",
+          "error": "On error"
+        },
+        "notifyWhen": "Notify when",
+        "repoLabel": "Repository"
+      },
       "dismiss": "Hide this section",
       "execution": {
         "baseLabel": "Base",
@@ -6961,7 +7019,17 @@
         "pullRequestNumberLabel": "Pull request number",
         "repositoryLabel": "Repository",
         "repositoryPlaceholder": "owner/repository",
-        "worktree": "Worktree"
+        "worktree": "Worktree",
+        "worktreeAuto": "Auto-named",
+        "worktreeAutoHint": "The host names the worktree",
+        "worktreeManual": "Custom name",
+        "worktreeManualHint": "You pick the worktree branch name",
+        "worktreeNameInvalid": "Not a valid branch name",
+        "worktreeNameLabel": "Worktree name",
+        "worktreeNamePlaceholder": "e.g. feat/login",
+        "worktreeNameTaken": "A branch with this name already exists",
+        "worktreeOff": "Off",
+        "worktreeOffHint": "Run directly in the checkout"
       },
       "greeting": {
         "afternoon": "Good afternoon",
@@ -6969,6 +7037,16 @@
         "morning": "Good morning",
         "named": "{greeting}, {name}",
         "night": "Working late"
+      },
+      "hints": {
+        "h1": "Summarize what changed in this repo this week.",
+        "h2": "Run the project's tests and explain any failures.",
+        "h3": "Draft a changelog entry from the recent commits.",
+        "h4": "Review the staged diff and flag anything risky.",
+        "h5": "Schedule a weekly code-review summary for Monday at 9am.",
+        "h6": "Find where session retries are handled and explain it.",
+        "h7": "Turn my unread inbox messages into a prioritized list.",
+        "h8": "Sketch a workflow that summarizes new issues every morning."
       },
       "illustrationAlt": "A connected workspace for chat, code, documents, and automation",
       "newChat": "New chat",
@@ -7034,7 +7112,17 @@
       "loading": "Loading {name}…",
       "pdfFallback": "PDF preview is unavailable.",
       "preview": "Preview",
-      "source": "Source"
+      "source": {
+        "cancel": "Cancel",
+        "confirm": "Remove source",
+        "download": "Download original",
+        "failed": "Unable to access the attachment source. Please try again.",
+        "remove": "Remove source",
+        "removeDescription": "This removes the stored original and searchable extraction from this conversation, and invalidates memory claims based on it. Existing message text and previews remain in history.",
+        "removeTitle": "Remove this attachment source?",
+        "removed": "Source removed",
+        "unavailable": "Original unavailable on this device"
+      }
     },
     "grounding": {
       "supported": "Retrieved evidence supports the answer's claims.",
@@ -7272,6 +7360,11 @@
       },
       "toggle": "Toggle hook details"
     },
+    "imNotify": {
+      "attention": "{title} needs your input",
+      "done": "{title} finished",
+      "error": "{title} ran into an error"
+    },
     "imageWorkbench": {
       "adjust": {
         "blur": "Blur",
@@ -7424,6 +7517,7 @@
         "preset-missing": "The import did not record a compatible runtime preset.",
         "preset-not-configured": "Configure the matching external Agent preset first.",
         "resume-unverified": "The connected Agent has not verified session/resume support.",
+        "runtime-ambiguous": "Multiple connected agents match this source. Disconnect other instances before resuming.",
         "runtime-unavailable": "The matching external Agent is not connected or executable."
       },
       "resumeNative": "Verify the original Agent and resume this exact native session",
@@ -8654,31 +8748,58 @@
   "chatTemplatesSettings": {
     "adopt": "Adopt into my library",
     "adopted": "Adopted {name}.",
+    "aiAssistHint": "AI drafts land in this form for review — nothing is saved until you save it.",
+    "aiFailed": "AI assist failed: {error}",
+    "aiGenerate": "Generate",
+    "aiImprove": "Improve",
+    "aiIntentPlaceholder": "Describe the template, or how the message should change",
+    "aiPiiBlocked": "AI assist was blocked: the request contains private-looking data.",
+    "aiSuggestSlots": "Suggest slots",
     "body": "Message",
+    "bodyPlaceholder": "Write the message. Wrap the parts that change in double braces, like '{{'topic'}}'.",
     "cancel": "Cancel",
+    "chooseTemplate": "Choose a template…",
+    "clickSlotHint": "Click a highlighted slot to fill it — the same gesture as in the composer.",
+    "copied": "Copied the filled message.",
+    "copyFailed": "Could not copy — the clipboard is unavailable.",
+    "copyMessage": "Copy message",
+    "customizeParams": "Customize labels, types & defaults",
     "delete": "Delete",
+    "deleteBody": "This removes the template from this device. There is no undo.",
+    "deleteTitle": "Delete {name}?",
     "deleted": "Deleted {name}.",
     "description": "Description",
     "duplicate": "Duplicate",
     "duplicated": "Duplicated {name}.",
     "duplicatedName": "{name} (copy)",
     "edit": "Edit",
-    "empty": "No saved templates yet. Write a message with parameters in it and use the bookmark control beside the composer.",
+    "empty": "A template is a message you send a lot — write it once, mark the parts that change, and fill them in each time.",
+    "emptyCreate": "New template",
+    "emptyRail": "No templates yet — create one above.",
+    "emptyTitle": "No templates yet",
     "exportAction": "Export .md",
-    "hasSetup": "Carries a setup",
+    "fillSlot": "Fill {id}",
     "importAction": "Import .md",
     "importFailed": "That file is not a template this app can read.",
-    "importHint": "Templates travel as Markdown. An imported setup is trimmed the same way a repository template's is: it may make a conversation stricter, never looser.",
     "imported": "Imported {name}.",
     "kindEnum": "Choice",
     "kindResource": "Reference",
     "kindString": "Text",
+    "messagePreview": "Message preview",
+    "mineHeading": "Mine",
+    "moreActions": "More actions",
     "name": "Name",
+    "newTemplate": "New",
+    "newTemplateHint": "Write the message once. Wrap the parts that change in double braces — '{{'topic'}}' becomes a fill-in chip when the template is used.",
+    "newTemplateTitle": "New template",
+    "noMatches": "No matches.",
     "noParameters": "none",
     "overwriteBody": "A template file is already there. Replacing it rewrites what everyone who clones this repository gets.",
     "overwriteConfirm": "Replace",
     "overwriteTitle": "Replace {path}?",
     "paramDefault": "Default value",
+    "paramHint": "Fill hint",
+    "paramHintPlaceholder": "What belongs here — e.g. “the service to deploy”",
     "paramKind": "Type",
     "paramLabel": "Label",
     "paramMultiline": "Multi-line",
@@ -8686,22 +8807,29 @@
     "paramOptionsHint": "One per line.",
     "paramRequired": "Required",
     "paramResource": "Picks from",
-    "parameters": "Parameters",
     "paramsHint": "Every parameter token in the message is a parameter. Type says how it is filled in; a parameter that is not required may be sent blank.",
+    "readyToSend": "ready to send",
     "repoHeading": "From this repository",
     "repoHint": "Templates in {path} travel with the repository — edit them there and they reach the whole team. They are only offered in workspaces you trust.",
     "repoReadOnly": "Read-only",
+    "requiredLeft": "{count} required left",
     "resourceAgent": "Team member",
     "resourceFile": "Workspace file",
     "resourceMember": "Team room member",
     "resourceSubagent": "Subagent",
     "save": "Save",
+    "saveFailed": "Could not save the template. Your edits are still here — try again.",
     "saveToRepo": "Save to repository",
     "saveToRepoFailed": "Could not write {path}.",
     "saveToRepoNoRoot": "There is no open workspace to save into.",
     "saveToRepoRestricted": "This workspace is not trusted, so nothing was written.",
     "saved": "Template saved.",
     "savedToRepo": "Saved to {path}.",
+    "searchPlaceholder": "Search templates…",
+    "suggestsSetup": "Suggests: {summary}",
+    "useHint": "Type / in the composer and pick “{name}”",
+    "useInChat": "Use in chat",
+    "useInChatFailed": "Could not start a chat with this template — try again.",
     "used": "{count, plural, =0 {never used} =1 {used once} other {used # times}}"
   },
   "cliHandoff": {
@@ -11028,6 +11156,7 @@
         "unpinSuccess": "{count, plural, one {Unpinned # conversation} other {Unpinned # conversations}}"
       },
       "cancel": "Cancel",
+      "chatsEmpty": "No chats yet — start one",
       "clearSearch": "Clear search",
       "collapseSidebar": "Collapse conversation list",
       "collapseTeams": "Collapse teams",
@@ -11059,7 +11188,11 @@
           "workspace": "Workspace"
         }
       },
+      "groupEmpty": "No conversations yet",
       "groupOther": "Other",
+      "groupShowAll": "Show all {count}",
+      "groupShowLess": "Show less",
+      "groupShowMore": "Show {count} more",
       "listActions": "List actions",
       "metadata": {
         "agent": "Agent",
@@ -11073,6 +11206,7 @@
       "moveFolderUp": "Move folder up",
       "newChat": "New chat",
       "newConversation": "New conversation",
+      "newConversationIn": "New conversation in {name}",
       "newFolder": "New folder",
       "newFolderName": "New folder",
       "openSessions": "Open sessions",
@@ -11084,6 +11218,7 @@
       "searchMessageContent": "Search message content",
       "searchPlaceholder": "Search chats…",
       "searchShortcutHint": "Press / to search",
+      "searchToggleAria": "Search this list",
       "searchTruncated": "Some results may be hidden — refine your search.",
       "searchingMessages": "Searching messages…",
       "sectionPinned": "Pinned",
@@ -11150,6 +11285,14 @@
       "bots": "Bots",
       "browser": "Browser",
       "canvas": "Canvas",
+      "categories": {
+        "agents": "Agents",
+        "explore": "Explore",
+        "insights": "Insights",
+        "spaces": "Spaces",
+        "system": "System",
+        "you": "You"
+      },
       "createTeam": "Create team",
       "customize": {
         "behaviour": "Behaviour",
@@ -11196,6 +11339,10 @@
       "me": "Me",
       "memory": "Memory",
       "more": "More",
+      "moreCount": "{count, plural, one {# feature} other {# features}}",
+      "moreFilterClear": "Clear filter",
+      "moreFilterEmpty": "No features match “{query}”.",
+      "moreFilterPlaceholder": "Filter features…",
       "moveTeamDown": "Move down",
       "moveTeamUp": "Move up",
       "navigation": "Navigation",
@@ -11518,6 +11665,10 @@
       "archive": "Archive",
       "branchedFrom": "Branched conversation — open parent",
       "cancel": "Cancel",
+      "codexHandoffPending": "The Codex import outcome is pending. Check Codex App before retrying; your source task is preserved.",
+      "codexHandoffPiiBlocked": "Sensitive information was detected in the handoff. Remove or redact it before exporting.",
+      "codexHandoffTargetMissing": "The linked Codex task is not available locally. Open it in Codex App and retry importing.",
+      "codexHandoffUnsupported": "Some content cannot be transferred. Save browser-only attachments as files and retry.",
       "cogniaAgentChecking": "Checking for the Cognia agent…",
       "cogniaAgentNotInstalled": "The Cognia agent CLI isn't installed",
       "contentMatch": "Matched inside messages",
@@ -11542,6 +11693,9 @@
       "pinned": "Pinned",
       "removeFromFolder": "Remove from folder",
       "rename": "Rename",
+      "returnFromCodexApp": "Bring back from Codex App",
+      "returnFromCodexAppFailed": "Could not import the linked Codex task.",
+      "returnedFromCodexApp": "Imported the latest Codex snapshot as a linked conversation.",
       "select": "Select",
       "unarchive": "Unarchive",
       "unpin": "Unpin",
@@ -11571,7 +11725,11 @@
         "title": "Top bar",
         "workbench": "Workbench"
       },
-      "title": "Shell layout"
+      "title": "Shell layout",
+      "webTitleBar": {
+        "description": "A browser tab already has its own chrome, so the bar is off by default — each column draws its own header, and search and commands stay on ⌘K / Ctrl+K. The item list below is the layout the bar comes back with.",
+        "label": "Show the top bar"
+      }
     },
     "shellLayoutNotice": {
       "description": "Panel toggles, theme, zoom and language now live in the Views menu in the title bar. The pet, OCR and clipboard buttons moved there too. Press ⌘B to show or hide the conversation list.",
@@ -11590,6 +11748,11 @@
       "standingCloud": "Cognia Cloud",
       "standingLocal": "On this device",
       "standingOrg": "Organization member",
+      "themeAria": "Switch theme",
+      "themeDark": "Dark",
+      "themeLight": "Light",
+      "themeNow": "Theme: {theme}",
+      "themeSystem": "System",
       "usage": "Usage",
       "usageLeft": "{percent}% left"
     },
@@ -14370,7 +14533,7 @@
       "sandboxedUntiered": "Sandbox",
       "tooltip": {
         "bundle": "Agent bundle: {tag} ({libc})",
-        "credentials": "Credentials: this host's own ({mode}); per-sandbox gateway tickets are not available yet",
+        "credentials": "Credentials: {mode} — host provider keys are stripped before the container starts",
         "egressEnforced": "Network: {tier}, enforced",
         "egressNotEnforced": "Network: {tier}, recorded but not enforced",
         "image": "Image: {image}",
@@ -14380,6 +14543,40 @@
         "userRemapped": "Runs as {user}, remapped onto the workspace owner"
       },
       "unknown": "Placement not recognized"
+    },
+    "readiness": {
+      "actions": {
+        "addRule": "Add routing rule",
+        "connect": "Connect",
+        "enable": "Enable",
+        "inspect": "Inspect",
+        "retry": "Retry"
+      },
+      "dotsLabel": "Readiness: {summary}",
+      "pipelineLabel": "Agent readiness",
+      "states": {
+        "blocked": "Blocked",
+        "checking": "Checking…",
+        "connected": "Connected",
+        "connecting": "Connecting",
+        "disabled": "Disabled",
+        "error": "Error",
+        "off": "Not connected",
+        "ready": "Ready"
+      },
+      "stepStates": {
+        "current": "in progress",
+        "done": "done",
+        "failed": "failed",
+        "off": "skipped",
+        "todo": "pending"
+      },
+      "steps": {
+        "configured": "Configured",
+        "connected": "Connected",
+        "routed": "Routed",
+        "runnable": "Runnable"
+      }
     },
     "runCommand": "Run /{name}",
     "runtimes": {
@@ -14444,6 +14641,7 @@
       "agentNamePlaceholder": "e.g., Claude Code",
       "agentRemoved": "Agent removed successfully",
       "agentUpdated": "Agent updated successfully",
+      "allAgents": "All agents",
       "apiKey": "API Key",
       "apiKeyPlaceholder": "Optional API key for authentication",
       "arguments": "Arguments",
@@ -14628,12 +14826,21 @@
       "endpointInvalid": "Enter a valid HTTP or HTTPS endpoint URL.",
       "endpointRequired": "Endpoint URL is required for HTTP transport",
       "executionTimeoutMs": "Execution Timeout (ms)",
+      "fleetBannerCollapsed": "{connected}/{total} connected",
+      "fleetBannerConnected": "{connected} of {total} agents connected",
+      "fleetHideSummary": "Hide summary",
+      "fleetShowSummary": "Show summary",
       "fromPreset": "From preset: {name}",
       "globalSettings": "Global settings",
       "globalSettingsDesc": "Defaults that apply to every external agent",
+      "inspectorTabAdvanced": "Advanced",
+      "inspectorTabConnection": "Connection",
+      "inspectorTabOverview": "Overview",
+      "inspectorUnsaved": "You have unsaved changes",
       "maxRetries": "Max Retries",
       "maxRetryDelayMs": "Max Retry Delay (ms)",
       "nameRequired": "Agent name is required",
+      "navConfigure": "Configure",
       "navGeneral": "General",
       "noAgentsConfigured": "No external agents configured",
       "opencode": {
@@ -16667,25 +16874,84 @@
       "open": "Open issue"
     },
     "create": {
+      "ai": {
+        "applied": "AI suggestion applied",
+        "dismiss": "Dismiss",
+        "draft": "Draft description from title",
+        "duplicates": "Possible duplicates:",
+        "failed": "AI assist failed — try again.",
+        "improve": "Improve writing",
+        "label": "AI assist",
+        "noModel": "No model available — configure a provider first.",
+        "relations": "Suggest relationships",
+        "skipped": {
+          "empty": "Nothing to work on yet — write a title or description first.",
+          "no-output": "The model returned nothing usable.",
+          "pii": "Skipped — the text looks like it contains sensitive data."
+        },
+        "suggest": "Suggest priority, labels & estimate",
+        "title": "Suggest title",
+        "undo": "Undo"
+      },
+      "assignMe": "Assign to me",
       "cancel": "Cancel",
+      "cardPreview": "Board card",
+      "createAnother": "Create another",
       "descriptionLabel": "Description",
+      "descriptionPlaceholder": "Add a description — Markdown supported",
       "destinationLabel": "Save to",
       "destinationLocal": "This device (default)",
       "destinationShared": "Shared workspace",
+      "draftRestored": "Draft restored",
+      "dueQuick": {
+        "0": "Today",
+        "1": "Tomorrow",
+        "7": "Next week"
+      },
+      "issueRef": "Reference an issue",
+      "markdownHint": "Markdown supported — type # to reference an issue",
+      "moreOptions": "More options",
       "newProject": "New project…",
       "noProject": "Create a project first — issues need somewhere to live.",
+      "nothingToPreview": "Nothing to preview",
       "pickExistingProject": "← Pick an existing project",
+      "preview": "Preview",
       "projectLabel": "Project",
+      "relationships": "Relationships",
       "sharedUnavailable": "This shared workspace is not ready for new issues.",
       "subIssueOf": "Sub-issue of {identifier}",
       "submit": "Create issue",
+      "submitHint": "⌘↵",
+      "templates": {
+        "bug": "Bug report",
+        "bugBody": "## What happened\n\n\n\n## Steps to reproduce\n\n1. \n2. \n3. \n\n## Expected\n\n\n\n## Environment\n\n- ",
+        "feature": "Feature request",
+        "featureBody": "## Problem\n\n\n\n## Proposal\n\n\n\n## Acceptance criteria\n\n- [ ] \n- [ ] ",
+        "label": "Templates",
+        "task": "Task",
+        "taskBody": "## Goal\n\n\n\n## Checklist\n\n- [ ] \n- [ ] "
+      },
       "title": "New issue",
       "titleLabel": "Title",
       "titlePlaceholder": "Issue title",
-      "trigger": "New issue"
+      "toolbar": {
+        "bold": "Bold",
+        "bullet": "Bullet list",
+        "code": "Code",
+        "heading": "Heading",
+        "italic": "Italic",
+        "link": "Link",
+        "number": "Numbered list",
+        "quote": "Quote",
+        "strikethrough": "Strikethrough",
+        "task": "Task list"
+      },
+      "trigger": "New issue",
+      "write": "Write"
     },
     "cycles": {
       "cancel": "Cancel",
+      "clear": "Clear",
       "create": "Create",
       "delete": "Delete {name}",
       "deleteConfirm": "Delete ({count, plural, =0 {no issues} one {# issue unplanned} other {# issues unplanned}})",
@@ -24791,8 +25057,64 @@
       },
       "title": "Plugin requesting permission"
     },
+    "conversionDialog": {
+      "acknowledge": "I have reviewed the warnings and accept the described behavior differences.",
+      "close": "Close",
+      "cloudHint": "Cloud export is currently blocked. Inspect to see the platform limitations.",
+      "description": "Inspect platform differences, review the files, then write a converted copy.",
+      "files": "Output files ({count})",
+      "inspect": "Inspect conversion",
+      "inspectFailed": "Could not inspect conversion: {message}",
+      "inspecting": "Inspecting…",
+      "outputDir": "Output directory",
+      "relativePaths": "Source and output directories are relative to the workspace root.",
+      "sourceDir": "Source directory",
+      "surface": "Target environment",
+      "surfaces": {
+        "cli": "CLI",
+        "cloud": "Cloud",
+        "desktop": "Desktop"
+      },
+      "target": "Target platform",
+      "title": "Convert plugin",
+      "workspaceRoot": "Workspace root (absolute path)",
+      "write": "Write converted files",
+      "writeFailed": "Could not write converted files: {message}",
+      "writing": "Writing…",
+      "written": "Converted files written to {path}. No plugin was installed."
+    },
     "conversionReport": {
       "counts": "{converted, plural, =0 {Nothing converted} =1 {1 capability converted} other {# capabilities converted}}, {warnings, plural, =0 {no warnings} =1 {1 warning} other {# warnings}}, {blocking, plural, =0 {nothing blocking} =1 {1 blocker} other {# blockers}}",
+      "delivery": {
+        "capability": "Capability",
+        "hosted": {
+          "requires-cognia": "Hosted tools: enable the plugin in Cognia and use it in a Cognia session with this agent. Cognia must remain running; tool permissions and availability are checked each turn.",
+          "unverified": "Hosted use on this platform or cloud surface is unverified. A local Cognia endpoint must not be assumed reachable."
+        },
+        "native": {
+          "blocked": "A complete native export is blocked by the issues above.",
+          "ready": "Native package can be written for independent installation.",
+          "review-required": "Review the conversion changes and configuration requirements before writing the native package."
+        },
+        "outcome": "Outcome",
+        "retained": "Retained in Cognia: {capabilities}. These do not become native agent capabilities.",
+        "status": {
+          "configuration-required": "Configuration required",
+          "contextual": "Behavior changed",
+          "hosted": "Requires Cognia hosting",
+          "native": "Preserved natively",
+          "unsupported": "Adapter required / unsupported",
+          "unverified": "Needs verification"
+        },
+        "surfaces": {
+          "cli": "CLI",
+          "cloud": "Cloud",
+          "desktop": "Desktop"
+        },
+        "target": "Target: {target} · {surface}",
+        "tools": "Hosted tool contributions: {capabilities}",
+        "unverified": "Native execution has not been verified against your installed agent version."
+      },
       "fidelity": {
         "contextual": "Contextual",
         "native-exact": "Native",
@@ -24802,19 +25124,26 @@
       "fidelityHint": {
         "contextual": "Behaviour is rebuilt from what the source declared, not translated one-to-one.",
         "native-exact": "Native Cognia plugin; no conversion required.",
-        "structured": "The manifest and its contributions carry over. Anything host-specific is listed below.",
+        "structured": "Declared contributions were converted. Review the per-capability limitations; native execution is not certified.",
         "unsupported": "This plugin cannot be converted without losing behaviour."
       },
       "issueBlocking": "Blocked · {capability}",
       "issueWarning": "Warning · {capability}",
       "more": "{count, plural, =1 {and 1 more} other {and # more}}",
-      "noIssues": "Everything carried over.",
+      "noIssues": "No conversion issues detected.",
       "source": "Detected source: {source}",
       "sources": {
+        "agent-plugins": "Agent Plugins 1.0",
         "claude-code": "Claude Code",
         "codex": "Codex",
         "cognia": "Cognia",
-        "gemini-cli": "Gemini CLI"
+        "copilot": "GitHub Copilot",
+        "cursor": "Cursor",
+        "devin": "Devin",
+        "gemini-cli": "Gemini CLI",
+        "kimi": "Kimi Code",
+        "opencode": "OpenCode",
+        "pi": "Pi"
       },
       "title": "Conversion report"
     },
@@ -25381,6 +25710,20 @@
         "demoHint": "You're browsing a sample catalog. Installs in this mode are simulated and won't run real plugin code.",
         "demoTitle": "Demo marketplace"
       },
+      "presets": {
+        "badge": "Bundle",
+        "desktopOnly": "Bundle installs run in the desktop app only.",
+        "install": "Install bundle",
+        "installing": "Installing {current}/{total}…",
+        "memberCount": "{count} plugins",
+        "missing": "{count} not in this catalog: {names}",
+        "moreMembers": "+{count} more",
+        "resultAllSkipped": "Every plugin in this bundle is already installed.",
+        "resultCancelled": "Bundle install cancelled — {installed} of {total} installed.",
+        "resultFailed": "Bundle install failed: {message}",
+        "resultInstalled": "Bundle installed — {installed} of {total} plugins.",
+        "resultPartial": "{installed} of {total} installed; {failed} failed: {message}"
+      },
       "retry": "Retry",
       "searchPlaceholder": "Search the marketplace…"
     },
@@ -25686,6 +26029,7 @@
     "title": "Plugins",
     "toolbar": {
       "checkUpdates": "Check for updates",
+      "convertPlugin": "Convert plugin…",
       "desktopOnlyGroupHint": "These install from disk or a git checkout, which runs in the desktop backend.",
       "desktopOnlyHint": "Needs the Cognia desktop app",
       "fromFile": "From file…",
@@ -25863,7 +26207,9 @@
         "filterAllFiles": "All files",
         "filterWasmBundle": "WASM bundle",
         "label": "Install local WASM plugin",
-        "tauriRequiredError": "Installing a local WASM plugin requires the desktop app."
+        "previewIntegrityError": "The bundle preview did not include an integrity check. Preview it again before installing.",
+        "tauriRequiredError": "Installing a local WASM plugin requires the desktop app.",
+        "zipRequiredError": "Select a .zip bundle containing a plugin manifest and WASM component."
       },
       "fromUrlDialog": {
         "alreadyTrusted": "You already trust this author.",
@@ -25877,6 +26223,7 @@
         "installing": "Installing…",
         "noAuthorKey": "No author key",
         "preview": "Preview",
+        "previewIntegrityError": "The bundle preview did not include an integrity check. Preview it again before installing.",
         "publicKeyLabel": "Author public key (optional)",
         "publicKeyPlaceholder": "base64-encoded ed25519 public key",
         "signatureUrlLabel": "Signature URL (optional)",
@@ -26202,17 +26549,36 @@
       "save": "Save",
       "searchProject": "Search in Project"
     },
+    "breadcrumbs": {
+      "empty": "Empty folder",
+      "failed": "Couldn't load this folder",
+      "loading": "Loading…",
+      "reveal": "Reveal in File Tree"
+    },
     "cancel": "Cancel",
+    "closeDirtyConfirm": "\"{name}\" has unsaved changes. Close anyway and discard them?",
+    "closeDirtyConfirmCount": "{count} files have unsaved changes. Close anyway and discard them?",
     "closeTab": "Close {name}",
+    "collapseAll": "Collapse All",
     "delete": "Delete",
     "deleteConfirm": "Delete \"{name}\"? This cannot be undone.",
     "editorTab": "Editor",
     "emptyEditor": "Open a file from the tree to start editing.",
     "externallyChanged": "Changed on disk",
+    "fallback": {
+      "binary": "This file isn't displayed because it's either binary or uses an unsupported text encoding.",
+      "imageDescription": "Image preview",
+      "openAnyway": "Open Anyway",
+      "tooLarge": "The file is too large ({size}) to display in the editor."
+    },
     "filesTab": "Files",
     "loadingFile": "Loading {name}…",
+    "mobileNav": {
+      "aria": "Editor navigation"
+    },
     "newFile": "New File",
     "newFolder": "New Folder",
+    "newFromTemplate": "New File from Template",
     "pinTab": "Keep {name} open",
     "previewTab": "{name} — preview tab, double-click to keep it open",
     "proIde": {
@@ -26264,8 +26630,23 @@
       "fix": "Please fix the issues in this code.",
       "review": "Please review this code for potential bugs and improvements."
     },
+    "quickOpen": {
+      "allFiles": "all files",
+      "description": "Search files by name to open them.",
+      "empty": "No matching files",
+      "footer": "↑↓ navigate · ↵ open",
+      "hint": "Quick Open",
+      "indexed": "{count} files indexed",
+      "indexing": "Indexing files…",
+      "openEditors": "open editors",
+      "placeholder": "Search files by name",
+      "refreshing": "Refreshing…",
+      "title": "Quick Open",
+      "truncated": "{count} files indexed (truncated)"
+    },
     "refresh": "Refresh",
     "rename": "Rename",
+    "revealActive": "Reveal Active File",
     "rootFollowing": "{name} · following",
     "rootLabel": "Project root",
     "rootMain": "main (repository)",
@@ -26273,8 +26654,52 @@
     "saveFailed": "Save failed: {error}",
     "search": "Search",
     "searchEmpty": "No matches",
+    "searchOptions": {
+      "caseSensitive": "Match Case",
+      "clear": "Clear Search",
+      "regex": "Use Regular Expression"
+    },
     "searchPlaceholder": "Search in project…",
+    "searchResults": "{count} results in {files} files",
     "searchTab": "Search",
+    "sidebar": {
+      "aria": "Editor sidebar",
+      "collapse": "Collapse Sidebar",
+      "expand": "Expand Sidebar",
+      "explorer": "Explorer",
+      "search": "Search"
+    },
+    "statusBar": {
+      "aria": "Editor status",
+      "externallyChanged": "Changed on disk",
+      "position": "Ln {line}, Col {col}",
+      "problemsTooltip": "Jump to the next problem",
+      "selected": "({count} selected)",
+      "unsaved": "Unsaved"
+    },
+    "tabs": {
+      "close": "Close",
+      "closeAll": "Close All",
+      "closeOthers": "Close Others",
+      "closeToRight": "Close to the Right",
+      "listOpen": "List open editors",
+      "pin": "Keep Open",
+      "preview": "preview",
+      "reopenClosed": "Reopen Closed Editor",
+      "revert": "Revert File"
+    },
+    "templates": {
+      "css": "CSS",
+      "empty": "Empty File",
+      "html": "HTML",
+      "json": "JSON",
+      "markdown": "Markdown",
+      "python": "Python",
+      "reactComponent": "React Component",
+      "shell": "Shell Script",
+      "test": "Test File",
+      "typescript": "TypeScript"
+    },
     "treeAria": "Project files",
     "treeEmpty": "No files",
     "treeFailure": {
@@ -26286,6 +26711,7 @@
       "unreachable": "Could not reach this folder."
     },
     "treeFailureToast": "Could not {operation} {path}: {reason}",
+    "treeLoading": "Loading files…",
     "treeOperation": {
       "create": "create",
       "delete": "delete",
@@ -26468,15 +26894,29 @@
       "bundleFollow": "Follow the release ({tag})",
       "bundleNone": "No agent bundle is configured on this deployment, so nothing can be sandboxed.",
       "bundlePinned": "Stay on {tag}",
-      "credentials": "Sandboxes receive this host's own filtered credentials. Per-sandbox gateway tickets are not available yet.",
+      "credentials": "Sandboxes receive no host provider credentials; a managed task carries a per-task gateway lease.",
       "declaration": {
         "approve": "Approve this image",
+        "approveBuildHint": "Approval binds this built image and its effective runtime configuration to the exact repository commit.",
         "approveHint": "Approving pins the image to the digest its tag names right now; a later push to that tag does not change what runs.",
         "approved": "Approved",
         "approvedBy": "Approved by {who}",
+        "build": "Build environment",
+        "buildHint": "Build the committed Dockerfile and Features on this Host, then approve the resulting image for runs. The Host must have the environment build service configured.",
+        "buildImage": "Build from this repository",
+        "buildStatus": {
+          "building": "Building environment…",
+          "cancelled": "Build cancelled",
+          "failed": "Build failed",
+          "queued": "Build queued",
+          "succeeded": "Build ready for approval"
+        },
+        "cancelBuild": "Cancel build",
         "changed": "Changed since it was approved — approve it again to use it.",
         "declared": "{path} asks for {image}",
         "details": "{env, plural, =0 {no variables} one {# variable} other {# variables}} · {ports, plural, =0 {no ports} one {# port} other {# ports}} · {commands, plural, =0 {no lifecycle commands} one {# lifecycle command} other {# lifecycle commands}}",
+        "effectiveRuntime": "Review effective runtime configuration",
+        "ignoredFields": "Fields not used by the sandbox runtime: {fields}",
         "invalid": "The declaration at {path} could not be read ({count, plural, one {# problem} other {# problems}}).",
         "none": "This repository does not declare a runtime environment.",
         "pending": "Not approved yet",
@@ -26508,6 +26948,12 @@
       "optInHint": "Off: agents run on the standard execution path, exactly as before.",
       "poolOff": "Runtime environments are not enabled on this deployment, so runs use the standard execution path.",
       "poolOffKept": "This project's selection is kept and takes effect once an operator enables them.",
+      "ports": {
+        "close": "Close connection",
+        "desktopRequired": "Open this project in the desktop app to access authenticated container ports.",
+        "open": "Open",
+        "title": "Forwarded ports"
+      },
       "preview": {
         "actualNote": "The isolation and user a run actually gets can be stronger than requested, and are shown on the run itself.",
         "declaredUser": "Runs as the declared user {user}",
@@ -28982,6 +29428,357 @@
       "title": "Router + Fusion"
     }
   },
+  "routerFusionClassifier": {
+    "settings": {
+      "cacheTtl": "Cache lifetime (seconds)",
+      "cacheTtlDesc": "A repeated prompt reuses its label for this long. 0 turns the cache off. Default 600.",
+      "costNote": "Costs one small call per routed turn. The call is ledgered like any other, and a prompt repeated within the cache lifetime costs nothing.",
+      "desc": "Labels Auto requests with one small model call instead of keyword rules: Auto chat turns while chat is on, Run API and cognia/auto requests while the Run API is on. While background utilities are ledgered, it also answers for legacy Auto's difficulty judge.",
+      "enable": "Classify Auto requests with a model",
+      "fallbackNote": "A timeout, an unusable answer, personal data in the prompt or an unavailable model falls back to the rules classifier. A call that was already sent stays billed.",
+      "invalidNumber": "Enter a whole number from {min} to {max}.",
+      "migrated": "Carried over from the difficulty judge: {fields}.",
+      "migratedField": {
+        "cacheTtlSeconds": "cache lifetime",
+        "routerModel": "router model",
+        "timeoutMs": "timeout"
+      },
+      "model": "Router model",
+      "modelClear": "Clear",
+      "modelDesc": "A small, fast model. It only labels the request; it never answers it.",
+      "modelUnset": "Pick a router model. Until then every request is labelled by the rules classifier.",
+      "needsMaster": "Takes effect once Router + Fusion and the surface are on.",
+      "timeout": "Timeout (ms)",
+      "timeoutDesc": "The whole classification, reservation included, must finish within this. Default 1500.",
+      "title": "LLM classifier"
+    }
+  },
+  "routerFusionCompanion": {
+    "composer": {
+      "queueLabel": "Router + Fusion {mode} run",
+      "startFailed": "The run could not be queued: {message}",
+      "textOnly": "Cascade and Panel take text only. Remove the attachments, or send it as a direct message."
+    },
+    "picker": {
+      "aria": "How this message runs: {mode}",
+      "cascade": "Cascade",
+      "cascadeDesc": "A cheap model drafts, the draft is checked, and a strong model takes over if it fails. Text only.",
+      "direct": "Direct",
+      "directDesc": "Sent to the host as an ordinary message.",
+      "hint": "Runs on the host with its own budget and caps. The answer appears once it is verified.",
+      "panel": "Panel",
+      "panelDesc": "Independent models answer, a judge compares them, and one answer is written. Text only.",
+      "title": "How this message runs"
+    },
+    "reason": {
+      "COMPANION_ACTOR_REQUIRED": "The host could not tell which paired device asked.",
+      "ROUTER_FUSION_DISABLED": "Router + Fusion is switched off for companions on the host. It can be turned on in Settings → AI connections → Routing on the host.",
+      "SCHEMA_INVALID": "The host could not read the request.",
+      "SESSION_NOT_FOUND": "This conversation is not one this device can run in.",
+      "TRANSPORT_FAILED": "The host could not be reached.",
+      "unknownDelivery": "unknown error"
+    },
+    "run": {
+      "answer": "Answer",
+      "answerExpired": "The host no longer keeps this answer. It is in the conversation above.",
+      "details": "Run details",
+      "dismiss": "Dismiss",
+      "dismissAria": "Dismiss this run",
+      "historyExpired": "The host no longer keeps part of this run's steps; showing its latest state.",
+      "noAnswer": "No answer was written.",
+      "queued": "Waiting to reach the host…",
+      "refused": "The host refused the run: {reason}",
+      "regionAria": "Router + Fusion runs started from this device",
+      "retrying": "Connection lost. Reading again from step {seq}…",
+      "running": "Running on the host…",
+      "starting": "Starting on the host…",
+      "stop": "Stop",
+      "stopAria": "Stop this run",
+      "stopFailed": "The run could not be stopped ({reason}).",
+      "title": "{mode} run",
+      "undelivered": "The run never reached the host: {reason}"
+    }
+  },
+  "routerFusionDelegate": {
+    "checks": {
+      "check": "Check",
+      "counts": "{discovered} discovered · {passed} passed · {failed} failed · {skipped} skipped",
+      "countsUnknown": "This report records no test counts.",
+      "errored": "{count} errored",
+      "executedBy": {
+        "human": "Person",
+        "model": "Model",
+        "runtime": "Runtime"
+      },
+      "exit": "Command exit",
+      "level": {
+        "human_review": "Reviewed by a person",
+        "mixed": "Mixed evidence",
+        "model_review": "Reviewed by a model",
+        "schema_only": "Shape only",
+        "tool_verified": "Verified by a tool"
+      },
+      "modelClaim": "Only a check the runtime executed is evidence. A model's claim that tests passed is not.",
+      "none": "This run recorded no acceptance report, so nothing here was verified.",
+      "outcome": "Outcome",
+      "report": "Report",
+      "revision": "Revision verified",
+      "revisionMissing": "The report names no revision, so it proves nothing about the delivered change.",
+      "status": {
+        "failed": "Failed",
+        "inconclusive": "Inconclusive",
+        "not_applicable": "Not applicable",
+        "passed": "Passed"
+      },
+      "summary": "Detail",
+      "tier": "Sandbox",
+      "tierUnattested": "Not attested. The report does not say which sandbox ran the command, so treat the isolation as unproven.",
+      "tierValue": {
+        "container": "Container",
+        "microvm": "microVM",
+        "os": "OS sandbox"
+      },
+      "title": "Acceptance checks",
+      "verifier": "Verifier"
+    },
+    "patch": {
+      "applied": "Written into your workspace at {revision}.",
+      "base": "Base revision",
+      "comparedMoved": "Your workspace has moved to {revision} since this patch was made against {base}. The comparison below is against your workspace as it is now, not against the base.",
+      "comparedNow": "Compared against your workspace, which is still at the patch's base revision.",
+      "comparedUnavailable": "Your workspace could not be read on this device, so every line is shown as added.",
+      "delivery": "Delivery",
+      "deliveryValue": {
+        "patch_only": "Patch only — your workspace was not changed",
+        "workspace_updated": "Applied to your workspace"
+      },
+      "download": "Download patch",
+      "downloadFailed": "The patch could not be saved.",
+      "downloaded": "Patch saved.",
+      "expired": "The patch document is no longer stored — patch content is kept for seven days — so it cannot be shown or downloaded.",
+      "file": {
+        "baseAbsent": "New file.",
+        "baseUnavailable": "The current file could not be read here, so every line is shown as added.",
+        "delete": "Deleted",
+        "write": "Replaced"
+      },
+      "files": "{count, plural, =1 {# file} other {# files}}",
+      "none": "This run staged no patch.",
+      "notApplied": "Not written into your workspace.",
+      "result": "Result revision",
+      "title": "Patch",
+      "unchanged": "This file's content is identical to your workspace's.",
+      "workspace": "Workspace"
+    },
+    "progress": {
+      "attempts": "Attempts",
+      "delivery": "Delivery",
+      "none": "This run recorded no delegate steps.",
+      "repairs": "Repairs",
+      "sandbox": "Sandbox",
+      "scopeExpansions": "Extra paths you approved",
+      "subtasks": "Subtasks",
+      "takeovers": "Lead takeovers",
+      "title": "Delegation",
+      "toolOperations": "Tool operations",
+      "turns": "Worker turns"
+    },
+    "review": {
+      "applyElsewhere": "This run delivered a patch only. Applying it into your workspace needs a run that asks for it, so that the write goes through the same approval and conflict check.",
+      "approval": {
+        "apply": "Apply to workspace",
+        "approve": "Approve",
+        "decidedAt": "{status} · {when}",
+        "deny": "Deny",
+        "digest": "Request digest",
+        "history": "Earlier decisions",
+        "kind": {
+          "scope_expansion": "Scope expansion",
+          "workspace_apply": "Workspace apply"
+        },
+        "mismatch": "This view is out of date: the run is waiting on a different request. Reopen the run to decide.",
+        "paths": "Paths",
+        "revision": "Revision",
+        "status": {
+          "approved": "Approved",
+          "denied": "Denied",
+          "pending": "Waiting"
+        },
+        "title": "Waiting for your decision",
+        "what": {
+          "scope_expansion": "The worker asks to change files outside the paths its subtask allowed. Approving allows exactly these paths, at exactly this revision.",
+          "workspace_apply": "The verified patch is ready to be written into your workspace. Approving applies it only while your workspace is still at the base revision; if it moved, nothing is written."
+        }
+      },
+      "loading": "Reading the delegation record…",
+      "notDelegate": "",
+      "title": "Delegation review",
+      "unavailable": "The delegation record could not be read on this device: {reason}"
+    },
+    "settings": {
+      "approve": "Approve",
+      "approveFailed": "\"{profile}\" was not approved: {reason}",
+      "approved": "Approved \"{profile}\".",
+      "approvedHash": "Approved at {hash}",
+      "desc": "A delegation is accepted only on a report produced by a command the project declares in .cognia/workspace.json, and only once you approve that exact command. Changing the command asks again.",
+      "hash": "Command {hash}",
+      "loading": "Reading…",
+      "needsMaster": "Turn on the master switch to review acceptance profiles.",
+      "noProjects": "No project yet. An acceptance profile lives in a project's workspace configuration.",
+      "project": "Project",
+      "reason": {
+        "ACCEPTANCE_PROFILE_APPROVAL_FAILED": "the approval could not be stored",
+        "ACCEPTANCE_PROFILE_CHANGED": "the command changed after it was shown; review it again",
+        "ACCEPTANCE_PROFILE_MISSING": "the project no longer declares it",
+        "ACCEPTANCE_PROFILE_UNTRUSTED": "trust this workspace before approving its commands",
+        "APPROVAL_STORE_FAILED": "the approval store could not be written",
+        "PROJECT_NOT_FOUND": "the project was not found",
+        "unknown": "{code}"
+      },
+      "revoke": "Revoke",
+      "revokeFailed": "The approval of \"{profile}\" was not withdrawn: {reason}",
+      "revoked": "Withdrew the approval of \"{profile}\".",
+      "runCap": "Delegate run cap",
+      "runCapDesc": "The most one delegation may spend, across every model call it makes. An action of its own may set a lower cap.",
+      "source": {
+        "project": "Project override",
+        "repository": "Repository"
+      },
+      "status": {
+        "approved": "Approved",
+        "changed": "Command changed",
+        "unapproved": "Not approved"
+      },
+      "title": "Acceptance profiles",
+      "unavailable": {
+        "absent": "This project declares no acceptance profile, so a delegation cannot be verified in it.",
+        "approval_pending": "Nothing is approved yet, so a delegation cannot run in this project.",
+        "fault": "The project's configuration could not be read: {message}",
+        "invalid": "The project's acceptance profiles could not be parsed: {message}",
+        "project_not_found": "The project was not found.",
+        "restricted": "This workspace is not trusted, so its configuration was not read."
+      }
+    }
+  },
+  "routerFusionEval": {
+    "actions": {
+      "busy": "Working…",
+      "collect": "Collect samples",
+      "export": "Export samples",
+      "promote": "Promote",
+      "rollback": "Roll back",
+      "runRecorded": "Run on collected samples",
+      "runSimulated": "Run simulated",
+      "shadow": "Record shadow decisions"
+    },
+    "errors": {
+      "failed": "The routing experiment failed: {message}"
+    },
+    "promotion": {
+      "active": "Active predictor",
+      "deactivated": "The learned router is off again",
+      "dormant": "Later release: a promoted predictor is recorded and shadowed, and does not change a routing decision yet.",
+      "none": "None — the rules router decides every route.",
+      "promoted": "Promoted {version}",
+      "refused": {
+        "FEATURES_VERSION_MISMATCH": "The manifest was trained on a different feature encoding than this build uses.",
+        "GATE_NOT_PASSED": "The promotion gate did not pass.",
+        "NO_PUBLISHED_MANIFEST": "No head was calibrated on independent data, so there is nothing to publish.",
+        "SIMULATED_REPORT": "A simulated report never promotes anything: it met no real request and spent no real money."
+      },
+      "rolledBack": "Restored the previous predictor",
+      "title": "Learned router"
+    },
+    "report": {
+      "acceptedCost": "Cost per accepted run",
+      "byAction": "By action",
+      "caveats": "Read this first",
+      "claimSaving": "Claimed saving per accepted run: {amount}",
+      "empty": "No experiment has been run yet.",
+      "gate": "Promotion gate",
+      "gateRefusal": {
+        "DETERMINISTIC_LOGGING": "Every run was routed by the deterministic rules router, so no comparison is identifiable.",
+        "NO_PREDICTOR": "No head could be published, so there was no candidate to compare against."
+      },
+      "headCalibrated": "Calibrated",
+      "headSamples": "{training} train · {calibration} calibration · {test} test",
+      "headWithheld": "Withheld",
+      "heads": "Heads",
+      "label": {
+        "live": "Live",
+        "simulated": "Simulated"
+      },
+      "noClaim": "This report makes no claim about real quality, cost or saving.",
+      "passRate": "Accepted share",
+      "sampleCount": "Samples",
+      "title": "Report",
+      "totalCost": "Total cost",
+      "undefinedCost": "Nothing was accepted",
+      "verdict": {
+        "fail": "Fail",
+        "inconclusive": "Inconclusive",
+        "none": "Not attempted",
+        "pass": "Pass"
+      }
+    },
+    "samples": {
+      "collected": "Collected {count} of {scanned} runs",
+      "exported": "Exported {count} samples with their propensity",
+      "reason": {
+        "cost_pending": "bill not settled yet",
+        "input_unavailable": "stored input is gone or unreadable",
+        "no_action_selected": "no action was selected",
+        "no_decision": "no route decision stored",
+        "not_terminal": "still running"
+      },
+      "skipped": "{count} runs could not be sampled",
+      "stored": "{count} stored",
+      "title": "Samples"
+    },
+    "shadow": {
+      "agreement": "Agreement",
+      "empty": "No shadow decision has been recorded yet.",
+      "evaluated": "Evaluated",
+      "noOpinion": "No calibrated head",
+      "noPredictor": "No learned router is active, so there is nothing to shadow.",
+      "note": "The learned router predicts beside the rules router and never acts on the result.",
+      "outOfDistribution": "Out of distribution",
+      "refused": "The active manifest could not be verified and was not used.",
+      "title": "Shadow decisions"
+    },
+    "subtitle": "Train the learned router on routed runs, watch it beside the rules router, and promote it only when the gate agrees.",
+    "tab": "Routing",
+    "title": "Routing experiment",
+    "unavailable": {
+      "body": "Turn on a Router + Fusion surface under Settings → AI connections → Routing. Without routed runs there is nothing to learn from.",
+      "title": "Router + Fusion is off"
+    }
+  },
+  "routerFusionModes": {
+    "actions": {
+      "auto": "Auto",
+      "cascade": "Cascade",
+      "delegate": "Delegate",
+      "direct": "Direct",
+      "panel": "Panel"
+    },
+    "errors": {
+      "modeDormant": "This action is not available in this release.",
+      "surfaceOff": "Router + Fusion is off for agents and workflows, so this runs as Auto. Turn it on in Settings → AI connections → Routing.",
+      "workspaceRequired": "Delegate edits files, so it needs a workspace."
+    },
+    "field": {
+      "label": "Router + Fusion action"
+    },
+    "hints": {
+      "auto": "Unchanged: one model turn, the way this step has always run.",
+      "cascade": "Start on a cheap model and escalate only when its answer fails the check.",
+      "delegate": "Hand the work to a bounded worker graph that proves its result in a sandbox. Needs a workspace.",
+      "direct": "One routed model call, reserved and settled on the ledger.",
+      "panel": "Several models answer, a judge compares them, and the checked answer is returned."
+    },
+    "laterRelease": "Later release"
+  },
   "routingFallback": {
     "answeredVia": "Answered via {provider} ({model})",
     "fallbackExhausted": "All fallback providers failed: {error}",
@@ -30348,8 +31145,7 @@
       "unhealthy": "Unhealthy",
       "unknown": "Unknown"
     },
-    "successRate": "{percent}%",
-    "title": "Provider health"
+    "successRate": "{percent}%"
   },
   "searchReliability": {
     "cooldown": "Cooldown",
@@ -30937,6 +31733,11 @@
     "empty": "No sessions found.",
     "emptyHint": "Nothing was found on disk. Try choosing session files manually.",
     "errorTitle": "Import failed",
+    "failedSessions": "{count, plural, one {# session could not be imported} other {# sessions could not be imported}}. Choose the files again to retry.",
+    "failureReasons": {
+      "parse-failed": "The session could not be parsed",
+      "source-unavailable": "The source adapter is no longer available"
+    },
     "fidelityReport": {
       "background": "Background",
       "fidelity": {
@@ -30993,6 +31794,7 @@
     "loadMore": "Show {count} more",
     "messagesLabel": "{count, plural, one {# message} other {# messages}}",
     "parsingProgress": "Parsing {done}/{total}…",
+    "partialTitle": "Import finished with failures",
     "pickButton": "Choose files…",
     "pickerOnly": "{sources} keeps its history inside each repository, so a scan can't find it — choose the file yourself.",
     "retry": "Try again",
@@ -32683,6 +33485,9 @@
       },
       "personalization": {
         "description": "How the chat welcome page greets you and how much it shows.",
+        "hintsHelp": "Typed out one by one inside the welcome input, Tab fills one in. Leave empty for generated suggestions.",
+        "hintsLabel": "Welcome input hints",
+        "hintsPlaceholder": "One prompt per line…",
         "nameLabel": "Your name",
         "namePlaceholder": "e.g. Max",
         "restoreSections": "Restore hidden welcome sections",
@@ -32945,10 +33750,11 @@
         "galleryTitle": "Gallery",
         "generator": {
           "accent": "Generated accent color",
-          "action": "Generate matching theme",
+          "action": "Generate & apply",
           "applyTuning": "Apply suggested",
           "created": "A matching light/dark theme was created and activated.",
-          "description": "Extract a local accent color from this image and build a readable light/dark theme.",
+          "createdWithTuning": "Theme applied, along with the suggested opacity and blur.",
+          "description": "Build a matching light/dark theme from this wallpaper and apply the suggested opacity and blur in one step.",
           "error": "Could not analyze this image. The wallpaper is unchanged.",
           "secondary": "Generated secondary color",
           "themeName": "{name} palette",
@@ -36546,10 +37352,14 @@
           "webOnlyNote": "Scheduled writes require the desktop app. In the browser you'll still see the reminder banner."
         },
         "shareScan": {
+          "binaryBody": "This backup contains original files or image previews. The text scan cannot inspect their contents.",
+          "binaryNote": "Original files and previews are included. Their contents were not inspected by the text scan.",
+          "binaryTitle": "Confirm attachment sharing",
           "body": "The link would carry these values exactly as they are. Backups are never redacted, because a redacted backup does not restore faithfully. Review the list, then confirm to continue.",
           "cancel": "Cancel",
           "clean": "Scanned for personal info before sharing: nothing found.",
           "confirm": "I understand this link will carry the personal information listed above.",
+          "confirmWithAttachments": "I understand that the original files and previews will be included in this share, including any personal information they contain.",
           "continue": "Continue to share",
           "domainRow": "{hits, plural, =1 {1 value} other {# values}}",
           "domains": {
@@ -36582,8 +37392,10 @@
           },
           "prepareFailed": "Could not prepare the backup for sharing.",
           "preparing": "Preparing backup…",
+          "streamingRequired": "This backup is too large for a share link. Use Export backup to save a local streaming backup with all attachments.",
           "title": "Personal info found in this backup",
-          "total": "{total, plural, =1 {1 personal value} other {# personal values}} across {domains, plural, =1 {1 area} other {# areas}}"
+          "total": "{total, plural, =1 {1 personal value} other {# personal values}} across {domains, plural, =1 {1 area} other {# areas}}",
+          "uninspectedAttachments": "{count} binary payloads were not inspected. They may contain personal information that does not appear in the extracted text."
         },
         "showPassphrase": "Show passphrase",
         "unlockButton": "Unlock & preview",
@@ -38261,6 +39073,10 @@
       "overloadCooldownHelp": "Park an account this long after a 529 overloaded response.",
       "port": "Port",
       "portHelp": "Port the listener binds to.",
+      "publicOrigin": "Public origin",
+      "publicOriginHelp": "Where callers reach this gateway when that is not the address the connection arrived on — behind a reverse proxy, a tunnel, or a mapped container port. Artifact download links are built from it. Leave it empty to keep deriving the address from each request.",
+      "publicOriginInvalid": "Enter an origin such as https://gateway.example.com — scheme and host only, with no path.",
+      "publicOriginPlaceholder": "https://gateway.example.com",
       "quotaExceeded": "Quota spent",
       "quotaReset": "Quota usage reset",
       "rateLimit": "Global requests / minute",
@@ -38408,6 +39224,10 @@
             "desc": "Inject .cognia/agent-context.md as standing context on every prompt.",
             "label": "Auto context (prompt)"
           },
+          "command-auth-gate": {
+            "desc": "Deny a shell command when its rule's `ensure` credential check fails — rules come from .cognia/command-auth.json / COGNIA_COMMAND_AUTH_RULES.",
+            "label": "Command auth gate"
+          },
           "cost-quota-guard": {
             "desc": "Deny a turn once the session token budget is exceeded.",
             "label": "Token budget guard"
@@ -38473,6 +39293,8 @@
         "removeAria": "Remove this group"
       },
       "handler": {
+        "asyncHint": "Runs detached — its output can't block or add context.",
+        "asyncLabel": "Run in background",
         "commandHint": "e.g. {example}",
         "commandLabel": "Shell command",
         "commandPlaceholder": "echo \"$CLAUDE_TOOL_NAME ran\"",
@@ -42795,13 +43617,11 @@
     "composer": {
       "skillPicker": {
         "builtinGroupHeading": "Built-in skills",
-        "description": "Select skills to include in the next message only.",
         "empty": "No skills found.",
         "groupHeading": "Available skills",
         "inertChip": "{name} is disabled for this session and won't be sent.",
         "removeChip": "Remove {name}",
         "searchPlaceholder": "Search skills…",
-        "title": "Attach a skill",
         "trigger": "Attach skill"
       }
     },
@@ -47390,9 +48210,12 @@
     }
   },
   "webSearchToggle": {
+    "goToSettings": "Open settings",
     "searchFailed": "Web search failed: {message}",
     "searchedVia": "Searched via {provider} — {count} results",
-    "tooltipDisabled": "Enable in Settings → Web search and configure a provider",
+    "setupNoProvider": "No search provider — set one up in Settings → Web search",
+    "setupSwitchOff": "Web search is off — turn it on in Settings → Web search",
+    "setupToolsOff": "Web tools are off — enable them in Settings → Tools",
     "tooltipOff": "Web search off",
     "tooltipOn": "Web search on — using {provider}"
   },

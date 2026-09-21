@@ -667,6 +667,9 @@
   },
   "personalization": {
     "description": "How the chat welcome page greets you and how much it shows.",
+    "hintsHelp": "Typed out one by one inside the welcome input, Tab fills one in. Leave empty for generated suggestions.",
+    "hintsLabel": "Welcome input hints",
+    "hintsPlaceholder": "One prompt per line…",
     "nameLabel": "Your name",
     "namePlaceholder": "e.g. Max",
     "restoreSections": "Restore hidden welcome sections",
@@ -929,10 +932,11 @@
     "galleryTitle": "Gallery",
     "generator": {
       "accent": "Generated accent color",
-      "action": "Generate matching theme",
+      "action": "Generate & apply",
       "applyTuning": "Apply suggested",
       "created": "A matching light/dark theme was created and activated.",
-      "description": "Extract a local accent color from this image and build a readable light/dark theme.",
+      "createdWithTuning": "Theme applied, along with the suggested opacity and blur.",
+      "description": "Build a matching light/dark theme from this wallpaper and apply the suggested opacity and blur in one step.",
       "error": "Could not analyze this image. The wallpaper is unchanged.",
       "secondary": "Generated secondary color",
       "themeName": "{name} palette",

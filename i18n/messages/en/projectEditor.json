@@ -6,17 +6,36 @@
     "save": "Save",
     "searchProject": "Search in Project"
   },
+  "breadcrumbs": {
+    "empty": "Empty folder",
+    "failed": "Couldn't load this folder",
+    "loading": "Loading…",
+    "reveal": "Reveal in File Tree"
+  },
   "cancel": "Cancel",
+  "closeDirtyConfirm": "\"{name}\" has unsaved changes. Close anyway and discard them?",
+  "closeDirtyConfirmCount": "{count} files have unsaved changes. Close anyway and discard them?",
   "closeTab": "Close {name}",
+  "collapseAll": "Collapse All",
   "delete": "Delete",
   "deleteConfirm": "Delete \"{name}\"? This cannot be undone.",
   "editorTab": "Editor",
   "emptyEditor": "Open a file from the tree to start editing.",
   "externallyChanged": "Changed on disk",
+  "fallback": {
+    "binary": "This file isn't displayed because it's either binary or uses an unsupported text encoding.",
+    "imageDescription": "Image preview",
+    "openAnyway": "Open Anyway",
+    "tooLarge": "The file is too large ({size}) to display in the editor."
+  },
   "filesTab": "Files",
   "loadingFile": "Loading {name}…",
+  "mobileNav": {
+    "aria": "Editor navigation"
+  },
   "newFile": "New File",
   "newFolder": "New Folder",
+  "newFromTemplate": "New File from Template",
   "pinTab": "Keep {name} open",
   "previewTab": "{name} — preview tab, double-click to keep it open",
   "proIde": {
@@ -68,8 +87,23 @@
     "fix": "Please fix the issues in this code.",
     "review": "Please review this code for potential bugs and improvements."
   },
+  "quickOpen": {
+    "allFiles": "all files",
+    "description": "Search files by name to open them.",
+    "empty": "No matching files",
+    "footer": "↑↓ navigate · ↵ open",
+    "hint": "Quick Open",
+    "indexed": "{count} files indexed",
+    "indexing": "Indexing files…",
+    "openEditors": "open editors",
+    "placeholder": "Search files by name",
+    "refreshing": "Refreshing…",
+    "title": "Quick Open",
+    "truncated": "{count} files indexed (truncated)"
+  },
   "refresh": "Refresh",
   "rename": "Rename",
+  "revealActive": "Reveal Active File",
   "rootFollowing": "{name} · following",
   "rootLabel": "Project root",
   "rootMain": "main (repository)",
@@ -77,8 +111,52 @@
   "saveFailed": "Save failed: {error}",
   "search": "Search",
   "searchEmpty": "No matches",
+  "searchOptions": {
+    "caseSensitive": "Match Case",
+    "clear": "Clear Search",
+    "regex": "Use Regular Expression"
+  },
   "searchPlaceholder": "Search in project…",
+  "searchResults": "{count} results in {files} files",
   "searchTab": "Search",
+  "sidebar": {
+    "aria": "Editor sidebar",
+    "collapse": "Collapse Sidebar",
+    "expand": "Expand Sidebar",
+    "explorer": "Explorer",
+    "search": "Search"
+  },
+  "statusBar": {
+    "aria": "Editor status",
+    "externallyChanged": "Changed on disk",
+    "position": "Ln {line}, Col {col}",
+    "problemsTooltip": "Jump to the next problem",
+    "selected": "({count} selected)",
+    "unsaved": "Unsaved"
+  },
+  "tabs": {
+    "close": "Close",
+    "closeAll": "Close All",
+    "closeOthers": "Close Others",
+    "closeToRight": "Close to the Right",
+    "listOpen": "List open editors",
+    "pin": "Keep Open",
+    "preview": "preview",
+    "reopenClosed": "Reopen Closed Editor",
+    "revert": "Revert File"
+  },
+  "templates": {
+    "css": "CSS",
+    "empty": "Empty File",
+    "html": "HTML",
+    "json": "JSON",
+    "markdown": "Markdown",
+    "python": "Python",
+    "reactComponent": "React Component",
+    "shell": "Shell Script",
+    "test": "Test File",
+    "typescript": "TypeScript"
+  },
   "treeAria": "Project files",
   "treeEmpty": "No files",
   "treeFailure": {
@@ -90,6 +168,7 @@
     "unreachable": "Could not reach this folder."
   },
   "treeFailureToast": "Could not {operation} {path}: {reason}",
+  "treeLoading": "Loading files…",
   "treeOperation": {
     "create": "create",
     "delete": "delete",

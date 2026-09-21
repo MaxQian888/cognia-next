@@ -69,6 +69,7 @@
       "unpinSuccess": "已取消置顶 {count} 个会话"
     },
     "cancel": "取消",
+    "chatsEmpty": "还没有对话——发起一个",
     "clearSearch": "清空搜索",
     "collapseSidebar": "折叠会话列表",
     "collapseTeams": "折叠团队列表",
@@ -100,7 +101,11 @@
         "workspace": "工作区"
       }
     },
+    "groupEmpty": "还没有会话",
     "groupOther": "其它",
+    "groupShowAll": "显示全部 {count} 条",
+    "groupShowLess": "收起",
+    "groupShowMore": "再显示 {count} 条",
     "listActions": "列表操作",
     "metadata": {
       "agent": "Agent",
@@ -114,6 +119,7 @@
     "moveFolderUp": "上移文件夹",
     "newChat": "新建对话",
     "newConversation": "新建会话",
+    "newConversationIn": "在「{name}」中新建会话",
     "newFolder": "新建文件夹",
     "newFolderName": "新建文件夹",
     "openSessions": "打开会话列表",
@@ -125,6 +131,7 @@
     "searchMessageContent": "搜索消息正文",
     "searchPlaceholder": "搜索对话…",
     "searchShortcutHint": "按 / 开始搜索",
+    "searchToggleAria": "搜索此列表",
     "searchTruncated": "部分结果可能被隐藏——请细化搜索。",
     "searchingMessages": "正在搜索消息内容…",
     "sectionPinned": "置顶",
@@ -191,6 +198,14 @@
     "bots": "Bot",
     "browser": "浏览器",
     "canvas": "画布",
+    "categories": {
+      "agents": "智能体",
+      "explore": "探索",
+      "insights": "洞察",
+      "spaces": "空间",
+      "system": "系统",
+      "you": "个人"
+    },
     "createTeam": "创建团队",
     "customize": {
       "behaviour": "行为",
@@ -237,6 +252,10 @@
     "me": "我的",
     "memory": "记忆",
     "more": "更多",
+    "moreCount": "{count, plural, other {# 个功能}}",
+    "moreFilterClear": "清除筛选",
+    "moreFilterEmpty": "没有匹配“{query}”的功能。",
+    "moreFilterPlaceholder": "筛选功能…",
     "moveTeamDown": "下移",
     "moveTeamUp": "上移",
     "navigation": "导航",
@@ -574,6 +593,13 @@
     "handoffStatus": "设备接力状态",
     "moveToFolder": "移动到文件夹",
     "openInCodexApp": "在 Codex App 中打开",
+    "codexHandoffPiiBlocked": "交接内容中检测到敏感信息。请先移除或脱敏，再导出。",
+    "codexHandoffUnsupported": "部分内容无法传递。请先将浏览器临时附件保存为文件，再重试。",
+    "codexHandoffPending": "Codex 导入结果尚未确认。请先检查 Codex App，再重试；原任务仍保留。",
+    "codexHandoffTargetMissing": "本地找不到关联的 Codex 任务。请先在 Codex App 中打开它，再重试导入。",
+    "returnFromCodexApp": "从 Codex App 接回",
+    "returnedFromCodexApp": "已将 Codex 最新快照导入为关联对话。",
+    "returnFromCodexAppFailed": "无法导入关联的 Codex 任务。",
     "openInCodexAppFailed": "无法在 Codex App 中打开此任务。",
     "openInTerminal": "在终端打开",
     "openInTerminalFailed": "无法导出此会话到终端",
@@ -612,7 +638,11 @@
       "title": "顶部栏",
       "workbench": "工作台"
     },
-    "title": "界面布局"
+    "title": "界面布局",
+    "webTitleBar": {
+      "label": "显示顶部栏",
+      "description": "浏览器标签页本身已有窗口框架，因此顶部栏默认关闭——各列会绘制自己的标题栏，搜索和命令仍可通过 ⌘K / Ctrl+K 打开。下方的项目列表即顶部栏重新启用后使用的布局。"
+    }
   },
   "shellLayoutNotice": {
     "description": "面板开关、主题、缩放和语言已移到标题栏的「视图」菜单，桌宠、OCR、剪贴板按钮也在那里。按 ⌘B 可显示或隐藏会话列表。",
@@ -631,6 +661,11 @@
     "standingCloud": "Cognia 云",
     "standingLocal": "仅本机",
     "standingOrg": "组织成员",
+    "themeAria": "切换主题",
+    "themeDark": "深色",
+    "themeLight": "浅色",
+    "themeNow": "主题：{theme}",
+    "themeSystem": "跟随系统",
     "usage": "用量",
     "usageLeft": "剩余 {percent}%"
   },

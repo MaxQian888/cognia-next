@@ -1,7 +1,10 @@
 {
   "searchFailed": "Web search failed: {message}",
   "searchedVia": "Searched via {provider} — {count} results",
-  "tooltipDisabled": "Enable in Settings → Web search and configure a provider",
+  "setupNoProvider": "No search provider — set one up in Settings → Web search",
+  "setupSwitchOff": "Web search is off — turn it on in Settings → Web search",
+  "setupToolsOff": "Web tools are off — enable them in Settings → Tools",
+  "goToSettings": "Open settings",
   "tooltipOff": "Web search off",
   "tooltipOn": "Web search on — using {provider}"
 }

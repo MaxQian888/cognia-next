@@ -6,17 +6,36 @@
     "save": "保存",
     "searchProject": "在项目中搜索"
   },
+  "breadcrumbs": {
+    "empty": "空文件夹",
+    "failed": "无法加载此文件夹",
+    "loading": "加载中…",
+    "reveal": "在文件树中显示"
+  },
   "cancel": "取消",
+  "closeDirtyConfirm": "“{name}”有未保存的更改。仍要关闭并丢弃这些更改吗？",
+  "closeDirtyConfirmCount": "{count} 个文件有未保存的更改。仍要关闭并丢弃这些更改吗？",
   "closeTab": "关闭 {name}",
+  "collapseAll": "全部折叠",
   "delete": "删除",
   "deleteConfirm": "删除“{name}”？此操作无法撤销。",
   "editorTab": "编辑器",
   "emptyEditor": "从文件树打开一个文件开始编辑。",
   "externallyChanged": "磁盘已变更",
+  "fallback": {
+    "binary": "此文件为二进制文件或使用了不受支持的文本编码，无法显示。",
+    "imageDescription": "图片预览",
+    "openAnyway": "仍然打开",
+    "tooLarge": "文件过大（{size}），无法在编辑器中显示。"
+  },
   "filesTab": "文件",
   "loadingFile": "正在加载 {name}…",
+  "mobileNav": {
+    "aria": "编辑器导航"
+  },
   "newFile": "新建文件",
   "newFolder": "新建文件夹",
+  "newFromTemplate": "从模板新建文件",
   "pinTab": "固定 {name}",
   "previewTab": "{name} —— 预览标签页，双击可固定",
   "proIde": {
@@ -68,8 +87,23 @@
     "fix": "请修复这段代码中的问题。",
     "review": "请审查这段代码，找出潜在的错误和改进点。"
   },
+  "quickOpen": {
+    "allFiles": "所有文件",
+    "description": "按名称搜索并打开文件。",
+    "empty": "没有匹配的文件",
+    "footer": "↑↓ 移动 · ↵ 打开",
+    "hint": "快速打开",
+    "indexed": "已索引 {count} 个文件",
+    "indexing": "正在索引文件…",
+    "openEditors": "已打开的编辑器",
+    "placeholder": "按名称搜索文件",
+    "refreshing": "正在刷新…",
+    "title": "快速打开",
+    "truncated": "已索引 {count} 个文件（已截断）"
+  },
   "refresh": "刷新",
   "rename": "重命名",
+  "revealActive": "显示当前文件",
   "rootFollowing": "{name} · 跟随对话",
   "rootLabel": "项目根目录",
   "rootMain": "main（主仓库）",
@@ -77,8 +111,52 @@
   "saveFailed": "保存失败：{error}",
   "search": "搜索",
   "searchEmpty": "无匹配",
+  "searchOptions": {
+    "caseSensitive": "区分大小写",
+    "clear": "清除搜索",
+    "regex": "使用正则表达式"
+  },
   "searchPlaceholder": "在项目中搜索…",
+  "searchResults": "{files} 个文件中 {count} 个结果",
   "searchTab": "搜索",
+  "sidebar": {
+    "aria": "编辑器侧边栏",
+    "collapse": "折叠侧边栏",
+    "expand": "展开侧边栏",
+    "explorer": "资源管理器",
+    "search": "搜索"
+  },
+  "statusBar": {
+    "aria": "编辑器状态",
+    "externallyChanged": "磁盘已变更",
+    "position": "行 {line}，列 {col}",
+    "problemsTooltip": "跳转到下一个问题",
+    "selected": "（已选 {count} 个字符）",
+    "unsaved": "未保存"
+  },
+  "tabs": {
+    "close": "关闭",
+    "closeAll": "全部关闭",
+    "closeOthers": "关闭其他",
+    "closeToRight": "关闭右侧",
+    "listOpen": "列出已打开的编辑器",
+    "pin": "保持打开",
+    "preview": "预览",
+    "reopenClosed": "重新打开已关闭的编辑器",
+    "revert": "还原文件"
+  },
+  "templates": {
+    "css": "CSS",
+    "empty": "空文件",
+    "html": "HTML",
+    "json": "JSON",
+    "markdown": "Markdown",
+    "python": "Python",
+    "reactComponent": "React 组件",
+    "shell": "Shell 脚本",
+    "test": "测试文件",
+    "typescript": "TypeScript"
+  },
   "treeAria": "项目文件",
   "treeEmpty": "暂无文件",
   "treeFailure": {
@@ -90,6 +168,7 @@
     "unreachable": "无法到达这个目录。"
   },
   "treeFailureToast": "{operation} {path} 失败：{reason}",
+  "treeLoading": "正在加载文件…",
   "treeOperation": {
     "create": "新建",
     "delete": "删除",

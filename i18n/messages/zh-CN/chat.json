@@ -267,7 +267,7 @@
         "fileTab": "文件",
         "fullSize": "查看原图",
         "imageHint": "发送前会将长边压缩到 {maxEdge}px 以内。",
-        "modelHint": "这就是模型将收到的完整内容。",
+        "modelHint": "这里展示附件的处理结果。较长的文本会按相关片段发送，完整提取内容仍保留，可按需读取。",
         "modelTab": "模型视角",
         "ocrDetail": "查看逐页结果",
         "ocrRun": "运行 OCR",
@@ -284,7 +284,8 @@
         "unsupportedType": "不支持的文件类型",
         "videoTooLarge": "过大，无法处理",
         "videoUndecodable": "此处无法解码该视频",
-        "videoUnprocessed": "该视频未经处理"
+        "videoUnprocessed": "该视频未经处理",
+        "audioUnprocessed": "请先转录此音频再发送。"
       },
       "removeAria": "移除 {filename}",
       "reorderAria": "拖动排序 {filename}",
@@ -370,7 +371,21 @@
         },
         "strategyLabel": "取帧方式"
       },
-      "videoSizeExceeded": "有 {count} 个视频超过 {max} MB，无法在此处理。"
+      "videoSizeExceeded": "有 {count} 个视频超过 {max} MB，无法在此处理。",
+      "processing": {
+        "audioPlayer": "播放 {filename}",
+        "modelHint": "音频请选择转写模型，图片请选择视觉模型。",
+        "cloudNotice": "处理会将此媒体发送至所选提供商，并可能产生用量费用。结果属于来源材料，不作为指令。",
+        "transcribe": "转写音频",
+        "describe": "描述画面",
+        "progress": "已处理 {processed} / {total}",
+        "cancel": "取消处理",
+        "retry": "重试提取",
+        "failed": "处理未完成，请检查所选模型和提供商后重试。",
+        "audioRequired": "请先转写此音频再发送。",
+        "partial": "当前为部分表示，不包含尚未处理的页面、音轨或未采样的视频内容。",
+        "rejected": "有 {count} 个附件尚未处理完成，请重试或移除后再发送。"
+      }
     },
     "camera": {
       "captureAria": "拍照或添加照片",
@@ -484,12 +499,17 @@
       "label": "追问建议"
     },
     "ghostAccept": "接受",
-    "ghostAcceptHint": "Tab",
-    "ghostCycleHint": "Alt+] / Alt+[ 切换",
+    "ghostCardAriaLabel": "补全建议",
+    "ghostCardCandidate": "候选 {index}",
+    "ghostCardCycle": "切换候选",
+    "ghostCardFailed": "建议生成失败",
+    "ghostCardRetry": "重试",
+    "ghostCardSuggestion": "建议",
+    "ghostCardSuggesting": "正在生成建议…",
+    "ghostCardThinking": "正在思考…",
     "ghostDismiss": "忽略建议",
     "ghostManualHint": "Alt+\\ 让 Agent 补全",
     "ghostManualPending": "Agent 正在思考…",
-    "ghostPosition": "第 {index} / {total} 条",
     "ghostSourceAgent": "来自 Agent",
     "ghostSourceAi": "模型建议",
     "ghostSourceCommand": "命令",
@@ -847,6 +867,20 @@
       "latestTurn": "最近一轮",
       "modelTooltip": "当前模型 · 在「设置 → API Key」中切换",
       "moreControls": "更多控件",
+      "moreMenu": {
+        "context": "上下文",
+        "cost": "花费",
+        "credential": "API 密钥",
+        "mode": "Agent 模式",
+        "model": "模型",
+        "permission": "权限",
+        "plugins": "插件",
+        "preset": "预设",
+        "routing": "路由",
+        "runtime": "运行时",
+        "sandbox": "沙盒",
+        "thinking": "思考"
+      },
       "noUsageYet": "尚未完成任何一轮对话 — 首次回复后开始统计 token。",
       "pluginExtensionOverflow": "更多插件操作",
       "quickActions": "插件快捷操作",
@@ -879,7 +913,8 @@
         "generic": "语音输入失败，请重试。",
         "noMicrophone": "没有可用的麦克风，请检查音频设备。",
         "noSpeech": "未检测到语音，请靠近麦克风再试。",
-        "permissionDenied": "麦克风权限被拒绝，请为应用开启麦克风权限后重试。"
+        "permissionDenied": "麦克风权限被拒绝，请为应用开启麦克风权限后重试。",
+        "unsupported": "当前环境不支持语音输入。"
       },
       "grantMicAccess": "允许访问麦克风",
       "languageLabel": "语言",
@@ -1026,6 +1061,29 @@
   },
   "empty": {
     "brandAlt": "Cognia",
+    "characterEntry": "角色对话",
+    "contextBar": {
+      "appliesToNew": "对下一个新会话生效。",
+      "branch": "分支",
+      "currentBranch": "当前分支",
+      "envDefault": "工作区默认",
+      "envDefaultNamed": "默认 · {name}",
+      "envLabel": "环境",
+      "envNone": "无环境",
+      "moreOptions": "更多上下文选项",
+      "notifyChannel": "通知渠道",
+      "notifyChannelAuto": "自动（已绑定账号）",
+      "notifyIm": "IM 通知",
+      "notifyImDone": "完成后通过 IM 通知",
+      "notifyNoChannels": "还没有已绑定的 IM 会话——请先在 设置 → 连接器 中接入一个机器人。",
+      "notifyOn": {
+        "attention": "需要我介入",
+        "done": "完成时",
+        "error": "失败时"
+      },
+      "notifyWhen": "通知时机",
+      "repoLabel": "仓库"
+    },
     "dismiss": "隐藏此区块",
     "execution": {
       "baseLabel": "基准",
@@ -1045,7 +1103,17 @@
       "pullRequestNumberLabel": "拉取请求编号",
       "repositoryLabel": "仓库",
       "repositoryPlaceholder": "所有者/仓库",
-      "worktree": "工作树"
+      "worktree": "工作树",
+      "worktreeAuto": "自动命名",
+      "worktreeAutoHint": "由系统自动生成 worktree 名称",
+      "worktreeManual": "手动命名",
+      "worktreeManualHint": "自定义 worktree 分支名",
+      "worktreeNameInvalid": "不是合法的分支名",
+      "worktreeNameLabel": "Worktree 名称",
+      "worktreeNamePlaceholder": "如 feat/login",
+      "worktreeNameTaken": "同名分支已存在",
+      "worktreeOff": "关闭",
+      "worktreeOffHint": "直接在仓库目录中运行"
     },
     "greeting": {
       "afternoon": "下午好",
@@ -1053,6 +1121,16 @@
       "morning": "早上好",
       "named": "{greeting}，{name}",
       "night": "夜深了"
+    },
+    "hints": {
+      "h1": "总结一下这个仓库这周改了什么。",
+      "h2": "跑一下项目的测试，失败的说明原因。",
+      "h3": "根据最近的提交起草一段更新日志。",
+      "h4": "审查暂存的改动，标出有风险的点。",
+      "h5": "安排每周一早上 9 点的代码评审摘要。",
+      "h6": "找到处理会话重试的代码并解释给我听。",
+      "h7": "把收件箱未读消息整理成优先级清单。",
+      "h8": "搭一个每天早上汇总新 issue 的工作流。"
     },
     "illustrationAlt": "连接对话、代码、文档与自动化的智能工作台",
     "newChat": "新建会话",
@@ -1118,7 +1196,17 @@
     "loading": "正在加载 {name}…",
     "pdfFallback": "无法预览此 PDF。",
     "preview": "预览",
-    "source": "源码"
+    "source": {
+      "download": "下载原文件",
+      "remove": "移除来源",
+      "removeTitle": "移除此附件来源？",
+      "removeDescription": "这会移除本对话中保存的原文件和可检索的提取内容，并使基于它的记忆失效。消息中的文字和预览仍保留在历史记录中。",
+      "cancel": "取消",
+      "confirm": "移除来源",
+      "unavailable": "此设备上没有原文件",
+      "removed": "来源已移除",
+      "failed": "无法访问附件来源，请重试。"
+    }
   },
   "grounding": {
     "supported": "检索证据支持本次回答中的陈述。",
@@ -1494,6 +1582,11 @@
     "zoomIn": "放大",
     "zoomOut": "缩小"
   },
+  "imNotify": {
+    "attention": "{title} 需要你的输入",
+    "done": "{title} 已完成",
+    "error": "{title} 出错了"
+  },
   "imported": {
     "diverged": "{source} 已另有改动",
     "divergedHint": "自 Cognia 接管以来，该对话在 {source} 一侧也发生了变化。Cognia 不会合并两边——你看到的是 Cognia 这一份。点击可忽略此提示。",
@@ -1503,6 +1596,7 @@
     "canonicalState": "已保留 {count} 项任务、计划、历史或 Agent 事件",
     "resume": "原生恢复",
     "resumeErrors": {
+      "runtime-ambiguous": "有多个已连接的 Agent 与此来源匹配。请断开其他实例后再恢复。",
       "binding-missing": "来源未提供原生会话 ID。",
       "cwd-missing": "原始工作目录已不存在。",
       "handshake-failed": "原 Agent 无法恢复此会话。",
