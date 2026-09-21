@@ -39,7 +39,7 @@ description: The ADR-0026 typed-tool tier — a code-reviewed registry of MCP to
 | `lib/skills/built-in/manifest.ts` | Registry → MCP tool defs; per-channel filter pipeline; capability summary |
 | `lib/skills/built-in/dispatcher.ts` | `runBuiltInSkill` — the 6-gate trust pipeline; never throws |
 | `lib/skills/built-in/index.ts` | Public barrel; `import "./lark"` triggers all registrations |
-| `lib/skills/built-in/lark/` | 40 Lark skills across 6 families + the lark-cli exec/auth bridge |
+| `lib/skills/built-in/lark/` | 43 Lark skills across 6 families + the lark-cli exec/auth bridge |
 | `lib/skills/built-in/plugin-conversion/` | Desktop-only inspect/apply tools for deterministic whole-plugin conversion |
 | `lib/plugin/convert/agent-service.ts` | Source snapshot, expiring plan, empty-target enforcement, and filesystem write adapter |
 | `lib/claude/build-options.ts:895` | Gate + manifest build + fold into `allowedTools` / `pluginTools` |
@@ -245,8 +245,8 @@ typed tools:
 
 | Tool | Mutation | Contract |
 | --- | --- | --- |
-| `inspect_plugin_conversion` | `read` | Detect the source ecosystem, run the canonical converter, return fidelity/issues/files, and mint an expiring plan without writing |
-| `apply_plugin_conversion` | `write` | Re-read the source, reject a stale plan or non-empty/overlapping target, then write only deterministic converter output after desktop approval |
+| `plugin_conversion_inspect` | `read` | Detect the source ecosystem, run the canonical converter, return fidelity/issues/files, and mint an expiring plan without writing |
+| `plugin_conversion_apply` | `write` | Re-read the source, reject a stale plan or non-empty/overlapping target, then write only deterministic converter output after desktop approval |
 
 Both tools declare `imAccess: "blocked"`. `resolveSendOptions` exposes them only when the prompt skill is
 active (or the opt-in `Skill` self-loader can activate it), a desktop workspace cwd exists, and the workspace
@@ -263,16 +263,16 @@ Foreign → foreign conversion is intentionally unsupported.
 
 ## The Lark CLI bridge
 
-The 40 v1 skills are all Lark, grouped into six families that each `registerBuiltInSkill()` at module load
-(`lark/index.ts:19-24`). The count is exact — 9 + 6 + 6 + 8 + 7 + 4 = **40** registrations.
+The 43 v1 skills are all Lark, grouped into six families that each `registerBuiltInSkill()` at module load
+(`lark/index.ts:19-24`). The count is exact — 10 + 6 + 7 + 8 + 8 + 4 = **43** registrations.
 
 | Family | Tools | Mutation tiers | Module |
 | --- | --- | --- | --- |
-| `lark.calendar` | 9 | read · write · destructive | `lark/calendar.ts` |
+| `lark.calendar` | 10 | read · write · destructive | `lark/calendar.ts` |
 | `lark.doc` | 6 | read · write · destructive | `lark/doc.ts` |
-| `lark.sheets` | 6 | read · write | `lark/sheets.ts` |
+| `lark.sheets` | 7 | read · write | `lark/sheets.ts` |
 | `lark.base` (Bitable) | 8 | read · write · destructive | `lark/base.ts` |
-| `lark.task` | 7 | read · write | `lark/task.ts` |
+| `lark.task` | 8 | read · write | `lark/task.ts` |
 | `lark.wiki` | 4 | read · write | `lark/wiki.ts` |
 
 Each family file uses two factories — a read maker and a write maker — to keep the per-skill body to the
@@ -410,7 +410,7 @@ the cached `lastKnownSkillCapabilities`, not a live registry walk.
     `binary_not_found` error (`exec-lark-cli.ts:118`), not a crash.
   - Audit is best-effort: `safeAppendAudit` (`dispatcher.ts:387`) swallows Dexie failures so a missing audit
     store never breaks a skill.
-  - Desktop writes suspend on the standard tool-approval dialog. `apply_plugin_conversion` cannot write until
+  - Desktop writes suspend on the standard tool-approval dialog. `plugin_conversion_apply` cannot write until
     the user approves; cancelling or timing out returns a structured denial.
 </Callout>
 

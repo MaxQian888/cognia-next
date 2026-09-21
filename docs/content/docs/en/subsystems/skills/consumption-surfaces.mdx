@@ -48,10 +48,12 @@ flowchart LR
 
 ## Chat composer (ephemeral attach)
 
-`components/chat/skill-picker.tsx:28` is a multi-select `CommandDialog` over `listSkills()` (`:30`),
-filtering to enabled, non-builtin rows (`:31`) and toggling ids through `onChange` (`:33-35`). The picks
-render as removable chips above the input via `components/chat/composer/skill-chip-row.tsx:19`, which
-resolves names with `listSkillsByIds(ids)` (`:22`) and exposes a per-chip remove button (`:32-41`).
+`components/chat/skill-picker.tsx` exports `SkillPickerContent`, a searchable multi-select list over
+`listSkills()` that keeps enabled rows split into custom and built-in groups and toggles ids through
+`onChange`. The composer hosts it in `components/chat/composer/skills-menu-entry.tsx`: a `CapabilityRow`
+inside the `+` menu's capability group opens a right-side `Popover` flyout wrapping the list. The picks
+render as removable chips above the input via `components/chat/composer/skill-chip-row.tsx`, which
+resolves names through `useEffectiveSkills` and exposes a per-chip remove button.
 `composer.tsx` mounts `SkillChipRow` for the active draft.
 
 The selected ids live in the chat store's `ephemeralSkillIds` and are consumed once — they are folded into

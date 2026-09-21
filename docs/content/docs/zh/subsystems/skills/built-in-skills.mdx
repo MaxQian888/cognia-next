@@ -14,7 +14,7 @@ description: ADR-0026 的类型化工具层级——经过代码审查、由助�
   （`manifest.ts:63`）将注册表投影为 MCP 工具定义；`runBuiltInSkill`（`dispatcher.ts:58`）是
   唯一永不抛出的入口点，运行一条 6 道闸门的流水线（注册表 → Zod → PII → 白名单 → IM 访问 →
   变更路由）。写 / 破坏性技能会渲染一张 A2UI 确认卡片，持久化一条 `skill_invoke` 回调
-  绑定（`a2ui-mapper.ts:171`），并在用户点击确认后通过连接器总线（`bus.ts:893`）重新进入。这 40 个 Lark 技能
+  绑定（`a2ui-mapper.ts:171`），并在用户点击确认后通过连接器总线（`bus.ts:893`）重新进入。这 43 个 Lark 技能
   会调用用户已安装的 `lark-cli`（`exec-lark-cli.ts:101`），OAuth 凭据从已有的 Lark 连接器
   拉取（`auth-bridge.ts:86`）。运行时接线位于
   `build-options.ts` 和 `plugin-tool-ipc.ts`。仅桌面可用的 `plugin.conversion` 家族则复用应用内
@@ -39,7 +39,7 @@ description: ADR-0026 的类型化工具层级——经过代码审查、由助�
 | `lib/skills/built-in/manifest.ts` | 注册表 → MCP 工具定义；按渠道的过滤流水线；能力摘要 |
 | `lib/skills/built-in/dispatcher.ts` | `runBuiltInSkill`——6 道闸门的信任流水线；永不抛出 |
 | `lib/skills/built-in/index.ts` | 公共桶文件；`import "./lark"` 触发所有注册 |
-| `lib/skills/built-in/lark/` | 跨 6 个家族（family）的 40 个 Lark 技能 + lark-cli 执行/鉴权桥 |
+| `lib/skills/built-in/lark/` | 跨 6 个家族（family）的 43 个 Lark 技能 + lark-cli 执行/鉴权桥 |
 | `lib/skills/built-in/plugin-conversion/` | 仅桌面可用的整插件确定性转换 inspect/apply 工具 |
 | `lib/plugin/convert/agent-service.ts` | 源快照、过期计划、空目标校验和文件系统写入适配器 |
 | `lib/claude/build-options.ts:895` | 闸门 + 清单构建 + 折叠进 `allowedTools` / `pluginTools` |
@@ -242,8 +242,8 @@ sequenceDiagram
 
 | 工具 | 变更等级 | 契约 |
 | --- | --- | --- |
-| `inspect_plugin_conversion` | `read` | 检测源生态、运行规范转换器、返回保真度/问题/文件清单，并在不写盘的情况下创建限时计划 |
-| `apply_plugin_conversion` | `write` | 重新读取源，拒绝过期计划、非空或重叠目标，经桌面确认后只写入确定性转换产物 |
+| `plugin_conversion_inspect` | `read` | 检测源生态、运行规范转换器、返回保真度/问题/文件清单，并在不写盘的情况下创建限时计划 |
+| `plugin_conversion_apply` | `write` | 重新读取源，拒绝过期计划、非空或重叠目标，经桌面确认后只写入确定性转换产物 |
 
 两个工具都声明 `imAccess: "blocked"`。仅当提示技能已激活（或选择加入的 `Skill` 自加载器可在本轮
 激活它）、桌面会话存在工作区 cwd 且工作区文件系统后端可用时，`resolveSendOptions` 才会暴露它们。
@@ -258,16 +258,16 @@ sequenceDiagram
 
 ## Lark CLI 桥
 
-这 40 个 v1 技能全部属于 Lark，分为六个家族，每个家族在模块加载时各自 `registerBuiltInSkill()`
-（`lark/index.ts:19-24`）。这个数字是精确的——9 + 6 + 6 + 8 + 7 + 4 = **40** 次注册。
+这 43 个 v1 技能全部属于 Lark，分为六个家族，每个家族在模块加载时各自 `registerBuiltInSkill()`
+（`lark/index.ts:19-24`）。这个数字是精确的——10 + 6 + 7 + 8 + 8 + 4 = **43** 次注册。
 
 | 家族 | 工具数 | 变更等级 | 模块 |
 | --- | --- | --- | --- |
-| `lark.calendar` | 9 | 读 · 写 · 破坏性 | `lark/calendar.ts` |
+| `lark.calendar` | 10 | 读 · 写 · 破坏性 | `lark/calendar.ts` |
 | `lark.doc` | 6 | 读 · 写 · 破坏性 | `lark/doc.ts` |
-| `lark.sheets` | 6 | 读 · 写 | `lark/sheets.ts` |
+| `lark.sheets` | 7 | 读 · 写 | `lark/sheets.ts` |
 | `lark.base`（Bitable） | 8 | 读 · 写 · 破坏性 | `lark/base.ts` |
-| `lark.task` | 7 | 读 · 写 | `lark/task.ts` |
+| `lark.task` | 8 | 读 · 写 | `lark/task.ts` |
 | `lark.wiki` | 4 | 读 · 写 | `lark/wiki.ts` |
 
 每个家族文件使用两个工厂——一个读取制造器和一个写入制造器——以将每个技能的主体保持为
@@ -404,7 +404,7 @@ channel: lark.calendar (read+write), …` 的句子，让模型知道它在该�
     `binary_not_found` 错误（`exec-lark-cli.ts:118`），而非崩溃。
   - 审计是尽力而为：`safeAppendAudit`（`dispatcher.ts:387`）吞掉 Dexie 失败，因此缺失的审计
     存储绝不会破坏技能。
-  - 桌面写操作会暂停在标准工具审批对话框。`apply_plugin_conversion` 必须经用户批准才能写盘；
+  - 桌面写操作会暂停在标准工具审批对话框。`plugin_conversion_apply` 必须经用户批准才能写盘；
     取消或超时会返回结构化拒绝。
 </Callout>
 

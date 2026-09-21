@@ -6,14 +6,14 @@
  *
  *   family         | tools | mutation tiers
  *   ---------------|-------|---------------------------
- *   calendar       | 9     | read · write · destructive
+ *   calendar       | 10    | read · write · destructive
  *   doc            | 6     | read · write · destructive
- *   sheets         | 6     | read · write
+ *   sheets         | 7     | read · write
  *   base (Bitable) | 8     | read · write · destructive
- *   task           | 7     | read · write
+ *   task           | 8     | read · write
  *   wiki           | 4     | read · write
  *
- * 40 skills total. Each file calls `registerBuiltInSkill()` at module load.
+ * 43 skills total. Each file calls `registerBuiltInSkill()` at module load.
  */
 
 import "./calendar"

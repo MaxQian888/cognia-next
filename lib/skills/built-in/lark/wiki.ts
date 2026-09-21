@@ -22,11 +22,11 @@ const PLATFORMS = ["lark"] as const
 const spaceIdParam = z
   .string()
   .min(1)
-  .describe("Wiki space id (a numeric string). Obtain it from lark.wiki.search_nodes.")
+  .describe("Wiki space id (a numeric string). Obtain it from lark_wiki_search_nodes.")
 const nodeTokenParam = z
   .string()
   .min(1)
-  .describe('Wiki node token (looks like "wikcn…"). Obtain it from lark.wiki.search_nodes.')
+  .describe('Wiki node token (looks like "wikcn…"). Obtain it from lark_wiki_search_nodes.')
 
 function mk<S extends z.ZodTypeAny>(input: {
   id: string
@@ -85,8 +85,9 @@ registerBuiltInSkill(
     mcpToolName: "lark_wiki_search_nodes",
     label: { en: "Search wiki", "zh-CN": "搜索知识库" },
     description: {
-      en: "Search Lark wiki nodes (pages and shortcuts) by keyword.",
-      "zh-CN": "按关键词搜索 Lark 知识库节点。",
+      en: "Search Lark wiki nodes (pages and shortcuts) by keyword. Returns the node tokens and space ids that lark_wiki_read_node, lark_wiki_create_node and lark_wiki_move_node accept.",
+      "zh-CN":
+        "按关键词搜索 Lark 知识库节点，返回 lark_wiki_read_node / lark_wiki_create_node / lark_wiki_move_node 所需的节点 token 与空间 id。",
     },
     schema: z.object({
       query: z.string().min(1).describe("Keywords to search wiki node titles/content for."),

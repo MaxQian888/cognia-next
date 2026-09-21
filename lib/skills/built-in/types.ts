@@ -143,7 +143,12 @@ export interface BuiltInSkill<Args extends ZodTypeAny = ZodTypeAny> {
   /**
    * MCP tool name as the assistant sees it, e.g. `"lark_calendar_list_events"`.
    * MUST be a valid JSON identifier; the manifest builder uses this verbatim.
-   * Convention: family + skill suffix joined with `_`.
+   * Convention: family + skill suffix joined with `_` (`issue.list` → `issue_list`).
+   * One deliberate divergence: the `schedule.*` family uses `scheduler_*` tool
+   * names to match the `lib/scheduler` subsystem and the native `scheduler_*`
+   * command vocabulary. Ids are the wrong side to fix — they persist in
+   * `ConversationOverrideRow.allowedBuiltInSkillIds`, so renaming `schedule.*`
+   * would silently de-authorize channels that already allowlisted it.
    */
   mcpToolName: string
   /** Zod schema validating the args the assistant passes to `execute`. */

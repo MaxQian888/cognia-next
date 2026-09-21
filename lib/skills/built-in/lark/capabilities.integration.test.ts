@@ -99,7 +99,7 @@ integrationIt("accepts the certified native Sheets dry-run contracts", () => {
   }
 })
 
-integrationIt("accepts dry-run argument contracts for all 40 registered Lark skills", () => {
+integrationIt("accepts dry-run argument contracts for all 43 registered Lark skills", () => {
   const isoStart = "2026-08-08T09:00:00+08:00"
   const isoEnd = "2026-08-08T10:00:00+08:00"
   const cases: Array<[string, string[]]> = [
@@ -175,6 +175,7 @@ integrationIt("accepts dry-run argument contracts for all 40 registered Lark ski
       ],
     ],
     ["lark.calendar.agenda_today", ["calendar", "+agenda"]],
+    ["lark.calendar.list_calendars", ["calendar", "calendars", "list", "--page-size", "100"]],
     [
       "lark.calendar.list_events",
       [
@@ -278,6 +279,7 @@ integrationIt("accepts dry-run argument contracts for all 40 registered Lark ski
       ],
     ],
     ["lark.doc.delete", ["drive", "+delete", "--file-token", "docx_test", "--type", "docx"]],
+    ["lark.sheets.list_sheets", ["sheets", "+workbook-info", "--spreadsheet-token", "sht_test"]],
     [
       "lark.sheets.read_range",
       [
@@ -356,6 +358,10 @@ integrationIt("accepts dry-run argument contracts for all 40 registered Lark ski
     ],
     ["lark.task.list_my_tasks", ["task", "+get-my-tasks", "--page-limit", "10"]],
     ["lark.task.get_task", ["task", "tasks", "get", "--task-guid", "task_test"]],
+    [
+      "lark.task.search_tasklists",
+      ["task", "+tasklist-search", "--query", "Test", "--page-limit", "10"],
+    ],
     ["lark.task.create", ["task", "+create", "--summary", "Test"]],
     ["lark.task.complete", ["task", "+complete", "--task-id", "task_test"]],
     ["lark.task.update", ["task", "+update", "--task-id", "task_test", "--summary", "Updated"]],
@@ -390,7 +396,7 @@ integrationIt("accepts dry-run argument contracts for all 40 registered Lark ski
       ],
     ],
   ]
-  expect(cases).toHaveLength(40)
+  expect(cases).toHaveLength(43)
 
   for (const [skillId, args] of cases) {
     const result = spawnSync(binary, [...args, "--dry-run"], { encoding: "utf8" })

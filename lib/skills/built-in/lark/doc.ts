@@ -24,7 +24,7 @@ const docTokenParam = z
   .string()
   .min(1)
   .describe(
-    'Doc token (looks like "doxcn…"). Obtain it from lark.doc.search, or a wiki node resolves to one via lark.wiki.read_node.'
+    'Doc token (looks like "doxcn…"). Obtain it from lark_doc_search, or a wiki node resolves to one via lark_wiki_read_node.'
   )
 
 function mk<S extends z.ZodTypeAny>(input: {
@@ -86,8 +86,9 @@ registerBuiltInSkill(
     mcpToolName: "lark_doc_search",
     label: { en: "Search docs", "zh-CN": "搜索文档" },
     description: {
-      en: "Full-text search across the user's Lark cloud-docs.",
-      "zh-CN": "在用户的 Lark 云空间中全文搜索。",
+      en: "Full-text search across the user's Lark cloud-docs. Returns the tokens that lark_doc_fetch and lark_doc_update accept.",
+      "zh-CN":
+        "在用户的 Lark 云空间中全文搜索，返回可用于 lark_doc_fetch / lark_doc_update 的文档 token。",
     },
     schema: z.object({
       query: z.string().min(1).describe("Keywords to search doc titles/content for."),
@@ -97,7 +98,7 @@ registerBuiltInSkill(
         .min(1)
         .max(20)
         .optional()
-        .describe("Max results to return (1–50)."),
+        .describe("Max results to return (1–20)."),
     }),
     subcommand: ["docs", "+search"],
     mutation: "read",
@@ -111,8 +112,9 @@ registerBuiltInSkill(
     mcpToolName: "lark_doc_fetch",
     label: { en: "Fetch doc", "zh-CN": "读取文档" },
     description: {
-      en: "Read the content of a Lark doc by token. Supports range and outline modes.",
-      "zh-CN": "按 token 读取 Lark 文档内容，支持 range / outline 模式。",
+      en: "Read a Lark doc by token. Use mode=outline/keyword/section to locate parts of a large doc, and format=with-ids to get the block ids that targeted lark_doc_update ops need.",
+      "zh-CN":
+        "按 token 读取 Lark 文档内容。大文档可用 outline / keyword / section 模式定位局部；format=with-ids 返回 block id，供 lark_doc_update 定点编辑。",
     },
     schema: z.object({
       docToken: docTokenParam,
@@ -194,8 +196,9 @@ registerBuiltInSkill(
     mcpToolName: "lark_doc_update",
     label: { en: "Update doc", "zh-CN": "编辑文档" },
     description: {
-      en: "Apply an edit operation to a Lark doc. Supported ops: append, overwrite, block_replace, block_insert_after, block_delete.",
-      "zh-CN": "对 Lark 文档应用编辑操作（append / overwrite / block_replace 等）。",
+      en: "Apply an edit operation to a Lark doc. Supported ops: append, overwrite, str_replace, block_replace, block_insert_after, block_delete.",
+      "zh-CN":
+        "对 Lark 文档应用编辑操作：append / overwrite / str_replace / block_replace / block_insert_after / block_delete。",
     },
     schema: z.object({
       docToken: docTokenParam,
@@ -221,7 +224,7 @@ registerBuiltInSkill(
         .string()
         .optional()
         .describe(
-          "Block id (block_* ops) or the existing string to match (str_replace). Get block ids via lark.doc.fetch with format=with-ids."
+          "Block id (block_* ops) or the existing string to match (str_replace). Get block ids via lark_doc_fetch with format=with-ids."
         ),
     }),
     subcommand: ["docs", "+update"],

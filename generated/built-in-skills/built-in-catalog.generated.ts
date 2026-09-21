@@ -203,7 +203,7 @@ export const BUILT_IN_SKILL_CATALOG: BuiltInSkillCatalogEntry[] = [
     canonicalId: "builtin:plugin-conversion",
     name: "plugin-conversion",
     description: "Inspect and deterministically convert complete plugin bundles between supported ecosystems.",
-    allowedTools: ["inspect_plugin_conversion","apply_plugin_conversion"],
+    allowedTools: ["plugin_conversion_inspect","plugin_conversion_apply"],
     triggers: {"surfaces":[],"intents":["inspect-plugin-conversion","apply-plugin-conversion","migrate-plugin-ecosystem"]},
     delivery: "explicit",
     capabilityRequirements: [{"capability":"workspace-backend","reason":"source and output paths must resolve inside the active workspace"},{"capability":"plugin-conversion-tools","reason":"conversion is performed only by the host inspect and apply tools"}],

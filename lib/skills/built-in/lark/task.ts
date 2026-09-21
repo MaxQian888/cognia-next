@@ -3,6 +3,7 @@
  *
  *   - list_my_tasks      read
  *   - get_task           read
+ *   - search_tasklists   read
  *   - create             write
  *   - complete           write
  *   - update             write
@@ -24,11 +25,14 @@ const PLATFORMS = ["lark"] as const
 const taskGuidParam = z
   .string()
   .min(1)
-  .describe("Task GUID. Obtain it from lark.task.list_my_tasks or lark.task.create.")
-const tasklistGuidParam = z.string().min(1).describe("Tasklist GUID to file the task under.")
+  .describe("Task GUID. Obtain it from lark_task_list_my_tasks or lark_task_create.")
+const tasklistGuidParam = z
+  .string()
+  .min(1)
+  .describe("Tasklist GUID to file the task under. Obtain it from lark_task_search_tasklists.")
 const assigneesParam = z
   .array(z.string())
-  .describe("Collaborator open_ids (resolve names → open_id via the lark-contact skill first).")
+  .describe("Collaborator open_ids (resolve names → open_id via im_resolve_contact first).")
 
 function mk<S extends z.ZodTypeAny>(input: {
   id: string
@@ -87,15 +91,15 @@ registerBuiltInSkill(
     mcpToolName: "lark_task_list_my_tasks",
     label: { en: "My tasks", "zh-CN": "我的任务" },
     description: {
-      en: "List the tasks assigned to the current user, optionally filtered by status.",
-      "zh-CN": "列出当前用户的任务，可选按状态过滤。",
+      en: "List the tasks assigned to the current user, optionally filtered by status. Returns the task GUIDs the other lark_task_* tools accept.",
+      "zh-CN": "列出当前用户的任务，可选按状态过滤；返回其他 lark_task_* 工具所需的任务 GUID。",
     },
     schema: z.object({
       status: z
         .enum(["pending", "completed", "all"])
         .optional()
         .describe("Filter by completion status (default pending)."),
-      pageSize: z.number().int().min(1).max(40).optional().describe("Max tasks to return (1–100)."),
+      pageSize: z.number().int().min(1).max(40).optional().describe("Max tasks to return (1–40)."),
     }),
     subcommand: ["task", "+get-my-tasks"],
     buildArgs: (args) => [
@@ -122,6 +126,33 @@ registerBuiltInSkill(
     },
     schema: z.object({ taskGuid: taskGuidParam }),
     subcommand: ["task", "tasks", "get"],
+    mutation: "read",
+    imAccess: "always",
+  })
+)
+
+registerBuiltInSkill(
+  mk({
+    id: "lark.task.search_tasklists",
+    mcpToolName: "lark_task_search_tasklists",
+    label: { en: "Search tasklists", "zh-CN": "搜索任务清单" },
+    description: {
+      en: "Search the signed-in user's Lark tasklists by keyword (omit query to list them all). Returns the tasklist GUIDs that lark_task_create and lark_task_add_to_tasklist accept.",
+      "zh-CN":
+        "按关键词搜索当前用户的 Lark 任务清单（省略关键词则列出全部），返回 lark_task_create / lark_task_add_to_tasklist 所需的清单 GUID。",
+    },
+    schema: z.object({
+      query: z.string().optional().describe("Keyword to match tasklist names; omit to list all."),
+      pageSize: z
+        .number()
+        .int()
+        .min(1)
+        .max(40)
+        .optional()
+        .describe("Max tasklists to return (1–40)."),
+    }),
+    subcommand: ["task", "+tasklist-search"],
+    buildArgs: (args) => argsToFlags({ query: args.query, pageLimit: args.pageSize }),
     mutation: "read",
     imAccess: "always",
   })

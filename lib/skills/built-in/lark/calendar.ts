@@ -4,8 +4,9 @@
  * Wraps `lark-cli calendar` subcommands as built-in MCP tools.
  *
  *   - agenda_today      read       — quick "what's on my plate" summary
+ *   - list_calendars    read       — which calendars exist (resolves calendar ids)
  *   - list_events       read       — paginated event list
- *   - freebusy          read       — busy windows for a set of users
+ *   - freebusy          read       — busy windows for one user
  *   - search_rooms      read       — meeting room availability
  *   - create_event      write      — schedule a new event (HITL)
  *   - update_event      write      — edit existing event (HITL)
@@ -27,16 +28,18 @@ const PLATFORMS = ["lark"] as const
 const calendarIdParam = z
   .string()
   .min(1)
-  .describe('Lark calendar id. Use "primary" for the current user\'s own calendar.')
+  .describe(
+    'Lark calendar id. Use "primary" for the signed-in user\'s own calendar; find other calendars via lark_calendar_list_calendars.'
+  )
 const eventIdParam = z
   .string()
   .min(1)
-  .describe("Event id. Obtain it from lark.calendar.list_events or lark.calendar.agenda_today.")
+  .describe("Event id. Obtain it from lark_calendar_list_events or lark_calendar_agenda_today.")
 const startTimeParam = z.string().describe("Start time in RFC3339, e.g. 2026-07-01T09:00:00+08:00.")
 const endTimeParam = z.string().describe("End time in RFC3339, e.g. 2026-07-01T10:00:00+08:00.")
 const userOpenIdsParam = z
   .array(z.string())
-  .describe("User open_ids (resolve names → open_id via the lark-contact skill first).")
+  .describe("User open_ids (resolve names → open_id via im_resolve_contact first).")
 
 function mkRead<S extends z.ZodTypeAny>(input: {
   id: string
@@ -128,11 +131,36 @@ registerBuiltInSkill(
     mcpToolName: "lark_calendar_agenda_today",
     label: { en: "Today's agenda", "zh-CN": "今日日程" },
     description: {
-      en: "Summarise the events on your calendar for today.",
-      "zh-CN": "汇总今天日历上的全部日程。",
+      en: "Summarise today's events on the signed-in user's Lark calendar.",
+      "zh-CN": "汇总当前用户 Lark 日历上的今日日程。",
     },
     schema: z.object({}).strict(),
     subcommand: ["calendar", "+agenda"],
+  })
+)
+
+registerBuiltInSkill(
+  mkRead({
+    id: "lark.calendar.list_calendars",
+    mcpToolName: "lark_calendar_list_calendars",
+    label: { en: "List calendars", "zh-CN": "列出日历" },
+    description: {
+      en: 'List the calendars visible to the signed-in user. Returns the calendar ids the other lark_calendar_* tools accept; "primary" always resolves to the user\'s own calendar without a lookup.',
+      "zh-CN":
+        '列出当前用户可见的 Lark 日历，返回其他 lark_calendar_* 工具所需的 calendar id；"primary" 始终指向用户自己的主日历，无需先查询。',
+    },
+    schema: z.object({
+      pageSize: z
+        .number()
+        .int()
+        .min(50)
+        .max(1000)
+        .optional()
+        .describe("Max calendars per page (50–1000, API default 500)."),
+      pageToken: z.string().optional().describe("Page token from a previous call."),
+    }),
+    subcommand: ["calendar", "calendars", "list"],
+    buildArgs: (args) => argsToFlags({ pageSize: args.pageSize, pageToken: args.pageToken }),
   })
 )
 
@@ -174,8 +202,8 @@ registerBuiltInSkill(
     mcpToolName: "lark_calendar_freebusy",
     label: { en: "Free/busy query", "zh-CN": "查询空闲" },
     description: {
-      en: "Busy windows for a set of users between two timestamps.",
-      "zh-CN": "查询一组用户在指定时间范围内的忙闲信息。",
+      en: "Busy windows for one user between two timestamps.",
+      "zh-CN": "查询单个用户在指定时间范围内的忙闲时间段。",
     },
     schema: z.object({
       userIds: userOpenIdsParam.length(1).describe("Exactly one user open_id."),
@@ -194,8 +222,9 @@ registerBuiltInSkill(
     mcpToolName: "lark_calendar_search_rooms",
     label: { en: "Search meeting rooms", "zh-CN": "搜索会议室" },
     description: {
-      en: "Find meeting rooms matching a query, optionally filtered by capacity or location.",
-      "zh-CN": "按名称、容量或位置搜索会议室。",
+      en: "Find meeting rooms matching a query, optionally filtered by capacity or location. Returns room ids that lark_calendar_create_event and lark_calendar_book_room accept.",
+      "zh-CN":
+        "按名称、容量或位置搜索会议室，返回可用于 lark_calendar_create_event / lark_calendar_book_room 的会议室 id。",
     },
     schema: z.object({
       query: z.string().min(1).describe("Room name or keywords to search for."),
@@ -241,7 +270,7 @@ registerBuiltInSkill(
       roomIds: z
         .array(z.string())
         .optional()
-        .describe("Optional meeting-room ids (from lark.calendar.search_rooms) to book."),
+        .describe("Optional meeting-room ids (from lark_calendar_search_rooms) to book."),
     }),
     subcommand: ["calendar", "+create"],
     buildArgs: (args) =>
@@ -346,7 +375,7 @@ registerBuiltInSkill(
     schema: z.object({
       calendarId: calendarIdParam,
       eventId: eventIdParam,
-      roomId: z.string().min(1).describe("Meeting-room id from lark.calendar.search_rooms."),
+      roomId: z.string().min(1).describe("Meeting-room id from lark_calendar_search_rooms."),
     }),
     subcommand: ["calendar", "+update"],
     buildArgs: (args) =>

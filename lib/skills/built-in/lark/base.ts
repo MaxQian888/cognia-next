@@ -27,15 +27,15 @@ const PLATFORMS = ["lark"] as const
 const appTokenParam = z
   .string()
   .min(1)
-  .describe('Bitable base app token (looks like "bascn…"). Obtain it from lark.base.search.')
+  .describe('Bitable base app token (looks like "bascn…"). Obtain it from lark_base_search.')
 const tableIdParam = z
   .string()
   .min(1)
-  .describe('Table id within the base (looks like "tbl…"). Obtain it from lark.base.list_tables.')
+  .describe('Table id within the base (looks like "tbl…"). Obtain it from lark_base_list_tables.')
 const recordIdParam = z
   .string()
   .min(1)
-  .describe('Record id (looks like "rec…"). Obtain it from lark.base.list_records.')
+  .describe('Record id (looks like "rec…"). Obtain it from lark_base_list_records.')
 
 function mk<S extends z.ZodTypeAny>(input: {
   id: string
@@ -94,8 +94,8 @@ registerBuiltInSkill(
     mcpToolName: "lark_base_search",
     label: { en: "Search bases", "zh-CN": "搜索多维表格" },
     description: {
-      en: "Search Lark Bitable bases by name.",
-      "zh-CN": "按名称搜索 Lark 多维表格。",
+      en: "Search Lark Bitable bases by name. Returns the app tokens that every other lark_base_* tool accepts.",
+      "zh-CN": "按名称搜索 Lark 多维表格，返回其他 lark_base_* 工具所需的 app token。",
     },
     schema: z.object({
       query: z.string().min(1).describe("Base name or keywords to search for."),
@@ -113,8 +113,8 @@ registerBuiltInSkill(
     mcpToolName: "lark_base_list_tables",
     label: { en: "List Bitable tables", "zh-CN": "列出多维表格的表" },
     description: {
-      en: "List the tables inside a Lark Bitable base.",
-      "zh-CN": "列出 Lark 多维表格中的所有表。",
+      en: "List the tables inside a Lark Bitable base. Returns the table ids the record- and field-level lark_base_* tools need.",
+      "zh-CN": "列出 Lark 多维表格中的所有表，返回记录级与字段级 lark_base_* 工具所需的 table id。",
     },
     schema: z.object({ appToken: appTokenParam }),
     subcommand: ["base", "+table-list"],

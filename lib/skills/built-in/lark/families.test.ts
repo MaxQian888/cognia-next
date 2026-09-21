@@ -37,9 +37,9 @@ describe("Lark skill families — registration smoke", () => {
     ])
   })
 
-  it("registers 40 skills across the six families", () => {
+  it("registers 43 skills across the six families", () => {
     const reg = getSharedBuiltInSkillRegistry()
-    expect(reg.list()).toHaveLength(40)
+    expect(reg.list()).toHaveLength(43)
   })
 
   it("every skill has platforms === ['lark']", () => {

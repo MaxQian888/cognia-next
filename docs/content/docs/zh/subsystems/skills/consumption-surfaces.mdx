@@ -47,11 +47,12 @@ flowchart LR
 
 ## 聊天 composer（输入框）（临时附加）
 
-`components/chat/skill-picker.tsx:28` 是一个基于 `listSkills()`（`:30`）的多选 `CommandDialog`，
-过滤到已启用、非内置的行（`:31`），并通过 `onChange` 切换 id（`:33-35`）。所选项会以可移除的
-chips 形式渲染在输入框上方，经由 `components/chat/composer/skill-chip-row.tsx:19`，它用
-`listSkillsByIds(ids)`（`:22`）解析名称，并为每个 chip 暴露一个移除按钮（`:32-41`）。
-`composer.tsx` 为当前草稿挂载 `SkillChipRow`。
+`components/chat/skill-picker.tsx` 导出 `SkillPickerContent`——基于 `listSkills()` 的可搜索多选列表，
+过滤到已启用行并按自定义 / 内置分组，通过 `onChange` 切换 id。composer 侧由
+`components/chat/composer/skills-menu-entry.tsx` 承载：`+` 菜单能力组里的 `CapabilityRow`
+打开一个右侧 `Popover` 浮层包住该列表。所选项会以可移除的 chips 形式渲染在输入框上方，经由
+`components/chat/composer/skill-chip-row.tsx`，它用 `useEffectiveSkills` 解析名称，
+并为每个 chip 暴露一个移除按钮。`composer.tsx` 为当前草稿挂载 `SkillChipRow`。
 
 所选 id 存放在聊天 store 的 `ephemeralSkillIds` 中，且只被消费一次——它们会被折叠进本次发送，
 并在消息发出后清空（发送时的折叠见

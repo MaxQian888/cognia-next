@@ -5,9 +5,9 @@ import {
   probeLarkCliCapabilities,
 } from "./capabilities"
 
-it("certifies all 40 registered Lark skill commands", () => {
+it("certifies all 43 registered Lark skill commands", () => {
   expect(CERTIFIED_LARK_CLI_VERSION).toBe("1.0.83")
-  expect(Object.keys(LARK_CLI_CAPABILITY_MANIFEST)).toHaveLength(40)
+  expect(Object.keys(LARK_CLI_CAPABILITY_MANIFEST)).toHaveLength(43)
   expect(Object.keys(LARK_CLI_REQUIRED_FLAGS)).toEqual(
     expect.arrayContaining(Object.keys(LARK_CLI_CAPABILITY_MANIFEST))
   )
@@ -26,7 +26,7 @@ it("fails closed on version mismatch and missing commands", async () => {
   })
   expect(diagnostics.ready).toBe(false)
   expect(diagnostics.detectedVersion).toBe("1.0.84")
-  expect(diagnostics.affectedSkillIds).toHaveLength(40)
+  expect(diagnostics.affectedSkillIds).toHaveLength(43)
   expect(diagnostics.missingCommands).toContain("sheets +cells-get")
 })
 

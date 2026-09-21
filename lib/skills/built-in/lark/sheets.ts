@@ -1,6 +1,7 @@
 /**
  * Lark Sheets skill family (ADR-0026).
  *
+ *   - list_sheets   read
  *   - read_range    read
  *   - find          read
  *   - create        write
@@ -24,9 +25,12 @@ const spreadsheetTokenParam = z
   .string()
   .min(1)
   .describe(
-    'Spreadsheet token (looks like "shtcn…"). Find it via lark-drive search, or it is returned by lark.sheets.create.'
+    'Spreadsheet token (looks like "shtcn…"). Find it via lark_doc_search, or it is returned by lark_sheets_create.'
   )
-const sheetIdParam = z.string().min(1).describe("Worksheet (tab) id within the spreadsheet.")
+const sheetIdParam = z
+  .string()
+  .min(1)
+  .describe("Worksheet (tab) id within the spreadsheet. Obtain it from lark_sheets_list_sheets.")
 const grid = z
   .array(z.array(z.union([z.string(), z.number(), z.boolean(), z.null()])))
   .describe("2D array of cell values, outer = rows, inner = columns.")
@@ -81,6 +85,25 @@ function mk<S extends z.ZodTypeAny>(input: {
   }
   return skill
 }
+
+registerBuiltInSkill(
+  mk({
+    id: "lark.sheets.list_sheets",
+    mcpToolName: "lark_sheets_list_sheets",
+    label: { en: "List worksheets", "zh-CN": "列出工作表" },
+    description: {
+      en: "List the worksheets (tabs) inside a Lark spreadsheet with their dimensions. Returns the sheet ids that lark_sheets_read_range, lark_sheets_find, lark_sheets_write_range and lark_sheets_append_rows accept — call this first for any existing spreadsheet.",
+      "zh-CN":
+        "列出 Lark 电子表格中的工作表（tab）及其行列规模，返回 lark_sheets_read_range / lark_sheets_find / lark_sheets_write_range / lark_sheets_append_rows 所需的 sheet id；对既有表格请先调它。",
+    },
+    schema: z.object({
+      spreadsheetToken: spreadsheetTokenParam,
+    }),
+    subcommand: ["sheets", "+workbook-info"],
+    mutation: "read",
+    imAccess: "always",
+  })
+)
 
 registerBuiltInSkill(
   mk({
@@ -141,8 +164,8 @@ registerBuiltInSkill(
     mcpToolName: "lark_sheets_create",
     label: { en: "Create spreadsheet", "zh-CN": "新建表格" },
     description: {
-      en: "Create a new Lark spreadsheet in the given folder.",
-      "zh-CN": "在指定文件夹中新建 Lark 电子表格。",
+      en: "Create a new Lark spreadsheet, optionally inside a Drive folder.",
+      "zh-CN": "新建 Lark 电子表格，可放入指定的云空间文件夹（省略则建在根目录）。",
     },
     schema: z.object({
       title: z.string().min(1).describe("Title of the new spreadsheet."),
