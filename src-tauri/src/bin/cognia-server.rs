@@ -37,6 +37,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use app_lib::companion_api::{
+    CompanionState, SharedState,
     data_plane::install_headless_store,
     deny_list::DenyList,
     desktop_messages_bridge::DesktopMessagesBridge,
@@ -49,19 +50,19 @@ use app_lib::companion_api::{
     push_creds::{self, FilePushCredStore},
     rate_limit::RateLimiter,
     secret,
-    security_store::{install_security_store, SecurityStore},
+    security_store::{SecurityStore, install_security_store},
     server, set_advertised_port, set_tls_fingerprint,
-    signaling::{self, registration_store::SignalingRegistrationStore, SignalingHub},
-    store::{sqlite::SqliteAppStore, AppStore},
+    signaling::{self, SignalingHub, registration_store::SignalingRegistrationStore},
+    store::{AppStore, sqlite::SqliteAppStore},
     sync_bridge::SyncBridge,
     sync_registry::SyncTableRegistry,
-    tls, CompanionState, SharedState,
+    tls,
 };
 use app_lib::headless::{
-    backup, brain, exec_backend_from_env, generate_master_key, headless_services,
+    ApiKeyState, HeadlessServices, HeadlessSidecarHost, MASTER_KEY_ENV, SIDECAR_SCRIPT_ENV,
+    SpawnPolicy, backup, brain, exec_backend_from_env, generate_master_key, headless_services,
     init_secret_store, install_headless_services, kill_sidecar, parse_master_key,
-    resolve_master_key_from_env, rotate_master_key, spawn_sidecar, ApiKeyState, HeadlessServices,
-    HeadlessSidecarHost, SpawnPolicy, MASTER_KEY_ENV, SIDECAR_SCRIPT_ENV,
+    resolve_master_key_from_env, rotate_master_key, spawn_sidecar,
 };
 use parking_lot::RwLock;
 
@@ -393,7 +394,7 @@ enum ProfilesCommand {
 /// than dying — the bus is bursty under a sync storm and a push is
 /// best-effort by contract.
 fn spawn_headless_push_triggers(shared: app_lib::companion_api::SharedState) {
-    use app_lib::companion_api::commands::{fan_out_push, PUSH_TRIGGER_CHANNELS};
+    use app_lib::companion_api::commands::{PUSH_TRIGGER_CHANNELS, fan_out_push};
     use app_lib::companion_api::event_bus::SubscribeResult;
 
     let now = chrono::Utc::now().timestamp_millis();
@@ -597,6 +598,13 @@ fn init_logger() {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_logger();
+    // Installed once, before any TLS connector is built: `reqwest` resolves the
+    // process-wide provider at `Client` construction — and
+    // `init_structured_tracing` builds one (the OTLP exporter under
+    // `otel-export`), so the provider must land first or that client panics.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .map_err(|_| "a rustls crypto provider was already installed")?;
     if !app_lib::init_structured_tracing() {
         log::warn!("headless structured tracing subscriber was not installed");
     }
@@ -1161,7 +1169,7 @@ fn run_profiles(
     command: ProfilesCommand,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use app_lib::provider_profiles::{
-        headless_store_path, ProviderProfileStore, SqliteProfileStore,
+        ProviderProfileStore, SqliteProfileStore, headless_store_path,
     };
     let store = SqliteProfileStore::open(headless_store_path(data_dir))?;
     match command {
@@ -1234,7 +1242,9 @@ async fn run_pair(
     if let Some(encoded) = pair_through_running_server(base_url).await {
         println!("\nPair invitation for device \"{device_name}\" (with relay):\n");
         println!("    {encoded}\n");
-        println!("Scan / paste the cgnp4|… string into the app's pair screen. It works from any network.");
+        println!(
+            "Scan / paste the cgnp4|… string into the app's pair screen. It works from any network."
+        );
         return Ok(());
     }
 
@@ -1274,7 +1284,9 @@ async fn run_pair(
     println!("    {encoded}\n");
     println!("Expires at: {expires_at_ms} (epoch milliseconds)\n");
     println!("Scan / paste the cgnp3|… string into the mobile app's pair screen.");
-    println!("(No running `serve` answered on loopback, so this invitation has no relay room: the device must reach {base_url} directly.)");
+    println!(
+        "(No running `serve` answered on loopback, so this invitation has no relay room: the device must reach {base_url} directly.)"
+    );
     Ok(())
 }
 
@@ -1335,7 +1347,9 @@ async fn pair_through_running_server(advertised_base_url: &str) -> Option<String
     let body: serde_json::Value = match response.json().await {
         Ok(body) => body,
         Err(error) => {
-            log::warn!("running server answered with an unreadable body ({error}); issuing a standalone one");
+            log::warn!(
+                "running server answered with an unreadable body ({error}); issuing a standalone one"
+            );
             return None;
         }
     };
@@ -1366,7 +1380,7 @@ fn encode_running_pair_invitation(
         }
         _ => 3,
     };
-    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
     Some(format!(
         "cgnp{version}|{}",
         URL_SAFE_NO_PAD.encode(payload.to_string().as_bytes())
@@ -1397,7 +1411,7 @@ fn encode_pair_invitation_payload(
     if let Some(invitation) = invitation {
         payload["invitation"] = serde_json::Value::String(invitation.to_string());
     }
-    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
     format!(
         "cgnp3|{}",
         URL_SAFE_NO_PAD.encode(payload.to_string().as_bytes())
@@ -1708,7 +1722,9 @@ async fn run_serve(
         if let Err(error) =
             spawn_sidecar(Arc::clone(&services.sidecar_host), services.sidecar.clone()).await
         {
-            log::warn!("headless sidecar startup failed; claude_* arms will fail until it recovers: {error}");
+            log::warn!(
+                "headless sidecar startup failed; claude_* arms will fail until it recovers: {error}"
+            );
         }
     }
 
@@ -1968,11 +1984,11 @@ async fn run_serve(
 #[cfg(test)]
 mod tests {
     use super::{
-        agent_session_store_path, browser_plane_base_url, color_enabled,
-        encode_pair_invitation_payload, encode_running_pair_invitation, format_log_line,
-        lark_entry, plugin_storage_dir, report_lark_env, Cli, CliCommand, DevicesCommand,
+        Cli, CliCommand, DevicesCommand, agent_session_store_path, browser_plane_base_url,
+        color_enabled, encode_pair_invitation_payload, encode_running_pair_invitation,
+        format_log_line, lark_entry, plugin_storage_dir, report_lark_env,
     };
-    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
     use clap::Parser;
     use std::path::Path;
 
@@ -2080,11 +2096,13 @@ mod tests {
             fatal: false,
             message: "points at loopback".into(),
         };
-        assert!(report_lark_env(
-            &mut |level, message| warned.push((level, message)),
-            std::slice::from_ref(&warning)
-        )
-        .is_ok());
+        assert!(
+            report_lark_env(
+                &mut |level, message| warned.push((level, message)),
+                std::slice::from_ref(&warning)
+            )
+            .is_ok()
+        );
         // A non-fatal issue reports at WARN, so the shared sink colours it as
         // one instead of spelling the severity into the message text.
         assert_eq!(

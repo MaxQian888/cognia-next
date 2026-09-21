@@ -72,18 +72,29 @@ export function isOperation(value: unknown): value is Operation {
  */
 export async function collectPages<T>(
   fetchPage: (pageToken: string | undefined) => Promise<Page<T>>,
-  options: { maxItems?: number; maxPages?: number } = {}
+  options: { maxItems?: number; maxPages?: number; requireComplete?: boolean } = {}
 ): Promise<T[]> {
   const maxItems = options.maxItems ?? Number.POSITIVE_INFINITY
   const maxPages = options.maxPages ?? 100
   const items: T[] = []
+  const seenTokens = new Set<string>()
   let token: string | undefined
   for (let pages = 0; pages < maxPages; pages += 1) {
     const page = await fetchPage(token)
     items.push(...page.items)
-    if (items.length >= maxItems) return items.slice(0, maxItems)
-    if (!page.nextPageToken) break
+    if (items.length >= maxItems) {
+      if (options.requireComplete && (items.length > maxItems || page.nextPageToken)) {
+        throw new Error("Incomplete collection: item limit reached")
+      }
+      return items.slice(0, maxItems)
+    }
+    if (!page.nextPageToken) return items
+    if (options.requireComplete && seenTokens.has(page.nextPageToken)) {
+      throw new Error("Incomplete collection: repeated page token")
+    }
+    seenTokens.add(page.nextPageToken)
     token = page.nextPageToken
   }
+  if (options.requireComplete) throw new Error("Incomplete collection: page limit reached")
   return items
 }

@@ -20,6 +20,16 @@ export interface GatewayConfig {
   rateLimitPerMin: number
   /** Interface the listener binds to. */
   bindInterface: GatewayBindInterface
+  /**
+   * The origin callers reach this gateway at, when that is not the address the
+   * connection arrived on — a reverse proxy, a tunnel, a container port map.
+   * `scheme://host[:port]`, no path. An artifact `read_url` is built from it,
+   * so the link names an address the caller can actually dial.
+   *
+   * `null` (the default) keeps the derived behaviour: the `Host` header when
+   * the gateway can vouch for it, otherwise the listener's own address.
+   */
+  publicOrigin: string | null
   /** Upstream TCP+TLS connect timeout (seconds). Bounds hung connects. */
   connectTimeoutSecs: number
   /** Total timeout (seconds) for NON-streaming requests; 0 = no cap. */
@@ -81,6 +91,7 @@ export const DEFAULT_GATEWAY_CONFIG: GatewayConfig = {
   allowlist: ["127.0.0.1/32"],
   rateLimitPerMin: 600,
   bindInterface: "loopback",
+  publicOrigin: null,
   connectTimeoutSecs: 30,
   requestTimeoutSecs: 300,
   maxRetries: 0,

@@ -43,6 +43,7 @@ pub mod dispatchers;
 /// Runtime environments: the installed sandbox pool and what the companion
 /// API serves about it (ADR-0182).
 pub mod environment_pool;
+pub mod environment_ports;
 pub mod event_batcher;
 pub mod event_bus;
 pub mod event_channels;
@@ -268,19 +269,11 @@ pub fn browser_advertised_port() -> Option<u16> {
 /// each). `main.rs` installs `ring` at boot, but the companion API server and
 /// the WebRTC peer-connection layer can be exercised from contexts that never
 /// run `main()` (notably the unit tests in this crate, and any future headless
-/// entry point). Calling `install_default` again after a successful install
-/// returns `Err`, so this swallows that error — the only contract we need is
-/// "a provider is installed by the time TLS/DTLS is set up". Cheap and safe to
-/// call on every server spawn / peer-connection construction.
-pub fn ensure_crypto_provider() {
-    static INIT: std::sync::Once = std::sync::Once::new();
-    INIT.call_once(|| {
-        // Ignore the result: a provider may already be installed (e.g. by
-        // `main.rs` in production, or by an earlier call in another test).
-        // `ring` is chosen to match axum-server's `tls-rustls` feature.
-        let _ = rustls::crypto::ring::default_provider().install_default();
-    });
-}
+/// entry point). Owned by `cognia_net`'s `Once`-guarded install so every
+/// outbound call site shares the same provider — `ring`, matching
+/// axum-server's `tls-rustls` feature. Cheap and safe to call on every
+/// server spawn / peer-connection construction.
+pub use cognia_net::proxy_config::ensure_crypto_provider;
 
 /// Per-source-IP limiter for unauthenticated challenge, registration, token,
 /// and socket-ticket requests. It is process-global so the many

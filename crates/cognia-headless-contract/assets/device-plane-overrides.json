@@ -5164,6 +5164,16 @@
           "id": {
             "type": "string"
           },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Compare-and-swap guard — the write refuses a memory whose version has moved past this value."
+          },
+          "operationId": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Idempotency key for the memory operation ledger — a retried identical request replays its first result."
+          },
           "adminLease": {
             "type": "string",
             "minLength": 1
@@ -5196,7 +5206,9 @@
             "type": "string",
             "enum": [
               "global",
-              "character"
+              "workspace",
+              "character",
+              "agent"
             ]
           },
           "characterId": {
@@ -5215,6 +5227,23 @@
             "items": {
               "type": "string"
             }
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "pathPattern": {
+            "type": "string"
+          },
+          "operationId": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Idempotency key for the memory operation ledger — a retried identical request replays its first result."
           },
           "adminLease": {
             "type": "string",
@@ -5253,6 +5282,19 @@
           },
           "key": {
             "type": "string"
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Compare-and-swap guard — the write refuses a memory whose version has moved past this value."
+          },
+          "operationId": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Idempotency key for the memory operation ledger — a retried identical request replays its first result."
           },
           "adminLease": {
             "type": "string",

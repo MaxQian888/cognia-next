@@ -229,6 +229,7 @@ enum ControllerStatus {
 
 /// Hit a Clash/Mihomo controller API and classify the response.
 async fn probe_controller(host: &str, port: u16) -> ControllerStatus {
+    super::ensure_crypto_provider();
     let Ok(client) = reqwest::Client::builder()
         .timeout(CLASH_API_TIMEOUT)
         // No proxy here — we're probing localhost.

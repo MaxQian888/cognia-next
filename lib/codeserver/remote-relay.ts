@@ -9,8 +9,8 @@
  * navigates to `http://127.0.0.1:<port>/` and no credential is ever in a URL.
  *
  * The Rust relay (`src-tauri/src/codeserver/relay.rs`) owns the socket, the
- * certificate pinning and the proxying. What has to live here is the part that
- * needs the device private key, which only the renderer holds:
+ * certificate pinning, proxying and per-request DPoP signing. The renderer
+ * supplies the device signing key through local IPC and owns:
  *
  *  - minting the device access token the relay presents upstream, and
  *  - re-minting it before it expires.
@@ -34,30 +34,32 @@ export interface DesktopRelayStatus {
   url: string
 }
 
-/**
- * Re-mint this far ahead of the five-minute expiry. Wide enough that a slow
- * challenge/token round-trip on a loaded host still lands before the old token
- * dies, and it costs two cheap requests a minute and a half.
- */
-const REFRESH_INTERVAL_MS = 3.5 * 60 * 1000
+/** Poll within companion-auth's 30-second refresh window; cached checks do no network I/O. */
+const REFRESH_INTERVAL_MS = 10_000
+
+interface RelayBinding {
+  status: DesktopRelayStatus
+  deviceJwt: string
+  devicePrivateKeyJwk: JsonWebKey
+}
 
 interface ActiveRelay {
   endpoint: RemoteHostEndpoint
   relayPath: string
   timer: ReturnType<typeof setInterval>
+  binding: RelayBinding
+  refresh?: Promise<unknown>
 }
 
 let active: ActiveRelay | null = null
 
 /**
- * The relay is authenticated with an ordinary device access token, not a socket
- * ticket: the companion mounts `/ide/relay/...` behind `require_device_access`,
- * which takes a `Bearer` bound to the device key. `companionAuthorizationHeaders`
- * also returns a DPoP proof, which is dropped — proofs are single-use and bound
- * to one method+path, so it could not be replayed across the many requests a
- * workbench makes anyway, and that route does not ask for one.
+ * Mint the device access token for the relay. The proof returned alongside it
+ * is single-use and bound to this call's method/path, so the native relay must
+ * sign a fresh DPoP proof for every actual upstream HTTP or WebSocket request.
+ * Its signing key is handed over only through local IPC, never in a URL.
  */
-async function mintDeviceToken(endpoint: RemoteHostEndpoint): Promise<string> {
+async function requestDeviceToken(endpoint: RemoteHostEndpoint): Promise<string> {
   const config: CompanionConfig = {
     baseUrl: endpoint.baseUrl,
     deviceId: endpoint.deviceId,
@@ -73,10 +75,37 @@ async function mintDeviceToken(endpoint: RemoteHostEndpoint): Promise<string> {
   return bearer
 }
 
+// One token request serves concurrent IDE/port refreshes for the same pairing.
+// The key contains only public identity and transport scope, never private key bytes.
+const tokenRequests = new Map<string, Promise<string>>()
+function mintDeviceToken(endpoint: RemoteHostEndpoint): Promise<string> {
+  const identity = JSON.stringify([
+    endpoint.baseUrl,
+    endpoint.deviceId,
+    endpoint.deviceKeyThumbprint,
+    endpoint.serverFingerprint,
+    endpoint.accountId,
+    endpoint.devicePrivateKeyJwk.x,
+    endpoint.devicePrivateKeyJwk.y,
+  ])
+  const pending = tokenRequests.get(identity)
+  if (pending) return pending
+  const request = requestDeviceToken(endpoint)
+  tokenRequests.set(identity, request)
+  void request
+    .finally(() => {
+      if (tokenRequests.get(identity) === request) tokenRequests.delete(identity)
+    })
+    .catch(() => undefined)
+  return request
+}
+
 async function bindRelay(
   endpoint: RemoteHostEndpoint,
-  relayPath: string
-): Promise<DesktopRelayStatus> {
+  relayPath: string,
+  relayId?: string,
+  previous?: RelayBinding
+): Promise<RelayBinding> {
   // Re-checked here rather than only at the entry point: the refresh timer
   // calls straight into this, and the Rust side takes a non-optional
   // fingerprint — passing `undefined` would surface as an opaque deserialize
@@ -85,15 +114,29 @@ async function bindRelay(
   if (!serverFingerprint) {
     throw new Error("remote host is missing its paired certificate fingerprint")
   }
+  const devicePrivateKeyJwk = endpoint.devicePrivateKeyJwk
+  if (!devicePrivateKeyJwk?.d) {
+    throw new Error("remote host is missing its paired device signing key")
+  }
   // Pinned local by the routing plane (`protocol/headless-command-dispositions.json`)
   // — this binds a socket on *this* machine, so it must never be forwarded to
   // the host it is proxying to.
-  return transport.call<DesktopRelayStatus>("codeserver_remote_relay_ensure", {
+  const deviceJwt = await mintDeviceToken(endpoint)
+  if (
+    previous?.deviceJwt === deviceJwt &&
+    JSON.stringify(previous.devicePrivateKeyJwk) === JSON.stringify(devicePrivateKeyJwk)
+  ) {
+    return previous
+  }
+  const status = await transport.call<DesktopRelayStatus>("codeserver_remote_relay_ensure", {
     baseUrl: endpoint.baseUrl,
-    deviceJwt: await mintDeviceToken(endpoint),
+    deviceJwt,
+    devicePrivateKeyJwk,
     serverFingerprint,
     relayPath,
+    ...(relayId ? { relayId } : {}),
   })
+  return { status, deviceJwt, devicePrivateKeyJwk: { ...devicePrivateKeyJwk } }
 }
 
 /**
@@ -108,24 +151,28 @@ export async function ensureRemoteIdeRelay(
   endpoint: RemoteHostEndpoint,
   relayPath: string
 ): Promise<DesktopRelayStatus> {
-  const status = await bindRelay(endpoint, relayPath)
+  const binding = await bindRelay(endpoint, relayPath)
   // Arm the refresh only once the first bind has actually succeeded, so a
   // failed ensure does not leave a timer hammering an unreachable host.
   stopRemoteIdeRelayRefresh()
   active = {
     endpoint,
     relayPath,
+    binding,
     timer: setInterval(() => {
       const current = active
-      if (!current) return
-      // Swallowed on purpose: a single missed refresh is recoverable (the next
-      // tick is still inside the token's lifetime), and there is no user action
-      // that would help. A relay that really is gone surfaces through the
-      // pane's own health watchdog instead.
-      void bindRelay(current.endpoint, current.relayPath).catch(() => undefined)
+      if (!current || current.refresh) return
+      current.refresh = bindRelay(current.endpoint, current.relayPath, undefined, current.binding)
+        .then((next) => {
+          current.binding = next
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          current.refresh = undefined
+        })
     }, REFRESH_INTERVAL_MS),
   }
-  return status
+  return binding.status
 }
 
 /** Stop refreshing. Called when the relay itself is torn down. */
@@ -143,4 +190,81 @@ export function isRemoteIdeRelayActive(): boolean {
 /** Test-only: drop the timer without touching the (mocked) native layer. */
 export function __resetRemoteIdeRelayForTesting(): void {
   stopRemoteIdeRelayRefresh()
+}
+
+const portRelays = new Map<
+  string,
+  { timer?: ReturnType<typeof setInterval>; refresh?: Promise<unknown> }
+>()
+const portOperations = new Map<string, Promise<unknown>>()
+
+function serializePort<T>(relayId: string, operation: () => Promise<T>): Promise<T> {
+  const previous = portOperations.get(relayId) ?? Promise.resolve()
+  const next = previous.catch(() => undefined).then(operation)
+  portOperations.set(relayId, next)
+  void next
+    .finally(() => {
+      if (portOperations.get(relayId) === next) portOperations.delete(relayId)
+    })
+    .catch(() => undefined)
+  return next
+}
+
+async function stopPort(relayId: string): Promise<void> {
+  const owner = portRelays.get(relayId)
+  if (!owner) return
+  if (owner.timer) clearInterval(owner.timer)
+  await owner.refresh
+  await transport.call("codeserver_remote_relay_stop", { relayId })
+  portRelays.delete(relayId)
+}
+
+/** Independent credentials and lifecycle ordering for each forwarded port. */
+export function ensureRemotePortRelay(
+  endpoint: RemoteHostEndpoint,
+  relayPath: string,
+  relayId: string
+): Promise<DesktopRelayStatus> {
+  return serializePort(relayId, async () => {
+    await stopPort(relayId)
+    let binding = await bindRelay(endpoint, relayPath, relayId)
+    const owner: { timer?: ReturnType<typeof setInterval>; refresh?: Promise<unknown> } = {
+      timer: setInterval(() => {
+        if (owner.refresh) return
+        owner.refresh = bindRelay(endpoint, relayPath, relayId, binding)
+          .then((next) => {
+            binding = next
+          })
+          .catch(() => undefined)
+          .finally(() => {
+            owner.refresh = undefined
+          })
+      }, REFRESH_INTERVAL_MS),
+    }
+    portRelays.set(relayId, owner)
+    return binding.status
+  })
+}
+
+/** Queued behind create/refresh so a late bind cannot resurrect the socket. */
+export function stopRemotePortRelay(relayId: string): Promise<void> {
+  return serializePort(relayId, () => stopPort(relayId))
+}
+
+/** Local desktop requests stay inside the native Host; no fabricated device credential. */
+export function ensureLocalPortRelay(
+  localPort: { projectId: string; containerId: string; port: number },
+  relayId: string
+): Promise<DesktopRelayStatus> {
+  return serializePort(relayId, async () => {
+    await stopPort(relayId)
+    const status = await transport.call<DesktopRelayStatus>("codeserver_remote_relay_ensure", {
+      relayId,
+      localPort,
+    })
+    // No credential expires on the in-process route. Keep a lease in the same
+    // table so callers dispose remote and local listeners identically.
+    portRelays.set(relayId, {})
+    return status
+  })
 }

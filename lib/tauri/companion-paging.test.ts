@@ -1,6 +1,20 @@
 import { collectPages, isOperation, isPage, type Page } from "./companion-paging"
 
 describe("companion paging (ADR-0175 B3)", () => {
+  it("refuses incomplete authority data and stops repeated tokens immediately", async () => {
+    const fetchPage = jest.fn(async () => ({ items: [1], nextPageToken: "same" }))
+    await expect(collectPages(fetchPage, { requireComplete: true })).rejects.toThrow(
+      "repeated page token"
+    )
+    expect(fetchPage).toHaveBeenCalledTimes(2)
+    await expect(collectPages(fetchPage, { maxPages: 1, requireComplete: true })).rejects.toThrow(
+      "page limit"
+    )
+    await expect(collectPages(fetchPage, { maxItems: 1, requireComplete: true })).rejects.toThrow(
+      "item limit"
+    )
+  })
+
   it("recognises the page envelope and the operation document", () => {
     expect(isPage({ items: [] })).toBe(true)
     expect(isPage({ items: [1], nextPageToken: "t" })).toBe(true)

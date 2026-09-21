@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "description": "External-agent capability manifest (ADR-0090 external SSOT). Source of truth for layer 1 (protocol) and layer 2 (preset refinement) of the capability merge. Only the six REGISTERED built-in protocols appear here: plugin protocols declare their own rows in the plugin manifest, and http/websocket/custom have no adapter and are read-only legacy. Every protocol carries a COMPLETE row -- an id with no evidence is written out as level \"unknown\", evidence \"none\", never omitted, so a missing measurement can never be mistaken for a measured yes.",
   "capabilityIds": [
     "streaming",
@@ -807,9 +807,8 @@
           "reasonKey": "noProtocolSlot"
         },
         "hooks.lifecycle": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "agentOwned"
+          "level": "unknown",
+          "evidence": "none"
         },
         "input.elicitation": {
           "level": "native",

@@ -9,6 +9,9 @@
 //!   - POST /v1/messages/count_tokens → Anthropic token count (forwarded, or a local estimate when no Anthropic route)
 //!   - POST /v1/embeddings            → OpenAI-format embeddings
 //!   - POST /v1/responses             → OpenAI Responses API (stream + non-stream)
+//!   - GET  /v1/models/cognia/{mode}  → one Router + Fusion virtual model (ADR-0188)
+//!   - ANY  /v1/runs, /v1/sessions/{id}, /v1/artifacts/{id}[/content]
+//!     → the Router + Fusion Run API (`runs.rs`); 403 until the brain turns it on
 //!
 //! Middleware mirrors `remote_control::server` (the audited reference), with
 //! the gateway's own additions: Host check (skipped for LAN peers when LAN
@@ -239,9 +242,9 @@ struct AppState {
     /// Upstream HTTP clients, one per live proxy route.
     http: Arc<UpstreamClients>,
     response_history: Arc<parking_lot::Mutex<ResponseHistory>>,
-    /// The Run API's brain link and surface switches (ADR-0188 B2). With the
-    /// surface off — the default — the merged routes refuse without ever
-    /// touching it.
+    /// The Run API's brain link, surface switches and compat-waiter cap
+    /// (ADR-0188 B2–B3). With the surface off — the default — `/v1/runs` and
+    /// the `cognia/*` models refuse without ever touching the brain.
     runs: crate::runs::RunsState,
 }
 
@@ -417,6 +420,7 @@ const UPSTREAM_CLIENT_CACHE_CAP: usize = 8;
 
 impl UpstreamClients {
     pub(crate) fn new(connect_timeout: Duration) -> Self {
+        cognia_net::proxy_config::ensure_crypto_provider();
         let fallback = reqwest::Client::builder()
             .connect_timeout(connect_timeout)
             .build()
@@ -509,8 +513,11 @@ pub async fn spawn_server(
         on_request,
         tickets,
         leases,
-        // No host attached this one: `/v1/runs` answers 503 rather than reading
-        // a state it does not have.
+        // No brain is attached to this listener and the Router + Fusion
+        // switches start off, so `/v1/runs` and the `cognia/*` models answer
+        // `403 ROUTER_FUSION_DISABLED`; were a host to switch them on without
+        // installing a bridge, they would answer `503 BRAIN_UNAVAILABLE`. Never
+        // a read of state this process does not have.
         crate::runs::RunsState::detached(),
     )
     .await
@@ -599,37 +606,13 @@ pub async fn spawn_server_with_account(
         leases,
         http,
         response_history: Arc::new(parking_lot::Mutex::new(ResponseHistory::default())),
-        runs: runs.clone(),
+        runs,
     };
     // Cloned before the router consumes `state`; both share the same Arcs, so a
     // probe run through this sees the live cooldown / in-flight state.
     let probe_state = state.clone();
 
-    let protected = Router::new()
-        .route("/v1/models", get(list_models))
-        .route("/v1/models/{model}", get(get_model))
-        .route("/v1/chat/completions", post(openai_chat))
-        .route("/v1/messages", post(anthropic_messages))
-        .route("/v1/messages/count_tokens", post(anthropic_count_tokens))
-        .route("/v1/embeddings", post(openai_embeddings))
-        .route("/v1/responses", post(openai_responses))
-        // `/v1/runs` shares this router's Host, origin, allowlist, key and
-        // rate-limit checks; what it adds is the scope check and the brain.
-        .merge(crate::runs::routes().with_state(runs.clone()))
-        .layer(from_fn_with_state(state.clone(), middleware))
-        .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES));
-
-    let app = Router::new()
-        // R2 client-compat: Claude Code probes `GET/HEAD /` before trusting an
-        // ANTHROPIC_BASE_URL and treats a non-2xx as "model unavailable".
-        // Answer 200 with an empty JSON object (no state, no data exposure).
-        .route("/", get(root_probe).head(root_probe))
-        .route("/healthz", get(healthz))
-        // W3.4: real-relay upstream self-check (loopback-only). Probes each
-        // resolved candidate through the actual resolve + upstream path.
-        .route("/healthz/upstream", post(healthz_upstream))
-        .merge(protected)
-        .with_state(state);
+    let app = app_router(state);
 
     let (tx, mut rx) = watch::channel(());
 
@@ -659,7 +642,9 @@ pub async fn spawn_server_with_account(
     tokio::spawn(async move {
         let server = axum::serve(
             listener,
-            app.into_make_service_with_connect_info::<SocketAddr>(),
+            // The connection's own local address rides along with the peer's
+            // (`split_connection` hands the middleware its `SocketAddr`).
+            app.into_make_service_with_connect_info::<GatewayConnection>(),
         );
         let result = server
             .with_graceful_shutdown(async move {
@@ -676,6 +661,114 @@ pub async fn spawn_server_with_account(
         shutdown: tx,
         state: probe_state,
     })
+}
+
+/// The whole HTTP surface the listener serves. Built in one place so the
+/// server-level tests drive exactly the router the listener mounts: every Run
+/// API route, fallback and guard is reached through it (ADR-0188).
+fn app_router(state: AppState) -> Router {
+    // Bind-time (the interface) plus request-time (the public origin, read
+    // live so an `update_config` changes read links without a restart).
+    let listener = ListenerOriginState {
+        lan: state.bind_is_lan,
+        config: state.config.clone(),
+    };
+    let protected = Router::new()
+        .route("/v1/models", get(list_models))
+        .route("/v1/models/{model}", get(get_model))
+        // A virtual model's name holds a slash, which `{model}` never matches
+        // (ADR-0188 D13).
+        .route("/v1/models/cognia/{mode}", get(get_virtual_model))
+        .route("/v1/chat/completions", post(openai_chat))
+        .route("/v1/messages", post(anthropic_messages))
+        .route("/v1/messages/count_tokens", post(anthropic_count_tokens))
+        .route("/v1/embeddings", post(openai_embeddings))
+        .route("/v1/responses", post(openai_responses))
+        // `/v1/runs` shares this router's Host, origin, allowlist, key and
+        // rate-limit checks; what it adds is the scope check and the brain.
+        .merge(crate::runs::routes().with_state(state.runs.clone()))
+        .layer(from_fn_with_state(state.clone(), middleware))
+        .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
+        // Outermost, so a Run API failure answered by any layer above — the
+        // body limit included — leaves in the contract's shape. A pass-through
+        // for every other path (ADR-0188 D37).
+        .layer(axum::middleware::from_fn(
+            crate::runs::contract_error_envelope,
+        ));
+
+    Router::new()
+        // R2 client-compat: Claude Code probes `GET/HEAD /` before trusting an
+        // ANTHROPIC_BASE_URL and treats a non-2xx as "model unavailable".
+        // Answer 200 with an empty JSON object (no state, no data exposure).
+        .route("/", get(root_probe).head(root_probe))
+        .route("/healthz", get(healthz))
+        // W3.4: real-relay upstream self-check (loopback-only). Probes each
+        // resolved candidate through the actual resolve + upstream path.
+        .route("/healthz/upstream", post(healthz_upstream))
+        .merge(protected)
+        .with_state(state)
+        .layer(axum::middleware::map_request_with_state(
+            listener,
+            split_connection,
+        ))
+}
+
+/// What [`split_connection`] needs to describe this listener to the Run API:
+/// whether it takes LAN peers, and the operator's configured public origin.
+#[derive(Clone)]
+struct ListenerOriginState {
+    lan: bool,
+    config: Arc<RwLock<GatewayConfig>>,
+}
+
+/// One accepted connection as the listener saw it: the peer, and the local
+/// address it arrived on. The local address is the one origin a request cannot
+/// forge, so the Run API builds read links from it whenever the Host header is
+/// not one it can vouch for (ADR-0188 B3 hardening).
+#[derive(Clone, Copy, Debug)]
+struct GatewayConnection {
+    remote: SocketAddr,
+    local: Option<SocketAddr>,
+}
+
+impl
+    axum::extract::connect_info::Connected<axum::serve::IncomingStream<'_, tokio::net::TcpListener>>
+    for GatewayConnection
+{
+    fn connect_info(stream: axum::serve::IncomingStream<'_, tokio::net::TcpListener>) -> Self {
+        Self {
+            remote: *stream.remote_addr(),
+            local: stream.io().local_addr().ok(),
+        }
+    }
+}
+
+/// Split the listener's connection info into what the handlers read: the
+/// peer's `ConnectInfo<SocketAddr>`, exactly as before, and the Run API's
+/// [`crate::runs::ListenerOrigin`].
+async fn split_connection(
+    State(listener): State<ListenerOriginState>,
+    mut request: axum::extract::Request,
+) -> axum::extract::Request {
+    let connection = request
+        .extensions()
+        .get::<ConnectInfo<GatewayConnection>>()
+        .map(|ConnectInfo(connection)| *connection);
+    if let Some(connection) = connection {
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(connection.remote));
+        request
+            .extensions_mut()
+            .insert(crate::runs::ListenerOrigin {
+                lan: listener.lan,
+                local_addr: connection.local,
+                // Normalised on the way in; `None` leaves the derived
+                // behaviour (Host header or listener address) untouched.
+                public_origin: listener.config.read().resolved_public_origin(),
+            });
+    }
+    request
 }
 
 /// Claude Code base-URL probe endpoint (see router comment). Stateless.
@@ -975,6 +1068,9 @@ async fn middleware(
         account: state.account.clone(),
         generation: account.generation,
     };
+    // ADR-0188 D37: a Run API path gets these refusals in its contract's
+    // `ErrorResponse`; every other path keeps the body its clients parse.
+    let run_surface = crate::runs::is_run_surface_path(&route);
 
     let reject = |status: StatusCode, message: &str, key_id: Option<String>| -> Response {
         state.on_request.on_call(&route, status, remote_ip);
@@ -993,6 +1089,9 @@ async fn middleware(
             false,
             None,
         );
+        if run_surface {
+            return crate::runs::gateway_refusal(status, message);
+        }
         (status, Json(json!({ "error": { "message": message } }))).into_response()
     };
 
@@ -1258,9 +1357,15 @@ async fn run_with_account_boundary(
     request: axum::http::Request<Body>,
     mut changes: tokio::sync::watch::Receiver<u64>,
 ) -> Response {
+    // ADR-0188 D37: only a Run API path trades the bare string for the
+    // contract's `ErrorResponse`.
+    let run_surface = crate::runs::is_run_surface_path(request.uri().path());
     let response = tokio::select! {
         biased;
         _ = changes.changed() => {
+            if run_surface {
+                return crate::runs::account_context_changed();
+            }
             return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": "gateway account context changed" }))).into_response();
         }
         response = next.run(request) => response,
@@ -1351,6 +1456,28 @@ async fn get_model(
         return Json(item.clone()).into_response();
     }
     (StatusCode::NOT_FOUND,Json(json!({"error":{"type":"not_found_error","message":"model is not available to this task"}}))).into_response()
+}
+
+/// `GET /v1/models/cognia/{mode}`: one Router + Fusion virtual model, under
+/// the rule `/v1/models` lists it by — the `gatewayRuns` switch is on, the key
+/// may create and read runs, and its model allowlist admits the name
+/// (ADR-0188 D13). Any name this key would not see listed is the same bare
+/// 404 the path answered before the route existed, so a switched-off gateway
+/// is unchanged (D37).
+async fn get_virtual_model(
+    State(state): State<AppState>,
+    Extension(ctx): Extension<ReqCtx>,
+    actor: Option<Extension<crate::runs::RunActor>>,
+    axum::extract::Path(mode): axum::extract::Path<String>,
+) -> Response {
+    let model = format!("cognia/{mode}");
+    let actor = actor.map(|Extension(actor)| actor).unwrap_or_default();
+    let document = crate::virtual_models::model_document(&model, state.runs.runs_enabled(), &actor)
+        .filter(|_| ctx_allows(&ctx, &model));
+    match document {
+        Some(document) => Json(document).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 fn model_document(id: &str, provider: &crate::snapshot::ProviderSnapshot, concrete: &str) -> Value {
@@ -1690,6 +1817,10 @@ async fn anthropic_count_tokens(
 ) -> Response {
     let state = state.for_request(&ctx);
     let _perf = cognia_instrument::guard("gateway.count_tokens");
+    // ADR-0188 D13: `cognia/*` has no tokenizer to count against.
+    if let Some(refusal) = virtual_model_refusal(&state, &ctx, &body) {
+        return refusal;
+    }
     let format = InboundFormat::AnthropicMessages;
     if ctx.ticket.is_some() && !body_has_no_leaking_pii(&body) {
         return logged_error(
@@ -1924,6 +2055,10 @@ async fn openai_embeddings(
 ) -> Response {
     let state = state.for_request(&ctx);
     let _perf = cognia_instrument::guard("gateway.embeddings");
+    // ADR-0188 D13: `cognia/*` is a routing mode, never an embeddings model.
+    if let Some(refusal) = virtual_model_refusal(&state, &ctx, &body) {
+        return refusal;
+    }
     let format = InboundFormat::OpenAiChat;
     let cfg = state.config.read().clone();
     let snapshot = state.snapshot.read().clone();
@@ -2265,6 +2400,10 @@ async fn openai_responses(
     Json(mut body): Json<Value>,
 ) -> Response {
     let state = state.for_request(&ctx);
+    // ADR-0188 D13: refused before the Responses checks read the body.
+    if let Some(refusal) = virtual_model_refusal(&state, &ctx, &body) {
+        return refusal;
+    }
     let format = InboundFormat::OpenAiChat;
     let native = state.snapshot.read().as_ref().is_some_and(|snapshot| {
         let model = body["model"].as_str().unwrap_or("");
@@ -2844,9 +2983,50 @@ async fn live_decision(
     }
 }
 
+/// ADR-0188 D13/D37: a request naming a `cognia/*` model — or `router/*` while
+/// runs are on — on an endpoint that does not serve it is refused here, first,
+/// in the Run API contract's `ErrorResponse` (the code in `code`, never in the
+/// legacy `type`), and logged like any other terminal error. Falling through
+/// would report "unknown model", which tells the caller nothing about the
+/// switch to turn on or the endpoint that serves what it asked for. `None` for
+/// any other model: the ordinary path carries on unchanged.
+fn virtual_model_refusal(state: &AppState, ctx: &ReqCtx, body: &Value) -> Option<Response> {
+    let model = body["model"].as_str()?;
+    let crate::virtual_models::VirtualModelVerdict::Refuse {
+        status,
+        code,
+        message,
+    } = crate::virtual_models::verdict_off_compat(model, state.runs.runs_enabled())
+    else {
+        return None;
+    };
+    let response = crate::virtual_models::refusal_response(model, status, &code, &message);
+    emit_request_log_ctx(
+        state.host.as_ref(),
+        ctx,
+        Some(model),
+        None,
+        response.status().as_u16(),
+        0,
+        None,
+        None,
+        Some(&message),
+        false,
+        None,
+    );
+    Some(response)
+}
+
 async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: Value) -> Response {
     let state = state.for_request(&ctx);
     let _perf = cognia_instrument::guard("gateway.chat");
+    // `cognia/*` names a routing MODE, not a model (ADR-0188 D13), and is
+    // answered before anything else reads the request. `/v1/chat/completions`
+    // serves the four modes before it gets here, so what reaches this point is
+    // refused: switched off, `delegate`, an unknown mode, or another endpoint.
+    if let Some(refusal) = virtual_model_refusal(&state, &ctx, &body) {
+        return refusal;
+    }
     let cfg = state.config.read().clone();
     if ctx.ticket.is_some() && !body_has_no_leaking_pii(&body) {
         return logged_error(
@@ -2884,34 +3064,6 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
             None,
         );
     };
-    // `cognia/*` names a routing MODE, not a model (ADR-0188 D13). Catch it
-    // before model resolution: falling through would report "unknown model",
-    // which tells a caller nothing about the switch it has to turn on or the
-    // endpoint that serves what it asked for.
-    let verdict = match crate::virtual_models::classify(&model, state.runs.runs_enabled()) {
-        // Served only by `/v1/chat/completions`, which answers before this
-        // point; any other endpoint reaching here has no compat subset.
-        crate::virtual_models::VirtualModelVerdict::Serve { .. } => {
-            crate::virtual_models::chat_completions_only()
-        }
-        other => other,
-    };
-    if let crate::virtual_models::VirtualModelVerdict::Refuse {
-        status,
-        code,
-        message,
-    } = verdict
-    {
-        return logged_error(
-            &state,
-            &ctx,
-            format,
-            StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_REQUEST),
-            &code,
-            &message,
-            None,
-        );
-    }
     let ticket = ctx.ticket.clone();
     // Ticket requests skip the exposure guard: their model surface was frozen
     // and validated at mint, and live exposure edits must not alter it.
@@ -5161,5 +5313,1030 @@ mod tests {
                     .map(|data| data["delta"]["text"] == "tail text")
                     .unwrap_or(false)
         }));
+    }
+}
+
+/// ADR-0188 (Router + Fusion, WP-A): every Run API route, fallback and guard,
+/// and every `cognia/*` behaviour, driven through [`app_router`] — the router
+/// the listener mounts — with the middleware, the body limit, the contract
+/// envelope and the connection split in place. The legacy answers beside them
+/// are pinned byte for byte (D37).
+#[cfg(test)]
+mod router_fusion_server_tests {
+    use super::*;
+    use crate::brain_bridge::{command, BrainBridge, BrainFuture, RecordingBrainBridge};
+    use crate::runs::{scope, RunsState, MAX_COMPAT_WAITERS};
+    use axum::http::header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, HOST};
+    use tower::ServiceExt;
+
+    const SECRET: &str = "sk-cognia-rf-server-tests-scoped-000000000000000000";
+    const LIMITED: &str = "sk-cognia-rf-server-tests-limited-00000000000000000";
+    const PLAIN: &str = "sk-cognia-rf-server-tests-plain-0000000000000000000";
+    const DRAINED: &str = "sk-cognia-rf-server-tests-drained-00000000000000000";
+    const LOCAL: &str = "127.0.0.1:8787";
+    const PEER: &str = "127.0.0.1:50000";
+    const RUN_ID: &str = "11111111-1111-4111-8111-111111111111";
+
+    struct NoopObserver;
+    impl RequestObserver for NoopObserver {
+        fn on_call(&self, _route: &str, _status: StatusCode, _ip: IpAddr) {}
+    }
+
+    fn key(id: &str, secret: &str, scopes: &[&str], allowlist: &[&str]) -> GatewayApiKey {
+        GatewayApiKey {
+            owner_account_id: None,
+            id: id.into(),
+            name: format!("{id} robot"),
+            secret: secret.into(),
+            model_allowlist: allowlist.iter().map(|m| m.to_string()).collect(),
+            scopes: scopes.iter().map(|s| s.to_string()).collect(),
+            expires_at_ms: None,
+            enabled: true,
+            rate_limit_per_min: None,
+            quota_tokens: None,
+            quota_used_tokens: 0,
+            created_at_ms: 0,
+            last_used_at_ms: None,
+        }
+    }
+
+    /// The four keys every test can use: a Run API key, one limited to named
+    /// models, a legacy key with no scopes, and one that drew down its quota.
+    fn keys() -> Vec<GatewayApiKey> {
+        let run_scopes = [
+            scope::CREATE,
+            scope::READ,
+            scope::CANCEL,
+            scope::APPROVE,
+            scope::ARTIFACTS_READ,
+            scope::FEEDBACK,
+        ];
+        let mut drained = key("drained", DRAINED, &run_scopes, &[]);
+        drained.quota_tokens = Some(10);
+        drained.quota_used_tokens = 10;
+        vec![
+            key("scoped", SECRET, &run_scopes, &[]),
+            key("limited", LIMITED, &[scope::CREATE, scope::READ], &["fast"]),
+            key("plain", PLAIN, &[], &[]),
+            drained,
+        ]
+    }
+
+    struct Gateway {
+        app: Router,
+        state: AppState,
+    }
+
+    fn gateway_with(
+        bridge: Arc<dyn BrainBridge>,
+        runs_enabled: bool,
+        lan: bool,
+        snapshot: Option<RoutingSnapshot>,
+    ) -> Gateway {
+        let runs = RunsState::new(bridge);
+        runs.switches.write().runs_enabled = runs_enabled;
+        let config = GatewayConfig {
+            allowlist: vec!["127.0.0.1/32".into(), "192.168.1.0/24".into()],
+            ..GatewayConfig::default()
+        };
+        let state = AppState {
+            account: Arc::new(RwLock::new(crate::GatewayAccountContext::default())),
+            account_changes: Arc::new(watch::channel(0).0),
+            host: Arc::new(crate::host::RecordingGatewayHost::new(false)),
+            keys: Arc::new(RwLock::new(keys())),
+            allowlist: Arc::new(ParsedAllowlist::parse(&config.allowlist).unwrap()),
+            rate_limiter: Arc::new(FixedWindowRateLimiter::new(config.rate_limit_per_min)),
+            config: Arc::new(RwLock::new(config)),
+            key_rate_limiter: Arc::new(KeyedRateLimiter::new()),
+            bind_is_lan: lan,
+            on_request: Arc::new(NoopObserver),
+            snapshot: Arc::new(RwLock::new(snapshot)),
+            decisions: Arc::new(DecisionRegistry::default()),
+            key_rotation: Arc::new(KeyRotationMap::default()),
+            route_planner: Arc::new(crate::route_planner::RoutePlannerState::default()),
+            key_cooldown: Arc::new(KeyCooldownMap::default()),
+            concurrency: Arc::new(ConcurrencyLimiter::default()),
+            in_flight: Arc::new(InFlightTracker::default()),
+            tickets: Arc::new(RouteTicketRegistry::new(Arc::new(
+                crate::route_ticket::InMemoryTicketMetaStore::default(),
+            ))),
+            leases: Arc::new(CredentialLeaseMap::default()),
+            http: Arc::new(UpstreamClients::new(Duration::from_secs(1))),
+            response_history: Arc::new(parking_lot::Mutex::new(ResponseHistory::default())),
+            runs,
+        };
+        Gateway {
+            app: app_router(state.clone()),
+            state,
+        }
+    }
+
+    fn gateway(bridge: &RecordingBrainBridge, runs_enabled: bool) -> Gateway {
+        gateway_with(Arc::new(bridge.clone()), runs_enabled, false, None)
+    }
+
+    /// A request as the listener hands it over: with the connection info the
+    /// real `GatewayConnection` make-service attaches.
+    fn request_via(
+        method: &str,
+        uri: &str,
+        bearer: Option<&str>,
+        body: Option<Value>,
+        remote: &str,
+        local: &str,
+        host: &str,
+    ) -> axum::http::Request<Body> {
+        let mut builder = axum::http::Request::builder()
+            .method(method)
+            .uri(uri)
+            .header(HOST, host);
+        if let Some(secret) = bearer {
+            builder = builder.header(AUTHORIZATION, format!("Bearer {secret}"));
+        }
+        let body = match body {
+            Some(value) => {
+                builder = builder.header(CONTENT_TYPE, "application/json");
+                Body::from(value.to_string())
+            }
+            None => Body::empty(),
+        };
+        let mut request = builder.body(body).unwrap();
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(GatewayConnection {
+                remote: remote.parse().unwrap(),
+                local: Some(local.parse().unwrap()),
+            }));
+        request
+    }
+
+    fn request(
+        method: &str,
+        uri: &str,
+        bearer: Option<&str>,
+        body: Option<Value>,
+    ) -> axum::http::Request<Body> {
+        request_via(method, uri, bearer, body, PEER, LOCAL, LOCAL)
+    }
+
+    async fn send(app: &Router, request: axum::http::Request<Body>) -> Response {
+        app.clone().oneshot(request).await.unwrap()
+    }
+
+    async fn bytes_of(response: Response) -> Bytes {
+        axum::body::to_bytes(response.into_body(), 1 << 20)
+            .await
+            .unwrap()
+    }
+
+    async fn json_of(response: Response) -> Value {
+        serde_json::from_slice(&bytes_of(response).await).unwrap_or(Value::Null)
+    }
+
+    /// The contract's `ErrorResponse`, and nothing else.
+    fn assert_contract(body: &Value, code: &str) {
+        let error = body["error"]
+            .as_object()
+            .unwrap_or_else(|| panic!("an error object: {body}"));
+        let mut keys: Vec<&str> = error.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["code", "details", "message", "retryable", "trace_id"],
+            "{body}"
+        );
+        assert_eq!(body["error"]["code"], code, "{body}");
+        assert_eq!(body.as_object().map(|o| o.len()), Some(1), "{body}");
+    }
+
+    fn created() -> Value {
+        json!({
+            "accepted": {
+                "schema_version": "1.0.0",
+                "run_id": RUN_ID,
+                "session_id": "22222222-2222-4222-8222-222222222222",
+                "session_version": 0,
+                "status": "queued",
+                "version": 1,
+                "created_at": "2026-09-16T08:00:00.000Z"
+            },
+            "replayed": false
+        })
+    }
+
+    fn chat_answer() -> Value {
+        json!({
+            "id": format!("chatcmpl-{RUN_ID}"),
+            "object": "chat.completion",
+            "created": 1_800_000_000,
+            "model": "cognia/panel",
+            "choices": [{ "index": 0, "message": { "role": "assistant", "content": "4%." }, "finish_reason": "stop" }],
+            "usage": { "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15 },
+            "routing": { "run_id": RUN_ID, "mode_executed": "panel", "degraded": false, "billing": {} }
+        })
+    }
+
+    fn chat(model: &str) -> Value {
+        json!({
+            "model": model,
+            "max_tokens": 16,
+            "messages": [{ "role": "user", "content": "What is the 2025 steel tariff?" }]
+        })
+    }
+
+    fn event(seq: u64, kind: &str) -> Value {
+        json!({
+            "schema_version": "1.0.0",
+            "run_id": RUN_ID,
+            "seq": seq,
+            "event_type": kind,
+            "timestamp": "2026-09-16T08:00:00.000Z",
+            "payload": {}
+        })
+    }
+
+    // ---- step 1: one error shape ------------------------------------------
+
+    #[tokio::test]
+    async fn run_api_auth_refusals_are_the_contracts_error_and_legacy_paths_keep_theirs() {
+        let bridge = RecordingBrainBridge::new();
+        let gw = gateway(&bridge, true);
+        for uri in [
+            "/v1/runs/r-1",
+            "/v1/sessions/s-1",
+            "/v1/artifacts/a-1",
+            "/v1/runs/r-1/events",
+        ] {
+            let missing = send(&gw.app, request("GET", uri, None, None)).await;
+            assert_eq!(missing.status(), StatusCode::UNAUTHORIZED, "{uri}");
+            assert_contract(&json_of(missing).await, "AUTH_REQUIRED");
+
+            let invalid = send(&gw.app, request("GET", uri, Some("sk-cognia-nope"), None)).await;
+            assert_eq!(invalid.status(), StatusCode::UNAUTHORIZED, "{uri}");
+            assert_contract(&json_of(invalid).await, "INVALID_API_KEY");
+
+            let drained = send(&gw.app, request("GET", uri, Some(DRAINED), None)).await;
+            assert_eq!(drained.status(), StatusCode::TOO_MANY_REQUESTS, "{uri}");
+            let body = json_of(drained).await;
+            assert_contract(&body, "KEY_QUOTA_EXHAUSTED");
+            // Waiting does not refill a quota: not retryable, though a 429.
+            assert_eq!(body["error"]["retryable"], false);
+            assert_eq!(
+                body["error"]["message"],
+                "insufficient_quota: key token quota exhausted"
+            );
+
+            let spoofed = send(
+                &gw.app,
+                request_via("GET", uri, Some(SECRET), None, PEER, LOCAL, "evil.example"),
+            )
+            .await;
+            assert_eq!(spoofed.status(), StatusCode::FORBIDDEN, "{uri}");
+            assert_contract(&json_of(spoofed).await, "HOST_NOT_ALLOWED");
+        }
+        assert!(bridge.calls().is_empty());
+
+        // D37: every other path answers with exactly the bytes it always did.
+        let legacy_missing = send(&gw.app, request("GET", "/v1/models", None, None)).await;
+        assert_eq!(legacy_missing.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            json_of(legacy_missing).await,
+            json!({ "error": { "message": "missing credentials (Authorization: Bearer or x-api-key)" } })
+        );
+        let legacy_invalid = send(
+            &gw.app,
+            request(
+                "POST",
+                "/v1/chat/completions",
+                Some("sk-cognia-nope"),
+                Some(chat("fast")),
+            ),
+        )
+        .await;
+        assert_eq!(
+            json_of(legacy_invalid).await,
+            json!({ "error": { "message": "invalid token" } })
+        );
+        let legacy_drained = send(&gw.app, request("GET", "/v1/models", Some(DRAINED), None)).await;
+        assert_eq!(legacy_drained.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(
+            json_of(legacy_drained).await,
+            json!({ "error": { "message": "insufficient_quota: key token quota exhausted" } })
+        );
+        let legacy_host = send(
+            &gw.app,
+            request_via(
+                "GET",
+                "/v1/models",
+                Some(SECRET),
+                None,
+                PEER,
+                LOCAL,
+                "evil.example",
+            ),
+        )
+        .await;
+        assert_eq!(
+            json_of(legacy_host).await,
+            json!({ "error": { "message": "invalid host" } })
+        );
+    }
+
+    #[tokio::test]
+    async fn the_run_routers_404_and_405_are_contract_shaped_and_legacy_misses_are_not() {
+        let bridge = RecordingBrainBridge::new();
+        let gw = gateway(&bridge, true);
+        let not_allowed = send(&gw.app, request("GET", "/v1/runs", Some(SECRET), None)).await;
+        assert_eq!(not_allowed.status(), StatusCode::METHOD_NOT_ALLOWED);
+        // The contract body keeps the header a 405 owes its caller.
+        assert_eq!(not_allowed.headers().get("allow").unwrap(), "POST");
+        assert_contract(&json_of(not_allowed).await, "METHOD_NOT_ALLOWED");
+        for uri in [
+            "/v1/runs/r-1/nope",
+            "/v1/sessions",
+            "/v1/artifacts/a-1/content/x",
+        ] {
+            let missing = send(&gw.app, request("GET", uri, Some(SECRET), None)).await;
+            assert_eq!(missing.status(), StatusCode::NOT_FOUND, "{uri}");
+            let body = json_of(missing).await;
+            assert_contract(&body, "ROUTE_NOT_FOUND");
+            assert_eq!(body["error"]["details"]["path"], uri);
+        }
+        // The fallbacks sit behind the key check like every route.
+        let anonymous = send(&gw.app, request("GET", "/v1/runs/r-1/nope", None, None)).await;
+        assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+        assert_contract(&json_of(anonymous).await, "AUTH_REQUIRED");
+        assert!(bridge.calls().is_empty());
+
+        // D37: a path no route claims, and a wrong method on a legacy route,
+        // are axum's own bare answers, as before.
+        for (method, uri, status) in [
+            ("GET", "/v1/nope", StatusCode::NOT_FOUND),
+            ("GET", "/v1/models/a/b/c", StatusCode::NOT_FOUND),
+            ("DELETE", "/v1/models", StatusCode::METHOD_NOT_ALLOWED),
+        ] {
+            let response = send(&gw.app, request(method, uri, Some(SECRET), None)).await;
+            assert_eq!(response.status(), status, "{method} {uri}");
+            assert!(bytes_of(response).await.is_empty(), "{method} {uri}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_run_api_body_over_the_limit_is_a_contract_413_and_a_legacy_one_is_not() {
+        let bridge = RecordingBrainBridge::new();
+        let gw = gateway(&bridge, true);
+        let oversized = |uri: &str| {
+            let mut request = request("POST", uri, Some(SECRET), Some(json!({})));
+            request.headers_mut().insert(
+                CONTENT_LENGTH,
+                HeaderValue::from(BODY_LIMIT_BYTES as u64 + 1),
+            );
+            request
+        };
+        let run = send(&gw.app, oversized("/v1/runs")).await;
+        assert_eq!(run.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        let body = json_of(run).await;
+        assert_contract(&body, "PAYLOAD_TOO_LARGE");
+        assert_eq!(body["error"]["message"], "length limit exceeded");
+        assert!(bridge.calls().is_empty());
+
+        let legacy = send(&gw.app, oversized("/v1/chat/completions")).await;
+        assert_eq!(legacy.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(&bytes_of(legacy).await[..], b"length limit exceeded");
+    }
+
+    /// A brain that takes every request and never answers, and says when it
+    /// has been asked.
+    struct StallingBrain {
+        asked: Arc<tokio::sync::Notify>,
+    }
+
+    impl BrainBridge for StallingBrain {
+        fn call(&self, _command: &'static str, _payload: Value) -> BrainFuture {
+            self.asked.notify_one();
+            Box::pin(std::future::pending())
+        }
+    }
+
+    #[tokio::test]
+    async fn an_account_switch_mid_request_is_a_contract_503_on_a_run_path() {
+        let asked = Arc::new(tokio::sync::Notify::new());
+        let gw = gateway_with(
+            Arc::new(StallingBrain {
+                asked: asked.clone(),
+            }),
+            true,
+            false,
+            None,
+        );
+        let app = gw.app.clone();
+        let pending = tokio::spawn(async move {
+            app.oneshot(request("GET", "/v1/runs/r-1", Some(SECRET), None))
+                .await
+                .unwrap()
+        });
+        asked.notified().await;
+        gw.state.account_changes.send_replace(1);
+        let response = pending.await.unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = json_of(response).await;
+        assert_contract(&body, "ACCOUNT_CONTEXT_CHANGED");
+        assert_eq!(body["error"]["retryable"], true);
+    }
+
+    #[tokio::test]
+    async fn an_account_switch_keeps_the_bare_string_on_every_other_path() {
+        let (changes, _) = watch::channel(0u64);
+        let changes = Arc::new(changes);
+        let router = axum::Router::new()
+            .route(
+                "/v1/models",
+                get(|| async { std::future::pending::<Response>().await }),
+            )
+            .layer(axum::middleware::from_fn({
+                let changes = changes.clone();
+                move |request: axum::http::Request<Body>, next: Next| {
+                    run_with_account_boundary(next, request, changes.subscribe())
+                }
+            }));
+        let pending = tokio::spawn(
+            router.oneshot(
+                axum::http::Request::builder()
+                    .uri("/v1/models")
+                    .body(Body::empty())
+                    .unwrap(),
+            ),
+        );
+        tokio::task::yield_now().await;
+        tokio::task::yield_now().await;
+        changes.send_replace(1);
+        let response = pending.await.unwrap().unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            json_of(response).await,
+            json!({ "error": "gateway account context changed" })
+        );
+    }
+
+    // ---- step 2: the body extractor ----------------------------------------
+
+    #[tokio::test]
+    async fn a_rejected_body_or_path_is_schema_invalid_through_the_mounted_app() {
+        let bridge = RecordingBrainBridge::new();
+        let gw = gateway(&bridge, true);
+        for (uri, content_type, body) in [
+            ("/v1/runs", "application/json", "{not json"),
+            ("/v1/runs/r-1/resume", "text/plain", "{}"),
+            ("/v1/runs/r-1/feedback", "application/json", ""),
+        ] {
+            let mut request = request("POST", uri, Some(SECRET), None);
+            request
+                .headers_mut()
+                .insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
+            *request.body_mut() = Body::from(body);
+            let response = send(&gw.app, request).await;
+            assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY, "{uri}");
+            let parsed = json_of(response).await;
+            assert_contract(&parsed, "SCHEMA_INVALID");
+            assert!(parsed["error"]["details"]["reason"].is_string(), "{uri}");
+        }
+        let undecodable = send(&gw.app, request("GET", "/v1/runs/%FF", Some(SECRET), None)).await;
+        assert_eq!(undecodable.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_contract(&json_of(undecodable).await, "SCHEMA_INVALID");
+        assert!(bridge.calls().is_empty());
+    }
+
+    // ---- step 3: the event stream ------------------------------------------
+
+    #[tokio::test(start_paused = true)]
+    async fn the_event_stream_ends_on_an_unreadable_page_through_the_mounted_app() {
+        let bridge = RecordingBrainBridge::new();
+        bridge.ok(command::RUN_EVENTS, json!("not a page"));
+        bridge.ok(
+            command::RUN_EVENTS,
+            json!({ "events": [event(1, "run.queued")], "terminal": false }),
+        );
+        bridge.ok(
+            command::RUN_EVENTS,
+            json!({ "events": null, "terminal": false }),
+        );
+        let gw = gateway(&bridge, true);
+
+        let eager = send(
+            &gw.app,
+            request("GET", "/v1/runs/r-1/events", Some(SECRET), None),
+        )
+        .await;
+        assert_eq!(eager.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_contract(&json_of(eager).await, "BRAIN_ANSWER_UNREADABLE");
+
+        let started = tokio::time::Instant::now();
+        let stream = send(
+            &gw.app,
+            request("GET", "/v1/runs/r-1/events", Some(SECRET), None),
+        )
+        .await;
+        assert_eq!(stream.status(), StatusCode::OK);
+        let text = String::from_utf8_lossy(&bytes_of(stream).await).to_string();
+        let ids: Vec<&str> = text
+            .lines()
+            .filter_map(|line| line.strip_prefix("id: "))
+            .collect();
+        assert_eq!(ids, ["1"]);
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(bridge.payloads_for(command::RUN_EVENTS).len(), 3);
+    }
+
+    /// Every events poll answers an empty, non-terminal page, slowly.
+    struct SlowQuietBrain {
+        polls: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl BrainBridge for SlowQuietBrain {
+        fn call(&self, _command: &'static str, _payload: Value) -> BrainFuture {
+            self.polls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Box::pin(async {
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                Ok(json!({ "events": [], "terminal": false }))
+            })
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stream_silence_is_wall_time_through_the_mounted_app() {
+        let polls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let gw = gateway_with(
+            Arc::new(SlowQuietBrain {
+                polls: polls.clone(),
+            }),
+            true,
+            false,
+            None,
+        );
+        let response = send(
+            &gw.app,
+            request("GET", "/v1/runs/r-1/events", Some(SECRET), None),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let opened = tokio::time::Instant::now();
+        bytes_of(response).await;
+        let silent_for = opened.elapsed();
+        assert!(silent_for >= crate::runs::SSE_MAX_SILENCE, "{silent_for:?}");
+        assert!(
+            silent_for <= crate::runs::SSE_MAX_SILENCE + Duration::from_secs(11),
+            "{silent_for:?}"
+        );
+        assert!(polls.load(std::sync::atomic::Ordering::SeqCst) <= 32);
+    }
+
+    // ---- step 4: the read link's origin ------------------------------------
+
+    #[tokio::test]
+    async fn a_spoofed_host_on_a_lan_listener_never_reaches_the_read_link() {
+        let bridge = RecordingBrainBridge::new();
+        for _ in 0..4 {
+            bridge.ok(
+                command::ARTIFACT_GET,
+                json!({ "artifact_id": "a-1", "read_url": "x" }),
+            );
+        }
+        let gw = gateway_with(Arc::new(bridge.clone()), true, true, None);
+        let lan_peer = "192.168.1.20:50000";
+        let lan_local = "192.168.1.5:8787";
+        for (host, expected) in [
+            ("evil.example", "http://192.168.1.5:8787"),
+            ("192.168.1.66:8787", "http://192.168.1.5:8787"),
+            ("192.168.1.5:8787", "http://192.168.1.5:8787"),
+            ("localhost:8787", "http://localhost:8787"),
+        ] {
+            let response = send(
+                &gw.app,
+                request_via(
+                    "GET",
+                    "/v1/artifacts/a-1",
+                    Some(SECRET),
+                    None,
+                    lan_peer,
+                    lan_local,
+                    host,
+                ),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::OK, "{host}");
+            let payloads = bridge.payloads_for(command::ARTIFACT_GET);
+            assert_eq!(payloads.last().unwrap()["baseUrl"], expected, "{host}");
+        }
+    }
+
+    /// The connection split end to end over a real socket: the make-service
+    /// the listener uses records the address the connection arrived on, and a
+    /// spoofed Host on a LAN-mode listener is replaced by it.
+    #[tokio::test]
+    async fn the_listener_hands_the_run_api_the_address_it_was_really_reached_on() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let bridge = RecordingBrainBridge::new();
+        bridge.ok(
+            command::ARTIFACT_GET,
+            json!({ "artifact_id": "a-1", "read_url": "x" }),
+        );
+        let gw = gateway_with(Arc::new(bridge.clone()), true, true, None);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = gw.app.clone();
+        tokio::spawn(async move {
+            let _ = axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<GatewayConnection>(),
+            )
+            .await;
+        });
+        let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let request = format!(
+            "GET /v1/artifacts/a-1 HTTP/1.1\r\nHost: evil.example\r\nAuthorization: Bearer {SECRET}\r\nConnection: close\r\n\r\n"
+        );
+        stream.write_all(request.as_bytes()).await.unwrap();
+        let mut answer = Vec::new();
+        stream.read_to_end(&mut answer).await.unwrap();
+        let answer = String::from_utf8_lossy(&answer);
+        assert!(answer.starts_with("HTTP/1.1 200"), "{answer}");
+        assert_eq!(
+            bridge.payloads_for(command::ARTIFACT_GET)[0]["baseUrl"],
+            format!("http://{addr}")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_loopback_listener_links_to_the_loopback_name_it_was_reached_by() {
+        let bridge = RecordingBrainBridge::new();
+        bridge.ok(
+            command::ARTIFACT_GET,
+            json!({ "artifact_id": "a-1", "read_url": "x" }),
+        );
+        let gw = gateway(&bridge, true);
+        let response = send(
+            &gw.app,
+            request_via(
+                "GET",
+                "/v1/artifacts/a-1",
+                Some(SECRET),
+                None,
+                PEER,
+                LOCAL,
+                "localhost:8787",
+            ),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            bridge.payloads_for(command::ARTIFACT_GET)[0]["baseUrl"],
+            "http://localhost:8787"
+        );
+    }
+
+    // ---- step 5: GET /v1/models/cognia/{mode} ------------------------------
+
+    #[tokio::test]
+    async fn a_virtual_model_is_served_by_its_own_route_under_the_lists_rule() {
+        let bridge = RecordingBrainBridge::new();
+        let on = gateway(&bridge, true);
+        let served = send(
+            &on.app,
+            request("GET", "/v1/models/cognia/panel", Some(SECRET), None),
+        )
+        .await;
+        assert_eq!(served.status(), StatusCode::OK);
+        let document = json_of(served).await;
+        assert_eq!(document["id"], "cognia/panel");
+        assert_eq!(document["owned_by"], "cognia");
+
+        let off = gateway(&bridge, false);
+        for (gw, uri, bearer) in [
+            (&off, "/v1/models/cognia/panel", SECRET),
+            (&on, "/v1/models/cognia/panel", PLAIN),
+            (&on, "/v1/models/cognia/panel", LIMITED),
+            (&on, "/v1/models/cognia/telepathy", SECRET),
+            (&on, "/v1/models/cognia/delegate", SECRET),
+        ] {
+            let response = send(&gw.app, request("GET", uri, Some(bearer), None)).await;
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{uri} {bearer}");
+            // The same bare 404 the path gave before the route existed.
+            assert!(bytes_of(response).await.is_empty(), "{uri} {bearer}");
+        }
+        // Still a protected route: no key, no answer.
+        let anonymous = send(
+            &on.app,
+            request("GET", "/v1/models/cognia/panel", None, None),
+        )
+        .await;
+        assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+        assert!(bridge.calls().is_empty());
+    }
+
+    // ---- step 6: compat waiters --------------------------------------------
+
+    #[tokio::test]
+    async fn a_compat_caller_past_the_waiter_cap_is_a_429_before_any_run_exists() {
+        let bridge = RecordingBrainBridge::new();
+        let gw = gateway(&bridge, true);
+        let held: Vec<_> = (0..MAX_COMPAT_WAITERS)
+            .map(|_| gw.state.runs.try_compat_waiter().unwrap())
+            .collect();
+        let response = send(
+            &gw.app,
+            request(
+                "POST",
+                "/v1/chat/completions",
+                Some(SECRET),
+                Some(chat("cognia/panel")),
+            ),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        let body = json_of(response).await;
+        assert_contract(&body, "RUN_WAITERS_EXHAUSTED");
+        assert_eq!(body["error"]["retryable"], true);
+        assert!(bridge.calls().is_empty(), "no run was created");
+        drop(held);
+    }
+
+    // ---- step 9: the virtual models through the endpoints ------------------
+
+    #[tokio::test]
+    async fn openai_chat_serves_cognia_panel_and_respects_the_key_allowlist() {
+        let bridge = RecordingBrainBridge::new();
+        bridge.ok(command::CHAT_CREATE, created());
+        bridge.ok(
+            command::CHAT_RESULT,
+            json!({ "state": "succeeded", "response": chat_answer() }),
+        );
+        let gw = gateway(&bridge, true);
+
+        // A key limited to named models reaches a virtual one only by name.
+        let refused = send(
+            &gw.app,
+            request(
+                "POST",
+                "/v1/chat/completions",
+                Some(LIMITED),
+                Some(chat("cognia/panel")),
+            ),
+        )
+        .await;
+        assert_eq!(refused.status(), StatusCode::FORBIDDEN);
+        assert_contract(&json_of(refused).await, "MODEL_NOT_PERMITTED");
+        assert!(bridge.calls().is_empty());
+
+        let served = send(
+            &gw.app,
+            request(
+                "POST",
+                "/v1/chat/completions",
+                Some(SECRET),
+                Some(chat("cognia/panel")),
+            ),
+        )
+        .await;
+        assert_eq!(served.status(), StatusCode::OK);
+        assert_eq!(
+            served.headers().get(crate::runs::RUN_ID_HEADER).unwrap(),
+            RUN_ID
+        );
+        assert_eq!(json_of(served).await, chat_answer());
+        let create = &bridge.payloads_for(command::CHAT_CREATE)[0];
+        assert_eq!(create["actor"]["keyId"], "scoped");
+        assert_eq!(create["body"]["model"], "cognia/panel");
+        // The answer's tokens drew down the calling key's quota.
+        let used = gw
+            .state
+            .keys
+            .read()
+            .iter()
+            .find(|k| k.id == "scoped")
+            .map(|k| k.quota_used_tokens);
+        assert_eq!(used, Some(15));
+        assert_eq!(gw.state.runs.idle_compat_waiters(), MAX_COMPAT_WAITERS);
+    }
+
+    #[tokio::test]
+    async fn a_refused_virtual_model_is_the_contracts_error_on_every_endpoint() {
+        let bridge = RecordingBrainBridge::new();
+        let on = gateway(&bridge, true);
+        let off = gateway(&bridge, false);
+        let embeddings = json!({ "model": "cognia/auto", "input": "hello" });
+        let responses = json!({ "model": "cognia/auto", "input": "hello" });
+        for (gw, uri, body, status, code) in [
+            (
+                &on,
+                "/v1/messages",
+                chat("cognia/auto"),
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "VIRTUAL_MODEL_CHAT_COMPLETIONS_ONLY",
+            ),
+            (
+                &on,
+                "/v1/responses",
+                responses,
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "VIRTUAL_MODEL_CHAT_COMPLETIONS_ONLY",
+            ),
+            (
+                &on,
+                "/v1/embeddings",
+                embeddings,
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "VIRTUAL_MODEL_CHAT_COMPLETIONS_ONLY",
+            ),
+            (
+                &on,
+                "/v1/messages/count_tokens",
+                chat("cognia/auto"),
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "VIRTUAL_MODEL_CHAT_COMPLETIONS_ONLY",
+            ),
+            (
+                &on,
+                "/v1/chat/completions",
+                chat("cognia/delegate"),
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "DELEGATE_REQUIRES_RUN_API",
+            ),
+            (
+                &on,
+                "/v1/chat/completions",
+                chat("cognia/telepathy"),
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "UNKNOWN_VIRTUAL_MODEL",
+            ),
+            (
+                &off,
+                "/v1/chat/completions",
+                chat("cognia/panel"),
+                StatusCode::FORBIDDEN,
+                "ROUTER_FUSION_DISABLED",
+            ),
+            (
+                &off,
+                "/v1/messages",
+                chat("cognia/auto"),
+                StatusCode::FORBIDDEN,
+                "ROUTER_FUSION_DISABLED",
+            ),
+        ] {
+            let response = send(&gw.app, request("POST", uri, Some(SECRET), Some(body))).await;
+            assert_eq!(response.status(), status, "{uri} {code}");
+            let parsed = json_of(response).await;
+            assert_contract(&parsed, code);
+            assert!(parsed["error"]["details"]["model"].is_string(), "{uri}");
+        }
+        assert!(bridge.calls().is_empty());
+    }
+
+    fn snapshot_with(value: Value) -> RoutingSnapshot {
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[tokio::test]
+    async fn list_models_shows_the_virtual_models_only_to_a_scoped_key_with_the_switch_on() {
+        let snapshot = || {
+            Some(snapshot_with(json!({
+                "aliases": [{ "alias": "fast", "entries": [{ "providerId": "up", "modelId": "m" }] }],
+                "providers": [{ "id": "up", "protocol": "openai", "baseUrl": "http://127.0.0.1:9/v1",
+                    "apiKey": "sk-up", "enabled": true, "models": ["m"] }],
+                "generatedAtMs": 1
+            })))
+        };
+        let bridge = RecordingBrainBridge::new();
+        let on = gateway_with(Arc::new(bridge.clone()), true, false, snapshot());
+        let off = gateway_with(Arc::new(bridge.clone()), false, false, snapshot());
+        let ids = |body: Value| -> Vec<String> {
+            body["data"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|m| m["id"].as_str().map(str::to_string))
+                .collect()
+        };
+        let virtual_ids = |all: &[String]| -> Vec<String> {
+            all.iter()
+                .filter(|id| id.starts_with("cognia/"))
+                .cloned()
+                .collect()
+        };
+
+        let scoped = ids(json_of(
+            send(&on.app, request("GET", "/v1/models", Some(SECRET), None)).await,
+        )
+        .await);
+        assert_eq!(
+            virtual_ids(&scoped),
+            crate::virtual_models::VIRTUAL_MODELS
+                .iter()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>()
+        );
+        assert!(scoped.contains(&"fast".to_string()));
+
+        let plain = ids(json_of(
+            send(&on.app, request("GET", "/v1/models", Some(PLAIN), None)).await,
+        )
+        .await);
+        assert!(virtual_ids(&plain).is_empty());
+        assert!(plain.contains(&"fast".to_string()));
+
+        // The allowlist names `fast` only, so no virtual model is listed.
+        let limited = ids(json_of(
+            send(&on.app, request("GET", "/v1/models", Some(LIMITED), None)).await,
+        )
+        .await);
+        assert_eq!(limited, ["fast"]);
+
+        let switched_off = ids(json_of(
+            send(&off.app, request("GET", "/v1/models", Some(SECRET), None)).await,
+        )
+        .await);
+        assert!(virtual_ids(&switched_off).is_empty());
+        assert!(bridge.calls().is_empty());
+    }
+
+    /// A one-route OpenAI-compatible upstream that records every body it gets.
+    async fn spawn_openai_upstream() -> (SocketAddr, Arc<parking_lot::Mutex<Vec<Value>>>) {
+        let seen = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let record = seen.clone();
+        let app = Router::new().route(
+            "/v1/chat/completions",
+            post(move |Json(body): Json<Value>| {
+                let record = record.clone();
+                async move {
+                    record.lock().push(body.clone());
+                    Json(json!({
+                        "id": "chatcmpl-upstream",
+                        "object": "chat.completion",
+                        "created": 1,
+                        "model": body["model"],
+                        "choices": [{ "index": 0, "message": { "role": "assistant", "content": "from upstream" }, "finish_reason": "stop" }],
+                        "usage": { "prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5 }
+                    }))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (addr, seen)
+    }
+
+    #[tokio::test]
+    async fn router_auto_with_the_switch_off_is_resolved_as_an_ordinary_model() {
+        let (upstream, seen) = spawn_openai_upstream().await;
+        let snapshot = || {
+            Some(snapshot_with(json!({
+                "aliases": [{ "alias": "router/auto", "entries": [{ "providerId": "up", "modelId": "up-model" }] }],
+                "providers": [{ "id": "up", "protocol": "openai", "baseUrl": format!("http://{upstream}/v1"),
+                    "apiKey": "sk-up", "enabled": true, "models": ["up-model"] }],
+                "generatedAtMs": 1
+            })))
+        };
+        let bridge = RecordingBrainBridge::new();
+
+        // D37: with runs off, an upstream alias named `router/…` resolves and
+        // is served exactly as it was before Router + Fusion existed.
+        let off = gateway_with(Arc::new(bridge.clone()), false, false, snapshot());
+        let response = send(
+            &off.app,
+            request(
+                "POST",
+                "/v1/chat/completions",
+                Some(SECRET),
+                Some(chat("router/auto")),
+            ),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = json_of(response).await;
+        assert_eq!(body["choices"][0]["message"]["content"], "from upstream");
+        assert_eq!(seen.lock().len(), 1);
+        assert_eq!(seen.lock()[0]["model"], "up-model");
+        assert!(bridge.calls().is_empty());
+
+        // With runs on, the same name is the spec's alias for `cognia/auto`:
+        // a run, never the upstream.
+        let on = gateway_with(Arc::new(bridge.clone()), true, false, snapshot());
+        let response = send(
+            &on.app,
+            request(
+                "POST",
+                "/v1/chat/completions",
+                Some(SECRET),
+                Some(chat("router/auto")),
+            ),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_contract(&json_of(response).await, "BRAIN_UNAVAILABLE");
+        assert_eq!(bridge.payloads_for(command::CHAT_CREATE).len(), 1);
+        assert_eq!(seen.lock().len(), 1, "the upstream was not asked again");
     }
 }

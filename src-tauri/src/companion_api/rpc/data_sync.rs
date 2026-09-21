@@ -82,6 +82,11 @@ pub(super) const COMMANDS: &[&str] = &[
     "team_run_stop",
     "execution_run_control",
     "execution_run_detail",
+    "execution_run_create",
+    "execution_run_resume",
+    "execution_run_get",
+    "execution_run_events",
+    "claude_call_reserve_respond",
     "agent_task_start",
     "agent_task_pause",
     "agent_task_resume",
@@ -799,6 +804,16 @@ pub(super) async fn dispatch(
         // paired device, through the same TS gate. Gated by CONTROL_COMMANDS.
         | "execution_run_control"
         | "execution_run_detail"
+        // ADR-0188 companion RPC: Router + Fusion runs for a paired device.
+        // The TS arm (`lib/router-fusion/gate/companion-bridge.ts`) runs the
+        // Run API with the injected `callerDeviceId` as the run's actor, and
+        // refuses with ROUTER_FUSION_DISABLED while the companion switch is
+        // off. Sharing this arm is safe because all four carry an explicit
+        // request contract (`scripts/build/companion-request-schema-contracts.mjs`).
+        | "execution_run_create"
+        | "execution_run_resume"
+        | "execution_run_get"
+        | "execution_run_events"
         // Single-Agent task board control — TS arms validate Agent ownership,
         // state-machine moves, and Scheduler lifecycle actions.
         | "agent_task_start"
@@ -986,6 +1001,51 @@ pub(super) async fn dispatch(
                 )
                 .await
                 .map_err(|error| map_desktop_write_bridge_error(name, error))
+        }
+        // ADR-0188 companion RPC: a companion renderer answers a Router +
+        // Fusion `call_reserve_request` this host's sidecar raised for a turn
+        // that companion started; its own ledger reserved or refused the call.
+        // The brain decides whether this host relays at all (its companion
+        // switch is authoritative, `lib/router-fusion/gate/companion-bridge.ts`),
+        // and only an `ok` verdict reaches the sidecar, as the same frame the
+        // desktop renderer's `claude_call_reserve_decision` writes.
+        "claude_call_reserve_respond" => {
+            let session_id: String = required(&args, "sessionId")?;
+            let request_id: String = required(&args, "requestId")?;
+            let decision: String = required(&args, "decision")?;
+            let attempt_id: Option<String> = optional(&args, "attemptId")?;
+            let attempt_no: Option<u32> = optional(&args, "attemptNo")?;
+            let code: Option<String> = optional(&args, "code")?;
+            let message: Option<String> = optional(&args, "message")?;
+            let args = inject_caller_device_id(name, args, device_id);
+            let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
+            let transport = super::super::ws_bridge::resolve_bridge_transport(state)
+                .map_err(RpcError::service_unavailable)?;
+            let verdict = bridge
+                .dispatch(
+                    transport.as_ref(),
+                    name,
+                    args,
+                    crate::companion_api::desktop_writes_bridge::DEFAULT_TIMEOUT,
+                )
+                .await
+                .map_err(|error| map_desktop_write_bridge_error(name, error))?;
+            if verdict.get("ok") != Some(&Value::Bool(true)) {
+                return Ok(verdict);
+            }
+            claude_commands::claude_call_reserve_decision_impl(
+                &host.sidecar_state(),
+                session_id,
+                request_id,
+                decision,
+                attempt_id,
+                attempt_no,
+                code,
+                message,
+            )
+            .await
+            .map_err(RpcError::internal)?;
+            Ok(verdict)
         }
         unknown => Err(RpcError::unknown_command(unknown)),
     };

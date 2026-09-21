@@ -59,6 +59,8 @@ const COMMAND_KINDS = [
   "bot_trigger_set_armed",
   "bot_run_manual",
   "bot_delivery_replay",
+  // ADR-0188 companion RPC — a Router + Fusion run from the remote-session composer
+  "execution_run_create",
   // Twin subsystem
   "twin_ingest_source",
   "twin_source_create",

@@ -321,6 +321,7 @@ mod tests {
         // This test owns a loopback origin and must not inherit the
         // process-wide fail-closed proxy environment exercised by parallel
         // proxy-policy tests.
+        crate::proxy_config::ensure_crypto_provider();
         let client = reqwest::Client::builder().no_proxy().build().unwrap();
         let url = format!("http://{address}/v1/events");
         let mut seen: Vec<SseEvent> = Vec::new();

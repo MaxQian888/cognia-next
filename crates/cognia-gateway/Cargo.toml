@@ -26,6 +26,11 @@ harness = false
 # ADR-0090 Phase 2).
 default = ["tauri-host"]
 tauri-host = ["dep:tauri"]
+# ADR-0188 (Router + Fusion): compiles the Run API's scripted test brain
+# (`brain_bridge::RecordingBrainBridge`) for OTHER crates' tests. Enable it only
+# from a `[dev-dependencies]` entry; this crate's own tests get it via
+# `cfg(test)`, and no production build carries it.
+test-support = []
 
 [dependencies]
 cognia-secrets = { path = "../cognia-secrets" }
@@ -37,7 +42,8 @@ serde_json = "1.0"
 axum = { version = "0.8", features = ["macros", "ws"] }
 tower-http = { version = "0.7", features = ["limit", "trace", "cors"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync", "time"] }
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream", "socks", "http2", "multipart"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider", "stream", "socks", "http2", "multipart"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 futures-util = { version = "0.3", default-features = false }
 bytes = "1"
 chrono = { version = "0.4", features = ["serde"] }

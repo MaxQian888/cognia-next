@@ -316,6 +316,13 @@ mod tests {
         ("team_run_stop", OutputShape::Opaque(RootType::Any)),
         ("execution_run_control", OutputShape::Opaque(RootType::Any)),
         ("execution_run_detail", OutputShape::Opaque(RootType::Object)),
+        // ADR-0188 companion RPC: Router + Fusion's `{ ok, value | error }`
+        // envelope (`#/$defs/RouterFusionOutcome`), answered by the brain.
+        ("execution_run_create", OutputShape::Declared(RootType::Object)),
+        ("execution_run_resume", OutputShape::Declared(RootType::Object)),
+        ("execution_run_get", OutputShape::Declared(RootType::Object)),
+        ("execution_run_events", OutputShape::Declared(RootType::Object)),
+        ("claude_call_reserve_respond", OutputShape::Declared(RootType::Object)),
         ("agent_task_start", OutputShape::Opaque(RootType::Object)),
         ("agent_task_pause", OutputShape::Opaque(RootType::Any)),
         ("agent_task_resume", OutputShape::Opaque(RootType::Any)),
@@ -618,6 +625,7 @@ mod tests {
         ("fs_search_workspace", OutputShape::Declared(RootType::Array)),
         ("fs_search_content_workspace", OutputShape::Opaque(RootType::Any)),
         ("fs_read_workspace_file", OutputShape::Scalar(ScalarShape::Text)),
+        ("fs_read_workspace_file_base64", OutputShape::Scalar(ScalarShape::Text)),
         ("fs_write_workspace_file", OutputShape::Scalar(ScalarShape::Null)),
         ("project_environment_execute", OutputShape::Opaque(RootType::Object)),
         ("task_workspace_status", OutputShape::Derived(DerivedOutput { rust_type: "crate::task_workspace::TaskWorkspaceStatus", schema: schema_of::<crate::task_workspace::TaskWorkspaceStatus> })),

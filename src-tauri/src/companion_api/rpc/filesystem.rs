@@ -10,6 +10,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "fs_search_workspace",
     "fs_search_content_workspace",
     "fs_read_workspace_file",
+    "fs_read_workspace_file_base64",
     "fs_write_workspace_file",
     "project_environment_execute",
     "task_workspace_status",
@@ -212,6 +213,18 @@ pub(super) async fn dispatch(
             let max_bytes: Option<usize> = optional(&args, "maxBytes")?;
             tokio::task::spawn_blocking(move || {
                 crate::files::fs_read_workspace_file(root, rel_path, max_bytes)
+            })
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))?
+            .map(Value::String)
+            .map_err(RpcError::internal)
+        }
+        "fs_read_workspace_file_base64" => {
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
+            let rel_path: String = required(&args, "relPath")?;
+            let max_bytes: Option<usize> = optional(&args, "maxBytes")?;
+            tokio::task::spawn_blocking(move || {
+                crate::files::fs_read_workspace_file_base64(root, rel_path, max_bytes)
             })
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?

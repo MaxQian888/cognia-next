@@ -490,7 +490,11 @@
     },
     "execution": {
       "children": {
-        "run": {}
+        "run": {
+          "children": {
+            "event": {}
+          }
+        }
       }
     },
     "external_agent": {
@@ -1082,6 +1086,7 @@
             "resource_event": {},
             "resource_manifest": {},
             "resource_summary": {},
+            "revision": {},
             "run": {},
             "snapshot": {},
             "source": {},

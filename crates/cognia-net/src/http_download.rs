@@ -150,6 +150,13 @@ mod tests {
         out
     }
 
+    /// `reqwest` resolves the process-wide TLS provider at `Client`
+    /// construction; no `main` runs inside a test binary, so install it here.
+    fn test_client() -> reqwest::Client {
+        crate::proxy_config::ensure_crypto_provider();
+        reqwest::Client::new()
+    }
+
     #[tokio::test]
     async fn streams_body_to_disk_and_returns_its_sha256() {
         let addr = serve_once(with_content_length(b"hello")).await;
@@ -157,7 +164,7 @@ mod tests {
         let dest = dir.path().join("out.bin");
 
         let outcome = stream_to_file(
-            &reqwest::Client::new(),
+            &test_client(),
             &format!("http://{addr}/x"),
             &dest,
             Some(1024),
@@ -178,7 +185,7 @@ mod tests {
         let mut seen: Vec<(u64, u64)> = Vec::new();
 
         stream_to_file(
-            &reqwest::Client::new(),
+            &test_client(),
             &format!("http://{addr}/x"),
             &dir.path().join("out.bin"),
             None,
@@ -198,7 +205,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         let err = stream_to_file(
-            &reqwest::Client::new(),
+            &test_client(),
             &format!("http://{addr}/x"),
             &dir.path().join("out.bin"),
             Some(2),
@@ -227,7 +234,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         let err = stream_to_file(
-            &reqwest::Client::new(),
+            &test_client(),
             &format!("http://{addr}/x"),
             &dir.path().join("out.bin"),
             Some(16),
@@ -250,7 +257,7 @@ mod tests {
         let dest = dir.path().join("out.bin");
 
         let err = stream_to_file(
-            &reqwest::Client::new(),
+            &test_client(),
             &format!("http://{addr}/x"),
             &dest,
             None,

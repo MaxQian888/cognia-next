@@ -55,26 +55,177 @@ pub fn codeserver_supported() -> bool {
     download::resolve_platform().is_ok()
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocalEnvironmentPort {
+    project_id: String,
+    container_id: String,
+    port: u16,
+}
+
+/// Forwarded application ports have independent relays; opening one never
+/// replaces the managed IDE socket. A bounded map also bounds listener tasks.
+#[derive(Default)]
+pub struct EnvironmentPortRelayState {
+    relays: tokio::sync::Mutex<std::collections::HashMap<String, DesktopRelayState>>,
+}
+
+impl EnvironmentPortRelayState {
+    async fn ensure(
+        &self,
+        id: String,
+        base_url: String,
+        device_jwt: String,
+        server_fingerprint: String,
+        relay_path: String,
+        device_private_key_jwk: serde_json::Value,
+    ) -> Result<DesktopRelayStatus, String> {
+        if id.is_empty()
+            || id.len() > 256
+            || !id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"-_:./".contains(&byte))
+        {
+            return Err("invalid environment port relay id".into());
+        }
+        if !relay_path.starts_with("/api/environment/ports/") {
+            return Err("environment port relay requires a forwarded port path".into());
+        }
+        let mut relays = self.relays.lock().await;
+        if !relays.contains_key(&id) && relays.len() >= 64 {
+            return Err("environment port relay limit reached".into());
+        }
+        let result = relays
+            .entry(id.clone())
+            .or_default()
+            .ensure(
+                base_url,
+                device_jwt,
+                server_fingerprint,
+                relay_path,
+                device_private_key_jwk,
+            )
+            .await;
+        if result.is_err() {
+            if let Some(relay) = relays.remove(&id) {
+                relay.stop().await;
+            }
+        }
+        result
+    }
+
+    async fn ensure_local(
+        &self,
+        id: String,
+        port: LocalEnvironmentPort,
+    ) -> Result<DesktopRelayStatus, String> {
+        if id.is_empty()
+            || id.len() > 256
+            || !id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"-_:./".contains(&byte))
+        {
+            return Err("invalid environment port relay id".into());
+        }
+        let mut relays = self.relays.lock().await;
+        if !relays.contains_key(&id) && relays.len() >= 64 {
+            return Err("environment port relay limit reached".into());
+        }
+        let result = relays
+            .entry(id.clone())
+            .or_default()
+            .ensure_local(port.project_id, port.container_id, port.port)
+            .await;
+        if result.is_err() {
+            if let Some(relay) = relays.remove(&id) {
+                relay.stop().await;
+            }
+        }
+        result
+    }
+
+    async fn stop(&self, id: &str) -> bool {
+        let mut relays = self.relays.lock().await;
+        match relays.remove(id) {
+            Some(relay) => relay.stop().await,
+            None => false,
+        }
+    }
+}
+
 /// Bind/reuse the desktop's ephemeral loopback relay for a remote-owned IDE.
 /// Certificate pinning completes before the existing device JWT is sent.
+// Preserve the existing flat IDE IPC arguments while adding an exclusive local-port target.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn codeserver_remote_relay_ensure(
     state: State<'_, DesktopRelayState>,
-    base_url: String,
-    device_jwt: String,
-    server_fingerprint: String,
-    relay_path: String,
+    port_relays: State<'_, EnvironmentPortRelayState>,
+    relay_id: Option<String>,
+    local_port: Option<LocalEnvironmentPort>,
+    base_url: Option<String>,
+    device_jwt: Option<String>,
+    server_fingerprint: Option<String>,
+    relay_path: Option<String>,
+    device_private_key_jwk: Option<serde_json::Value>,
 ) -> Result<DesktopRelayStatus, String> {
-    state
-        .ensure(base_url, device_jwt, server_fingerprint, relay_path)
-        .await
+    if let Some(port) = local_port {
+        if base_url.is_some()
+            || device_jwt.is_some()
+            || server_fingerprint.is_some()
+            || relay_path.is_some()
+            || device_private_key_jwk.is_some()
+        {
+            return Err("local and remote environment relay targets cannot be combined".into());
+        }
+        return port_relays
+            .ensure_local(
+                relay_id.ok_or("local environment port requires relayId")?,
+                port,
+            )
+            .await;
+    }
+    let base_url = base_url.ok_or("remote relay requires baseUrl")?;
+    let device_jwt = device_jwt.ok_or("remote relay requires deviceJwt")?;
+    let server_fingerprint = server_fingerprint.ok_or("remote relay requires serverFingerprint")?;
+    let relay_path = relay_path.ok_or("remote relay requires relayPath")?;
+    let device_private_key_jwk =
+        device_private_key_jwk.ok_or("remote relay requires devicePrivateKeyJwk")?;
+    if let Some(id) = relay_id {
+        port_relays
+            .ensure(
+                id,
+                base_url,
+                device_jwt,
+                server_fingerprint,
+                relay_path,
+                device_private_key_jwk,
+            )
+            .await
+    } else {
+        state
+            .ensure(
+                base_url,
+                device_jwt,
+                server_fingerprint,
+                relay_path,
+                device_private_key_jwk,
+            )
+            .await
+    }
 }
 
 #[tauri::command]
 pub async fn codeserver_remote_relay_stop(
     state: State<'_, DesktopRelayState>,
+    port_relays: State<'_, EnvironmentPortRelayState>,
+    relay_id: Option<String>,
 ) -> Result<bool, String> {
-    Ok(state.stop().await)
+    Ok(if let Some(id) = relay_id {
+        port_relays.stop(&id).await
+    } else {
+        state.stop().await
+    })
 }
 
 /// Build and sign a deterministic managed proxy VSIX from normalized IDE IR.
@@ -665,5 +816,109 @@ mod tests {
         assert!(!codeserver_language_pack_available(
             "xx-unknown".to_string()
         ));
+    }
+}
+
+#[cfg(test)]
+mod environment_port_relay_tests {
+    use super::*;
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+
+    fn credentials(nonce: &str) -> (String, serde_json::Value) {
+        let private = [1u8; 32];
+        let key = p256::ecdsa::SigningKey::from_slice(&private).unwrap();
+        let point = key.verifying_key().to_sec1_point(false);
+        let public = point.as_bytes();
+        let jwk = serde_json::json!({
+            "kty": "EC", "crv": "P-256",
+            "d": URL_SAFE_NO_PAD.encode(private),
+            "x": URL_SAFE_NO_PAD.encode(&public[1..33]),
+            "y": URL_SAFE_NO_PAD.encode(&public[33..65]),
+        });
+        let claims = URL_SAFE_NO_PAD.encode(serde_json::json!({"jti": nonce}).to_string());
+        (format!("header.{claims}.signature"), jwk)
+    }
+
+    #[tokio::test]
+    async fn separate_ports_reuse_independently_and_stop_without_the_ide() {
+        let ports = EnvironmentPortRelayState::default();
+        let base = "https://example.com".to_string();
+        let fingerprint = "ab".repeat(32);
+        let first = ports
+            .ensure(
+                "one".into(),
+                base.clone(),
+                credentials("token").0,
+                fingerprint.clone(),
+                "/api/environment/ports/p/c/3000/".into(),
+                credentials("token").1,
+            )
+            .await
+            .unwrap();
+        let second = ports
+            .ensure(
+                "two".into(),
+                base.clone(),
+                credentials("token").0,
+                fingerprint.clone(),
+                "/api/environment/ports/p/c/4000/".into(),
+                credentials("token").1,
+            )
+            .await
+            .unwrap();
+        assert_ne!(first.port, second.port);
+        assert_eq!(
+            first.port,
+            ports
+                .ensure(
+                    "one".into(),
+                    base,
+                    credentials("new-token").0,
+                    fingerprint,
+                    "/api/environment/ports/p/c/3000/".into(),
+                    credentials("token").1,
+                )
+                .await
+                .unwrap()
+                .port
+        );
+        assert!(ports.stop("one").await);
+        assert!(!ports.stop("one").await);
+        assert_eq!(ports.relays.lock().await.len(), 1);
+        assert!(ports.stop("two").await);
+    }
+    #[tokio::test]
+    async fn refuses_invalid_ids_and_bounded_capacity_before_binding() {
+        let ports = EnvironmentPortRelayState::default();
+        assert!(ports
+            .ensure(
+                "".into(),
+                "".into(),
+                "".into(),
+                "".into(),
+                "/api/environment/ports/p/c/3000/".into(),
+                credentials("token").1,
+            )
+            .await
+            .is_err());
+        for index in 0..64 {
+            ports
+                .relays
+                .lock()
+                .await
+                .insert(index.to_string(), DesktopRelayState::new());
+        }
+        assert!(ports
+            .ensure(
+                "overflow".into(),
+                "".into(),
+                "".into(),
+                "".into(),
+                "/api/environment/ports/p/c/3000/".into(),
+                credentials("token").1,
+            )
+            .await
+            .unwrap_err()
+            .contains("limit"));
     }
 }

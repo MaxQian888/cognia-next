@@ -9,7 +9,7 @@
 name = "cognia-net"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.89.0"
+rust-version = "1.95"
 description = "Outbound proxy configuration, detection and WSS proxy dialer shared across cognia subsystem crates."
 license = "AGPL-3.0-or-later"
 publish = false
@@ -26,7 +26,7 @@ base64 = "0.23"
 # Same feature set as src-tauri so the unified build behaves identically
 # (socks is needed for socks5:// proxy URLs, json for the Clash controller
 # probe, stream for http_download's bytes_stream()).
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "socks", "stream"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider", "socks", "stream"] }
 # `macros` for the detect-stage tokio::join!; `fs` for http_download's
 # streamed writes.
 tokio = { version = "1", features = ["net", "time", "io-util", "rt", "macros", "fs", "sync"] }
@@ -36,13 +36,13 @@ hex = "0.4"
 thiserror = "2"
 # SOCKS5 CONNECT dialing for the WSS proxy path.
 tokio-socks = "0.5"
-tokio-rustls = "0.26"
+tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12", "ring"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-native-certs = "0.8"
 # join_all over the detect-stage probe futures.
 futures-util = { version = "0.3", default-features = false }
 # Proxy-client detection: process snapshot + per-client config-file discovery.
-sysinfo = { version = "0.38", default-features = false, features = ["system"] }
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 dirs = "6"
 regex = "1"
 # ADR-0067 Tier C — `provider_diagnostics` sandboxes user-authored balance

@@ -42,7 +42,7 @@ mod chat;
 mod codex_app;
 mod data_sync;
 mod diagnostics;
-mod environment;
+pub(crate) mod environment;
 mod filesystem;
 mod gateway_plane;
 mod host_admin;
@@ -799,6 +799,13 @@ const KNOWN_COMMANDS: &[&str] = &[
     // `upgrade-required` on the TS side).
     "execution_run_control",
     "execution_run_detail",
+    // ADR-0188 companion RPC: Router + Fusion runs for a paired device, and a
+    // companion renderer's answer to a sidecar call reservation.
+    "execution_run_create",
+    "execution_run_resume",
+    "execution_run_get",
+    "execution_run_events",
+    "claude_call_reserve_respond",
     "thread_handoff_offer",
     "thread_handoff_preflight",
     "thread_handoff_accept",
@@ -960,6 +967,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     "fs_search_workspace",
     "fs_search_content_workspace",
     "fs_read_workspace_file",
+    "fs_read_workspace_file_base64",
     "fs_write_workspace_file",
     "project_environment_execute",
     // Task-scoped resource ledger. File bodies use bounded reads or verified
@@ -1350,6 +1358,10 @@ const KNOWN_COMMANDS: &[&str] = &[
     "environment_catalog_update",
     "environment_catalog_delete",
     "environment_declaration_read",
+    "environment_build_start",
+    "environment_build_get",
+    "environment_build_cancel",
+    "environment_ports_list",
     "environment_spec_resolve_preview",
     "environment_approval_list",
     "environment_approval_get",
@@ -1377,6 +1389,8 @@ pub fn known_commands() -> &'static [&'static str] {
 #[cfg(test)]
 const READ_ONLY_COMMANDS: &[&str] = &[
     "execution_run_detail",
+    "execution_run_get",
+    "execution_run_events",
     "bot_console_read",
     // Shared media engine, with caller-owned binary transfers.
     "video_get_info",
@@ -1540,6 +1554,7 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "fs_search_workspace",
     "fs_search_content_workspace",
     "fs_read_workspace_file",
+    "fs_read_workspace_file_base64",
     "task_workspace_status",
     "task_workspace_managed_get",
     "task_workspace_managed_list",
@@ -1659,6 +1674,7 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "environment_catalog_list",
     "environment_catalog_get",
     "environment_declaration_read",
+    "environment_build_get",
     "environment_spec_resolve_preview",
     "environment_approval_list",
     "environment_approval_get",
@@ -2155,6 +2171,14 @@ const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
     // it becomes the operator the control gate authorizes and the actor the
     // receipt names, so a payload must not be able to borrow another one.
     "execution_run_control",
+    // ADR-0188 companion RPC. The Run API actor of a companion run is the
+    // authenticated device (`device:<id>`): only it may read, resume or stop
+    // the run, and it answers only the reservations of its own turns.
+    "execution_run_create",
+    "execution_run_resume",
+    "execution_run_get",
+    "execution_run_events",
+    "claude_call_reserve_respond",
     // Remote Session Control — the attach registry keys watchers by device and
     // the host routes a `permission_request` to whoever is attached. Trusting
     // `payload.deviceId` let any paired device attach (and collect another

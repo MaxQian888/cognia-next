@@ -640,6 +640,9 @@ fn build_router_for_mode(
     let device_routes = Router::new()
         .route("/api/whoami", get(super::api::whoami_handler))
         .route("/api/catalog", get(super::catalog::device_catalog_handler))
+        .route("/api/environment/ports/{project}/{container}/{port}", any(super::environment_ports::root_handler))
+        .route("/api/environment/ports/{project}/{container}/{port}/", any(super::environment_ports::root_handler))
+        .route("/api/environment/ports/{project}/{container}/{port}/{*tail}", any(super::environment_ports::handler))
         .route("/api/_rpc/{name}", post(super::api::rpc_handler))
         .route(
             "/api/sessions/{session_id}/media/{hash}",

@@ -261,6 +261,7 @@ pub struct JwksCache {
 /// HS256 fall-through), so an issuer that connects but never responds must not
 /// stall every companion request for the OS TCP timeout.
 fn jwks_client_builder() -> reqwest::ClientBuilder {
+    crate::ensure_crypto_provider();
     reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(10))

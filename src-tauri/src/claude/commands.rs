@@ -1217,6 +1217,27 @@ pub async fn claude_call_reserve_decision(
     code: Option<String>,
     message: Option<String>,
 ) -> Result<(), String> {
+    claude_call_reserve_decision_impl(
+        &state, session_id, request_id, decision, attempt_id, attempt_no, code, message,
+    )
+    .await
+}
+
+/// The body of [`claude_call_reserve_decision`], shared with the companion
+/// RPC's `claude_call_reserve_respond` arm (ADR-0188 D25): a web or mobile
+/// companion whose renderer started the turn answers the reservation through
+/// the paired host, which writes the same frame to its own sidecar.
+#[allow(clippy::too_many_arguments)]
+pub async fn claude_call_reserve_decision_impl(
+    state: &SidecarState,
+    session_id: String,
+    request_id: String,
+    decision: String,
+    attempt_id: Option<String>,
+    attempt_no: Option<u32>,
+    code: Option<String>,
+    message: Option<String>,
+) -> Result<(), String> {
     let payload = build_call_reserve_decision_payload(
         session_id, request_id, decision, attempt_id, attempt_no, code, message,
     )?;

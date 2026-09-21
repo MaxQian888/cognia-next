@@ -57,6 +57,37 @@ function grantHeader(call: Call): string | undefined {
 }
 
 describe("CollabClient", () => {
+  it("authorizes exports on the server without caching the decision", async () => {
+    const { calls, fetchImpl } = harness()
+    const client = new CollabClient({
+      baseUrl: "https://collab.test",
+      accessToken: async () => "logto-token",
+      fetchImpl: async (url, init) => {
+        const response = await fetchImpl(url, init)
+        return url.endsWith("/export-authorization")
+          ? new Response(null, { status: 204 })
+          : response
+      },
+      now: () => 0,
+    })
+    await expect(client.authorizeSessionExport(ORG, "session / one")).resolves.toBeUndefined()
+    expect(calls[1].url).toBe(
+      `https://collab.test/v1/orgs/${ORG}/chat-sessions/session%20%2F%20one/export-authorization`
+    )
+    expect(calls[1].init?.cache).toBe("no-store")
+    expect(grantHeader(calls[1])).toBe("Bearer grant-1")
+    const denied = harness({ issueStatuses: [403] })
+    const deniedClient = new CollabClient({
+      baseUrl: "https://collab.test",
+      accessToken: async () => "token",
+      fetchImpl: denied.fetchImpl,
+      now: () => 0,
+    })
+    await expect(deniedClient.authorizeSessionExport(ORG, "session")).rejects.toMatchObject({
+      status: 403,
+    })
+  })
+
   it("keeps the acquisition token stable on retry and authenticates release with device credentials", async () => {
     const { calls, fetchImpl } = harness()
     const client = new CollabClient({

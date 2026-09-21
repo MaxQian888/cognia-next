@@ -2168,7 +2168,7 @@ pub struct PgStore {
     pool: Pool,
 }
 
-fn ensure_crypto_provider() {
+pub(crate) fn ensure_crypto_provider() {
     static INIT: std::sync::Once = std::sync::Once::new();
     INIT.call_once(|| {
         // The library is used directly by integration tests and embedders that
@@ -2264,6 +2264,9 @@ impl PgStore {
             .await?;
         client
             .batch_execute(include_str!("../migrations/0010_canvas.sql"))
+            .await?;
+        client
+            .batch_execute(include_str!("../migrations/0011_chat_run_queue_binding.sql"))
             .await?;
         Ok(())
     }

@@ -25,10 +25,12 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { isValidPublicOrigin } from "@/lib/gateway/config-schema"
 import { gatewayStart, gatewayStop } from "@/lib/tauri/gateway"
 import { type GatewayBindInterface } from "@/types/gateway"
 
 import { ChipInput } from "../shared/chip-input"
+import { DeferredTextInput } from "../../common/deferred-text-input"
 import { NumberRow } from "../../common/number-row"
 import type { GatewayPanelContext } from "../gateway-section"
 import { GatewayPanelSection } from "../shared/panel-section"
@@ -46,6 +48,22 @@ export function GatewayListenerPanel({ ctx, onRestarted }: GatewayListenerPanelP
   // running listener cannot be derived the way port/interface can. Tracked from
   // the edit instead — deliberately conservative: it clears only on restart.
   const [allowlistDirty, setAllowlistDirty] = useState(false)
+  // A malformed public origin is refused by the Rust config validator, which
+  // would surface as an opaque toast. Catch it here and say which field.
+  const [publicOriginError, setPublicOriginError] = useState(false)
+
+  const commitPublicOrigin = useCallback(
+    (next: string) => {
+      if (!isValidPublicOrigin(next)) {
+        setPublicOriginError(true)
+        return
+      }
+      setPublicOriginError(false)
+      // Empty means unset, and `null` is what the Rust `Option<String>` reads.
+      void persist({ publicOrigin: next.trim() === "" ? null : next.trim() })
+    },
+    [persist]
+  )
 
   const running = status?.running ?? false
   const portDiverged = running && status?.boundPort != null && status.boundPort !== config.port
@@ -136,6 +154,31 @@ export function GatewayListenerPanel({ ctx, onRestarted }: GatewayListenerPanelP
           <Alert>
             <AlertTriangleIcon />
             <AlertDescription>{t("lanWarning")}</AlertDescription>
+          </Alert>
+        </MotionCollapse>
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <Label htmlFor="gw-public-origin">{t("publicOrigin")}</Label>
+          <Badge variant="outline" className="text-[10px]">
+            {t("liveBadge")}
+          </Badge>
+        </div>
+        <DeferredTextInput
+          id="gw-public-origin"
+          value={config.publicOrigin ?? ""}
+          onCommit={commitPublicOrigin}
+          placeholder={t("publicOriginPlaceholder")}
+          aria-label={t("publicOrigin")}
+          aria-invalid={publicOriginError}
+          data-testid="gateway-public-origin"
+        />
+        <p className="text-xs text-muted-foreground">{t("publicOriginHelp")}</p>
+        <MotionCollapse open={publicOriginError}>
+          <Alert variant="destructive" data-testid="gateway-public-origin-error">
+            <AlertTriangleIcon />
+            <AlertDescription>{t("publicOriginInvalid")}</AlertDescription>
           </Alert>
         </MotionCollapse>
       </div>

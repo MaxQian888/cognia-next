@@ -32,6 +32,7 @@ const LEASE_HEARTBEAT_TTL_MS: i64 = 90_000;
 const ATTACHMENT_TICKET_TTL_MS: i64 = 60_000;
 const MAX_ATTACHMENT_BYTES: i64 = 52_428_800;
 const SHARED_CHAT_PROTOCOL_VERSION: u32 = 2;
+const MAX_PENDING_TICKETS: usize = 8_192;
 
 #[derive(Debug, Clone)]
 struct SocketTicket {
@@ -76,10 +77,17 @@ impl ChatHub {
             .clone()
     }
 
-    fn issue_ticket(&self, ticket: SocketTicket) -> String {
+    fn issue_ticket(&self, ticket: SocketTicket) -> Result<String, ChatFailure> {
+        // Expiry is assigned by this service, so it also captures issuance time.
+        let now = ticket.expires_at.saturating_sub(SOCKET_TICKET_TTL_MS);
+        let mut tickets = self.tickets.write();
+        tickets.retain(|_, ticket| ticket.expires_at > now);
+        if tickets.len() >= MAX_PENDING_TICKETS {
+            return Err(ChatFailure::TicketCapacity);
+        }
         let value = format!("st_{}", Uuid::new_v4().simple());
-        self.tickets.write().insert(value.clone(), ticket);
-        value
+        tickets.insert(value.clone(), ticket);
+        Ok(value)
     }
 
     fn consume_ticket(&self, value: &str, now: i64) -> Option<SocketTicket> {
@@ -89,12 +97,16 @@ impl ChatHub {
             .filter(|ticket| ticket.expires_at > now)
     }
 
-    fn issue_attachment_ticket(&self, ticket: AttachmentTicket) -> String {
+    fn issue_attachment_ticket(&self, ticket: AttachmentTicket) -> Result<String, ChatFailure> {
+        let now = ticket.expires_at.saturating_sub(ATTACHMENT_TICKET_TTL_MS);
+        let mut tickets = self.attachment_tickets.write();
+        tickets.retain(|_, ticket| ticket.expires_at > now);
+        if tickets.len() >= MAX_PENDING_TICKETS {
+            return Err(ChatFailure::TicketCapacity);
+        }
         let value = format!("att_{}", Uuid::new_v4().simple());
-        self.attachment_tickets
-            .write()
-            .insert(value.clone(), ticket);
-        value
+        tickets.insert(value.clone(), ticket);
+        Ok(value)
     }
 
     fn consume_attachment_ticket(
@@ -155,6 +167,10 @@ pub fn routes() -> Router<AppState> {
             delete(revoke_invite),
         )
         .route("/v1/orgs/{org_id}/chat-invites/accept", post(accept_invite))
+        .route(
+            "/v1/orgs/{org_id}/chat-sessions/{session_id}/export-authorization",
+            get(authorize_export),
+        )
         .route(
             "/v1/orgs/{org_id}/chat-sessions/{session_id}/events",
             get(list_events).post(append_event),
@@ -252,12 +268,17 @@ enum ChatFailure {
     Gone,
     BadRequest(String),
     ObjectStore,
+    TicketCapacity,
     Store(StoreError),
 }
 
 impl IntoResponse for ChatFailure {
     fn into_response(self) -> Response {
         let (status, body) = match self {
+            Self::TicketCapacity => (
+                StatusCode::TOO_MANY_REQUESTS,
+                serde_json::json!({"error":"too many pending tickets"}),
+            ),
             Self::Unauthorized => (
                 StatusCode::UNAUTHORIZED,
                 serde_json::json!({"error":"unauthorized"}),
@@ -486,6 +507,22 @@ async fn get_session(
             .await?
             .0,
     ))
+}
+
+async fn authorize_export(
+    State(state): State<AppState>,
+    Path((org_id, session_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, ChatFailure> {
+    visible(
+        &state,
+        &headers,
+        &org_id,
+        &session_id,
+        SessionAction::Export,
+    )
+    .await?;
+    Ok(([("cache-control", "no-store")], StatusCode::NO_CONTENT))
 }
 
 #[derive(Deserialize)]
@@ -1543,7 +1580,7 @@ async fn create_stream_ticket(
         session_id,
         user_id: member.user_id,
         expires_at,
-    });
+    })?;
     Ok(Json(TicketResponse { ticket, expires_at }))
 }
 
@@ -1582,7 +1619,25 @@ async fn stream_loop(
     ticket: SocketTicket,
     mut receiver: broadcast::Receiver<SessionEvent>,
 ) {
-    while let Ok(event) = receiver.recv().await {
+    loop {
+        let event = tokio::select! {
+            incoming = socket.recv() => {
+                match incoming {
+                    None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break,
+                    // Axum responds to ping frames; the stream is read-only.
+                    Some(Ok(_)) => continue,
+                }
+            }
+            event = receiver.recv() => match event {
+                Ok(event) => event,
+                // The existing client reconnects and catches up from its durable
+                // cursor. Never silently skip events when a receiver lags.
+                Err(_) => {
+                    let _ = socket.send(Message::Close(None)).await;
+                    break;
+                }
+            }
+        };
         if state
             .chat_store
             .visible_session(&ticket.org_id, &ticket.session_id, &ticket.user_id)
@@ -2349,6 +2404,17 @@ async fn create_attachment(
     }
     let now = (state.now)();
     let attachment_id = format!("att_{}", Uuid::new_v4().simple());
+    let expires_at = now + ATTACHMENT_TICKET_TTL_MS;
+    // Reserve capacity before persisting an attachment the caller cannot yet
+    // address. A capacity rejection must not leave an orphan pending row.
+    let ticket = state.chat_hub.issue_attachment_ticket(AttachmentTicket {
+        org_id: org_id.clone(),
+        session_id: session_id.clone(),
+        attachment_id: attachment_id.clone(),
+        user_id: member.user_id.clone(),
+        action: AttachmentTicketAction::Upload,
+        expires_at,
+    })?;
     let attachment = state
         .chat_store
         .create_attachment(NewChatAttachment {
@@ -2368,16 +2434,10 @@ async fn create_attachment(
             now,
         })
         .await
-        .map_err(ChatFailure::Store)?;
-    let expires_at = now + ATTACHMENT_TICKET_TTL_MS;
-    let ticket = state.chat_hub.issue_attachment_ticket(AttachmentTicket {
-        org_id,
-        session_id,
-        attachment_id,
-        user_id: member.user_id,
-        action: AttachmentTicketAction::Upload,
-        expires_at,
-    });
+        .map_err(|error| {
+            state.chat_hub.attachment_tickets.write().remove(&ticket);
+            ChatFailure::Store(error)
+        })?;
     Ok((
         StatusCode::CREATED,
         Json(AttachmentTicketResponse {
@@ -2423,7 +2483,7 @@ async fn issue_attachment_ticket(
         user_id: member.user_id,
         action,
         expires_at,
-    });
+    })?;
     Ok(AttachmentTicketResponse {
         attachment,
         ticket,
@@ -2769,6 +2829,230 @@ mod tests {
     }
     use super::*;
 
+    #[tokio::test]
+    async fn export_authorization_uses_current_membership_and_never_caches_success() {
+        use crate::chat_store::NewSharedSession;
+        use axum::{body::Body, http::Request};
+        use cognia_tenant_auth::{grant::GrantClaims, OrgId, UserId};
+        use std::sync::Arc;
+        use std::time::Duration;
+        use tower::ServiceExt;
+
+        let org = "org_acme00000000000000000";
+        let user = UserId::parse("usr_aaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+        let signer = cognia_tenant_auth::grant::GrantSigner::new(&[7; 32]).unwrap();
+        let claims = GrantClaims::issue(
+            user.clone(),
+            OrgId::parse(org).unwrap(),
+            None,
+            None,
+            Duration::from_secs(300),
+        )
+        .unwrap();
+        let grant = format!("Bearer {}", signer.sign(&claims).unwrap());
+        let state = AppState::new(
+            Arc::new(crate::store::InMemoryStore::new()),
+            signer,
+            Arc::new(cognia_tenant_auth::oidc::TestAuthenticator),
+        );
+        state
+            .chat_store
+            .create_session(NewSharedSession {
+                id: "session".into(),
+                org_id: org.into(),
+                workspace_id: "workspace".into(),
+                title: "Shared".into(),
+                status: SessionStatus::Active,
+                created_by_user_id: "another-owner".into(),
+                now: 1,
+                operation_id: "create".into(),
+            })
+            .await
+            .unwrap();
+        let app = routes().with_state(state.clone());
+        for (role, guest, expected) in [
+            (SessionRole::Owner, false, StatusCode::NO_CONTENT),
+            (SessionRole::Maintainer, false, StatusCode::NO_CONTENT),
+            (SessionRole::Member, false, StatusCode::FORBIDDEN),
+            (SessionRole::Viewer, false, StatusCode::FORBIDDEN),
+            (SessionRole::Member, true, StatusCode::FORBIDDEN),
+        ] {
+            state
+                .chat_store
+                .put_member(
+                    org,
+                    "session",
+                    "workspace",
+                    user.as_str(),
+                    role,
+                    false,
+                    guest,
+                    2,
+                )
+                .await
+                .unwrap();
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!(
+                            "/v1/orgs/{org}/chat-sessions/session/export-authorization"
+                        ))
+                        .header("authorization", &grant)
+                        .header(
+                            "x-cognia-collab-protocol",
+                            SHARED_CHAT_PROTOCOL_VERSION.to_string(),
+                        )
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), expected, "{role:?} guest={guest}");
+            if expected == StatusCode::NO_CONTENT {
+                assert_eq!(response.headers()["cache-control"], "no-store");
+            }
+        }
+    }
+
+    #[test]
+    fn issuing_tickets_reclaims_expired_unused_credentials() {
+        let hub = ChatHub::default();
+        hub.issue_ticket(SocketTicket {
+            org_id: "org".into(),
+            session_id: "session".into(),
+            user_id: "user".into(),
+            expires_at: 1,
+        })
+        .unwrap();
+        hub.issue_ticket(SocketTicket {
+            org_id: "org".into(),
+            session_id: "session".into(),
+            user_id: "user".into(),
+            expires_at: SOCKET_TICKET_TTL_MS + 1,
+        })
+        .unwrap();
+        assert_eq!(hub.tickets.read().len(), 1);
+
+        for expires_at in [1, ATTACHMENT_TICKET_TTL_MS + 1] {
+            hub.issue_attachment_ticket(AttachmentTicket {
+                org_id: "org".into(),
+                session_id: "session".into(),
+                attachment_id: "attachment".into(),
+                user_id: "user".into(),
+                action: AttachmentTicketAction::Upload,
+                expires_at,
+            })
+            .unwrap();
+        }
+        assert_eq!(hub.attachment_tickets.read().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn idle_stream_releases_its_subscription_when_the_peer_closes() {
+        use std::sync::Arc;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let state = AppState::new(
+            Arc::new(crate::store::InMemoryStore::new()),
+            cognia_tenant_auth::grant::GrantSigner::new(&[7; 32]).unwrap(),
+            Arc::new(cognia_tenant_auth::oidc::TestAuthenticator),
+        );
+        let sender = state.chat_hub.sender("session");
+        let subscription = sender.clone();
+        let (ended_tx, ended_rx) = tokio::sync::oneshot::channel();
+        let ended = Arc::new(std::sync::Mutex::new(Some(ended_tx)));
+        let app = Router::new().route(
+            "/stream",
+            get(move |ws: WebSocketUpgrade| {
+                let state = state.clone();
+                let receiver = subscription.subscribe();
+                let ended = ended.clone();
+                async move {
+                    ws.on_upgrade(move |socket| async move {
+                        stream_loop(
+                            socket,
+                            state,
+                            SocketTicket {
+                                org_id: "org".into(),
+                                session_id: "session".into(),
+                                user_id: "user".into(),
+                                expires_at: i64::MAX,
+                            },
+                            receiver,
+                        )
+                        .await;
+                        let _ = ended.lock().unwrap().take().unwrap().send(());
+                    })
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
+        client.write_all(b"GET /stream HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").await.unwrap();
+        let mut response = Vec::new();
+        while !response.ends_with(b"\r\n\r\n") {
+            response.push(client.read_u8().await.unwrap());
+        }
+        assert!(response.starts_with(b"HTTP/1.1 101"));
+        assert_eq!(sender.receiver_count(), 1);
+        // A client close frame must be masked, including an empty payload.
+        client.write_all(&[0x88, 0x80, 0, 0, 0, 0]).await.unwrap();
+        let finished = tokio::time::timeout(std::time::Duration::from_secs(1), ended_rx).await;
+        server.abort();
+        assert!(finished.is_ok(), "idle socket retained its server task");
+        assert_eq!(sender.receiver_count(), 0);
+    }
+
+    #[test]
+    fn ticket_capacity_rejects_new_credentials_without_invalidating_live_ones() {
+        let hub = ChatHub::default();
+        let socket = SocketTicket {
+            org_id: "org".into(),
+            session_id: "session".into(),
+            user_id: "user".into(),
+            expires_at: SOCKET_TICKET_TTL_MS + 1,
+        };
+        let attachment = AttachmentTicket {
+            org_id: "org".into(),
+            session_id: "session".into(),
+            user_id: "user".into(),
+            attachment_id: "attachment".into(),
+            action: AttachmentTicketAction::Upload,
+            expires_at: ATTACHMENT_TICKET_TTL_MS + 1,
+        };
+        for index in 0..MAX_PENDING_TICKETS {
+            hub.tickets
+                .write()
+                .insert(index.to_string(), socket.clone());
+            hub.attachment_tickets
+                .write()
+                .insert(index.to_string(), attachment.clone());
+        }
+        assert!(matches!(
+            hub.issue_ticket(socket.clone()),
+            Err(ChatFailure::TicketCapacity)
+        ));
+        assert!(matches!(
+            hub.issue_attachment_ticket(attachment.clone()),
+            Err(ChatFailure::TicketCapacity)
+        ));
+        assert_eq!(
+            ChatFailure::TicketCapacity.into_response().status(),
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        assert!(hub.consume_ticket("0", 1).is_some());
+        assert!(hub
+            .consume_attachment_ticket("0", AttachmentTicketAction::Upload, 1)
+            .is_some());
+        assert!(hub.issue_ticket(socket).is_ok());
+        assert!(hub.issue_attachment_ticket(attachment).is_ok());
+        assert_eq!(hub.tickets.read().len(), MAX_PENDING_TICKETS);
+        assert_eq!(hub.attachment_tickets.read().len(), MAX_PENDING_TICKETS);
+    }
+
     #[test]
     fn leaving_requires_membership_but_removing_others_requires_management() {
         assert_eq!(
@@ -2787,20 +3071,24 @@ mod tests {
     #[test]
     fn socket_tickets_are_single_use_and_expire() {
         let hub = ChatHub::default();
-        let value = hub.issue_ticket(SocketTicket {
-            org_id: "org".into(),
-            session_id: "ses".into(),
-            user_id: "usr".into(),
-            expires_at: 20,
-        });
+        let value = hub
+            .issue_ticket(SocketTicket {
+                org_id: "org".into(),
+                session_id: "ses".into(),
+                user_id: "usr".into(),
+                expires_at: 20,
+            })
+            .unwrap();
         assert!(hub.consume_ticket(&value, 10).is_some());
         assert!(hub.consume_ticket(&value, 10).is_none());
-        let expired = hub.issue_ticket(SocketTicket {
-            org_id: "org".into(),
-            session_id: "ses".into(),
-            user_id: "usr".into(),
-            expires_at: 20,
-        });
+        let expired = hub
+            .issue_ticket(SocketTicket {
+                org_id: "org".into(),
+                session_id: "ses".into(),
+                user_id: "usr".into(),
+                expires_at: 20,
+            })
+            .unwrap();
         assert!(hub.consume_ticket(&expired, 20).is_none());
     }
 
@@ -2829,14 +3117,16 @@ mod tests {
     #[test]
     fn attachment_tickets_are_action_bound_and_single_use() {
         let hub = ChatHub::default();
-        let ticket = hub.issue_attachment_ticket(AttachmentTicket {
-            org_id: "org".into(),
-            session_id: "session".into(),
-            attachment_id: "attachment".into(),
-            user_id: "user".into(),
-            action: AttachmentTicketAction::Upload,
-            expires_at: 20,
-        });
+        let ticket = hub
+            .issue_attachment_ticket(AttachmentTicket {
+                org_id: "org".into(),
+                session_id: "session".into(),
+                attachment_id: "attachment".into(),
+                user_id: "user".into(),
+                action: AttachmentTicketAction::Upload,
+                expires_at: 20,
+            })
+            .unwrap();
         assert!(hub
             .consume_attachment_ticket(&ticket, AttachmentTicketAction::Download, 10)
             .is_none());

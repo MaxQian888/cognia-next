@@ -20,7 +20,9 @@
  * (`lib/scheduler/scheduled-task-rpc.ts`), `workflow_api_*`
  * (`lib/workflow/api/workflow-api-service.ts`), `router_fusion_run_*`
  * (`lib/router-fusion/gate/run-api-bridge.ts`) and `router_fusion_passthrough_*`
- * (`lib/router-fusion/gate/passthrough-bridge.ts`).
+ * (`lib/router-fusion/gate/passthrough-bridge.ts`). The companion's Router +
+ * Fusion commands (`execution_run_create|resume|get|events`,
+ * `claude_call_reserve_respond`) go to `lib/router-fusion/gate/companion-bridge.ts`.
  *
  * The authoritative routing table lives on the Rust side — a command only
  * reaches here if one of these dispatches it to the writes bridge:
@@ -49,6 +51,12 @@ import {
   dispatchRouterFusionPassthroughCommand,
   isRouterFusionPassthroughCommand,
 } from "@/lib/router-fusion/gate/passthrough-bridge"
+import {
+  companionOperationHealth,
+  dispatchRouterFusionCompanionCommand,
+  isRouterFusionCompanionCommand,
+  routeCompanionRunControl,
+} from "@/lib/router-fusion/gate/companion-bridge"
 import { currentRouterFusionGateSettings } from "@/lib/router-fusion/gate/current-settings"
 import { parseAdapterPolicyRelay } from "@/lib/connectors/adapter-policy-relay"
 import { updateAdapterConfigSection } from "@/lib/db/adapter-instances"
@@ -296,6 +304,16 @@ export async function dispatchCommand(
     // value, so it always travels as `ok: true`; a bare outcome would be read
     // as a broken contract and turn every request into "brain unavailable".
     return { ok: true, value: outcome }
+  }
+  // Router + Fusion for a paired phone or browser (ADR-0188 D25, the
+  // `companion` surface): the Run API as `execution_run_*`, and the relay
+  // verdict for a companion's `claude_call_reserve_respond`. Same rule as the
+  // two families above: with the companion switch off the gate module refuses
+  // without loading anything else.
+  if (isRouterFusionCompanionCommand(command)) {
+    return dispatchRouterFusionCompanionCommand(command, payload, {
+      settings: await currentRouterFusionGateSettings(),
+    })
   }
   if (
     command === "workflow_api_run_create" ||
@@ -580,8 +598,18 @@ export async function dispatchCommand(
       const { readExecutionRunDetailSources } = await import("@/lib/execution/run-detail-source")
       return readExecutionRunDetailSources(payload.runId as string)
     }
-    case "execution_run_control":
+    case "execution_run_control": {
+      // A companion Router + Fusion run has no execution-run projection, so
+      // the cockpit's control plane cannot find it; its cancel and approve
+      // reuse this command and are answered by the Run API instead. `null`
+      // (every other run, or the companion switch off) is the path below,
+      // unchanged.
+      const companion = await routeCompanionRunControl(payload, {
+        settings: await currentRouterFusionGateSettings(),
+      })
+      if (companion) return companion
       return handleExecutionRunControl(payload)
+    }
     // Single-Agent task board control. Task ownership is revalidated against
     // the live Dexie row before every Scheduler or state-machine action.
     case "agent_task_start":
@@ -1772,6 +1800,16 @@ async function hostFeatureManifest(payload: Record<string, unknown>): Promise<un
         operationHealth[operation] = { healthy: false, reason }
       }
     }
+  }
+  // Router + Fusion for companions (ADR-0188 D36: a companion reads the
+  // effective state). The operations are always declared by a host that has
+  // the arms; whether this host will run them right now is their health, read
+  // from the companion switch through the gate — nothing else loads.
+  if (platform === "tauri" || platform === "headless") {
+    Object.assign(
+      operationHealth,
+      companionOperationHealth(await currentRouterFusionGateSettings())
+    )
   }
   // The scope a device must use to reach this Host's host-state. Declared
   // rather than inferred: a client only knows this Host by the `hostId` it

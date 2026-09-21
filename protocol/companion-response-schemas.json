@@ -6948,6 +6948,42 @@
       },
       "additionalProperties": false
     },
+    "RouterFusionOutcome": {
+      "type": "object",
+      "description": "Router + Fusion's value envelope (ADR-0188): every outcome is a value, refusals included. `value` is the Run API answer the command names (RunCreated, RunSnapshotRead, RunEventsPage, RunSnapshot) or the reservation relay verdict; `error` carries the HTTP status and the contract code (403 ROUTER_FUSION_DISABLED while the companion switch is off).",
+      "x-cognia-wire-source": "lib/router-fusion/gate/companion-bridge.ts dispatchRouterFusionCompanionCommand",
+      "required": ["ok"],
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "value": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "error": {
+          "type": "object",
+          "required": ["status", "code", "message"],
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "details": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "AppliedFile": {
       "additionalProperties": false,
       "properties": {
@@ -9779,6 +9815,9 @@
     "claude_approve": {
       "$ref": "#/$defs/NullResult"
     },
+    "claude_call_reserve_respond": {
+      "$ref": "#/$defs/RouterFusionOutcome"
+    },
     "claude_close_session": {
       "$ref": "#/$defs/NullResult"
     },
@@ -10122,6 +10161,9 @@
     "execution_run_control": {
       "$ref": "#/$defs/LegacyResult"
     },
+    "execution_run_create": {
+      "$ref": "#/$defs/RouterFusionOutcome"
+    },
     "external_agent_admit_run": {
       "type": "object",
       "required": ["admitted"],
@@ -10411,6 +10453,9 @@
       "$ref": "#/$defs/RawWorkspaceEntryList"
     },
     "fs_read_workspace_file": {
+      "$ref": "#/$defs/StringResult"
+    },
+    "fs_read_workspace_file_base64": {
       "$ref": "#/$defs/StringResult"
     },
     "fs_rename_workspace_entry": {
@@ -12404,6 +12449,15 @@
       },
       "additionalProperties": false
     },
+    "execution_run_events": {
+      "$ref": "#/$defs/RouterFusionOutcome"
+    },
+    "execution_run_get": {
+      "$ref": "#/$defs/RouterFusionOutcome"
+    },
+    "execution_run_resume": {
+      "$ref": "#/$defs/RouterFusionOutcome"
+    },
     "bot_installation_mutate": {
       "type": "object",
       "description": "Authoritative installation projection or idempotent removal receipt; no auth-session handles.",
@@ -12880,6 +12934,274 @@
       "required": ["id", "scope", "label", "image", "isolationFloor", "sizeClassIds", "source"],
       "title": "CatalogEntry",
       "type": "object"
+    },
+    "environment_build_start": {
+      "type": "object",
+      "properties": {
+        "jobId": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["queued", "building", "succeeded", "failed", "cancelled"]
+        },
+        "record": {
+          "type": "object",
+          "properties": {
+            "buildKey": {
+              "type": "string"
+            },
+            "imageId": {
+              "type": "string"
+            },
+            "projectId": {
+              "type": "string"
+            },
+            "commitSha": {
+              "type": "string"
+            },
+            "declarationPath": {
+              "type": "string"
+            },
+            "declarationDigest": {
+              "type": "string"
+            },
+            "declarationBytesSha256": {
+              "type": "string"
+            },
+            "sourceHash": {
+              "type": "string"
+            },
+            "cliVersion": {
+              "type": "string"
+            },
+            "platform": {
+              "type": "string"
+            },
+            "createdAt": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "runtimeConfiguration": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "buildKey",
+            "imageId",
+            "projectId",
+            "commitSha",
+            "declarationPath",
+            "declarationDigest",
+            "declarationBytesSha256",
+            "sourceHash",
+            "cliVersion",
+            "platform",
+            "createdAt",
+            "runtimeConfiguration"
+          ],
+          "additionalProperties": false
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["jobId", "projectId", "status"],
+      "additionalProperties": false
+    },
+    "environment_build_get": {
+      "type": "object",
+      "properties": {
+        "jobId": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["queued", "building", "succeeded", "failed", "cancelled"]
+        },
+        "record": {
+          "type": "object",
+          "properties": {
+            "buildKey": {
+              "type": "string"
+            },
+            "imageId": {
+              "type": "string"
+            },
+            "projectId": {
+              "type": "string"
+            },
+            "commitSha": {
+              "type": "string"
+            },
+            "declarationPath": {
+              "type": "string"
+            },
+            "declarationDigest": {
+              "type": "string"
+            },
+            "declarationBytesSha256": {
+              "type": "string"
+            },
+            "sourceHash": {
+              "type": "string"
+            },
+            "cliVersion": {
+              "type": "string"
+            },
+            "platform": {
+              "type": "string"
+            },
+            "createdAt": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "runtimeConfiguration": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "buildKey",
+            "imageId",
+            "projectId",
+            "commitSha",
+            "declarationPath",
+            "declarationDigest",
+            "declarationBytesSha256",
+            "sourceHash",
+            "cliVersion",
+            "platform",
+            "createdAt",
+            "runtimeConfiguration"
+          ],
+          "additionalProperties": false
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["jobId", "projectId", "status"],
+      "additionalProperties": false
+    },
+    "environment_build_cancel": {
+      "type": "object",
+      "properties": {
+        "jobId": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["queued", "building", "succeeded", "failed", "cancelled"]
+        },
+        "record": {
+          "type": "object",
+          "properties": {
+            "buildKey": {
+              "type": "string"
+            },
+            "imageId": {
+              "type": "string"
+            },
+            "projectId": {
+              "type": "string"
+            },
+            "commitSha": {
+              "type": "string"
+            },
+            "declarationPath": {
+              "type": "string"
+            },
+            "declarationDigest": {
+              "type": "string"
+            },
+            "declarationBytesSha256": {
+              "type": "string"
+            },
+            "sourceHash": {
+              "type": "string"
+            },
+            "cliVersion": {
+              "type": "string"
+            },
+            "platform": {
+              "type": "string"
+            },
+            "createdAt": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "runtimeConfiguration": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "buildKey",
+            "imageId",
+            "projectId",
+            "commitSha",
+            "declarationPath",
+            "declarationDigest",
+            "declarationBytesSha256",
+            "sourceHash",
+            "cliVersion",
+            "platform",
+            "createdAt",
+            "runtimeConfiguration"
+          ],
+          "additionalProperties": false
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["jobId", "projectId", "status"],
+      "additionalProperties": false
+    },
+    "environment_ports_list": {
+      "type": "object",
+      "properties": {
+        "ports": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "containerId": {
+                "type": "string"
+              },
+              "projectId": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              }
+            },
+            "required": ["containerId", "projectId", "path", "port"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["ports"],
+      "additionalProperties": false
     },
     "environment_declaration_read": {
       "description": "Every declaration file a repository has, plus where the Host looked.\n\n**All** of them, not the first one that matched. Precedence between\n`.cognia/workspace.json` and a devcontainer file is decided by\n`lib/project-environment/read-environment-declaration.ts`, together with\nthe trust gate and the parse \u2014 and a Host that returned only its own first\nmatch would be a second, silent answer to the same question. Returning the\nset keeps that rule in one place and still costs one round trip.",

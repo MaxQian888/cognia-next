@@ -121,6 +121,18 @@ pub struct GatewayConfig {
     /// Interface the listener binds to. See [`BindInterface`].
     #[serde(default)]
     pub bind_interface: BindInterface,
+    /// The origin callers reach this gateway at, when that is not the address
+    /// the connection arrived on — a reverse proxy, a tunnel, a container
+    /// port map. It is the operator's statement, not a client's: an artifact
+    /// `read_url` is built from it so the link names the address the caller
+    /// can actually dial.
+    ///
+    /// `None` or an empty string keeps the derived behaviour exactly as it
+    /// was: the Host header when it is trustworthy, otherwise the listener's
+    /// own address. The value is `scheme://host[:port]` with no path;
+    /// anything else is refused by [`GatewayConfig::validate`].
+    #[serde(default)]
+    pub public_origin: Option<String>,
     /// Upstream TCP+TLS connect timeout in seconds. Bounds a hung *connect*
     /// on every request (streaming included) without killing a long stream.
     #[serde(default = "default_connect_timeout_secs")]
@@ -214,6 +226,46 @@ pub struct GatewayConfig {
     pub field_strip_allow: Vec<String>,
 }
 
+/// Normalise an operator-supplied public origin into `scheme://authority`,
+/// or `None` when it is not one.
+///
+/// Deliberately narrow: the value ends up as the prefix of a URL handed to a
+/// caller, so it must be an origin and nothing else. A path, a query, a
+/// fragment, embedded credentials, whitespace or a control character are all
+/// rejected rather than trimmed into something plausible — a link built from
+/// a guess is worse than the derived address. Trailing slashes are the one
+/// forgiving case, because every browser address bar adds one.
+pub fn normalize_public_origin(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    let (scheme, rest) = if let Some(rest) = strip_prefix_ascii_case(trimmed, "https://") {
+        ("https", rest)
+    } else if let Some(rest) = strip_prefix_ascii_case(trimmed, "http://") {
+        ("http", rest)
+    } else {
+        return None;
+    };
+    let authority = rest.trim_end_matches('/');
+    if authority.is_empty() {
+        return None;
+    }
+    let rejected =
+        |c: char| c.is_whitespace() || c.is_control() || matches!(c, '/' | '?' | '#' | '@' | '\\');
+    if authority.contains(rejected) {
+        return None;
+    }
+    Some(format!("{scheme}://{authority}"))
+}
+
+/// `str::strip_prefix`, case-insensitively on ASCII — a scheme is
+/// case-insensitive and operators type `HTTPS://`.
+fn strip_prefix_ascii_case<'a>(value: &'a str, prefix: &str) -> Option<&'a str> {
+    if value.len() >= prefix.len() && value[..prefix.len()].eq_ignore_ascii_case(prefix) {
+        Some(&value[prefix.len()..])
+    } else {
+        None
+    }
+}
+
 impl Default for GatewayConfig {
     fn default() -> Self {
         Self {
@@ -222,6 +274,7 @@ impl Default for GatewayConfig {
             allowlist: default_allowlist(),
             rate_limit_per_min: default_rate_limit(),
             bind_interface: BindInterface::default(),
+            public_origin: None,
             connect_timeout_secs: default_connect_timeout_secs(),
             request_timeout_secs: default_request_timeout_secs(),
             max_retries: 0,
@@ -265,7 +318,28 @@ impl GatewayConfig {
                 "retry backoff base must not exceed retry backoff max".into(),
             ));
         }
+        // An unusable public origin is refused here rather than ignored at
+        // request time: a link builder that quietly fell back would hand out
+        // the wrong URL with nothing to show the operator why.
+        if let Some(raw) = self.public_origin.as_deref() {
+            if !raw.trim().is_empty() && normalize_public_origin(raw).is_none() {
+                return Err(GatewayError::InvalidConfig(
+                    "public origin must be http://host[:port] or https://host[:port], with no path"
+                        .into(),
+                ));
+            }
+        }
         Ok(())
+    }
+
+    /// The configured public origin, normalised, or `None` when unset (the
+    /// derived behaviour). Callers use this rather than the raw field so a
+    /// config written by an older build — or by hand — can never produce a
+    /// malformed link.
+    pub fn resolved_public_origin(&self) -> Option<String> {
+        self.public_origin
+            .as_deref()
+            .and_then(normalize_public_origin)
     }
 
     /// How long an SSE pump waits on a silent upstream before abandoning it.
@@ -404,6 +478,7 @@ mod tests {
             allowlist: vec!["127.0.0.1/32".into()],
             rate_limit_per_min: 120,
             bind_interface: BindInterface::Lan,
+            public_origin: Some("https://gw.example.com".into()),
             connect_timeout_secs: 10,
             request_timeout_secs: 0,
             max_retries: 2,
@@ -440,11 +515,16 @@ mod tests {
         assert_eq!(json["concurrencyWaitMs"], 5_000);
         assert_eq!(json["streamIdleTimeoutSecs"], 90);
         assert_eq!(json["fieldStripAllow"][0], "openai:service_tier");
+        assert_eq!(json["publicOrigin"], "https://gw.example.com");
         let back: GatewayConfig = serde_json::from_value(json).unwrap();
         assert_eq!(back.port, 50001);
         assert_eq!(back.bind_interface, BindInterface::Lan);
         assert_eq!(back.exposed_models, vec!["fast".to_string()]);
         assert_eq!(back.max_concurrent_per_key, 4);
+        assert_eq!(
+            back.resolved_public_origin().as_deref(),
+            Some("https://gw.example.com")
+        );
         assert!(!back.gateway_local_routing_v2);
         assert_eq!(
             back.stripped_request_fields,
@@ -562,5 +642,72 @@ mod tests {
     fn errors_stringify_clearly() {
         assert!(String::from(GatewayError::TokenMissing).contains("key"));
         assert!(String::from(GatewayError::AlreadyRunning(1)).contains('1'));
+    }
+
+    #[test]
+    fn public_origin_defaults_to_unset() {
+        let cfg = GatewayConfig::default();
+        assert_eq!(cfg.public_origin, None);
+        assert_eq!(cfg.resolved_public_origin(), None);
+    }
+
+    #[test]
+    fn public_origin_normalises_scheme_and_trailing_slash() {
+        for (raw, want) in [
+            ("https://gw.example.com", "https://gw.example.com"),
+            ("https://gw.example.com/", "https://gw.example.com"),
+            ("https://gw.example.com///", "https://gw.example.com"),
+            ("  http://10.0.0.5:8787  ", "http://10.0.0.5:8787"),
+            ("HTTPS://GW.example.com", "https://GW.example.com"),
+            ("http://[2001:db8::1]:8787", "http://[2001:db8::1]:8787"),
+        ] {
+            assert_eq!(
+                normalize_public_origin(raw).as_deref(),
+                Some(want),
+                "normalising {raw}"
+            );
+        }
+    }
+
+    #[test]
+    fn public_origin_refuses_anything_that_is_not_an_origin() {
+        for raw in [
+            "",
+            "   ",
+            "gw.example.com",
+            "ftp://gw.example.com",
+            "https://",
+            "https:///",
+            "https://gw.example.com/v1",
+            "https://gw.example.com?x=1",
+            "https://gw.example.com#f",
+            "https://user:pass@gw.example.com",
+            "https://gw.example.com\\evil",
+            "https://gw example.com",
+            "https://gw.exa\u{7}mple.com",
+        ] {
+            assert_eq!(normalize_public_origin(raw), None, "refusing {raw:?}");
+        }
+    }
+
+    #[test]
+    fn validate_refuses_a_malformed_public_origin_but_allows_empty() {
+        let mut cfg = GatewayConfig {
+            public_origin: Some(String::new()),
+            ..GatewayConfig::default()
+        };
+        assert!(cfg.validate().is_ok());
+        assert_eq!(cfg.resolved_public_origin(), None);
+
+        cfg.public_origin = Some("gw.example.com".into());
+        let err = cfg.validate().unwrap_err();
+        assert!(String::from(err).contains("public origin"));
+
+        cfg.public_origin = Some("https://gw.example.com/".into());
+        assert!(cfg.validate().is_ok());
+        assert_eq!(
+            cfg.resolved_public_origin().as_deref(),
+            Some("https://gw.example.com")
+        );
     }
 }

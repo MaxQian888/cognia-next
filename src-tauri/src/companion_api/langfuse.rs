@@ -517,6 +517,7 @@ async fn enforce_ssrf_policy(endpoint: &url::Url) -> Result<Vec<SocketAddr>, Str
 }
 
 fn client_for(endpoint: &url::Url, addresses: &[SocketAddr]) -> Result<reqwest::Client, String> {
+    crate::ensure_crypto_provider();
     let host = endpoint
         .host_str()
         .ok_or_else(|| "Langfuse endpoint has no host".to_string())?;

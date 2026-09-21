@@ -509,6 +509,48 @@ const schemas = {
     withBody: z.boolean(),
   }),
 
+  // ADR-0188 companion RPC (WP-C): Router + Fusion runs for a paired phone or
+  // browser. `callerDeviceId` is stamped by the host after validation and is
+  // never something a client may send. A companion names a mode and its
+  // message; the host builds the contract RunRequest from its own settings.
+  execution_run_create: z.object({
+    mode: z.enum(["cascade", "panel"]),
+    text: z.string().min(1).max(500000),
+    sessionId: z.string().min(1).max(1000).optional(),
+    idempotencyKey: z.string().min(1).max(200),
+  }),
+  // `body` is the contract's ResumeRequest, validated again by the Run API.
+  execution_run_resume: z.object({
+    runId: z.string().min(1).max(256),
+    body: z.object({
+      kind: z.enum(["input", "approval"]),
+      expected_run_version: z.number().int().nonnegative(),
+      input_messages: z
+        .array(z.object({ role: z.literal("user"), content: z.string().min(1).max(500000) }))
+        .min(1)
+        .optional(),
+      approval_id: z.string().min(1).max(256).optional(),
+      decision: z.enum(["approve", "reject"]).optional(),
+    }),
+  }),
+  execution_run_get: z.object({ runId: z.string().min(1).max(256) }),
+  // Paged by sequence number, not by token: a caller resumes from the last
+  // seq it holds and a gap is a 410, never skipped (REC-07, SSE-04).
+  execution_run_events: z.object({
+    runId: z.string().min(1).max(256),
+    afterSeq: z.number().int().nonnegative(),
+    maxEvents: z.number().int().min(1).max(500).optional(),
+  }),
+  claude_call_reserve_respond: z.object({
+    sessionId: z.string().min(1).max(1000),
+    requestId: z.string().min(1).max(256),
+    decision: z.enum(["granted", "refused", "bypass"]),
+    attemptId: z.string().min(1).max(256).optional(),
+    attemptNo: z.number().int().min(1).optional(),
+    code: z.string().min(1).max(200).optional(),
+    message: z.string().max(2000).optional(),
+  }),
+
   // `generation` is required by both arms (rpc/plugins.rs) so the host can
   // reject a call aimed at a since-reloaded Python runtime. It was declared in
   // protocol/companion-request-schemas.json but not here, and these Zod

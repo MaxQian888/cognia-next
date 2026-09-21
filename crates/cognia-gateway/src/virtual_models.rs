@@ -25,6 +25,12 @@
 //! A caller that goes away does not cancel the run (SSE-03): it carries on in
 //! the brain, and `GET /v1/runs/{id}` (the id is in `x-cognia-run-id`) reads
 //! the result.
+//!
+//! Every refusal of a virtual model, on any endpoint, is the Run API
+//! contract's `ErrorResponse` with the code in `code` — never the legacy
+//! OpenAI or Anthropic error object with the code squeezed into `type`. The
+//! waits themselves are capped per gateway ([`MAX_COMPAT_WAITERS`]); a caller
+//! past the cap is told so before any run is created.
 
 use std::convert::Infallible;
 use std::time::Duration;
@@ -38,7 +44,8 @@ use serde_json::{json, Value};
 use crate::brain_bridge::{command, BrainBridgeError};
 use crate::runs::{
     accepted_response, bridge_error, bridge_failure, error_body, error_response, missing_scope,
-    scope, unreadable_answer, RunActor, RunsState, RUN_ID_HEADER, SSE_KEEPALIVE_INTERVAL,
+    scope, unreadable_answer, RunActor, RunsState, MAX_COMPAT_WAITERS, RUN_ID_HEADER,
+    SSE_KEEPALIVE_INTERVAL,
 };
 
 /// What the gateway should do with a request naming this model.
@@ -145,6 +152,43 @@ pub fn chat_completions_only() -> VirtualModelVerdict {
     )
 }
 
+/// What an endpoint that does NOT serve the compat subset (`/v1/messages`,
+/// `/v1/responses`, `/v1/embeddings`, `/v1/messages/count_tokens`) does with
+/// a request naming `model`: carry on (`NotVirtual`), or refuse. A mode that
+/// `/v1/chat/completions` would serve is refused as chat-completions-only.
+pub fn verdict_off_compat(model: &str, runs_enabled: bool) -> VirtualModelVerdict {
+    match classify(model, runs_enabled) {
+        VirtualModelVerdict::Serve { .. } => chat_completions_only(),
+        other => other,
+    }
+}
+
+/// A refused virtual model as the contract's `ErrorResponse`, naming the model
+/// the caller asked for. A status that is not an error is answered as `400`.
+pub fn refusal_response(model: &str, status: u16, code: &str, message: &str) -> Response {
+    let status = StatusCode::from_u16(status)
+        .ok()
+        .filter(|s| s.is_client_error() || s.is_server_error())
+        .unwrap_or(StatusCode::BAD_REQUEST);
+    error_response(status, code, message, Some(json!({ "model": model })))
+}
+
+/// `429 RUN_WAITERS_EXHAUSTED`: every compat wait slot on this gateway is
+/// taken. Retryable, and answered before any run exists.
+pub fn waiters_exhausted() -> Response {
+    let mut response = error_response(
+        StatusCode::TOO_MANY_REQUESTS,
+        "RUN_WAITERS_EXHAUSTED",
+        "too many cognia/* callers are already waiting for their answers on this gateway; try again shortly",
+        Some(json!({ "limit": MAX_COMPAT_WAITERS })),
+    );
+    response.headers_mut().insert(
+        axum::http::header::RETRY_AFTER,
+        HeaderValue::from_static("1"),
+    );
+    response
+}
+
 /// `/v1/models` entries for the virtual models, for a key that may use them.
 pub fn model_documents(runs_enabled: bool, actor: &RunActor) -> Vec<Value> {
     if !runs_enabled || !actor.has(scope::CREATE) || !actor.has(scope::READ) {
@@ -154,6 +198,15 @@ pub fn model_documents(runs_enabled: bool, actor: &RunActor) -> Vec<Value> {
         .iter()
         .map(|id| json!({ "id": id, "object": "model", "owned_by": "cognia", "created": 0 }))
         .collect()
+}
+
+/// The `/v1/models/cognia/{mode}` document for `id`, under exactly the rule
+/// the list follows: the switch is on and the key may create and read runs.
+/// `None` for a name the list would not show.
+pub fn model_document(id: &str, runs_enabled: bool, actor: &RunActor) -> Option<Value> {
+    model_documents(runs_enabled, actor)
+        .into_iter()
+        .find(|document| document["id"].as_str() == Some(id))
 }
 
 /// How long to wait for the run this body creates.
@@ -343,6 +396,11 @@ pub async fn serve_chat(
             return missing_scope(needed);
         }
     }
+    // A slot to wait in comes before the run: a caller that could not wait
+    // for its answer must not leave a run behind that nobody reads.
+    let Some(waiter) = runs.try_compat_waiter() else {
+        return waiters_exhausted();
+    };
     let stream = body["stream"].as_bool() == Some(true);
     let model = body["model"].as_str().unwrap_or("cognia/auto").to_string();
     let budget = wait_budget(&body);
@@ -363,6 +421,8 @@ pub async fn serve_chat(
     };
 
     if !stream {
+        // Held until the answer (or the refusal) is built, then released.
+        let _waiter = waiter;
         let response = match wait_for_answer(runs, actor, &run_id, &model, budget).await {
             Outcome::Answer(answer) => {
                 on_usage(answer_tokens(&answer));
@@ -386,6 +446,9 @@ pub async fn serve_chat(
     let actor = actor.clone();
     let waiting_run = run_id.clone();
     let answer = futures_util::stream::once(async move {
+        // The slot travels with the stream: released once the answer is
+        // produced, or when the caller drops the stream mid-wait.
+        let _waiter = waiter;
         let frames: Vec<Event> = match wait_for_answer(&runs, &actor, &waiting_run, &model, budget)
             .await
         {
@@ -598,6 +661,140 @@ mod tests {
         assert!(model_documents(false, &able).is_empty());
         assert!(model_documents(true, &actor(&[scope::CREATE])).is_empty());
         assert!(model_documents(true, &RunActor::default()).is_empty());
+    }
+
+    #[test]
+    fn an_endpoint_without_the_compat_subset_refuses_every_virtual_name() {
+        for (model, enabled, code) in [
+            ("cognia/auto", true, "VIRTUAL_MODEL_CHAT_COMPLETIONS_ONLY"),
+            ("router/panel", true, "VIRTUAL_MODEL_CHAT_COMPLETIONS_ONLY"),
+            ("cognia/delegate", true, "DELEGATE_REQUIRES_RUN_API"),
+            ("cognia/telepathy", true, "UNKNOWN_VIRTUAL_MODEL"),
+            ("cognia/auto", false, "ROUTER_FUSION_DISABLED"),
+        ] {
+            match verdict_off_compat(model, enabled) {
+                VirtualModelVerdict::Refuse { code: got, .. } => assert_eq!(got, code, "{model}"),
+                other => panic!("unexpected for {model}: {other:?}"),
+            }
+        }
+        // D37: ordinary names, and `router/*` while runs are off, carry on.
+        assert_eq!(
+            verdict_off_compat("gpt-5-mini", true),
+            VirtualModelVerdict::NotVirtual
+        );
+        assert_eq!(
+            verdict_off_compat("router/auto", false),
+            VirtualModelVerdict::NotVirtual
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refusal_is_the_contracts_error_with_the_code_in_code() {
+        let response = refusal_response("cognia/auto", 422, "X_CODE", "why");
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let parsed: Value = serde_json::from_str(&text_of(response).await).unwrap();
+        assert_eq!(parsed["error"]["code"], "X_CODE");
+        assert_eq!(parsed["error"]["message"], "why");
+        assert_eq!(parsed["error"]["retryable"], false);
+        assert_eq!(parsed["error"]["details"]["model"], "cognia/auto");
+        assert!(parsed["error"].get("type").is_none());
+        // A status that is not an error never reaches the caller as one.
+        assert_eq!(
+            refusal_response("cognia/auto", 200, "X", "m").status(),
+            StatusCode::BAD_REQUEST
+        );
+    }
+
+    #[test]
+    fn a_single_model_document_follows_the_lists_rule() {
+        let able = actor(&[scope::CREATE, scope::READ]);
+        assert_eq!(
+            model_document("cognia/cascade", true, &able).unwrap()["owned_by"],
+            "cognia"
+        );
+        assert!(model_document("cognia/cascade", false, &able).is_none());
+        assert!(model_document("cognia/cascade", true, &actor(&[scope::READ])).is_none());
+        assert!(model_document("cognia/delegate", true, &able).is_none());
+        assert!(model_document("cognia/telepathy", true, &able).is_none());
+    }
+
+    #[tokio::test]
+    async fn a_caller_past_the_waiter_cap_is_turned_away_before_a_run_exists() {
+        let bridge = RecordingBrainBridge::new();
+        let runs = runs_with(&bridge);
+        let held: Vec<_> = (0..MAX_COMPAT_WAITERS)
+            .map(|_| runs.try_compat_waiter().unwrap())
+            .collect();
+        let response = serve_chat(
+            &runs,
+            &actor(&[scope::CREATE, scope::READ]),
+            body(false),
+            None,
+            Box::new(|_| {}),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(
+            response
+                .headers()
+                .get(axum::http::header::RETRY_AFTER)
+                .unwrap(),
+            "1"
+        );
+        let parsed: Value = serde_json::from_str(&text_of(response).await).unwrap();
+        assert_eq!(parsed["error"]["code"], "RUN_WAITERS_EXHAUSTED");
+        assert_eq!(parsed["error"]["retryable"], true);
+        assert_eq!(parsed["error"]["details"]["limit"], MAX_COMPAT_WAITERS);
+        // Nothing was created: the brain was never asked.
+        assert!(bridge.calls().is_empty());
+        drop(held);
+        assert_eq!(runs.idle_compat_waiters(), MAX_COMPAT_WAITERS);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_waiter_slot_is_held_while_waiting_and_released_with_the_answer() {
+        let bridge = RecordingBrainBridge::new();
+        let run_id = "11111111-1111-4111-8111-111111111111";
+        bridge.ok(command::CHAT_CREATE, created(run_id));
+        bridge.ok(
+            command::CHAT_RESULT,
+            json!({ "state": "succeeded", "response": chat_response(run_id, "4%.") }),
+        );
+        let runs = runs_with(&bridge);
+        let response = serve_chat(
+            &runs,
+            &actor(&[scope::CREATE, scope::READ]),
+            body(false),
+            None,
+            Box::new(|_| {}),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(runs.idle_compat_waiters(), MAX_COMPAT_WAITERS);
+
+        // A streaming wait holds its slot inside the stream…
+        bridge.ok(command::CHAT_CREATE, created(run_id));
+        for _ in 0..4 {
+            bridge.ok(
+                command::CHAT_RESULT,
+                json!({ "state": "pending", "status": "running", "lastSeq": 1 }),
+            );
+        }
+        let response = serve_chat(
+            &runs,
+            &actor(&[scope::CREATE, scope::READ]),
+            body(true),
+            None,
+            Box::new(|_| {}),
+        )
+        .await;
+        assert_eq!(runs.idle_compat_waiters(), MAX_COMPAT_WAITERS - 1);
+        let mut stream = response.into_body().into_data_stream();
+        stream.next().await.expect("a heartbeat").expect("readable");
+        assert_eq!(runs.idle_compat_waiters(), MAX_COMPAT_WAITERS - 1);
+        // …and a caller that goes away gives it back.
+        drop(stream);
+        assert_eq!(runs.idle_compat_waiters(), MAX_COMPAT_WAITERS);
     }
 
     #[test]

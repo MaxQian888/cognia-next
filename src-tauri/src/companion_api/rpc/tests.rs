@@ -4971,6 +4971,46 @@ fn execution_run_detail_is_read_only_and_scoped_to_agent_authority() {
 }
 
 #[test]
+fn router_fusion_companion_commands_are_classified_and_bound_to_the_device() {
+    // ADR-0188 companion RPC: the Run API actor of a companion run is the
+    // authenticated device, so every one of these binds `callerDeviceId`, and
+    // each needs the Control grant's `agent.run`.
+    let reads = ["execution_run_get", "execution_run_events"];
+    let writes = [
+        "execution_run_create",
+        "execution_run_resume",
+        "claude_call_reserve_respond",
+    ];
+    for command in reads.iter().chain(writes.iter()) {
+        assert!(KNOWN_COMMANDS.contains(command), "{command} must be known");
+        assert!(data_sync::COMMANDS.contains(command), "{command} is bridged");
+        assert!(
+            CALLER_DEVICE_ID_COMMANDS.contains(command),
+            "{command} must bind callerDeviceId"
+        );
+        let descriptor = crate::companion_api::command_manifest::descriptor(command)
+            .expect("companion Router + Fusion commands have a manifest descriptor");
+        assert_eq!(descriptor.capability, "agent.run");
+        assert_eq!(
+            descriptor.target,
+            crate::companion_api::command_manifest::CommandTarget::Execution
+        );
+        let bound = inject_caller_device_id(
+            command,
+            json!({ "callerDeviceId": "spoofed" }),
+            "verified-device",
+        );
+        assert_eq!(bound["callerDeviceId"], json!("verified-device"));
+    }
+    for command in reads {
+        assert!(READ_ONLY_COMMANDS.contains(&command));
+    }
+    for command in writes {
+        assert!(!READ_ONLY_COMMANDS.contains(&command));
+    }
+}
+
+#[test]
 fn bot_lifecycle_commands_require_workspace_write_authority() {
     for command in ["bot_console_read", "bot_installation_mutate"] {
         assert!(KNOWN_COMMANDS.contains(&command));

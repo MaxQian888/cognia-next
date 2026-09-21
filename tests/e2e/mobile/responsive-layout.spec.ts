@@ -19,10 +19,19 @@ test.describe("mobile — responsive layout sanity", () => {
     await injectCapacitor(page, { platform: "android" })
     await page.goto("/")
     await resetCogniaDb(page)
-    // `resetCogniaDb` clears `mobileRuntimeMode`, which parks the app on the
-    // `/welcome` mode chooser — so `/workflows` below never reached its own
-    // screen. Seeding a mode is the same pattern the other mobile specs use.
-    await setCogniaSettings(page, { mobileRuntimeMode: "standalone" })
+    // `resetCogniaDb` clears `mobileRuntimeMode` and `onboardingProgress`, which
+    // parks the app on the `/welcome` mode chooser — so `/pair` and `/workflows`
+    // below never reached their own screens. Seeding a mode alone isn't enough:
+    // the ADR-0122 gate also routes a session-less account into first-run until
+    // onboarding reads as settled. Same pattern the composer-plus specs use.
+    await setCogniaSettings(page, {
+      mobileRuntimeMode: "standalone",
+      onboardingProgress: {
+        version: 2,
+        path: "completed",
+        completedAt: "2026-01-01T00:00:00.000Z",
+      },
+    })
   })
 
   test("/pair renders without horizontal overflow", async ({ page }) => {
@@ -117,8 +126,16 @@ test.describe("mobile — desktop routes reached on a phone", () => {
     // Without a runtime mode the app parks on the `/welcome` mode chooser and
     // every navigation below would assert against the welcome screen instead of
     // the route under test. Standalone is the harsher of the two modes here —
-    // no paired desktop to answer for anything these pages ask about.
-    await setCogniaSettings(page, { mobileRuntimeMode: "standalone" })
+    // no paired desktop to answer for anything these pages ask about. The
+    // ADR-0122 gate also needs onboarding settled, or first-run takes over.
+    await setCogniaSettings(page, {
+      mobileRuntimeMode: "standalone",
+      onboardingProgress: {
+        version: 2,
+        path: "completed",
+        completedAt: "2026-01-01T00:00:00.000Z",
+      },
+    })
   })
 
   for (const [from, to] of COMPACT_REDIRECTS) {

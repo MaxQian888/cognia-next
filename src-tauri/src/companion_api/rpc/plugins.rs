@@ -216,6 +216,7 @@ pub(super) async fn dispatch(
                 git_ref,
                 subdir,
                 generated_files,
+                None,
             )
             .await
             .map_err(RpcError::internal)

@@ -739,6 +739,14 @@ export class CollabClient {
     )
   }
 
+  async authorizeSessionExport(orgId: string, sessionId: string): Promise<void> {
+    await this.json<void>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/export-authorization`,
+      { cache: "no-store" }
+    )
+  }
+
   async updateSharedSession(
     orgId: string,
     sessionId: string,

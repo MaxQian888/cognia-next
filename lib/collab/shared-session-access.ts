@@ -15,6 +15,21 @@ export async function assertSharedSessionRead(
   session: Pick<ChatSession, "collaboration">,
   resolveContext: () => Promise<CurrentCollabContext | null> = resolveCurrentCollabContext
 ): Promise<void> {
+  return assertSharedSessionAccess(session, "session.read", resolveContext)
+}
+
+export async function assertSharedSessionExport(
+  session: Pick<ChatSession, "collaboration">,
+  resolveContext: () => Promise<CurrentCollabContext | null> = resolveCurrentCollabContext
+): Promise<void> {
+  return assertSharedSessionAccess(session, "session.export", resolveContext)
+}
+
+async function assertSharedSessionAccess(
+  session: Pick<ChatSession, "collaboration">,
+  action: "session.read" | "session.export",
+  resolveContext: () => Promise<CurrentCollabContext | null>
+): Promise<void> {
   const binding = session.collaboration
   if (!binding) return
   const context = await resolveContext()
@@ -26,13 +41,28 @@ export async function assertSharedSessionRead(
     throw new SharedSessionAccessError("not_found")
   }
   try {
-    const [remote, members] = await Promise.all([
-      context.client.getSharedSession(binding.orgId, binding.sessionId),
-      context.client.listSessionMembers(binding.orgId, binding.sessionId),
-    ])
-    const member = members.find((candidate) => candidate.userId === context.userId) ?? null
-    const decision = authorizeSessionAction(member, "session.read", remote.policyRevision)
-    if (!decision.allowed) throw new SharedSessionAccessError("not_found")
+    if (action === "session.export") {
+      await context.client.authorizeSessionExport(binding.orgId, binding.sessionId)
+    } else {
+      const [remote, members] = await Promise.all([
+        context.client.getSharedSession(binding.orgId, binding.sessionId),
+        context.client.listSessionMembers(binding.orgId, binding.sessionId),
+      ])
+      const member = members.find((candidate) => candidate.userId === context.userId) ?? null
+      const decision = authorizeSessionAction(member, action, remote.policyRevision)
+      if (!decision.allowed) throw new SharedSessionAccessError("not_found")
+    }
+    // Authorization must not outlive the account or endpoint that requested it.
+    const current = await resolveContext()
+    if (
+      !current ||
+      current.localAccountId !== context.localAccountId ||
+      current.userId !== context.userId ||
+      current.orgId !== context.orgId ||
+      current.client.baseUrl !== context.client.baseUrl
+    ) {
+      throw new SharedSessionAccessError("not_found")
+    }
   } catch (error) {
     if (error instanceof SharedSessionAccessError) throw error
     throw new SharedSessionAccessError("not_found")

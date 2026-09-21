@@ -729,6 +729,18 @@ pub fn apply_reqwest_policy(
     current()?.apply_reqwest_policy(builder, target_url)
 }
 
+/// Ensure a process-wide rustls `CryptoProvider` exists.
+///
+/// `reqwest` resolves the installed provider at `Client` construction; the
+/// library is also used directly by tests and embedders that never execute a
+/// binary's `main`. `Once` makes repeat calls free.
+pub fn ensure_crypto_provider() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
 /// Build a client bound to the live policy for `target_url`.
 ///
 /// The one-line form of "apply the policy, then build", named so that every
@@ -753,6 +765,7 @@ pub fn managed_client(
     builder: reqwest::ClientBuilder,
     target_url: &str,
 ) -> Result<reqwest::Client, ProxyError> {
+    ensure_crypto_provider();
     let (builder, _route) = apply_reqwest_policy(builder, target_url)?;
     builder.build().map_err(|error| {
         ProxyError::new(
@@ -1333,6 +1346,7 @@ mod tests {
             .apply_reqwest_policy(reqwest::Client::builder(), "http://service.example/data")
             .unwrap();
         assert!(matches!(route, ProxyRouteSummary::Proxy { .. }));
+        ensure_crypto_provider();
         let client = builder.build().unwrap();
         assert_eq!(
             client
@@ -1396,6 +1410,7 @@ mod tests {
                 reason: DirectReason::Off
             }
         );
+        ensure_crypto_provider();
         let result = builder
             .build()
             .unwrap()

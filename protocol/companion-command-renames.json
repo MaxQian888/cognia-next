@@ -458,6 +458,9 @@
     "claude_approve": {
       "to": "agent.permission.approve"
     },
+    "claude_call_reserve_respond": {
+      "to": "agent.call_reservation.decide"
+    },
     "claude_close_session": {
       "to": "agent.session.close",
       "merge": "agent_close_session",
@@ -1272,6 +1275,18 @@
     },
     "execution_run_control": {
       "to": "execution.run.control"
+    },
+    "execution_run_create": {
+      "to": "execution.run.create"
+    },
+    "execution_run_events": {
+      "to": "execution.run.event.replay"
+    },
+    "execution_run_get": {
+      "to": "execution.run.snapshot"
+    },
+    "execution_run_resume": {
+      "to": "execution.run.resume"
     },
     "external_agent_admit_run": {
       "to": "external_agent.run.admit"
@@ -3400,6 +3415,15 @@
     },
     "task_workspace_restore_snapshot": {
       "to": "task.workspace.snapshot.restore"
+    },
+    "task_workspace_revision_apply": {
+      "to": "task.workspace.revision.apply"
+    },
+    "task_workspace_revision_get": {
+      "to": "task.workspace.revision.get"
+    },
+    "task_workspace_revision_read": {
+      "to": "task.workspace.revision.read"
     },
     "task_workspace_settle": {
       "to": "task.workspace.settle"

@@ -1217,6 +1217,10 @@ mod tests {
 
     #[tokio::test]
     async fn real_listener_refuses_old_keys_after_lock_and_account_switch() {
+        // `reqwest::Client::new` resolves the process-wide provider at
+        // construction — the bins install it at startup, test processes must
+        // install it themselves.
+        let _ = rustls::crypto::ring::default_provider().install_default();
         struct NoopObserver;
         impl RequestObserver for NoopObserver {
             fn on_call(&self, _: &str, _: axum::http::StatusCode, _: std::net::IpAddr) {}

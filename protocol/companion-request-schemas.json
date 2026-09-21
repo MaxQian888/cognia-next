@@ -4335,6 +4335,84 @@
       },
       "additionalProperties": false
     },
+    "environment_build_cancel": {
+      "type": "object",
+      "properties": {
+        "projectId": {
+          "type": "string"
+        },
+        "jobId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId",
+        "jobId"
+      ],
+      "additionalProperties": false
+    },
+    "environment_build_get": {
+      "type": "object",
+      "properties": {
+        "projectId": {
+          "type": "string"
+        },
+        "jobId": {
+          "type": "string"
+        },
+        "buildKey": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId"
+      ],
+      "additionalProperties": false
+    },
+    "environment_build_start": {
+      "type": "object",
+      "properties": {
+        "request": {
+          "type": "object",
+          "properties": {
+            "projectId": {
+              "type": "string"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "declarationPath": {
+              "type": "string"
+            },
+            "declarationDigest": {
+              "type": "string"
+            },
+            "declarationBytesSha256": {
+              "type": "string"
+            },
+            "commitSha": {
+              "type": "string"
+            },
+            "platform": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "projectId",
+            "cwd",
+            "declarationPath",
+            "declarationDigest",
+            "declarationBytesSha256",
+            "commitSha"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "additionalProperties": false
+    },
     "environment_catalog_create": {
       "type": "object",
       "required": [
@@ -4485,6 +4563,18 @@
           "description": "An image reference: `name`, `name:tag` or `name@sha256:<hex>`. Only a registry on the deployment's allowlist is contacted."
         }
       },
+      "additionalProperties": false
+    },
+    "environment_ports_list": {
+      "type": "object",
+      "properties": {
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId"
+      ],
       "additionalProperties": false
     },
     "environment_probe_get": {
@@ -5305,6 +5395,25 @@
       "additionalProperties": false
     },
     "fs_read_workspace_file": {
+      "type": "object",
+      "required": [
+        "root",
+        "relPath"
+      ],
+      "properties": {
+        "root": {
+          "type": "string"
+        },
+        "relPath": {
+          "type": "string"
+        },
+        "maxBytes": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "fs_read_workspace_file_base64": {
       "type": "object",
       "required": [
         "root",

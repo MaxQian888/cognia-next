@@ -2198,6 +2198,21 @@ fn dpop_rejected(error: Problem) -> Problem {
     error
 }
 
+/// Exercise the exact production proof verifier from native relay tests.
+#[cfg(test)]
+pub(crate) fn verify_relay_device_proof(
+    public_key_pem: &str,
+    proof: &str,
+    nonce: &str,
+    method: &str,
+    path: &str,
+    now: i64,
+) -> Result<String, String> {
+    verify_device_proof(public_key_pem, proof, nonce, method, path, now)
+        .map(|proof| proof.jti)
+        .map_err(|error| error.code.to_string())
+}
+
 fn consume_device_proof(
     tenant_id: &str,
     device_id: &str,

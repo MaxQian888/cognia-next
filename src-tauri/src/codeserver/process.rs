@@ -1335,6 +1335,7 @@ fn spawn_watchdog(
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         use tauri::Emitter as _;
+        crate::ensure_crypto_provider();
         let Ok(client) = reqwest::Client::builder()
             .timeout(Duration::from_secs(2))
             .no_proxy()
@@ -1374,6 +1375,7 @@ fn spawn_watchdog(
 /// Poll `http://127.0.0.1:<port>/healthz` until it answers 200 or `budget`
 /// elapses. code-server exposes `/healthz` once its HTTP server is up.
 async fn wait_healthy(port: u16, budget: Duration) -> Result<(), String> {
+    crate::ensure_crypto_provider();
     let url = format!("http://127.0.0.1:{port}/healthz");
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(2))

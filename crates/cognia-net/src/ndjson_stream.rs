@@ -212,6 +212,13 @@ mod tests {
     const OK_HEADERS: &str =
         "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nConnection: close\r\n\r\n";
 
+    /// `reqwest` resolves the process-wide TLS provider at `Client`
+    /// construction; no `main` runs inside a test binary, so install it here.
+    fn test_client() -> reqwest::Client {
+        crate::proxy_config::ensure_crypto_provider();
+        reqwest::Client::new()
+    }
+
     #[tokio::test]
     async fn delivers_each_line_as_it_arrives() {
         let addr = serve_once(
@@ -225,7 +232,7 @@ mod tests {
 
         let mut seen: Vec<Progress> = Vec::new();
         let n = stream_ndjson_post(
-            &reqwest::Client::new(),
+            &test_client(),
             &format!("http://{addr}/api/pull"),
             &serde_json::json!({ "name": "m" }),
             &mut |p: Progress| seen.push(p),
@@ -250,7 +257,7 @@ mod tests {
         );
 
         let delivered = stream_ndjson_post_with_headers(
-            &reqwest::Client::new(),
+            &test_client(),
             &format!("http://{addr}/api/pull"),
             &serde_json::json!({ "name": "m" }),
             headers,
@@ -279,7 +286,7 @@ mod tests {
 
         let mut seen: Vec<Progress> = Vec::new();
         stream_ndjson_post(
-            &reqwest::Client::new(),
+            &test_client(),
             &format!("http://{addr}/api/pull"),
             &serde_json::json!({}),
             &mut |p: Progress| seen.push(p),
@@ -303,7 +310,7 @@ mod tests {
 
         let mut seen: Vec<Progress> = Vec::new();
         let n = stream_ndjson_post(
-            &reqwest::Client::new(),
+            &test_client(),
             &format!("http://{addr}/api/pull"),
             &serde_json::json!({}),
             &mut |p: Progress| seen.push(p),
@@ -321,7 +328,7 @@ mod tests {
 
         let mut seen: Vec<Progress> = Vec::new();
         stream_ndjson_post(
-            &reqwest::Client::new(),
+            &test_client(),
             &format!("http://{addr}/api/pull"),
             &serde_json::json!({}),
             &mut |p: Progress| seen.push(p),
@@ -342,7 +349,7 @@ mod tests {
         let addr = serve_once(OK_HEADERS, vec![flood]).await;
 
         let err = stream_ndjson_post(
-            &reqwest::Client::new(),
+            &test_client(),
             &format!("http://{addr}/api/pull"),
             &serde_json::json!({}),
             &mut |_p: Progress| {},
@@ -367,7 +374,7 @@ mod tests {
         .await;
 
         let err = stream_ndjson_post(
-            &reqwest::Client::new(),
+            &test_client(),
             &format!("http://{addr}/api/pull"),
             &serde_json::json!({}),
             &mut |_p: Progress| {},

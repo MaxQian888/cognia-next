@@ -5,7 +5,8 @@ use anyhow::Context;
 use async_trait::async_trait;
 use bytes::Bytes;
 use object_store::{
-    aws::AmazonS3Builder, local::LocalFileSystem, path::Path, ObjectStore, PutPayload,
+    aws::AmazonS3Builder, local::LocalFileSystem, path::Path, ObjectStore, ObjectStoreExt,
+    PutPayload,
 };
 
 #[async_trait]

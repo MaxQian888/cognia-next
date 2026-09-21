@@ -19,8 +19,10 @@
 
 use std::future::Future;
 use std::pin::Pin;
+#[cfg(any(test, feature = "test-support"))]
 use std::sync::Arc;
 
+#[cfg(any(test, feature = "test-support"))]
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -94,7 +96,8 @@ pub struct BrainRefusal {
 pub type BrainFuture = Pin<Box<dyn Future<Output = Result<Value, BrainBridgeError>> + Send>>;
 
 /// One round trip to the brain. Implemented by the desktop host over the
-/// companion writes bridge, and by `RecordingBrainBridge` in tests.
+/// companion writes bridge, and by `RecordingBrainBridge` in tests (a test
+/// double, compiled only for tests and the `test-support` feature).
 pub trait BrainBridge: Send + Sync {
     fn call(&self, command: &'static str, payload: Value) -> BrainFuture;
 }
@@ -115,17 +118,25 @@ impl BrainBridge for DetachedBrainBridge {
     }
 }
 
+#[cfg(any(test, feature = "test-support"))]
 type ScriptedAnswer = Result<Value, BrainBridgeError>;
 
 /// A bridge that records what it was asked and answers from a script. The
 /// gateway's own tests drive `/v1/runs` end to end through it, so the routes,
 /// the scope checks and the SSE stream are exercised without a renderer.
+///
+/// A test double, not a bridge: it is compiled only into this crate's tests
+/// and, for another crate's tests, behind the `test-support` feature, which
+/// only a `[dev-dependencies]` entry may enable. A production build has no way
+/// to install a scripted brain.
+#[cfg(any(test, feature = "test-support"))]
 #[derive(Clone, Default)]
 pub struct RecordingBrainBridge {
     calls: Arc<Mutex<Vec<(String, Value)>>>,
     answers: Arc<Mutex<Vec<(String, ScriptedAnswer)>>>,
 }
 
+#[cfg(any(test, feature = "test-support"))]
 impl RecordingBrainBridge {
     pub fn new() -> Self {
         Self::default()
@@ -169,6 +180,7 @@ impl RecordingBrainBridge {
     }
 }
 
+#[cfg(any(test, feature = "test-support"))]
 impl BrainBridge for RecordingBrainBridge {
     fn call(&self, command: &'static str, payload: Value) -> BrainFuture {
         self.calls.lock().push((command.to_string(), payload));
@@ -245,6 +257,77 @@ mod tests {
             vec![json!({ "runId": "run-1" }), json!({ "runId": "run-2" })]
         );
         assert_eq!(bridge.calls().len(), 2);
+    }
+
+    /// The scripted brain is a test double. Its declaration and both of its
+    /// impls carry the test gate, so a production build of this crate has no
+    /// type that can answer the Run API from a script.
+    #[test]
+    fn the_scripted_brain_is_compiled_only_for_tests() {
+        const GATE: &str = "#[cfg(any(test, feature = \"test-support\"))]";
+        let source = include_str!("brain_bridge.rs");
+        let lines: Vec<&str> = source.lines().collect();
+        for declaration in [
+            "pub struct RecordingBrainBridge {",
+            "impl RecordingBrainBridge {",
+            "impl BrainBridge for RecordingBrainBridge {",
+            "type ScriptedAnswer = Result<Value, BrainBridgeError>;",
+        ] {
+            let at = lines
+                .iter()
+                .position(|line| *line == declaration)
+                .unwrap_or_else(|| panic!("{declaration} is declared"));
+            let attributes: Vec<&str> = lines[..at]
+                .iter()
+                .rev()
+                .take_while(|line| line.starts_with("#[") || line.starts_with("///"))
+                .copied()
+                .collect();
+            assert!(attributes.contains(&GATE), "{declaration} is not gated");
+        }
+    }
+
+    /// `test-support` is declared, and every crate that depends on this one
+    /// enables it only from `[dev-dependencies]`.
+    #[test]
+    fn test_support_is_enabled_only_by_dev_dependencies() {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let own = std::fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+        assert!(own.lines().any(|line| line.trim() == "test-support = []"));
+
+        let root = manifest_dir.join("../..");
+        let mut manifests = vec![root.join("src-tauri/Cargo.toml")];
+        for dir in ["crates", "services"] {
+            let Ok(entries) = std::fs::read_dir(root.join(dir)) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let manifest = entry.path().join("Cargo.toml");
+                if manifest.is_file() && entry.path() != manifest_dir {
+                    manifests.push(manifest);
+                }
+            }
+        }
+        for manifest in manifests {
+            let Ok(text) = std::fs::read_to_string(&manifest) else {
+                continue;
+            };
+            let mut section = String::new();
+            for line in text.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with('[') {
+                    section = trimmed.to_string();
+                    continue;
+                }
+                if trimmed.starts_with("cognia-gateway") && trimmed.contains("test-support") {
+                    assert!(
+                        section.ends_with("dev-dependencies]"),
+                        "{} enables cognia-gateway/test-support under {section}",
+                        manifest.display()
+                    );
+                }
+            }
+        }
     }
 
     #[tokio::test]

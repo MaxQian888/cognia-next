@@ -284,6 +284,7 @@ async fn execute_template(
             .ok_or_else(|| "request URL is missing a host".to_string())?;
         // Pin the exact addresses that passed policy validation. Reqwest must
         // not perform a second DNS lookup that could be rebound to a private IP.
+        crate::proxy_config::ensure_crypto_provider();
         let builder = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .timeout(MAX_WALL_TIME)

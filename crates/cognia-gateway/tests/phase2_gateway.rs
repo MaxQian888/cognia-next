@@ -31,6 +31,13 @@ impl RequestObserver for NoopObserver {
     fn on_call(&self, _route: &str, _status: axum::http::StatusCode, _ip: std::net::IpAddr) {}
 }
 
+/// `reqwest` resolves the process-wide TLS provider at `Client` construction;
+/// no `main` runs inside a test binary, so it must be installed here.
+fn http_client() -> reqwest::Client {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    reqwest::Client::new()
+}
+
 /// What the mock upstream records about each attempt.
 #[derive(Debug, Clone)]
 struct UpstreamHit {
@@ -289,7 +296,7 @@ fn chat_body() -> Value {
 }
 
 async fn post_count_tokens(port: u16, bearer: &str, body: &Value) -> reqwest::Response {
-    reqwest::Client::new()
+    http_client()
         .post(format!("http://127.0.0.1:{port}/v1/messages/count_tokens"))
         .header("x-api-key", bearer)
         .json(body)
@@ -304,7 +311,7 @@ async fn post_messages(
     body: &Value,
     extra_headers: &[(&str, &str)],
 ) -> reqwest::Response {
-    let client = reqwest::Client::new();
+    let client = http_client();
     let mut req = client
         .post(format!("http://127.0.0.1:{port}/v1/messages"))
         .header("x-api-key", bearer)
@@ -607,7 +614,7 @@ async fn count_tokens_upstream_401_is_not_swallowed_into_an_estimate() {
 // ---- ticket scope + budget --------------------------------------------------
 
 async fn post_json(port: u16, path: &str, bearer: &str, body: &Value) -> reqwest::Response {
-    reqwest::Client::new()
+    http_client()
         .post(format!("http://127.0.0.1:{port}{path}"))
         .header("x-api-key", bearer)
         .json(body)
@@ -902,7 +909,7 @@ async fn task_responses_preserves_structured_controls_and_multimodal_results_at_
     let gw = start_gateway_with_snapshot(task_snapshot(addr)).await;
     let anthropic = task_mint(&gw, addr, "expanded-anthropic", "anthropic");
     let chat = task_mint(&gw, addr, "expanded-chat", "chat");
-    let client = reqwest::Client::new();
+    let client = http_client();
     let schema = json!({"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false});
     let mut body = json!({"model":"primary","input":[{"type":"function_call","call_id":"call_1","name":"inspect","arguments":"{}"},
         {"type":"function_call_output","call_id":"call_1","output":[{"type":"input_text","text":"screenshot"},{"type":"input_image","image_url":"data:image/png;base64,aGVsbG8="}]}],
@@ -967,7 +974,7 @@ async fn external_task_responses_tools_history_models_and_credentials_are_isolat
     let gw = start_gateway_with_snapshot(task_snapshot(addr)).await;
     let a = task_mint(&gw, addr, "a", "chat");
     let b = task_mint(&gw, addr, "b", "chat");
-    let client = reqwest::Client::new();
+    let client = http_client();
     let models: Value = client
         .get(format!("http://127.0.0.1:{}/v1/models", gw.port))
         .bearer_auth(&a.secret)
