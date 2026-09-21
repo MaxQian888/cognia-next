@@ -52,6 +52,9 @@ const EMPTY_VIEW: InlineEngineView = {
   candidates: [],
   index: 0,
   pending: false,
+  querying: false,
+  streaming: false,
+  completionError: false,
   manualAvailable: false,
   manualPending: false,
 }

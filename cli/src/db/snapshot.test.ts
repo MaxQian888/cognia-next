@@ -2,6 +2,9 @@
  * @jest-environment node
  */
 import {
+  encodeSnapshotRows,
+  decodeSnapshotRows,
+  decodeSnapshotRowsAsync,
   parseMultiSnapshot,
   parseSnapshot,
   restoreMultiSnapshot,
@@ -36,6 +39,138 @@ function fakeDb(tables: FakeTable[], verno = 82): DbLike {
 }
 
 describe("serializeDb", () => {
+  it("preserves original media, thumbnails, and typed byte slices through JSON and restore", async () => {
+    const bytes = Uint8Array.from({ length: 150_000 }, (_, index) => index % 251)
+    const original = new Blob([bytes], { type: "video/mp4" })
+    const thumbnail = new Blob(["preview"], { type: "image/png" })
+    const backing = new Uint8Array([99, 1, 2, 3, 99])
+    const table = new FakeTable("messageMedia", [
+      {
+        hash: "media",
+        blob: original,
+        thumb: thumbnail,
+        raw: backing.subarray(1, 4),
+        nested: { original: new Blob([]) },
+      },
+    ])
+    const snapshot = await serializeDb(fakeDb([table]))
+    const text = serializeSnapshot(snapshot)
+    const parsed = parseSnapshot(text)
+    expect(parsed.kind).toBe("valid")
+    if (parsed.kind !== "valid") throw new Error("snapshot must parse")
+    table.rows = []
+    await restoreSnapshot(fakeDb([table]), parsed.snapshot)
+    const row = table.rows[0] as {
+      blob: Blob
+      thumb: Blob
+      raw: Uint8Array
+      nested: { original: Blob }
+    }
+    expect(row.blob.type).toBe("video/mp4")
+    expect(new Uint8Array(await row.blob.arrayBuffer())).toEqual(bytes)
+    expect(await row.thumb.text()).toBe("preview")
+    expect(row.raw).toBeInstanceOf(Uint8Array)
+    expect([...row.raw]).toEqual([1, 2, 3])
+    expect(row.nested.original.size).toBe(0)
+    expect(original.size).toBe(bytes.length)
+  })
+
+  it("reads each Blob in bounded chunks instead of allocating another full source buffer", async () => {
+    const blob = new Blob([new Uint8Array(200_000)])
+    const read = jest.spyOn(blob, "arrayBuffer")
+    const slice = jest.spyOn(blob, "slice")
+    await encodeSnapshotRows([{ blob }])
+    expect(read).not.toHaveBeenCalled()
+    expect(slice).toHaveBeenCalledTimes(4)
+    expect(slice.mock.calls.every(([start, end]) => end! - start! <= 65_536)).toBe(true)
+  })
+
+  it("restores sidecar ArrayBuffers without leaking pooled Buffer backing bytes", async () => {
+    const source = new Uint8Array([1, 2, 3]).buffer
+    const reference = "a".repeat(64)
+    const encoded = await encodeSnapshotRows([{ source }], { write: async () => reference })
+    const pooled = Buffer.from([99, 1, 2, 3, 99]).subarray(1, 4)
+    const result = decodeSnapshotRows(encoded, { read: () => pooled })[0] as { source: ArrayBuffer }
+    expect(result.source.byteLength).toBe(3)
+    expect([...new Uint8Array(result.source)]).toEqual([1, 2, 3])
+  })
+
+  it("escapes user records that happen to use the binary envelope property", async () => {
+    const rows = [
+      {
+        content: {
+          $cogniaSnapshotValue: {
+            version: 1,
+            type: "blob",
+            byteLength: 0,
+            mediaType: "text/plain",
+            chunks: [],
+          },
+        },
+      },
+    ]
+    expect(decodeSnapshotRows(JSON.parse(JSON.stringify(await encodeSnapshotRows(rows))))).toEqual(
+      rows
+    )
+    expect(
+      decodeSnapshotRows([{ bytes: new Uint8Array([1]), original: new Blob(["a"]) }])[0]
+    ).toMatchObject({ bytes: new Uint8Array([1]) })
+  })
+
+  it("keeps asynchronously hydrated Blobs lazy while materializing typed byte fields", async () => {
+    const blob = new Blob(["original"], { type: "text/plain" })
+    const read = jest.spyOn(blob, "arrayBuffer")
+    const encoded = await encodeSnapshotRows(
+      [{ nested: { blob }, bytes: new Uint8Array([1, 2]) }],
+      {
+        write: async (value) => (value instanceof Blob ? "a" : "b").repeat(64),
+      }
+    )
+    const readBlob = jest.fn(async () => blob)
+    const rows = (await decodeSnapshotRowsAsync(encoded, {
+      readBlob,
+      read: () => new Uint8Array([1, 2]),
+    })) as Array<{ nested: { blob: Blob }; bytes: Uint8Array }>
+    expect(rows[0]!.nested.blob).toBe(blob)
+    expect(read).not.toHaveBeenCalled()
+    expect([...rows[0]!.bytes]).toEqual([1, 2])
+    expect(readBlob).toHaveBeenCalledWith("a".repeat(64), 8, "text/plain")
+  })
+
+  it("validates all async envelopes before opening source files and rejects mismatched Blobs", async () => {
+    const encoded = await encodeSnapshotRows([{ blob: new Blob(["source"]) }], {
+      write: async () => "a".repeat(64),
+    })
+    const readBlob = jest.fn(async () => new Blob(["wrong"]))
+    await expect(decodeSnapshotRowsAsync(encoded, { readBlob })).rejects.toThrow(
+      "metadata mismatch"
+    )
+    readBlob.mockClear()
+    await expect(
+      decodeSnapshotRowsAsync([...encoded, { $cogniaSnapshotValue: { version: 8 } }], { readBlob })
+    ).rejects.toThrow("unsupported")
+    expect(readBlob).not.toHaveBeenCalled()
+  })
+
+  it("rejects corrupt binary payloads before clearing any stored rows", async () => {
+    const encoded = await encodeSnapshotRows([{ blob: new Blob(["original"]) }])
+    const corrupt = JSON.parse(JSON.stringify(encoded))
+    corrupt[0].blob.$cogniaSnapshotValue.chunks[0] = "@@@="
+    const table = new FakeTable("messageMedia", [{ id: "keep" }])
+    const snapshot = { version: 82, tables: { messageMedia: corrupt } }
+    expect(parseSnapshot(JSON.stringify(snapshot)).kind).toBe("corrupt")
+    expect(
+      parseMultiSnapshot(
+        JSON.stringify({ snapshotFormat: 2, dbs: { CogniaDB: snapshot } }),
+        "CogniaDB"
+      ).kind
+    ).toBe("corrupt")
+    await expect(restoreSnapshot(fakeDb([table]), snapshot)).rejects.toThrow(
+      "invalid snapshot binary chunk"
+    )
+    expect(table.rows).toEqual([{ id: "keep" }])
+  })
+
   it("dumps every table keyed by name with the db version", async () => {
     const db = fakeDb([new FakeTable("goals", [{ id: "g1" }]), new FakeTable("sessions", [])])
     const snap = await serializeDb(db)

@@ -11,9 +11,11 @@ import {
   loadConfig as defaultLoadConfig,
 } from "../config/load"
 import {
+  setAgentBackendModel as defaultSetAgentBackendModel,
   setBackendExtensionPolicy as defaultSetBackendExtensionPolicy,
   setConfigValue as defaultSet,
   setProviderBaseURL as defaultSetProviderBaseURL,
+  setProviderModel as defaultSetProviderModel,
 } from "../config/mutate"
 import type { CliConfigFile } from "../config/schema"
 import { type ParsedArgs } from "./args"
@@ -24,6 +26,8 @@ export interface ConfigDeps {
   loadConfig?: (flags?: Partial<CliConfigFile>) => ReturnType<typeof defaultLoadConfig>
   setConfigValue?: typeof defaultSet
   setProviderBaseURL?: typeof defaultSetProviderBaseURL
+  setProviderModel?: typeof defaultSetProviderModel
+  setAgentBackendModel?: typeof defaultSetAgentBackendModel
   setBackendExtensionPolicy?: typeof defaultSetBackendExtensionPolicy
   out?: OutputSink
   env?: Record<string, string | undefined>
@@ -31,6 +35,17 @@ export interface ConfigDeps {
 
 /** Matches the nested `set` path `providers.<id>.baseURL`. */
 const PROVIDER_BASE_URL_KEY = /^providers\.([^.]+)\.baseURL$/
+
+/** Matches the nested `set` path `providers.<id>.model` (per-provider model memory). */
+const PROVIDER_MODEL_KEY = /^providers\.([^.]+)\.model$/
+
+/**
+ * Matches `agentBackends.<preset>.model` — the model one external agent
+ * backend remembers (`agentBackends[presetId].model`). Routed to the backend
+ * writer rather than the provider one: an external agent is not a chat
+ * provider, and sharing the record would rewrite the built-in sidecar's model.
+ */
+const BACKEND_MODEL_KEY = /^agentBackends\.([^.]+)\.model$/
 
 /**
  * Matches `agentBackends.<preset>.piExtensionPolicy` — how much of the user's
@@ -40,6 +55,28 @@ const PROVIDER_BASE_URL_KEY = /^providers\.([^.]+)\.baseURL$/
  */
 const BACKEND_EXTENSION_POLICY_KEY = /^agentBackends\.([^.]+)\.piExtensionPolicy$/
 
+/**
+ * Resolve a `config get` key against the redacted resolved config. Top-level
+ * keys resolve directly; dotted keys (`agentBackends.pi-rpc.model`,
+ * `providers.deepseek.baseURL`, `statusBar.theme`) walk nested objects, so
+ * every path `config set` writes is also readable. Own-property lookup only —
+ * `constructor.prototype`-style segments must not reach the prototype chain.
+ */
+function lookupConfigValue(root: Record<string, unknown>, key: string): unknown {
+  let value: unknown = root
+  for (const segment of key.split(".")) {
+    if (
+      value === null ||
+      typeof value !== "object" ||
+      !Object.prototype.hasOwnProperty.call(value, segment)
+    ) {
+      return undefined
+    }
+    value = (value as Record<string, unknown>)[segment]
+  }
+  return value
+}
+
 export async function configCommand(args: ParsedArgs, deps: ConfigDeps = {}): Promise<number> {
   const out = deps.out ?? realOutput
   const env = deps.env ?? process.env
@@ -47,6 +84,8 @@ export async function configCommand(args: ParsedArgs, deps: ConfigDeps = {}): Pr
   const loadConfig = deps.loadConfig ?? defaultLoadConfig
   const setConfigValue = deps.setConfigValue ?? defaultSet
   const setProviderBaseURL = deps.setProviderBaseURL ?? defaultSetProviderBaseURL
+  const setProviderModel = deps.setProviderModel ?? defaultSetProviderModel
+  const setAgentBackendModel = deps.setAgentBackendModel ?? defaultSetAgentBackendModel
   const setBackendExtensionPolicy =
     deps.setBackendExtensionPolicy ?? defaultSetBackendExtensionPolicy
 
@@ -80,7 +119,7 @@ export async function configCommand(args: ParsedArgs, deps: ConfigDeps = {}): Pr
       }
       const key = args.positionals[0]
       if (key) {
-        const value = (redacted as Record<string, unknown>)[key]
+        const value = lookupConfigValue(redacted, key)
         if (value === undefined) {
           out.error(`config get: unknown key "${key}"`)
           return 2
@@ -99,10 +138,22 @@ export async function configCommand(args: ParsedArgs, deps: ConfigDeps = {}): Pr
         return 2
       }
       const providerBaseURLMatch = key.match(PROVIDER_BASE_URL_KEY)
+      const providerModelMatch = key.match(PROVIDER_MODEL_KEY)
+      const backendModelMatch = key.match(BACKEND_MODEL_KEY)
       const backendPolicyMatch = key.match(BACKEND_EXTENSION_POLICY_KEY)
       try {
         if (providerBaseURLMatch) {
           const path = setProviderBaseURL(home, providerBaseURLMatch[1], value)
+          out.write(`Set ${key} in ${path}\n`)
+          return 0
+        }
+        if (providerModelMatch) {
+          const path = setProviderModel(home, providerModelMatch[1], value)
+          out.write(`Set ${key} in ${path}\n`)
+          return 0
+        }
+        if (backendModelMatch) {
+          const path = setAgentBackendModel(home, backendModelMatch[1], value)
           out.write(`Set ${key} in ${path}\n`)
           return 0
         }

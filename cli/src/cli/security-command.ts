@@ -75,6 +75,10 @@ const USAGE = `cognia-agent security <report|scan>
   report --input <file>            evaluate an existing scanner artifact
   scan   --target <t> --authorized run strix against a target, then evaluate
 
+Input format: a strix-style JSON findings report — a bare array, or an object
+  holding an array under vulnerabilities | reports | findings | results.
+  (SARIF is an OUTPUT via --sarif, not an accepted input.)
+
 Shared flags:
   --fail-on <severity>   exit 2 when a finding is at or above this severity
                          (critical|high|medium|low|info). Omitted = report only.

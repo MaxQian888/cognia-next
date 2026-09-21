@@ -12,6 +12,242 @@
  * `~/.cognia/serve/db-*.json` keeps restoring after an upgrade.
  */
 
+import { Buffer } from "node:buffer"
+
+const BINARY_CHUNK_BYTES = 64 * 1024
+const SNAPSHOT_VALUE_KEY = "$cogniaSnapshotValue"
+
+export type SnapshotBinary = Blob | Uint8Array | ArrayBuffer
+export interface SnapshotBinaryStore {
+  write?: (value: SnapshotBinary) => Promise<string>
+  read?: (reference: string, byteLength: number) => Uint8Array<ArrayBuffer>
+  readBlob?: (reference: string, byteLength: number, mediaType: string) => Promise<Blob>
+}
+
+/** Encode source bytes in bounded chunks; Blob.toJSON otherwise silently writes {}. */
+async function encodeSnapshotValue(
+  value: unknown,
+  ancestors = new Set<object>(),
+  binaryStore?: SnapshotBinaryStore
+): Promise<unknown> {
+  if (!value || typeof value !== "object") return value
+  if (value instanceof Blob || value instanceof Uint8Array || value instanceof ArrayBuffer) {
+    const byteLength = value instanceof Blob ? value.size : value.byteLength
+    if (binaryStore?.write)
+      return {
+        [SNAPSHOT_VALUE_KEY]: {
+          version: 1,
+          type:
+            value instanceof Blob
+              ? "blob"
+              : value instanceof Uint8Array
+                ? "uint8array"
+                : "arraybuffer",
+          byteLength,
+          ...(value instanceof Blob ? { mediaType: value.type } : {}),
+          fileRef: await binaryStore.write(value),
+        },
+      }
+    const chunks: string[] = []
+    for (let offset = 0; offset < byteLength; offset += BINARY_CHUNK_BYTES) {
+      const bytes =
+        value instanceof Blob
+          ? new Uint8Array(await value.slice(offset, offset + BINARY_CHUNK_BYTES).arrayBuffer())
+          : value instanceof Uint8Array
+            ? value.subarray(offset, offset + BINARY_CHUNK_BYTES)
+            : new Uint8Array(value, offset, Math.min(BINARY_CHUNK_BYTES, byteLength - offset))
+      chunks.push(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64"))
+    }
+    return {
+      [SNAPSHOT_VALUE_KEY]: {
+        version: 1,
+        type:
+          value instanceof Blob
+            ? "blob"
+            : value instanceof Uint8Array
+              ? "uint8array"
+              : "arraybuffer",
+        byteLength,
+        ...(value instanceof Blob ? { mediaType: value.type } : {}),
+        chunks,
+      },
+    }
+  }
+  if (value instanceof Date) return value.toJSON()
+  if (ancestors.has(value)) throw new TypeError("Cannot snapshot a cyclic value")
+  ancestors.add(value)
+  try {
+    if (Array.isArray(value)) {
+      const result: unknown[] = []
+      for (const item of value) result.push(await encodeSnapshotValue(item, ancestors, binaryStore))
+      return result
+    }
+    const entries: [string, unknown][] = []
+    for (const [key, item] of Object.entries(value))
+      entries.push([key, await encodeSnapshotValue(item, ancestors, binaryStore)])
+    // User/plugin objects may use any property name, including the codec tag.
+    // Escape those records so they never acquire binary semantics on restore.
+    return Object.hasOwn(value, SNAPSHOT_VALUE_KEY)
+      ? { [SNAPSHOT_VALUE_KEY]: { version: 1, type: "record", entries } }
+      : Object.fromEntries(entries)
+  } finally {
+    ancestors.delete(value)
+  }
+}
+
+function decodeSnapshotValue(
+  value: unknown,
+  materialize = true,
+  binaryStore?: SnapshotBinaryStore
+): unknown {
+  if (!value || typeof value !== "object") return value
+  if (value instanceof Blob || value instanceof Uint8Array || value instanceof ArrayBuffer)
+    return value
+  if (Array.isArray(value))
+    return value.map((item) => decodeSnapshotValue(item, materialize, binaryStore))
+  const object = value as Record<string, unknown>
+  if (Object.keys(object).length === 1 && Object.hasOwn(object, SNAPSHOT_VALUE_KEY)) {
+    const envelope = object[SNAPSHOT_VALUE_KEY]
+    if (!envelope || typeof envelope !== "object" || Array.isArray(envelope))
+      throw new Error("invalid snapshot value envelope")
+    const data = envelope as Record<string, unknown>
+    if (data.version !== 1) throw new Error("unsupported snapshot value version")
+    if (data.type === "record") {
+      if (
+        !Array.isArray(data.entries) ||
+        data.entries.some(
+          (entry) => !Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== "string"
+        )
+      )
+        throw new Error("invalid escaped snapshot record")
+      return Object.fromEntries(
+        data.entries.map(([key, item]: [string, unknown]) => [
+          key,
+          decodeSnapshotValue(item, materialize, binaryStore),
+        ])
+      )
+    }
+    if (
+      !["blob", "uint8array", "arraybuffer"].includes(String(data.type)) ||
+      !Number.isSafeInteger(data.byteLength) ||
+      (data.byteLength as number) < 0 ||
+      (data.fileRef === undefined &&
+        (!Array.isArray(data.chunks) ||
+          data.chunks.length !== Math.ceil((data.byteLength as number) / BINARY_CHUNK_BYTES))) ||
+      (data.fileRef !== undefined &&
+        (typeof data.fileRef !== "string" ||
+          !/^[a-f0-9]{64}$/.test(data.fileRef) ||
+          data.chunks !== undefined)) ||
+      (data.type === "blob" && typeof data.mediaType !== "string")
+    )
+      throw new Error("invalid snapshot binary metadata")
+    if (typeof data.fileRef === "string") {
+      if (!materialize) return value
+      if (!binaryStore?.read) throw new Error("snapshot binary store unavailable")
+      const bytes = binaryStore.read(data.fileRef, data.byteLength as number)
+      if (bytes.byteLength !== data.byteLength) throw new Error("snapshot binary length mismatch")
+      return data.type === "blob"
+        ? new Blob([bytes], { type: data.mediaType as string })
+        : data.type === "arraybuffer"
+          ? new Uint8Array(bytes).buffer
+          : new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    }
+    const parts: Uint8Array<ArrayBuffer>[] = []
+    let remaining = data.byteLength as number
+    for (const chunk of data.chunks as unknown[]) {
+      const expected = Math.min(BINARY_CHUNK_BYTES, remaining)
+      if (
+        typeof chunk !== "string" ||
+        chunk.length !== Math.ceil(expected / 3) * 4 ||
+        !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(chunk)
+      )
+        throw new Error("invalid snapshot binary chunk")
+      const bytes = Buffer.from(chunk, "base64")
+      if (bytes.length !== expected || bytes.toString("base64") !== chunk)
+        throw new Error("invalid snapshot binary length")
+      if (materialize) parts.push(new Uint8Array(bytes))
+      remaining -= expected
+    }
+    if (!materialize) return value
+    if (data.type === "blob") return new Blob(parts, { type: data.mediaType as string })
+    const result = new Uint8Array(data.byteLength as number)
+    let offset = 0
+    for (const part of parts) {
+      result.set(part, offset)
+      offset += part.length
+    }
+    return data.type === "arraybuffer" ? result.buffer : result
+  }
+  return Object.fromEntries(
+    Object.entries(object).map(([key, item]) => [
+      key,
+      decodeSnapshotValue(item, materialize, binaryStore),
+    ])
+  )
+}
+
+/** Shared by the legacy snapshot and production per-table storage formats. */
+export async function encodeSnapshotRows(
+  rows: readonly unknown[],
+  binaryStore?: SnapshotBinaryStore
+): Promise<unknown[]> {
+  const result: unknown[] = []
+  for (const row of rows) result.push(await encodeSnapshotValue(row, new Set(), binaryStore))
+  return result
+}
+
+export function decodeSnapshotRows(value: unknown, binaryStore?: SnapshotBinaryStore): unknown[] {
+  if (!Array.isArray(value)) throw new Error("snapshot table is not an array")
+  return value.map((item) => decodeSnapshotValue(item, true, binaryStore))
+}
+
+/** Resolve file-backed Blobs without materializing their source bytes. Other
+ * binary types retain the normal synchronous codec and legacy compatibility. */
+export async function decodeSnapshotRowsAsync(
+  value: unknown,
+  binaryStore: SnapshotBinaryStore
+): Promise<unknown[]> {
+  if (!Array.isArray(value)) throw new Error("snapshot table is not an array")
+  if (!binaryStore.readBlob) return decodeSnapshotRows(value, binaryStore)
+  // Validate every envelope before touching any sidecar or stored table.
+  for (const row of value) decodeSnapshotValue(row, false)
+  const hydrate = async (item: unknown): Promise<unknown> => {
+    if (
+      !item ||
+      typeof item !== "object" ||
+      item instanceof Blob ||
+      item instanceof Uint8Array ||
+      item instanceof ArrayBuffer
+    )
+      return item
+    if (Array.isArray(item)) {
+      const entries: unknown[] = []
+      for (const entry of item) entries.push(await hydrate(entry))
+      return entries
+    }
+    const object = item as Record<string, unknown>
+    const data = object[SNAPSHOT_VALUE_KEY] as Record<string, unknown> | undefined
+    if (
+      Object.keys(object).length === 1 &&
+      data?.type === "blob" &&
+      typeof data.fileRef === "string"
+    ) {
+      const blob = await binaryStore.readBlob!(
+        data.fileRef,
+        data.byteLength as number,
+        data.mediaType as string
+      )
+      if (!(blob instanceof Blob) || blob.size !== data.byteLength || blob.type !== data.mediaType)
+        throw new Error("snapshot binary Blob metadata mismatch")
+      return blob
+    }
+    const entries: [string, unknown][] = []
+    for (const [key, child] of Object.entries(object)) entries.push([key, await hydrate(child)])
+    return Object.fromEntries(entries)
+  }
+  return decodeSnapshotRows(await hydrate(value), binaryStore)
+}
+
 /** The minimal Dexie surface the snapshot logic needs. */
 export interface DbTableLike {
   name: string
@@ -92,7 +328,7 @@ export async function serializeDb(
   const tables: Record<string, unknown[]> = {}
   for (const table of db.tables) {
     if (excluded.has(table.name)) continue
-    tables[table.name] = await table.toArray()
+    tables[table.name] = await encodeSnapshotRows(await table.toArray())
   }
   return { version: db.verno, tables }
 }
@@ -128,8 +364,9 @@ export async function restoreSnapshot(
   for (const table of db.tables) {
     const rows = snapshot.tables[table.name]
     if (!rows) continue
+    const decoded = decodeSnapshotRows(rows)
     await table.clear()
-    if (rows.length > 0) await table.bulkPut(rows)
+    if (decoded.length > 0) await table.bulkPut(decoded)
   }
 }
 
@@ -174,6 +411,13 @@ export function parseSnapshot(text: string | null | undefined): SnapshotParseRes
   const tables = obj.tables as Record<string, unknown>
   if (Object.values(tables).some((rows) => !Array.isArray(rows))) {
     return { kind: "corrupt", reason: "one or more snapshot tables are not arrays" }
+  }
+  try {
+    for (const rows of Object.values(tables)) {
+      for (const row of rows as unknown[]) decodeSnapshotValue(row, false)
+    }
+  } catch {
+    return { kind: "corrupt", reason: "invalid snapshot binary value" }
   }
   return {
     kind: "valid",
@@ -237,6 +481,13 @@ function parsePerDbSnapshot(value: unknown): DbSnapshot | null {
   if (!entry.tables || typeof entry.tables !== "object" || Array.isArray(entry.tables)) return null
   const tables = entry.tables as Record<string, unknown>
   if (Object.values(tables).some((rows) => !Array.isArray(rows))) return null
+  try {
+    for (const rows of Object.values(tables)) {
+      for (const row of rows as unknown[]) decodeSnapshotValue(row, false)
+    }
+  } catch {
+    return null
+  }
   return { version: entry.version, tables: tables as Record<string, unknown[]> }
 }
 

@@ -16,7 +16,10 @@ import fs from "node:fs"
 import { cliEsbuildOptions, loadEsbuild } from "./esbuild-shared.mjs"
 import { missingNativeHosts, nativeHostFiles } from "./native-host-files.mjs"
 import { stagePiExtension } from "./lib/stage-pi-extension.mjs"
-import { stageBuiltinPluginAssets } from "./lib/stage-builtin-plugin-assets.mjs"
+import {
+  BUILTIN_PLUGIN_ASSET_DIR,
+  stageBuiltinPluginAssets,
+} from "./lib/stage-builtin-plugin-assets.mjs"
 import { pruneSidecarResidue } from "./lib/prune-sidecar-residue.mjs"
 
 const root = path.dirname(fileURLToPath(import.meta.url)) + "/../.."
@@ -42,6 +45,22 @@ pruneSidecarResidue({ outDir: outdir, log: (line) => console.log(line) })
 stageAstGrep({ outDir: outdir })
 
 if (jsOnly) {
+  // A `dist/sidecar/pi-extension/` staged by an earlier full build shadows the
+  // repo's own `sidecar/pi-extension/` in the runtime walk-up, exactly like the
+  // bundled host `pruneSidecarResidue` sweeps — except this one keeps loading.
+  // A js-only bundle is a dev artifact, so drop the staged copy and let the
+  // walk-up reach the live source file (and its pin) instead of an extension
+  // frozen at the date of the last full build.
+  fs.rmSync(path.join(outdir, "sidecar", "pi-extension"), { recursive: true, force: true })
+  // Refresh built-in plugin chunks when the generated `public/` tree already
+  // exists — a plain copy that keeps restored plugins (cognia-visualize & co.)
+  // working under a js-only dist. Never trigger `plugin:builtin:build` here:
+  // a missing tree means it was never run, and "--js-only" is the flag that
+  // promises not to pay for a full asset build.
+  if (fs.existsSync(path.join(root, "public", BUILTIN_PLUGIN_ASSET_DIR))) {
+    const staged = stageBuiltinPluginAssets({ root, outDir: outdir })
+    console.log(`build-cli: staged ${staged.pluginIds.length} built-in plugin chunk(s)`)
+  }
   console.log(`build-cli: wrote ${path.relative(root, outdir)}/cognia-agent.mjs (JavaScript only)`)
   process.exit(0)
 }

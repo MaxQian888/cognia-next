@@ -8,7 +8,7 @@ import nodeFs from "node:fs"
 import path from "node:path"
 
 import { processDocumentAsync as realProcess } from "@cognia/document/document-processor"
-import type { ProcessedDocument } from "@/types/document/document"
+import type { ProcessedDocument } from "@cognia/document/types"
 
 export interface RichDocDeps {
   readFileBytes?: (absPath: string) => ArrayBuffer
@@ -20,7 +20,8 @@ export interface RichDocDeps {
   ) => Promise<ProcessedDocument>
 }
 
-export type RichDocResult = { ok: true; text: string } | { ok: false }
+export type RichDocResult =
+  { ok: true; text: string; sourceSegments?: ProcessedDocument["sourceSegments"] } | { ok: false }
 
 function toArrayBuffer(buf: Buffer): ArrayBuffer {
   return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer
@@ -50,7 +51,11 @@ export async function extractRichDocBlock(
     const processed = await processDocumentAsync(ref, path.basename(ref), data)
     const text = (processed.content ?? "").trim()
     if (!text) return { ok: false }
-    return { ok: true, text: `<file path="${ref}">\n${text}\n</file>` }
+    return {
+      ok: true,
+      text: `<file path="${ref}">\n${text}\n</file>`,
+      ...(processed.sourceSegments ? { sourceSegments: processed.sourceSegments } : {}),
+    }
   } catch {
     return { ok: false }
   }

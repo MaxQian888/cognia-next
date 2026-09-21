@@ -56,6 +56,32 @@ describe("transcript", () => {
     ])
   })
 
+  it("stores imported ids with portable filenames", () => {
+    const m = memFs()
+    appendTranscript(HOME, "import:codex:id", { role: "user", content: "resume" }, m.fsx, 1)
+    expect([...m.files.keys()][0]).toBe(`${HOME}/sessions/import%3Acodex%3Aid.jsonl`)
+    expect(readTranscript(HOME, "import:codex:id", m.fsx)).toHaveLength(1)
+  })
+
+  it("preserves versioned structured handoff history when appending", () => {
+    const m = memFs()
+    const parts = [
+      { type: "file" as const, url: "file:///tmp/report.txt", mediaType: "text/plain" },
+    ]
+    appendTranscript(
+      HOME,
+      "rich",
+      { role: "user", content: "report", id: "source-id", schemaVersion: 1, parts },
+      m.fsx,
+      1
+    )
+    expect(readTranscript(HOME, "rich", m.fsx)[0]).toMatchObject({
+      id: "source-id",
+      schemaVersion: 1,
+      parts,
+    })
+  })
+
   it("creates the sessions dir before writing", () => {
     const m = memFs()
     appendTranscript(HOME, "s1", { role: "user", content: "x" }, m.fsx, 1)

@@ -204,11 +204,14 @@ describe("capabilitiesForProtocol", () => {
     expect(new Set(caps).size).toBe(caps.length)
   })
 
-  it("claims nothing for a protocol nothing describes", () => {
-    // An unknown protocol has no manifest row, so every capability is
-    // `unknown` — and `unknown` is never usable. Answering with a base set here
-    // is how an unrecognized backend used to be credited with streaming.
-    expect(capabilitiesForProtocol("telepathy")).toEqual([])
+  it("claims no protocol-derived capability for a protocol nothing describes", () => {
+    // An unknown protocol has no manifest row, so every protocol-described
+    // capability is `unknown` — and `unknown` is never usable. Answering with a
+    // base set here is how an unrecognized backend used to be credited with
+    // streaming. The one exception is `hooks.lifecycle`: it is a HOST facility
+    // (the CLI wraps any external turn with lifecycle hooks regardless of
+    // protocol), so it resolves from host facts even with no manifest row.
+    expect(capabilitiesForProtocol("telepathy")).toEqual(["hooks.lifecycle"])
     expect(capabilitiesForProtocol(undefined)).toEqual([])
   })
 })

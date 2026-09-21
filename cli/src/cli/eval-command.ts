@@ -42,6 +42,10 @@ export interface EvalCommandDeps {
   resolveConfig(): Promise<import("../config/schema").ResolvedConfig>
   /** Capture seam for live recording; injected by tests to avoid opening a socket. */
   recordSession: typeof import("../eval/replay/fixture-maintenance").recordSession
+  /** Wall clock; injected so a routing report is reproducible in tests. */
+  now(): number
+  /** Process environment the live confirmation rule reads. */
+  env(): Readonly<Record<string, string | undefined>>
 }
 
 const HELP = `Usage:
@@ -54,6 +58,29 @@ const HELP = `Usage:
   cognia eval replay <fixture> [--runtime] [--allow-recorded] [--password <password>] [--platform <headless|tauri>]
   cognia eval record <fixture> --live --password <password> --output <path>
   cognia eval refresh <fixture> [--password <password>] [--output <path>]
+  cognia eval routing --fake [--seed <n>] [--sessions <n>] [--output <path>]
+  cognia eval routing --live --samples <file> [--settings <file>] [--seed <n>] [--output <path>]
+`
+
+const ROUTING_HELP = `Usage:
+  cognia eval routing --fake [options]
+  cognia eval routing --live --samples <file> [options]
+
+Trains, calibrates and gates the learned router (ADR-0188 B6) and prints the
+report as JSON.
+
+  --fake                generate the sample set deterministically from a seed.
+                        No model, no provider, no money; the report is labelled
+                        "simulated" and claims nothing about quality or saving.
+  --live                read samples that really happened from --samples. Under
+                        the same confirmation rule as the live smoke: it needs
+                        the user's settings export and the shared $5 ledger cap.
+  --samples <file>      routing sample export (Evaluation → Routing → Export)
+  --settings <file>     settings export; or set the live-smoke settings variable
+  --seed <n>            seeds the calibration draw and the bootstrap (default 1)
+  --sessions <n>        simulated conversations to generate (--fake only)
+  --iterations <n>      bootstrap replicates
+  --output <path>       also write the report JSON to this path
 `
 
 async function readJson(pathname: string): Promise<unknown> {
@@ -101,6 +128,101 @@ const defaultDeps: EvalCommandDeps = {
   waitForInterrupt,
   resolveConfig,
   recordSession,
+  now: Date.now,
+  env: () => process.env,
+}
+
+/** A whole-number flag, refusing anything that is not one. */
+function intFlag(args: ParsedArgs, name: string): number | undefined {
+  const raw = stringFlag(args, name)
+  if (raw === undefined) return undefined
+  const value = Number(raw)
+  if (!Number.isInteger(value)) throw new Error(`--${name} must be a whole number, got ${raw}`)
+  return value
+}
+
+/**
+ * `cognia eval routing` (ADR-0188 B6 WP-F2): train, calibrate and gate the
+ * learned router over a sample set.
+ *
+ * The two modes are mutually exclusive on purpose, exactly like the live
+ * smoke's: a report is either simulated or live, never a blend whose numbers
+ * could be read as the other. `--live` answers to the same confirmation rule
+ * as the smoke — the user's settings export plus the shared $5 ledger cap —
+ * and additionally refuses a simulated sample file, because a live report may
+ * not be built from generated rows (EVAL-04).
+ *
+ * Exit codes follow the rest of this command: 0 when the experiment ran, 2 for
+ * a refusal the operator can fix, 1 for a usage or read error.
+ */
+async function runRoutingSubcommand(
+  args: ParsedArgs,
+  out: OutputSink,
+  deps: EvalCommandDeps
+): Promise<number> {
+  if (boolFlag(args, "help") || boolFlag(args, "h")) {
+    out.write(ROUTING_HELP)
+    return 0
+  }
+  const fake = boolFlag(args, "fake")
+  const live = boolFlag(args, "live")
+  if (fake === live) {
+    out.error(`eval routing needs exactly one of --fake or --live\n${ROUTING_HELP}`)
+    return 1
+  }
+  const seed = intFlag(args, "seed") ?? 1
+  const iterations = intFlag(args, "iterations")
+  const sessions = intFlag(args, "sessions")
+  const createdAt = new Date(deps.now()).toISOString()
+  const experiment = await import("@/lib/ai/eval/routing-experiment")
+
+  let result: Awaited<ReturnType<typeof experiment.runSimulatedRoutingExperiment>>
+  let cap: { capUsd: string; settingsPath: string; samplesPath: string } | null = null
+
+  if (fake) {
+    result = await experiment.runSimulatedRoutingExperiment({
+      seed,
+      createdAt,
+      ...(sessions === undefined ? {} : { sessionCount: sessions }),
+      ...(iterations === undefined ? {} : { iterations }),
+    })
+  } else {
+    const guard = await import("@/lib/router-fusion/eval/routing-live-guard")
+    const decision = guard.checkRoutingLiveRun({
+      env: deps.env(),
+      settingsPath: stringFlag(args, "settings") ?? null,
+      samplesPath: stringFlag(args, "samples") ?? args.positionals[0] ?? null,
+    })
+    if (!decision.ok) {
+      out.error(`${decision.code}: ${decision.message}`)
+      return 2
+    }
+    const rows = await experiment.parseRoutingSamples(await deps.readJson(decision.samplesPath), {
+      now: deps.now(),
+    })
+    const { sampleSetLabel } = await import("@/lib/router-fusion/eval/routing-sample")
+    const labelCheck = guard.checkRoutingLiveSamples(sampleSetLabel(rows))
+    if (!labelCheck.ok) {
+      out.error(`${labelCheck.code}: ${labelCheck.message}`)
+      return 2
+    }
+    cap = {
+      capUsd: decision.capUsd,
+      settingsPath: decision.settingsPath,
+      samplesPath: decision.samplesPath,
+    }
+    result = await experiment.runRecordedRoutingExperiment(rows, {
+      seed,
+      createdAt,
+      ...(iterations === undefined ? {} : { iterations }),
+    })
+  }
+
+  const payload = cap ? { ...result.report, live: cap } : result.report
+  const output = stringFlag(args, "output")
+  if (output) await deps.writeJson(output, payload)
+  out.json(payload)
+  return 0
 }
 
 function parseDocument(value: unknown): CliEvalProjectDocument {
@@ -216,11 +338,16 @@ export async function evalCommand(
   const out = options.out ?? realOutput
   const deps = { ...defaultDeps, ...overrides }
   const target = args.positionals[0]
-  if (!args.subcommand || !target) {
+  // `routing` takes its inputs from flags, so it is the one subcommand with no
+  // required positional.
+  if (!args.subcommand || (!target && args.subcommand !== "routing")) {
     out.error(HELP)
     return 1
   }
   try {
+    if (args.subcommand === "routing") {
+      return await runRoutingSubcommand(args, out, deps)
+    }
     if (args.subcommand === "preflight") {
       const document = parseDocument(await deps.readJson(target))
       const verified = await deps.preflightProject(document.project, target)

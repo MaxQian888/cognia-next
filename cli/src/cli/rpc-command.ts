@@ -15,16 +15,18 @@ import { randomUUID } from "node:crypto"
 import os from "node:os"
 
 import type { ParsedArgs } from "./args"
-import { stringFlag } from "./args"
+import { boolFlag, stringFlag } from "./args"
 import type { OutputSink } from "./output"
 import { realOutput } from "./output"
 import { loadConfig as defaultLoadConfig, resolveHome } from "../config/load"
+import { configureCliLogging as defaultConfigureLogging } from "../config/cli-logging"
 import { createAgentRpcServer } from "../agent/rpc/server"
 import { createAgentRuntimeService } from "../agent/rpc/runtime-service"
 
 export interface RpcCommandDeps {
   out?: OutputSink
   loadConfig?: typeof defaultLoadConfig
+  configureLogging?: typeof defaultConfigureLogging
   createService?: typeof createAgentRuntimeService
   createServer?: typeof createAgentRpcServer
 }
@@ -64,6 +66,14 @@ export async function rpcCommand(args: ParsedArgs, deps: RpcCommandDeps = {}): P
   const home = resolveHome(process.env, os.homedir())
   let service: ReturnType<typeof createAgentRuntimeService> | undefined
 
+  // stdout is the JSON-RPC wire: a single library `[INFO]` line on it breaks
+  // client framing (the default console transport writes there). Route every
+  // diagnostic to stderr — same headless surface `run` uses — before the
+  // service boots the plugin/external-agent stack that produces the noise.
+  const restoreLogging = (deps.configureLogging ?? defaultConfigureLogging)({
+    surface: "headless",
+    verbose: boolFlag(args, "verbose") || boolFlag(args, "debug"),
+  })
   try {
     service = (deps.createService ?? createAgentRuntimeService)({
       config: runtimeConfig,
@@ -86,5 +96,7 @@ export async function rpcCommand(args: ParsedArgs, deps: RpcCommandDeps = {}): P
     const message = err instanceof Error ? err.message : String(err)
     process.stderr.write(JSON.stringify({ level: "error", message }) + "\n")
     return 1
+  } finally {
+    restoreLogging()
   }
 }

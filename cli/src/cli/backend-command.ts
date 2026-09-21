@@ -11,6 +11,7 @@ import {
   runtimeHomeFor,
 } from "../runtime/external/dsh-installer"
 import type { DshProfileId } from "@/types/agent/dsh-runtime-channel"
+import { getPresetConfig } from "@/lib/ai/agent/external/presets"
 
 /**
  * `cognia-agent backend <install|doctor|remove> <backend>` — manage runtimes
@@ -70,6 +71,20 @@ export async function backendCommand(
     return 1
   }
   if (!SUPPORTED_BACKENDS.has(backend)) {
+    // Naming a real external agent preset is not a typo: the user installs and
+    // owns that executable, so there is no Cognia-managed runtime home to
+    // install, doctor, or remove. Say so instead of reporting it as unknown.
+    const preset = getPresetConfig(backend)
+    if (preset) {
+      const ownCli = preset.process?.command
+      ctx.out.error(
+        `"${backend}" is a user-installed external agent` +
+          (ownCli ? ` (managed by its own CLI: \`${ownCli}\`)` : "") +
+          `; \`backend\` only manages Cognia-installed runtimes ` +
+          `(${[...SUPPORTED_BACKENDS].sort().join(", ")})`
+      )
+      return 1
+    }
     ctx.out.error(
       `unknown backend ${backend}; supported: ${[...SUPPORTED_BACKENDS].sort().join(", ")}`
     )

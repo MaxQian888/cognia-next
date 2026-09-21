@@ -258,7 +258,9 @@ export async function runCliSubagent(
   // desktop's host-side injection, and the CLI's own `hook-runner` is wired
   // into the TUI only. Identity marks it a subagent so an `agents: "subagent"`
   // selector scopes to exactly these turns.
-  const hooks = (deps.resolveHooks ?? (() => resolveCliHooksConfig({ home: deps.home })))()
+  const hooks = (
+    deps.resolveHooks ?? (() => resolveCliHooksConfig({ home: deps.home, cwd: deps.cwd }))
+  )()
   if (hasAnyHookGroup(hooks)) sendOptions.hooks = hooks
   sendOptions.agentKind = "subagent"
   sendOptions.agentRef = def.id

@@ -295,6 +295,73 @@ describe("createAgentRuntimeService", () => {
     await service.close()
   })
 
+  it("steers an in-flight turn through the live provider session adapter", async () => {
+    let release!: () => void
+    let entered!: () => void
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const turnEntered = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    const steer = jest.fn(async (_text: string) => {})
+    const liveSession = {
+      sessionId: "provider-1",
+      steer,
+      close: jest.fn(async () => {}),
+    }
+    const runTurn = jest.fn(async (params: UnifiedTurnParams): Promise<UnifiedTurnResult> => {
+      // Populate the lease the way runUnifiedTurn does — the steer channel
+      // lives on this provider session, not the claude_session_control path.
+      params.providerSession?.session("test-key", () => liveSession as never)
+      entered()
+      await blocked
+      return {
+        result: {
+          schemaVersion: 1,
+          type: "result",
+          status: "completed",
+          sessionId: params.sessionId ?? "session-1",
+          runId: "run-1",
+          turnId: "turn-1",
+          attemptId: "attempt-1",
+          text: "done",
+          backend: "builtin",
+          model: "test-model",
+          capabilities: [],
+          session: { persisted: true },
+        },
+        envelopes: [],
+      }
+    })
+    const service = createAgentRuntimeService({
+      config: { ...DEFAULT_RESOLVED_CONFIG, cwd: home, model: "test-model" },
+      home,
+      runTurn,
+      mintSessionId: () => "session-1",
+    })
+    await service.handle("session/create", {}, context as never)
+    const run = service.handle(
+      "turn/run",
+      { sessionId: "session-1", input: "start", commandId: "run-1" },
+      context as never
+    )
+    // The turn must be in flight — steering an idle session is a usage error.
+    await turnEntered
+    const steered = await service.handle(
+      "turn/steer",
+      { sessionId: "session-1", input: "adjust course", commandId: "steer-1" },
+      context as never
+    )
+
+    expect(steer).toHaveBeenCalledWith("adjust course")
+    expect(steered).toMatchObject({ commandId: "steer-1", accepted: true })
+
+    release()
+    await run
+    await service.close()
+  })
+
   it("fails closed on unsupported handoff and deduplicates worker session creation", async () => {
     const handoff = {
       envelopeVersion: 1 as const,

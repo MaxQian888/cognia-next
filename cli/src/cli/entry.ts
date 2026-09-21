@@ -12,7 +12,11 @@
  */
 
 import { selectRole } from "./role"
-import { normalizeProcessExitCode, runProcessEntrypoint } from "./entry-runtime"
+import {
+  installClosedPipeHandler,
+  normalizeProcessExitCode,
+  runProcessEntrypoint,
+} from "./entry-runtime"
 
 async function boot(): Promise<number> {
   const role = selectRole(process.env)
@@ -65,6 +69,12 @@ async function boot(): Promise<number> {
     process.stdout.write(`${JSON.stringify({ ok })}\n`)
     return ok ? 0 : 1
   }
+
+  // Public CLI only: `run … | head` closes stdout mid-stream, and an
+  // unhandled EPIPE would crash the turn with a stack dump. Sidecar roles
+  // keep Node's default — their stdout IS a protocol wire, so a dead consumer
+  // SHOULD surface as a process failure to the supervisor.
+  installClosedPipeHandler(process)
 
   // Before the preamble, and before anything from `@/lib`: this process owns a
   // process table and nothing in the shared graph can tell by looking. Without

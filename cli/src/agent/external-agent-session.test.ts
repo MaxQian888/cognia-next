@@ -1447,6 +1447,44 @@ describe("external-agent turn bounds", () => {
     expect(manager.removeAgent).not.toHaveBeenCalled()
   })
 
+  it("clears a stale registration left by a failed init before retrying", async () => {
+    // The manager registers the id, then fails before the session can mark
+    // init done — the residue the RPC turn path produced: every retry died on
+    // "Agent already exists" instead of the real cause.
+    let registered = false
+    let addCalls = 0
+    const { manager } = fakeManager()
+    manager.addAgent = jest.fn(async () => {
+      addCalls += 1
+      if (registered) throw new Error("Agent already exists: cli-external-retry-reg")
+      registered = true
+      if (addCalls === 1) throw new Error("connect timed out")
+    })
+    manager.removeAgent = jest.fn(async () => {
+      registered = false
+    })
+    const session = createExternalAgentSession({
+      disableToolHost: true,
+      config: baseConfig,
+      sessionId: "retry-reg",
+      manager,
+      transcriptFs: memoryTranscript().fs,
+    })
+
+    await expect(session.send("go", { gate: async () => ({ decision: "allow" }) })).rejects.toThrow(
+      "connect timed out"
+    )
+    expect(manager.removeAgent).not.toHaveBeenCalled()
+
+    // The retry must drop the stale row before re-registering — without that
+    // this send would die on the duplicate id rather than recovering.
+    await session.send("go", { gate: async () => ({ decision: "allow" }) })
+
+    expect(manager.removeAgent).toHaveBeenCalledWith("cli-external-retry-reg")
+    expect(manager.addAgent).toHaveBeenCalledTimes(2)
+    await session.close()
+  })
+
   it("classifies a thrown execution failure instead of letting it read as a dead session", async () => {
     const manager: ExternalAgentSessionManager = {
       addAgent: jest.fn(async () => undefined),

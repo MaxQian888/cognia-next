@@ -260,7 +260,16 @@ export async function main(argv = process.argv.slice(2)) {
         cols: geometry.columns,
         rows: geometry.rows,
         cwd: workspace,
-        env: { ...process.env, TERM: "xterm-256color", NO_COLOR: "1", COGNIA_HOME: home },
+        env: {
+          ...process.env,
+          TERM: "xterm-256color",
+          NO_COLOR: "1",
+          COGNIA_HOME: home,
+          // The step expectations match English copy ("Do you trust", "Ask, run").
+          // A zh-CN user config would render Chinese strings the harness never
+          // matches and stall every wait — pin the locale for the pty only.
+          COGNIA_LOCALE: "en",
+        },
       }
     )
     await converse({

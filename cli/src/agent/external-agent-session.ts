@@ -263,6 +263,10 @@ export interface ExternalAgentSessionManager {
   closeSession?: (agentId: string, sessionId: string) => Promise<void>
   cancel(agentId: string, sessionId: string): Promise<void>
   removeAgent(agentId: string): Promise<void>
+  /** Deliver input into the agent's in-flight turn (Pi `steer`, Codex
+   * `turn/steer`). Optional: adapters without a steer channel leave it
+   * undefined and the session answers "cannot steer". */
+  steerSession?(agentId: string, sessionId: string | undefined, text: string): Promise<void>
 }
 
 function modelConfigOption(configOptions: AcpConfigOption[] | undefined) {
@@ -677,6 +681,13 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
   let mcpServers: AcpMcpServerConfig[] | undefined
   let initialized = params.connection !== undefined
   let resolvedPresetId = params.connection?.presetId ?? backend
+  // Whether `ensureAgent` has already attempted a registration. A retry that
+  // reaches the manager again means an earlier attempt failed AFTER the row
+  // was added — `initialized` never flipped but the id stays registered, and
+  // `addAgent` throws on a duplicate, which would mask the real failure on
+  // every retry. The flag scopes the clear to retries only, so the first
+  // attempt's behavior is untouched.
+  let agentRegistrationAttempted = params.connection !== undefined
   let closed = false
   // Seeded from the recorded link so a `/resume` continues the agent's OWN
   // session instead of silently starting an empty one behind a full transcript.
@@ -771,6 +782,16 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
         },
       }
     }
+    // Re-registration after a failed attempt must first drop the residue the
+    // earlier attempt left behind — the manager keeps the id on a partial
+    // failure, so a bare `addAgent` would throw "already exists" and hide the
+    // original error forever. `ownsAgent` scopes this to agents we created: a
+    // connection-provided id belongs to whoever handed it in and is never ours
+    // to remove. Same remove-before-add the TUI's reconnect performs.
+    if (ownsAgent && agentRegistrationAttempted) {
+      await manager.removeAgent(agentId).catch(() => undefined)
+    }
+    agentRegistrationAttempted = true
     await manager.addAgent(config)
     negotiated = manager.getAgentCapabilities?.(agentId) ?? negotiated
     supportsMcp = canHostCogniaTools(negotiated, config.protocol)
@@ -1221,7 +1242,16 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
         appendTranscript(
           home,
           sessionId,
-          { role: "user", content: prompt },
+          {
+            role: "user",
+            content: prompt,
+            ...(turn.attachmentParts?.length
+              ? {
+                  schemaVersion: 1 as const,
+                  parts: [{ type: "text" as const, text: prompt }, ...turn.attachmentParts],
+                }
+              : {}),
+          },
           params.transcriptFs,
           now()
         )
@@ -1650,6 +1680,27 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       } catch {
         return false
       }
+    },
+    /**
+     * Pi `steer` / Codex `turn/steer`: inject input into the turn currently
+     * executing on the external session. The Cognia session id is not the
+     * agent's thread id — `externalSessionId` is. Same outbound PII gate as
+     * `execute`: steered text reaches the provider verbatim.
+     */
+    async steer(text) {
+      if (!initialized || !externalSessionId) {
+        throw new Error("no live external session to steer")
+      }
+      if (!manager.steerSession) {
+        throw new Error("external agent does not support steering an active turn")
+      }
+      if (!hasNoLeakingPiiDeep({ prompt: text })) {
+        throw new RunAndCaptureError(
+          "External agent input blocked by the outbound PII gate",
+          "session_error"
+        )
+      }
+      await manager.steerSession(agentId, externalSessionId, text)
     },
     isLive() {
       return initialized && !closed

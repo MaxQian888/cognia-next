@@ -76,6 +76,38 @@ describe("rpcCommand", () => {
     expect(serve).toHaveBeenCalledTimes(1)
   })
 
+  it("routes library logs to stderr for the life of the server", async () => {
+    // stdout is the JSON-RPC wire — a single `[INFO]` from the plugin or
+    // external-agent stack on it breaks client framing. The command must
+    // install the CLI sink before the service boots and restore it after.
+    const calls: string[] = []
+    const restore = jest.fn(() => {
+      calls.push("restore")
+    })
+    const configureLogging = jest.fn(() => {
+      calls.push("configure")
+      return restore
+    })
+    const serve = jest.fn(async () => {
+      calls.push("serve")
+    })
+    const createService = jest.fn(() => {
+      calls.push("service")
+      return { close: jest.fn() } as never
+    })
+
+    const code = await rpcCommand(makeArgs({ flags: { verbose: true } }), {
+      loadConfig: () => ({}) as never,
+      configureLogging,
+      createService,
+      createServer: () => ({ serve }) as never,
+    })
+
+    expect(code).toBe(0)
+    expect(configureLogging).toHaveBeenCalledWith({ surface: "headless", verbose: true })
+    expect(calls).toEqual(["configure", "service", "serve", "restore"])
+  })
+
   it("returns 1 and emits a structured diagnostic when startup fails", async () => {
     const write = jest.spyOn(process.stderr, "write").mockImplementation(() => true)
     const close = jest.fn(async () => undefined)

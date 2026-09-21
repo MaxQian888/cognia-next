@@ -861,10 +861,19 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
         return result(
           await runCommand(session, method, params, async (commandId) => {
             if (!session.busy) throw structured("usage_error", "no active turn to steer")
-            await steerSession(session.id, lowerInput(params.input), undefined, {
-              priority: "now",
-              commandId,
-            })
+            const input = lowerInput(params.input)
+            // External agents steer through their own adapter (Pi `steer`,
+            // Codex `turn/steer`) — the claude_session_control channel below is
+            // the built-in backend's and cannot reach a Pi or Codex thread.
+            const liveSteer = session.lease.current?.steer
+            if (liveSteer) {
+              await liveSteer.call(session.lease.current, input)
+            } else {
+              await steerSession(session.id, input, undefined, {
+                priority: "now",
+                commandId,
+              })
+            }
             return receipt(commandId)
           })
         )

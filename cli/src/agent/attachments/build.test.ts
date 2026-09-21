@@ -151,3 +151,90 @@ describe("buildAttachmentContent", () => {
 })
 
 type SendContentBlockArray = Array<{ type: string } & Record<string, unknown>>
+
+describe("durable CLI attachment sources", () => {
+  it("retains full text beyond prompt projection and writes only provenance into transcript parts", async () => {
+    const dir = nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), "cognia-source-"))
+    try {
+      const text = "a".repeat(270_000) + "tail evidence"
+      nodeFs.writeFileSync(nodePath.join(dir, "large.txt"), text)
+      const persistSource = jest.fn(
+        async (_source: import("./build").CliAttachmentSource) => undefined
+      )
+      const built = await buildAttachmentContent("read @large.txt", dir, {
+        provider: "anthropic",
+        model: "test",
+        isAnthropic: true,
+        anthropicKey: () => null,
+        persistSource,
+      })
+      expect(built.content).toContain("Selected excerpts")
+      expect(String(built.content).length).toBeLessThan(20_000)
+      const source = persistSource.mock
+        .calls[0]?.[0] as unknown as import("./build").CliAttachmentSource
+      expect(source.extractedContent.segments[0].text).toBe(text)
+      expect(await source.blob.text()).toBe(text)
+      expect(built.attachmentParts?.[0]).toMatchObject({
+        type: "file",
+        extractedContent: { attachmentId: source.assetId, status: "ready" },
+      })
+      expect(built.attachmentParts?.[0]).not.toHaveProperty("blob")
+      expect(built.attachmentParts?.[0]).not.toHaveProperty("attachmentOriginal")
+    } finally {
+      nodeFs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("preserves source locators and refuses to dispatch after storage failure", async () => {
+    const dir = nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), "cognia-source-"))
+    try {
+      nodeFs.writeFileSync(nodePath.join(dir, "sheet.xlsx"), "binary")
+      const persistSource = jest.fn(
+        async (_source: import("./build").CliAttachmentSource) => undefined
+      )
+      const options: BuildAttachmentDeps = {
+        ...baseDeps,
+        persistSource,
+        extractRichDocBlock: async () => ({
+          ok: true,
+          text: "sheet value",
+          sourceSegments: [
+            { id: "s1", text: "value", locator: { type: "sheet", sheet: "Revenue", range: "A1" } },
+          ],
+        }),
+      }
+      await buildAttachmentContent("read @sheet.xlsx", dir, options)
+      expect(persistSource.mock.calls[0]?.[0].extractedContent.segments[0].locator).toEqual({
+        type: "sheet",
+        sheet: "Revenue",
+        range: "A1",
+      })
+      options.persistSource = async () => {
+        throw new Error("source_store_failed")
+      }
+      await expect(buildAttachmentContent("read @sheet.xlsx", dir, options)).rejects.toThrow(
+        "source_store_failed"
+      )
+    } finally {
+      nodeFs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("marks native binary sources as unextracted without inventing text evidence", async () => {
+    const dir = nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), "cognia-source-"))
+    try {
+      nodeFs.writeFileSync(nodePath.join(dir, "source.pdf"), "%PDF sample")
+      const persistSource = jest.fn(
+        async (_source: import("./build").CliAttachmentSource) => undefined
+      )
+      await buildAttachmentContent("read @source.pdf", dir, { ...baseDeps, persistSource })
+      expect(persistSource.mock.calls[0]?.[0].extractedContent).toMatchObject({
+        status: "partial",
+        segments: [],
+        issues: ["native-source-without-text-extraction"],
+      })
+    } finally {
+      nodeFs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})

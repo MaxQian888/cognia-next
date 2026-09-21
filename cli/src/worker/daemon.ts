@@ -263,6 +263,12 @@ export interface StopDaemonResult {
   profile: string
   /** True when the daemon had to be killed after ignoring SIGTERM. */
   forced?: boolean
+  /**
+   * True when there was no live daemon to stop (never started, or only a stale
+   * pidfile). Distinguishes "stop was a no-op" from a failed stop so callers can
+   * treat the idempotent case as success instead of `stopped:false` ambiguity.
+   */
+  notRunning?: boolean
 }
 
 export async function stopWorkerDaemon(
@@ -274,10 +280,10 @@ export async function stopWorkerDaemon(
   const normalized = normalizeProfile(profile)
   const paths = daemonPaths(home, normalized)
   const meta = readDaemonMeta(paths, stateIo(io))
-  if (!meta) return { stopped: false, profile: normalized }
+  if (!meta) return { stopped: false, notRunning: true, profile: normalized }
   if (!rt.isAlive(meta.pid)) {
     clearDaemonState(paths, stateIo(io))
-    return { stopped: false, pid: meta.pid, profile: normalized }
+    return { stopped: false, notRunning: true, pid: meta.pid, profile: normalized }
   }
 
   rt.kill(meta.pid, "SIGTERM")

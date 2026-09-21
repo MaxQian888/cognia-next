@@ -471,22 +471,22 @@ describe("searchConfigSchema", () => {
         providerHealth: { enabled: false, failureThreshold: 5, cooldownMs: 60_000 },
       }).success
     ).toBe(true)
-    expect(
-      searchConfigSchema.safeParse({ providerHealth: { failureThreshold: 0 } }).success
-    ).toBe(false)
-    expect(
-      searchConfigSchema.safeParse({ providerHealth: { failureThreshold: 11 } }).success
-    ).toBe(false)
-    expect(
-      searchConfigSchema.safeParse({ providerHealth: { cooldownMs: 4999 } }).success
-    ).toBe(false)
-    expect(
-      searchConfigSchema.safeParse({ providerHealth: { cooldownMs: 600_001 } }).success
-    ).toBe(false)
+    expect(searchConfigSchema.safeParse({ providerHealth: { failureThreshold: 0 } }).success).toBe(
+      false
+    )
+    expect(searchConfigSchema.safeParse({ providerHealth: { failureThreshold: 11 } }).success).toBe(
+      false
+    )
+    expect(searchConfigSchema.safeParse({ providerHealth: { cooldownMs: 4999 } }).success).toBe(
+      false
+    )
+    expect(searchConfigSchema.safeParse({ providerHealth: { cooldownMs: 600_001 } }).success).toBe(
+      false
+    )
     // Strict: unknown keys rejected.
-    expect(
-      searchConfigSchema.safeParse({ providerHealth: { halfOpenProbes: 2 } }).success
-    ).toBe(false)
+    expect(searchConfigSchema.safeParse({ providerHealth: { halfOpenProbes: 2 } }).success).toBe(
+      false
+    )
   })
 
   it("accepts per-provider defaultOptions and stays strict", () => {
@@ -496,6 +496,16 @@ describe("searchConfigSchema", () => {
           tavily: {
             enabled: true,
             defaultOptions: { searchType: "news", maxResults: 3, includeDomains: ["x.com"] },
+          },
+        },
+      }).success
+    ).toBe(true)
+    // Every `Partial<SearchOptions>` field the app can persist must parse here.
+    expect(
+      searchConfigSchema.safeParse({
+        providers: {
+          tavily: {
+            defaultOptions: { safeSearch: "strict", includeRawContent: true },
           },
         },
       }).success

@@ -250,7 +250,21 @@ describe("worker daemon lifecycle", () => {
   })
 
   it("reports nothing to stop when no daemon was ever started", async () => {
-    await expect(stopWorkerDaemon(home, "default")).resolves.toMatchObject({ stopped: false })
+    await expect(stopWorkerDaemon(home, "default")).resolves.toMatchObject({
+      stopped: false,
+      notRunning: true,
+    })
+  })
+
+  it("clears a stale pidfile and reports notRunning when the recorded pid is dead", async () => {
+    const spawn = jest.fn(() => ({ pid: 557, unref: jest.fn() }))
+    await startWorkerDaemon(
+      { home, connectOptions },
+      { spawn: spawn as never, isAlive: () => false }
+    )
+    const result = await stopWorkerDaemon(home, "default", { isAlive: () => false })
+    expect(result).toMatchObject({ stopped: false, notRunning: true, pid: 557 })
+    expect(readDaemonMeta(daemonPaths(home, "default"))).toBeNull()
   })
 
   it("reads the tail of the daemon log", () => {

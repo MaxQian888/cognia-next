@@ -525,6 +525,184 @@ describe("ensureCliDb", () => {
     }
   })
 
+  it("restores attachment bytes and derived thumbnails after a production table-store restart", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-media-restart-"))
+    const bytes = Uint8Array.from({ length: 140_000 }, (_, index) => index % 251)
+    const media = new FakeTable("messageMedia", [
+      {
+        hash: "source",
+        blob: new Blob([bytes], { type: "application/pdf" }),
+        thumb: new Blob(["preview"], { type: "image/png" }),
+      },
+    ])
+    const options = {
+      home,
+      getDatabase: () => ({ name: "CogniaDB", verno: 82, tables: [media] }),
+      installGlobals: async () => {},
+      whenReady: async () => {},
+      schedule: () => () => {},
+    }
+    try {
+      const first = await ensureCliDb(options)
+      await first.dispose()
+      const tableDirectory = path.join(home, "db.json.tables")
+      const serialized = fs.readFileSync(
+        path.join(tableDirectory, "CogniaDB--messageMedia.json"),
+        "utf8"
+      )
+      expect(serialized.length).toBeLessThan(1000)
+      expect(serialized).not.toContain("chunks")
+      expect(fs.readdirSync(path.join(tableDirectory, "binary"))).toHaveLength(2)
+      media.rows = []
+      const readFileSync = fs.readFileSync
+      const read = jest.spyOn(fs, "readFileSync").mockImplementation(((
+        file: fs.PathOrFileDescriptor,
+        ...args: unknown[]
+      ) => {
+        if (String(file).includes(`${path.sep}binary${path.sep}`))
+          throw new Error("originals must not be materialized during restore")
+        return Reflect.apply(readFileSync, fs, [file, ...args])
+      }) as typeof fs.readFileSync)
+      let restarted: Awaited<ReturnType<typeof ensureCliDb>>
+      try {
+        restarted = await ensureCliDb(options)
+      } finally {
+        read.mockRestore()
+      }
+      const restored = media.rows[0] as { blob: Blob; thumb: Blob }
+      expect(restored.blob).toBeInstanceOf(Blob)
+      expect(restored.blob.type).toBe("application/pdf")
+      expect(new Uint8Array(await restored.blob.arrayBuffer())).toEqual(bytes)
+      expect(await restored.thumb.text()).toBe("preview")
+      const binaryFiles = fs.readdirSync(path.join(tableDirectory, "binary"))
+      const before = binaryFiles.map(
+        (name) => fs.statSync(path.join(tableDirectory, "binary", name)).ino
+      )
+      restarted.scheduleTableFlush("CogniaDB", "messageMedia")
+      await restarted.flush()
+      expect(
+        binaryFiles.map((name) => fs.statSync(path.join(tableDirectory, "binary", name)).ino)
+      ).toEqual(before)
+      // A duplicate flush must not replace the backing inode and invalidate
+      // the Blob already held by the restored database or a source preview.
+      expect(new Uint8Array(await restored.blob.arrayBuffer())).toEqual(bytes)
+      await restarted.dispose()
+    } finally {
+      __resetCliDbForTesting()
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it("rejects same-length corrupted sidecars before clearing a stored table", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-media-corrupt-"))
+    const media = new FakeTable("messageMedia", [{ blob: new Blob(["source"]) }])
+    const options = {
+      home,
+      getDatabase: () => ({ name: "CogniaDB", verno: 82, tables: [media] }),
+      installGlobals: async () => {},
+      whenReady: async () => {},
+      schedule: () => () => {},
+    }
+    try {
+      const first = await ensureCliDb(options)
+      await first.dispose()
+      const binary = path.join(home, "db.json.tables", "binary")
+      fs.writeFileSync(path.join(binary, fs.readdirSync(binary)[0]!), "broken")
+      media.rows = [{ id: "keep" }]
+      await expect(ensureCliDb(options)).rejects.toThrow("corrupt")
+      expect(media.rows).toEqual([{ id: "keep" }])
+    } finally {
+      __resetCliDbForTesting()
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it("round-trips lazy sources through real Dexie reads, updates, cloning, and another snapshot", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-lazy-dexie-"))
+    await installFakeIndexedDb()
+    const name = `LazyMedia-${path.basename(home)}`
+    const open = () => {
+      const db = new Dexie(name)
+      db.version(1).stores({ messageMedia: "hash" })
+      return db
+    }
+    let database = open()
+    const options = {
+      home,
+      getDatabase: () => database,
+      installGlobals: async () => {},
+      whenReady: async () => {
+        await database.open()
+      },
+      schedule: () => () => {},
+    }
+    try {
+      await database.open()
+      await database
+        .table("messageMedia")
+        .put({ hash: "source", blob: new Blob(["source bytes"], { type: "text/plain" }) })
+      const first = await ensureCliDb(options)
+      await first.dispose()
+      await database.table("messageMedia").clear()
+      database.close()
+      database = open()
+      const restarted = await ensureCliDb(options)
+      const table = database.table("messageMedia")
+      const row = await table.get("source")
+      expect(await row.blob.text()).toBe("source bytes")
+      expect(await structuredClone(row).blob.text()).toBe("source bytes")
+      expect(await (await table.toArray())[0].blob.text()).toBe("source bytes")
+      await table.update("source", { lastUsedAt: 2 })
+      await table.put({ ...(await table.get("source")), lastUsedAt: 3 })
+      restarted.scheduleTableFlush(name, "messageMedia")
+      await restarted.flush()
+      expect(await row.blob.text()).toBe("source bytes")
+      expect(await (await table.get("source")).blob.text()).toBe("source bytes")
+      await restarted.dispose()
+      const tableJson = fs.readFileSync(
+        path.join(home, "db.json.tables", `${encodeURIComponent(name)}--messageMedia.json`),
+        "utf8"
+      )
+      expect(JSON.parse(tableJson)[0].blob.$cogniaSnapshotValue.fileRef).toMatch(/^[a-f0-9]{64}$/)
+      const binary = path.join(home, "db.json.tables", "binary")
+      fs.writeFileSync(path.join(binary, fs.readdirSync(binary)[0]!), "changed data")
+      await expect(row.blob.text()).rejects.toThrow()
+    } finally {
+      __resetCliDbForTesting()
+      await database.delete()
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it("retains binary recovery generations and collects them only after every durable reference is gone", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-media-gc-"))
+    const media = new FakeTable("messageMedia", [{ hash: "source", blob: new Blob(["original"]) }])
+    const options = {
+      home,
+      getDatabase: () => ({ name: "CogniaDB", verno: 82, tables: [media] }),
+      installGlobals: async () => {},
+      whenReady: async () => {},
+      schedule: () => () => {},
+    }
+    try {
+      const handle = await ensureCliDb(options)
+      await handle.flush()
+      const binary = path.join(home, "db.json.tables", "binary")
+      expect(fs.readdirSync(binary)).toHaveLength(1)
+      media.rows = []
+      handle.scheduleTableFlush("CogniaDB", "messageMedia")
+      await handle.flush()
+      expect(fs.readdirSync(binary)).toHaveLength(1)
+      handle.scheduleTableFlush("CogniaDB", "messageMedia")
+      await handle.flush()
+      expect(fs.readdirSync(binary)).toHaveLength(0)
+      await handle.dispose()
+    } finally {
+      __resetCliDbForTesting()
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+
   it.each([process.platform, "win32"])(
     "yields during durable table writes and serializes queued flushes on %s",
     async (platform) => {

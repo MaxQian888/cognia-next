@@ -297,6 +297,7 @@ describe("createCliContextAssembler — turn context", () => {
     const withRefs = makeAssembler({
       buildContent: async () => ({
         content: "hi",
+        attachmentParts: [{ type: "file", mediaType: "text/plain", url: "", filename: "a.txt" }],
         imageCount: 1,
         documentCount: 0,
         injectedFiles: ["a.txt"],
@@ -314,6 +315,10 @@ describe("createCliContextAssembler — turn context", () => {
       failed: [],
       skipped: [],
     })
+
+    expect((await withRefs.resolveTurn("hi @a.txt", session)).attachmentParts).toEqual([
+      { type: "file", mediaType: "text/plain", url: "", filename: "a.txt" },
+    ])
 
     const plain = makeAssembler()
     const plainSession = await plain.resolveSession()

@@ -13,6 +13,7 @@
 import os from "node:os"
 import path from "node:path"
 import fs from "node:fs"
+import { createHash, randomUUID } from "node:crypto"
 
 import { getDb, whenSeeded } from "@/lib/db/schema"
 import { createLogger } from "@/packages/logging/src/core"
@@ -30,6 +31,8 @@ import {
   type StoreLock,
 } from "./store-lock"
 import {
+  decodeSnapshotRowsAsync,
+  encodeSnapshotRows,
   parseMultiSnapshot,
   restoreMultiSnapshot,
   serializeSnapshot,
@@ -37,6 +40,7 @@ import {
   SnapshotVersionMismatchError,
   type DbLike,
   type SnapshotSource,
+  type SnapshotBinaryStore,
 } from "./snapshot"
 
 export { installFakeIndexedDb }
@@ -336,6 +340,110 @@ function tableFileName(databaseName: string, tableName: string): string {
   return `${encodeURIComponent(databaseName)}--${encodeURIComponent(tableName)}.json`
 }
 
+/** Binary originals do not belong in a JSON string: a supported 500 MiB source
+ * exceeds V8's string limit after base64. Sidecars commit before their row refs. */
+function tableBinaryStore(tableDirectory: string): SnapshotBinaryStore {
+  const directory = path.join(tableDirectory, "binary")
+  const readBlob = async (
+    reference: string,
+    byteLength: number,
+    mediaType: string
+  ): Promise<Blob> => {
+    if (!/^[a-f0-9]{64}$/.test(reference)) throw new Error("invalid binary source reference")
+    const blob = await fs.openAsBlob(path.join(directory, reference), { type: mediaType })
+    if (blob.size !== byteLength) throw new Error("snapshot binary length mismatch")
+    const hash = createHash("sha256")
+    for (let offset = 0; offset < blob.size; offset += 1024 * 1024) {
+      hash.update(new Uint8Array(await blob.slice(offset, offset + 1024 * 1024).arrayBuffer()))
+    }
+    if (hash.digest("hex") !== reference) throw new Error("snapshot binary content mismatch")
+    // Node's direct file-backed Blob rejects structuredClone, which IndexedDB
+    // requires. A native composite Blob shares the backing data lazily while
+    // remaining cloneable; do not turn the source into an ArrayBuffer here.
+    return new Blob([blob], { type: mediaType })
+  }
+  return {
+    readBlob,
+    write: async (value) => {
+      await fs.promises.mkdir(directory, { recursive: true })
+      const temporary = path.join(directory, `.tmp-${randomUUID()}`)
+      const descriptor = await fs.promises.open(temporary, "wx", 0o600)
+      const hash = createHash("sha256")
+      const size = value instanceof Blob ? value.size : value.byteLength
+      try {
+        try {
+          for (let offset = 0; offset < size; offset += 1024 * 1024) {
+            const bytes =
+              value instanceof Blob
+                ? new Uint8Array(await value.slice(offset, offset + 1024 * 1024).arrayBuffer())
+                : value instanceof Uint8Array
+                  ? value.subarray(offset, offset + 1024 * 1024)
+                  : new Uint8Array(value, offset, Math.min(1024 * 1024, size - offset))
+            hash.update(bytes)
+            await descriptor.writeFile(bytes)
+          }
+          await descriptor.sync()
+        } finally {
+          await descriptor.close()
+        }
+        const reference = hash.digest("hex")
+        const destination = path.join(directory, reference)
+        if (fs.existsSync(destination)) {
+          // A restored Blob is backed by this immutable file. Replacing it,
+          // even with identical bytes, invalidates Node's lazy Blob handles.
+          await readBlob(reference, size, "")
+        } else {
+          await replaceFileAsync(temporary, destination)
+        }
+        if (process.platform !== "win32") await syncFileAsync(directory)
+        return reference
+      } finally {
+        await fs.promises.rm(temporary, { force: true }).catch(() => {})
+      }
+    },
+    read: (reference, byteLength) => {
+      if (!/^[a-f0-9]{64}$/.test(reference)) throw new Error("invalid binary source reference")
+      const file = path.join(directory, reference)
+      if (fs.statSync(file).size !== byteLength) throw new Error("snapshot binary length mismatch")
+      const bytes = fs.readFileSync(file)
+      if (createHash("sha256").update(bytes).digest("hex") !== reference)
+        throw new Error("snapshot binary content mismatch")
+      return bytes
+    },
+  }
+}
+
+/** Keep both current and recovery-table generations; a failed flush cannot
+ * collect source bytes that its last durable table or backup still references. */
+async function collectTableBinaryOrphans(tableDirectory: string): Promise<void> {
+  const directory = path.join(tableDirectory, "binary")
+  if (!fs.existsSync(directory)) return
+  const references = new Set<string>()
+  const visit = (value: unknown): void => {
+    if (!value || typeof value !== "object") return
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item)
+      return
+    }
+    const object = value as Record<string, unknown>
+    const envelope = object.$cogniaSnapshotValue as { fileRef?: unknown } | undefined
+    if (envelope && typeof envelope.fileRef === "string") references.add(envelope.fileRef)
+    for (const item of Object.values(object)) visit(item)
+  }
+  try {
+    for (const file of await fs.promises.readdir(tableDirectory)) {
+      if (file.endsWith(".json") || file.endsWith(".json.bak"))
+        visit(JSON.parse(await fs.promises.readFile(path.join(tableDirectory, file), "utf8")))
+    }
+  } catch {
+    return
+  }
+  for (const file of await fs.promises.readdir(directory)) {
+    if (/^[a-f0-9]{64}$/.test(file) && !references.has(file))
+      await fs.promises.rm(path.join(directory, file), { force: true })
+  }
+}
+
 function includedTableNames(source: SnapshotSource): string[] {
   const excluded = new Set(source.excludeTables ?? [])
   return source.db.tables.filter((table) => !excluded.has(table.name)).map((table) => table.name)
@@ -446,7 +554,10 @@ async function restoreTableStore(
       const tableFile = path.join(tableDirectory, tableFileName(source.name, tableName))
       let rows: unknown
       try {
-        rows = JSON.parse(fs.readFileSync(tableFile, "utf8"))
+        rows = await decodeSnapshotRowsAsync(
+          JSON.parse(fs.readFileSync(tableFile, "utf8")),
+          tableBinaryStore(tableDirectory)
+        )
       } catch {
         throw preserve(
           "corrupt",
@@ -487,7 +598,7 @@ async function flushDirtyTables(
     const rows = await table.toArray()
     await writeSnapshotAtomicallyAsync(
       path.join(tableDirectory, tableFileName(databaseName, tableName)),
-      JSON.stringify(rows)
+      JSON.stringify(await encodeSnapshotRows(rows, tableBinaryStore(tableDirectory)))
     )
   }
 
@@ -517,6 +628,7 @@ async function flushDirtyTables(
       },
     } satisfies TableStoreManifest)
   )
+  await collectTableBinaryOrphans(tableDirectory)
 }
 
 /**

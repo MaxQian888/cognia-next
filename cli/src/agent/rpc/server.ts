@@ -113,15 +113,23 @@ export function createAgentRpcServer(options: AgentRpcServerOptions): AgentRpcSe
   let closing: Promise<void> | null = null
   let bufferedBytes = 0
   let lines: ReadlineInterface | null = null
+  // Set on stdin EOF: the client can never answer a callback after that, so
+  // new `client/*` requests reject immediately instead of parking forever.
+  let stdinEnded = false
 
   const context: AgentRpcServiceContext = {
     emit(method, params) {
       return write(makeNotification(method, params))
     },
     requestClient(method, params, callOptions = {}) {
-      if (state !== "ready") {
+      if (state !== "ready" || stdinEnded) {
         return Promise.reject(
-          new AgentRpcHostError(RPC_ERROR_CODES.protocolError, "client is not initialized")
+          new AgentRpcHostError(
+            state === "ready" ? RPC_ERROR_CODES.callbackFailed : RPC_ERROR_CODES.protocolError,
+            state === "ready"
+              ? "client input closed before the callback could be answered"
+              : "client is not initialized"
+          )
         )
       }
       const id = nextClientRequestId++
@@ -381,16 +389,20 @@ export function createAgentRpcServer(options: AgentRpcServerOptions): AgentRpcSe
     )
   }
 
+  function rejectPendingClientRequests(error: Error): void {
+    for (const pending of pendingClientRequests.values()) {
+      if (pending.timer) clearTimeout(pending.timer)
+      pending.abortCleanup?.()
+      pending.reject(error)
+    }
+    pendingClientRequests.clear()
+  }
+
   async function close(error: Error = new Error("connection closed")): Promise<void> {
     if (closing) return closing
     state = "closed"
     closing = (async () => {
-      for (const pending of pendingClientRequests.values()) {
-        if (pending.timer) clearTimeout(pending.timer)
-        pending.abortCleanup?.()
-        pending.reject(error)
-      }
-      pendingClientRequests.clear()
+      rejectPendingClientRequests(error)
       await options.service.close()
       lines?.close()
       options.input.destroy()
@@ -403,10 +415,47 @@ export function createAgentRpcServer(options: AgentRpcServerOptions): AgentRpcSe
       `${JSON.stringify({ level: "info", message: `cognia-agent rpc v${RPC_PROTOCOL_VERSION} ready` })}\n`
     )
     lines = createInterface({ input: options.input, crlfDelay: Infinity })
+    const inFlight = new Set<Promise<void>>()
     for await (const line of lines) {
       if (state === "closed") break
-      if (line.trim()) await consumeLine(line)
+      // Dispatch without blocking the read loop. `turn/run` holds its service
+      // call for the whole turn, so an awaited dispatch makes every mid-turn
+      // method unreachable — turn/steer, turn/abort, turn/followUp-while-busy,
+      // even a concurrent session/state could never observe `busy`. Ordering
+      // that matters is still enforced: the initialize handshake mutates state
+      // in its synchronous prefix, and per-session guards (busy, commandId
+      // dedup) reject whatever concurrency should not interleave.
+      if (line.trim()) {
+        const pending = consumeLine(line).catch((error: unknown) => {
+          // consumeLine already answers protocol-level failures on the wire;
+          // what reaches here is a write or dispatch fault after close —
+          // nothing a client can still act on, so it goes to diagnostics.
+          const message = error instanceof Error ? error.message : String(error)
+          options.diagnostic.write(
+            `${JSON.stringify({ level: "error", message: `request handling failed: ${message}` })}\n`
+          )
+        })
+        inFlight.add(pending)
+        void pending.finally(() => inFlight.delete(pending))
+      }
     }
+    // EOF must not strand requests still being answered: a client that
+    // pipelines a batch and closes stdin expects every response it is owed,
+    // which is what the serialized loop guaranteed before. `shutdown` skips
+    // this by calling close() directly — that path means tear down now.
+    //
+    // But EOF also means no `client/*` callback can ever be answered, and
+    // `close()` — the only rejector of `pendingClientRequests` — runs after
+    // the drain. Reject them first (and fail new ones fast via `stdinEnded`)
+    // or a handler parked on a callback keeps `allSettled` waiting forever.
+    stdinEnded = true
+    rejectPendingClientRequests(
+      new AgentRpcHostError(
+        RPC_ERROR_CODES.callbackFailed,
+        "client input closed before the callback could be answered"
+      )
+    )
+    await Promise.allSettled([...inFlight])
     await close()
   }
 

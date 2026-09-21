@@ -169,7 +169,9 @@ async function daemonSubcommand(
     case "stop": {
       const result = await (deps.daemon?.stop ?? stopWorkerDaemon)(home, profile)
       emit(result)
-      return result.stopped ? 0 : 1
+      // Idempotent: stopping a daemon that was not running is a successful
+      // no-op (same contract as `systemctl stop` / `docker stop`), not an error.
+      return result.stopped || result.notRunning === true ? 0 : 1
     }
     case "status": {
       const status = (deps.daemon?.status ?? workerDaemonStatus)(home, profile)

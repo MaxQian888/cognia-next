@@ -34,3 +34,29 @@ export async function runProcessEntrypoint(
   proc.exitCode = code
   if (options.forceExitOnSuccess) proc.exit(code)
 }
+
+/** The `on("error", …)` surface of a `process.stdout`/`stderr` socket. */
+interface PipeEnd {
+  on(event: "error", listener: (error: NodeJS.ErrnoException) => void): unknown
+}
+
+/**
+ * `run … | head -5` closes our stdout mid-stream; the next write then raises
+ * EPIPE as an 'error' EVENT on the socket — never an exception `write()` can
+ * return — which Node reports as a fatal "unhandled 'error' event" stack.
+ * Unix tools die quietly on SIGPIPE; a Node CLI should do the same rather
+ * than dump a stack over a closed consumer. Non-EPIPE stream faults still
+ * throw, so a genuinely broken channel stays loud.
+ */
+export function installClosedPipeHandler(proc: {
+  stdout: PipeEnd
+  stderr: PipeEnd
+  exit(code: number): never
+}): void {
+  const onClosedPipe = (error: NodeJS.ErrnoException) => {
+    if (error.code === "EPIPE") proc.exit(0)
+    else throw error
+  }
+  proc.stdout.on("error", onClosedPipe)
+  proc.stderr.on("error", onClosedPipe)
+}

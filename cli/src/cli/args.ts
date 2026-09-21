@@ -77,6 +77,9 @@ export const BOOLEAN_FLAGS = new Set([
   "use",
   // `host add --local` — write ./.cognia/hosts.json instead of the CLI home.
   "local",
+  // `eval routing --fake` — run the experiment against generated samples. The
+  // counterpart of `--live`, and like it must never swallow the next token.
+  "fake",
 ])
 
 /** Commands whose first extra positional is a subcommand, not free content. */

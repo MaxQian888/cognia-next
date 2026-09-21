@@ -16,6 +16,10 @@ export interface TranscriptEntry {
   ts: number
   role: TranscriptRole
   content: string
+  id?: string
+  parts?: import("ai").UIMessage["parts"]
+  schemaVersion?: 1
+  metadata?: import("ai").UIMessage["metadata"]
   /** Optional per-turn metadata (usage, model, sdkSessionId, …). */
   meta?: Record<string, unknown>
 }
@@ -47,7 +51,7 @@ export const SESSIONS_DIR = "sessions"
 
 /** Absolute path to a session's transcript file. */
 export function sessionTranscriptPath(home: string, sessionId: string): string {
-  return path.join(home, SESSIONS_DIR, `${sessionId}.jsonl`)
+  return path.join(home, SESSIONS_DIR, `${encodeURIComponent(sessionId)}.jsonl`)
 }
 
 /** Append one entry to a session's transcript, creating the dir/file as needed. */
@@ -62,6 +66,10 @@ export function appendTranscript(
   fsx.mkdirp(path.dirname(target))
   const record: TranscriptEntry = { ts: entry.ts ?? now, role: entry.role, content: entry.content }
   if (entry.meta) record.meta = entry.meta
+  if (entry.id) record.id = entry.id
+  if (entry.parts) record.parts = entry.parts
+  if (entry.metadata) record.metadata = entry.metadata
+  if (entry.schemaVersion) record.schemaVersion = entry.schemaVersion
   fsx.append(target, JSON.stringify(record) + "\n")
 }
 

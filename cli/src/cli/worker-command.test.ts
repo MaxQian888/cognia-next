@@ -253,6 +253,36 @@ describe("workerCommand daemon", () => {
     expect(stop).toHaveBeenCalledWith(base.home, undefined)
   })
 
+  it("treats stopping a not-running daemon as a successful no-op", async () => {
+    const stop = jest.fn(async () => ({
+      stopped: false,
+      notRunning: true,
+      pid: 7,
+      profile: "default",
+    }))
+    const harness = deps({ daemon: { stop } })
+
+    const code = await workerCommand(
+      parseArgv(["worker", "daemon", "stop", "--json"]),
+      harness.deps as never
+    )
+
+    expect(code).toBe(0)
+    expect(JSON.parse(harness.output.stdout[0]!)).toMatchObject({ notRunning: true })
+  })
+
+  it("still fails stop when the dep reports a plain stopped:false result", async () => {
+    const stop = jest.fn(async () => ({ stopped: false, profile: "default" }))
+    const harness = deps({ daemon: { stop } })
+
+    const code = await workerCommand(
+      parseArgv(["worker", "daemon", "stop", "--json"]),
+      harness.deps as never
+    )
+
+    expect(code).toBe(1)
+  })
+
   it("prints raw log lines by default and structured output with --json", async () => {
     const logs = jest.fn(() => ({ file: "/log", lines: ["first", "second"] }))
     const plain = deps({ daemon: { logs } })

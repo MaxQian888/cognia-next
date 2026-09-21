@@ -2,6 +2,7 @@
  * @jest-environment node
  */
 import {
+  installClosedPipeHandler,
   normalizeProcessExitCode,
   runProcessEntrypoint,
   type EntrypointProcess,
@@ -87,5 +88,50 @@ describe("runProcessEntrypoint", () => {
 
     expect(stderr.join("")).toBe("cognia-agent: fatal: database bootstrap failed\n")
     expect(proc.exit).toHaveBeenCalledWith(1)
+  })
+})
+
+describe("installClosedPipeHandler", () => {
+  function pipeProc() {
+    type Listener = (error: NodeJS.ErrnoException) => void
+    const listeners = { stdout: [] as Listener[], stderr: [] as Listener[] }
+    const exit = jest.fn((code?: number): never => {
+      throw new Error(`process-exit:${code}`)
+    })
+    const proc = {
+      stdout: { on: (_: "error", cb: Listener) => listeners.stdout.push(cb) },
+      stderr: { on: (_: "error", cb: Listener) => listeners.stderr.push(cb) },
+      exit,
+    }
+    const emit = (end: "stdout" | "stderr", err: NodeJS.ErrnoException) => {
+      for (const cb of listeners[end]) cb(err)
+    }
+    return { proc, exit, emit }
+  }
+
+  it("exits quietly when the stdout consumer closes the pipe", () => {
+    const { proc, exit, emit } = pipeProc()
+    installClosedPipeHandler(proc)
+    expect(() =>
+      emit("stdout", Object.assign(new Error("write EPIPE"), { code: "EPIPE" }))
+    ).toThrow("process-exit:0")
+    expect(exit).toHaveBeenCalledWith(0)
+  })
+
+  it("exits quietly when the stderr consumer closes the pipe", () => {
+    const { proc, exit, emit } = pipeProc()
+    installClosedPipeHandler(proc)
+    expect(() =>
+      emit("stderr", Object.assign(new Error("write EPIPE"), { code: "EPIPE" }))
+    ).toThrow("process-exit:0")
+    expect(exit).toHaveBeenCalledWith(0)
+  })
+
+  it("rethrows non-EPIPE stream faults so a broken channel stays loud", () => {
+    const { proc, exit, emit } = pipeProc()
+    installClosedPipeHandler(proc)
+    const reset = Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" })
+    expect(() => emit("stdout", reset)).toThrow("read ECONNRESET")
+    expect(exit).not.toHaveBeenCalled()
   })
 })

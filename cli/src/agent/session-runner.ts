@@ -288,6 +288,13 @@ export interface AgentSession {
    * nothing), an agent with no depth axis, or no live session to write.
    */
   setThinkingLevel?(level: ThinkingLevel): Promise<string | undefined>
+  /**
+   * Deliver user input into the session's IN-FLIGHT turn (Pi `steer`, Codex
+   * `turn/steer`). Throws when nothing is executing or the backend cannot
+   * steer — the caller then falls back to queue-and-replay. Optional: the
+   * built-in sidecar has no live steer channel and does not implement it.
+   */
+  steer?(text: string): Promise<void>
   close(): Promise<void>
 }
 
@@ -610,7 +617,16 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
       appendTranscript(
         home,
         sessionId,
-        { role: "user", content: prompt },
+        {
+          role: "user",
+          content: prompt,
+          ...(turn.attachmentParts?.length
+            ? {
+                schemaVersion: 1 as const,
+                parts: [{ type: "text" as const, text: prompt }, ...turn.attachmentParts],
+              }
+            : {}),
+        },
         params.transcriptFs,
         now()
       )

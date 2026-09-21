@@ -63,6 +63,17 @@ describe("argument handling", () => {
     expect(err.join()).toContain("deepseek-harness")
   })
 
+  it("explains that a real external agent is not Cognia-managed", async () => {
+    // `pi-rpc` is a known preset — "unknown backend" would be wrong; the
+    // command manages only runtimes Cognia installs itself.
+    const { ctx, err } = sink()
+    expect(await backendCommand(args("backend doctor pi-rpc"), ctx)).toBe(1)
+    const text = err.join()
+    expect(text).toContain("user-installed external agent")
+    expect(text).toContain("deepseek-harness")
+    expect(text).not.toContain("unknown backend")
+  })
+
   it("rejects an unknown action", async () => {
     const { ctx, err } = sink()
     expect(await backendCommand(args("backend frobnicate deepseek-harness"), ctx)).toBe(1)

@@ -18,6 +18,7 @@
 
 import { z } from "zod"
 import { DEFAULT_BUILTIN_TOOLS, type BuiltinToolsConfig } from "@cognia/agent-config-types"
+import { SEARCH_PROVIDER_HEALTH_LIMITS } from "@cognia/web-search/types"
 
 import { EFFORT_SLIDER_LEVELS, THINKING_LEVELS, type ThinkingLevel } from "@/lib/ai/thinking-level"
 import { BUILTIN_TOOL_CONFIG_KEYS } from "@/lib/settings/builtin-tools"
@@ -630,6 +631,26 @@ export const CLI_SEARCH_PROVIDER_IDS = [
 
 export type CliSearchProviderId = (typeof CLI_SEARCH_PROVIDER_IDS)[number]
 
+/**
+ * The option fields shared by the global `search` defaults and each provider's
+ * `defaultOptions` — one declaration so the per-provider rung can never drift
+ * behind the global one (`SearchProviderSettings.defaultOptions` in
+ * `@cognia/web-search` is `Partial<SearchOptions>`, the same set).
+ */
+const searchOptionFields = {
+  searchType: z.enum(["general", "news", "academic", "images", "videos"]).optional(),
+  searchDepth: z.enum(["basic", "advanced", "deep"]).optional(),
+  recency: z.enum(["day", "week", "month", "year", "any"]).optional(),
+  maxResults: z.number().int().min(1).max(50).optional(),
+  includeAnswer: z.boolean().optional(),
+  includeRawContent: z.boolean().optional(),
+  safeSearch: z.enum(["off", "moderate", "strict"]).optional(),
+  country: z.string().min(1).optional(),
+  language: z.string().min(1).optional(),
+  includeDomains: z.array(z.string().min(1)).optional(),
+  excludeDomains: z.array(z.string().min(1)).optional(),
+} satisfies Record<string, z.ZodTypeAny>
+
 const searchProviderConfigSchema = z
   .object({
     /** Secret; prefer `credentials.json.searchProviders` or env. */
@@ -643,20 +664,7 @@ const searchProviderConfigSchema = z
      * the call's explicit options (see `SearchProviderSettings.defaultOptions`
      * in `@cognia/web-search`).
      */
-    defaultOptions: z
-      .object({
-        searchType: z.enum(["general", "news", "academic", "images", "videos"]).optional(),
-        searchDepth: z.enum(["basic", "advanced", "deep"]).optional(),
-        recency: z.enum(["day", "week", "month", "year", "any"]).optional(),
-        maxResults: z.number().int().min(1).max(50).optional(),
-        includeAnswer: z.boolean().optional(),
-        country: z.string().min(1).optional(),
-        language: z.string().min(1).optional(),
-        includeDomains: z.array(z.string().min(1)).optional(),
-        excludeDomains: z.array(z.string().min(1)).optional(),
-      })
-      .strict()
-      .optional(),
+    defaultOptions: z.object(searchOptionFields).strict().optional(),
   })
   .strict()
 
@@ -712,32 +720,32 @@ const sandboxConfigSchema = z
 export const searchConfigSchema = z
   .object({
     defaultProvider: z.enum(CLI_SEARCH_PROVIDER_IDS).optional(),
-    maxResults: z.number().int().min(1).max(50).optional(),
     fallbackEnabled: z.boolean().optional(),
     maxRetries: z.number().int().min(0).max(10).optional(),
-    searchType: z.enum(["general", "news", "academic", "images", "videos"]).optional(),
-    searchDepth: z.enum(["basic", "advanced", "deep"]).optional(),
-    recency: z.enum(["day", "week", "month", "year", "any"]).optional(),
-    country: z.string().min(1).optional(),
-    language: z.string().min(1).optional(),
-    includeDomains: z.array(z.string().min(1)).optional(),
-    excludeDomains: z.array(z.string().min(1)).optional(),
-    includeAnswer: z.boolean().optional(),
-    includeRawContent: z.boolean().optional(),
-    safeSearch: z.enum(["off", "moderate", "strict"]).optional(),
+    ...searchOptionFields,
     cacheEnabled: z.boolean().optional(),
     cacheTTL: z.number().int().positive().optional(),
     cacheMaxEntries: z.number().int().positive().optional(),
     /**
      * Circuit-breaker tuning for the shared provider-health breaker. Bounds
-     * mirror `SEARCH_PROVIDER_HEALTH_LIMITS` in `@cognia/web-search`; the
+     * come from `SEARCH_PROVIDER_HEALTH_LIMITS` in `@cognia/web-search`; the
      * projection in `to-build-context` normalizes through the same helper.
      */
     providerHealth: z
       .object({
         enabled: z.boolean().optional(),
-        failureThreshold: z.number().int().min(1).max(10).optional(),
-        cooldownMs: z.number().int().min(5000).max(600000).optional(),
+        failureThreshold: z
+          .number()
+          .int()
+          .min(SEARCH_PROVIDER_HEALTH_LIMITS.failureThreshold.min)
+          .max(SEARCH_PROVIDER_HEALTH_LIMITS.failureThreshold.max)
+          .optional(),
+        cooldownMs: z
+          .number()
+          .int()
+          .min(SEARCH_PROVIDER_HEALTH_LIMITS.cooldownMs.min)
+          .max(SEARCH_PROVIDER_HEALTH_LIMITS.cooldownMs.max)
+          .optional(),
       })
       .strict()
       .optional(),

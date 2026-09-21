@@ -122,16 +122,17 @@ export interface BackendSelectResult extends SelectedBackend {
 /**
  * The CLI's own host facts, as the capability profile sees them.
  *
- * Both halves are deliberate. `hookRuntimeAvailable` is false because the CLI's
- * external-agent session does not run Cognia's lifecycle hooks around an
- * external turn (the renderer does), and `toolHostRunning` is false because the
+ * Both halves are deliberate. `hookRuntimeAvailable` is true because the CLI's
+ * external-agent session wraps every external turn with Cognia's lifecycle
+ * hooks (`dispatchUserPromptSubmit` plus the stream lifecycle dispatchers in
+ * `external-agent-session.ts`), and `toolHostRunning` is false because the
  * broker has not started at SELECTION time — it is a live fact, and claiming it
  * here would be a pre-handshake guess.
  */
 const CLI_SELECTION_HOST_FACTS = {
   toolHostRunning: false,
   subagentDispatchProjected: false,
-  hookRuntimeAvailable: false,
+  hookRuntimeAvailable: true,
 } as const
 
 /**

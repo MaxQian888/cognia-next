@@ -115,6 +115,7 @@ export interface ResolvedCliSessionContext {
 
 /** Everything one turn contributes on top of the session context. */
 export interface ResolvedCliTurn {
+  attachmentParts?: import("ai").UIMessage["parts"]
   /** Wire content for this turn (string, or multimodal blocks). */
   content: SendContent
   /** Attachment report, or null when the prompt referenced no `@<path>`. */
@@ -203,6 +204,7 @@ export function createCliContextAssembler(params: CliContextAssemblerParams): Cl
     (() =>
       resolveCliHooksConfig({
         home,
+        cwd: config.cwd,
         builtinHookOverrides: config.builtinHookOverrides,
       }) as SendOptions["hooks"])
   const resolveMcpServers =
@@ -479,9 +481,19 @@ export function createCliContextAssembler(params: CliContextAssemblerParams): Cl
       // Assemble multimodal content: encode `@image` refs, inject text/rich-doc
       // content, and resolve `@*.pdf` per the active model (native block vs OCR).
       const activeProvider = sendOptions.provider ?? config.provider ?? "anthropic"
+      let attachmentSessionReady = false
       const built = await (buildContentOverride
         ? buildContentOverride(prompt, config.cwd)
         : buildAttachmentContent(prompt, config.cwd, {
+            persistSource: async (source) => {
+              if (!attachmentSessionReady) {
+                const { ensureSessionRow } = await import("./cli-session-store")
+                await ensureSessionRow(sessionId, config, { ensureDb })
+                attachmentSessionReady = true
+              }
+              const { putSessionAsset } = await import("@/lib/db/session-assets")
+              await putSessionAsset({ sessionId, ...source })
+            },
             provider: activeProvider,
             model: sendOptions.model ?? "",
             isAnthropic: activeProvider === "anthropic",
@@ -511,6 +523,7 @@ export function createCliContextAssembler(params: CliContextAssemblerParams): Cl
           ].join("\n")
         : ""
       return {
+        ...(built.attachmentParts ? { attachmentParts: built.attachmentParts } : {}),
         content: contextualSection
           ? prependTextBlock(built.content, contextualSection)
           : built.content,

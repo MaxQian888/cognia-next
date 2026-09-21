@@ -81,6 +81,70 @@ describe("configCommand", () => {
     expect(code).toBe(2)
   })
 
+  it("get <dotted.path> walks nested config — the path `set` writes must read back", async () => {
+    const s = sink()
+    const code = await configCommand(parseArgv(["config", "get", "agentBackends.pi-rpc.model"]), {
+      out: s.out,
+      home: "/h",
+      loadConfig: () =>
+        cfg({
+          agentBackends: {
+            "pi-rpc": { model: "commandcode/deepseek/deepseek-v4.1-flash" },
+          },
+        }),
+    })
+    expect(code).toBe(0)
+    expect(s.stdout()).toBe("commandcode/deepseek/deepseek-v4.1-flash\n")
+  })
+
+  it("get <dotted.path> prints nested objects as JSON", async () => {
+    const s = sink()
+    const code = await configCommand(parseArgv(["config", "get", "agentBackends.pi-rpc"]), {
+      out: s.out,
+      home: "/h",
+      loadConfig: () =>
+        cfg({
+          agentBackends: {
+            "pi-rpc": { model: "m-x", piExtensionPolicy: "global" },
+          },
+        }),
+    })
+    expect(code).toBe(0)
+    expect(JSON.parse(s.stdout())).toEqual({ model: "m-x", piExtensionPolicy: "global" })
+  })
+
+  it("get <dotted.path> keeps redacting secrets on the way down", async () => {
+    const s = sink()
+    const code = await configCommand(parseArgv(["config", "get", "providers.deepseek.apiKey"]), {
+      out: s.out,
+      home: "/h",
+      loadConfig: () => cfg({ providers: { deepseek: { apiKey: "sk-real-secret" } } }),
+    })
+    expect(code).toBe(0)
+    expect(s.stdout()).toBe("***\n")
+  })
+
+  it("get errors when a dotted segment resolves through a non-object", async () => {
+    const s = sink()
+    const code = await configCommand(parseArgv(["config", "get", "provider.name"]), {
+      out: s.out,
+      home: "/h",
+      loadConfig: () => cfg({ provider: "deepseek" }),
+    })
+    expect(code).toBe(2)
+    expect(s.stderr()).toMatch(/unknown key "provider\.name"/)
+  })
+
+  it("get does not resolve dotted keys through the prototype chain", async () => {
+    const s = sink()
+    const code = await configCommand(parseArgv(["config", "get", "providers.constructor.name"]), {
+      out: s.out,
+      home: "/h",
+      loadConfig: () => cfg({ providers: {} }),
+    })
+    expect(code).toBe(2)
+  })
+
   it("set writes the value via the injected writer", async () => {
     const s = sink()
     const setConfigValue = jest.fn().mockReturnValue("/h/config.json")
@@ -109,6 +173,60 @@ describe("configCommand", () => {
     )
     expect(setConfigValue).not.toHaveBeenCalled()
     expect(s.stdout()).toMatch(/Set providers\.deepseek\.baseURL in \/h\/config\.json/)
+  })
+
+  it("set providers.<id>.model routes to setProviderModel, not the flat writer", async () => {
+    const s = sink()
+    const setConfigValue = jest.fn()
+    const setProviderModel = jest.fn().mockReturnValue("/h/config.json")
+    const code = await configCommand(
+      parseArgv(["config", "set", "providers.deepseek.model", "deepseek-v4.1-flash"]),
+      { out: s.out, home: "/h", setConfigValue, setProviderModel }
+    )
+    expect(code).toBe(0)
+    expect(setProviderModel).toHaveBeenCalledWith("/h", "deepseek", "deepseek-v4.1-flash")
+    expect(setConfigValue).not.toHaveBeenCalled()
+    expect(s.stdout()).toMatch(/Set providers\.deepseek\.model in \/h\/config\.json/)
+  })
+
+  it("set agentBackends.<preset>.model routes to the backend model writer", async () => {
+    const s = sink()
+    const setConfigValue = jest.fn()
+    const setAgentBackendModel = jest.fn().mockReturnValue("/h/config.json")
+    const code = await configCommand(
+      parseArgv([
+        "config",
+        "set",
+        "agentBackends.pi-rpc.model",
+        "commandcode/deepseek/deepseek-v4.1-flash",
+      ]),
+      { out: s.out, home: "/h", setConfigValue, setAgentBackendModel }
+    )
+    expect(code).toBe(0)
+    // An external backend is not a chat provider — routing to the provider
+    // writer would have rewritten the built-in sidecar's remembered model.
+    expect(setAgentBackendModel).toHaveBeenCalledWith(
+      "/h",
+      "pi-rpc",
+      "commandcode/deepseek/deepseek-v4.1-flash"
+    )
+    expect(setConfigValue).not.toHaveBeenCalled()
+  })
+
+  it("set agentBackends.<preset>.model surfaces writer validation errors", async () => {
+    const s = sink()
+    const code = await configCommand(
+      parseArgv(["config", "set", "agentBackends.pi-rpc.model", "not a model"]),
+      {
+        out: s.out,
+        home: "/h",
+        setAgentBackendModel: () => {
+          throw new Error("model id must not be empty")
+        },
+      }
+    )
+    expect(code).toBe(2)
+    expect(s.stderr()).toMatch(/model id must not be empty/)
   })
 
   it("set agentBackends.<preset>.piExtensionPolicy routes to the backend writer", async () => {
