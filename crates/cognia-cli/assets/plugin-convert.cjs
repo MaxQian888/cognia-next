@@ -33,154 +33,6 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/umd/main.js
-var require_main = __commonJS({
-  "node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/umd/main.js"(exports2, module2) {
-    (function(factory) {
-      if (typeof module2 === "object" && typeof module2.exports === "object") {
-        var v = factory(require, exports2);
-        if (v !== void 0) module2.exports = v;
-      } else if (typeof define === "function" && define.amd) {
-        define(["require", "exports", "./impl/format", "./impl/edit", "./impl/scanner", "./impl/parser"], factory);
-      }
-    })(function(require2, exports3) {
-      "use strict";
-      Object.defineProperty(exports3, "__esModule", { value: true });
-      exports3.applyEdits = exports3.modify = exports3.format = exports3.printParseErrorCode = exports3.ParseErrorCode = exports3.stripComments = exports3.visit = exports3.getNodeValue = exports3.getNodePath = exports3.findNodeAtOffset = exports3.findNodeAtLocation = exports3.parseTree = exports3.parse = exports3.getLocation = exports3.SyntaxKind = exports3.ScanError = exports3.createScanner = void 0;
-      const formatter = require2("./impl/format");
-      const edit = require2("./impl/edit");
-      const scanner = require2("./impl/scanner");
-      const parser = require2("./impl/parser");
-      exports3.createScanner = scanner.createScanner;
-      var ScanError;
-      (function(ScanError2) {
-        ScanError2[ScanError2["None"] = 0] = "None";
-        ScanError2[ScanError2["UnexpectedEndOfComment"] = 1] = "UnexpectedEndOfComment";
-        ScanError2[ScanError2["UnexpectedEndOfString"] = 2] = "UnexpectedEndOfString";
-        ScanError2[ScanError2["UnexpectedEndOfNumber"] = 3] = "UnexpectedEndOfNumber";
-        ScanError2[ScanError2["InvalidUnicode"] = 4] = "InvalidUnicode";
-        ScanError2[ScanError2["InvalidEscapeCharacter"] = 5] = "InvalidEscapeCharacter";
-        ScanError2[ScanError2["InvalidCharacter"] = 6] = "InvalidCharacter";
-      })(ScanError || (exports3.ScanError = ScanError = {}));
-      var SyntaxKind;
-      (function(SyntaxKind2) {
-        SyntaxKind2[SyntaxKind2["OpenBraceToken"] = 1] = "OpenBraceToken";
-        SyntaxKind2[SyntaxKind2["CloseBraceToken"] = 2] = "CloseBraceToken";
-        SyntaxKind2[SyntaxKind2["OpenBracketToken"] = 3] = "OpenBracketToken";
-        SyntaxKind2[SyntaxKind2["CloseBracketToken"] = 4] = "CloseBracketToken";
-        SyntaxKind2[SyntaxKind2["CommaToken"] = 5] = "CommaToken";
-        SyntaxKind2[SyntaxKind2["ColonToken"] = 6] = "ColonToken";
-        SyntaxKind2[SyntaxKind2["NullKeyword"] = 7] = "NullKeyword";
-        SyntaxKind2[SyntaxKind2["TrueKeyword"] = 8] = "TrueKeyword";
-        SyntaxKind2[SyntaxKind2["FalseKeyword"] = 9] = "FalseKeyword";
-        SyntaxKind2[SyntaxKind2["StringLiteral"] = 10] = "StringLiteral";
-        SyntaxKind2[SyntaxKind2["NumericLiteral"] = 11] = "NumericLiteral";
-        SyntaxKind2[SyntaxKind2["LineCommentTrivia"] = 12] = "LineCommentTrivia";
-        SyntaxKind2[SyntaxKind2["BlockCommentTrivia"] = 13] = "BlockCommentTrivia";
-        SyntaxKind2[SyntaxKind2["LineBreakTrivia"] = 14] = "LineBreakTrivia";
-        SyntaxKind2[SyntaxKind2["Trivia"] = 15] = "Trivia";
-        SyntaxKind2[SyntaxKind2["Unknown"] = 16] = "Unknown";
-        SyntaxKind2[SyntaxKind2["EOF"] = 17] = "EOF";
-      })(SyntaxKind || (exports3.SyntaxKind = SyntaxKind = {}));
-      exports3.getLocation = parser.getLocation;
-      exports3.parse = parser.parse;
-      exports3.parseTree = parser.parseTree;
-      exports3.findNodeAtLocation = parser.findNodeAtLocation;
-      exports3.findNodeAtOffset = parser.findNodeAtOffset;
-      exports3.getNodePath = parser.getNodePath;
-      exports3.getNodeValue = parser.getNodeValue;
-      exports3.visit = parser.visit;
-      exports3.stripComments = parser.stripComments;
-      var ParseErrorCode;
-      (function(ParseErrorCode2) {
-        ParseErrorCode2[ParseErrorCode2["InvalidSymbol"] = 1] = "InvalidSymbol";
-        ParseErrorCode2[ParseErrorCode2["InvalidNumberFormat"] = 2] = "InvalidNumberFormat";
-        ParseErrorCode2[ParseErrorCode2["PropertyNameExpected"] = 3] = "PropertyNameExpected";
-        ParseErrorCode2[ParseErrorCode2["ValueExpected"] = 4] = "ValueExpected";
-        ParseErrorCode2[ParseErrorCode2["ColonExpected"] = 5] = "ColonExpected";
-        ParseErrorCode2[ParseErrorCode2["CommaExpected"] = 6] = "CommaExpected";
-        ParseErrorCode2[ParseErrorCode2["CloseBraceExpected"] = 7] = "CloseBraceExpected";
-        ParseErrorCode2[ParseErrorCode2["CloseBracketExpected"] = 8] = "CloseBracketExpected";
-        ParseErrorCode2[ParseErrorCode2["EndOfFileExpected"] = 9] = "EndOfFileExpected";
-        ParseErrorCode2[ParseErrorCode2["InvalidCommentToken"] = 10] = "InvalidCommentToken";
-        ParseErrorCode2[ParseErrorCode2["UnexpectedEndOfComment"] = 11] = "UnexpectedEndOfComment";
-        ParseErrorCode2[ParseErrorCode2["UnexpectedEndOfString"] = 12] = "UnexpectedEndOfString";
-        ParseErrorCode2[ParseErrorCode2["UnexpectedEndOfNumber"] = 13] = "UnexpectedEndOfNumber";
-        ParseErrorCode2[ParseErrorCode2["InvalidUnicode"] = 14] = "InvalidUnicode";
-        ParseErrorCode2[ParseErrorCode2["InvalidEscapeCharacter"] = 15] = "InvalidEscapeCharacter";
-        ParseErrorCode2[ParseErrorCode2["InvalidCharacter"] = 16] = "InvalidCharacter";
-      })(ParseErrorCode || (exports3.ParseErrorCode = ParseErrorCode = {}));
-      function printParseErrorCode2(code) {
-        switch (code) {
-          case 1:
-            return "InvalidSymbol";
-          case 2:
-            return "InvalidNumberFormat";
-          case 3:
-            return "PropertyNameExpected";
-          case 4:
-            return "ValueExpected";
-          case 5:
-            return "ColonExpected";
-          case 6:
-            return "CommaExpected";
-          case 7:
-            return "CloseBraceExpected";
-          case 8:
-            return "CloseBracketExpected";
-          case 9:
-            return "EndOfFileExpected";
-          case 10:
-            return "InvalidCommentToken";
-          case 11:
-            return "UnexpectedEndOfComment";
-          case 12:
-            return "UnexpectedEndOfString";
-          case 13:
-            return "UnexpectedEndOfNumber";
-          case 14:
-            return "InvalidUnicode";
-          case 15:
-            return "InvalidEscapeCharacter";
-          case 16:
-            return "InvalidCharacter";
-        }
-        return "<unknown ParseErrorCode>";
-      }
-      exports3.printParseErrorCode = printParseErrorCode2;
-      function format(documentText, range, options2) {
-        return formatter.format(documentText, range, options2);
-      }
-      exports3.format = format;
-      function modify(text, path, value, options2) {
-        return edit.setProperty(text, path, value, options2);
-      }
-      exports3.modify = modify;
-      function applyEdits(text, edits) {
-        let sortedEdits = edits.slice(0).sort((a, b) => {
-          const diff = a.offset - b.offset;
-          if (diff === 0) {
-            return a.length - b.length;
-          }
-          return diff;
-        });
-        let lastModifiedOffset = text.length;
-        for (let i = sortedEdits.length - 1; i >= 0; i--) {
-          let e = sortedEdits[i];
-          if (e.offset + e.length <= lastModifiedOffset) {
-            text = edit.applyEdit(text, e);
-          } else {
-            throw new Error("Overlapping edit");
-          }
-          lastModifiedOffset = e.offset;
-        }
-        return text;
-      }
-      exports3.applyEdits = applyEdits;
-    });
-  }
-});
-
 // node_modules/.pnpm/kind-of@6.0.3/node_modules/kind-of/index.js
 var require_kind_of = __commonJS({
   "node_modules/.pnpm/kind-of@6.0.3/node_modules/kind-of/index.js"(exports2, module2) {
@@ -800,8 +652,8 @@ var require_null = __commonJS({
     function constructYamlNull() {
       return null;
     }
-    function isNull(object) {
-      return object === null;
+    function isNull(object2) {
+      return object2 === null;
     }
     module2.exports = new Type("tag:yaml.org,2002:null", {
       kind: "scalar",
@@ -840,8 +692,8 @@ var require_bool = __commonJS({
     function constructYamlBoolean(data) {
       return data === "true" || data === "True" || data === "TRUE";
     }
-    function isBoolean(object) {
-      return Object.prototype.toString.call(object) === "[object Boolean]";
+    function isBoolean(object2) {
+      return Object.prototype.toString.call(object2) === "[object Boolean]";
     }
     module2.exports = new Type("tag:yaml.org,2002:bool", {
       kind: "scalar",
@@ -849,14 +701,14 @@ var require_bool = __commonJS({
       construct: constructYamlBoolean,
       predicate: isBoolean,
       represent: {
-        lowercase: function(object) {
-          return object ? "true" : "false";
+        lowercase: function(object2) {
+          return object2 ? "true" : "false";
         },
-        uppercase: function(object) {
-          return object ? "TRUE" : "FALSE";
+        uppercase: function(object2) {
+          return object2 ? "TRUE" : "FALSE";
         },
-        camelcase: function(object) {
-          return object ? "True" : "False";
+        camelcase: function(object2) {
+          return object2 ? "True" : "False";
         }
       },
       defaultStyle: "lowercase"
@@ -963,8 +815,8 @@ var require_int = __commonJS({
       }
       return sign * parseInt(value, 10);
     }
-    function isInteger(object) {
-      return Object.prototype.toString.call(object) === "[object Number]" && (object % 1 === 0 && !common.isNegativeZero(object));
+    function isInteger(object2) {
+      return Object.prototype.toString.call(object2) === "[object Number]" && (object2 % 1 === 0 && !common.isNegativeZero(object2));
     }
     module2.exports = new Type("tag:yaml.org,2002:int", {
       kind: "scalar",
@@ -1043,9 +895,9 @@ var require_float = __commonJS({
       return sign * parseFloat(value, 10);
     }
     var SCIENTIFIC_WITHOUT_DOT = /^[-+]?[0-9]+e/;
-    function representYamlFloat(object, style) {
+    function representYamlFloat(object2, style) {
       var res;
-      if (isNaN(object)) {
+      if (isNaN(object2)) {
         switch (style) {
           case "lowercase":
             return ".nan";
@@ -1054,7 +906,7 @@ var require_float = __commonJS({
           case "camelcase":
             return ".NaN";
         }
-      } else if (Number.POSITIVE_INFINITY === object) {
+      } else if (Number.POSITIVE_INFINITY === object2) {
         switch (style) {
           case "lowercase":
             return ".inf";
@@ -1063,7 +915,7 @@ var require_float = __commonJS({
           case "camelcase":
             return ".Inf";
         }
-      } else if (Number.NEGATIVE_INFINITY === object) {
+      } else if (Number.NEGATIVE_INFINITY === object2) {
         switch (style) {
           case "lowercase":
             return "-.inf";
@@ -1072,14 +924,14 @@ var require_float = __commonJS({
           case "camelcase":
             return "-.Inf";
         }
-      } else if (common.isNegativeZero(object)) {
+      } else if (common.isNegativeZero(object2)) {
         return "-0.0";
       }
-      res = object.toString(10);
+      res = object2.toString(10);
       return SCIENTIFIC_WITHOUT_DOT.test(res) ? res.replace("e", ".e") : res;
     }
-    function isFloat(object) {
-      return Object.prototype.toString.call(object) === "[object Number]" && (object % 1 !== 0 || common.isNegativeZero(object));
+    function isFloat(object2) {
+      return Object.prototype.toString.call(object2) === "[object Number]" && (object2 % 1 !== 0 || common.isNegativeZero(object2));
     }
     module2.exports = new Type("tag:yaml.org,2002:float", {
       kind: "scalar",
@@ -1172,8 +1024,8 @@ var require_timestamp = __commonJS({
       if (delta) date.setTime(date.getTime() - delta);
       return date;
     }
-    function representYamlTimestamp(object) {
-      return object.toISOString();
+    function representYamlTimestamp(object2) {
+      return object2.toISOString();
     }
     module2.exports = new Type("tag:yaml.org,2002:timestamp", {
       kind: "scalar",
@@ -1250,8 +1102,8 @@ var require_binary = __commonJS({
       }
       return result;
     }
-    function representYamlBinary(object) {
-      var result = "", bits = 0, idx, tail, max = object.length, map = BASE64_MAP;
+    function representYamlBinary(object2) {
+      var result = "", bits = 0, idx, tail, max = object2.length, map = BASE64_MAP;
       for (idx = 0; idx < max; idx++) {
         if (idx % 3 === 0 && idx) {
           result += map[bits >> 18 & 63];
@@ -1259,7 +1111,7 @@ var require_binary = __commonJS({
           result += map[bits >> 6 & 63];
           result += map[bits & 63];
         }
-        bits = (bits << 8) + object[idx];
+        bits = (bits << 8) + object2[idx];
       }
       tail = max % 3;
       if (tail === 0) {
@@ -1280,8 +1132,8 @@ var require_binary = __commonJS({
       }
       return result;
     }
-    function isBinary(object) {
-      return NodeBuffer && NodeBuffer.isBuffer(object);
+    function isBinary(object2) {
+      return NodeBuffer && NodeBuffer.isBuffer(object2);
     }
     module2.exports = new Type("tag:yaml.org,2002:binary", {
       kind: "scalar",
@@ -1302,9 +1154,9 @@ var require_omap = __commonJS({
     var _toString = Object.prototype.toString;
     function resolveYamlOmap(data) {
       if (data === null) return true;
-      var objectKeys = {}, index, length, pair, pairKey, pairHasKey, object = data;
-      for (index = 0, length = object.length; index < length; index += 1) {
-        pair = object[index];
+      var objectKeys = {}, index, length, pair, pairKey, pairHasKey, object2 = data;
+      for (index = 0, length = object2.length; index < length; index += 1) {
+        pair = object2[index];
         pairHasKey = false;
         if (_toString.call(pair) !== "[object Object]") return false;
         for (pairKey in pair) {
@@ -1338,10 +1190,10 @@ var require_pairs = __commonJS({
     var _toString = Object.prototype.toString;
     function resolveYamlPairs(data) {
       if (data === null) return true;
-      var index, length, pair, keys, result, object = data;
-      result = new Array(object.length);
-      for (index = 0, length = object.length; index < length; index += 1) {
-        pair = object[index];
+      var index, length, pair, keys, result, object2 = data;
+      result = new Array(object2.length);
+      for (index = 0, length = object2.length; index < length; index += 1) {
+        pair = object2[index];
         if (_toString.call(pair) !== "[object Object]") return false;
         keys = Object.keys(pair);
         if (keys.length !== 1) return false;
@@ -1351,10 +1203,10 @@ var require_pairs = __commonJS({
     }
     function constructYamlPairs(data) {
       if (data === null) return [];
-      var index, length, pair, keys, result, object = data;
-      result = new Array(object.length);
-      for (index = 0, length = object.length; index < length; index += 1) {
-        pair = object[index];
+      var index, length, pair, keys, result, object2 = data;
+      result = new Array(object2.length);
+      for (index = 0, length = object2.length; index < length; index += 1) {
+        pair = object2[index];
         keys = Object.keys(pair);
         result[index] = [keys[0], pair[keys[0]]];
       }
@@ -1376,10 +1228,10 @@ var require_set = __commonJS({
     var _hasOwnProperty = Object.prototype.hasOwnProperty;
     function resolveYamlSet(data) {
       if (data === null) return true;
-      var key, object = data;
-      for (key in object) {
-        if (_hasOwnProperty.call(object, key)) {
-          if (object[key] !== null) return false;
+      var key, object2 = data;
+      for (key in object2) {
+        if (_hasOwnProperty.call(object2, key)) {
+          if (object2[key] !== null) return false;
         }
       }
       return true;
@@ -1432,8 +1284,8 @@ var require_undefined = __commonJS({
     function representJavascriptUndefined() {
       return "";
     }
-    function isUndefined(object) {
-      return typeof object === "undefined";
+    function isUndefined(object2) {
+      return typeof object2 === "undefined";
     }
     module2.exports = new Type("tag:yaml.org,2002:js/undefined", {
       kind: "scalar",
@@ -1469,15 +1321,15 @@ var require_regexp = __commonJS({
       }
       return new RegExp(regexp, modifiers);
     }
-    function representJavascriptRegExp(object) {
-      var result = "/" + object.source + "/";
-      if (object.global) result += "g";
-      if (object.multiline) result += "m";
-      if (object.ignoreCase) result += "i";
+    function representJavascriptRegExp(object2) {
+      var result = "/" + object2.source + "/";
+      if (object2.global) result += "g";
+      if (object2.multiline) result += "m";
+      if (object2.ignoreCase) result += "i";
       return result;
     }
-    function isRegExp(object) {
-      return Object.prototype.toString.call(object) === "[object RegExp]";
+    function isRegExp(object2) {
+      return Object.prototype.toString.call(object2) === "[object RegExp]";
     }
     module2.exports = new Type("tag:yaml.org,2002:js/regexp", {
       kind: "scalar",
@@ -1528,11 +1380,11 @@ var require_function = __commonJS({
       }
       return new Function(params, "return " + source.slice(body[0], body[1]));
     }
-    function representJavascriptFunction(object) {
-      return object.toString();
+    function representJavascriptFunction(object2) {
+      return object2.toString();
     }
-    function isFunction(object) {
-      return Object.prototype.toString.call(object) === "[object Function]";
+    function isFunction(object2) {
+      return Object.prototype.toString.call(object2) === "[object Function]";
     }
     module2.exports = new Type("tag:yaml.org,2002:js/function", {
       kind: "scalar",
@@ -1640,16 +1492,16 @@ var require_loader = __commonJS({
         (c - 65536 & 1023) + 56320
       );
     }
-    function setProperty(object, key, value) {
+    function setProperty2(object2, key, value) {
       if (key === "__proto__") {
-        Object.defineProperty(object, key, {
+        Object.defineProperty(object2, key, {
           configurable: true,
           enumerable: true,
           writable: true,
           value
         });
       } else {
-        object[key] = value;
+        object2[key] = value;
       }
     }
     var simpleEscapeCheck = new Array(256);
@@ -1764,7 +1616,7 @@ var require_loader = __commonJS({
           throwError(state, "merge keys exceeded maxTotalMergeKeys (" + state.maxTotalMergeKeys + ")");
         }
         if (!_hasOwnProperty.call(destination, key)) {
-          setProperty(destination, key, source[key]);
+          setProperty2(destination, key, source[key]);
           overridableKeys[key] = true;
         }
       }
@@ -1803,7 +1655,7 @@ var require_loader = __commonJS({
           state.position = startPos || state.position;
           throwError(state, "duplicated mapping key");
         }
-        setProperty(_result, keyNode, valueNode);
+        setProperty2(_result, keyNode, valueNode);
         delete overridableKeys[keyNode];
       }
       return _result;
@@ -3006,10 +2858,10 @@ var require_dumper = __commonJS({
       }
       return result;
     }
-    function writeFlowSequence(state, level, object) {
+    function writeFlowSequence(state, level, object2) {
       var _result = "", _tag = state.tag, index, length;
-      for (index = 0, length = object.length; index < length; index += 1) {
-        if (writeNode(state, level, object[index], false, false)) {
+      for (index = 0, length = object2.length; index < length; index += 1) {
+        if (writeNode(state, level, object2[index], false, false)) {
           if (index !== 0) _result += "," + (!state.condenseFlow ? " " : "");
           _result += state.dump;
         }
@@ -3017,10 +2869,10 @@ var require_dumper = __commonJS({
       state.tag = _tag;
       state.dump = "[" + _result + "]";
     }
-    function writeBlockSequence(state, level, object, compact) {
+    function writeBlockSequence(state, level, object2, compact) {
       var _result = "", _tag = state.tag, index, length;
-      for (index = 0, length = object.length; index < length; index += 1) {
-        if (writeNode(state, level + 1, object[index], true, true)) {
+      for (index = 0, length = object2.length; index < length; index += 1) {
+        if (writeNode(state, level + 1, object2[index], true, true)) {
           if (!compact || index !== 0) {
             _result += generateNextLine(state, level);
           }
@@ -3035,14 +2887,14 @@ var require_dumper = __commonJS({
       state.tag = _tag;
       state.dump = _result || "[]";
     }
-    function writeFlowMapping(state, level, object) {
-      var _result = "", _tag = state.tag, objectKeyList = Object.keys(object), index, length, objectKey, objectValue, pairBuffer;
+    function writeFlowMapping(state, level, object2) {
+      var _result = "", _tag = state.tag, objectKeyList = Object.keys(object2), index, length, objectKey, objectValue, pairBuffer;
       for (index = 0, length = objectKeyList.length; index < length; index += 1) {
         pairBuffer = "";
         if (index !== 0) pairBuffer += ", ";
         if (state.condenseFlow) pairBuffer += '"';
         objectKey = objectKeyList[index];
-        objectValue = object[objectKey];
+        objectValue = object2[objectKey];
         if (!writeNode(state, level, objectKey, false, false)) {
           continue;
         }
@@ -3057,8 +2909,8 @@ var require_dumper = __commonJS({
       state.tag = _tag;
       state.dump = "{" + _result + "}";
     }
-    function writeBlockMapping(state, level, object, compact) {
-      var _result = "", _tag = state.tag, objectKeyList = Object.keys(object), index, length, objectKey, objectValue, explicitPair, pairBuffer;
+    function writeBlockMapping(state, level, object2, compact) {
+      var _result = "", _tag = state.tag, objectKeyList = Object.keys(object2), index, length, objectKey, objectValue, explicitPair, pairBuffer;
       if (state.sortKeys === true) {
         objectKeyList.sort();
       } else if (typeof state.sortKeys === "function") {
@@ -3072,7 +2924,7 @@ var require_dumper = __commonJS({
           pairBuffer += generateNextLine(state, level);
         }
         objectKey = objectKeyList[index];
-        objectValue = object[objectKey];
+        objectValue = object2[objectKey];
         if (!writeNode(state, level + 1, objectKey, true, true, true)) {
           continue;
         }
@@ -3102,19 +2954,19 @@ var require_dumper = __commonJS({
       state.tag = _tag;
       state.dump = _result || "{}";
     }
-    function detectType(state, object, explicit) {
+    function detectType(state, object2, explicit) {
       var _result, typeList, index, length, type, style;
       typeList = explicit ? state.explicitTypes : state.implicitTypes;
       for (index = 0, length = typeList.length; index < length; index += 1) {
         type = typeList[index];
-        if ((type.instanceOf || type.predicate) && (!type.instanceOf || typeof object === "object" && object instanceof type.instanceOf) && (!type.predicate || type.predicate(object))) {
+        if ((type.instanceOf || type.predicate) && (!type.instanceOf || typeof object2 === "object" && object2 instanceof type.instanceOf) && (!type.predicate || type.predicate(object2))) {
           state.tag = explicit ? type.tag : "?";
           if (type.represent) {
             style = state.styleMap[type.tag] || type.defaultStyle;
             if (_toString.call(type.represent) === "[object Function]") {
-              _result = type.represent(object, style);
+              _result = type.represent(object2, style);
             } else if (_hasOwnProperty.call(type.represent, style)) {
-              _result = type.represent[style](object, style);
+              _result = type.represent[style](object2, style);
             } else {
               throw new YAMLException("!<" + type.tag + '> tag resolver accepts not "' + style + '" style');
             }
@@ -3125,19 +2977,19 @@ var require_dumper = __commonJS({
       }
       return false;
     }
-    function writeNode(state, level, object, block, compact, iskey) {
+    function writeNode(state, level, object2, block2, compact, iskey) {
       state.tag = null;
-      state.dump = object;
-      if (!detectType(state, object, false)) {
-        detectType(state, object, true);
+      state.dump = object2;
+      if (!detectType(state, object2, false)) {
+        detectType(state, object2, true);
       }
       var type = _toString.call(state.dump);
-      if (block) {
-        block = state.flowLevel < 0 || state.flowLevel > level;
+      if (block2) {
+        block2 = state.flowLevel < 0 || state.flowLevel > level;
       }
       var objectOrArray = type === "[object Object]" || type === "[object Array]", duplicateIndex, duplicate;
       if (objectOrArray) {
-        duplicateIndex = state.duplicates.indexOf(object);
+        duplicateIndex = state.duplicates.indexOf(object2);
         duplicate = duplicateIndex !== -1;
       }
       if (state.tag !== null && state.tag !== "?" || duplicate || state.indent !== 2 && level > 0) {
@@ -3150,7 +3002,7 @@ var require_dumper = __commonJS({
           state.usedDuplicates[duplicateIndex] = true;
         }
         if (type === "[object Object]") {
-          if (block && Object.keys(state.dump).length !== 0) {
+          if (block2 && Object.keys(state.dump).length !== 0) {
             writeBlockMapping(state, level, state.dump, compact);
             if (duplicate) {
               state.dump = "&ref_" + duplicateIndex + state.dump;
@@ -3163,7 +3015,7 @@ var require_dumper = __commonJS({
           }
         } else if (type === "[object Array]") {
           var arrayLevel = state.noArrayIndent && level > 0 ? level - 1 : level;
-          if (block && state.dump.length !== 0) {
+          if (block2 && state.dump.length !== 0) {
             writeBlockSequence(state, arrayLevel, state.dump, compact);
             if (duplicate) {
               state.dump = "&ref_" + duplicateIndex + state.dump;
@@ -3188,32 +3040,32 @@ var require_dumper = __commonJS({
       }
       return true;
     }
-    function getDuplicateReferences(object, state) {
+    function getDuplicateReferences(object2, state) {
       var objects = [], duplicatesIndexes = [], index, length;
-      inspectNode(object, objects, duplicatesIndexes);
+      inspectNode(object2, objects, duplicatesIndexes);
       for (index = 0, length = duplicatesIndexes.length; index < length; index += 1) {
         state.duplicates.push(objects[duplicatesIndexes[index]]);
       }
       state.usedDuplicates = new Array(length);
     }
-    function inspectNode(object, objects, duplicatesIndexes) {
+    function inspectNode(object2, objects, duplicatesIndexes) {
       var objectKeyList, index, length;
-      if (object !== null && typeof object === "object") {
-        index = objects.indexOf(object);
+      if (object2 !== null && typeof object2 === "object") {
+        index = objects.indexOf(object2);
         if (index !== -1) {
           if (duplicatesIndexes.indexOf(index) === -1) {
             duplicatesIndexes.push(index);
           }
         } else {
-          objects.push(object);
-          if (Array.isArray(object)) {
-            for (index = 0, length = object.length; index < length; index += 1) {
-              inspectNode(object[index], objects, duplicatesIndexes);
+          objects.push(object2);
+          if (Array.isArray(object2)) {
+            for (index = 0, length = object2.length; index < length; index += 1) {
+              inspectNode(object2[index], objects, duplicatesIndexes);
             }
           } else {
-            objectKeyList = Object.keys(object);
+            objectKeyList = Object.keys(object2);
             for (index = 0, length = objectKeyList.length; index < length; index += 1) {
-              inspectNode(object[objectKeyList[index]], objects, duplicatesIndexes);
+              inspectNode(object2[objectKeyList[index]], objects, duplicatesIndexes);
             }
           }
         }
@@ -3457,10 +3309,10 @@ var require_stringify = __commonJS({
       data = Object.assign({}, file.data, data);
       const open = opts.delimiters[0];
       const close = opts.delimiters[1];
-      const matter3 = engine.stringify(data, options2).trim();
+      const matter4 = engine.stringify(data, options2).trim();
       let buf = "";
-      if (matter3 !== "{}") {
-        buf = newline(open) + newline(matter3) + newline(close);
+      if (matter4 !== "{}") {
+        buf = newline(open) + newline(matter4) + newline(close);
       }
       if (typeof file.excerpt === "string" && file.excerpt !== "") {
         if (str2.indexOf(file.excerpt.trim()) === -1) {
@@ -3564,21 +3416,21 @@ var require_gray_matter = __commonJS({
     var excerpt = require_excerpt();
     var engines2 = require_engines();
     var toFile = require_to_file();
-    var parse18 = require_parse();
+    var parse19 = require_parse();
     var utils = require_utils();
-    function matter3(input, options2) {
+    function matter4(input, options2) {
       if (input === "") {
         return { data: {}, content: input, excerpt: "", orig: input };
       }
       let file = toFile(input);
-      const cached = matter3.cache[file.content];
+      const cached = matter4.cache[file.content];
       if (!options2) {
         if (cached) {
           file = Object.assign({}, cached);
           file.orig = cached.orig;
           return file;
         }
-        matter3.cache[file.content] = file;
+        matter4.cache[file.content] = file;
       }
       return parseMatter(file, options2);
     }
@@ -3600,7 +3452,7 @@ var require_gray_matter = __commonJS({
       }
       str2 = str2.slice(openLen);
       const len = str2.length;
-      const language = matter3.language(str2, opts);
+      const language = matter4.language(str2, opts);
       if (language.name) {
         file.language = language.name;
         str2 = str2.slice(language.raw.length);
@@ -3610,13 +3462,13 @@ var require_gray_matter = __commonJS({
         closeIndex = len;
       }
       file.matter = str2.slice(0, closeIndex);
-      const block = file.matter.replace(/^\s*#[^\n]+/gm, "").trim();
-      if (block === "") {
+      const block2 = file.matter.replace(/^\s*#[^\n]+/gm, "").trim();
+      if (block2 === "") {
         file.isEmpty = true;
         file.empty = file.content;
         file.data = {};
       } else {
-        file.data = parse18(file.language, file.matter, opts);
+        file.data = parse19(file.language, file.matter, opts);
       }
       if (closeIndex === len) {
         file.content = "";
@@ -3635,24 +3487,24 @@ var require_gray_matter = __commonJS({
       }
       return file;
     }
-    matter3.engines = engines2;
-    matter3.stringify = function(file, data, options2) {
-      if (typeof file === "string") file = matter3(file, options2);
+    matter4.engines = engines2;
+    matter4.stringify = function(file, data, options2) {
+      if (typeof file === "string") file = matter4(file, options2);
       return stringify2(file, data, options2);
     };
-    matter3.read = function(filepath, options2) {
+    matter4.read = function(filepath, options2) {
       const str2 = fs.readFileSync(filepath, "utf8");
-      const file = matter3(str2, options2);
+      const file = matter4(str2, options2);
       file.path = filepath;
       return file;
     };
-    matter3.test = function(str2, options2) {
+    matter4.test = function(str2, options2) {
       return utils.startsWith(str2, defaults(options2).delimiters[0]);
     };
-    matter3.language = function(str2, options2) {
+    matter4.language = function(str2, options2) {
       const opts = defaults(options2);
       const open = opts.delimiters[0];
-      if (matter3.test(str2)) {
+      if (matter4.test(str2)) {
         str2 = str2.slice(open.length);
       }
       const language = str2.slice(0, str2.search(/\r?\n/));
@@ -3661,11 +3513,11 @@ var require_gray_matter = __commonJS({
         name: language ? language.trim() : ""
       };
     };
-    matter3.cache = {};
-    matter3.clearCache = function() {
-      matter3.cache = {};
+    matter4.cache = {};
+    matter4.clearCache = function() {
+      matter4.cache = {};
     };
-    module2.exports = matter3;
+    module2.exports = matter4;
   }
 });
 
@@ -3786,14 +3638,909 @@ function serializeManifest(manifest) {
 `;
 }
 
+// node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/esm/impl/scanner.js
+function createScanner(text, ignoreTrivia = false) {
+  const len = text.length;
+  let pos = 0, value = "", tokenOffset = 0, token = 16, lineNumber = 0, lineStartOffset = 0, tokenLineStartOffset = 0, prevTokenLineStartOffset = 0, scanError = 0;
+  function scanHexDigits(count, exact) {
+    let digits = 0;
+    let value2 = 0;
+    while (digits < count || !exact) {
+      let ch = text.charCodeAt(pos);
+      if (ch >= 48 && ch <= 57) {
+        value2 = value2 * 16 + ch - 48;
+      } else if (ch >= 65 && ch <= 70) {
+        value2 = value2 * 16 + ch - 65 + 10;
+      } else if (ch >= 97 && ch <= 102) {
+        value2 = value2 * 16 + ch - 97 + 10;
+      } else {
+        break;
+      }
+      pos++;
+      digits++;
+    }
+    if (digits < count) {
+      value2 = -1;
+    }
+    return value2;
+  }
+  function setPosition(newPosition) {
+    pos = newPosition;
+    value = "";
+    tokenOffset = 0;
+    token = 16;
+    scanError = 0;
+  }
+  function scanNumber() {
+    let start = pos;
+    if (text.charCodeAt(pos) === 48) {
+      pos++;
+    } else {
+      pos++;
+      while (pos < text.length && isDigit(text.charCodeAt(pos))) {
+        pos++;
+      }
+    }
+    if (pos < text.length && text.charCodeAt(pos) === 46) {
+      pos++;
+      if (pos < text.length && isDigit(text.charCodeAt(pos))) {
+        pos++;
+        while (pos < text.length && isDigit(text.charCodeAt(pos))) {
+          pos++;
+        }
+      } else {
+        scanError = 3;
+        return text.substring(start, pos);
+      }
+    }
+    let end = pos;
+    if (pos < text.length && (text.charCodeAt(pos) === 69 || text.charCodeAt(pos) === 101)) {
+      pos++;
+      if (pos < text.length && text.charCodeAt(pos) === 43 || text.charCodeAt(pos) === 45) {
+        pos++;
+      }
+      if (pos < text.length && isDigit(text.charCodeAt(pos))) {
+        pos++;
+        while (pos < text.length && isDigit(text.charCodeAt(pos))) {
+          pos++;
+        }
+        end = pos;
+      } else {
+        scanError = 3;
+      }
+    }
+    return text.substring(start, end);
+  }
+  function scanString() {
+    let result = "", start = pos;
+    while (true) {
+      if (pos >= len) {
+        result += text.substring(start, pos);
+        scanError = 2;
+        break;
+      }
+      const ch = text.charCodeAt(pos);
+      if (ch === 34) {
+        result += text.substring(start, pos);
+        pos++;
+        break;
+      }
+      if (ch === 92) {
+        result += text.substring(start, pos);
+        pos++;
+        if (pos >= len) {
+          scanError = 2;
+          break;
+        }
+        const ch2 = text.charCodeAt(pos++);
+        switch (ch2) {
+          case 34:
+            result += '"';
+            break;
+          case 92:
+            result += "\\";
+            break;
+          case 47:
+            result += "/";
+            break;
+          case 98:
+            result += "\b";
+            break;
+          case 102:
+            result += "\f";
+            break;
+          case 110:
+            result += "\n";
+            break;
+          case 114:
+            result += "\r";
+            break;
+          case 116:
+            result += "	";
+            break;
+          case 117:
+            const ch3 = scanHexDigits(4, true);
+            if (ch3 >= 0) {
+              result += String.fromCharCode(ch3);
+            } else {
+              scanError = 4;
+            }
+            break;
+          default:
+            scanError = 5;
+        }
+        start = pos;
+        continue;
+      }
+      if (ch >= 0 && ch <= 31) {
+        if (isLineBreak(ch)) {
+          result += text.substring(start, pos);
+          scanError = 2;
+          break;
+        } else {
+          scanError = 6;
+        }
+      }
+      pos++;
+    }
+    return result;
+  }
+  function scanNext() {
+    value = "";
+    scanError = 0;
+    tokenOffset = pos;
+    lineStartOffset = lineNumber;
+    prevTokenLineStartOffset = tokenLineStartOffset;
+    if (pos >= len) {
+      tokenOffset = len;
+      return token = 17;
+    }
+    let code = text.charCodeAt(pos);
+    if (isWhiteSpace(code)) {
+      do {
+        pos++;
+        value += String.fromCharCode(code);
+        code = text.charCodeAt(pos);
+      } while (isWhiteSpace(code));
+      return token = 15;
+    }
+    if (isLineBreak(code)) {
+      pos++;
+      value += String.fromCharCode(code);
+      if (code === 13 && text.charCodeAt(pos) === 10) {
+        pos++;
+        value += "\n";
+      }
+      lineNumber++;
+      tokenLineStartOffset = pos;
+      return token = 14;
+    }
+    switch (code) {
+      // tokens: []{}:,
+      case 123:
+        pos++;
+        return token = 1;
+      case 125:
+        pos++;
+        return token = 2;
+      case 91:
+        pos++;
+        return token = 3;
+      case 93:
+        pos++;
+        return token = 4;
+      case 58:
+        pos++;
+        return token = 6;
+      case 44:
+        pos++;
+        return token = 5;
+      // strings
+      case 34:
+        pos++;
+        value = scanString();
+        return token = 10;
+      // comments
+      case 47:
+        const start = pos - 1;
+        if (text.charCodeAt(pos + 1) === 47) {
+          pos += 2;
+          while (pos < len) {
+            if (isLineBreak(text.charCodeAt(pos))) {
+              break;
+            }
+            pos++;
+          }
+          value = text.substring(start, pos);
+          return token = 12;
+        }
+        if (text.charCodeAt(pos + 1) === 42) {
+          pos += 2;
+          const safeLength = len - 1;
+          let commentClosed = false;
+          while (pos < safeLength) {
+            const ch = text.charCodeAt(pos);
+            if (ch === 42 && text.charCodeAt(pos + 1) === 47) {
+              pos += 2;
+              commentClosed = true;
+              break;
+            }
+            pos++;
+            if (isLineBreak(ch)) {
+              if (ch === 13 && text.charCodeAt(pos) === 10) {
+                pos++;
+              }
+              lineNumber++;
+              tokenLineStartOffset = pos;
+            }
+          }
+          if (!commentClosed) {
+            pos++;
+            scanError = 1;
+          }
+          value = text.substring(start, pos);
+          return token = 13;
+        }
+        value += String.fromCharCode(code);
+        pos++;
+        return token = 16;
+      // numbers
+      case 45:
+        value += String.fromCharCode(code);
+        pos++;
+        if (pos === len || !isDigit(text.charCodeAt(pos))) {
+          return token = 16;
+        }
+      // found a minus, followed by a number so
+      // we fall through to proceed with scanning
+      // numbers
+      case 48:
+      case 49:
+      case 50:
+      case 51:
+      case 52:
+      case 53:
+      case 54:
+      case 55:
+      case 56:
+      case 57:
+        value += scanNumber();
+        return token = 11;
+      // literals and unknown symbols
+      default:
+        while (pos < len && isUnknownContentCharacter(code)) {
+          pos++;
+          code = text.charCodeAt(pos);
+        }
+        if (tokenOffset !== pos) {
+          value = text.substring(tokenOffset, pos);
+          switch (value) {
+            case "true":
+              return token = 8;
+            case "false":
+              return token = 9;
+            case "null":
+              return token = 7;
+          }
+          return token = 16;
+        }
+        value += String.fromCharCode(code);
+        pos++;
+        return token = 16;
+    }
+  }
+  function isUnknownContentCharacter(code) {
+    if (isWhiteSpace(code) || isLineBreak(code)) {
+      return false;
+    }
+    switch (code) {
+      case 125:
+      case 93:
+      case 123:
+      case 91:
+      case 34:
+      case 58:
+      case 44:
+      case 47:
+        return false;
+    }
+    return true;
+  }
+  function scanNextNonTrivia() {
+    let result;
+    do {
+      result = scanNext();
+    } while (result >= 12 && result <= 15);
+    return result;
+  }
+  return {
+    setPosition,
+    getPosition: () => pos,
+    scan: ignoreTrivia ? scanNextNonTrivia : scanNext,
+    getToken: () => token,
+    getTokenValue: () => value,
+    getTokenOffset: () => tokenOffset,
+    getTokenLength: () => pos - tokenOffset,
+    getTokenStartLine: () => lineStartOffset,
+    getTokenStartCharacter: () => tokenOffset - prevTokenLineStartOffset,
+    getTokenError: () => scanError
+  };
+}
+function isWhiteSpace(ch) {
+  return ch === 32 || ch === 9;
+}
+function isLineBreak(ch) {
+  return ch === 10 || ch === 13;
+}
+function isDigit(ch) {
+  return ch >= 48 && ch <= 57;
+}
+var CharacterCodes;
+(function(CharacterCodes2) {
+  CharacterCodes2[CharacterCodes2["lineFeed"] = 10] = "lineFeed";
+  CharacterCodes2[CharacterCodes2["carriageReturn"] = 13] = "carriageReturn";
+  CharacterCodes2[CharacterCodes2["space"] = 32] = "space";
+  CharacterCodes2[CharacterCodes2["_0"] = 48] = "_0";
+  CharacterCodes2[CharacterCodes2["_1"] = 49] = "_1";
+  CharacterCodes2[CharacterCodes2["_2"] = 50] = "_2";
+  CharacterCodes2[CharacterCodes2["_3"] = 51] = "_3";
+  CharacterCodes2[CharacterCodes2["_4"] = 52] = "_4";
+  CharacterCodes2[CharacterCodes2["_5"] = 53] = "_5";
+  CharacterCodes2[CharacterCodes2["_6"] = 54] = "_6";
+  CharacterCodes2[CharacterCodes2["_7"] = 55] = "_7";
+  CharacterCodes2[CharacterCodes2["_8"] = 56] = "_8";
+  CharacterCodes2[CharacterCodes2["_9"] = 57] = "_9";
+  CharacterCodes2[CharacterCodes2["a"] = 97] = "a";
+  CharacterCodes2[CharacterCodes2["b"] = 98] = "b";
+  CharacterCodes2[CharacterCodes2["c"] = 99] = "c";
+  CharacterCodes2[CharacterCodes2["d"] = 100] = "d";
+  CharacterCodes2[CharacterCodes2["e"] = 101] = "e";
+  CharacterCodes2[CharacterCodes2["f"] = 102] = "f";
+  CharacterCodes2[CharacterCodes2["g"] = 103] = "g";
+  CharacterCodes2[CharacterCodes2["h"] = 104] = "h";
+  CharacterCodes2[CharacterCodes2["i"] = 105] = "i";
+  CharacterCodes2[CharacterCodes2["j"] = 106] = "j";
+  CharacterCodes2[CharacterCodes2["k"] = 107] = "k";
+  CharacterCodes2[CharacterCodes2["l"] = 108] = "l";
+  CharacterCodes2[CharacterCodes2["m"] = 109] = "m";
+  CharacterCodes2[CharacterCodes2["n"] = 110] = "n";
+  CharacterCodes2[CharacterCodes2["o"] = 111] = "o";
+  CharacterCodes2[CharacterCodes2["p"] = 112] = "p";
+  CharacterCodes2[CharacterCodes2["q"] = 113] = "q";
+  CharacterCodes2[CharacterCodes2["r"] = 114] = "r";
+  CharacterCodes2[CharacterCodes2["s"] = 115] = "s";
+  CharacterCodes2[CharacterCodes2["t"] = 116] = "t";
+  CharacterCodes2[CharacterCodes2["u"] = 117] = "u";
+  CharacterCodes2[CharacterCodes2["v"] = 118] = "v";
+  CharacterCodes2[CharacterCodes2["w"] = 119] = "w";
+  CharacterCodes2[CharacterCodes2["x"] = 120] = "x";
+  CharacterCodes2[CharacterCodes2["y"] = 121] = "y";
+  CharacterCodes2[CharacterCodes2["z"] = 122] = "z";
+  CharacterCodes2[CharacterCodes2["A"] = 65] = "A";
+  CharacterCodes2[CharacterCodes2["B"] = 66] = "B";
+  CharacterCodes2[CharacterCodes2["C"] = 67] = "C";
+  CharacterCodes2[CharacterCodes2["D"] = 68] = "D";
+  CharacterCodes2[CharacterCodes2["E"] = 69] = "E";
+  CharacterCodes2[CharacterCodes2["F"] = 70] = "F";
+  CharacterCodes2[CharacterCodes2["G"] = 71] = "G";
+  CharacterCodes2[CharacterCodes2["H"] = 72] = "H";
+  CharacterCodes2[CharacterCodes2["I"] = 73] = "I";
+  CharacterCodes2[CharacterCodes2["J"] = 74] = "J";
+  CharacterCodes2[CharacterCodes2["K"] = 75] = "K";
+  CharacterCodes2[CharacterCodes2["L"] = 76] = "L";
+  CharacterCodes2[CharacterCodes2["M"] = 77] = "M";
+  CharacterCodes2[CharacterCodes2["N"] = 78] = "N";
+  CharacterCodes2[CharacterCodes2["O"] = 79] = "O";
+  CharacterCodes2[CharacterCodes2["P"] = 80] = "P";
+  CharacterCodes2[CharacterCodes2["Q"] = 81] = "Q";
+  CharacterCodes2[CharacterCodes2["R"] = 82] = "R";
+  CharacterCodes2[CharacterCodes2["S"] = 83] = "S";
+  CharacterCodes2[CharacterCodes2["T"] = 84] = "T";
+  CharacterCodes2[CharacterCodes2["U"] = 85] = "U";
+  CharacterCodes2[CharacterCodes2["V"] = 86] = "V";
+  CharacterCodes2[CharacterCodes2["W"] = 87] = "W";
+  CharacterCodes2[CharacterCodes2["X"] = 88] = "X";
+  CharacterCodes2[CharacterCodes2["Y"] = 89] = "Y";
+  CharacterCodes2[CharacterCodes2["Z"] = 90] = "Z";
+  CharacterCodes2[CharacterCodes2["asterisk"] = 42] = "asterisk";
+  CharacterCodes2[CharacterCodes2["backslash"] = 92] = "backslash";
+  CharacterCodes2[CharacterCodes2["closeBrace"] = 125] = "closeBrace";
+  CharacterCodes2[CharacterCodes2["closeBracket"] = 93] = "closeBracket";
+  CharacterCodes2[CharacterCodes2["colon"] = 58] = "colon";
+  CharacterCodes2[CharacterCodes2["comma"] = 44] = "comma";
+  CharacterCodes2[CharacterCodes2["dot"] = 46] = "dot";
+  CharacterCodes2[CharacterCodes2["doubleQuote"] = 34] = "doubleQuote";
+  CharacterCodes2[CharacterCodes2["minus"] = 45] = "minus";
+  CharacterCodes2[CharacterCodes2["openBrace"] = 123] = "openBrace";
+  CharacterCodes2[CharacterCodes2["openBracket"] = 91] = "openBracket";
+  CharacterCodes2[CharacterCodes2["plus"] = 43] = "plus";
+  CharacterCodes2[CharacterCodes2["slash"] = 47] = "slash";
+  CharacterCodes2[CharacterCodes2["formFeed"] = 12] = "formFeed";
+  CharacterCodes2[CharacterCodes2["tab"] = 9] = "tab";
+})(CharacterCodes || (CharacterCodes = {}));
+
+// node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/esm/impl/string-intern.js
+var cachedSpaces = new Array(20).fill(0).map((_, index) => {
+  return " ".repeat(index);
+});
+var maxCachedValues = 200;
+var cachedBreakLinesWithSpaces = {
+  " ": {
+    "\n": new Array(maxCachedValues).fill(0).map((_, index) => {
+      return "\n" + " ".repeat(index);
+    }),
+    "\r": new Array(maxCachedValues).fill(0).map((_, index) => {
+      return "\r" + " ".repeat(index);
+    }),
+    "\r\n": new Array(maxCachedValues).fill(0).map((_, index) => {
+      return "\r\n" + " ".repeat(index);
+    })
+  },
+  "	": {
+    "\n": new Array(maxCachedValues).fill(0).map((_, index) => {
+      return "\n" + "	".repeat(index);
+    }),
+    "\r": new Array(maxCachedValues).fill(0).map((_, index) => {
+      return "\r" + "	".repeat(index);
+    }),
+    "\r\n": new Array(maxCachedValues).fill(0).map((_, index) => {
+      return "\r\n" + "	".repeat(index);
+    })
+  }
+};
+
+// node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/esm/impl/parser.js
+var ParseOptions;
+(function(ParseOptions2) {
+  ParseOptions2.DEFAULT = {
+    allowTrailingComma: false
+  };
+})(ParseOptions || (ParseOptions = {}));
+function parse2(text, errors = [], options2 = ParseOptions.DEFAULT) {
+  let currentProperty = null;
+  let currentParent = [];
+  const previousParents = [];
+  function onValue(value) {
+    if (Array.isArray(currentParent)) {
+      currentParent.push(value);
+    } else if (currentProperty !== null) {
+      currentParent[currentProperty] = value;
+    }
+  }
+  const visitor = {
+    onObjectBegin: () => {
+      const object2 = {};
+      onValue(object2);
+      previousParents.push(currentParent);
+      currentParent = object2;
+      currentProperty = null;
+    },
+    onObjectProperty: (name) => {
+      currentProperty = name;
+    },
+    onObjectEnd: () => {
+      currentParent = previousParents.pop();
+    },
+    onArrayBegin: () => {
+      const array = [];
+      onValue(array);
+      previousParents.push(currentParent);
+      currentParent = array;
+      currentProperty = null;
+    },
+    onArrayEnd: () => {
+      currentParent = previousParents.pop();
+    },
+    onLiteralValue: onValue,
+    onError: (error, offset, length) => {
+      errors.push({ error, offset, length });
+    }
+  };
+  visit(text, visitor, options2);
+  return currentParent[0];
+}
+function visit(text, visitor, options2 = ParseOptions.DEFAULT) {
+  const _scanner = createScanner(text, false);
+  const _jsonPath = [];
+  let suppressedCallbacks = 0;
+  function toNoArgVisit(visitFunction) {
+    return visitFunction ? () => suppressedCallbacks === 0 && visitFunction(_scanner.getTokenOffset(), _scanner.getTokenLength(), _scanner.getTokenStartLine(), _scanner.getTokenStartCharacter()) : () => true;
+  }
+  function toOneArgVisit(visitFunction) {
+    return visitFunction ? (arg) => suppressedCallbacks === 0 && visitFunction(arg, _scanner.getTokenOffset(), _scanner.getTokenLength(), _scanner.getTokenStartLine(), _scanner.getTokenStartCharacter()) : () => true;
+  }
+  function toOneArgVisitWithPath(visitFunction) {
+    return visitFunction ? (arg) => suppressedCallbacks === 0 && visitFunction(arg, _scanner.getTokenOffset(), _scanner.getTokenLength(), _scanner.getTokenStartLine(), _scanner.getTokenStartCharacter(), () => _jsonPath.slice()) : () => true;
+  }
+  function toBeginVisit(visitFunction) {
+    return visitFunction ? () => {
+      if (suppressedCallbacks > 0) {
+        suppressedCallbacks++;
+      } else {
+        let cbReturn = visitFunction(_scanner.getTokenOffset(), _scanner.getTokenLength(), _scanner.getTokenStartLine(), _scanner.getTokenStartCharacter(), () => _jsonPath.slice());
+        if (cbReturn === false) {
+          suppressedCallbacks = 1;
+        }
+      }
+    } : () => true;
+  }
+  function toEndVisit(visitFunction) {
+    return visitFunction ? () => {
+      if (suppressedCallbacks > 0) {
+        suppressedCallbacks--;
+      }
+      if (suppressedCallbacks === 0) {
+        visitFunction(_scanner.getTokenOffset(), _scanner.getTokenLength(), _scanner.getTokenStartLine(), _scanner.getTokenStartCharacter());
+      }
+    } : () => true;
+  }
+  const onObjectBegin = toBeginVisit(visitor.onObjectBegin), onObjectProperty = toOneArgVisitWithPath(visitor.onObjectProperty), onObjectEnd = toEndVisit(visitor.onObjectEnd), onArrayBegin = toBeginVisit(visitor.onArrayBegin), onArrayEnd = toEndVisit(visitor.onArrayEnd), onLiteralValue = toOneArgVisitWithPath(visitor.onLiteralValue), onSeparator = toOneArgVisit(visitor.onSeparator), onComment = toNoArgVisit(visitor.onComment), onError = toOneArgVisit(visitor.onError);
+  const disallowComments = options2 && options2.disallowComments;
+  const allowTrailingComma = options2 && options2.allowTrailingComma;
+  function scanNext() {
+    while (true) {
+      const token = _scanner.scan();
+      switch (_scanner.getTokenError()) {
+        case 4:
+          handleError(
+            14
+            /* ParseErrorCode.InvalidUnicode */
+          );
+          break;
+        case 5:
+          handleError(
+            15
+            /* ParseErrorCode.InvalidEscapeCharacter */
+          );
+          break;
+        case 3:
+          handleError(
+            13
+            /* ParseErrorCode.UnexpectedEndOfNumber */
+          );
+          break;
+        case 1:
+          if (!disallowComments) {
+            handleError(
+              11
+              /* ParseErrorCode.UnexpectedEndOfComment */
+            );
+          }
+          break;
+        case 2:
+          handleError(
+            12
+            /* ParseErrorCode.UnexpectedEndOfString */
+          );
+          break;
+        case 6:
+          handleError(
+            16
+            /* ParseErrorCode.InvalidCharacter */
+          );
+          break;
+      }
+      switch (token) {
+        case 12:
+        case 13:
+          if (disallowComments) {
+            handleError(
+              10
+              /* ParseErrorCode.InvalidCommentToken */
+            );
+          } else {
+            onComment();
+          }
+          break;
+        case 16:
+          handleError(
+            1
+            /* ParseErrorCode.InvalidSymbol */
+          );
+          break;
+        case 15:
+        case 14:
+          break;
+        default:
+          return token;
+      }
+    }
+  }
+  function handleError(error, skipUntilAfter = [], skipUntil2 = []) {
+    onError(error);
+    if (skipUntilAfter.length + skipUntil2.length > 0) {
+      let token = _scanner.getToken();
+      while (token !== 17) {
+        if (skipUntilAfter.indexOf(token) !== -1) {
+          scanNext();
+          break;
+        } else if (skipUntil2.indexOf(token) !== -1) {
+          break;
+        }
+        token = scanNext();
+      }
+    }
+  }
+  function parseString2(isValue) {
+    const value = _scanner.getTokenValue();
+    if (isValue) {
+      onLiteralValue(value);
+    } else {
+      onObjectProperty(value);
+      _jsonPath.push(value);
+    }
+    scanNext();
+    return true;
+  }
+  function parseLiteral() {
+    switch (_scanner.getToken()) {
+      case 11:
+        const tokenValue = _scanner.getTokenValue();
+        let value = Number(tokenValue);
+        if (isNaN(value)) {
+          handleError(
+            2
+            /* ParseErrorCode.InvalidNumberFormat */
+          );
+          value = 0;
+        }
+        onLiteralValue(value);
+        break;
+      case 7:
+        onLiteralValue(null);
+        break;
+      case 8:
+        onLiteralValue(true);
+        break;
+      case 9:
+        onLiteralValue(false);
+        break;
+      default:
+        return false;
+    }
+    scanNext();
+    return true;
+  }
+  function parseProperty() {
+    if (_scanner.getToken() !== 10) {
+      handleError(3, [], [
+        2,
+        5
+        /* SyntaxKind.CommaToken */
+      ]);
+      return false;
+    }
+    parseString2(false);
+    if (_scanner.getToken() === 6) {
+      onSeparator(":");
+      scanNext();
+      if (!parseValue2()) {
+        handleError(4, [], [
+          2,
+          5
+          /* SyntaxKind.CommaToken */
+        ]);
+      }
+    } else {
+      handleError(5, [], [
+        2,
+        5
+        /* SyntaxKind.CommaToken */
+      ]);
+    }
+    _jsonPath.pop();
+    return true;
+  }
+  function parseObject() {
+    onObjectBegin();
+    scanNext();
+    let needsComma = false;
+    while (_scanner.getToken() !== 2 && _scanner.getToken() !== 17) {
+      if (_scanner.getToken() === 5) {
+        if (!needsComma) {
+          handleError(4, [], []);
+        }
+        onSeparator(",");
+        scanNext();
+        if (_scanner.getToken() === 2 && allowTrailingComma) {
+          break;
+        }
+      } else if (needsComma) {
+        handleError(6, [], []);
+      }
+      if (!parseProperty()) {
+        handleError(4, [], [
+          2,
+          5
+          /* SyntaxKind.CommaToken */
+        ]);
+      }
+      needsComma = true;
+    }
+    onObjectEnd();
+    if (_scanner.getToken() !== 2) {
+      handleError(7, [
+        2
+        /* SyntaxKind.CloseBraceToken */
+      ], []);
+    } else {
+      scanNext();
+    }
+    return true;
+  }
+  function parseArray2() {
+    onArrayBegin();
+    scanNext();
+    let isFirstElement = true;
+    let needsComma = false;
+    while (_scanner.getToken() !== 4 && _scanner.getToken() !== 17) {
+      if (_scanner.getToken() === 5) {
+        if (!needsComma) {
+          handleError(4, [], []);
+        }
+        onSeparator(",");
+        scanNext();
+        if (_scanner.getToken() === 4 && allowTrailingComma) {
+          break;
+        }
+      } else if (needsComma) {
+        handleError(6, [], []);
+      }
+      if (isFirstElement) {
+        _jsonPath.push(0);
+        isFirstElement = false;
+      } else {
+        _jsonPath[_jsonPath.length - 1]++;
+      }
+      if (!parseValue2()) {
+        handleError(4, [], [
+          4,
+          5
+          /* SyntaxKind.CommaToken */
+        ]);
+      }
+      needsComma = true;
+    }
+    onArrayEnd();
+    if (!isFirstElement) {
+      _jsonPath.pop();
+    }
+    if (_scanner.getToken() !== 4) {
+      handleError(8, [
+        4
+        /* SyntaxKind.CloseBracketToken */
+      ], []);
+    } else {
+      scanNext();
+    }
+    return true;
+  }
+  function parseValue2() {
+    switch (_scanner.getToken()) {
+      case 3:
+        return parseArray2();
+      case 1:
+        return parseObject();
+      case 10:
+        return parseString2(true);
+      default:
+        return parseLiteral();
+    }
+  }
+  scanNext();
+  if (_scanner.getToken() === 17) {
+    if (options2.allowEmptyContent) {
+      return true;
+    }
+    handleError(4, [], []);
+    return false;
+  }
+  if (!parseValue2()) {
+    handleError(4, [], []);
+    return false;
+  }
+  if (_scanner.getToken() !== 17) {
+    handleError(9, [], []);
+  }
+  return true;
+}
+
+// node_modules/.pnpm/jsonc-parser@3.3.1/node_modules/jsonc-parser/lib/esm/main.js
+var ScanError;
+(function(ScanError2) {
+  ScanError2[ScanError2["None"] = 0] = "None";
+  ScanError2[ScanError2["UnexpectedEndOfComment"] = 1] = "UnexpectedEndOfComment";
+  ScanError2[ScanError2["UnexpectedEndOfString"] = 2] = "UnexpectedEndOfString";
+  ScanError2[ScanError2["UnexpectedEndOfNumber"] = 3] = "UnexpectedEndOfNumber";
+  ScanError2[ScanError2["InvalidUnicode"] = 4] = "InvalidUnicode";
+  ScanError2[ScanError2["InvalidEscapeCharacter"] = 5] = "InvalidEscapeCharacter";
+  ScanError2[ScanError2["InvalidCharacter"] = 6] = "InvalidCharacter";
+})(ScanError || (ScanError = {}));
+var SyntaxKind;
+(function(SyntaxKind2) {
+  SyntaxKind2[SyntaxKind2["OpenBraceToken"] = 1] = "OpenBraceToken";
+  SyntaxKind2[SyntaxKind2["CloseBraceToken"] = 2] = "CloseBraceToken";
+  SyntaxKind2[SyntaxKind2["OpenBracketToken"] = 3] = "OpenBracketToken";
+  SyntaxKind2[SyntaxKind2["CloseBracketToken"] = 4] = "CloseBracketToken";
+  SyntaxKind2[SyntaxKind2["CommaToken"] = 5] = "CommaToken";
+  SyntaxKind2[SyntaxKind2["ColonToken"] = 6] = "ColonToken";
+  SyntaxKind2[SyntaxKind2["NullKeyword"] = 7] = "NullKeyword";
+  SyntaxKind2[SyntaxKind2["TrueKeyword"] = 8] = "TrueKeyword";
+  SyntaxKind2[SyntaxKind2["FalseKeyword"] = 9] = "FalseKeyword";
+  SyntaxKind2[SyntaxKind2["StringLiteral"] = 10] = "StringLiteral";
+  SyntaxKind2[SyntaxKind2["NumericLiteral"] = 11] = "NumericLiteral";
+  SyntaxKind2[SyntaxKind2["LineCommentTrivia"] = 12] = "LineCommentTrivia";
+  SyntaxKind2[SyntaxKind2["BlockCommentTrivia"] = 13] = "BlockCommentTrivia";
+  SyntaxKind2[SyntaxKind2["LineBreakTrivia"] = 14] = "LineBreakTrivia";
+  SyntaxKind2[SyntaxKind2["Trivia"] = 15] = "Trivia";
+  SyntaxKind2[SyntaxKind2["Unknown"] = 16] = "Unknown";
+  SyntaxKind2[SyntaxKind2["EOF"] = 17] = "EOF";
+})(SyntaxKind || (SyntaxKind = {}));
+var parse3 = parse2;
+var ParseErrorCode;
+(function(ParseErrorCode2) {
+  ParseErrorCode2[ParseErrorCode2["InvalidSymbol"] = 1] = "InvalidSymbol";
+  ParseErrorCode2[ParseErrorCode2["InvalidNumberFormat"] = 2] = "InvalidNumberFormat";
+  ParseErrorCode2[ParseErrorCode2["PropertyNameExpected"] = 3] = "PropertyNameExpected";
+  ParseErrorCode2[ParseErrorCode2["ValueExpected"] = 4] = "ValueExpected";
+  ParseErrorCode2[ParseErrorCode2["ColonExpected"] = 5] = "ColonExpected";
+  ParseErrorCode2[ParseErrorCode2["CommaExpected"] = 6] = "CommaExpected";
+  ParseErrorCode2[ParseErrorCode2["CloseBraceExpected"] = 7] = "CloseBraceExpected";
+  ParseErrorCode2[ParseErrorCode2["CloseBracketExpected"] = 8] = "CloseBracketExpected";
+  ParseErrorCode2[ParseErrorCode2["EndOfFileExpected"] = 9] = "EndOfFileExpected";
+  ParseErrorCode2[ParseErrorCode2["InvalidCommentToken"] = 10] = "InvalidCommentToken";
+  ParseErrorCode2[ParseErrorCode2["UnexpectedEndOfComment"] = 11] = "UnexpectedEndOfComment";
+  ParseErrorCode2[ParseErrorCode2["UnexpectedEndOfString"] = 12] = "UnexpectedEndOfString";
+  ParseErrorCode2[ParseErrorCode2["UnexpectedEndOfNumber"] = 13] = "UnexpectedEndOfNumber";
+  ParseErrorCode2[ParseErrorCode2["InvalidUnicode"] = 14] = "InvalidUnicode";
+  ParseErrorCode2[ParseErrorCode2["InvalidEscapeCharacter"] = 15] = "InvalidEscapeCharacter";
+  ParseErrorCode2[ParseErrorCode2["InvalidCharacter"] = 16] = "InvalidCharacter";
+})(ParseErrorCode || (ParseErrorCode = {}));
+function printParseErrorCode(code) {
+  switch (code) {
+    case 1:
+      return "InvalidSymbol";
+    case 2:
+      return "InvalidNumberFormat";
+    case 3:
+      return "PropertyNameExpected";
+    case 4:
+      return "ValueExpected";
+    case 5:
+      return "ColonExpected";
+    case 6:
+      return "CommaExpected";
+    case 7:
+      return "CloseBraceExpected";
+    case 8:
+      return "CloseBracketExpected";
+    case 9:
+      return "EndOfFileExpected";
+    case 10:
+      return "InvalidCommentToken";
+    case 11:
+      return "UnexpectedEndOfComment";
+    case 12:
+      return "UnexpectedEndOfString";
+    case 13:
+      return "UnexpectedEndOfNumber";
+    case 14:
+      return "InvalidUnicode";
+    case 15:
+      return "InvalidEscapeCharacter";
+    case 16:
+      return "InvalidCharacter";
+  }
+  return "<unknown ParseErrorCode>";
+}
+
 // lib/jsonc/index.ts
-var import_jsonc_parser = __toESM(require_main());
 function parseJsonc(text) {
   const errors = [];
-  const value = (0, import_jsonc_parser.parse)(text, errors, { allowTrailingComma: true });
+  const value = parse3(text, errors, { allowTrailingComma: true });
   if (errors.length > 0) {
     const first = errors[0];
-    throw new SyntaxError(`${(0, import_jsonc_parser.printParseErrorCode)(first.error)} at offset ${first.offset}`);
+    throw new SyntaxError(`${printParseErrorCode(first.error)} at offset ${first.offset}`);
   }
   return value;
 }
@@ -3877,7 +4624,7 @@ function entriesFromMap(map) {
   }
   return out;
 }
-function parse3(value) {
+function parse4(value) {
   const root = asRoot(value);
   if (!root) return [];
   const seen = /* @__PURE__ */ new Map();
@@ -3920,7 +4667,7 @@ var CLAUDE_CODE_AGENT = {
   description: "~/.claude.json \u2014 root mcpServers + projects[].mcpServers",
   writable: true,
   format: "json",
-  parse: parse3,
+  parse: parse4,
   project
 };
 
@@ -3929,7 +4676,7 @@ function asRoot2(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value;
 }
-function parse4(value) {
+function parse5(value) {
   const root = asRoot2(value);
   if (!root?.mcpServers || typeof root.mcpServers !== "object") return [];
   const out = [];
@@ -3965,7 +4712,7 @@ var CLAUDE_DESKTOP_AGENT = {
   description: "claude_desktop_config.json \u2014 stdio servers only",
   writable: true,
   format: "json",
-  parse: parse4,
+  parse: parse5,
   project: project2
 };
 
@@ -3974,7 +4721,7 @@ function asRoot3(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value;
 }
-function parse5(value) {
+function parse6(value) {
   const root = asRoot3(value);
   if (!root?.mcpServers || typeof root.mcpServers !== "object") return [];
   const out = [];
@@ -3996,7 +4743,7 @@ var CLINE_AGENT = {
   description: "VS Code extension \u2014 read-only (path varies)",
   writable: false,
   format: "json",
-  parse: parse5,
+  parse: parse6,
   project: project3
 };
 
@@ -4012,7 +4759,7 @@ function pickServerMap(root) {
   if (b && typeof b === "object") return b;
   return {};
 }
-function parse6(value) {
+function parse7(value) {
   const root = asRoot4(value);
   if (!root) return [];
   const map = pickServerMap(root);
@@ -4046,7 +4793,7 @@ var CODEX_AGENT = {
   description: "~/.codex/config.toml \u2014 TOML, [mcp_servers.NAME] tables",
   writable: true,
   format: "toml",
-  parse: parse6,
+  parse: parse7,
   project: project4
 };
 
@@ -4055,7 +4802,7 @@ function asRoot5(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value;
 }
-function parse7(value) {
+function parse8(value) {
   const root = asRoot5(value);
   if (!root?.mcpServers || typeof root.mcpServers !== "object") return [];
   const out = [];
@@ -4088,7 +4835,7 @@ var COGNIA_AGENT = {
   description: "~/.cognia/mcp.json \u2014 the standalone cognia-agent CLI",
   writable: true,
   format: "json",
-  parse: parse7,
+  parse: parse8,
   project: project5
 };
 
@@ -4097,7 +4844,7 @@ function asRoot6(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value;
 }
-function parse8(value) {
+function parse9(value) {
   const root = asRoot6(value);
   if (!root?.mcpServers || typeof root.mcpServers !== "object") return [];
   const out = [];
@@ -4130,7 +4877,7 @@ var CURSOR_AGENT = {
   description: "~/.cursor/mcp.json \u2014 global Cursor MCP config",
   writable: true,
   format: "json",
-  parse: parse8,
+  parse: parse9,
   project: project6
 };
 
@@ -4139,7 +4886,7 @@ function asRoot7(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value;
 }
-function parse9(value) {
+function parse10(value) {
   const root = asRoot7(value);
   if (!root?.mcpServers || typeof root.mcpServers !== "object") return [];
   const out = [];
@@ -4195,7 +4942,7 @@ var GEMINI_AGENT = {
   description: "~/.gemini/settings.json \u2014 url=SSE, httpUrl=HTTP",
   writable: true,
   format: "json",
-  parse: parse9,
+  parse: parse10,
   project: project7
 };
 
@@ -4205,7 +4952,7 @@ function asRoot8(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value;
 }
-function parse10(value) {
+function parse11(value) {
   const root = asRoot8(value);
   if (!root?.mcpServers || typeof root.mcpServers !== "object") return [];
   const out = [];
@@ -4250,7 +4997,7 @@ var KIRO_AGENT = {
   description: "~/.kiro/settings/mcp.json \u2014 no `type` key, local vs remote inferred",
   writable: true,
   format: "json",
-  parse: parse10,
+  parse: parse11,
   project: project8
 };
 
@@ -4259,7 +5006,7 @@ function asRoot9(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value;
 }
-function parse11(value) {
+function parse12(value) {
   const root = asRoot9(value);
   if (!root?.mcp || typeof root.mcp !== "object") return [];
   const out = [];
@@ -4332,7 +5079,7 @@ var OPENCODE_AGENT = {
   description: "~/.config/opencode/opencode.json \u2014 `mcp` key, command is one array",
   writable: true,
   format: "json",
-  parse: parse11,
+  parse: parse12,
   project: project9
 };
 
@@ -4355,7 +5102,7 @@ function serversOf(root) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   return raw;
 }
-function parse12(value) {
+function parse13(value) {
   const servers = serversOf(asRoot10(value));
   if (!servers) return [];
   const out = [];
@@ -4391,7 +5138,7 @@ var PI_MCP_ADAPTER_AGENT = {
   description: "~/.pi/agent/mcp.json \u2014 requires the pi-mcp-adapter package",
   writable: true,
   format: "json",
-  parse: parse12,
+  parse: parse13,
   project: project10
 };
 
@@ -4400,7 +5147,7 @@ function asRoot11(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value;
 }
-function parse13(value) {
+function parse14(value) {
   const root = asRoot11(value);
   if (!root?.mcpServers || typeof root.mcpServers !== "object") return [];
   const out = [];
@@ -4422,7 +5169,7 @@ var ROO_CODE_AGENT = {
   description: "VS Code extension \u2014 read-only (path varies)",
   writable: false,
   format: "json",
-  parse: parse13,
+  parse: parse14,
   project: project11
 };
 
@@ -4431,7 +5178,7 @@ function asRoot12(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value;
 }
-function parse14(value) {
+function parse15(value) {
   const root = asRoot12(value);
   if (!root?.servers || typeof root.servers !== "object") return [];
   const out = [];
@@ -4464,7 +5211,7 @@ var VSCODE_AGENT = {
   description: "User mcp.json \u2014 top-level key `servers`, JSONC",
   writable: true,
   format: "jsonc",
-  parse: parse14,
+  parse: parse15,
   project: project12
 };
 
@@ -4473,7 +5220,7 @@ function asRoot13(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value;
 }
-function parse15(value) {
+function parse16(value) {
   const root = asRoot13(value);
   if (!root?.mcpServers || typeof root.mcpServers !== "object") return [];
   const out = [];
@@ -4509,7 +5256,7 @@ var WINDSURF_AGENT = {
   description: "~/.codeium/windsurf/mcp_config.json \u2014 uses `serverUrl`",
   writable: true,
   format: "json",
-  parse: parse15,
+  parse: parse16,
   project: project13
 };
 
@@ -4522,7 +5269,7 @@ function asRoot14(value) {
 function isExtensionEntry(entry) {
   return "settings" in entry && !("command" in entry) && !("url" in entry);
 }
-function parse16(value) {
+function parse17(value) {
   const root = asRoot14(value);
   if (!root?.context_servers || typeof root.context_servers !== "object") return [];
   const out = [];
@@ -4564,7 +5311,7 @@ var ZED_AGENT = {
   description: "settings.json `context_servers` \u2014 no `type` key, JSONC",
   writable: true,
   format: "jsonc",
-  parse: parse16,
+  parse: parse17,
   project: project14
 };
 
@@ -5168,7 +5915,7 @@ function peekTable(key, table, meta, type) {
   }
   return [k, t, state.c];
 }
-function parse17(toml, { maxDepth = 1e3, integersAsBigInt } = {}) {
+function parse18(toml, { maxDepth = 1e3, integersAsBigInt } = {}) {
   let ctx = { s: toml, p: 0, d: maxDepth };
   let res = {};
   let meta = {};
@@ -5233,155 +5980,6 @@ function parse17(toml, { maxDepth = 1e3, integersAsBigInt } = {}) {
     skipVoid(ctx);
   }
   return res;
-}
-
-// node_modules/.pnpm/smol-toml@1.8.0/node_modules/smol-toml/dist/stringify.js
-var BARE_KEY = /^[a-z0-9-_]+$/i;
-function extendedTypeOf(obj) {
-  let type = typeof obj;
-  if (type === "object") {
-    if (Array.isArray(obj))
-      return "array";
-    if (typeof obj?.getUTCDate === "function" && obj instanceof Date)
-      return "date";
-    if (globalThis.Temporal && // check for the 'since' property as an early bailout that avoids running all 5 instanceof checks
-    typeof obj?.since === "function" && (obj instanceof Temporal.Instant || obj instanceof Temporal.PlainDate || obj instanceof Temporal.PlainDateTime || obj instanceof Temporal.PlainTime || obj instanceof Temporal.ZonedDateTime)) {
-      return "temporal";
-    }
-  }
-  return type;
-}
-function isArrayOfTables(obj) {
-  for (let i = 0; i < obj.length; i++) {
-    if (extendedTypeOf(obj[i]) !== "object")
-      return false;
-  }
-  return obj.length != 0;
-}
-function formatString(s) {
-  return JSON.stringify(s).replace(/\x7f/g, "\\u007f");
-}
-function stringifyTemporal(temporal) {
-  return temporal.toString({
-    calendarName: "never",
-    timeZoneName: "never"
-  });
-}
-function stringifyValue(val, type, depth, numberAsFloat) {
-  if (depth === 0) {
-    throw new Error("Could not stringify the object: maximum object depth exceeded");
-  }
-  switch (type) {
-    // @ts-expect-error -- intentional fallthrough case
-    case "number":
-      if (isNaN(val))
-        return "nan";
-      if (val === Infinity)
-        return "inf";
-      if (val === -Infinity)
-        return "-inf";
-      if (Number.isInteger(val) && (numberAsFloat || !Number.isSafeInteger(val)))
-        return val.toFixed(1);
-    case "bigint":
-    case "boolean":
-      return val.toString();
-    case "string":
-      return formatString(val);
-    case "date":
-      if (isNaN(val.getTime()))
-        throw new TypeError("cannot serialize invalid date");
-      return val.toISOString();
-    case "object":
-      return stringifyInlineTable(val, depth, numberAsFloat);
-    case "array":
-      return stringifyArray(val, depth, numberAsFloat);
-    case "temporal":
-      return stringifyTemporal(val);
-  }
-}
-function stringifyInlineTable(obj, depth, numberAsFloat) {
-  let keys = Object.keys(obj);
-  if (keys.length === 0)
-    return "{}";
-  let res = "{ ";
-  for (let i = 0; i < keys.length; i++) {
-    let k = keys[i];
-    if (i)
-      res += ", ";
-    res += BARE_KEY.test(k) ? k : formatString(k);
-    res += " = ";
-    res += stringifyValue(obj[k], extendedTypeOf(obj[k]), depth - 1, numberAsFloat);
-  }
-  return res + " }";
-}
-function stringifyArray(array, depth, numberAsFloat) {
-  if (array.length === 0)
-    return "[]";
-  let res = "[ ";
-  for (let i = 0; i < array.length; i++) {
-    if (i)
-      res += ", ";
-    if (array[i] === null || array[i] === void 0) {
-      throw new TypeError("arrays cannot contain null or undefined values");
-    }
-    res += stringifyValue(array[i], extendedTypeOf(array[i]), depth - 1, numberAsFloat);
-  }
-  return res + " ]";
-}
-function stringifyArrayTable(array, key, depth, numberAsFloat) {
-  if (depth === 0) {
-    throw new Error("Could not stringify the object: maximum object depth exceeded");
-  }
-  let res = "";
-  for (let i = 0; i < array.length; i++) {
-    res += `${res && "\n"}[[${key}]]
-`;
-    res += stringifyTable(0, array[i], key, depth, numberAsFloat);
-  }
-  return res;
-}
-function stringifyTable(tableKey, obj, prefix, depth, numberAsFloat) {
-  if (depth === 0) {
-    throw new Error("Could not stringify the object: maximum object depth exceeded");
-  }
-  let preamble = "";
-  let tables = "";
-  let keys = Object.keys(obj);
-  for (let i = 0; i < keys.length; i++) {
-    let k = keys[i];
-    if (obj[k] !== null && obj[k] !== void 0) {
-      let type = extendedTypeOf(obj[k]);
-      if (type === "symbol" || type === "function") {
-        throw new TypeError(`cannot serialize values of type '${type}'`);
-      }
-      let key = BARE_KEY.test(k) ? k : formatString(k);
-      if (type === "array" && isArrayOfTables(obj[k])) {
-        tables += (tables && "\n") + stringifyArrayTable(obj[k], prefix ? `${prefix}.${key}` : key, depth - 1, numberAsFloat);
-      } else if (type === "object") {
-        let tblKey = prefix ? `${prefix}.${key}` : key;
-        tables += (tables && "\n") + stringifyTable(tblKey, obj[k], tblKey, depth - 1, numberAsFloat);
-      } else {
-        preamble += key;
-        preamble += " = ";
-        preamble += stringifyValue(obj[k], type, depth, numberAsFloat);
-        preamble += "\n";
-      }
-    }
-  }
-  if (tableKey && (preamble || !tables))
-    preamble = preamble ? `[${tableKey}]
-${preamble}` : `[${tableKey}]`;
-  return preamble && tables ? `${preamble}
-${tables}` : preamble || tables;
-}
-function stringify(obj, { maxDepth = 1e3, numbersAsFloat = false } = {}) {
-  if (extendedTypeOf(obj) !== "object") {
-    throw new TypeError("stringify can only be called with an object");
-  }
-  let str2 = stringifyTable(0, obj, "", maxDepth, numbersAsFloat);
-  if (str2[str2.length - 1] !== "\n")
-    return str2 + "\n";
-  return str2;
 }
 
 // lib/plugin/convert/secrets.ts
@@ -5526,7 +6124,7 @@ function readMcpDrafts(text, sourceName) {
   const toml = /\.toml$/i.test(sourceName ?? "");
   if (toml) {
     try {
-      value = parse17(text);
+      value = parse18(text);
     } catch (err) {
       throw new Error(
         `could not parse "${sourceName ?? "input"}" as TOML: ${err instanceof Error ? err.message : String(err)}`
@@ -6133,7 +6731,6 @@ function parseJsonStringArray(value) {
 }
 
 // lib/plugin/convert/skill-source.ts
-var BUNDLE_RESOURCE_DIRS = ["scripts", "references", "assets"];
 var SKILL_BUNDLE_DIR = "skills";
 function listSkillCandidates(text, sourceName) {
   const { draft } = parseSkillMarkdown(text, { fallbackName: sourceName });
@@ -6146,24 +6743,71 @@ function listSkillCandidates(text, sourceName) {
   ];
 }
 function isBundleResource(relativePath) {
-  const head = relativePath.replace(/^[./\\]+/, "").split(/[\\/]/)[0];
-  return BUNDLE_RESOURCE_DIRS.includes(head);
+  const path = relativePath.replace(/\\/g, "/").replace(/^\.\//, "");
+  return Boolean(path) && !path.startsWith("/") && !/^[a-z]:/i.test(path) && !/[\x00-\x1f]/.test(path) && !path.split("/").some((part) => part === ".." || part === "." || part === "") && !/^SKILL\.md$/i.test(path);
 }
+var UNSUPPORTED_SKILL_EXECUTION_FIELDS = [
+  "context",
+  "agent",
+  "model",
+  "hooks",
+  "user-invocable",
+  "paths",
+  "priority",
+  "sessionStart",
+  "pathPatterns",
+  "bashPatterns",
+  "importPatterns",
+  "promptSignals"
+];
 function buildSkill(text, resources = [], sourceName) {
   const { draft, warnings } = parseSkillMarkdown(text, { fallbackName: sourceName });
   const id = slugify(draft.name);
   if (!id) throw new Error(`cannot derive a skill id from name "${draft.name}"`);
-  const bundled = resources.filter(isBundleResource);
-  const ignored = resources.filter((r) => !isBundleResource(r) && !/^SKILL\.md$/i.test(r));
+  const bundled = [];
+  for (const resource of resources) {
+    const path = resource.replace(/\\/g, "/").replace(/^\.\//, "");
+    if (/^SKILL\.md$/i.test(path)) continue;
+    if (!isBundleResource(path)) throw new Error(`unsafe resource path "${resource}"`);
+    if (!bundled.includes(path)) bundled.push(path);
+  }
   const allWarnings = [...warnings];
-  for (const path of ignored) {
-    allWarnings.push(
-      `"${path}" is not under ${BUNDLE_RESOURCE_DIRS.join("/")} and was not copied into the plugin`
+  const blockers = UNSUPPORTED_SKILL_EXECUTION_FIELDS.filter(
+    (field) => Object.hasOwn(draft.frontmatterExtensions ?? {}, field)
+  ).map(
+    (field) => `Skill "${id}" requires unsupported execution field "${field}"; preserving its text does not implement its behavior.`
+  );
+  if (/!`[^`]+`/.test(draft.content)) {
+    blockers.push(
+      `Skill "${id}" requires shell preprocessing (! followed by a backtick command), which Cognia does not execute.`
     );
+  }
+  if (/\$(?:ARGUMENTS(?:\[\d+\])?|\d+)|\$\{(?:CLAUDE_SESSION_ID|CLAUDE_SKILL_DIR)\}/.test(
+    draft.content
+  )) {
+    blockers.push(
+      `Skill "${id}" requires invocation argument or session substitutions which Cognia does not implement.`
+    );
+  }
+  const metadata = {};
+  for (const field of [
+    "slug",
+    "compatibility",
+    "metadata",
+    "frontmatterExtensions",
+    "invocationPolicy",
+    "license",
+    "version",
+    "author",
+    "tags",
+    "category"
+  ]) {
+    if (draft[field] !== void 0) Object.assign(metadata, { [field]: draft[field] });
   }
   if (bundled.length === 0) {
     return {
       skill: {
+        ...metadata,
         id,
         name: draft.name,
         description: draft.description ?? "",
@@ -6172,12 +6816,14 @@ function buildSkill(text, resources = [], sourceName) {
       },
       needsFilesystem: false,
       copies: [],
-      warnings: allWarnings
+      warnings: allWarnings,
+      blockers
     };
   }
   const bundleDir = `${SKILL_BUNDLE_DIR}/${id}`;
   return {
     skill: {
+      ...metadata,
       id,
       name: draft.name,
       description: draft.description ?? "",
@@ -6189,7 +6835,8 @@ function buildSkill(text, resources = [], sourceName) {
       { from: "SKILL.md", to: `${bundleDir}/SKILL.md` },
       ...bundled.map((path) => ({ from: path, to: `${bundleDir}/${path}` }))
     ],
-    warnings: allWarnings
+    warnings: allWarnings,
+    blockers
   };
 }
 
@@ -6240,6 +6887,7 @@ function buildContribution(input) {
     }
     case "skill": {
       const built = buildSkill(requireText(input), input.resources ?? [], input.sourceName);
+      if (built.blockers.length > 0) throw new Error(built.blockers.join("\n"));
       return {
         capability: "skills",
         manifestField: "skills",
@@ -6494,6 +7142,829 @@ function parseMarkdownAgent(id, content) {
   return { id: declaredName || id, def, unsupportedFields };
 }
 
+// lib/claude/hooks/event-catalog.ts
+var EVENT_META = {
+  // tools
+  PreToolUse: { category: "tools" },
+  PostToolUse: { category: "tools" },
+  PostToolBatch: { category: "tools" },
+  PostToolUseFailure: { category: "tools" },
+  // session
+  SessionStart: { category: "session" },
+  SessionEnd: { category: "session" },
+  UserPromptSubmit: { category: "session" },
+  UserPromptExpansion: { category: "session" },
+  Stop: { category: "session" },
+  StopFailure: { category: "session" },
+  Notification: { category: "session" },
+  MessageDisplay: { category: "session" },
+  PreModelSwitch: { category: "session" },
+  PostModelSwitch: { category: "session" },
+  // permissions
+  PermissionRequest: { category: "permissions" },
+  PermissionDenied: { category: "permissions" },
+  Elicitation: { category: "permissions" },
+  ElicitationResult: { category: "permissions" },
+  // tasks
+  TaskCreated: { category: "tasks" },
+  TaskCompleted: { category: "tasks" },
+  SubagentStart: { category: "tasks" },
+  SubagentStop: { category: "tasks" },
+  TeammateIdle: { category: "tasks" },
+  // lifecycle
+  PreCompact: { category: "lifecycle" },
+  PostCompact: { category: "lifecycle" },
+  Setup: { category: "lifecycle" },
+  // Producers (ADR-0111 decision 9): the managed-worktree Registry in Rust
+  // (`crates/cognia-task-workspace/src/lifecycle.rs` → `src-tauri/src/
+  // task_workspace.rs:HookWorktreeLifecycleSink`) and the TS git choke point
+  // `lib/git/commands.ts` (`gitWorktreeAdd` / `gitWorktreeRemove`, which the
+  // agent-team allocator and the source-control panel both go through).
+  // Payload: `worktree_path`, `workspace_root`, `branch`, `base_ref` |
+  // `base`, `owner_type`, `owner_ref`, `source`, and `reason` on remove.
+  WorktreeCreate: { category: "lifecycle" },
+  WorktreeRemove: { category: "lifecycle" },
+  FileChanged: { category: "lifecycle" },
+  DirectoryAdded: { category: "lifecycle" },
+  CwdChanged: { category: "lifecycle" },
+  InstructionsLoaded: { category: "lifecycle" },
+  ConfigChange: { category: "lifecycle" }
+};
+var HOOK_EVENT_CATALOG = Object.entries(EVENT_META).map(([event, m]) => ({ event, category: m.category, dormant: m.dormant ?? false }));
+var HOOK_EVENTS = HOOK_EVENT_CATALOG.map((m) => m.event);
+var HOOK_EVENT_META = HOOK_EVENT_CATALOG.reduce(
+  (acc, m) => {
+    acc[m.event] = m;
+    return acc;
+  },
+  {}
+);
+var HOOK_EVENT_SET = new Set(HOOK_EVENTS);
+
+// lib/claude/hooks.ts
+var DORMANT_HOOK_HANDLER_FIELDS = [
+  "args",
+  "if",
+  "statusMessage",
+  "once",
+  "asyncRewake",
+  "shell",
+  "allowedEnvVars"
+];
+
+// lib/plugin/convert/delivery.ts
+var PLUGIN_ECOSYSTEMS = [
+  "cognia",
+  "claude-code",
+  "codex",
+  "gemini-cli",
+  "agent-plugins",
+  "cursor",
+  "copilot",
+  "kimi",
+  "devin",
+  "opencode",
+  "pi"
+];
+var HOSTED_TOOL_CAPABILITIES = /* @__PURE__ */ new Set(["tools", "cli-tools"]);
+var HOSTED_SESSION_TARGETS = /* @__PURE__ */ new Set([
+  "claude-code",
+  "codex",
+  "gemini-cli",
+  "devin",
+  "opencode",
+  "pi"
+]);
+function assessPluginDelivery({
+  manifest,
+  report,
+  target,
+  surface = "cli"
+}) {
+  const capabilities = [...new Set(manifest?.capabilities ?? [])];
+  const hostedTools = capabilities.filter((capability) => HOSTED_TOOL_CAPABILITIES.has(capability));
+  const hostedStatus = target === "cognia" || hostedTools.length === 0 ? "unavailable" : surface === "cloud" || !HOSTED_SESSION_TARGETS.has(target) ? "unverified" : "requires-cognia";
+  const aliases = {
+    agents: "subagent",
+    hooks: "command-hooks",
+    commandHooks: "command-hooks",
+    mcpServers: "mcp-server-preset",
+    mcp: "mcp-server-preset"
+  };
+  const canonicalCapability = (value) => value.startsWith("skill-") ? "skills" : aliases[value] ?? value;
+  const listed = [
+    .../* @__PURE__ */ new Set([
+      ...capabilities,
+      ...[...report.converted, ...report.warnings, ...report.blocking].map(
+        (issue) => canonicalCapability(issue.capability)
+      )
+    ])
+  ];
+  const details = listed.map(
+    (capability) => {
+      const blocked2 = report.blocking.some(
+        (issue) => canonicalCapability(issue.capability) === capability
+      );
+      const warning = report.warnings.some(
+        (issue) => canonicalCapability(issue.capability) === capability
+      );
+      const converted = report.converted.some(
+        (issue) => canonicalCapability(issue.capability) === capability
+      );
+      const status = blocked2 ? hostedStatus === "requires-cognia" && HOSTED_TOOL_CAPABILITIES.has(capability) ? "hosted" : "unsupported" : capability === "mcp-server-preset" && manifest?.mcpServerPresets?.some((preset) => preset.fields?.length) ? "configuration-required" : warning ? report.fidelity === "contextual" ? "contextual" : "unverified" : report.blocking.length && !converted ? "unverified" : "native";
+      return { capability, status };
+    }
+  );
+  return {
+    target,
+    surface,
+    native: report.blocking.length ? "blocked" : report.warnings.length || report.fidelity === "contextual" ? "review-required" : "ready",
+    hostVerified: false,
+    capabilities: details,
+    hosted: {
+      status: hostedStatus,
+      capabilities: hostedTools,
+      retained: capabilities.filter((capability) => !HOSTED_TOOL_CAPABILITIES.has(capability))
+    }
+  };
+}
+
+// lib/plugin/convert/source-snapshot.ts
+function isPluginEnvironmentFile(relativePath) {
+  return /(^|\/)\.env(?:\.|$)/.test(relativePath);
+}
+
+// lib/plugin/convert/platform-bundles.ts
+var import_gray_matter3 = __toESM(require_gray_matter());
+var AGENT_PLUGINS_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
+var MCP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json";
+var CLAUDE_MANIFEST = ".claude-plugin/plugin.json";
+var METADATA = [
+  "name",
+  "version",
+  "description",
+  "author",
+  "homepage",
+  "repository",
+  "license",
+  "keywords"
+];
+var PLATFORM_BUNDLE_PROFILES = {
+  "agent-plugins": {
+    manifest: "plugin.json",
+    surfaces: ["cli", "desktop"],
+    skills: "native",
+    mcp: "native",
+    agents: "vendor-extension",
+    hooks: "vendor-extension"
+  },
+  cursor: {
+    manifest: ".cursor-plugin/plugin.json",
+    surfaces: ["desktop"],
+    skills: "native",
+    mcp: "native",
+    agents: "adapter-required",
+    hooks: "adapter-required"
+  },
+  copilot: {
+    manifest: ".github/plugin/plugin.json",
+    surfaces: ["cli", "desktop", "cloud"],
+    skills: "native",
+    mcp: "native",
+    agents: "adapter-required",
+    hooks: "surface-dependent"
+  },
+  kimi: {
+    manifest: "kimi.plugin.json",
+    surfaces: ["cli"],
+    skills: "native",
+    mcp: "native",
+    agents: "adapter-required",
+    hooks: "adapter-required"
+  },
+  devin: {
+    manifest: ".devin-plugin/plugin.json",
+    surfaces: ["cli", "desktop", "cloud"],
+    skills: "native",
+    mcp: "native",
+    agents: "local-only",
+    hooks: "local-fail-open"
+  },
+  opencode: {
+    manifest: "opencode.json",
+    surfaces: ["cli"],
+    skills: "native",
+    mcp: "native",
+    agents: "adapter-required",
+    hooks: "runtime-port-required"
+  },
+  pi: {
+    manifest: "package.json",
+    surfaces: ["cli"],
+    skills: "native",
+    mcp: "extension-required",
+    agents: "extension-required",
+    hooks: "runtime-port-required"
+  }
+};
+function object(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function read(files, path) {
+  const value = JSON.parse(files.get(path) ?? "{}");
+  if (!object(value)) throw new Error(`${path} must contain an object`);
+  return value;
+}
+function present(value) {
+  return value !== void 0 && value !== null && value !== false && value !== "" && (!Array.isArray(value) || value.length > 0) && (!object(value) || Object.keys(value).length > 0);
+}
+function block(result, capability, path, message) {
+  result.blocking.push({ capability, path, message, blocking: true });
+}
+function save(files, path, value) {
+  files.set(path, `${JSON.stringify(value, null, 2)}
+`);
+}
+function detectPlatformBundle(files) {
+  const markers = [
+    [".devin-plugin/plugin.json", "devin"],
+    [".cursor-plugin/plugin.json", "cursor"],
+    ["kimi.plugin.json", "kimi"],
+    [".kimi-plugin/plugin.json", "kimi"],
+    [".github/plugin/plugin.json", "copilot"],
+    [".github/plugin.json", "copilot"],
+    ["opencode.json", "opencode"],
+    ["opencode.jsonc", "opencode"]
+  ];
+  for (const [path, target] of markers) if (files.has(path)) return target;
+  try {
+    const root = read(files, "plugin.json");
+    if (typeof root.$schema === "string" && root.$schema.startsWith("https://agent-plugins.org/"))
+      return "agent-plugins";
+    const pkg = read(files, "package.json");
+    if (object(pkg.pi) || Array.isArray(pkg.keywords) && pkg.keywords.includes("pi-package"))
+      return "pi";
+  } catch {
+    return null;
+  }
+  return null;
+}
+function manifestPath(files, target) {
+  if (target === "kimi" && !files.has("kimi.plugin.json")) return ".kimi-plugin/plugin.json";
+  if (target === "copilot" && files.has(".github/plugin.json")) return ".github/plugin.json";
+  if (target === "copilot" && !files.has(".github/plugin/plugin.json") && files.has("plugin.json"))
+    return "plugin.json";
+  if (target === "opencode" && !files.has("opencode.json")) return "opencode.jsonc";
+  return PLATFORM_BUNDLE_PROFILES[target].manifest;
+}
+function inventory(files, result) {
+  const unsafe = /^(?:(?:\.opencode\/)?(?:agents?|commands?|hooks|rules|policies|extensions|plugins|prompts|themes|output-styles)\/|com\.[^/]+\/|(?:AGENTS|CLAUDE|GEMINI)\.md$|(?:hooks|lsp|\.lsp|\.app)\.json$)/;
+  for (const path of files.keys()) {
+    if (path.startsWith("/") || path.split(/[\\/]/).includes("..") || path.includes("\\")) {
+      block(result, "path", path, "Bundle paths must be relative canonical paths without traversal");
+    } else if (unsafe.test(path)) {
+      block(
+        result,
+        path.includes("hook") ? "hooks" : "platform-control",
+        path,
+        "Platform-specific runtime, agent, command or policy semantics require an explicit adapter or hosted use"
+      );
+    }
+  }
+}
+function checkFields(source, allowed, path, result) {
+  for (const field of Object.keys(source)) {
+    if (!allowed.includes(field))
+      block(result, field, `${path}.${field}`, "Field has no verified behavioral mapping");
+  }
+}
+function validateManifestContract(source, target, path, result) {
+  if (target === "kimi" && (typeof source.name !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(source.name)))
+    block(result, "name", `${path}.name`, "Kimi plugin ids must match [a-z0-9][a-z0-9_-]{0,63}");
+  if (target !== "agent-plugins" && target !== "copilot") return;
+  if (typeof source.name !== "string" || source.name.length > 64 || !/^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(source.name))
+    block(result, "name", `${path}.name`, "Name is invalid for the Agent Plugins 1.0 manifest");
+  for (const key of ["version", "description", "homepage", "repository", "license"]) {
+    if (source[key] !== void 0 && typeof source[key] !== "string")
+      block(result, "metadata", `${path}.${key}`, "Portable manifest metadata must be a string");
+  }
+  if (source.keywords !== void 0 && (!Array.isArray(source.keywords) || source.keywords.some((keyword) => typeof keyword !== "string")))
+    block(result, "metadata", `${path}.keywords`, "Portable keywords must be an array of strings");
+  if (source.author !== void 0) {
+    if (!object(source.author))
+      block(result, "metadata", `${path}.author`, "Portable author must be an object");
+    else {
+      checkFields(source.author, ["name", "email", "url"], `${path}.author`, result);
+      if (Object.values(source.author).some((value) => typeof value !== "string"))
+        block(result, "metadata", `${path}.author`, "Portable author values must be strings");
+    }
+  }
+  if (source.extensions !== void 0 && (!object(source.extensions) || Object.values(source.extensions).some((value) => !object(value))))
+    block(
+      result,
+      "extensions",
+      `${path}.extensions`,
+      "Portable extensions must map namespaces to objects"
+    );
+}
+function rootTokens(value, from, to) {
+  if (typeof value === "string") return value.replaceAll(from, to);
+  if (Array.isArray(value)) return value.map((entry) => rootTokens(entry, from, to));
+  if (object(value))
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, rootTokens(entry, from, to)])
+    );
+  return value;
+}
+function adaptSkillSemantics(files, result, target, direction) {
+  const skillPaths = [...files.keys()].filter(
+    (path) => path === "SKILL.md" || path.endsWith("/SKILL.md")
+  );
+  const known = [
+    "name",
+    "description",
+    "license",
+    "compatibility",
+    "metadata",
+    "disable-model-invocation",
+    "allowed-tools",
+    "allowedTools"
+  ];
+  for (const path of skillPaths) {
+    try {
+      const text = files.get(path);
+      const parsed = (0, import_gray_matter3.default)(text);
+      const data = { ...parsed.data };
+      let changed = false;
+      if (direction === "import" && target === "kimi") {
+        for (const alias of ["disableModelInvocation", "disable_model_invocation"]) {
+          if (data[alias] === void 0) continue;
+          if (data["disable-model-invocation"] !== void 0 && data["disable-model-invocation"] !== data[alias]) {
+            block(result, "skill-invocation", path, "Conflicting Kimi invocation policy aliases");
+          }
+          data["disable-model-invocation"] = data[alias];
+          delete data[alias];
+          changed = true;
+        }
+        if (data.type === "prompt" || data.type === "inline") {
+          delete data.type;
+          changed = true;
+        }
+      }
+      if (direction === "import" && target === "devin" && data.triggers !== void 0) {
+        const triggers = data.triggers;
+        if (Array.isArray(triggers) && triggers.includes("user") && triggers.every((entry) => entry === "user" || entry === "model")) {
+          data["disable-model-invocation"] = !triggers.includes("model");
+          delete data.triggers;
+          changed = true;
+        } else
+          block(
+            result,
+            "skill-invocation",
+            path,
+            "Devin model-only or custom triggers need an invocation adapter"
+          );
+      }
+      for (const key of Object.keys(data)) {
+        if (!known.includes(key))
+          block(
+            result,
+            "skill-frontmatter",
+            `${path}.${key}`,
+            "Skill field has no verified cross-platform behavioral mapping"
+          );
+      }
+      if (present(data["allowed-tools"]) || present(data.allowedTools)) {
+        block(
+          result,
+          "skill-tools",
+          path,
+          "Tool identities and pre-approval differ by host; a tool and permission adapter is required"
+        );
+      }
+      const manual = data["disable-model-invocation"];
+      if (manual !== void 0 && typeof manual !== "boolean")
+        block(result, "skill-invocation", path, "disable-model-invocation must be a boolean");
+      if (manual === true && (target === "opencode" || target === "agent-plugins")) {
+        block(
+          result,
+          "skill-invocation",
+          path,
+          target === "opencode" ? "OpenCode ignores disable-model-invocation; manual-only activation cannot be preserved" : "Agent Plugins does not define a host-independent manual invocation policy"
+        );
+      }
+      if (direction === "export" && target === "devin" && typeof manual === "boolean") {
+        data.triggers = manual ? ["user"] : ["user", "model"];
+        delete data["disable-model-invocation"];
+        changed = true;
+      }
+      if (direction === "export") {
+        if (typeof data.name !== "string" || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(data.name) || data.name.length > 64)
+          block(
+            result,
+            "skill-name",
+            path,
+            "Target skills require a lowercase identifier of at most 64 characters"
+          );
+        const directoryName = path.split("/").at(-2);
+        if (target !== "pi" && target !== "devin" && directoryName && data.name !== directoryName)
+          block(result, "skill-name", path, "Target skill name must match its parent directory");
+        if (typeof data.description !== "string" || !data.description.trim() || data.description.length > 1024)
+          block(
+            result,
+            "skill-description",
+            path,
+            "Target skills require a non-empty description of at most 1024 characters"
+          );
+      }
+      if (changed) result.files.set(path, import_gray_matter3.default.stringify(parsed.content, data));
+    } catch (error) {
+      block(
+        result,
+        "skill-frontmatter",
+        path,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
+  const roots = skillPaths.map((path) => path.slice(0, Math.max(0, path.lastIndexOf("/"))));
+  const runtime = /\$(?:\{(?:COGNIA_PLUGIN_ROOT|CLAUDE_PLUGIN_ROOT|CLAUDE_PLUGIN_DATA|CLAUDE_PROJECT_DIR|CLAUDE_SKILL_DIR|CODEX_PLUGIN_ROOT|PLUGIN_ROOT|PLUGIN_DATA|CURSOR_PLUGIN_ROOT|KIMI_PLUGIN_ROOT|KIMI_SKILL_DIR|extensionPath|workspacePath)\}|(?:CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT|PLUGIN_DATA|KIMI_SKILL_DIR)\b)/;
+  for (const [path, text] of files) {
+    const resource = roots.some(
+      (root) => root ? path.startsWith(`${root}/`) : path === "SKILL.md" || /^(?:scripts|references|assets)\//.test(path)
+    );
+    if (resource && runtime.test(text))
+      block(
+        result,
+        "skill-runtime",
+        path,
+        "Host runtime variables in skill resources need a component-specific binding; bytes were preserved but execution cannot be promised"
+      );
+    if (direction === "export" && target === "opencode" && path.startsWith("skills/")) {
+      const outsideSkillTree = [...text.matchAll(/(?:\.\.\/)+/g)].some(
+        (match) => match[0].split("../").length - 1 >= path.split("/").length - 1
+      );
+      if (outsideSkillTree)
+        block(
+          result,
+          "skill-resources",
+          path,
+          "Moving skills into .opencode changes relative references outside the skills tree; dependency relocation is required"
+        );
+    }
+    if (direction === "import" && target === "pi" && /^skills\/[^/]+\.md$/.test(path) && path !== "skills/SKILL.md")
+      block(result, "skills", path, "Pi flat Markdown skills require explicit discovery mapping");
+  }
+}
+function mcpServers(files, source, target, result) {
+  let document = {};
+  const declared = source.mcpServers;
+  if (typeof declared === "string") {
+    const path = declared.replace(/^\.\//, "");
+    if (!files.has(path)) throw new Error(`MCP configuration not found: ${path}`);
+    document = read(files, path);
+  } else if (object(declared)) {
+    document = "mcpServers" in declared ? declared : { mcpServers: declared };
+  } else if (declared !== void 0) {
+    block(
+      result,
+      "mcp",
+      "mcpServers",
+      "This MCP declaration shape requires a platform-specific merge adapter"
+    );
+  } else {
+    const path = target === "agent-plugins" || target === "cursor" ? "mcp.json" : ".mcp.json";
+    if (files.has(path)) document = read(files, path);
+  }
+  if (target === "opencode") document = { mcpServers: source.mcp ?? {} };
+  checkFields(document, ["$schema", "mcpServers"], "mcp", result);
+  if (target === "agent-plugins" && Object.keys(document).length) {
+    checkFields(document, ["$schema", "mcpServers"], "mcp.json", result);
+    if (document.$schema !== MCP_SCHEMA)
+      block(
+        result,
+        "schema",
+        "mcp.json.$schema",
+        "Unsupported or missing Agent Plugins MCP schema version"
+      );
+  }
+  const servers = document.mcpServers ?? {};
+  if (!object(servers)) throw new Error("mcpServers must be an object");
+  const output2 = {};
+  for (const [name, value] of Object.entries(servers)) {
+    if (!object(value)) throw new Error(`MCP server ${name} must be an object`);
+    let server = { ...value };
+    if (target === "opencode") {
+      checkFields(
+        server,
+        ["type", "command", "environment", "url", "headers", "enabled"],
+        `mcp.${name}`,
+        result
+      );
+      if (server.enabled === false)
+        block(result, "mcp", `mcp.${name}.enabled`, "Disabled-server state cannot be discarded");
+      if (server.type === "local" && Array.isArray(server.command) && server.command.length > 0) {
+        server = {
+          command: server.command[0],
+          args: server.command.slice(1),
+          ...server.environment ? { env: server.environment } : {}
+        };
+      } else if (server.type === "remote") {
+        block(
+          result,
+          "mcp",
+          `mcp.${name}`,
+          "OpenCode remote transport fallback and OAuth require explicit resolution before conversion"
+        );
+        continue;
+      } else throw new Error(`Invalid OpenCode MCP server: ${name}`);
+    }
+    const type = server.type ?? (server.command ? "stdio" : "http");
+    if (target === "agent-plugins" && !["stdio", "streamable-http", "sse"].includes(String(server.type))) {
+      block(result, "mcp", `mcpServers.${name}.type`, "Portable MCP transport must be explicit");
+    }
+    checkFields(
+      server,
+      type === "stdio" ? ["type", "command", "args", "env", "cwd"] : ["type", "url", "headers"],
+      `mcpServers.${name}`,
+      result
+    );
+    if (type === "stdio") {
+      if (typeof server.command !== "string" || !server.command.trim())
+        throw new Error(`MCP server ${name} requires a command`);
+      if (server.args !== void 0 && (!Array.isArray(server.args) || server.args.some((arg) => typeof arg !== "string")))
+        throw new Error(`MCP server ${name} args must be strings`);
+    } else if (!["http", "streamable-http", "sse"].includes(String(type)) || typeof server.url !== "string" || !server.url.trim()) {
+      throw new Error(`Unsupported MCP transport or URL: ${name}`);
+    }
+    for (const key of ["env", "headers"]) {
+      const record = server[key];
+      if (record !== void 0 && (!object(record) || Object.values(record).some((item) => typeof item !== "string")))
+        throw new Error(`MCP server ${name} ${key} must contain strings`);
+    }
+    if (JSON.stringify(server).includes("${PLUGIN_DATA}") || JSON.stringify(server).includes("${CLAUDE_PLUGIN_DATA}")) {
+      block(
+        result,
+        "runtime-data",
+        `mcpServers.${name}`,
+        "Persistent plugin data lifecycle needs a verified binding"
+      );
+    }
+    if (target === "agent-plugins" || target === "kimi") {
+      if (typeof server.command === "string" && server.command.startsWith("./"))
+        server.command = `\${CLAUDE_PLUGIN_ROOT}/${server.command.slice(2)}`;
+      if (type === "stdio" && server.cwd === void 0) server.cwd = "${CLAUDE_PLUGIN_ROOT}";
+      if (typeof server.cwd === "string" && server.cwd.startsWith("./"))
+        server.cwd = `\${CLAUDE_PLUGIN_ROOT}/${server.cwd.slice(2)}`;
+    }
+    const rootToken = target === "agent-plugins" ? "${PLUGIN_ROOT}" : target === "cursor" ? "${CURSOR_PLUGIN_ROOT}" : null;
+    if (rootToken) server = rootTokens(server, rootToken, "${CLAUDE_PLUGIN_ROOT}");
+    if (target === "agent-plugins" && object(server.env) && ["PLUGIN_ROOT", "PLUGIN_DATA"].some((key) => key in server.env)) {
+      block(
+        result,
+        "mcp",
+        `mcpServers.${name}.env`,
+        "Portable MCP reserved runtime variables cannot be overridden"
+      );
+    }
+    output2[name] = { ...server, type: type === "streamable-http" ? "http" : type };
+  }
+  return output2;
+}
+function normalizePlatformBundle(files, target) {
+  const result = { files: new Map(files), blocking: [], warnings: [] };
+  inventory(files, result);
+  adaptSkillSemantics(files, result, target, "import");
+  try {
+    const path = manifestPath(files, target);
+    if (!files.has(path)) throw new Error(`Manifest not found: ${path}`);
+    const source = read(files, path);
+    validateManifestContract(source, target, path, result);
+    if (target === "copilot" && path === "plugin.json" && source.$schema === AGENT_PLUGINS_SCHEMA)
+      return normalizePlatformBundle(files, "agent-plugins");
+    const native = target === "pi" ? object(source.pi) ? source.pi : {} : source;
+    const allowed = target === "agent-plugins" ? [...METADATA, "$schema", "extensions"] : target === "opencode" ? ["$schema", "mcp"] : target === "pi" ? ["skills"] : [...METADATA, "skills", "mcpServers"];
+    checkFields(native, allowed, path, result);
+    if (target === "agent-plugins") {
+      if (source.$schema !== AGENT_PLUGINS_SCHEMA)
+        block(result, "schema", `${path}.$schema`, "Only Agent Plugins 1.0.0 is supported");
+      if (present(source.extensions))
+        block(
+          result,
+          "extensions",
+          `${path}.extensions`,
+          "Vendor extensions require explicit semantic adapters"
+        );
+    }
+    if (target === "pi") {
+      checkFields(source, [...METADATA, "pi"], path, result);
+      if (present(source.dependencies) || present(source.scripts))
+        block(
+          result,
+          "runtime",
+          path,
+          "Pi dependency installation and scripts require a runtime port or hosted use"
+        );
+    }
+    const name = target === "opencode" ? "opencode-resource-bundle" : source.name;
+    if (typeof name !== "string" || !name.trim()) throw new Error(`${path}.name is required`);
+    const manifest = Object.fromEntries(
+      METADATA.filter((key) => source[key] !== void 0).map((key) => [key, source[key]])
+    );
+    manifest.name = name;
+    if (native.skills !== void 0) manifest.skills = native.skills;
+    else if (target === "opencode") manifest.skills = "./.opencode/skills";
+    else if (target === "kimi") {
+      if (files.has("SKILL.md")) manifest.skills = "./SKILL.md";
+      else if ([...files.keys()].some((file) => file.startsWith("skills/") && file.endsWith("/SKILL.md"))) {
+        block(
+          result,
+          "skills",
+          "skills",
+          "Kimi only discovers the root SKILL.md when manifest.skills is omitted; undeclared skills cannot be activated by conversion"
+        );
+      }
+    }
+    if (Array.isArray(native.skills) && native.skills.length === 0)
+      block(
+        result,
+        "skills",
+        `${path}.skills`,
+        "An empty skill selection cannot fall back to automatic discovery"
+      );
+    const servers = target === "pi" ? {} : mcpServers(files, source, target, result);
+    result.files.set(path, "{}\n");
+    for (const configPath of [
+      "mcp.json",
+      ...typeof source.mcpServers === "string" ? [source.mcpServers.replace(/^\.\//, "")] : []
+    ]) {
+      if (files.has(configPath) && configPath !== CLAUDE_MANIFEST)
+        result.files.set(configPath, "{}\n");
+    }
+    if (Object.keys(servers).length) {
+      save(result.files, ".mcp.json", { mcpServers: servers });
+      manifest.mcpServers = "./.mcp.json";
+    }
+    save(result.files, CLAUDE_MANIFEST, manifest);
+    result.warnings.push({
+      capability: "compatibility",
+      path,
+      message: "Declarative normalization only; native host execution has not been verified",
+      blocking: false
+    });
+  } catch (error) {
+    block(
+      result,
+      "format",
+      manifestPath(files, target),
+      error instanceof Error ? error.message : String(error)
+    );
+  }
+  return result;
+}
+function projectPlatformBundle(files, target) {
+  const result = { files: new Map(files), blocking: [], warnings: [] };
+  inventory(files, result);
+  adaptSkillSemantics(files, result, target, "export");
+  try {
+    if (!files.has(CLAUDE_MANIFEST))
+      throw new Error("A validated Claude bundle manifest is required");
+    const source = read(files, CLAUDE_MANIFEST);
+    checkFields(
+      source,
+      [...METADATA, "displayName", "skills", "mcpServers"],
+      CLAUDE_MANIFEST,
+      result
+    );
+    const metadata = Object.fromEntries(
+      METADATA.filter((key) => source[key] !== void 0).map((key) => [key, source[key]])
+    );
+    validateManifestContract(metadata, target, PLATFORM_BUNDLE_PROFILES[target].manifest, result);
+    if (["agent-plugins", "copilot", "pi", "opencode"].includes(target) && source.skills !== void 0) {
+      const roots = Array.isArray(source.skills) ? source.skills : [source.skills];
+      if (roots.length !== 1 || !["skills", "./skills", "./skills/"].includes(String(roots[0])))
+        block(
+          result,
+          "skills",
+          "skills",
+          "This target uses fixed skill locations; custom skill roots require resource relocation"
+        );
+    }
+    const servers = mcpServers(files, source, "devin", result);
+    result.files.delete(CLAUDE_MANIFEST);
+    result.files.delete(".mcp.json");
+    if (target === "pi") {
+      if (Object.keys(servers).length)
+        block(
+          result,
+          "mcp",
+          "mcpServers",
+          "Pi core requires an MCP extension; select hosted use or a verified runtime adapter"
+        );
+      save(result.files, "package.json", {
+        ...metadata,
+        keywords: ["pi-package"],
+        pi: { skills: ["./skills"] }
+      });
+    } else if (target === "opencode") {
+      result.warnings.push({
+        capability: "metadata",
+        path: "opencode.json",
+        message: "OpenCode resource configuration has no native plugin identity metadata; imported identity will be generated",
+        blocking: false
+      });
+      const mcp = {};
+      for (const [name, value] of Object.entries(servers)) {
+        const server = value;
+        if (server.type !== "stdio" || server.cwd !== void 0 || JSON.stringify(server).includes("${")) {
+          block(
+            result,
+            "mcp",
+            `mcpServers.${name}`,
+            "OpenCode export requires a PATH command without plugin-relative paths, cwd or unresolved variables"
+          );
+          continue;
+        }
+        mcp[name] = {
+          type: "local",
+          command: [server.command, ...server.args ?? []],
+          ...server.env ? { environment: server.env } : {}
+        };
+      }
+      for (const [path, text] of Array.from(result.files))
+        if (path.startsWith("skills/")) {
+          result.files.set(`.opencode/${path}`, text);
+          result.files.delete(path);
+        }
+      save(result.files, "opencode.json", { $schema: "https://opencode.ai/config.json", mcp });
+    } else if (target === "agent-plugins" || target === "copilot") {
+      save(result.files, "plugin.json", { $schema: AGENT_PLUGINS_SCHEMA, ...metadata });
+      if (Object.keys(servers).length) {
+        const portable = Object.fromEntries(
+          Object.entries(servers).map(([name, value]) => {
+            const server = rootTokens(value, "${CLAUDE_PLUGIN_ROOT}", "${PLUGIN_ROOT}");
+            if (server.type === "stdio" && server.cwd === void 0)
+              block(
+                result,
+                "mcp",
+                `mcpServers.${name}.cwd`,
+                "Portable MCP defaults cwd to the plugin root; an explicit working directory is required to preserve source behavior"
+              );
+            if (server.cwd !== void 0 && (typeof server.cwd !== "string" || !/^(?:\.\/|\$\{PLUGIN_ROOT\}(?:\/|$))/.test(server.cwd)))
+              block(
+                result,
+                "mcp",
+                `mcpServers.${name}.cwd`,
+                "Working directory is not representable by the portable plugin-root contract"
+              );
+            if (object(server.env) && ["PLUGIN_ROOT", "PLUGIN_DATA"].some((key) => key in server.env))
+              block(
+                result,
+                "mcp",
+                `mcpServers.${name}.env`,
+                "Portable MCP reserved runtime variables cannot be overridden"
+              );
+            return [
+              name,
+              { ...server, type: server.type === "http" ? "streamable-http" : server.type }
+            ];
+          })
+        );
+        save(result.files, "mcp.json", { $schema: MCP_SCHEMA, mcpServers: portable });
+      }
+    } else {
+      const manifest = { ...metadata, ...source.skills ? { skills: source.skills } : {} };
+      const token = target === "cursor" ? "${CURSOR_PLUGIN_ROOT}" : "${CLAUDE_PLUGIN_ROOT}";
+      if (Object.keys(servers).length) {
+        if (target === "kimi" && JSON.stringify(servers).includes("${CLAUDE_PLUGIN_ROOT}"))
+          block(
+            result,
+            "mcp",
+            "mcpServers",
+            "Kimi plugin-relative executable and working-directory mappings require a dedicated adapter"
+          );
+        const projected = rootTokens(servers, "${CLAUDE_PLUGIN_ROOT}", token);
+        if (target === "kimi") manifest.mcpServers = projected;
+        else {
+          const path = target === "cursor" ? "mcp.json" : ".mcp.json";
+          save(result.files, path, { mcpServers: projected });
+          manifest.mcpServers = `./${path}`;
+        }
+      }
+      save(result.files, PLATFORM_BUNDLE_PROFILES[target].manifest, manifest);
+    }
+    result.warnings.push({
+      capability: "compatibility",
+      path: PLATFORM_BUNDLE_PROFILES[target].manifest,
+      message: "Native host installation and execution require separate verification",
+      blocking: false
+    });
+  } catch (error) {
+    block(result, "format", CLAUDE_MANIFEST, error instanceof Error ? error.message : String(error));
+  }
+  return result;
+}
+
 // lib/plugin/convert/ecosystem.ts
 var UnsupportedPluginConversionError = class extends Error {
   constructor(source, target, report) {
@@ -6580,7 +8051,7 @@ function authorFields(author, fallbackName = "unknown") {
 }
 function replacePluginRootToken(value) {
   if (typeof value === "string") {
-    return value.replaceAll("${CLAUDE_PLUGIN_ROOT}", "${COGNIA_PLUGIN_ROOT}").replaceAll("${CODEX_PLUGIN_ROOT}", "${COGNIA_PLUGIN_ROOT}").replaceAll("${extensionPath}", "${COGNIA_PLUGIN_ROOT}");
+    return value.replaceAll("${CLAUDE_PLUGIN_ROOT}", "${COGNIA_PLUGIN_ROOT}").replaceAll("${CODEX_PLUGIN_ROOT}", "${COGNIA_PLUGIN_ROOT}").replaceAll("${PLUGIN_ROOT}", "${COGNIA_PLUGIN_ROOT}").replaceAll("${extensionPath}", "${COGNIA_PLUGIN_ROOT}");
   }
   if (Array.isArray(value)) return value.map(replacePluginRootToken);
   if (value && typeof value === "object") {
@@ -6591,6 +8062,7 @@ function replacePluginRootToken(value) {
   return value;
 }
 var UNSUPPORTED_RUNTIME_TOKENS = [
+  "${PLUGIN_DATA}",
   "${CLAUDE_PLUGIN_DATA}",
   "${CLAUDE_PROJECT_DIR}",
   "${workspacePath}"
@@ -6606,11 +8078,11 @@ function rejectUnsupportedRuntimeTokens(args) {
   });
   return true;
 }
-function unsupportedIssue(capability) {
+function unsupportedIssue(capability, target = "cognia") {
   return {
     capability,
     path: capability,
-    message: `${capability} has no behaviorally equivalent Cognia declarative contribution`,
+    message: `${capability} requires a ${target} adapter or host runtime; native conversion is not implemented`,
     blocking: true
   };
 }
@@ -6668,7 +8140,11 @@ function finalizeForeignConversion(args) {
   if (contributions.skills.length > 0) capabilities.push("skills");
   if (contributions.subagents.length > 0) capabilities.push("subagent");
   if (contributions.presets.length > 0) capabilities.push("mcp-server-preset");
-  const need = contributions.presets.some((preset) => preset.transport === "stdio") ? "host-process" : contributions.needsFilesystem ? "host-filesystem" : "portable";
+  const hasCommandHooks = Object.values(contributions.commandHooks ?? {}).some(
+    (groups) => Array.isArray(groups) && groups.length > 0
+  );
+  if (hasCommandHooks) capabilities.push("command-hooks");
+  const need = hasCommandHooks || contributions.presets.some((preset) => preset.transport === "stdio") ? "host-process" : contributions.needsFilesystem ? "host-filesystem" : "portable";
   const manifest = assembleManifest({
     identity: {
       id: metadata.id,
@@ -6685,7 +8161,8 @@ function finalizeForeignConversion(args) {
     contributions: {
       ...contributions.skills.length > 0 ? { skills: contributions.skills } : {},
       ...contributions.subagents.length > 0 ? { subagents: contributions.subagents } : {},
-      ...contributions.presets.length > 0 ? { mcpServerPresets: contributions.presets } : {}
+      ...contributions.presets.length > 0 ? { mcpServerPresets: contributions.presets } : {},
+      ...hasCommandHooks ? { commandHooks: contributions.commandHooks } : {}
     }
   });
   manifest.homepage = metadata.homepage;
@@ -6696,6 +8173,15 @@ function finalizeForeignConversion(args) {
   if (metadata.author.url && manifest.author) {
     manifest.author.url = metadata.author.url;
   }
+  for (const path of [
+    ".claude-plugin/plugin.json",
+    ".codex-plugin/plugin.json",
+    "gemini-extension.json"
+  ])
+    if (output2.has(path)) output2.set(path, "{}\n");
+  for (const path of output2.keys()) {
+    if (isPluginEnvironmentFile(path)) output2.set(path, "\n");
+  }
   output2.set("plugin.json", serializeManifest(manifest));
   output2.set("dist/index.js", renderDist(manifest));
   return {
@@ -6703,7 +8189,7 @@ function finalizeForeignConversion(args) {
     target: "cognia",
     manifest,
     files: output2,
-    copies: [],
+    copies: [...options2.binaryPaths ?? []].filter((path) => output2.has(path) && !isPluginEnvironmentFile(path)).map((path) => ({ from: path, to: path })),
     report
   };
 }
@@ -6729,8 +8215,13 @@ function collectSkillMarkdownFiles(files, declared) {
   }
   return Array.from(result).sort();
 }
+function rootSkillFiles(files, runtimeEntry) {
+  return [...files.keys()].filter(
+    (path) => path !== runtimeEntry && !isPluginEnvironmentFile(path) && !/^(?:\.(?:claude|codex|cursor|kimi|devin)-plugin\/|\.github\/|\.opencode\/|(?:skills|agents|commands|hooks|policies|output-styles|workflows)\/|(?:plugin|kimi\.plugin|gemini-extension|mcp|\.mcp|hooks|settings|opencode)\.jsonc?$)/.test(path)
+  );
+}
 function convertSkillFiles(args) {
-  const { files, declared, output: output2, report } = args;
+  const { files, declared, report } = args;
   const paths = collectSkillMarkdownFiles(files, declared);
   if (!configured(declared) && files.has("SKILL.md")) paths.unshift("SKILL.md");
   const skills = [];
@@ -6753,19 +8244,15 @@ function convertSkillFiles(args) {
       report
     });
     const directory = skillFile.slice(0, Math.max(0, skillFile.lastIndexOf("/")));
-    const resources = directory ? filesBelow(files, directory) : [];
+    const resources = directory ? filesBelow(files, directory) : rootSkillFiles(files);
     const built = buildSkill(text, resources, displayNameFromPath(directory || skillFile));
-    if (built.skill.source.kind === "local-bundle" && directory) {
-      built.skill.source = { kind: "local-bundle", path: directory };
+    for (const message of built.blockers)
+      report.blocking.push({ capability: "skills", path: skillFile, message, blocking: true });
+    if (built.skill.source.kind === "local-bundle") {
+      built.skill.source = { kind: "local-bundle", path: directory || "." };
     }
     skills.push(built.skill);
     needsFilesystem ||= built.needsFilesystem;
-    if (!directory) {
-      for (const copy of built.copies) {
-        const contents = files.get(normalizePath(copy.from));
-        if (contents !== void 0) output2.set(copy.to, contents);
-      }
-    }
     for (const warning of built.warnings) {
       report.warnings.push({
         capability: "skills",
@@ -6811,17 +8298,89 @@ function convertMcpDocuments(args) {
       report: args.report
     });
     const canonicalText = JSON.stringify(replacePluginRootToken(document.value));
-    const { drafts } = readMcpDrafts(canonicalText, args.adapterSourceName);
+    const declaredServers = document.value.mcpServers;
+    let drafts;
+    try {
+      drafts = readMcpDrafts(canonicalText, args.adapterSourceName).drafts;
+    } catch {
+      args.report.blocking.push({
+        capability: "mcpServers",
+        path: document.path,
+        message: "MCP configuration does not contain valid server declarations",
+        blocking: true
+      });
+      continue;
+    }
+    if (declaredServers && typeof declaredServers === "object" && !Array.isArray(declaredServers)) {
+      for (const name of Object.keys(declaredServers)) {
+        if (!drafts.some((draft) => draft.name === name)) args.report.blocking.push({
+          capability: "mcpServers",
+          path: `${document.path}.${name}`,
+          message: "Declared MCP server could not be parsed; conversion cannot silently omit it",
+          blocking: true
+        });
+      }
+    }
+    if (args.output.has(document.path)) args.output.set(document.path, "{}\n");
+    for (const path of [
+      ".claude-plugin/plugin.json",
+      ".codex-plugin/plugin.json",
+      "gemini-extension.json"
+    ])
+      if (args.output.has(path)) args.output.set(path, "{}\n");
+    for (const path of args.output.keys())
+      if (isPluginEnvironmentFile(path)) args.output.set(path, "\n");
     for (const draft of drafts) {
+      const hostFields = ["excludeTools", "includeTools", "disabled", "enabled", "trust", "autoApprove"].filter((field) => draft.config[field] !== void 0);
+      if (hostFields.length) args.report.blocking.push({
+        capability: "mcpServers",
+        path: `${document.path}.${draft.name}`,
+        message: `Host-specific MCP policy requires an enforcement adapter: ${hostFields.join(", ")}`,
+        blocking: true
+      });
+      const sanitized = sanitizeMcpConfig(draft.transport, draft.config);
+      const env = draft.config.env;
+      for (const [key, value] of Object.entries(env ?? {})) {
+        if (typeof value === "string" && value.startsWith("${COGNIA_PLUGIN_ROOT}")) {
+          ;
+          sanitized.config.env[key] = value;
+          sanitized.fields = sanitized.fields.filter(
+            (field) => !(field.placement === "env" && field.key === key)
+          );
+        }
+      }
       const preset = {
         id: draft.name,
         name: draft.name,
-        description: describeConfig(draft.transport, draft.config),
+        description: describeConfig(draft.transport, sanitized.config),
         transport: draft.transport,
-        config: draft.config,
-        fields: []
+        config: sanitized.config,
+        fields: sanitized.fields
       };
+      for (const field of sanitized.fields.filter(
+        (field2) => field2.secret || field2.placement === "url"
+      )) {
+        const original = field.placement === "env" ? draft.config.env?.[field.key] : field.placement === "header" ? draft.config.headers?.[field.key] : draft.config.url;
+        if (typeof original !== "string" || !original || /^\$\{[A-Z0-9_]+\}$/.test(original))
+          continue;
+        for (const [path, contents] of args.output) {
+          if (contents.includes(original))
+            args.report.blocking.push({
+              capability: "secrets",
+              path,
+              message: "A credential removed from MCP configuration is also present in this bundled file; remove it before conversion",
+              blocking: true
+            });
+        }
+      }
       presets.push(preset);
+      if (sanitized.fields.length)
+        args.report.warnings.push({
+          capability: "mcpServers",
+          path: document.path,
+          message: `User configuration required for ${draft.name}: ${sanitized.fields.map((field) => field.key).join(", ")}; source values were removed`,
+          blocking: false
+        });
       args.report.converted.push({
         capability: "mcpServers",
         path: document.path,
@@ -6832,13 +8391,256 @@ function convertMcpDocuments(args) {
   }
   return presets;
 }
+var CONVERTIBLE_HOOK_HANDLER_TYPES = /* @__PURE__ */ new Set([
+  "command",
+  "http",
+  "webhook",
+  "prompt",
+  "agent",
+  "mcp_tool"
+]);
+function collectHookDocuments(args) {
+  const { files, declared, sourcePath, report } = args;
+  const documents = [];
+  const seen = /* @__PURE__ */ new Set();
+  const addFile = (path) => {
+    const normalized = normalizePath(path);
+    if (seen.has(normalized)) return;
+    const text = files.get(normalized);
+    if (text === void 0) return;
+    seen.add(normalized);
+    documents.push({ path: normalized, value: parseJsonObject(text, normalized) });
+  };
+  const addDeclared = (value, path) => {
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => addDeclared(item, `${path}[${index}]`));
+      return;
+    }
+    if (typeof value === "string" && value.trim()) {
+      const normalized = normalizePath(value);
+      if (!files.has(normalized))
+        report.blocking.push({
+          capability: "commandHooks",
+          path: normalized,
+          message: "declared hooks file was not found",
+          blocking: true
+        });
+      else addFile(normalized);
+    } else if (value && typeof value === "object") {
+      documents.push({ path, value });
+    } else if (value !== void 0) {
+      report.blocking.push({
+        capability: "commandHooks",
+        path,
+        message: "manifest hooks field must be a file path, inline event map, or array of these",
+        blocking: true
+      });
+    }
+  };
+  addDeclared(declared, `${sourcePath}.hooks`);
+  if (args.defaultDiscovery !== false) {
+    addFile("hooks/hooks.json");
+    addFile("hooks.json");
+  }
+  return documents;
+}
+function convertHookDocuments(args) {
+  const { documents, report } = args;
+  const merged = {};
+  let convertedGroups = 0;
+  for (const document of documents) {
+    const text = JSON.stringify(document.value);
+    rejectUnsupportedRuntimeTokens({
+      text,
+      capability: "commandHooks",
+      path: document.path,
+      report
+    });
+    const canonical = replacePluginRootToken(document.value);
+    const inner = canonical.hooks;
+    const eventMap = inner && typeof inner === "object" && !Array.isArray(inner) ? inner : canonical;
+    for (const [event, groups] of Object.entries(eventMap)) {
+      if (!HOOK_EVENTS.includes(event)) {
+        report.blocking.push({
+          capability: "commandHooks",
+          path: document.path,
+          message: `hook event "${event}" has no Cognia hook-runtime equivalent (install/update lifecycle events are not dispatched to command hooks)`,
+          blocking: true
+        });
+        continue;
+      }
+      if (!Array.isArray(groups)) {
+        report.blocking.push({
+          capability: "commandHooks",
+          path: document.path,
+          message: `hook event "${event}" must map to an array of groups`,
+          blocking: true
+        });
+        continue;
+      }
+      let usable = true;
+      for (const [index, group] of groups.entries()) {
+        if (!group || typeof group !== "object" || Array.isArray(group)) {
+          report.blocking.push({
+            capability: "commandHooks",
+            path: document.path,
+            message: `hook group "${event}"[${index}] must be an object`,
+            blocking: true
+          });
+          usable = false;
+          continue;
+        }
+        const unknownGroupKeys = Object.keys(group).filter(
+          (key) => !["matcher", "hooks"].includes(key)
+        );
+        if (unknownGroupKeys.length) {
+          report.blocking.push({
+            capability: "commandHooks",
+            path: document.path,
+            message: `Unsupported hook group selectors/fields: ${unknownGroupKeys.join(", ")}`,
+            blocking: true
+          });
+          usable = false;
+        }
+        const handlers = group.hooks;
+        if (!Array.isArray(handlers)) {
+          report.blocking.push({
+            capability: "commandHooks",
+            path: document.path,
+            message: `hook group "${event}"[${index}] must carry a "hooks" handler array`,
+            blocking: true
+          });
+          usable = false;
+          continue;
+        }
+        for (const [handlerIndex, handler] of handlers.entries()) {
+          const type = handler && typeof handler === "object" && !Array.isArray(handler) ? handler.type : void 0;
+          if (handler && typeof handler === "object" && !Array.isArray(handler)) {
+            const record = handler;
+            const supported = /* @__PURE__ */ new Set([
+              "type",
+              "timeout",
+              ...type === "command" ? ["command", "async"] : type === "http" || type === "webhook" ? ["url", "headers"] : type === "prompt" || type === "agent" ? ["prompt", "model"] : type === "mcp_tool" ? ["server", "tool", "input"] : []
+            ]);
+            const unknown = Object.keys(record).filter(
+              (key) => !supported.has(key) && !DORMANT_HOOK_HANDLER_FIELDS.includes(key)
+            );
+            if (unknown.length) {
+              report.blocking.push({
+                capability: "commandHooks",
+                path: document.path,
+                message: `Unsupported hook handler fields: ${unknown.join(", ")}`,
+                blocking: true
+              });
+              usable = false;
+            }
+            if (record.timeout !== void 0 && (typeof record.timeout !== "number" || !Number.isFinite(record.timeout) || record.timeout <= 0) || record.async !== void 0 && typeof record.async !== "boolean") {
+              report.blocking.push({
+                capability: "commandHooks",
+                path: document.path,
+                message: "Hook timeout must be a positive number and async must be boolean",
+                blocking: true
+              });
+              usable = false;
+            }
+            const dormant = DORMANT_HOOK_HANDLER_FIELDS.filter((field) => configured(record[field]));
+            if (dormant.length) {
+              report.blocking.push({
+                capability: "commandHooks",
+                path: document.path,
+                message: `Cognia runners do not execute hook fields: ${dormant.join(", ")}`,
+                blocking: true
+              });
+              usable = false;
+            }
+            const required = type === "command" ? "command" : type === "http" || type === "webhook" ? "url" : type === "prompt" || type === "agent" ? "prompt" : void 0;
+            if (type === "mcp_tool" && (!optionalString(record.server) || !optionalString(record.tool))) {
+              report.blocking.push({
+                capability: "commandHooks",
+                path: document.path,
+                message: "MCP hook handler requires non-empty server and tool identifiers",
+                blocking: true
+              });
+              usable = false;
+            }
+            if (required && !optionalString(record[required])) {
+              report.blocking.push({
+                capability: "commandHooks",
+                path: document.path,
+                message: `hook handler requires a non-empty ${required}`,
+                blocking: true
+              });
+              usable = false;
+            }
+          }
+          if (typeof type !== "string" || !CONVERTIBLE_HOOK_HANDLER_TYPES.has(type)) {
+            report.blocking.push({
+              capability: "commandHooks",
+              path: document.path,
+              message: `hook handler "${event}"[${index}].hooks[${handlerIndex}] has unsupported type ${JSON.stringify(type ?? null)} \u2014 only ${[...CONVERTIBLE_HOOK_HANDLER_TYPES].join("/")} handlers convert`,
+              blocking: true
+            });
+            usable = false;
+          }
+        }
+      }
+      if (!usable) continue;
+      const target = merged[event] ??= [];
+      for (const group of groups) {
+        target.push(group);
+        convertedGroups += 1;
+      }
+    }
+    if (convertedGroups > 0) {
+      report.converted.push({
+        capability: "commandHooks",
+        path: document.path,
+        message: `converted ${convertedGroups} hook group(s) into manifest.commandHooks`,
+        blocking: false
+      });
+      convertedGroups = 0;
+    }
+  }
+  return merged;
+}
 function detectPluginEcosystem(files) {
-  if (files.has("plugin.json")) return "cognia";
-  if (files.has(".claude-plugin/plugin.json")) return "claude-code";
-  if (files.has(".codex-plugin/plugin.json")) return "codex";
-  if (files.has("gemini-extension.json")) return "gemini-cli";
+  const rootText = files.get("plugin.json");
+  if (rootText !== void 0) {
+    const root = parseJsonObject(rootText, "plugin.json");
+    if (typeof root.id === "string" && typeof root.type === "string") return "cognia";
+  }
+  const markers = [
+    [".claude-plugin/plugin.json", "claude-code"],
+    [".codex-plugin/plugin.json", "codex"],
+    ["gemini-extension.json", "gemini-cli"],
+    [".cursor-plugin/plugin.json", "cursor"],
+    [".github/plugin/plugin.json", "copilot"],
+    [".github/plugin.json", "copilot"],
+    ["kimi.plugin.json", "kimi"],
+    [".kimi-plugin/plugin.json", "kimi"],
+    [".devin-plugin/plugin.json", "devin"],
+    ["opencode.json", "opencode"],
+    ["opencode.jsonc", "opencode"]
+  ];
+  const candidates = markers.filter(([path]) => files.has(path));
+  const active = candidates.filter(([path]) => !/^\s*\{\s*\}\s*$/.test(files.get(path)));
+  const formats = [...new Set((active.length ? active : candidates).map(([, format2]) => format2))];
+  if (formats.length > 1) throw new Error("multiple plugin formats found; provide one unambiguous plugin bundle");
+  const platformFiles = new Map(files);
+  for (const [path] of candidates) if (!active.some(([entry]) => entry === path)) platformFiles.delete(path);
+  const platform = detectPlatformBundle(platformFiles);
+  if (platform) {
+    if (formats.length && formats[0] !== platform) throw new Error("multiple plugin formats found; provide one unambiguous plugin bundle");
+    return platform;
+  }
+  if (formats.length) return formats[0];
+  if (rootText !== void 0) {
+    const root = parseJsonObject(rootText, "plugin.json");
+    if (root.$schema) throw new Error("plugin.json schema is not a recognized Cognia or Agent Plugins format");
+    return "cognia";
+  }
   throw new Error(
-    "plugin format not recognized \u2014 expected plugin.json, .claude-plugin/plugin.json, .codex-plugin/plugin.json, or gemini-extension.json"
+    "plugin format not recognized \u2014 provide a Cognia, Agent Plugins, Claude Code, Codex, Gemini, Cursor, Copilot, Kimi, Devin, OpenCode or Pi bundle"
   );
 }
 function convertClaudePlugin(files, options2) {
@@ -6849,7 +8651,6 @@ function convertClaudePlugin(files, options2) {
   );
   const sourceRecord = source;
   const blocking = [
-    ["hooks", source.hooks],
     ["lspServers", source.lspServers],
     ["outputStyles", source.outputStyles],
     ["workflows", source.workflows],
@@ -6860,9 +8661,7 @@ function convertClaudePlugin(files, options2) {
     ["experimental", source.experimental]
   ].filter(([, value]) => configured(value)).map(([capability]) => unsupportedIssue(String(capability)));
   const discoveredExecutableSurfaces = [
-    ["hooks", ["hooks/", "hooks.json"]],
     ["monitors", ["monitors/"]],
-    ["bin", ["bin/"]],
     ["themes", ["themes/"]],
     ["workflows", ["workflows/"]],
     ["outputStyles", ["output-styles/"]],
@@ -6913,7 +8712,16 @@ function convertClaudePlugin(files, options2) {
     sourcePath,
     report
   });
-  if (blocking.length > 0) {
+  const commandHooks = convertHookDocuments({
+    documents: collectHookDocuments({
+      files,
+      declared: source.hooks,
+      sourcePath,
+      report
+    }),
+    report
+  });
+  if (report.blocking.length > 0) {
     throw new UnsupportedPluginConversionError("claude-code", "cognia", report);
   }
   const output2 = cloneFiles(files);
@@ -6940,6 +8748,8 @@ function convertClaudePlugin(files, options2) {
         report
       });
       const built = buildSkill(text, [], displayNameFromPath(commandPath));
+      for (const message of built.blockers)
+        report.blocking.push({ capability: "commands", path: commandPath, message, blocking: true });
       skills.push(built.skill);
       report.converted.push({
         capability: "commands",
@@ -7017,6 +8827,7 @@ function convertClaudePlugin(files, options2) {
   const presets = convertMcpDocuments({
     documents: mcpDocuments(files, source.mcpServers, ".mcp.json"),
     adapterSourceName: "claude-code.json",
+    output: output2,
     report
   });
   return finalizeForeignConversion({
@@ -7027,6 +8838,7 @@ function convertClaudePlugin(files, options2) {
       skills,
       subagents,
       presets,
+      commandHooks,
       needsFilesystem: convertedSkills.needsFilesystem
     },
     report,
@@ -7036,10 +8848,7 @@ function convertClaudePlugin(files, options2) {
 function convertCodexPlugin(files, options2) {
   const sourcePath = ".codex-plugin/plugin.json";
   const source = parseJsonObject(requiredString(files.get(sourcePath), sourcePath), sourcePath);
-  const blocking = [
-    ["hooks", source.hooks],
-    ["apps", source.apps]
-  ].filter(([, value]) => configured(value)).map(([capability]) => unsupportedIssue(String(capability)));
+  const blocking = [["apps", source.apps]].filter(([, value]) => configured(value)).map(([capability]) => unsupportedIssue(String(capability)));
   const report = {
     fidelity: blocking.length > 0 ? "unsupported" : "structured",
     converted: [],
@@ -7066,6 +8875,16 @@ function convertCodexPlugin(files, options2) {
     sourcePath,
     report
   });
+  const commandHooks = convertHookDocuments({
+    documents: collectHookDocuments({
+      files,
+      declared: source.hooks,
+      sourcePath,
+      report,
+      defaultDiscovery: source.hooks === void 0
+    }),
+    report
+  });
   const output2 = cloneFiles(files);
   const convertedSkills = convertSkillFiles({
     files,
@@ -7076,6 +8895,7 @@ function convertCodexPlugin(files, options2) {
   const presets = convertMcpDocuments({
     documents: mcpDocuments(files, source.mcpServers, ".mcp.json"),
     adapterSourceName: "claude-code.json",
+    output: output2,
     report
   });
   const interfaceMetadata = source.interface && typeof source.interface === "object" && !Array.isArray(source.interface) ? source.interface : void 0;
@@ -7107,6 +8927,7 @@ function convertCodexPlugin(files, options2) {
       skills: convertedSkills.skills,
       subagents: [],
       presets,
+      commandHooks,
       needsFilesystem: convertedSkills.needsFilesystem
     },
     report,
@@ -7116,7 +8937,7 @@ function convertCodexPlugin(files, options2) {
 function parseGeminiCommand(path, text, report) {
   let parsed;
   try {
-    parsed = parse17(text);
+    parsed = parse18(text);
   } catch (error) {
     report.blocking.push({
       capability: "commands",
@@ -7199,13 +9020,24 @@ function convertGeminiPlugin(files, options2) {
       "keywords",
       "contextFileName",
       "excludeTools",
-      "mcpServers"
+      "mcpServers",
+      "settings"
     ]),
     sourcePath,
     report
   });
   const output2 = cloneFiles(files);
-  const skills = [];
+  const convertedSkills = convertSkillFiles({ files, declared: void 0, output: output2, report });
+  const skills = [...convertedSkills.skills];
+  for (const directory of ["hooks", "agents", "policies"]) {
+    if (filesBelow(files, directory).length)
+      report.blocking.push({
+        capability: directory,
+        path: `${directory}/`,
+        message: `Gemini ${directory} use platform-specific event, execution, or policy semantics; a Cognia adapter is not implemented`,
+        blocking: true
+      });
+  }
   const contextPath = optionalString(source.contextFileName) ?? "GEMINI.md";
   const context = files.get(normalizePath(contextPath));
   if (context !== void 0 && context.trim()) {
@@ -7246,8 +9078,10 @@ function convertGeminiPlugin(files, options2) {
   const presets = convertMcpDocuments({
     documents: mcpDocuments(files, source.mcpServers, ".mcp.json"),
     adapterSourceName: "gemini.json",
+    output: output2,
     report
   });
+  importGeminiSettings({ settings: source.settings, presets, source, report });
   return finalizeForeignConversion({
     source: "gemini-cli",
     output: output2,
@@ -7256,11 +9090,102 @@ function convertGeminiPlugin(files, options2) {
       skills,
       subagents: [],
       presets,
-      needsFilesystem: false
+      needsFilesystem: convertedSkills.needsFilesystem
     },
     report,
     options: options2
   });
+}
+function importGeminiSettings(args) {
+  if (args.settings === void 0) return;
+  const fail = (path, message) => args.report.blocking.push({ capability: "settings", path, message, blocking: true });
+  if (!Array.isArray(args.settings)) {
+    fail("settings", "Gemini settings must be an array");
+    return;
+  }
+  const servers = args.source.mcpServers;
+  const seen = /* @__PURE__ */ new Set();
+  for (const [index, value] of args.settings.entries()) {
+    const path = `settings[${index}]`;
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      fail(path, "Gemini setting must be an object");
+      continue;
+    }
+    const setting = value;
+    const variable = optionalString(setting.envVar);
+    const label = optionalString(setting.name);
+    if (!variable || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(variable) || !label || seen.has(variable) || Object.keys(setting).some(
+      (key) => !["name", "description", "envVar", "sensitive"].includes(key)
+    ) || setting.sensitive !== void 0 && typeof setting.sensitive !== "boolean") {
+      fail(
+        path,
+        "Setting has invalid/duplicate environment variable, missing name, or unsupported configuration fields"
+      );
+      continue;
+    }
+    seen.add(variable);
+    const reference = "${" + variable + "}";
+    let used = false;
+    for (const preset of args.presets) {
+      const original = servers?.[preset.id] ?? {};
+      const fields = preset.fields ??= [];
+      const add = (field) => {
+        const existing = fields.findIndex(
+          (candidate) => candidate.placement === field.placement && candidate.key === field.key
+        );
+        const mapped = {
+          ...field,
+          label,
+          ...optionalString(setting.description) ? { description: optionalString(setting.description) } : {},
+          secret: Boolean(setting.sensitive)
+        };
+        if (existing >= 0) fields[existing] = mapped;
+        else fields.push(mapped);
+        used = true;
+      };
+      const env = original.env;
+      for (const [key, raw] of Object.entries(env ?? {})) {
+        if (raw === reference) add({ key, label, placement: "env" });
+        else if (typeof raw === "string" && raw.includes(reference))
+          fail(
+            path,
+            `Composed environment binding ${key} cannot be represented by a Cognia preset field`
+          );
+      }
+      const headers = original.headers;
+      for (const [key, raw] of Object.entries(headers ?? {})) {
+        if (raw === reference) add({ key, label, placement: "header" });
+        else if (typeof raw === "string" && raw.includes(reference))
+          fail(
+            path,
+            `Composed header binding ${key} cannot be represented by a Cognia preset field`
+          );
+      }
+      const url = original.httpUrl ?? original.url;
+      if (url === reference) add({ key: "url", label, placement: "url" });
+      else if (typeof url === "string" && url.includes(reference))
+        fail(
+          path,
+          "Composed URL bindings require a template adapter; conversion cannot replace them with an unrelated full URL"
+        );
+      if (Array.isArray(original.args) && original.args.some((arg) => typeof arg === "string" && arg.includes(reference)))
+        add({ key: variable, label, placement: "arg-replace", token: reference });
+      if (preset.transport === "stdio" && !(variable in (env ?? {}))) {
+        preset.config.env = {
+          ...preset.config.env ?? {},
+          [variable]: ""
+        };
+        add({ key: variable, label, placement: "env" });
+      }
+    }
+    if (!used)
+      args.report.warnings.push({
+        capability: "settings",
+        path,
+        message: "Setting is not referenced by a converted MCP contribution; no Cognia field was created",
+        blocking: false
+      });
+  }
 }
 function loadCogniaPlugin(files) {
   const manifest = parseExistingManifest(
@@ -7282,7 +9207,7 @@ function loadCogniaPlugin(files) {
   };
 }
 function replaceCanonicalRootToken(value, target) {
-  const token = target === "claude-code" ? "${CLAUDE_PLUGIN_ROOT}" : target === "gemini-cli" ? "${extensionPath}" : "${CODEX_PLUGIN_ROOT}";
+  const token = target === "claude-code" ? "${CLAUDE_PLUGIN_ROOT}" : target === "gemini-cli" ? "${extensionPath}" : "${CLAUDE_PLUGIN_ROOT}";
   if (typeof value === "string") {
     return value.replaceAll("${COGNIA_PLUGIN_ROOT}", token);
   }
@@ -7297,29 +9222,67 @@ function replaceCanonicalRootToken(value, target) {
 function exportCogniaSkills(args) {
   for (const skill of args.manifest.skills ?? []) {
     const targetDirectory = `skills/${skill.id}`;
+    if (args.target === "gemini-cli" && (skill.invocationPolicy === "explicit" || skill.allowedTools?.length)) {
+      args.report.blocking.push({
+        capability: "skills",
+        path: `skills.${skill.id}`,
+        message: "Gemini skill activation and tool approval do not implement Claude invocation/tool controls; export cannot silently loosen them",
+        blocking: true
+      });
+      continue;
+    }
+    const markdown = skill.source.kind === "inline" ? skill.source.markdown : args.files.get(
+      [normalizePath("path" in skill.source ? skill.source.path : ""), "SKILL.md"].filter(Boolean).join("/")
+    );
+    if (markdown) {
+      const built = buildSkill(serializeSkill({ ...skill, content: markdown }), [], skill.name);
+      for (const message of built.blockers)
+        args.report.blocking.push({
+          capability: "skills",
+          path: `skills.${skill.id}`,
+          message,
+          blocking: true
+        });
+    }
     if (skill.source.kind === "inline") {
       args.output.set(
         `${targetDirectory}/SKILL.md`,
         serializeSkill({
-          name: skill.name,
-          description: skill.description,
-          content: skill.source.markdown,
-          allowedTools: skill.allowedTools
+          ...skill,
+          content: skill.source.markdown
         })
       );
     } else if (skill.source.kind === "local-folder" || skill.source.kind === "local-bundle") {
-      if (args.target === "gemini-cli") {
+      const sourceDirectory = normalizePath(skill.source.path);
+      const sourcePrefix = sourceDirectory ? `${sourceDirectory}/` : "";
+      const originalMarkdown = args.files.get(`${sourcePrefix}SKILL.md`);
+      if (originalMarkdown === void 0) {
         args.report.blocking.push({
           capability: "skills",
-          path: `skills.${skill.id}.source`,
-          message: "Gemini prompt commands cannot preserve a resource-bearing Cognia skill",
+          path: sourceDirectory,
+          message: `skill bundle ${skill.id} was not found or is missing SKILL.md`,
           blocking: true
         });
         continue;
       }
-      const sourceDirectory = normalizePath(skill.source.path);
+      const parsedBundle = buildSkill(originalMarkdown, [], skill.name);
+      for (const message of parsedBundle.blockers)
+        args.report.blocking.push({
+          capability: "skills",
+          path: `${sourceDirectory}/SKILL.md`,
+          message,
+          blocking: true
+        });
+      if (args.target === "gemini-cli" && (parsedBundle.skill.invocationPolicy === "explicit" || parsedBundle.skill.allowedTools?.length))
+        args.report.blocking.push({
+          capability: "skills",
+          path: `${sourceDirectory}/SKILL.md`,
+          message: "Gemini cannot enforce the skill's invocation or tool approval controls",
+          blocking: true
+        });
+      const rootFiles = sourceDirectory ? void 0 : new Set(rootSkillFiles(args.files, args.manifest.main));
       const entries = Array.from(args.files.entries()).filter(
-        ([path]) => normalizePath(path).startsWith(`${sourceDirectory}/`)
+        ([path]) => !isPluginEnvironmentFile(path) && (rootFiles ? rootFiles.has(path) : normalizePath(path).startsWith(sourcePrefix))
       );
       if (entries.length === 0) {
         args.report.blocking.push({
@@ -7331,13 +9294,20 @@ function exportCogniaSkills(args) {
         continue;
       }
       for (const [path, contents] of entries) {
-        const relative2 = normalizePath(path).slice(sourceDirectory.length + 1);
+        const relative2 = normalizePath(path).slice(sourcePrefix.length);
         const normalizedSource = normalizePath(path);
         const target = `${targetDirectory}/${relative2}`;
         if (args.binaryPaths?.has(normalizedSource)) {
           args.copies.push({ from: normalizedSource, to: target });
         } else {
-          args.output.set(target, contents);
+          args.output.set(
+            target,
+            relative2 === "SKILL.md" && parsedBundle.skill.source.kind === "inline" ? serializeSkill({
+              ...parsedBundle.skill,
+              ...skill,
+              content: parsedBundle.skill.source.markdown
+            }) : contents
+          );
         }
       }
     } else {
@@ -7364,7 +9334,7 @@ function exportCogniaSubagents(args) {
     args.report.blocking.push({
       capability: "subagent",
       path: "subagents",
-      message: `${args.target} plugins do not expose a compatible subagent contribution`,
+      message: `${args.target} subagent execution and routing require a dedicated adapter; native export is not implemented`,
       blocking: true
     });
     return;
@@ -7413,15 +9383,97 @@ function exportMcpServers(args) {
   if (presets.length === 0) return void 0;
   const servers = [];
   for (const preset of presets) {
-    if (preset.fields?.length) {
+    const sanitized = sanitizeMcpConfig(preset.transport, preset.config);
+    const config = sanitized.config;
+    const fields = [...preset.fields ?? []];
+    for (const field of sanitized.fields) {
+      const container = field.placement === "env" ? "env" : "headers";
+      const original = field.placement === "url" ? preset.config.url : field.placement === "arg-replace" ? void 0 : preset.config[container]?.[field.key];
+      const binding = typeof original === "string" && /^\$\{[A-Za-z_][A-Za-z0-9_]*\}(?:\/[^\r\n]*)?$/.test(original);
+      if (field.placement === "arg-replace") {
+        config.args = structuredClone(preset.config.args);
+        continue;
+      }
+      if (field.placement === "env" && !field.secret || binding) {
+        if (field.placement === "url") config.url = original;
+        else config[container] = { ...config[container] ?? {}, [field.key]: original };
+        continue;
+      }
+      if (typeof original === "string" && original) args.removedValues.add(original);
+      if (!fields.some((existing) => existing.key === field.key && existing.placement === field.placement)) fields.push(field);
+    }
+    const hostFields = ["excludeTools", "includeTools", "disabled", "enabled", "trust", "autoApprove"].filter((field) => config[field] !== void 0);
+    if (hostFields.length) args.report.blocking.push({
+      capability: "mcp-server-preset",
+      path: `mcpServerPresets.${preset.id}`,
+      message: `Host-specific MCP policy requires a target enforcement adapter: ${hostFields.join(", ")}`,
+      blocking: true
+    });
+    if (preset.defaultDisallowedTools?.length || preset.toolRiskRules?.length || preset.provisioning?.mode === "managed" || preset.runtime && preset.runtime !== "both") {
       args.report.blocking.push({
         capability: "mcp-server-preset",
-        path: `mcpServerPresets.${preset.id}.fields`,
-        message: "target plugin formats cannot prompt users for Cognia preset fields",
+        path: `mcpServerPresets.${preset.id}`,
+        message: "Cognia tool restrictions, runtime routing, managed provisioning, and risk policy require host enforcement; native export cannot drop them",
         blocking: true
       });
       continue;
     }
+    if (fields.length && args.target !== "gemini-cli") {
+      args.report.blocking.push({
+        capability: "mcp-server-preset",
+        path: `mcpServerPresets.${preset.id}.fields`,
+        message: `${args.target} installation configuration projection is not implemented; configure the preset or use Cognia hosting`,
+        blocking: true
+      });
+      continue;
+    }
+    for (const field of fields) {
+      const variable = `COGNIA_${preset.id}_${field.key}`.toUpperCase().replace(/[^A-Z0-9_]/g, "_");
+      if (args.settings.some((setting) => setting.envVar === variable)) {
+        args.report.blocking.push({
+          capability: "mcp-server-preset",
+          path: `mcpServerPresets.${preset.id}.fields`,
+          message: "Configuration fields collide after environment-variable normalization",
+          blocking: true
+        });
+        continue;
+      }
+      const reference = "${" + variable + "}";
+      if (field.placement === "env" || field.placement === "header") {
+        const key = field.placement === "env" ? "env" : "headers";
+        config[key] = {
+          ...config[key] ?? {},
+          [field.key]: reference
+        };
+      } else if (field.placement === "url") {
+        config.url = reference;
+      } else if (field.placement === "arg-replace" && field.token && Array.isArray(config.args) && config.args.some((arg) => typeof arg === "string" && arg.includes(field.token))) {
+        config.args = config.args.map(
+          (arg) => typeof arg === "string" ? arg.replaceAll(field.token, reference) : arg
+        );
+      } else {
+        args.report.blocking.push({
+          capability: "mcp-server-preset",
+          path: `mcpServerPresets.${preset.id}.fields.${field.key}`,
+          message: "Invalid configuration placement or missing argument replacement token",
+          blocking: true
+        });
+        continue;
+      }
+      args.settings.push({
+        name: field.label,
+        description: field.description ?? field.label,
+        envVar: variable,
+        sensitive: Boolean(field.secret)
+      });
+    }
+    if (fields.length)
+      args.report.warnings.push({
+        capability: "mcp-server-preset",
+        path: `mcpServerPresets.${preset.id}.fields`,
+        message: "Gemini requests these settings during installation; values must be supplied before use",
+        blocking: false
+      });
     if (args.target === "codex" && preset.transport === "sse") {
       args.report.blocking.push({
         capability: "mcp-server-preset",
@@ -7435,7 +9487,7 @@ function exportMcpServers(args) {
       id: preset.id,
       name: preset.id,
       transport: preset.transport,
-      config: replaceCanonicalRootToken(preset.config, args.target),
+      config: replaceCanonicalRootToken(config, args.target),
       enabled: true,
       createdAt: 0,
       updatedAt: 0
@@ -7459,6 +9511,107 @@ function exportMcpServers(args) {
   }
   return projected;
 }
+function exportCommandHooks(args) {
+  const hooks = args.manifest.commandHooks;
+  if (!hooks || !Object.keys(hooks).length) return;
+  if (args.target !== "claude-code") {
+    args.report.blocking.push({
+      capability: "command-hooks",
+      path: "commandHooks",
+      message: `${args.target} hooks require an event/payload/decision adapter; native export is not implemented`,
+      blocking: true
+    });
+    return;
+  }
+  const validated = convertHookDocuments({
+    documents: [{ path: "commandHooks", value: { hooks } }],
+    report: args.report
+  });
+  for (const [event, groups] of Object.entries(hooks)) {
+    for (const group of groups ?? []) {
+      if (group.agents)
+        args.report.blocking.push({
+          capability: "command-hooks",
+          path: `commandHooks.${event}`,
+          message: "Claude Code cannot enforce Cognia agent selectors",
+          blocking: true
+        });
+      for (const handler of group.hooks) {
+        if (!["command", "http", "prompt", "agent"].includes(handler.type) || handler.policyClass === "managed") {
+          args.report.blocking.push({
+            capability: "command-hooks",
+            path: `commandHooks.${event}`,
+            message: "Cognia-only hook handlers and managed fail-closed policies require the Cognia host",
+            blocking: true
+          });
+        }
+      }
+    }
+  }
+  args.output.set(
+    "hooks/hooks.json",
+    JSON.stringify(replaceCanonicalRootToken({ hooks: validated }, args.target), null, 2) + "\n"
+  );
+}
+function exportRuntimeResources(args) {
+  const strings = [];
+  const collectStrings = (value) => {
+    if (typeof value === "string") strings.push(value);
+    else if (Array.isArray(value)) value.forEach(collectStrings);
+    else if (value && typeof value === "object") Object.values(value).forEach(collectStrings);
+  };
+  collectStrings([args.manifest.mcpServerPresets, args.manifest.commandHooks]);
+  if (!strings.some((value) => value.includes("${COGNIA_PLUGIN_ROOT}"))) return;
+  const payloadPaths = new Set(args.files.keys());
+  for (const path of args.files.keys()) {
+    const segments = path.split("/");
+    for (let length = 1; length < segments.length; length++) payloadPaths.add(segments.slice(0, length).join("/"));
+  }
+  const candidates = [...payloadPaths].sort((a, b) => b.length - a.length);
+  const references = [];
+  for (const value of strings) {
+    for (const match of value.matchAll(/\$\{COGNIA_PLUGIN_ROOT\}\//g)) {
+      const suffix = value.slice(match.index + match[0].length);
+      const known = candidates.find((path) => suffix.startsWith(path) && (!suffix[path.length] || /[\s"'`;)]/.test(suffix[path.length])));
+      references.push(known ?? suffix.split(/["'`\r\n]/)[0]);
+    }
+  }
+  for (const reference of references) {
+    const path = normalizePath(reference);
+    if (!args.files.has(path) && !filesBelow(args.files, path).length)
+      args.report.blocking.push({
+        capability: "resources",
+        path,
+        message: "Plugin-relative executable or resource reference is missing from the bundle",
+        blocking: true
+      });
+  }
+  for (const [path, text] of args.files) {
+    if (path === "plugin.json" || path === args.manifest.main || path === "gemini-extension.json" || /^\.(?:claude|codex)-plugin\//.test(path) || /(^|\/)\.env(?:\.|$)/.test(path) || path === ".mcp.json" || path === "hooks/hooks.json" || path === "hooks.json")
+      continue;
+    if (path.startsWith("skills/") && path.endsWith("/SKILL.md") || path.startsWith("agents/") && path.endsWith(".md") || path.startsWith("commands/") && /\.(?:toml|md)$/.test(path) || path.startsWith("policies/") || path.startsWith("output-styles/") || path.startsWith("workflows/") || path === ".lsp.json" || path === "settings.json")
+      continue;
+    if (args.output.has(path)) continue;
+    if (args.binaryPaths?.has(path)) args.copies.push({ from: path, to: path });
+    else args.output.set(path, replaceCanonicalRootToken(text, args.target));
+  }
+  for (const reference of references) {
+    const path = normalizePath(reference);
+    if (!args.output.has(path) && !filesBelow(args.output, path).length && !args.copies.some((copy) => copy.to === path || copy.to.startsWith(`${path}/`)))
+      args.report.blocking.push({
+        capability: "resources",
+        path,
+        message: "Referenced resource is excluded or relocated in this target bundle; update the reference before exporting",
+        blocking: true
+      });
+  }
+  args.report.warnings.push({
+    capability: "resources",
+    path: ".",
+    message: "Bundled runtime payload and dependency manifests preserved; executable installation and runtime availability require target-host verification",
+    blocking: false
+  });
+}
 function authorForForeign(manifest) {
   if (!manifest.author) return void 0;
   return {
@@ -7471,7 +9624,7 @@ function convertCogniaPlugin(files, target, options2) {
   const loaded = loadCogniaPlugin(files);
   const { manifest } = loaded;
   const report = {
-    fidelity: target === "gemini-cli" ? "contextual" : "structured",
+    fidelity: "structured",
     converted: [],
     warnings: [],
     blocking: []
@@ -7479,25 +9632,26 @@ function convertCogniaPlugin(files, target, options2) {
   const allowedCapabilities = /* @__PURE__ */ new Set([
     "skills",
     "mcp-server-preset",
+    "command-hooks",
     ...target === "claude-code" ? ["subagent"] : []
   ]);
   for (const capability of manifest.capabilities ?? []) {
     if (!allowedCapabilities.has(capability)) {
-      report.blocking.push(unsupportedIssue(capability));
+      report.blocking.push(unsupportedIssue(capability, target));
     }
   }
   if (manifest.permissions?.length) {
-    report.blocking.push(unsupportedIssue("permissions"));
+    report.blocking.push(unsupportedIssue("permissions", target));
   }
   const executableEntries = [manifest.pythonMain, manifest.wasmMain, manifest.vscodeMain].filter(
     configured
   );
   if (executableEntries.length > 0) {
-    report.blocking.push(unsupportedIssue("runtime"));
+    report.blocking.push(unsupportedIssue("runtime", target));
   }
   if (manifest.main) {
     const entry = files.get(normalizePath(manifest.main));
-    if (!entry?.includes("Built output of src/index.ts, pre-generated by `cognia plugin import`")) {
+    if (entry !== renderDist(manifest)) {
       report.blocking.push({
         capability: "runtime",
         path: manifest.main,
@@ -7518,7 +9672,27 @@ function convertCogniaPlugin(files, target, options2) {
     binaryPaths: options2.binaryPaths
   });
   exportCogniaSubagents({ manifest, output: output2, target, report });
-  const mcp = exportMcpServers({ manifest, output: output2, target, report });
+  const settings = [];
+  const removedValues = /* @__PURE__ */ new Set();
+  const mcp = exportMcpServers({ manifest, output: output2, target, report, settings, removedValues });
+  exportCommandHooks({ manifest, output: output2, target, report });
+  exportRuntimeResources({
+    manifest,
+    files,
+    output: output2,
+    copies,
+    target,
+    report,
+    binaryPaths: options2.binaryPaths
+  });
+  for (const [path, text] of output2) {
+    if ([...removedValues].some((value) => text.includes(value))) report.blocking.push({
+      capability: "secrets",
+      path,
+      message: "A removed MCP credential is also present in an exported resource",
+      blocking: true
+    });
+  }
   if (report.blocking.length > 0) {
     report.fidelity = "unsupported";
     throw new UnsupportedPluginConversionError("cognia", target, report);
@@ -7573,28 +9747,6 @@ function convertCogniaPlugin(files, target, options2) {
 `);
   } else {
     const geminiServers = mcp && typeof mcp.mcpServers === "object" && mcp.mcpServers ? mcp.mcpServers : void 0;
-    for (const skill of manifest.skills ?? []) {
-      const skillFile = output2.get(`skills/${skill.id}/SKILL.md`);
-      if (skillFile === void 0) continue;
-      const parsed = buildSkill(skillFile, [], skill.name).skill;
-      const markdown = parsed.source.kind === "inline" ? parsed.source.markdown : skillFile;
-      output2.set(
-        `commands/${skill.id}.toml`,
-        stringify({
-          description: skill.description,
-          prompt: markdown
-        })
-      );
-      report.warnings.push({
-        capability: "skills",
-        path: `skills.${skill.id}`,
-        message: "exported as a Gemini prompt command; autonomous skill activation is contextual",
-        blocking: false
-      });
-    }
-    for (const path of Array.from(output2.keys())) {
-      if (path.startsWith("skills/")) output2.delete(path);
-    }
     output2.set(
       "gemini-extension.json",
       `${JSON.stringify(
@@ -7602,7 +9754,8 @@ function convertCogniaPlugin(files, target, options2) {
           name: manifest.id,
           version: manifest.version,
           description: manifest.description,
-          ...geminiServers ? { mcpServers: geminiServers } : {}
+          ...geminiServers ? { mcpServers: geminiServers } : {},
+          ...settings.length ? { settings } : {}
         },
         null,
         2
@@ -7620,34 +9773,64 @@ function convertCogniaPlugin(files, target, options2) {
   };
 }
 function convertPluginBundle(files, target, options2 = {}) {
+  for (const path of files.keys()) {
+    if (path.startsWith("/") || /^[A-Za-z]:/.test(path) || path.includes("\\") || path.split("/").includes("..")) {
+      throw new Error(`plugin source path must stay relative to the bundle: ${path}`);
+    }
+  }
   const source = detectPluginEcosystem(files);
-  if (source === target && source === "cognia") return loadCogniaPlugin(files);
-  if (source === "claude-code" && target === "cognia") {
-    return convertClaudePlugin(files, options2);
-  }
-  if (source === "codex" && target === "cognia") {
-    return convertCodexPlugin(files, options2);
-  }
-  if (source === "gemini-cli" && target === "cognia") {
-    return convertGeminiPlugin(files, options2);
-  }
-  if (source === "cognia" && target !== "cognia") {
-    return convertCogniaPlugin(files, target, options2);
-  }
-  const report = {
-    fidelity: "unsupported",
-    converted: [],
-    warnings: [],
-    blocking: [
-      {
-        capability: "format",
-        path: source,
-        message: `conversion from ${source} to ${target} is not implemented`,
-        blocking: true
-      }
-    ]
+  let canonical;
+  const platformTarget = (value) => value in PLATFORM_BUNDLE_PROFILES;
+  const finish = (result) => {
+    result.source = source;
+    result.target = target;
+    result.report.delivery = assessPluginDelivery({ manifest: canonical?.manifest ?? result.manifest, report: result.report, target });
+    return result;
   };
-  throw new UnsupportedPluginConversionError(source, target, report);
+  try {
+    if (source === "cognia") canonical = loadCogniaPlugin(files);
+    else if (source === "claude-code") canonical = convertClaudePlugin(files, options2);
+    else if (source === "codex") canonical = convertCodexPlugin(files, options2);
+    else if (source === "gemini-cli") canonical = convertGeminiPlugin(files, options2);
+    else {
+      const normalized = normalizePlatformBundle(files, source);
+      if (normalized.blocking.length) throw new UnsupportedPluginConversionError(source, target, {
+        fidelity: "unsupported",
+        converted: [],
+        warnings: normalized.warnings,
+        blocking: normalized.blocking
+      });
+      canonical = convertClaudePlugin(normalized.files, options2);
+      canonical.report.warnings.unshift(...normalized.warnings);
+    }
+    if (target === "cognia") return finish(canonical);
+    const exportTarget = platformTarget(target) ? "claude-code" : target;
+    const result = convertCogniaPlugin(canonical.files, exportTarget, options2);
+    result.report.warnings.unshift(...canonical.report.warnings);
+    if (platformTarget(target)) {
+      const nativeFiles = new Map(result.files);
+      for (const copy of result.copies) if (!nativeFiles.has(copy.to)) nativeFiles.set(copy.to, "");
+      const projected = projectPlatformBundle(nativeFiles, target);
+      result.report.warnings.push(...projected.warnings);
+      result.report.blocking.push(...projected.blocking);
+      if (projected.blocking.length) {
+        result.report.fidelity = "unsupported";
+        throw new UnsupportedPluginConversionError(source, target, result.report);
+      }
+      result.files = projected.files;
+      result.copies = result.copies.map((copy) => ({
+        ...copy,
+        to: target === "opencode" && copy.to.startsWith("skills/") ? `.opencode/${copy.to}` : copy.to
+      }));
+      for (const copy of result.copies) result.files.delete(copy.to);
+    }
+    return finish(result);
+  } catch (error) {
+    if (!(error instanceof UnsupportedPluginConversionError)) throw error;
+    const report = { ...error.report, fidelity: "unsupported" };
+    report.delivery = assessPluginDelivery({ manifest: canonical?.manifest, report, target });
+    throw new UnsupportedPluginConversionError(source, target, report);
+  }
 }
 
 // lib/plugin/convert/cli.ts
@@ -7753,13 +9936,23 @@ function assertWritableTarget(dir, io) {
     );
   }
 }
-var ECOSYSTEM_TARGETS = ["cognia", "claude-code", "codex", "gemini-cli"];
+var ECOSYSTEM_TARGETS = PLUGIN_ECOSYSTEMS;
 var BUNDLE_TEXT_PATTERN = /\.(?:md|markdown|txt|json|jsonc|toml|ya?ml|js|mjs|cjs|ts|tsx|jsx|sh|bash|zsh|py|rs|css|html)$/i;
 function parseEcosystemArgs(argv) {
-  const allowed = /* @__PURE__ */ new Set(["--operation", "--from", "--input", "--to", "--dir"]);
+  const allowed = /* @__PURE__ */ new Set(["--operation", "--from", "--input", "--to", "--dir", "--surface"]);
   const values = /* @__PURE__ */ new Map();
+  let dryRun = false;
+  let acceptWarnings = false;
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
+    if (flag === "--dry-run") {
+      dryRun = true;
+      continue;
+    }
+    if (flag === "--accept-warnings") {
+      acceptWarnings = true;
+      continue;
+    }
     if (!allowed.has(flag)) throw new Error(`unknown option: ${flag}`);
     const value = argv[i + 1];
     if (value === void 0 || value.startsWith("--")) {
@@ -7782,13 +9975,21 @@ function parseEcosystemArgs(argv) {
     throw new Error(`--to must be one of ${ECOSYSTEM_TARGETS.join(" | ")}, got "${target}"`);
   }
   if (operation === "export" && target === "cognia") {
-    throw new Error("plugin export requires --to claude-code, codex, or gemini-cli");
+    throw new Error(
+      `plugin export requires --to ${ECOSYSTEM_TARGETS.filter((target2) => target2 !== "cognia").join(", ")}`
+    );
   }
+  const surface = values.get("--surface") ?? "cli";
+  if (!["cli", "desktop", "cloud"].includes(surface))
+    throw new Error("--surface must be cli, desktop, or cloud");
   return {
     operation,
     input,
     target,
-    dir: values.get("--dir")
+    dir: values.get("--dir"),
+    dryRun,
+    acceptWarnings,
+    surface
   };
 }
 function runEcosystemConvertCli(argv, io) {
@@ -7809,9 +10010,73 @@ function runEcosystemConvertCli(argv, io) {
       binaryPaths.add(normalized);
     }
   }
-  const result = convertPluginBundle(files, args.target, { binaryPaths });
+  let result;
+  try {
+    result = convertPluginBundle(files, args.target, { binaryPaths });
+    if (args.surface === "cloud" && args.target !== "cognia") {
+      throw new UnsupportedPluginConversionError(result.source, args.target, {
+        fidelity: "unsupported",
+        converted: [],
+        warnings: [],
+        blocking: [
+          {
+            capability: "surface",
+            path: "cloud",
+            message: "Cloud installation and execution have not been verified. Use a local CLI or desktop target.",
+            blocking: true
+          }
+        ]
+      });
+    }
+  } catch (error) {
+    if (!(error instanceof UnsupportedPluginConversionError)) throw error;
+    const manifest = detectPluginEcosystem(files) === "cognia" ? convertPluginBundle(files, "cognia", { binaryPaths }).manifest : void 0;
+    error.report.delivery = assessPluginDelivery({
+      manifest,
+      report: error.report,
+      target: args.target,
+      surface: args.surface
+    });
+    if (!args.dryRun) throw error;
+    return { ok: true, mode: "inspect", files: [], report: error.report };
+  }
+  result.report.delivery = assessPluginDelivery({
+    manifest: result.manifest,
+    report: result.report,
+    target: args.target,
+    surface: args.surface
+  });
   const defaultDir = args.operation === "import" ? result.manifest.id : `${result.manifest.id}-${args.target}`;
   const outputDir = io.resolve(args.dir ?? defaultDir);
+  const normalizeDirectory = (path) => path.replaceAll("\\", "/").replace(/\/+$/, "");
+  const sourcePath = normalizeDirectory(sourceRoot);
+  const outputPath = normalizeDirectory(outputDir);
+  if (sourcePath === outputPath || outputPath.startsWith(`${sourcePath}/`) || sourcePath.startsWith(`${outputPath}/`)) {
+    throw new Error("source and output directories must not overlap");
+  }
+  if (args.dryRun) {
+    return {
+      ok: true,
+      mode: "inspect",
+      pluginId: result.manifest.id,
+      dir: outputDir,
+      files: [.../* @__PURE__ */ new Set([...result.files.keys(), ...result.copies.map((copy) => copy.to)])].sort(),
+      report: result.report
+    };
+  }
+  if (result.report.warnings.length && !args.acceptWarnings) {
+    throw new UnsupportedPluginConversionError(result.source, result.target, {
+      ...result.report,
+      blocking: [
+        {
+          capability: "review",
+          path: "--accept-warnings",
+          message: "Inspect with --dry-run, then acknowledge the conversion warnings with --accept-warnings before writing.",
+          blocking: true
+        }
+      ]
+    });
+  }
   assertWritableTarget(outputDir, io);
   const written = [];
   const copies = [...result.copies];
@@ -7841,7 +10106,8 @@ function runEcosystemConvertCli(argv, io) {
     pluginId: result.manifest.id,
     dir: outputDir,
     files: written.sort(),
-    warnings: result.report.warnings.map((issue) => `${issue.path}: ${issue.message}`)
+    warnings: result.report.warnings.map((issue) => `${issue.path}: ${issue.message}`),
+    report: result.report
   };
 }
 function runConvertCli(argv, io) {
@@ -7865,17 +10131,17 @@ function runConvertCli(argv, io) {
   }
   if (args.into) {
     const intoDir = io.resolve(args.into);
-    const manifestPath = io.join(intoDir, "plugin.json");
-    if (!io.exists(manifestPath)) {
-      throw new Error(`${manifestPath} not found \u2014 --into expects an existing plugin directory`);
+    const manifestPath2 = io.join(intoDir, "plugin.json");
+    if (!io.exists(manifestPath2)) {
+      throw new Error(`${manifestPath2} not found \u2014 --into expects an existing plugin directory`);
     }
     const result2 = convert(input, {
       hostVersion: args.hostVersion,
       gitAuthor: io.gitAuthor(),
-      existingManifestText: io.readFile(manifestPath),
-      existingManifestPath: manifestPath
+      existingManifestText: io.readFile(manifestPath2),
+      existingManifestPath: manifestPath2
     });
-    io.writeFile(manifestPath, result2.files.get("plugin.json"));
+    io.writeFile(manifestPath2, result2.files.get("plugin.json"));
     copyResources(result2.copies, source.skillRoot, intoDir, io);
     return {
       ok: true,
@@ -7934,7 +10200,14 @@ function runMain(argv, io) {
     return { output: JSON.stringify(result), exitCode: 0 };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return { output: JSON.stringify({ ok: false, error: message }), exitCode: 1 };
+    return {
+      output: JSON.stringify({
+        ok: false,
+        error: message,
+        ...err instanceof UnsupportedPluginConversionError ? { report: err.report } : {}
+      }),
+      exitCode: 1
+    };
   }
 }
 

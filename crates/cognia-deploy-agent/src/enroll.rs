@@ -67,6 +67,7 @@ pub async fn enroll(options: EnrollmentOptions) -> anyhow::Result<EnrollmentResu
     params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
     let csr_pem = params.serialize_request(&key)?.pem()?;
 
+    crate::ensure_crypto_provider();
     let mut client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(5))
         .timeout(std::time::Duration::from_secs(30));

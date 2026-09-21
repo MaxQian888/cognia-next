@@ -30,9 +30,9 @@ cognia-tenant-auth = { path = "../cognia-tenant-auth", features = ["oidc"] }
 futures-util = "0.3"
 hex = "0.4"
 ed25519-dalek = "3"
-jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
+jsonwebtoken = { version = "11", features = ["rust_crypto"] }
 parking_lot = "0.12"
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
 rcgen = { version = "0.14", features = ["pem", "x509-parser"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-native-certs = "0.8"

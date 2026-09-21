@@ -13,6 +13,7 @@ pub fn build_client(
     target_url: &str,
     default_headers: Option<reqwest::header::HeaderMap>,
 ) -> Result<Client> {
+    cognia_net::proxy_config::ensure_crypto_provider();
     let mut builder = Client::builder()
         .timeout(Duration::from_secs(30))
         .connect_timeout(Duration::from_secs(10))

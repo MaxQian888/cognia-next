@@ -20,12 +20,12 @@ sha2 = "0.10"
 hex = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-zip = { version = "5", default-features = false, features = ["deflate"] }
+zip = { version = "8", default-features = false, features = ["deflate"] }
 anyhow = "1"
 # RFC 8785 canonicalizer for Character Pack signatures (shared leaf).
 cognia-canonical-json = { path = "../cognia-canonical-json" }
 notify = "8"
-wasmparser = "0.246"
+wasmparser = "0.256"
 # Used by status/install/uninstall/list/reload/dev to talk to a running
 # cognia desktop's CLI bridge. Plain HTTP because the bridge binds to
 # 127.0.0.1 only — see src-tauri/src/cli_bridge/.
@@ -34,7 +34,7 @@ ureq = { version = "3", default-features = false, features = ["json", "native-tl
 # (blocking) client keeps tokio out of the binary, matching the ureq choice.
 tungstenite = { version = "0.29", features = ["native-tls"] }
 native-tls = "0.2"
-directories = "6"
+dirs = "6"
 parking_lot = "0.12"
 # ── UX/TUI stack (Phase 1 — see plans/cli-tui-majestic-quokka.md) ─────────
 # `eyre` + `color-eyre` provide the top-level error report with severity

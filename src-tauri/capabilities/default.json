@@ -36,6 +36,9 @@
     "fs:allow-write-text-file",
     "fs:allow-read-file",
     "fs:allow-write-file",
+    "fs:allow-open",
+    "fs:allow-read",
+    "fs:allow-write",
     "fs:allow-remove",
     "fs:allow-copy-file",
     "fs:allow-rename",
@@ -43,6 +46,10 @@
     "fs:allow-stat",
     "fs:allow-exists",
     "fs:allow-read-dir",
+    {
+      "identifier": "fs:scope",
+      "allow": [{ "path": "$APPDATA/backups" }, { "path": "$APPDATA/backups/**" }]
+    },
     "global-shortcut:default",
     "process:allow-restart",
     "updater:allow-check",

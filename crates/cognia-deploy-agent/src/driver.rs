@@ -1236,6 +1236,7 @@ async fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), DriverError> {
 }
 
 fn smoke_client() -> Result<reqwest::Client, DriverError> {
+    crate::ensure_crypto_provider();
     reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(30))

@@ -1682,6 +1682,7 @@
               "geminiVoice": {},
               "humeVoice": {},
               "importedVscodeThemes": {},
+              "inlineQuestions": {},
               "instructions": {},
               "language": {},
               "lastInboxViewedAt": {},
@@ -6954,6 +6955,112 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "claude_call_reserve_respond",
+      "category": "agents",
+      "resource": "claude",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "agent.run",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "claude_call_reserve_respond (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "requestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "granted",
+              "refused",
+              "bypass"
+            ]
+          },
+          "attemptId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "attemptNo": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "sessionId",
+          "requestId",
+          "decision"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "Router + Fusion's value envelope (ADR-0188): every outcome is a value, refusals included. `value` is the Run API answer the command names (RunCreated, RunSnapshotRead, RunEventsPage, RunSnapshot) or the reservation relay verdict; `error` carries the HTTP status and the contract code (403 ROUTER_FUSION_DISABLED while the companion switch is off).",
+        "x-cognia-wire-source": "lib/router-fusion/gate/companion-bridge.ts dispatchRouterFusionCompanionCommand",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "value": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "error": {
+            "type": "object",
+            "required": [
+              "status",
+              "code",
+              "message"
+            ],
+            "properties": {
+              "status": {
+                "type": "integer"
+              },
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -14978,6 +15085,396 @@
       "outputTyped": true
     },
     {
+      "name": "environment_build_cancel",
+      "category": "development",
+      "resource": "environment",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "environment_build_cancel (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "jobId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId",
+          "jobId"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "building",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "record": {
+            "type": "object",
+            "properties": {
+              "buildKey": {
+                "type": "string"
+              },
+              "imageId": {
+                "type": "string"
+              },
+              "projectId": {
+                "type": "string"
+              },
+              "commitSha": {
+                "type": "string"
+              },
+              "declarationPath": {
+                "type": "string"
+              },
+              "declarationDigest": {
+                "type": "string"
+              },
+              "declarationBytesSha256": {
+                "type": "string"
+              },
+              "sourceHash": {
+                "type": "string"
+              },
+              "cliVersion": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "runtimeConfiguration": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "buildKey",
+              "imageId",
+              "projectId",
+              "commitSha",
+              "declarationPath",
+              "declarationDigest",
+              "declarationBytesSha256",
+              "sourceHash",
+              "cliVersion",
+              "platform",
+              "createdAt",
+              "runtimeConfiguration"
+            ],
+            "additionalProperties": false
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "jobId",
+          "projectId",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "environment_build_get",
+      "category": "development",
+      "resource": "environment",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "environment_build_get (workspace.read)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "buildKey": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "building",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "record": {
+            "type": "object",
+            "properties": {
+              "buildKey": {
+                "type": "string"
+              },
+              "imageId": {
+                "type": "string"
+              },
+              "projectId": {
+                "type": "string"
+              },
+              "commitSha": {
+                "type": "string"
+              },
+              "declarationPath": {
+                "type": "string"
+              },
+              "declarationDigest": {
+                "type": "string"
+              },
+              "declarationBytesSha256": {
+                "type": "string"
+              },
+              "sourceHash": {
+                "type": "string"
+              },
+              "cliVersion": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "runtimeConfiguration": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "buildKey",
+              "imageId",
+              "projectId",
+              "commitSha",
+              "declarationPath",
+              "declarationDigest",
+              "declarationBytesSha256",
+              "sourceHash",
+              "cliVersion",
+              "platform",
+              "createdAt",
+              "runtimeConfiguration"
+            ],
+            "additionalProperties": false
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "jobId",
+          "projectId",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "environment_build_start",
+      "category": "development",
+      "resource": "environment",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "environment_build_start (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "request": {
+            "type": "object",
+            "properties": {
+              "projectId": {
+                "type": "string"
+              },
+              "cwd": {
+                "type": "string"
+              },
+              "declarationPath": {
+                "type": "string"
+              },
+              "declarationDigest": {
+                "type": "string"
+              },
+              "declarationBytesSha256": {
+                "type": "string"
+              },
+              "commitSha": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "projectId",
+              "cwd",
+              "declarationPath",
+              "declarationDigest",
+              "declarationBytesSha256",
+              "commitSha"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "request"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "building",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "record": {
+            "type": "object",
+            "properties": {
+              "buildKey": {
+                "type": "string"
+              },
+              "imageId": {
+                "type": "string"
+              },
+              "projectId": {
+                "type": "string"
+              },
+              "commitSha": {
+                "type": "string"
+              },
+              "declarationPath": {
+                "type": "string"
+              },
+              "declarationDigest": {
+                "type": "string"
+              },
+              "declarationBytesSha256": {
+                "type": "string"
+              },
+              "sourceHash": {
+                "type": "string"
+              },
+              "cliVersion": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "runtimeConfiguration": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "buildKey",
+              "imageId",
+              "projectId",
+              "commitSha",
+              "declarationPath",
+              "declarationDigest",
+              "declarationBytesSha256",
+              "sourceHash",
+              "cliVersion",
+              "platform",
+              "createdAt",
+              "runtimeConfiguration"
+            ],
+            "additionalProperties": false
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "jobId",
+          "projectId",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "environment_catalog_create",
       "category": "development",
       "resource": "environment",
@@ -16679,6 +17176,75 @@
       "outputTyped": true
     },
     {
+      "name": "environment_ports_list",
+      "category": "development",
+      "resource": "environment",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "environment_ports_list (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "ports": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "containerId": {
+                  "type": "string"
+                },
+                "projectId": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "port": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65535
+                }
+              },
+              "required": [
+                "containerId",
+                "projectId",
+                "path",
+                "port"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "ports"
+        ],
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "environment_probe_get",
       "category": "development",
       "resource": "environment",
@@ -17097,6 +17663,97 @@
       "outputTyped": true
     },
     {
+      "name": "execution_run_create",
+      "category": "tasks",
+      "resource": "execution",
+      "target": "execution",
+      "operation": "write",
+      "capability": "agent.run",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "execution_run_create (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "cascade",
+              "panel"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500000
+          },
+          "sessionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "mode",
+          "text",
+          "idempotencyKey"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "Router + Fusion's value envelope (ADR-0188): every outcome is a value, refusals included. `value` is the Run API answer the command names (RunCreated, RunSnapshotRead, RunEventsPage, RunSnapshot) or the reservation relay verdict; `error` carries the HTTP status and the contract code (403 ROUTER_FUSION_DISABLED while the companion switch is off).",
+        "x-cognia-wire-source": "lib/router-fusion/gate/companion-bridge.ts dispatchRouterFusionCompanionCommand",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "value": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "error": {
+            "type": "object",
+            "required": [
+              "status",
+              "code",
+              "message"
+            ],
+            "properties": {
+              "status": {
+                "type": "integer"
+              },
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "execution_run_detail",
       "category": "tasks",
       "resource": "execution",
@@ -17153,6 +17810,291 @@
           "botResult": {
             "type": "object",
             "additionalProperties": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "execution_run_events",
+      "category": "tasks",
+      "resource": "execution",
+      "target": "execution",
+      "operation": "read",
+      "capability": "agent.run",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "execution_run_events (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "afterSeq": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "maxEvents": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          }
+        },
+        "required": [
+          "runId",
+          "afterSeq"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "Router + Fusion's value envelope (ADR-0188): every outcome is a value, refusals included. `value` is the Run API answer the command names (RunCreated, RunSnapshotRead, RunEventsPage, RunSnapshot) or the reservation relay verdict; `error` carries the HTTP status and the contract code (403 ROUTER_FUSION_DISABLED while the companion switch is off).",
+        "x-cognia-wire-source": "lib/router-fusion/gate/companion-bridge.ts dispatchRouterFusionCompanionCommand",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "value": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "error": {
+            "type": "object",
+            "required": [
+              "status",
+              "code",
+              "message"
+            ],
+            "properties": {
+              "status": {
+                "type": "integer"
+              },
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "execution_run_get",
+      "category": "tasks",
+      "resource": "execution",
+      "target": "execution",
+      "operation": "read",
+      "capability": "agent.run",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "execution_run_get (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "runId"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "Router + Fusion's value envelope (ADR-0188): every outcome is a value, refusals included. `value` is the Run API answer the command names (RunCreated, RunSnapshotRead, RunEventsPage, RunSnapshot) or the reservation relay verdict; `error` carries the HTTP status and the contract code (403 ROUTER_FUSION_DISABLED while the companion switch is off).",
+        "x-cognia-wire-source": "lib/router-fusion/gate/companion-bridge.ts dispatchRouterFusionCompanionCommand",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "value": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "error": {
+            "type": "object",
+            "required": [
+              "status",
+              "code",
+              "message"
+            ],
+            "properties": {
+              "status": {
+                "type": "integer"
+              },
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "execution_run_resume",
+      "category": "tasks",
+      "resource": "execution",
+      "target": "execution",
+      "operation": "write",
+      "capability": "agent.run",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "execution_run_resume (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "body": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "input",
+                  "approval"
+                ]
+              },
+              "expected_run_version": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "input_messages": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "role": {
+                      "type": "string",
+                      "const": "user"
+                    },
+                    "content": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500000
+                    }
+                  },
+                  "required": [
+                    "role",
+                    "content"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "approval_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "decision": {
+                "type": "string",
+                "enum": [
+                  "approve",
+                  "reject"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "expected_run_version"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "runId",
+          "body"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "Router + Fusion's value envelope (ADR-0188): every outcome is a value, refusals included. `value` is the Run API answer the command names (RunCreated, RunSnapshotRead, RunEventsPage, RunSnapshot) or the reservation relay verdict; `error` carries the HTTP status and the contract code (403 ROUTER_FUSION_DISABLED while the companion switch is off).",
+        "x-cognia-wire-source": "lib/router-fusion/gate/companion-bridge.ts dispatchRouterFusionCompanionCommand",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "value": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "error": {
+            "type": "object",
+            "required": [
+              "status",
+              "code",
+              "message"
+            ],
+            "properties": {
+              "status": {
+                "type": "integer"
+              },
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "additionalProperties": false
           }
         },
         "additionalProperties": false
@@ -19963,6 +20905,44 @@
       "approval": "none",
       "idempotency": "structural",
       "summary": "fs_read_workspace_file (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "root",
+          "relPath"
+        ],
+        "properties": {
+          "root": {
+            "type": "string"
+          },
+          "relPath": {
+            "type": "string"
+          },
+          "maxBytes": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "string"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "fs_read_workspace_file_base64",
+      "category": "development",
+      "resource": "workspace-files",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "fs_read_workspace_file_base64 (host.observe)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
       "inputSchemaSource": "contract",
       "inputSchema": {
@@ -28454,6 +29434,16 @@
         "properties": {
           "id": {
             "type": "string"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Compare-and-swap guard — the write refuses a memory whose version has moved past this value."
+          },
+          "operationId": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Idempotency key for the memory operation ledger — a retried identical request replays its first result."
           }
         },
         "additionalProperties": false
@@ -28501,8 +29491,13 @@
             "type": "string",
             "enum": [
               "global",
-              "character"
+              "workspace",
+              "character",
+              "agent"
             ]
+          },
+          "characterId": {
+            "type": "string"
           },
           "pageSize": {
             "type": "integer",
@@ -28514,6 +29509,18 @@
             "type": "string",
             "minLength": 1,
             "description": "The nextPageToken of the previous page, handed back unchanged."
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "pathPattern": {
+            "type": "string"
           }
         },
         "additionalProperties": false
@@ -28672,6 +29679,18 @@
             }
           },
           "characterId": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "path": {
             "type": "string"
           }
         },
@@ -28843,7 +29862,9 @@
             "type": "string",
             "enum": [
               "global",
-              "character"
+              "workspace",
+              "character",
+              "agent"
             ]
           },
           "characterId": {
@@ -28862,6 +29883,23 @@
             "items": {
               "type": "string"
             }
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "pathPattern": {
+            "type": "string"
+          },
+          "operationId": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Idempotency key for the memory operation ledger — a retried identical request replays its first result."
           }
         },
         "additionalProperties": false
@@ -28920,6 +29958,19 @@
           },
           "key": {
             "type": "string"
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Compare-and-swap guard — the write refuses a memory whose version has moved past this value."
+          },
+          "operationId": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Idempotency key for the memory operation ledger — a retried identical request replays its first result."
           }
         },
         "additionalProperties": false
@@ -37086,6 +38137,95 @@
                   "example": {}
                 },
                 "example": {}
+              }
+            },
+            "additionalProperties": false
+          },
+          "citations": {
+            "type": "array",
+            "description": "The records this turn cites (ADR-0157): the context chips it sent plus typed `@…` tokens, as ContextRef entries ({ kind, id, label?, raw? }). The envelope inside `content` feeds the model; this field is what lets the persisted user row keep `metadata.mentions` so the citation gets a backlink.",
+            "items": {
+              "type": "object",
+              "required": [
+                "kind",
+                "id"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "file",
+                    "agent",
+                    "subagent",
+                    "member",
+                    "skill",
+                    "preset",
+                    "wfNode",
+                    "wfEdge",
+                    "doc",
+                    "entity"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "label": {
+                  "type": "string"
+                },
+                "raw": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "promptPreamble": {
+            "type": "object",
+            "description": "What the context envelope in front of the typed text carries (ADR-0157): section kinds and reference titles, never bodies. Persisted as `metadata.promptPreamble` so the bubble can name the references.",
+            "required": [
+              "sections",
+              "references"
+            ],
+            "properties": {
+              "sections": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "reviewReceipts",
+                    "references",
+                    "webSearch"
+                  ]
+                }
+              },
+              "references": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "title"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string"
+                    },
+                    "entityKind": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "href": {
+                      "type": "string"
+                    },
+                    "count": {
+                      "type": "number"
+                    }
+                  },
+                  "additionalProperties": false
+                }
               }
             },
             "additionalProperties": false
@@ -63236,5 +64376,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "535876dc52010f58bd8603633d5f47bcd79376dde8a634d1d4fcf0144b22d508"
+  "catalogHash": "35130b5bb41cee8e6cd8a234c29f6f4f9d7186ba76ae7c7e56443e1a13a45181"
 }

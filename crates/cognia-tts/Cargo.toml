@@ -25,9 +25,9 @@ log = "0.4"
 uuid = { version = "1", features = ["v4", "v7"] }
 parking_lot = "0.12"
 futures-util = { version = "0.3", default-features = false }
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream", "socks", "http2", "multipart"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider", "stream", "socks", "http2", "multipart"] }
 tokio = { version = "1", features = ["sync", "time", "net", "io-util"] }
-tokio-tungstenite = { version = "0.30", default-features = false, features = ["rustls-tls-native-roots", "connect"] }
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["rustls-tls-native-roots", "connect"] }
 
 [dev-dependencies]
 cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }

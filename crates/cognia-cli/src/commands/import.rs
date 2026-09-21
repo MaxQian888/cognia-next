@@ -52,6 +52,9 @@ pub(crate) struct ImportArgs {
     pub(crate) license: Option<String>,
     pub(crate) min_app_version: Option<String>,
     pub(crate) no_build: bool,
+    pub(crate) dry_run: bool,
+    pub(crate) accept_warnings: bool,
+    pub(crate) surface: Option<String>,
 }
 
 /// One `--pick`-able entry in the supplied input.
@@ -85,6 +88,8 @@ pub(crate) struct ConverterOutput {
     pub(crate) warnings: Vec<String>,
     #[serde(rename = "buildTarget", default)]
     pub(crate) build_target: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) report: Option<serde_json::Value>,
 }
 
 /// Outcome of the trailing build, reported alongside the conversion.
@@ -118,11 +123,25 @@ pub(crate) struct ImportReport {
     pub(crate) build: BuildOutcome,
     #[serde(rename = "buildError", skip_serializing_if = "Option::is_none")]
     pub(crate) build_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) report: Option<serde_json::Value>,
 }
 
 pub fn run(args: ImportArgs, json: bool, ui: &mut RuntimeUi) -> Result<()> {
     let script = materialize_converter(CONVERTER_JS)?;
     let output = run_converter(&script, &build_argv(&args))?;
+    if !output.ok {
+        if json {
+            println!("{}", serde_json::to_string_pretty(&output)?);
+            return Err(crate::shared::JsonFailureExit.into());
+        }
+        if !ui.flags.quiet {
+            if let Some(details) = &output.report {
+                println!("{}", serde_json::to_string_pretty(details)?);
+            }
+        }
+        bail!(output.error.unwrap_or_else(|| "conversion failed without a reason".to_string()));
+    }
     let report = finish(args, output, ui)?;
 
     if json {
@@ -162,6 +181,7 @@ pub(crate) fn build_argv(args: &ImportArgs) -> Vec<String> {
     push("--license", &args.license);
     push("--min-app-version", &args.min_app_version);
     push("--to", &args.to);
+    push("--surface", &args.surface);
     if let Some(into) = &args.into {
         argv.push("--into".to_string());
         argv.push(into.to_string_lossy().into_owned());
@@ -172,6 +192,12 @@ pub(crate) fn build_argv(args: &ImportArgs) -> Vec<String> {
     }
     if args.list {
         argv.push("--list".to_string());
+    }
+    if args.dry_run {
+        argv.push("--dry-run".to_string());
+    }
+    if args.accept_warnings {
+        argv.push("--accept-warnings".to_string());
     }
     argv
 }
@@ -235,11 +261,6 @@ pub(crate) fn parse_converter_output(stdout: &str, stderr: &str) -> Result<Conve
     let parsed: ConverterOutput = serde_json::from_str(trimmed).with_context(|| {
         format!("converter emitted output that is not the expected JSON report: {trimmed}")
     })?;
-    if !parsed.ok {
-        bail!(parsed
-            .error
-            .unwrap_or_else(|| "conversion failed without a reason".to_string()));
-    }
     Ok(parsed)
 }
 
@@ -285,6 +306,7 @@ fn finish(args: ImportArgs, output: ConverterOutput, ui: &mut RuntimeUi) -> Resu
         warnings: output.warnings,
         build,
         build_error,
+        report: output.report,
     })
 }
 
@@ -295,6 +317,22 @@ fn build_generated_project(dir: &Path) -> Result<()> {
 }
 
 fn print_human(report: &ImportReport) {
+    if report.mode == "inspect" {
+        println!(
+            "{}",
+            style::bold("Conversion inspection — no files written")
+        );
+        if let Some(details) = &report.report {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(details).unwrap_or_default()
+            );
+        }
+        if let Some(dir) = &report.dir {
+            println!("Proposed output: {dir}");
+        }
+        return;
+    }
     if report.mode == "list" {
         println!("{}", style::bold("Available entries"));
         for candidate in &report.candidates {
@@ -408,6 +446,31 @@ mod tests {
         assert_eq!(
             build_argv(&args()),
             vec!["--from", "mcp", "--input", "/a/mcp.json"]
+        );
+    }
+
+    #[test]
+    fn build_argv_forwards_conversion_review_options() {
+        let options = ImportArgs {
+            from: "plugin".to_string(),
+            input: "/plugins/source".to_string(),
+            dry_run: true,
+            accept_warnings: true,
+            surface: Some("desktop".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            build_argv(&options),
+            vec![
+                "--from",
+                "plugin",
+                "--input",
+                "/plugins/source",
+                "--surface",
+                "desktop",
+                "--dry-run",
+                "--accept-warnings"
+            ]
         );
     }
 
@@ -540,9 +603,16 @@ mod tests {
 
     #[test]
     fn parse_converter_output_surfaces_the_converter_error() {
-        let err = parse_converter_output(r#"{"ok":false,"error":"--pick is required"}"#, "")
-            .expect_err("must fail");
-        assert!(err.to_string().contains("--pick is required"));
+        let output = parse_converter_output(
+            r#"{"ok":false,"error":"acknowledge warnings","report":{"blocking":[{"capability":"review"}],"warnings":[{"capability":"skills"}]}}"#,
+            "",
+        ).expect("valid failure response");
+        assert!(!output.ok);
+        assert_eq!(output.error.as_deref(), Some("acknowledge warnings"));
+        let json = serde_json::to_value(&output).expect("JSON failure output");
+        assert_eq!(json["ok"], false);
+        assert_eq!(json["report"]["blocking"][0]["capability"], "review");
+        assert_eq!(json["report"]["warnings"][0]["capability"], "skills");
     }
 
     #[test]

@@ -52,6 +52,13 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .init();
+
+    // Installed once, before any TLS connector is built: `reqwest` resolves the
+    // process-wide provider at `Client` construction.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .map_err(|_| anyhow::anyhow!("a rustls crypto provider was already installed"))?;
+
     let args = Args::parse();
     if let Some(Command::Enroll(args)) = args.command {
         let EnrollArgs {

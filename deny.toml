@@ -31,6 +31,12 @@ ignore = [
   # conversion/mutation APIs are not used by imbl, eyeball-im, matrix-sdk, or
   # Cognia; no maintained replacement or patched release exists yet.
   { id = "RUSTSEC-2025-0167", reason = "matrix-sdk transitive dependency; affected Bitmap raw-byte APIs are unreachable" },
+  # jsonwebtoken's rust_crypto backend pulls rsa for RS*/PS* JWT algorithms.
+  # Cognia verifies signatures (public-key ops) and signs dispatch JWTs
+  # locally; it never exposes an RSA decryption oracle — Marvin's
+  # Bleichenbacher timing sidechannel targets PKCS#1 v1.5 decryption, an
+  # operation this codebase does not perform.
+  { id = "RUSTSEC-2023-0071", reason = "rsa runs JWT verification and local signing only; Marvin targets decryption oracles, which Cognia never exposes" },
 ]
 
 [bans]

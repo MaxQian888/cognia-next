@@ -138,7 +138,11 @@ pub(crate) enum TopCommand {
         #[arg(long, env = "COGNIA_CLI_ENDPOINT_FILE")]
         endpoint_file: Option<PathBuf>,
         /// Headless server base URL. Must be HTTPS on a loopback host.
-        #[arg(long, env = "COGNIA_SERVER_URL", default_value = "https://127.0.0.1:27890")]
+        #[arg(
+            long,
+            env = "COGNIA_SERVER_URL",
+            default_value = "https://127.0.0.1:27890"
+        )]
         server_url: String,
         /// Cognia server data directory (TLS material and signing state).
         #[arg(long, env = "COGNIA_DATA_DIR")]
@@ -327,11 +331,21 @@ pub(crate) enum HostCommand {
         #[arg(long)]
         data: Option<String>,
         /// Set a top-level request body field to a string value. Repeatable.
-        #[arg(short = 'f', long = "field", value_name = "KEY=VALUE", conflicts_with = "data")]
+        #[arg(
+            short = 'f',
+            long = "field",
+            value_name = "KEY=VALUE",
+            conflicts_with = "data"
+        )]
         fields: Vec<String>,
         /// Set a top-level request body field to a parsed JSON value
         /// (`-F count=3`, `-F enabled=true`, `-F tags='["a"]'`). Repeatable.
-        #[arg(short = 'F', long = "field-json", value_name = "KEY=JSON", conflicts_with = "data")]
+        #[arg(
+            short = 'F',
+            long = "field-json",
+            value_name = "KEY=JSON",
+            conflicts_with = "data"
+        )]
         fields_json: Vec<String>,
         #[arg(long)]
         idempotency_key: Option<String>,
@@ -635,7 +649,7 @@ pub(crate) enum PluginCommand {
         /// What kind of artifact `--input` points at: `mcp` (an agent's MCP
         /// config file), `skill` (a SKILL.md file or its folder), `cli`
         /// (the name of a binary on PATH), or `plugin` (a complete Cognia,
-        /// Claude Code, Codex, or Gemini CLI plugin directory).
+        /// supported agent plugin directory).
         #[arg(long, value_name = "KIND")]
         from: String,
         /// The MCP config file, skill folder / SKILL.md, or binary name.
@@ -684,6 +698,15 @@ pub(crate) enum PluginCommand {
         /// generated `dist/index.js`, so it stays installable either way.
         #[arg(long)]
         no_build: bool,
+        /// Inspect bundle conversion without writing files (requires --from plugin for import).
+        #[arg(long)]
+        dry_run: bool,
+        /// Acknowledge warnings shown by --dry-run.
+        #[arg(long)]
+        accept_warnings: bool,
+        /// Target surface: cli, desktop, or cloud (bundle conversion only).
+        #[arg(long, value_parser = ["cli", "desktop", "cloud"])]
+        surface: Option<String>,
         /// Emit a machine-readable JSON report instead of human prose.
         #[arg(long)]
         json: bool,
@@ -696,12 +719,22 @@ pub(crate) enum PluginCommand {
         /// Cognia plugin directory containing plugin.json.
         #[arg(long, value_name = "DIR")]
         input: PathBuf,
-        /// Target ecosystem: claude-code, codex, or gemini-cli.
+        /// Target ecosystem: claude-code, codex, gemini-cli, agent-plugins,
+        /// cursor, copilot, kimi, devin, opencode, or pi.
         #[arg(long, value_name = "ECOSYSTEM")]
         to: String,
         /// Directory to create. Defaults to ./<plugin-id>-<ecosystem>.
         #[arg(long)]
         dir: Option<PathBuf>,
+        /// Inspect bundle conversion without writing files (requires --from plugin for import).
+        #[arg(long)]
+        dry_run: bool,
+        /// Acknowledge warnings shown by --dry-run.
+        #[arg(long)]
+        accept_warnings: bool,
+        /// Target surface: cli, desktop, or cloud (bundle conversion only).
+        #[arg(long, value_parser = ["cli", "desktop", "cloud"])]
+        surface: Option<String>,
         /// Emit a machine-readable JSON report instead of human prose.
         #[arg(long)]
         json: bool,
@@ -1019,6 +1052,9 @@ pub(crate) fn dispatch_plugin(
             min_app_version,
             no_build,
             json,
+            dry_run,
+            accept_warnings,
+            surface,
         } => {
             ui.flags.json = json;
             ui.verbose(format!(
@@ -1050,6 +1086,9 @@ pub(crate) fn dispatch_plugin(
                     license,
                     min_app_version,
                     no_build,
+                    dry_run,
+                    accept_warnings,
+                    surface,
                 },
                 json,
                 ui,
@@ -1060,6 +1099,9 @@ pub(crate) fn dispatch_plugin(
             to,
             dir,
             json,
+            dry_run,
+            accept_warnings,
+            surface,
         } => {
             ui.flags.json = json;
             ui.verbose(format!(
@@ -1074,6 +1116,9 @@ pub(crate) fn dispatch_plugin(
                     operation: "export".to_string(),
                     input: input.to_string_lossy().into_owned(),
                     to: Some(to),
+                    dry_run,
+                    accept_warnings,
+                    surface,
                     dir,
                     ..Default::default()
                 },
@@ -1534,7 +1579,15 @@ mod tests {
         for argv in [
             vec!["cognia", "plugin", "--endpoint-file", "/tmp/e.json", "list"],
             vec!["cognia", "plugin", "list", "--endpoint-file", "/tmp/e.json"],
-            vec!["cognia", "plugin", "dev", "--path", ".", "--endpoint-file", "/tmp/e.json"],
+            vec![
+                "cognia",
+                "plugin",
+                "dev",
+                "--path",
+                ".",
+                "--endpoint-file",
+                "/tmp/e.json",
+            ],
         ] {
             let cli = Cli::try_parse_from(argv.clone())
                 .unwrap_or_else(|err| panic!("{argv:?} should parse: {err}"));
@@ -1547,8 +1600,8 @@ mod tests {
 
     #[test]
     fn open_parses_exclusive_surfaces_and_share_payload() {
-        let cli = Cli::try_parse_from(["cognia", "open", "--session", "abc"])
-            .expect("open --session");
+        let cli =
+            Cli::try_parse_from(["cognia", "open", "--session", "abc"]).expect("open --session");
         let TopCommand::Open(args) = cli.command else {
             panic!("expected open command");
         };
@@ -1588,8 +1641,7 @@ mod tests {
         };
         assert_eq!(shell, clap_complete::Shell::Bash);
 
-        let cli = Cli::try_parse_from(["cognia", "status", "--json"])
-            .expect("status should parse");
+        let cli = Cli::try_parse_from(["cognia", "status", "--json"]).expect("status should parse");
         let TopCommand::Status { json, .. } = cli.command else {
             panic!("expected status command");
         };
@@ -1617,14 +1669,8 @@ mod tests {
         };
         assert!(paginate);
 
-        let cli = Cli::try_parse_from([
-            "cognia",
-            "host",
-            "events",
-            "--query",
-            ".payload",
-        ])
-        .expect("events query should parse");
+        let cli = Cli::try_parse_from(["cognia", "host", "events", "--query", ".payload"])
+            .expect("events query should parse");
         let TopCommand::Host {
             command: HostCommand::Events { query, .. },
             ..

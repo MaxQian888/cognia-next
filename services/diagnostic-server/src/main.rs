@@ -19,6 +19,12 @@ async fn main() -> anyhow::Result<()> {
         .with(tracing_subscriber::fmt::layer().json())
         .init();
 
+    // Installed once, before any TLS connector is built: `reqwest` and `sqlx`
+    // resolve the process-wide provider at connection setup.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .map_err(|_| anyhow::anyhow!("a rustls crypto provider was already installed"))?;
+
     let config = Arc::new(ServerConfig::from_env()?);
     let pool = PgPoolOptions::new()
         .max_connections(config.database_max_connections)

@@ -919,6 +919,40 @@ pub fn fs_read_workspace_file(
     Ok(content)
 }
 
+/// Hard ceiling for a base64 read when the caller passes no `max_bytes` —
+/// the string travels WS/HTTP as JSON, so an unbounded read would be an
+/// unbounded frame *and* an unbounded allocation on a paired client.
+const BASE64_READ_HARD_CAP: usize = 32 * 1024 * 1024;
+
+/// Read a workspace file's raw bytes as base64 — the binary counterpart to
+/// [`fs_read_workspace_file`], for file types the text path cannot represent
+/// (the built-in editor's image previews). Same root-relative sandbox check.
+/// Refuses files over `max_bytes` (or the hard cap when none is given) before
+/// touching the disk so the cap bounds the allocation, not just the output.
+#[tauri::command]
+pub fn fs_read_workspace_file_base64(
+    root: String,
+    rel_path: String,
+    max_bytes: Option<usize>,
+) -> Result<String, String> {
+    use base64::Engine;
+    let (_root_path, target) = resolve_workspace_target(&root, &rel_path, true)?;
+    let limit = max_bytes
+        .unwrap_or(BASE64_READ_HARD_CAP)
+        .min(BASE64_READ_HARD_CAP);
+    let size = std::fs::metadata(&target)
+        .map_err(|e| format!("stat {}: {}", rel_path, e))?
+        .len();
+    if size > limit as u64 {
+        return Err(format!(
+            "{} exceeds the {}-byte preview cap ({} bytes)",
+            rel_path, limit, size
+        ));
+    }
+    let bytes = std::fs::read(&target).map_err(|e| format!("read {}: {}", rel_path, e))?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
 /// Write a text file inside a workspace, with the same sandboxed path-traversal
 /// check as [`fs_read_workspace_file`]. `rel_path` is joined to `root`; parent
 /// directories are created as needed, and the resolved parent must canonicalize
@@ -1984,6 +2018,54 @@ mod tests {
         )
         .unwrap();
         assert!(unicode_preview.starts_with("你"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn read_workspace_file_base64_roundtrips_and_blocks_traversal() {
+        use base64::Engine;
+        let root = make_sandbox("read-b64");
+        // Non-UTF-8 bytes — the text read cannot represent these.
+        let bytes: Vec<u8> = vec![0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 0x01];
+        std::fs::write(root.join("img.png"), &bytes).unwrap();
+
+        let b64 = fs_read_workspace_file_base64(
+            root.to_string_lossy().to_string(),
+            "img.png".into(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD
+                .decode(&b64)
+                .unwrap(),
+            bytes
+        );
+
+        // Cap honored: over-cap rejects before reading, at-cap reads fine.
+        assert!(fs_read_workspace_file_base64(
+            root.to_string_lossy().to_string(),
+            "img.png".into(),
+            Some(bytes.len() - 1),
+        )
+        .is_err());
+        assert!(fs_read_workspace_file_base64(
+            root.to_string_lossy().to_string(),
+            "img.png".into(),
+            Some(bytes.len()),
+        )
+        .is_ok());
+
+        // Same sandbox check as the text read.
+        assert!(
+            fs_read_workspace_file_base64(
+                root.to_string_lossy().to_string(),
+                "../../etc/hosts".into(),
+                None,
+            )
+            .is_err(),
+            "traversal must be rejected"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

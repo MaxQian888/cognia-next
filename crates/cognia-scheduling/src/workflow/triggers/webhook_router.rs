@@ -931,6 +931,13 @@ mod tests {
     use crate::workflow::triggers::cron_daemon::RecordingEmitter;
     use std::error::Error as _;
 
+    /// `reqwest` resolves the process-wide TLS provider at `Client`
+    /// construction; no `main` runs inside a test binary, so install it here.
+    fn http_client() -> reqwest::Client {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        reqwest::Client::new()
+    }
+
     fn entry(path: &str) -> WebhookEntry {
         WebhookEntry {
             trigger_id: format!("trg_{path}"),
@@ -1040,7 +1047,7 @@ mod tests {
         let bound = router.start(recorder.clone(), 0).await.unwrap();
 
         let url = format!("http://{bound}/webhook/hello");
-        let client = reqwest::Client::new();
+        let client = http_client();
         let resp = client
             .post(&url)
             .header("Content-Type", "application/json")
@@ -1072,14 +1079,8 @@ mod tests {
 
         let url = format!("http://{bound}/webhook/dyn");
         // The POST blocks until we respond; drive it on a separate task.
-        let post = tokio::spawn(async move {
-            reqwest::Client::new()
-                .post(&url)
-                .body("{}")
-                .send()
-                .await
-                .unwrap()
-        });
+        let post =
+            tokio::spawn(async move { http_client().post(&url).body("{}").send().await.unwrap() });
 
         // Wait for the trigger to fire, then read the correlation id the
         // handler injected into the payload.
@@ -1125,7 +1126,7 @@ mod tests {
         let recorder = Arc::new(RecordingEmitter::default());
         let bound = router.start(recorder, 0).await.unwrap();
 
-        let resp = reqwest::Client::new()
+        let resp = http_client()
             .post(format!("http://{bound}/webhook/slow"))
             .body("{}")
             .send()
@@ -1154,7 +1155,7 @@ mod tests {
         let router = WebhookRouter::new();
         let recorder = Arc::new(RecordingEmitter::default());
         let bound = router.start(recorder, 0).await.unwrap();
-        let resp = reqwest::Client::new()
+        let resp = http_client()
             .post(format!("http://{bound}/webhook/missing"))
             .send()
             .await
@@ -1309,7 +1310,7 @@ mod tests {
             .map(|b| format!("{b:02x}"))
             .collect();
 
-        let resp = reqwest::Client::new()
+        let resp = http_client()
             .post(format!("http://{bound}/webhook/signed"))
             .header("Content-Type", "application/json")
             .header(HMAC_SIGNATURE_HEADER_COGNIA, format!("sha256={hex}"))
@@ -1333,7 +1334,7 @@ mod tests {
         let recorder = Arc::new(RecordingEmitter::default());
         let bound = router.start(recorder.clone(), 0).await.unwrap();
 
-        let resp = reqwest::Client::new()
+        let resp = http_client()
             .post(format!("http://{bound}/webhook/must-sign"))
             .body("{}".to_string())
             .send()
@@ -1355,7 +1356,7 @@ mod tests {
 
         // 2 MiB — well above the 1 MiB cap.
         let payload = "x".repeat(2 * 1024 * 1024);
-        let result = reqwest::Client::new()
+        let result = http_client()
             .post(format!("http://{bound}/webhook/big"))
             .body(payload)
             .send()
@@ -1399,7 +1400,7 @@ mod tests {
         router.upsert(entry("only-post")).unwrap();
         let recorder = Arc::new(RecordingEmitter::default());
         let bound = router.start(recorder, 0).await.unwrap();
-        let resp = reqwest::Client::new()
+        let resp = http_client()
             .get(format!("http://{bound}/webhook/only-post"))
             .send()
             .await
@@ -1543,7 +1544,7 @@ mod tests {
             .unwrap();
         let recorder = Arc::new(RecordingEmitter::default());
         let bound = router.start(recorder, 0).await.unwrap();
-        let client = reqwest::Client::new();
+        let client = http_client();
         for expected in [reqwest::StatusCode::ACCEPTED, reqwest::StatusCode::OK] {
             let response = client
                 .post(format!("http://{bound}/integration/demo"))

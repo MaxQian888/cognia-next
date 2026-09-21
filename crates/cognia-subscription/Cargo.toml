@@ -36,7 +36,7 @@ keyring = { version = "4", default-features = false }
 # Live re-discovery of upstream CLI credential files.
 notify = "8"
 # Codex device-auth flow.
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream", "socks", "http2", "multipart", "form"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider", "stream", "socks", "http2", "multipart", "form"] }
 tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]

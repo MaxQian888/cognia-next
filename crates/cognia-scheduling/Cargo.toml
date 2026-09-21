@@ -41,7 +41,7 @@ log = "0.4"
 notify = "8"
 ignore = "0.4"
 async-trait = "0.1"
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream", "socks", "http2", "multipart"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider", "stream", "socks", "http2", "multipart"] }
 # Workflow webhook-trigger HTTP surface + HMAC signature verification.
 axum = { version = "0.8", features = ["macros", "ws"] }
 tower-http = { version = "0.7", features = ["limit", "trace", "cors"] }
@@ -56,5 +56,6 @@ dirs = "6"
 libc = "0.2"
 
 [dev-dependencies]
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 tempfile = "3"
 cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }

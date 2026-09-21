@@ -37,4 +37,5 @@ hex = "0.4"
 [dev-dependencies]
 tower = { version = "0.5", features = ["util", "limit", "timeout"] }
 # http_server integration tests drive the live listener over HTTP.
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }

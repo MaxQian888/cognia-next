@@ -46,7 +46,7 @@ pub(super) fn install_embedded_skills(
             format!("cannot resolve the current directory: {error}"),
         )
     })?;
-    let home = directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf());
+    let home = dirs::home_dir();
     let root = resolve_skills_root(scope, &cwd, home.as_deref())?;
     install_at_root(scope, &root)
 }

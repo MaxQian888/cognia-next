@@ -57,9 +57,9 @@ pub fn endpoint_file_path() -> Result<PathBuf> {
     if let Ok(override_path) = std::env::var("COGNIA_CLI_ENDPOINT_FILE") {
         return Ok(PathBuf::from(override_path));
     }
-    let dirs = directories::BaseDirs::new()
-        .ok_or_else(|| anyhow!("could not determine user home directory"))?;
-    Ok(dirs.config_dir().join("cognia").join(ENDPOINT_FILE_NAME))
+    let config_dir =
+        dirs::config_dir().ok_or_else(|| anyhow!("could not determine user home directory"))?;
+    Ok(config_dir.join("cognia").join(ENDPOINT_FILE_NAME))
 }
 
 /// Resolve the endpoint-file path with an explicit `--endpoint-file` flag

@@ -22,7 +22,7 @@ cognia-instrument = { path = "../cognia-instrument" }
 cognia-net = { path = "../cognia-net" }
 tauri = { version = "=2.11.5" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "process", "io-util", "net"] }
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream", "socks", "http2", "multipart"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider", "stream", "socks", "http2", "multipart"] }
 futures-util = { version = "0.3", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

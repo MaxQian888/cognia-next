@@ -1457,8 +1457,8 @@ fn validate_server_url(value: &str) -> std::result::Result<Url, HostFailure> {
 }
 
 fn default_data_dir() -> PathBuf {
-    directories::BaseDirs::new()
-        .map(|dirs| dirs.data_dir().join("cognia-server"))
+    dirs::data_dir()
+        .map(|dir| dir.join("cognia-server"))
         .unwrap_or_else(|| PathBuf::from("."))
 }
 

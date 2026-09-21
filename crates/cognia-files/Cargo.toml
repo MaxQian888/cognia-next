@@ -24,6 +24,8 @@ path = "src/lib.rs"
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+# Base64 transport for workspace binary reads (editor image previews).
+base64 = "0.23"
 # Front-matter on slash-command / skill markdown. `default-features = false`
 # keeps the JSON+TOML engines out; must stay byte-identical to src-tauri's
 # declaration or cargo builds a second copy.

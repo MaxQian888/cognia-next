@@ -499,6 +499,14 @@ mod tests {
         ))
     }
 
+    /// `reqwest` resolves the process-wide TLS provider at `Client`
+    /// construction; no `main` runs inside a test binary, so it must be
+    /// installed here.
+    fn http_client() -> reqwest::Client {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        reqwest::Client::new()
+    }
+
     // ── Pure unit tests (no network, no sidecar) ──────────────────────────
 
     #[test]
@@ -635,7 +643,7 @@ mod tests {
         .expect("server should bind on ephemeral port");
 
         let url = format!("http://127.0.0.1:{}/healthz", handle.bound_port);
-        let resp = reqwest::get(&url).await.expect("GET /healthz");
+        let resp = http_client().get(&url).send().await.expect("GET /healthz");
         assert_eq!(resp.status().as_u16(), 200);
 
         let body: serde_json::Value = resp.json().await.expect("json");
@@ -652,7 +660,7 @@ mod tests {
         let handle = spawn_server(0, "tok".to_string(), Arc::new(sidecar), echo_sessions())
             .await
             .expect("bind");
-        let client = reqwest::Client::new();
+        let client = http_client();
 
         for path in ["/mcp", "/mcp/sse"] {
             let response = client
@@ -679,7 +687,7 @@ mod tests {
             .await
             .expect("bind");
 
-        let client = reqwest::Client::new();
+        let client = http_client();
         let url = format!("http://127.0.0.1:{}/mcp/stream", handle.bound_port);
 
         // 1. initialize → 200 + Mcp-Session-Id.
@@ -758,7 +766,7 @@ mod tests {
         let handle = spawn_server(0, "tok".to_string(), Arc::new(sidecar), sessions)
             .await
             .expect("bind");
-        let client = reqwest::Client::new();
+        let client = http_client();
         let url = format!("http://127.0.0.1:{}/mcp/stream", handle.bound_port);
 
         let first = client
@@ -795,7 +803,7 @@ mod tests {
         let handle = spawn_server(0, "tok".to_string(), Arc::new(sidecar), echo_sessions())
             .await
             .expect("bind");
-        let client = reqwest::Client::new();
+        let client = http_client();
         let url = format!("http://127.0.0.1:{}/mcp/stream", handle.bound_port);
         let resp = client
             .post(&url)

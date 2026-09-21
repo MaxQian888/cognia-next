@@ -8,9 +8,9 @@ use serde::Serialize;
 use crate::cli::OutputFormat;
 
 pub fn cognia_data_dir() -> Result<PathBuf> {
-    let dirs = directories::BaseDirs::new()
+    let data_dir = dirs::data_local_dir()
         .ok_or_else(|| anyhow!("could not determine the local data directory"))?;
-    Ok(dirs.data_local_dir().join("Cognia"))
+    Ok(data_dir.join("Cognia"))
 }
 
 pub fn resolve_log_dir(override_dir: Option<PathBuf>) -> Result<PathBuf> {

@@ -102,6 +102,11 @@ pub use cognia_observability::logging;
 pub fn init_structured_tracing() -> bool {
     logging::tracing_setup::init()
 }
+
+// Process-wide rustls `CryptoProvider` init — owned by cognia-net so every
+// outbound Rust call site installs the same provider exactly once.
+pub(crate) use cognia_net::proxy_config::ensure_crypto_provider;
+
 // Native local-video pipeline lives in its own subsystem crate; the app crate
 // only re-exports it for generate_handler! command registration.
 pub use cognia_media as media;
@@ -466,6 +471,7 @@ pub fn run() {
         .manage(claude::SidecarState::new())
         .manage(codeserver::CodeServerState::new())
         .manage(codeserver::relay::DesktopRelayState::new())
+        .manage(codeserver::commands::EnvironmentPortRelayState::default())
         .manage(ApiKeyState::new())
         .manage(media::MediaSourceRegistry::default())
         // ADR-0025 — unified subscription module. In-process cache of the
@@ -578,6 +584,14 @@ pub fn run() {
             // raw read/write/ensure_dir commands). Pure in-memory inserts — the
             // renderer extends it with the active workspace roots once it loads.
             files::seed_default_allowed_roots();
+            // Mirror the narrow static backup scope in the dynamic scope used
+            // by the atomic stream helper; existing deny patterns still win.
+            {
+                use tauri::Manager as _;
+                use tauri_plugin_fs::FsExt as _;
+                app.fs_scope()
+                    .allow_directory(app.path().app_data_dir()?.join("backups"), true)?;
+            }
             task_workspace::start_workspace_maintenance();
 
             // Give the gateway its link to the brain (ADR-0188 D9). Installing
@@ -670,6 +684,7 @@ pub fn run() {
             commands::greet,
             commands::menu_action_ids,
             commands::set_window_background_color,
+            commands::backup_stream_temporary_path,
             // Unified managed-process registry (performance panel → Managed
             // Processes tab): list + control cognia-spawned child processes.
             process_registry::list_managed_processes,
@@ -952,6 +967,7 @@ pub fn run() {
             files::fs_search_workspace,
             files::fs_search_content_workspace,
             files::fs_read_workspace_file,
+            files::fs_read_workspace_file_base64,
             files::fs_write_workspace_file,
             task_workspace::task_workspace_status,
             task_workspace::task_workspace_begin,
@@ -997,6 +1013,9 @@ pub fn run() {
             task_workspace::task_workspace_get_resource,
             task_workspace::task_workspace_get_patch_set,
             task_workspace::task_workspace_restore_snapshot,
+            task_workspace::task_workspace_revision_get,
+            task_workspace::task_workspace_revision_apply,
+            task_workspace::task_workspace_revision_read,
             task_workspace::task_resource_read_diff,
             task_workspace::task_resource_read_text,
             task_workspace::task_resource_download_open,
@@ -2438,6 +2457,14 @@ mod tests {
                 "missing Tauri command: {command}"
             );
         }
+    }
+
+    #[test]
+    fn backup_stream_helper_is_registered_only_on_the_local_invoke_surface() {
+        let source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        assert!(source.contains("commands::backup_stream_temporary_path,"));
+        assert!(!include_str!("companion_api/rpc/filesystem.rs")
+            .contains("backup_stream_temporary_path"));
     }
 
     #[test]

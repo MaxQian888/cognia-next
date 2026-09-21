@@ -25,7 +25,7 @@ log = "0.4"
 # through VectorRegistry), so this must be a direct dep, not transitive.
 async-trait = "0.1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream", "socks", "http2", "multipart"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider", "stream", "socks", "http2", "multipart"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 sqlite-vec = "0.1"
 qdrant-client = { version = "1.19", default-features = false, features = ["serde"] }
