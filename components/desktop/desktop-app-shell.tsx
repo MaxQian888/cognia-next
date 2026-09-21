@@ -30,7 +30,7 @@
  */
 
 import { usePathname, useRouter } from "next/navigation"
-import dynamic from "next/dynamic"
+
 import { useEffect, useState } from "react"
 import { CommandPalette } from "@/components/desktop/command-palette"
 import { GuildRail } from "@/components/shell/guild-rail"
@@ -69,14 +69,6 @@ import { usesCompactShell } from "@/lib/shell/compact-shell"
 import { isOnboardingRoute } from "@/lib/onboarding/route"
 
 const log = loggers.shell
-
-// PROTOTYPE (throwaway): dev-only lab for the bar-less web shell — `?bar=<id>`
-// or the floating switcher picks how the status segments redistribute. Dynamic
-// + ssr:false so production and test bundles never fetch the chunk.
-const StatusBarLab = dynamic(
-  () => import("@/components/desktop/status-bar-lab").then((m) => m.StatusBarLab),
-  { ssr: false }
-)
 
 // Re-exported so the shell stays the discoverable home of "which routes have
 // no chrome"; the list itself lives in `lib/shell/bypass-routes` because
@@ -284,11 +276,7 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
         <ShellLayoutNotice />
         {/* Collapses to zero height on the same clock rather than unmounting —
           hiding it used to drop 24px out of the window in one frame. */}
-        {platform === "web" && process.env.NODE_ENV === "development" ? (
-          <StatusBarLab collapsed={statusBarCollapsed} />
-        ) : (
-          <StatusBar collapsed={statusBarCollapsed} />
-        )}
+        <StatusBar collapsed={statusBarCollapsed} />
       </div>
     </TitleBarOutletsProvider>
   )
