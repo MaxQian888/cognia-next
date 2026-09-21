@@ -411,14 +411,16 @@ function BadgeListEditor({
           {entries.map((entry) => (
             <Badge key={entry} variant="secondary" className="max-w-full gap-1 font-mono text-xs">
               <span className="min-w-0 truncate">{entry}</span>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-xs"
                 aria-label={removeAriaFor(entry)}
                 onClick={() => onRemove(entry)}
-                className="shrink-0 opacity-60 hover:opacity-100"
+                className="size-auto shrink-0 rounded-sm p-0 opacity-60 hover:bg-transparent hover:opacity-100 dark:hover:bg-transparent"
               >
                 <TrashIcon className="size-3" aria-hidden="true" />
-              </button>
+              </Button>
             </Badge>
           ))}
         </div>

@@ -61,21 +61,23 @@ function OptionRow({
   testid: string
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="sm"
       role="menuitemradio"
       aria-checked={selected}
       data-testid={testid}
       onClick={onSelect}
       className={cn(
-        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors",
+        "h-auto w-full justify-start gap-2 rounded-md px-2 py-1.5 text-left text-xs font-normal",
         "hover:bg-accent hover:text-accent-foreground",
         selected && "bg-muted font-medium"
       )}
     >
       <Check className={cn("h-3.5 w-3.5 shrink-0", selected ? "opacity-100" : "opacity-0")} />
       <span className="min-w-0 truncate">{label}</span>
-    </button>
+    </Button>
   )
 }
 

@@ -34,7 +34,7 @@
  * only the form knows which credentials are required on which transport.
  */
 
-import { useState, type ReactNode } from "react"
+import { useState, type ComponentProps, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import {
   AlertTriangleIcon,
@@ -45,6 +45,7 @@ import {
   LockIcon,
   RotateCwIcon,
 } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import {
   InputGroup,
   InputGroupAddon,
@@ -236,15 +237,10 @@ function CredentialStatusLine({
             : t("awaitingConsent")}
         </span>
         {onRetry ? (
-          <button
-            type="button"
-            onClick={onRetry}
-            disabled={disabled}
-            className="inline-flex shrink-0 items-center gap-1 underline underline-offset-2 disabled:opacity-50"
-          >
+          <InlineActionButton onClick={onRetry} disabled={disabled}>
             <RotateCwIcon className="size-3" aria-hidden />
             {t("retry")}
-          </button>
+          </InlineActionButton>
         ) : null}
       </p>
     )
@@ -263,15 +259,10 @@ function CredentialStatusLine({
           only offer on screen was to overwrite it blind.
         */}
         {onRetry ? (
-          <button
-            type="button"
-            onClick={onRetry}
-            disabled={disabled}
-            className="inline-flex shrink-0 items-center gap-1 underline underline-offset-2 disabled:opacity-50"
-          >
+          <InlineActionButton onClick={onRetry} disabled={disabled}>
             <KeyRoundIcon className="size-3" aria-hidden />
             {t("unlock")}
-          </button>
+          </InlineActionButton>
         ) : null}
       </p>
     )
@@ -282,16 +273,31 @@ function CredentialStatusLine({
       <AlertTriangleIcon className="size-3 shrink-0" aria-hidden />
       <span className="min-w-0">{t("statusError")}</span>
       {onRetry ? (
-        <button
-          type="button"
-          onClick={onRetry}
-          disabled={disabled}
-          className="inline-flex items-center gap-1 underline underline-offset-2 disabled:opacity-50"
-        >
+        <InlineActionButton onClick={onRetry} disabled={disabled}>
           <RotateCwIcon className="size-3" aria-hidden />
           {t("retry")}
-        </button>
+        </InlineActionButton>
       ) : null}
     </p>
+  )
+}
+
+/**
+ * The retry/unlock affordance inside a status sentence — reads as an inline
+ * link, so it inherits the surrounding text colour (muted, or amber on
+ * error) instead of a button variant's.
+ */
+function InlineActionButton({ className, ...props }: ComponentProps<typeof Button>) {
+  return (
+    <Button
+      type="button"
+      variant="link"
+      size="sm"
+      className={cn(
+        "inline-flex h-auto shrink-0 items-center gap-1 p-0 text-xs font-normal text-inherit underline underline-offset-2",
+        className
+      )}
+      {...props}
+    />
   )
 }

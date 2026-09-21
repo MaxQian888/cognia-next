@@ -6,7 +6,20 @@ import { densitySurfaceProps } from "@/lib/appearance/density-applier"
 import { cn } from "@/lib/utils"
 import { useSettingsStore } from "@/stores/settings"
 
-function Table({ className, ...props }: React.ComponentProps<"table">) {
+function Table({
+  className,
+  containerClassName,
+  ...props
+}: React.ComponentProps<"table"> & {
+  /**
+   * Classes for the scroll wrapper around the table. Defaults keep
+   * `overflow-x-auto` so wide tables scroll horizontally; callers that nest
+   * the table inside their own scroller (e.g. a `ScrollArea` with a sticky
+   * header) pass `overflow-x-visible` so sticky offsets keep resolving
+   * against the outer scrollport instead of a div that never scrolls.
+   */
+  containerClassName?: string
+}) {
   // ADR-0127: every data table is the `table` density surface, so the
   // Appearance → Density "tables" override (previously a dead knob) reaches
   // it; cells below read `--density-row-padding` for their vertical padding.
@@ -14,7 +27,7 @@ function Table({ className, ...props }: React.ComponentProps<"table">) {
   return (
     <div
       data-slot="table-container"
-      className="relative w-full overflow-x-auto"
+      className={cn("relative w-full overflow-x-auto", containerClassName)}
       {...densitySurfaceProps("table", density)}
     >
       <table

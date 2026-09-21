@@ -358,6 +358,9 @@ const FILL_HEIGHT_SECTIONS = new Set<SettingsSectionId>([
   // window and stack a second scrollbar on it.
   "mcp",
   "logs",
+  // Chat templates is a list+detail pane too (template rail + preview/editor
+  // detail) — same reason as above.
+  "chatTemplates",
 ])
 
 /**

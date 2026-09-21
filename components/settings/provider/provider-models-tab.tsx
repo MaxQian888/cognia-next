@@ -18,6 +18,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Table } from "@/components/ui/table"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -222,20 +223,22 @@ function SortableHead({
       aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}
       className={cn("px-2 py-1.5 font-medium", align === "right" && "text-right", className)}
     >
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="sm"
         onClick={() => onSort(sortKey)}
         data-testid={`models-sort-${sortKey}`}
         title={t("modelsTab.sortColumn", { label })}
         className={cn(
-          "inline-flex h-6 max-w-full items-center gap-1 rounded-sm px-1 text-xs hover:text-foreground",
+          "inline-flex h-6 max-w-full items-center gap-1 rounded-sm px-1 text-xs hover:bg-transparent hover:text-foreground dark:hover:bg-transparent",
           align === "right" && "flex-row-reverse",
           active ? "text-foreground" : "text-muted-foreground"
         )}
       >
         <span className="truncate">{label}</span>
         <Icon className={cn("size-3 shrink-0", !active && "opacity-50")} />
-      </button>
+      </Button>
     </th>
   )
 }
@@ -666,7 +669,8 @@ export function ProviderModelsTab({
       {/* ── Scrolling table ─────────────────────────────────────────────── */}
       <ScrollArea className="min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:!block">
         {filtered.length > 0 ? (
-          <table
+          <Table
+            containerClassName="overflow-x-visible"
             className="w-full border-collapse text-sm"
             data-testid="models-table"
             aria-label={t("modelsTab.tableLabel")}
@@ -751,7 +755,7 @@ export function ProviderModelsTab({
                 )
               })}
             </tbody>
-          </table>
+          </Table>
         ) : (
           <div className="flex items-center justify-center px-4 py-12 text-sm text-muted-foreground">
             {t("modelsTab.noModels")}

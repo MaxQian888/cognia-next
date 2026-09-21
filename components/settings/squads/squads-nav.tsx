@@ -168,19 +168,21 @@ function NavRow({
   children: React.ReactNode
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="sm"
       role="listitem"
       aria-current={active ? "true" : undefined}
       onClick={onSelect}
       data-testid={testId}
       className={cn(
-        "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs hover:bg-accent",
+        "h-auto w-full justify-start gap-2 rounded-sm px-2 py-1.5 text-left text-xs font-normal",
         active && "bg-accent font-medium"
       )}
     >
       {children}
-    </button>
+    </Button>
   )
 }
 

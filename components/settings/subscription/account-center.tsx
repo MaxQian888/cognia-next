@@ -202,9 +202,11 @@ export function AccountCenter() {
                   return (
                     <li key={accountKey(account)}>
                       <Surface asChild layer="raised" radius="control">
-                        <button
+                        <Button
                           type="button"
-                          className="flex w-full items-start gap-2 border px-2.5 py-2 text-left hover:bg-muted/40 data-[active=true]:border-primary/50 data-[active=true]:bg-primary/5"
+                          variant="ghost"
+                          size="sm"
+                          className="h-auto w-full items-start justify-start gap-2 border px-2.5 py-2 text-left font-normal whitespace-normal hover:bg-muted/40 hover:text-inherit data-[active=true]:border-primary/50 data-[active=true]:bg-primary/5 dark:hover:bg-muted/40"
                           data-active={
                             selected?.id === account.id && selected.provider === account.provider
                           }
@@ -232,7 +234,7 @@ export function AccountCenter() {
                               · {account.authMode} · {account.credentialSource}
                             </span>
                           </span>
-                        </button>
+                        </Button>
                       </Surface>
                     </li>
                   )

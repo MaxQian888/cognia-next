@@ -51,7 +51,6 @@ describe("settings component primitives", () => {
         "components/settings/appearance/tabs/custom-theme-tab.tsx",
         "components/settings/appearance/tabs/preset-grid.tsx",
         "components/settings/appearance/tabs/theme-tab.tsx",
-        "components/settings/appearance/tabs/wallpaper-tab.tsx",
         "components/settings/appearance/vscode-import-form.tsx",
         "components/settings/characters-section.tsx",
         "components/settings/automation/inspector-tab.tsx",

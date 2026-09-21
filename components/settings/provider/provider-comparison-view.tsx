@@ -26,6 +26,7 @@ import { Button } from "@/components/ui/button"
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Table } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { ProviderIcon } from "@/components/providers/ai/provider-icon"
 import { cn } from "@/lib/utils"
@@ -535,10 +536,10 @@ export function ProviderComparisonView({
       </div>
 
       {/* ── Main content ────────────────────────────────────────────────────── */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-auto">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {selectedModels.length === 0 ? (
           /* ── Empty state ──────────────────────────────────────────────────── */
-          <div className="flex flex-1 items-center justify-center p-6">
+          <div className="flex flex-1 items-center justify-center overflow-auto p-6">
             <div className="max-w-sm text-center">
               <GitCompareArrows className="mx-auto h-10 w-10 text-muted-foreground/30" />
               <h3 className="mt-4 text-base font-semibold text-foreground">
@@ -550,8 +551,11 @@ export function ProviderComparisonView({
             </div>
           </div>
         ) : (
-          /* ── Comparison table ─────────────────────────────────────────────── */
-          <table
+          /* ── Comparison table. The Table container is the scroller on both
+              axes so the sticky first column and header row resolve against
+              it. ──────────────────────────────────────────────────────────── */
+          <Table
+            containerClassName="min-h-0 flex-1"
             className="w-max min-w-full border-separate border-spacing-0 text-sm"
             data-testid="comparison-table"
           >
@@ -670,7 +674,7 @@ export function ProviderComparisonView({
                 </tr>
               )}
             </tbody>
-          </table>
+          </Table>
         )}
 
         {/* ── Recommendation ────────────────────────────────────────────────── */}

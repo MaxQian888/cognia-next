@@ -27,6 +27,7 @@ import { useTranslations } from "next-intl"
 import { CheckCircle2Icon, LoaderIcon, SendIcon, XCircleIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { getConnectorDeliveryGateway } from "@/lib/connectors/delivery-gateway"
@@ -278,21 +279,25 @@ export function SendTestMessageSection({ adapterId, platform }: SendTestMessageS
           <ConnectorHostNotice reach={reach} className="text-[10px]" />
         </div>
 
-        <details className="rounded-md border px-3 py-2 text-xs">
-          <summary className="cursor-pointer font-medium">{t("advancedTitle")}</summary>
-          <p className="mt-2 text-muted-foreground">{t("advancedDescription")}</p>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="mt-2"
-            onClick={() => void handleTransportProbe()}
-            disabled={disabled}
-            data-testid="send-test-transport-probe"
-          >
-            {t("probeButton")}
-          </Button>
-        </details>
+        <Collapsible className="rounded-md border px-3 py-2 text-xs">
+          <CollapsibleTrigger type="button" className="w-full cursor-pointer text-left font-medium">
+            {t("advancedTitle")}
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <p className="mt-2 text-muted-foreground">{t("advancedDescription")}</p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-2"
+              onClick={() => void handleTransportProbe()}
+              disabled={disabled}
+              data-testid="send-test-transport-probe"
+            >
+              {t("probeButton")}
+            </Button>
+          </CollapsibleContent>
+        </Collapsible>
 
         {result && (
           <div
