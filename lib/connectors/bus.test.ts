@@ -17,6 +17,7 @@ jest.mock("@/lib/telemetry/events/track-event", () => ({
 
 import { getBus, __resetBusForTesting } from "./bus"
 import { appendAudit } from "./audit"
+import { resolveCallbackBinding } from "./adapters/_shared/a2ui-mapper"
 import { evaluatePolicy } from "./policy-eval"
 import type { TriggerPolicy } from "@/types/connectors/policy"
 
@@ -35,6 +36,20 @@ jest.mock("./audit", () => ({
 }))
 jest.mock("./adapters/_shared/a2ui-mapper", () => ({
   resolveCallbackBinding: jest.fn().mockResolvedValue(undefined),
+}))
+
+// The ask_user short-circuit dynamically imports these two modules; the
+// registry/applier internals are covered by their own co-located suites.
+const mockApplyAskUserCallback = jest.fn(async (..._args: unknown[]) => ({
+  handled: true,
+  resolved: true,
+}))
+const mockGetPendingAskUserBySurface = jest.fn((..._args: unknown[]): unknown => undefined)
+jest.mock("@/lib/connectors/hitl/ask-user-question", () => ({
+  applyAskUserCallback: (...args: unknown[]) => mockApplyAskUserCallback(...args),
+}))
+jest.mock("@/lib/connectors/hitl/ask-user-registry", () => ({
+  getPendingAskUserBySurface: (...args: unknown[]) => mockGetPendingAskUserBySurface(...args),
 }))
 const mockRecordDelivered = jest.fn().mockResolvedValue(undefined)
 jest.mock("./delivered-messages", () => ({
@@ -706,5 +721,106 @@ describe("ConnectorBus — recordBotReply (cooldown bookkeeping)", () => {
     const map = bus.__getPolicyStateForTesting().recentBotReplyAtByConversation
     expect(map["old"]).toBeUndefined()
     expect(map["fresh"]).toBe(20 * 60_000)
+  })
+})
+
+describe("ConnectorBus — ask_user short-circuit", () => {
+  const askUserBinding = {
+    id: "a1:a2ui:au_1:opt_0:select",
+    adapterId: "a1",
+    actionId: "a2ui:au_1:opt_0:select",
+    kind: "ask_user" as const,
+    surfaceId: "au_0123456789abcdef",
+    componentId: "opt_0",
+    conversationKey: "telegram:a1:42",
+    createdAt: 1,
+    payload: { sessionId: "sess-1", toolUseId: "use-1", op: "select", value: "a" },
+    actorScope: { mode: "conversation" as const },
+  }
+
+  beforeEach(() => {
+    mockApplyAskUserCallback.mockClear().mockResolvedValue({ handled: true, resolved: true })
+    mockGetPendingAskUserBySurface.mockClear().mockReturnValue(undefined)
+  })
+
+  it("routes an ask_user binding to the HITL applier, skipping the generic handler", async () => {
+    const bus = getBus()
+    const generic = jest.fn()
+    bus.callbackHandler = generic
+    jest.mocked(resolveCallbackBinding).mockResolvedValueOnce(askUserBinding as never)
+
+    await bus.dispatchConnectorCallback(
+      makeCallback({ triggerId: askUserBinding.actionId, conversationKey: "telegram:a1:42" })
+    )
+
+    expect(mockApplyAskUserCallback).toHaveBeenCalledTimes(1)
+    expect(mockApplyAskUserCallback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        binding: askUserBinding,
+        surfaceId: askUserBinding.surfaceId,
+      })
+    )
+    // Control-plane press — never an A2UI/model digest turn.
+    expect(generic).not.toHaveBeenCalled()
+  })
+
+  it("swallows a stale ask_user press (handled, no generic hand-off)", async () => {
+    const bus = getBus()
+    const generic = jest.fn()
+    bus.callbackHandler = generic
+    jest.mocked(resolveCallbackBinding).mockResolvedValueOnce(askUserBinding as never)
+    mockApplyAskUserCallback.mockResolvedValueOnce({ handled: true, resolved: false })
+
+    await bus.dispatchConnectorCallback(
+      makeCallback({ triggerId: askUserBinding.actionId, conversationKey: "telegram:a1:42" })
+    )
+
+    expect(generic).not.toHaveBeenCalled()
+  })
+
+  it("correlates a binding-less input event by surface (Telegram ForceReply)", async () => {
+    const bus = getBus()
+    const generic = jest.fn()
+    bus.callbackHandler = generic
+    // No binding row — the parser matched reply_to_message_id, not an actionId.
+    mockGetPendingAskUserBySurface.mockReturnValueOnce({ meta: {} })
+
+    await bus.dispatchConnectorCallback(
+      makeCallback({
+        triggerId: "msg-reply-1",
+        surfaceId: "au_0123456789abcdef",
+        actionType: "input",
+        value: "typed",
+        conversationKey: "telegram:a1:42",
+      })
+    )
+
+    expect(mockGetPendingAskUserBySurface).toHaveBeenCalledWith("au_0123456789abcdef")
+    expect(mockApplyAskUserCallback).toHaveBeenCalledWith(
+      expect.objectContaining({ surfaceId: "au_0123456789abcdef" })
+    )
+    expect(
+      (mockApplyAskUserCallback.mock.calls[0][0] as { binding?: unknown }).binding
+    ).toBeUndefined()
+    expect(generic).not.toHaveBeenCalled()
+  })
+
+  it("falls through to the generic handler when no prompt owns the surface", async () => {
+    const bus = getBus()
+    const generic = jest.fn()
+    bus.callbackHandler = generic
+    mockGetPendingAskUserBySurface.mockReturnValueOnce(undefined)
+
+    await bus.dispatchConnectorCallback(
+      makeCallback({
+        triggerId: "msg-reply-2",
+        surfaceId: "au_ffffffffffffffff",
+        actionType: "input",
+        value: "stray",
+      })
+    )
+
+    expect(mockApplyAskUserCallback).not.toHaveBeenCalled()
+    expect(generic).toHaveBeenCalledTimes(1)
   })
 })

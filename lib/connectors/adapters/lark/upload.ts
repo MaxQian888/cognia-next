@@ -19,6 +19,7 @@
 
 import type { A2UISegmentContent, MessageSegment } from "@/types/connectors/segment"
 import { walkA2UISurface } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
+import { isLarkCardPayload } from "@/lib/connectors/adapters/lark/card"
 import {
   connectorsLarkUploadFile,
   connectorsLarkUploadImage,
@@ -226,6 +227,22 @@ export async function resolveLarkMediaKeys(
       continue
     }
 
+    if (seg.type === "card") {
+      // Lark card payloads (e.g. `buildLarkResultCard` result cards) carry
+      // `{tag:"img"}` elements whose `img_key` may still hold the raw
+      // `![](…)` source — a remote URL, `data:` blob, or local path. Lark
+      // accepts only uploaded image_keys here, so resolve each one: upload
+      // remote/data: sources, degrade a failed http(s) source to a
+      // markdown link, and drop elements whose source can never resolve.
+      if (!isLarkCardPayload(seg.card?.payload)) {
+        out.push(seg)
+        continue
+      }
+      const payload = await resolveCardImageKeys(seg.card.payload, uploadImage, token, cache)
+      out.push(payload === seg.card.payload ? seg : { ...seg, card: { ...seg.card, payload } })
+      continue
+    }
+
     out.push(seg)
   }
   return out
@@ -265,5 +282,136 @@ export function replaceA2UIImageUrls(
       }
     }
   })
+  return clone
+}
+
+// ---------------------------------------------------------------------------
+// Card-payload `img` element resolution (result cards)
+// ---------------------------------------------------------------------------
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value)
+}
+
+/**
+ * `img_key` values that are really unresolved local-path placeholders —
+ * `buildLarkResultCard` emits the `![](…)` source verbatim so the pre-pass
+ * can find it. The Lark upload command only fetches http(s)/data: sources
+ * (see `crates/…/lark_upload.rs::fetch_bytes`), so a local path can never
+ * resolve to a key — the element is dropped rather than shipped broken.
+ * Real uploaded keys (`img_v3_…`) match none of these shapes.
+ */
+function isLocalImageSource(imgKey: string): boolean {
+  return (
+    imgKey.startsWith("/") ||
+    imgKey.startsWith("./") ||
+    imgKey.startsWith("~/") ||
+    /\.(?:png|jpe?g|gif|webp|bmp)(?:[?#].*)?$/i.test(imgKey)
+  )
+}
+
+interface CardImageRef {
+  el: Record<string, unknown>
+  arr: unknown[]
+  index: number
+}
+
+/**
+ * Deep-walk a card payload and collect every `{tag:"img", img_key:string}`
+ * element WITH its containing array + index. Recursing through every
+ * object/array (rather than a fixed `body.elements` path) keeps images
+ * inside `form`, `column_set` → `columns`, `collapsible_panel`, and any
+ * future container reachable without a per-tag allowlist.
+ */
+function collectCardImageRefs(root: unknown): CardImageRef[] {
+  const refs: CardImageRef[] = []
+  const visit = (node: unknown, arr?: unknown[], index?: number): void => {
+    if (Array.isArray(node)) {
+      node.forEach((item, i) => visit(item, node, i))
+      return
+    }
+    if (!isRecord(node)) return
+    if (
+      node.tag === "img" &&
+      typeof node.img_key === "string" &&
+      arr !== undefined &&
+      index !== undefined
+    ) {
+      refs.push({ el: node, arr, index })
+    }
+    for (const value of Object.values(node)) visit(value)
+  }
+  visit(root)
+  return refs
+}
+
+function cardImageAlt(el: Record<string, unknown>): string {
+  return isRecord(el.alt) && typeof el.alt.content === "string" && el.alt.content.trim()
+    ? el.alt.content
+    : "image"
+}
+
+/**
+ * Resolve `{tag:"img"}` placeholders inside a Lark card payload. Remote
+ * `http(s)`/`data:` sources upload via `connectors_lark_upload_image`
+ * (each source once per payload + via the shared `uploadCache`); on a
+ * per-source failure an http(s) image degrades to a `[alt](url)` markdown
+ * element and a non-linkable one (`data:`, `ftp:`, …) is dropped. Local
+ * file-path sources — which the Lark upload command cannot read — are
+ * dropped outright. Already-keyed elements (`img_v3_…`) pass through
+ * untouched. Returns the ORIGINAL payload reference when nothing needed
+ * resolving, otherwise a deep clone — the persisted request row must stay
+ * byte-identical for retries.
+ */
+async function resolveCardImageKeys(
+  payload: Record<string, unknown>,
+  uploadImage: typeof connectorsLarkUploadImage,
+  token: () => Promise<string>,
+  cache?: Map<string, string>
+): Promise<Record<string, unknown>> {
+  const needsWork = collectCardImageRefs(payload).some(({ el }) => {
+    const source = el.img_key as string
+    return needsUpload(source) || isLocalImageSource(source)
+  })
+  if (!needsWork) return payload
+
+  const clone = structuredClone(payload)
+  const refs = collectCardImageRefs(clone)
+
+  const resolved = new Map<string, string>()
+  const uploadSources = [...new Set(refs.map(({ el }) => el.img_key as string).filter(needsUpload))]
+  for (const source of uploadSources) {
+    const cached = cache?.get(source)
+    if (cached) {
+      resolved.set(source, cached)
+      continue
+    }
+    try {
+      const key = await uploadImage({ accessToken: await token(), sourceUrl: source })
+      cache?.set(source, key)
+      resolved.set(source, key)
+    } catch {
+      // Degrade per-image below — one broken CDN URL must not fail the card.
+    }
+  }
+
+  // Apply back-to-front so an earlier splice can't shift a pending index.
+  for (const { el, arr, index } of refs.reverse()) {
+    const source = el.img_key as string
+    if (needsUpload(source)) {
+      const uploaded = resolved.get(source)
+      if (uploaded) {
+        el.img_key = uploaded
+        continue
+      }
+      if (/^https?:\/\//i.test(source)) {
+        arr[index] = { tag: "markdown", content: `[${cardImageAlt(el)}](${source})` }
+      } else {
+        arr.splice(index, 1)
+      }
+      continue
+    }
+    if (isLocalImageSource(source)) arr.splice(index, 1)
+  }
   return clone
 }

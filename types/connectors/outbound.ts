@@ -46,6 +46,22 @@ export interface OutboundRequest {
       sourceId: string
       disclosure: "ai-generated"
     }>
+    /**
+     * Marks the job as carrying a terminal result card (Lark Card 2.0) for an
+     * execution surface. Forwarded verbatim to the `onConnectorOutbound`
+     * plugin hook so a result-card middleware can tell "this segment list IS
+     * the run's final card" apart from ordinary traffic without parsing card
+     * JSON — the analogue of Aiden's `onResultCard(ctx, card, meta)` seam.
+     * Read-only context for the hook; the runner never acts on it.
+     */
+    resultCard?: {
+      /** The execution run / turn the card reports on. */
+      runId?: string
+      /** Terminal state the card was rendered with. */
+      status: "done" | "error" | "interrupted"
+      /** The triggering inbound StoredMessage, when one exists. */
+      sourceMessageId?: string
+    }
   }
 }
 

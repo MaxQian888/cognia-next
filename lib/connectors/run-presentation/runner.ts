@@ -1,4 +1,5 @@
 import { buildLarkRunFallbackSegment } from "./lark-driver"
+import { buildLarkResultCardSegment } from "@/lib/connectors/adapters/lark/result-card"
 import { resolveWebEntryBase } from "@/lib/connectors/entry/deep-links"
 import { liveQuery, type Subscription } from "dexie"
 import { getDb } from "@/lib/db/schema"
@@ -375,16 +376,55 @@ async function deliverMilestone(
   binding: ExecutionRunBinding,
   snapshot: RunProjectionSnapshot
 ): Promise<void> {
+  const segments =
+    deliveryConversationRef(binding).platform === "lark"
+      ? [
+          // On Lark the milestone is a proper result card — state header,
+          // elapsed/details footer — rather than a bare markdown bubble. The
+          // projected snapshot is already PII-safe, so its timeline markdown
+          // and run link can go straight into the card body.
+          buildLarkResultCardSegment({
+            answer: markdown(snapshot),
+            status:
+              snapshot.status === "completed"
+                ? "done"
+                : snapshot.status === "cancelled"
+                  ? "interrupted"
+                  : "error",
+            elapsedMs: snapshot.elapsedMs,
+            ...(resolveWebEntryBase() && snapshot.detailsUrl
+              ? {
+                  detailsUrl: `${resolveWebEntryBase()}${snapshot.detailsUrl}`,
+                }
+              : {}),
+          }),
+        ]
+      : [{ type: "markdown" as const, md: markdown(snapshot) }]
   const job = await enqueueOutbound({
     adapterId: binding.adapterId,
     conversationKey: binding.conversationKey,
     request: {
       conversationRef: deliveryConversationRef(binding),
       deliveryTarget: binding.deliveryTarget,
-      segments: [{ type: "markdown", md: markdown(snapshot) }],
+      segments,
       metadata: {
         idempotencyKey: `execution-run:${binding.id}:${snapshot.revision}:final`,
         ...(binding.sourceMessageId ? { sourceMessageId: binding.sourceMessageId } : {}),
+        // Terminal-card marker for the `onConnectorOutbound` result-card seam.
+        ...(deliveryConversationRef(binding).platform === "lark"
+          ? {
+              resultCard: {
+                runId: snapshot.runId,
+                status:
+                  snapshot.status === "completed"
+                    ? ("done" as const)
+                    : snapshot.status === "cancelled"
+                      ? ("interrupted" as const)
+                      : ("error" as const),
+                ...(binding.sourceMessageId ? { sourceMessageId: binding.sourceMessageId } : {}),
+              },
+            }
+          : {}),
       },
     },
     source: snapshot.kind === "workflow" ? "workflow" : "ai-run",

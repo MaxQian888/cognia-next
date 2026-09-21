@@ -2737,6 +2737,66 @@ export class ConnectorBus {
       return true
     }
 
+    // ── Step 4-pre-c1: ask_user short-circuit (control-plane HITL) ──
+    //
+    // A button / text-input on an A2UI `ask_user` question card. Applies the
+    // op to the pending prompt in the in-process registry so the suspended
+    // `plugin_tool_exec` round-trip resumes with the answer. `toggle`
+    // repaints the card in place (multi-select marks); `select` / `submit` /
+    // `submit_text` / `skip` settle it and `runImAskUser`'s continuation
+    // freezes the card. Never a digest turn.
+    //
+    // The probe also claims the binding-less input paths that correlate onto
+    // a live question card by surfaceId alone: Telegram ForceReply text
+    // replies (actionType "input", no binding row), Discord modal submits
+    // (the resolved row is `modal_open`, not `ask_user`), and card
+    // dismissals. `applyAskUserCallback` re-checks the prompt's own actor
+    // scope on those paths because the unified guard never saw an ask_user
+    // row; `handled: false` means the surface isn't a live prompt, so the
+    // event falls through to the generic A2UI hand-off untouched.
+    const askUserRelevant =
+      resolvedBinding?.kind === "ask_user" ||
+      ((event.actionType === "input" ||
+        event.actionType === "submit" ||
+        event.actionType === "dismiss") &&
+        typeof resolvedSurfaceId === "string" &&
+        resolvedSurfaceId.length > 0)
+    if (askUserRelevant) {
+      try {
+        const [{ applyAskUserCallback }, { getPendingAskUserBySurface }] = await Promise.all([
+          import("@/lib/connectors/hitl/ask-user-question"),
+          import("@/lib/connectors/hitl/ask-user-registry"),
+        ])
+        const correlated =
+          resolvedBinding?.kind === "ask_user" ||
+          (resolvedSurfaceId ? getPendingAskUserBySurface(resolvedSurfaceId) !== undefined : false)
+        if (correlated) {
+          const outcome = await applyAskUserCallback({
+            event,
+            ...(resolvedBinding ? { binding: resolvedBinding } : {}),
+            ...(resolvedSurfaceId ? { surfaceId: resolvedSurfaceId } : {}),
+            operatorIds: Array.isArray(adapterRow?.settings.runOperatorUserIds)
+              ? adapterRow!.settings.runOperatorUserIds!.filter(
+                  (v): v is string => typeof v === "string"
+                )
+              : [],
+          })
+          if (outcome.handled) return true
+        }
+      } catch (err) {
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "callback.handler_failed",
+          at: Date.now(),
+          conversationKey: resolvedConversationKey ?? undefined,
+          reason: err instanceof Error ? err.name : "unknown",
+          message: err instanceof Error ? err.message : String(err),
+          fields: { triggerId: event.triggerId, kind: "ask_user" },
+        })
+        return true
+      }
+    }
+
     // ── Step 4-pre-c2: media_grant short-circuit ──
     //
     // A button on the media-consent card. Writes (or withdraws) the

@@ -292,6 +292,9 @@ export function createBotStepApi(input: {
           db.executionRunInterrupts,
           db.executionRuns,
           db.executionRunEvents,
+          // `resolveRunInterruptFromSource` journals inside this zone, and the
+          // journal write touches `notificationProjectionWork` (schema v227).
+          db.notificationProjectionWork,
           db.botInstallations,
           db.botRunSteps,
         ],

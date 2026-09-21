@@ -70,6 +70,12 @@ export interface ActivityI18n {
   stoppedBecause: (reason: string) => string
   /** Terminal note for milestones that never ran. */
   notReached: (count: number) => string
+  /** Lark COT: failure row under a failed tool call. */
+  cotToolFailed: string
+  /** Lark COT: running-step title while the run waits on a person. */
+  cotWaitingForAction: string
+  /** Card note pointing at the COT message when the timeline lives there. */
+  cotProcessInline: string
 }
 
 const EN: ActivityI18n = {
@@ -157,6 +163,9 @@ const EN: ActivityI18n = {
   moreMilestones: (count) => `… and ${count} more`,
   stoppedBecause: (reason) => `Stopped: ${reason}`,
   notReached: (count) => `${count} milestone${count === 1 ? "" : "s"} not reached`,
+  cotToolFailed: "Tool failed",
+  cotWaitingForAction: "Waiting for your action",
+  cotProcessInline: "Process shown in the thinking timeline above",
 }
 
 const ZH: ActivityI18n = {
@@ -238,6 +247,9 @@ const ZH: ActivityI18n = {
   moreMilestones: (count) => `…还有 ${count} 项`,
   stoppedBecause: (reason) => `已停止：${reason}`,
   notReached: (count) => `${count} 项里程碑未执行`,
+  cotToolFailed: "执行失败",
+  cotWaitingForAction: "等待你的操作",
+  cotProcessInline: "执行过程见上方思维链",
 }
 
 const MAPS: Record<string, ActivityI18n> = {

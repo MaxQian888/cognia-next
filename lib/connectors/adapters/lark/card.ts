@@ -262,9 +262,11 @@ export function segmentToLarkBody(seg: MessageSegment): LarkMessageBody | null {
 /**
  * Duck-type check for Lark interactive-card JSON: a card body has an
  * `elements` array (v1), locale-keyed `i18n_elements`, a `header` object,
- * or a Card 2.0 `schema` marker.
+ * or a Card 2.0 `schema` marker. Exported so the upload pre-pass
+ * (`resolveLarkMediaKeys`) can find `img` elements inside card payloads
+ * without re-implementing the detection.
  */
-function isLarkCardPayload(payload: unknown): payload is Record<string, unknown> {
+export function isLarkCardPayload(payload: unknown): payload is Record<string, unknown> {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false
   const p = payload as Record<string, unknown>
   return (
@@ -567,6 +569,10 @@ export async function buildLarkA2UICard(input: LarkA2UIMapperInput): Promise<Lar
           surfaceId: input.surfaceId,
           componentId: node.id,
           conversationKey: input.conversationKey,
+          // Text inputs may carry binding hints too (e.g. an `ask_user`
+          // free-text field must resolve its pending prompt, not a digest
+          // turn). Same seam as the Button case.
+          ...bindingHintFields(node.raw),
         })
         // Lark's message-card schema only accepts `input` INSIDE an action
         // module's `actions` array — a root-level `{tag:"input"}` element

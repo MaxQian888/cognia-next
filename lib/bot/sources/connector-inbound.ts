@@ -19,7 +19,7 @@
 import { buildBotEventEnvelope } from "@/lib/bot/events/envelope"
 import { dispatchBotEvent, type DispatchBotEventResult } from "@/lib/bot/events/dispatch"
 import { externalProvenance } from "@/lib/bot/events/provenance"
-import type { NormalizedInboundEvent } from "@/types/connectors/event"
+import { deliveryTargetFromEvent, type NormalizedInboundEvent } from "@/types/connectors/event"
 
 /** The one event type an `interaction` trigger matches. */
 export const CONNECTOR_INBOUND_EVENT_TYPE = "connector.inbound"
@@ -42,6 +42,11 @@ function payloadOf(event: NormalizedInboundEvent) {
     channelKind: event.channel.kind,
     selfMentioned: event.mentions.selfMentioned,
     ...(event.replyTo ? { replyToMessageId: event.replyTo.messageId } : {}),
+    // The sendable target for THIS conversation at ingress time, so a Bot run
+    // can bind the run-presentation plane (progress card, COT, approvals) and
+    // reply without re-resolving the session's binding — which may have moved
+    // topics by the time the delivery runs.
+    deliveryTarget: deliveryTargetFromEvent(event),
   }
 }
 

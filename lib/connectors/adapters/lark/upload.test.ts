@@ -323,3 +323,171 @@ describe("resolveLarkMediaKeys — A2UI card images", () => {
     expect(invoke).not.toHaveBeenCalled()
   })
 })
+
+describe("resolveLarkMediaKeys — Lark card payload images", () => {
+  const imgEl = (imgKey: string, alt = "diagram") => ({
+    tag: "img",
+    img_key: imgKey,
+    alt: { tag: "plain_text", content: alt },
+  })
+  const mdEl = (content: string) => ({ tag: "markdown", content })
+
+  function cardSegment(elements: Record<string, unknown>[]): MessageSegment {
+    return {
+      type: "card",
+      card: {
+        kind: "lark",
+        payload: { schema: "2.0", config: { update_multi: true }, body: { elements } },
+      },
+    }
+  }
+
+  function cardElements(seg: MessageSegment): Record<string, unknown>[] {
+    if (seg.type !== "card") throw new Error("expected card segment")
+    const payload = seg.card.payload as { body: { elements: Record<string, unknown>[] } }
+    return payload.body.elements
+  }
+
+  beforeEach(() => {
+    mockInvoke.mockReset()
+  })
+
+  it("uploads an http img_key placeholder and swaps in the real image_key", async () => {
+    mockInvoke.mockResolvedValueOnce("img_v3_result")
+    const seg = cardSegment([
+      mdEl("before"),
+      imgEl("https://cdn.example.com/d.png", "diagram"),
+      mdEl("after"),
+    ])
+    const out = await resolveLarkMediaKeys([seg], { getAccessToken: async () => "t-token" })
+
+    const els = cardElements(out[0])
+    expect(els.map((el) => el.tag)).toEqual(["markdown", "img", "markdown"])
+    expect(els[1].img_key).toBe("img_v3_result")
+    expect(els[1].alt).toEqual({ tag: "plain_text", content: "diagram" })
+    expect(mockInvoke).toHaveBeenCalledWith("connectors_lark_upload_image", {
+      accessToken: "t-token",
+      sourceUrl: "https://cdn.example.com/d.png",
+      imageType: undefined,
+    })
+    // The persisted request payload stays byte-identical for retries.
+    expect(cardElements(seg)[1].img_key).toBe("https://cdn.example.com/d.png")
+  })
+
+  it("uploads a data: img_key placeholder (inline bytes path)", async () => {
+    mockInvoke.mockResolvedValueOnce("img_v3_inline")
+    const seg = cardSegment([imgEl("data:image/png;base64,AQID")])
+    const out = await resolveLarkMediaKeys([seg], { getAccessToken: async () => "t-token" })
+    expect(cardElements(out[0])[0].img_key).toBe("img_v3_inline")
+    expect(mockInvoke).toHaveBeenCalledWith("connectors_lark_upload_image", {
+      accessToken: "t-token",
+      sourceUrl: "data:image/png;base64,AQID",
+      imageType: undefined,
+    })
+  })
+
+  it("degrades a failed http(s) upload to a markdown link element in place", async () => {
+    mockInvoke.mockRejectedValueOnce(new Error("Lark upload HTTP 500"))
+    const seg = cardSegment([
+      mdEl("before"),
+      imgEl("https://cdn.example.com/broken.png", "shot"),
+      mdEl("after"),
+    ])
+    const out = await resolveLarkMediaKeys([seg], { getAccessToken: async () => "t-token" })
+    const els = cardElements(out[0])
+    expect(els).toEqual([
+      mdEl("before"),
+      { tag: "markdown", content: "[shot](https://cdn.example.com/broken.png)" },
+      mdEl("after"),
+    ])
+  })
+
+  it("drops a local-path img element (the Lark upload command cannot read files)", async () => {
+    const seg = cardSegment([
+      mdEl("before"),
+      imgEl("/tmp/shot.png"),
+      imgEl("./out.webp"),
+      imgEl("~/pic.jpg"),
+      imgEl("chart.gif"),
+      mdEl("after"),
+    ])
+    const out = await resolveLarkMediaKeys([seg], { getAccessToken: async () => "t-token" })
+    const els = cardElements(out[0])
+    expect(els).toEqual([mdEl("before"), mdEl("after")])
+    // No upload attempt — local paths are dropped without a network call.
+    expect(mockInvoke).not.toHaveBeenCalled()
+  })
+
+  it("drops a failed data: upload rather than emitting an unusable data: link", async () => {
+    mockInvoke.mockRejectedValueOnce(new Error("decode failed"))
+    const seg = cardSegment([mdEl("a"), imgEl("data:image/png;base64,BAD"), mdEl("b")])
+    const out = await resolveLarkMediaKeys([seg], { getAccessToken: async () => "t-token" })
+    expect(cardElements(out[0])).toEqual([mdEl("a"), mdEl("b")])
+  })
+
+  it("resolves images nested inside form / column_set containers", async () => {
+    mockInvoke.mockResolvedValueOnce("img_v3_form").mockResolvedValueOnce("img_v3_col")
+    const seg: MessageSegment = {
+      type: "card",
+      card: {
+        kind: "lark",
+        payload: {
+          schema: "2.0",
+          body: {
+            elements: [
+              {
+                tag: "form",
+                elements: [imgEl("https://cdn.example.com/form.png")],
+              },
+              {
+                tag: "column_set",
+                columns: [{ tag: "column", elements: [imgEl("https://cdn.example.com/col.png")] }],
+              },
+            ],
+          },
+        },
+      },
+    }
+    const out = await resolveLarkMediaKeys([seg], { getAccessToken: async () => "t-token" })
+    const els = cardElements(out[0])
+    const form = els[0] as { elements: Record<string, unknown>[] }
+    const colSet = els[1] as { columns: { elements: Record<string, unknown>[] }[] }
+    expect(form.elements[0].img_key).toBe("img_v3_form")
+    expect(colSet.columns[0].elements[0].img_key).toBe("img_v3_col")
+    expect(mockInvoke).toHaveBeenCalledTimes(2)
+  })
+
+  it("leaves already-keyed img elements untouched and returns the same segment", async () => {
+    const seg = cardSegment([imgEl("img_v3_already"), mdEl("text")])
+    const out = await resolveLarkMediaKeys([seg], { getAccessToken: async () => "t-token" })
+    expect(out[0]).toBe(seg)
+    expect(mockInvoke).not.toHaveBeenCalled()
+  })
+
+  it("passes non-lark card dialects through untouched", async () => {
+    const seg: MessageSegment = {
+      type: "card",
+      card: { kind: "slack", payload: { blocks: [{ type: "image" }] } },
+    }
+    const out = await resolveLarkMediaKeys([seg], { getAccessToken: async () => "t-token" })
+    expect(out[0]).toBe(seg)
+    expect(mockInvoke).not.toHaveBeenCalled()
+  })
+
+  it("uploads each distinct source once and reuses the cache", async () => {
+    const cache = new Map<string, string>([["https://cdn.example.com/cached.png", "img_v3_cached"]])
+    mockInvoke.mockResolvedValueOnce("img_v3_new")
+    const seg = cardSegment([
+      imgEl("https://cdn.example.com/cached.png"),
+      imgEl("https://cdn.example.com/fresh.png"),
+      imgEl("https://cdn.example.com/fresh.png"),
+    ])
+    const out = await resolveLarkMediaKeys([seg], {
+      getAccessToken: async () => "t-token",
+      uploadCache: cache,
+    })
+    const els = cardElements(out[0])
+    expect(els.map((el) => el.img_key)).toEqual(["img_v3_cached", "img_v3_new", "img_v3_new"])
+    expect(mockInvoke).toHaveBeenCalledTimes(1)
+  })
+})

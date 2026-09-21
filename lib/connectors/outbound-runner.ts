@@ -916,6 +916,9 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
             segments: request.segments,
             source: job.source,
             idempotencyKey,
+            // Terminal-card marker a producer may stamp so result-card
+            // middleware can find "the" card without parsing segment JSON.
+            ...(request.metadata.resultCard ? { resultCard: request.metadata.resultCard } : {}),
           }
         )
         if (decision.action === "block") {

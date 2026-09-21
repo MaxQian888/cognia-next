@@ -136,6 +136,20 @@ describe("dispatchConnectorInboundToBots", () => {
       segments: [{ type: "text", text: "ship it" }],
       channelKind: "group",
       selfMentioned: true,
+      // The sendable target this conversation had at ingress — what
+      // `bindImPresentationForBotDelivery` turns into a run binding.
+      deliveryTarget: {
+        address: {
+          conversationKey: "slack:adp_1:C1",
+          platform: "slack",
+          adapterId: "adp_1",
+          scopeKind: "group",
+          containerId: "C1",
+        },
+        conversationRef: { platform: "slack", adapterId: "adp_1", chatId: "C1" },
+        sourceMessageId: "m1",
+        refreshedAt: NOW,
+      },
     })
     expect(JSON.stringify(row.envelope)).not.toContain("enormous")
   })

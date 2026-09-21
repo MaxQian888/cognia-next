@@ -304,6 +304,18 @@ export type AuditKind =
   | "plan_approve.granted"
   | "plan_approve.denied"
   | "plan_approve.expired"
+  // `ask_user` elicitation over IM (control-plane HITL). `requested` when the
+  // question card was enqueued; `answered` when a callback resolved the
+  // pending prompt with a real answer (option select / submit / free text);
+  // `cancelled` on Skip/dismiss or owner abort; `expired` on TTL;
+  // `failed` when the card could not even be projected (bind/enqueue throw).
+  // Carries `fields.toolUseId`, `fields.sessionId` and, on answers,
+  // `fields.op` — never the answer text itself.
+  | "ask_user.requested"
+  | "ask_user.answered"
+  | "ask_user.cancelled"
+  | "ask_user.expired"
+  | "ask_user.failed"
   // Proactive notification over IM (control-plane notifications). `pushed` when
   // an agent event was enqueued to a conversation; `skipped` when opt-in was
   // off / no target resolved; `pii_blocked` when the PII gate dropped it.

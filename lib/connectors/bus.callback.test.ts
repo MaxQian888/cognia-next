@@ -1095,8 +1095,7 @@ describe("ConnectorBus.dispatchConnectorCallback: notification_action kind", () 
         adapterId: "adp_tg",
         conversationKey,
         binding: expect.objectContaining({
-          kind: "notification_action",
-          payload: { notificationId: "n1", actionId: "approve" },
+          bindingPayload: { notificationId: "n1", actionId: "approve" },
         }),
       })
     )
@@ -1126,5 +1125,154 @@ describe("ConnectorBus.dispatchConnectorCallback: notification_action kind", () 
       )
     ).resolves.not.toThrow()
     expect(handler).not.toHaveBeenCalled()
+  })
+})
+
+describe("ConnectorBus.dispatchConnectorCallback: ask_user kind", () => {
+  const askConversationKey = "telegram:adp_tg:c1"
+  const askSurfaceId = `ask_user:${askConversationKey}:use-1`
+
+  function askMeta(): import("./hitl/ask-user-registry").PendingAskUserMeta {
+    return {
+      surfaceId: askSurfaceId,
+      request: {
+        question: "Pick",
+        options: [
+          { value: "a", label: "A" },
+          { value: "b", label: "B" },
+        ],
+        multiSelect: false,
+        allowText: false,
+      },
+      adapterId: "adp_tg",
+      conversationKey: askConversationKey,
+      conversationRef: { platform: "telegram", adapterId: "adp_tg", channelId: "c1" },
+      actorScope: { mode: "conversation" },
+    }
+  }
+
+  async function bindAskUser(actionId: string, payload: Record<string, unknown>) {
+    await recordCallbackBinding({
+      adapterId: "adp_tg",
+      actionId,
+      kind: "ask_user",
+      surfaceId: askSurfaceId,
+      conversationKey: askConversationKey,
+      payload: { sessionId: "sess-1", toolUseId: "use-1", ...payload },
+    })
+  }
+
+  it("a select button resolves the pending prompt; the generic handler never sees it", async () => {
+    const { awaitAskUser, __resetAskUserRegistryForTesting } =
+      await import("./hitl/ask-user-registry")
+    __resetAskUserRegistryForTesting()
+    const pending = awaitAskUser("sess-1", "use-1", { meta: askMeta() })
+    await bindAskUser("a2ui:ask1:opt_0:select", { op: "select", value: "a" })
+
+    const bus = getBus()
+    const handler = jest.fn<ReturnType<CallbackHandler>, Parameters<CallbackHandler>>()
+    bus.callbackHandler = handler
+    await bus.dispatchConnectorCallback(
+      makeEvent({
+        triggerId: "a2ui:ask1:opt_0:select",
+        surfaceId: askSurfaceId,
+        conversationKey: askConversationKey,
+      })
+    )
+    expect(handler).not.toHaveBeenCalled()
+    await expect(pending).resolves.toMatchObject({
+      reason: "answered",
+      answer: { selected: ["a"], cancelled: false },
+    })
+    __resetAskUserRegistryForTesting()
+  })
+
+  it("toggle stays open, then submit resolves with the accumulated selection", async () => {
+    const { awaitAskUser, getPendingAskUser, __resetAskUserRegistryForTesting } =
+      await import("./hitl/ask-user-registry")
+    __resetAskUserRegistryForTesting()
+    const meta = askMeta()
+    meta.request = { ...meta.request, multiSelect: true }
+    const pending = awaitAskUser("sess-1", "use-1", { meta })
+    await bindAskUser("a2ui:ask2:opt_0:toggle", { op: "toggle", value: "a" })
+    await bindAskUser("a2ui:ask2:submit:submit", { op: "submit" })
+
+    const bus = getBus()
+    const handler = jest.fn<ReturnType<CallbackHandler>, Parameters<CallbackHandler>>()
+    bus.callbackHandler = handler
+    await bus.dispatchConnectorCallback(
+      makeEvent({
+        triggerId: "a2ui:ask2:opt_0:toggle",
+        surfaceId: askSurfaceId,
+        conversationKey: askConversationKey,
+      })
+    )
+    expect(handler).not.toHaveBeenCalled()
+    // Toggle mutates but does not settle.
+    expect(getPendingAskUser("sess-1", "use-1")?.selected).toEqual(["a"])
+
+    await bus.dispatchConnectorCallback(
+      makeEvent({
+        triggerId: "a2ui:ask2:submit:submit",
+        surfaceId: askSurfaceId,
+        conversationKey: askConversationKey,
+      })
+    )
+    await expect(pending).resolves.toMatchObject({
+      reason: "answered",
+      answer: { selected: ["a"], cancelled: false },
+    })
+    __resetAskUserRegistryForTesting()
+  })
+
+  it("a binding-less text reply on the card's surface resolves via the pending lookup", async () => {
+    const { awaitAskUser, __resetAskUserRegistryForTesting } =
+      await import("./hitl/ask-user-registry")
+    __resetAskUserRegistryForTesting()
+    const pending = awaitAskUser("sess-1", "use-1", {
+      meta: { ...askMeta(), actorScope: { mode: "initiator", allowedUserIds: ["u_999"] } },
+    })
+    const bus = getBus()
+    const handler = jest.fn<ReturnType<CallbackHandler>, Parameters<CallbackHandler>>()
+    bus.callbackHandler = handler
+    // No binding row: the surfaceId on the event is the only anchor.
+    await bus.dispatchConnectorCallback(
+      makeEvent({
+        triggerId: "trig_surface_reply",
+        surfaceId: askSurfaceId,
+        actionType: "input",
+        value: "typed answer",
+        conversationKey: askConversationKey,
+      })
+    )
+    expect(handler).not.toHaveBeenCalled()
+    await expect(pending).resolves.toMatchObject({
+      reason: "answered",
+      answer: { text: "typed answer", cancelled: false },
+    })
+    __resetAskUserRegistryForTesting()
+  })
+
+  it("rejects a surface-fallback answer from a user outside the actor scope", async () => {
+    const { awaitAskUser, getPendingAskUser, __resetAskUserRegistryForTesting } =
+      await import("./hitl/ask-user-registry")
+    __resetAskUserRegistryForTesting()
+    const pending = awaitAskUser("sess-1", "use-1", {
+      meta: { ...askMeta(), actorScope: { mode: "initiator", allowedUserIds: ["someone_else"] } },
+    })
+    const bus = getBus()
+    await bus.dispatchConnectorCallback(
+      makeEvent({
+        triggerId: "trig_surface_denied",
+        surfaceId: askSurfaceId,
+        actionType: "input",
+        value: "typed answer",
+        conversationKey: askConversationKey,
+      })
+    )
+    // The wrong user's click settles nothing.
+    expect(getPendingAskUser("sess-1", "use-1")).toBeDefined()
+    __resetAskUserRegistryForTesting()
+    void pending
   })
 })

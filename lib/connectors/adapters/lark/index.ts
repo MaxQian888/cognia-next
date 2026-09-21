@@ -1104,6 +1104,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     runPresentation: createLarkRunPresentationDriver(doRequest, {
       statusReactions: true,
       webEntryBaseUrl: opts.webEntryBaseUrl,
+      cot: true,
     }),
     runtimeCapabilities: builtInConnectorRuntimeCapabilities("lark"),
     historyCursorKind: "timestamp",

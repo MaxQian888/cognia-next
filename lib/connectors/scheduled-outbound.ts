@@ -41,8 +41,11 @@ import {
 } from "@/lib/connectors/scheduled-notice-i18n"
 import { isLateDelivery } from "@/lib/scheduler/catchup-policy"
 import { findSessionByConversationKey } from "./runtime"
+import { registerImElicitationContext } from "./hitl/im-elicitation-context"
 import { appendAudit } from "./audit"
 import type { MessageSegment } from "@/types/connectors/segment"
+import { parseConversationKey } from "@/types/connectors/event"
+import type { PlatformKind } from "@/types/connectors/platform-kind"
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 import type { OutboundJobSource, OutboundJobWorkflowSource } from "@/lib/db/connector-types"
 import { getConnectorConversationState } from "@/lib/db/connector-conversation-state"
@@ -304,6 +307,38 @@ export async function runConnectorDigestTurn(input: RunDigestInput): Promise<Run
   }
 
   // ── Step 4: drive the AI turn (PII gate + capture) ──────────────────
+  // Register the IM elicitation context for the duration of the capture so a
+  // digest/callback-fed `ask_user` call lands on an interactive card in this
+  // conversation instead of the unwatched desktop dialog. Digest turns have
+  // no single requester — anyone in the conversation may answer, hence the
+  // explicit `conversation` actor scope. When the platform cannot be resolved
+  // at all (no adapter row, malformed key) the card could never be addressed,
+  // so the registration is skipped and the tool falls back to the desktop.
+  const digestDeliveryTarget = session.platformBinding?.deliveryTarget
+  let elicitationPlatform: PlatformKind | undefined =
+    adapterRow?.type ?? digestDeliveryTarget?.address.platform
+  if (!elicitationPlatform) {
+    try {
+      elicitationPlatform = parseConversationKey(conversationKey).platform
+    } catch {
+      elicitationPlatform = undefined
+    }
+  }
+  const elicitationController = new AbortController()
+  const unregisterImElicitation = elicitationPlatform
+    ? registerImElicitationContext({
+        sessionId: session.id,
+        adapterId,
+        conversationKey,
+        conversationRef: digestDeliveryTarget?.conversationRef ?? {
+          platform: elicitationPlatform,
+          adapterId,
+        },
+        ...(digestDeliveryTarget ? { deliveryTarget: digestDeliveryTarget } : {}),
+        actorScope: { mode: "conversation" },
+        signal: elicitationController.signal,
+      })
+    : undefined
   let captured: Awaited<ReturnType<DigestSendPromptFn>>
   try {
     captured = await injectedDigestSender(session.id, prompt, sendOptions, {
@@ -322,6 +357,12 @@ export async function runConnectorDigestTurn(input: RunDigestInput): Promise<Run
       message: msg,
     })
     return { success: false, error: msg }
+  } finally {
+    // The context dies with the turn — abort settles a prompt still pending
+    // (defensive; a suspended ask_user blocks the capture above) and hides
+    // the registration from any late plugin_tool_exec event.
+    elicitationController.abort()
+    unregisterImElicitation?.()
   }
 
   // ── Step 5: project text + A2UI surfaces into outbound segments ─────

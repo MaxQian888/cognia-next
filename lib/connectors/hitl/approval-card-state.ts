@@ -5,16 +5,21 @@ import { buildLarkCommandFrame } from "@/lib/connectors/adapters/lark/card"
 import type { ConversationReference } from "@/types/connectors/event"
 import type { MessageSegment } from "@/types/connectors/segment"
 
-export type ApprovalCardState = "approved" | "denied" | "expired" | "processed" | "failed"
+export type ApprovalCardState =
+  "approved" | "denied" | "expired" | "processed" | "failed" | "answered" | "skipped" | "cancelled"
 
-export function approvalStateSegment(state: ApprovalCardState): MessageSegment {
+export function approvalStateSegment(state: ApprovalCardState, detail?: string): MessageSegment {
   const title = {
     approved: "✓ 已批准 / Approved",
     denied: "⊘ 已拒绝 / Denied",
     expired: "◷ 已过期 / Expired",
     processed: "✓ 已处理 / Processed",
     failed: "✕ 处理失败 / Failed",
+    answered: "✓ 已回答 / Answered",
+    skipped: "↷ 已跳过 / Skipped",
+    cancelled: "⊘ 已停止 / Stopped",
   }[state]
+  const trimmed = detail?.trim()
   return {
     type: "card",
     card: {
@@ -22,13 +27,16 @@ export function approvalStateSegment(state: ApprovalCardState): MessageSegment {
       payload: buildLarkCommandFrame(
         title,
         [
+          ...(trimmed ? [{ tag: "markdown" as const, content: trimmed.slice(0, 500) }] : []),
           {
             tag: "markdown",
             content:
               "此请求已结束，操作按钮已移除。 / This request is closed. Its action buttons have been removed.",
           },
         ],
-        state === "approved" || state === "processed" ? "success" : "warning"
+        state === "approved" || state === "processed" || state === "answered"
+          ? "success"
+          : "warning"
       ),
     },
   }
@@ -43,6 +51,8 @@ export async function settleApprovalCard(input: {
   state: ApprovalCardState
   messageId?: string
   jobId?: string
+  /** Optional echo rendered above the closed notice (e.g. the given answer). */
+  detail?: string
 }): Promise<void> {
   if (input.conversationRef.platform !== "lark") return
   try {
@@ -59,7 +69,7 @@ export async function settleApprovalCard(input: {
           ? { deliveryTarget: delivery.request.deliveryTarget }
           : {}),
         editTargetMessageId: messageId,
-        segments: [approvalStateSegment(input.state)],
+        segments: [approvalStateSegment(input.state, input.detail)],
         metadata: { idempotencyKey: `approval-state:${input.surfaceId}:${input.state}` },
       },
       source: "ai-run",

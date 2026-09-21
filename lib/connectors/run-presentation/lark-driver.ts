@@ -20,6 +20,16 @@ import {
   RUN_ACTION_LABEL_EN,
   RUN_ACTION_LABEL_ZH,
 } from "./follow-up-items"
+import {
+  createLarkCotClient,
+  createLarkCotProjectionState,
+  isLarkCotKnownUnsupported,
+  isLarkCotProjectionState,
+  isLarkCotUnsupportedError,
+  projectLarkCotEvents,
+  rememberLarkCotUnsupported,
+} from "./lark-cot"
+import type { LarkCotProjectionState } from "./lark-cot"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 
 type LarkMethod = "POST" | "PUT" | "PATCH" | "DELETE"
@@ -86,6 +96,44 @@ function isSafePendingMutation(
   )
 }
 
+/**
+ * The COT projection persisted under `ref.opaqueState.cot`: either an active
+ * handle + diff state, or the reason the feature is off for this run.
+ */
+type LarkCotOpaqueState =
+  | { status: "active"; cotId: string; messageId: string; projection: LarkCotProjectionState }
+  | { status: "disabled"; reason: string }
+
+/**
+ * Read `ref.opaqueState.cot` the same defensive way `state()` reads
+ * `pendingMutation`: a malformed persisted shape is treated as disabled with
+ * reason `invalid_state` rather than trusted for a diff or re-probe.
+ * `undefined` means COT was never attempted — distinct from disabled.
+ */
+function cotOpaqueState(ref: RunPresentationRef | undefined): LarkCotOpaqueState | undefined {
+  const raw = ref?.opaqueState?.cot
+  if (raw === undefined || raw === null) return undefined
+  if (typeof raw !== "object") return { status: "disabled", reason: "invalid_state" }
+  const cot = raw as Record<string, unknown>
+  if (cot.status === "disabled" && typeof cot.reason === "string") {
+    return { status: "disabled", reason: cot.reason }
+  }
+  if (
+    cot.status === "active" &&
+    typeof cot.cotId === "string" &&
+    typeof cot.messageId === "string" &&
+    isLarkCotProjectionState(cot.projection)
+  ) {
+    return {
+      status: "active",
+      cotId: cot.cotId,
+      messageId: cot.messageId,
+      projection: cot.projection,
+    }
+  }
+  return { status: "disabled", reason: "invalid_state" }
+}
+
 interface FollowUpControlItem {
   action: RunControlAction | "status"
   content: string
@@ -107,6 +155,13 @@ export interface LarkRunPresentationDriverOptions {
   now?: () => number
   statusReactions?: boolean
   webEntryBaseUrl?: string | null
+  /**
+   * Write the run's process timeline to a native COT message
+   * (`im/v1/message_cot`) created right before the card. On by default; any
+   * COT failure degrades to the card-only presentation without failing the
+   * run. Pass `false` to disable the feature entirely.
+   */
+  cot?: boolean
 }
 
 // Shared with the generic fallback path, which registers the same verbs so
@@ -208,7 +263,8 @@ function graphSignature(snapshot: RunProjectionSnapshot): string {
 function cardJson(
   snapshot: RunProjectionSnapshot,
   streaming: boolean,
-  webBase?: string | null
+  webBase?: string | null,
+  cotActive = false
 ): Record<string, unknown> {
   const safeRunId = safeStableActivityId(snapshot.runId)
   const zh = snapshot.locale?.toLowerCase().startsWith("zh") === true
@@ -216,7 +272,7 @@ function cardJson(
   const statusLabel = i18n.runStatus(snapshot.status)
   const title = runTitleForPresentation(snapshot, i18n)
   const actionLabel = zh ? ACTION_LABEL_ZH : ACTION_LABEL_EN
-  const details = summaryContent(snapshot)
+  const details = summaryContent(snapshot, cotActive)
   const runUrl = buildRunDetailsUrl(safeRunId, webBase)
   const detailsUrl =
     runUrl && snapshot.workflowGraph
@@ -303,32 +359,42 @@ function cardJson(
       vertical_spacing: "12px",
       elements: [
         ...workflowElements(snapshot),
-        {
-          tag: "collapsible_panel",
-          element_id: "run_progress",
-          expanded: !snapshot.workflowGraph,
-          padding: "12px",
-          vertical_spacing: "12px",
-          header: {
-            title: {
-              tag: "plain_text",
-              content:
-                snapshot.kind === "workflow"
-                  ? zh
-                    ? "节点与执行活动"
-                    : "Nodes and activity"
-                  : zh
-                    ? "执行过程"
-                    : "Execution activity",
+        // With a live COT message the process timeline renders there; the
+        // panel collapses to a single summary element (same element_id, so
+        // stream_summary mutations keep working). Without COT the collapsible
+        // panel carries the full in-card timeline as before.
+        cotActive
+          ? { tag: "markdown", content: details, element_id: SUMMARY_ELEMENT_ID }
+          : {
+              tag: "collapsible_panel",
+              element_id: "run_progress",
+              expanded: !snapshot.workflowGraph,
+              padding: "12px",
+              vertical_spacing: "12px",
+              header: {
+                title: {
+                  tag: "plain_text",
+                  content:
+                    snapshot.kind === "workflow"
+                      ? zh
+                        ? "节点与执行活动"
+                        : "Nodes and activity"
+                      : zh
+                        ? "执行过程"
+                        : "Execution activity",
+                },
+                background_color: "grey-100",
+                padding: "12px",
+                icon: {
+                  tag: "standard_icon",
+                  token: "down-small-ccm_outlined",
+                  size: "16px 16px",
+                },
+                icon_position: "right",
+              },
+              border: { color: "grey-200", corner_radius: "8px" },
+              elements: [{ tag: "markdown", content: details, element_id: SUMMARY_ELEMENT_ID }],
             },
-            background_color: "grey-100",
-            padding: "12px",
-            icon: { tag: "standard_icon", token: "down-small-ccm_outlined", size: "16px 16px" },
-            icon_position: "right",
-          },
-          border: { color: "grey-200", corner_radius: "8px" },
-          elements: [{ tag: "markdown", content: details, element_id: SUMMARY_ELEMENT_ID }],
-        },
         ...(actions.length > 0
           ? [
               {
@@ -359,9 +425,10 @@ export function buildLarkRunFallbackSegment(
 function serializeCard(
   snapshot: RunProjectionSnapshot,
   streaming: boolean,
-  webBase?: string | null
+  webBase?: string | null,
+  cotActive = false
 ): string {
-  let json = JSON.stringify(cardJson(snapshot, streaming, webBase))
+  let json = JSON.stringify(cardJson(snapshot, streaming, webBase, cotActive))
   if (new TextEncoder().encode(json).byteLength <= CARD_LIMIT_BYTES) return json
   json = JSON.stringify(
     cardJson(
@@ -373,7 +440,8 @@ function serializeCard(
         artifacts: [],
       },
       streaming,
-      webBase
+      webBase,
+      cotActive
     )
   )
   if (new TextEncoder().encode(json).byteLength > CARD_LIMIT_BYTES) {
@@ -382,7 +450,7 @@ function serializeCard(
   return json
 }
 
-function summaryContent(snapshot: RunProjectionSnapshot): string {
+function summaryContent(snapshot: RunProjectionSnapshot, cotActive = false): string {
   const zh = snapshot.locale?.toLowerCase().startsWith("zh") === true
   const i18n = resolveActivityI18n(snapshot.locale)
   const escape = (value: string) =>
@@ -412,11 +480,15 @@ function summaryContent(snapshot: RunProjectionSnapshot): string {
       : undefined
   // Reuse the sanitized public timeline; raw tool payloads and errors are not
   // presentation data. The same element updates in place on every revision.
-  const timeline = formatRunActivityTimeline(snapshot, i18n)
-    .split("\n")
-    .slice(1)
-    .filter((line) => line !== "│")
-    .join("\n\n")
+  // With a live COT the timeline lives in that message — the summary keeps a
+  // pointer line instead of duplicating the process inside the card.
+  const timeline = cotActive
+    ? undefined
+    : formatRunActivityTimeline(snapshot, i18n)
+        .split("\n")
+        .slice(1)
+        .filter((line) => line !== "│")
+        .join("\n\n")
   return [
     overview,
     bar,
@@ -424,6 +496,7 @@ function summaryContent(snapshot: RunProjectionSnapshot): string {
     timeline,
     artifacts,
     followUpHintLine(buildFollowUpItems(snapshot), zh),
+    cotActive ? i18n.cotProcessInline : undefined,
   ]
     .filter(Boolean)
     .join("\n\n")
@@ -431,9 +504,10 @@ function summaryContent(snapshot: RunProjectionSnapshot): string {
 
 function actionsElement(
   snapshot: RunProjectionSnapshot,
-  webBase?: string | null
+  webBase?: string | null,
+  cotActive = false
 ): Record<string, unknown> {
-  const card = cardJson(snapshot, true, webBase) as {
+  const card = cardJson(snapshot, true, webBase, cotActive) as {
     body: { elements: Array<Record<string, unknown> & { element_id?: string }> }
   }
   return (
@@ -501,6 +575,7 @@ export function createLarkRunPresentationDriver(
 ): RunPresentationDriver {
   const sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)))
   const now = options.now ?? Date.now
+  const cot = options.cot === false ? undefined : createLarkCotClient(request, { sleep, now })
 
   async function react(
     ref: RunPresentationRef,
@@ -622,6 +697,127 @@ export function createLarkRunPresentationDriver(
     return sent.data?.message_id
   }
 
+  /**
+   * Project the snapshot diff into the live COT message and persist the
+   * advanced projection. The write lands BEFORE the projection checkpoint so
+   * a failed write re-derives the same diff on the next mutation (the
+   * projector is deterministic given the same prior state + snapshot).
+   * Every failure degrades to a persisted `disabled` state — the COT path
+   * never throws into the card flow. One strike disables for the run.
+   */
+  async function syncCot(
+    ref: RunPresentationRef,
+    snapshot: RunProjectionSnapshot,
+    checkpoint?: (ref: RunPresentationRef) => Promise<void>
+  ): Promise<RunPresentationRef> {
+    const current = cotOpaqueState(ref)
+    if (!cot || current?.status !== "active") return ref
+    const {
+      events,
+      state: projection,
+      terminalReason,
+    } = projectLarkCotEvents(
+      current.projection,
+      snapshot,
+      resolveActivityI18n(snapshot.locale),
+      now()
+    )
+    if (events.length === 0 && projection === current.projection) return ref
+    const handle = { cotId: current.cotId, messageId: current.messageId }
+    try {
+      if (events.length > 0) await cot.write(handle, events)
+      // RUN_FINISHED auto-completes; only an error terminal needs the call.
+      if (terminalReason === "error") await cot.complete(handle, "error")
+    } catch (error) {
+      const unsupported = isLarkCotUnsupportedError(error)
+      const reason = unsupported
+        ? "unsupported"
+        : errorCode(error) === 230001
+          ? "param_invalid"
+          : "write_failed"
+      if (unsupported) {
+        const adapterId = (ref.opaqueState?.target as RunPresentationTarget | undefined)?.adapterId
+        if (adapterId) rememberLarkCotUnsupported(adapterId, reason, now())
+      }
+      const disabled: RunPresentationRef = {
+        ...ref,
+        opaqueState: { ...ref.opaqueState, cot: { status: "disabled", reason } },
+      }
+      await checkpoint?.(disabled)
+      return disabled
+    }
+    const next: RunPresentationRef = {
+      ...ref,
+      opaqueState: { ...ref.opaqueState, cot: { ...current, projection } },
+    }
+    await checkpoint?.(next)
+    return next
+  }
+
+  /**
+   * Create the COT message ahead of the card (so it renders above it) and
+   * write the initial event batch. Skipped entirely when the feature is off,
+   * the adapter is already known to lack message_cot, or the target cannot
+   * anchor one — a topic conversation needs `origin_message_id` because
+   * message_cot has no reply_in_thread. Failure never fails `open()`: the
+   * disabled state is checkpointed and the card proceeds exactly as before.
+   */
+  async function maybeOpenCot(
+    ref: RunPresentationRef,
+    target: RunPresentationTarget,
+    snapshot: RunProjectionSnapshot,
+    checkpoint?: (ref: RunPresentationRef) => Promise<void>
+  ): Promise<RunPresentationRef> {
+    if (!cot) return ref
+    const existing = cotOpaqueState(ref)
+    if (existing?.status === "disabled") return ref
+    if (existing?.status === "active") {
+      // A retried open after the create checkpoint: the COT already exists —
+      // flush the current diff (a same-snapshot retry emits nothing).
+      return syncCot(ref, snapshot, checkpoint)
+    }
+    const disable = async (reason: string): Promise<RunPresentationRef> => {
+      const next: RunPresentationRef = {
+        ...ref,
+        opaqueState: { ...ref.opaqueState, cot: { status: "disabled", reason } },
+      }
+      await checkpoint?.(next)
+      return next
+    }
+    if (isLarkCotKnownUnsupported(target.adapterId, now())) return disable("unsupported")
+    const delivery = target.deliveryTarget
+    const chatId = delivery?.address.containerId
+    if (!delivery || !chatId) return ref
+    const anchor = target.sourceMessageId ?? delivery.sourceMessageId
+    if (delivery.address.topicId && !anchor) return disable("no_topic_anchor")
+    let handle: { cotId: string; messageId: string }
+    try {
+      handle = await cot.create({ chatId, ...(anchor ? { originMessageId: anchor } : {}) })
+    } catch (error) {
+      if (isLarkCotUnsupportedError(error)) {
+        rememberLarkCotUnsupported(target.adapterId, "unsupported", now())
+        return disable("unsupported")
+      }
+      return disable("create_failed")
+    }
+    const active: RunPresentationRef = {
+      ...ref,
+      opaqueState: {
+        ...ref.opaqueState,
+        cot: {
+          status: "active",
+          cotId: handle.cotId,
+          messageId: handle.messageId,
+          projection: createLarkCotProjectionState(),
+        },
+      },
+    }
+    // Persist the handle before the first write: a retry must reuse this COT
+    // instead of creating a duplicate message.
+    await checkpoint?.(active)
+    return syncCot(active, snapshot, checkpoint)
+  }
+
   async function ensureFollowUpControl(
     ref: RunPresentationRef,
     target: RunPresentationTarget,
@@ -740,9 +936,10 @@ export function createLarkRunPresentationDriver(
       ...previousRef,
       opaqueState: { ...previousRef?.opaqueState, pendingCreate },
     })
+    const cotActive = cotOpaqueState(previousRef)?.status === "active"
     const created = (await request("POST", "/cardkit/v1/cards", {
       type: "card_json",
-      data: serializeCard(snapshot, true, options.webEntryBaseUrl),
+      data: serializeCard(snapshot, true, options.webEntryBaseUrl, cotActive),
       uuid: pendingCreate.uuid,
     })) as { data?: { card_id?: string } }
     const cardId = created.data?.card_id
@@ -758,6 +955,7 @@ export function createLarkRunPresentationDriver(
         hasActions: snapshot.allowedActions.length > 0,
         presentedStatus: snapshot.status,
         presentedGraph: graphSignature(snapshot),
+        presentedCot: cotActive,
         pendingCreate: undefined,
       },
     }
@@ -780,8 +978,14 @@ export function createLarkRunPresentationDriver(
     checkpoint?: (ref: RunPresentationRef) => Promise<void>
   ): Promise<RunPresentationRef> {
     const current = state(ref)
+    const cotState = cotOpaqueState(ref)
+    const cotActive = cotState?.status === "active"
+    // A card replacement keeps the COT state so the timeline message keeps
+    // being written even though the card entity is new.
+    const carryCot: RunPresentationRef | undefined =
+      cotState !== undefined ? { opaqueState: { cot: cotState } } : undefined
     if (now() - current.cardCreatedAt >= 14 * 24 * 60 * 60 * 1_000) {
-      return openCard(current.target, snapshot, checkpoint)
+      return openCard(current.target, snapshot, checkpoint, carryCot)
     }
     const sequence = current.lastAcknowledgedSequence + 1
     const mutationUuid = (kind: string) =>
@@ -796,7 +1000,7 @@ export function createLarkRunPresentationDriver(
             method: "PUT",
             path: `/cardkit/v1/cards/${current.cardId}/elements/${current.elementIds.summary}/content`,
             body: {
-              content: summaryContent(snapshot),
+              content: summaryContent(snapshot, cotActive),
               sequence,
               uuid: mutationUuid("summary"),
             },
@@ -810,7 +1014,9 @@ export function createLarkRunPresentationDriver(
               method: "PUT",
               path: `/cardkit/v1/cards/${current.cardId}/elements/${current.elementIds.actions}`,
               body: {
-                element: JSON.stringify(actionsElement(snapshot, options.webEntryBaseUrl)),
+                element: JSON.stringify(
+                  actionsElement(snapshot, options.webEntryBaseUrl, cotActive)
+                ),
                 sequence,
                 uuid: mutationUuid("actions"),
               },
@@ -828,7 +1034,8 @@ export function createLarkRunPresentationDriver(
                   data: serializeCard(
                     snapshot,
                     snapshot.status === "running" || snapshot.status === "queued",
-                    options.webEntryBaseUrl
+                    options.webEntryBaseUrl,
+                    cotActive
                   ),
                 },
                 sequence,
@@ -862,7 +1069,7 @@ export function createLarkRunPresentationDriver(
         )
       }
       if ([200740, 200750, 300317].includes(errorCode(error) ?? -1)) {
-        return openCard(current.target, snapshot, checkpoint)
+        return openCard(current.target, snapshot, checkpoint, carryCot)
       }
       throw error
     }
@@ -872,7 +1079,11 @@ export function createLarkRunPresentationDriver(
         ...ref.opaqueState,
         lastAcknowledgedSequence: pending.sequence,
         ...(pending.operation === "replace_card"
-          ? { presentedStatus: snapshot.status, presentedGraph: graphSignature(snapshot) }
+          ? {
+              presentedStatus: snapshot.status,
+              presentedGraph: graphSignature(snapshot),
+              presentedCot: cotActive,
+            }
           : {}),
         pendingMutation: undefined,
         hasActions: snapshot.allowedActions.length > 0,
@@ -907,7 +1118,8 @@ export function createLarkRunPresentationDriver(
         options?.checkpoint
       )
       if (!provisional?.opaqueState?.cardId) {
-        return openCard(target, snapshot, options?.checkpoint, provisional)
+        const withCot = await maybeOpenCot(provisional, target, snapshot, options?.checkpoint)
+        return openCard(target, snapshot, options?.checkpoint, withCot)
       }
       if (provisional.platformMessageId) {
         const current = state(provisional)
@@ -930,12 +1142,16 @@ export function createLarkRunPresentationDriver(
         mutationOptions?.checkpoint
       )
       ref = await react(ref, state(ref).target, reactionFor(snapshot), mutationOptions?.checkpoint)
+      ref = await syncCot(ref, snapshot, mutationOptions?.checkpoint)
       const current = state(ref)
       if (
         !["running", "queued"].includes(snapshot.status) ||
         current.hasActions !== snapshot.allowedActions.length > 0 ||
         ref.opaqueState?.presentedStatus !== snapshot.status ||
-        (ref.opaqueState?.presentedGraph ?? "") !== graphSignature(snapshot)
+        (ref.opaqueState?.presentedGraph ?? "") !== graphSignature(snapshot) ||
+        // A COT that just died mid-run means the card on screen has no
+        // timeline panel — force a replace so the in-card timeline returns.
+        (ref.opaqueState?.presentedCot === true) !== (cotOpaqueState(ref)?.status === "active")
       ) {
         return mutate(ref, snapshot, "replace_card", mutationOptions?.checkpoint)
       }
@@ -951,6 +1167,7 @@ export function createLarkRunPresentationDriver(
         mutationOptions?.checkpoint
       )
       ref = await react(ref, state(ref).target, reactionFor(snapshot), mutationOptions?.checkpoint)
+      ref = await syncCot(ref, snapshot, mutationOptions?.checkpoint)
       return mutate(ref, snapshot, "replace_card", mutationOptions?.checkpoint)
     },
   }

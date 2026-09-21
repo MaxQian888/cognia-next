@@ -89,4 +89,15 @@ describe("resolveActivityI18n", () => {
     expect(zh.completedActivities(3)).toBe("已完成 3 项")
     expect(en.omittedActivities(5)).toBe("… 5 earlier activities hidden")
   })
+
+  it("provides the Lark COT strings for both locales", () => {
+    const en = resolveActivityI18n("en")
+    const zh = resolveActivityI18n("zh-CN")
+    expect(en.cotToolFailed).toBe("Tool failed")
+    expect(zh.cotToolFailed).toBe("执行失败")
+    expect(en.cotWaitingForAction).toBe("Waiting for your action")
+    expect(zh.cotWaitingForAction).toBe("等待你的操作")
+    expect(en.cotProcessInline).toBe("Process shown in the thinking timeline above")
+    expect(zh.cotProcessInline).toBe("执行过程见上方思维链")
+  })
 })

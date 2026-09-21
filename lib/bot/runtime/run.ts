@@ -50,6 +50,7 @@ import {
 import { BotRunCancelledError, BotRunParkedError, createBotStepApi, type BotStepDeps } from "./step"
 import { appendBotRunLog, appendBotRunProgress } from "./journal"
 import { clearPendingPark } from "./host-step"
+import { bindImPresentationForBotDelivery } from "./im-presentation"
 
 /** The run a delivery maps to. Derived, so a re-entry finds its own state. */
 export function botRunId(deliveryId: string): string {
@@ -232,6 +233,11 @@ export async function runBotDelivery(input: RunBotDeliveryInput): Promise<BotRun
     })
   }
   await markBotDeliveryRunning(delivery.id, runId, ts)
+  // An IM-originated delivery carries its conversation's delivery target in
+  // the envelope payload; binding it here hands the run the generic
+  // presentation plane (progress card, COT, approval controls) with no
+  // additional machinery. Idempotent — a re-entered delivery finds its row.
+  await bindImPresentationForBotDelivery(delivery, runId).catch(() => undefined)
   await runEventJournal
     .append(
       runId,

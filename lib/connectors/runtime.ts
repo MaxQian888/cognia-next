@@ -65,14 +65,20 @@ import { readResolvedPrincipal } from "./principal/resolve"
 import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
 import { resolveMemoryConfig } from "@/types/memory/memory"
 import { assistantReplyToSegments } from "@/lib/connectors/a2ui-bridge/a2ui-to-segments"
+import { buildRunDetailsUrl, resolveWebEntryBase } from "./entry/deep-links"
+import {
+  splitLarkCardSegments,
+  withLarkResultCard,
+} from "@/lib/connectors/adapters/lark/result-card"
 import { buildSteerPayload, steerBlocksOf } from "@/lib/claude/steer"
 import { deliveryTargetFromEvent } from "@/types/connectors/event"
-import { hasNoLeakingPii } from "@cognia/redact"
+import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import { appendAudit } from "./audit"
 import { getBus } from "./bus"
 import {
   createPlatformSession,
   findActiveSessionForConversation,
+  listSessionsByConversationKey,
   refreshPlatformSessionBinding,
 } from "./session-bindings"
 import { stampSlaDeadline } from "./sla"
@@ -83,6 +89,7 @@ import type { AgentPermissionCeiling } from "@/types/agent/permission-ceiling"
 import { evaluateImRate } from "@/lib/connectors/im-rate/registry"
 import { getRunningAdapter } from "./lifecycle"
 import { makeImPermissionResponder } from "./hitl/tool-approval"
+import { registerImElicitationContext } from "./hitl/im-elicitation-context"
 import { holdWorkflowDispatchForApproval } from "./hitl/workflow-run-approval"
 import {
   createExecutionRun,
@@ -114,7 +121,12 @@ import {
   hasEffectiveCapability,
 } from "@/lib/connectors/effective-capabilities"
 import { markSessionDirty } from "@/lib/chat/search/indexer"
-import { speakerFromPlatformIdentity, speakerPromptHeader } from "@/lib/chat/speaker"
+import {
+  resolveMessageSpeaker,
+  speakerFromPlatformIdentity,
+  speakerPromptHeader,
+  speakerTranscriptName,
+} from "@/lib/chat/speaker"
 
 /**
  * Turn-capture timeout for connector AI-run turns. Raised above the 5-min chat
@@ -609,6 +621,134 @@ export function inboundEventToSendContent(event: NormalizedInboundEvent): SendCo
 function groupSpeakerHeader(event: NormalizedInboundEvent): string | undefined {
   if (event.channel.kind === "private") return undefined
   return speakerPromptHeader(speakerFromPlatformIdentity(event.sender))
+}
+
+const GROUP_CONTEXT_MAX_MESSAGES = 8
+const GROUP_CONTEXT_MAX_AGE_MS = 24 * 60 * 60 * 1_000
+const GROUP_CONTEXT_LINE_CHARS = 200
+const GROUP_CONTEXT_BUDGET_CHARS = 2_000
+const GROUP_CONTEXT_SESSION_LIMIT = 4
+const GROUP_CONTEXT_SCAN_ROWS = 60
+
+function storedMessagePlainText(parts: StoredMessage["parts"]): string {
+  return parts
+    .filter(
+      (part): part is { type: "text"; text: string } =>
+        part.type === "text" && typeof (part as { text?: unknown }).text === "string"
+    )
+    .map((part) => part.text)
+    .join("\n")
+    .trim()
+}
+
+/**
+ * Recent group chatter the model never saw.
+ *
+ * Ambient group traffic is stored by `insertInboundMessage` for every
+ * non-`drop` decision, but only `ai-run`/`draft-prepare` turns enter the
+ * sidecar's session history — so "@bot 就按这个来" reaches the model with no
+ * antecedent for "这个". The selector is the per-session watermark of the
+ * newest assistant reply: user messages after it are exactly the turns no
+ * model call has consumed. Once this turn replies the watermark covers them,
+ * which is what keeps the block from repeating on every turn.
+ *
+ * All bound sessions of the conversation are scanned (a `/new` or a
+ * rebound session leaves the previous session's rows in place), bounded by
+ * sessions × scan rows × message age × line and total budget. Every line is
+ * redact-gated; a leaking line is dropped, never the turn itself.
+ *
+ * Exported for `runtime.test.ts`.
+ */
+export async function recentGroupContextBlock(input: {
+  event: NormalizedInboundEvent
+  excludeMessageId: string
+  now?: number
+}): Promise<string | undefined> {
+  const { event } = input
+  if (event.channel.kind === "private") return undefined
+  const now = input.now ?? Date.now()
+  const cutoff = now - GROUP_CONTEXT_MAX_AGE_MS
+  const sessions = await listSessionsByConversationKey(event.conversationKey).catch(
+    () => [] as ChatSession[]
+  )
+
+  const candidates: Array<{ createdAt: number; speaker: string; text: string }> = []
+  for (const bound of sessions.slice(0, GROUP_CONTEXT_SESSION_LIMIT)) {
+    const rows = await getDb()
+      .messages.where("[sessionId+createdAt]")
+      .between([bound.id, 0], [bound.id, Number.MAX_SAFE_INTEGER])
+      .reverse()
+      .limit(GROUP_CONTEXT_SCAN_ROWS)
+      .toArray()
+      .catch(() => [] as StoredMessage[])
+    // Newest assistant reply in this session is the watermark: rows at or
+    // below it already reached the model through session history.
+    const lastAssistantAt = rows.find((row) => row.role === "assistant")?.createdAt ?? 0
+    for (const row of rows) {
+      if (row.role !== "user") continue
+      if (row.id === input.excludeMessageId) continue
+      if (row.createdAt <= lastAssistantAt || row.createdAt < cutoff) continue
+      const text = storedMessagePlainText(row.parts)
+      if (!text) continue
+      const speaker = resolveMessageSpeaker(row)
+      candidates.push({
+        createdAt: row.createdAt,
+        speaker: speaker ? speakerTranscriptName(speaker) : "",
+        text,
+      })
+    }
+  }
+
+  candidates.sort((a, b) => a.createdAt - b.createdAt)
+  const tail = candidates.slice(-GROUP_CONTEXT_MAX_MESSAGES)
+  const lines: string[] = []
+  let budget = GROUP_CONTEXT_BUDGET_CHARS
+  for (const candidate of tail) {
+    const flat = redactText(candidate.text.replace(/\s+/g, " ").trim()).redacted
+    if (!flat || !hasNoLeakingPii(flat)) continue
+    const clipped = flat.slice(0, GROUP_CONTEXT_LINE_CHARS)
+    if (clipped.length > budget) break
+    budget -= clipped.length
+    lines.push(`- ${candidate.speaker ? `${candidate.speaker}: ` : ""}${clipped}`)
+  }
+  if (lines.length === 0) return undefined
+  return `[group-context]\n${lines.join("\n")}\n[/group-context]`
+}
+
+/**
+ * Fold the replied-to message's preview plus any unseen group context into
+ * the prompt. Both are metadata lines in the same bracketed style as the
+ * `[speaker: …]` header: the quote is what `resolveInboundReplyTo` already
+ * stored on the row (the platform's reply descriptor resolved to the stored
+ * parent), and the context block is `recentGroupContextBlock`. Each is
+ * independently redact-gated and dropped — not fatal — when it cannot be
+ * made safe.
+ */
+export async function withConversationContext(
+  prompt: SendContent,
+  input: {
+    event: NormalizedInboundEvent
+    stored: StoredMessage
+  }
+): Promise<SendContent> {
+  const headers: string[] = []
+  const replyMeta = input.stored.metadata?.replyTo as { preview?: string } | undefined
+  const preview = replyMeta?.preview
+  if (typeof preview === "string" && preview.trim()) {
+    const flat = redactText(preview.replace(/\s+/g, " ").trim()).redacted
+    if (flat && hasNoLeakingPii(flat)) {
+      headers.push(`[replying-to: ${flat.slice(0, 280)}]`)
+    }
+  }
+  const context = await recentGroupContextBlock({
+    event: input.event,
+    excludeMessageId: input.stored.id,
+  })
+  if (context) headers.push(context)
+  if (headers.length === 0) return prompt
+  const block = headers.join("\n")
+  if (typeof prompt === "string") return `${block}\n${prompt}`
+  return [{ type: "text", text: block }, ...prompt]
 }
 
 /**
@@ -1636,7 +1776,9 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           restoredPermissions: previousRecoveryAnchor?.restoredPermissions,
           partialOutput: previousRecoveryAnchor?.partialOutput,
         })
-        await runProducer.start(Date.now(), { recoveryAnchor })
+        // Wall-clock turn start — also the result-card footer's elapsed base.
+        const turnStartedAt = Date.now()
+        await runProducer.start(turnStartedAt, { recoveryAnchor })
         // Abort propagation: thread the per-adapter teardown signal (aborted
         // by the install teardown and by a lifecycle requeue/stop) into the
         // capture, so tearing the runtime down halts an in-flight turn instead
@@ -1686,6 +1828,23 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           initiatorUserId: event.sender.remoteUserId,
           deliveryTarget: deliveryTargetFromEvent(event),
           approvalMode: override?.approvalMode,
+        })
+        // The `ask_user` tool call surfaces as an interactive card in THIS
+        // conversation while the capture runs (Phase 3 — connector-initiated
+        // runs have nobody watching the desktop dialog). The registration
+        // dies with the capture: `approvalController` aborts in the finally
+        // below, which both hides the context from late `plugin_tool_exec`
+        // events and settles any prompt still pending as aborted.
+        const unregisterImElicitation = registerImElicitationContext({
+          sessionId: session.id,
+          adapterId: event.adapterId,
+          conversationKey: event.conversationKey,
+          conversationRef: event.conversationRef,
+          deliveryTarget: deliveryTargetFromEvent(event),
+          initiatorUserId: event.sender.remoteUserId,
+          runId: executionRunId,
+          drafting: requireAcceptance,
+          signal: AbortSignal.any([captureSignal, approvalController.signal]),
         })
         const restoredDeniedRequests = new Set(
           (previousRecoveryAnchor?.restoredPermissions ?? [])
@@ -1775,10 +1934,18 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         }
 
         const inboundPrompt = inboundEventToSendContent(event)
+        // Quote + unseen group context ride into the model turn. The stored
+        // row keeps its clean body — this augments only what the sidecar sees.
+        const contextualPrompt = await withConversationContext(inboundPrompt, {
+          event,
+          stored: storedMsg,
+        })
         const prompt =
           event.channelData?.dispatchIntent === "steer-replay"
-            ? buildSteerPayload([{ text: event.plainText, blocks: steerBlocksOf(inboundPrompt) }])
-            : inboundPrompt
+            ? buildSteerPayload([
+                { text: event.plainText, blocks: steerBlocksOf(contextualPrompt) },
+              ])
+            : contextualPrompt
         let captured: Awaited<ReturnType<RunAndCaptureFn>>
         try {
           captured = await opts.runAndCapture(session.id, prompt, sendOptions, cap)
@@ -1841,6 +2008,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           break
         } finally {
           approvalController.abort()
+          unregisterImElicitation()
         }
         unregisterRunController()
         unregisterLiveSteer?.()
@@ -1990,14 +2158,84 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           break
         }
 
+        // ── Lark result card ──
+        // A completed Lark ai-run answer ships as a Card 2.0 "result card"
+        // (header state, `> 回复：…` quote when native reply-quoting is off,
+        // elapsed/initiator/run-link footer) instead of a bare lark_md div.
+        // The transform runs AFTER the draft branch, so an acceptance draft
+        // always keeps the raw generated segments.
+        //
+        // A `card` segment survives the serializer verbatim ONLY as its
+        // request's sole segment — the multi-segment combiner would degrade
+        // it to a "[card]" label — so the list is grouped for enqueueing:
+        // contiguous non-card runs keep today's combined body, each card
+        // goes out as its own interactive message.
+        let larkGroups: MessageSegment[][] | undefined
+        if (outboundTarget.deliveryTarget.address.platform === "lark") {
+          const carded = withLarkResultCard(outboundSegments, {
+            status: "done",
+            // The card's blockquote stands in for the platform reply-quote
+            // only when quoting is off; a private chat never needs it.
+            quote: !quoteReply && event.channel.kind !== "private" ? event.plainText : undefined,
+            elapsedMs: Date.now() - turnStartedAt,
+            initiatorOpenId: /^ou_[A-Za-z0-9]+$/.test(event.sender.remoteUserId)
+              ? event.sender.remoteUserId
+              : undefined,
+            detailsUrl:
+              buildRunDetailsUrl(executionRunId, resolveWebEntryBase(adapterRow)) ?? undefined,
+            fallbackAnswer: recoveredText,
+          })
+          const groups = splitLarkCardSegments(carded)
+          // An empty list keeps the legacy single enqueue (empty segments
+          // serialize to the "[empty]" placeholder) rather than sending
+          // nothing at all.
+          larkGroups = groups.length > 0 ? groups : undefined
+        }
+
         // Deliver through the respond-via target resolved above (falls back to
         // the receiving bot on any invalid target).
-        await enqueueOutbound({
-          adapterId: outboundTarget.adapterId,
-          conversationKey: outboundTarget.conversationKey,
-          request: outboundRequest,
-          source: "ai-run",
-        })
+        if (larkGroups) {
+          for (const [index, group] of larkGroups.entries()) {
+            await enqueueOutbound({
+              adapterId: outboundTarget.adapterId,
+              conversationKey: outboundTarget.conversationKey,
+              request: {
+                conversationRef: outboundRequest.conversationRef,
+                deliveryTarget: outboundRequest.deliveryTarget,
+                segments: group,
+                // The reply anchor rides on the first message of the turn.
+                ...(index === 0 && quoteReply ? { replyTo: { messageId: event.messageId } } : {}),
+                metadata: {
+                  ...outboundRequest.metadata,
+                  // Multi-part turns need distinct keys — the runner dedupes
+                  // delivered idempotency keys, so sharing `airun:…` across
+                  // parts would drop every part after the first.
+                  idempotencyKey:
+                    larkGroups.length > 1 ? `${idempotencyKey}:part:${index}` : idempotencyKey,
+                  // Card-bearing groups carry the terminal-card marker the
+                  // `onConnectorOutbound` hook exposes as `resultCard`.
+                  ...(group.some((segment) => segment.type === "card")
+                    ? {
+                        resultCard: {
+                          runId: executionRunId,
+                          status: "done" as const,
+                          sourceMessageId: storedMsg.id,
+                        },
+                      }
+                    : {}),
+                },
+              },
+              source: "ai-run",
+            })
+          }
+        } else {
+          await enqueueOutbound({
+            adapterId: outboundTarget.adapterId,
+            conversationKey: outboundTarget.conversationKey,
+            request: outboundRequest,
+            source: "ai-run",
+          })
+        }
 
         await appendAudit({
           adapterId: event.adapterId,

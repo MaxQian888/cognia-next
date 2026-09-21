@@ -230,16 +230,38 @@ export async function truncateActionId(
 export const DEFAULT_CALLBACK_BINDING_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
 /**
- * Binding-kind hints a surface author may put on a raw interactive component
- * (`bindingKind` + `bindingPayload`), so the platform mapper records the
- * button's binding under a specific kind the bus short-circuits on
- * (`help_quick_command`, `issue_action`, …) instead of the default
- * `callback_query`. Mappers spread the result into `recordCallbackBinding`.
- * Absent hints yield `{}` — every existing button keeps working.
+ * Binding hints a surface author may put on a raw interactive component, so
+ * the platform mapper records the component's binding under a specific kind
+ * the bus short-circuits on (`help_quick_command`, `issue_action`,
+ * `ask_user`, …) instead of the default `callback_query`. Mappers spread the
+ * result into `recordCallbackBinding`. Absent hints yield `{}` — every
+ * existing component keeps working.
+ *
+ *   - `bindingKind`           → `kind`
+ *   - `bindingPayload`        → `payload`
+ *   - `bindingActorScope`     → `actorScope`    ({mode, allowedUserIds?})
+ *   - `bindingAllowedActions` → `allowedActions` (string[])
+ *   - `bindingAccountId`      → `accountId`     (string)
+ *   - `bindingExpiresAt`      → `expiresAt`     (epoch ms)
+ *
+ * The guard fields matter for kinds whose presses mutate state: without
+ * `bindingActorScope` the authorization guard falls back to per-kind legacy
+ * scopes (usually "conversation"), which may be wider than intended.
+ *
+ * NOTE on `bindingAllowedActions`: `authorizeConnectorCallback` compares it
+ * against `normalizeRequestedAction(event)` — which is platform-dependent
+ * (Slack sends the action verb, Telegram/Discord echo the wire action id,
+ * personal-WeChat numeric replies carry the digit). A fixed verb list is only
+ * correct on verb-carrying platforms; surfaces that must work across all of
+ * them (e.g. `ask_user`) should leave the hint unset and lean on actorScope.
  */
 export function bindingHintFields(raw: Record<string, unknown> | undefined): {
   kind?: ConnectorCallbackBindingRow["kind"]
   payload?: Record<string, unknown>
+  accountId?: string
+  actorScope?: CallbackActorScope
+  allowedActions?: string[]
+  expiresAt?: number
 } {
   if (!raw) return {}
   const kind =
@@ -252,7 +274,46 @@ export function bindingHintFields(raw: Record<string, unknown> | undefined): {
     !Array.isArray(raw.bindingPayload)
       ? (raw.bindingPayload as Record<string, unknown>)
       : undefined
-  return { ...(kind ? { kind } : {}), ...(payload ? { payload } : {}) }
+  const accountId =
+    typeof raw.bindingAccountId === "string" && raw.bindingAccountId.length > 0
+      ? raw.bindingAccountId
+      : undefined
+  const scopeRaw = raw.bindingActorScope
+  const actorScope: CallbackActorScope | undefined =
+    scopeRaw &&
+    typeof scopeRaw === "object" &&
+    !Array.isArray(scopeRaw) &&
+    ["initiator", "operators", "conversation", "anyone"].includes(
+      String((scopeRaw as { mode?: unknown }).mode)
+    )
+      ? {
+          mode: (scopeRaw as { mode: CallbackActorScope["mode"] }).mode,
+          ...(Array.isArray((scopeRaw as { allowedUserIds?: unknown }).allowedUserIds)
+            ? {
+                allowedUserIds: (scopeRaw as { allowedUserIds: unknown[] }).allowedUserIds.filter(
+                  (v): v is string => typeof v === "string"
+                ),
+              }
+            : {}),
+        }
+      : undefined
+  const allowedActions = Array.isArray(raw.bindingAllowedActions)
+    ? (raw.bindingAllowedActions.filter(
+        (v): v is string => typeof v === "string" && v.length > 0
+      ) as string[])
+    : undefined
+  const expiresAt =
+    typeof raw.bindingExpiresAt === "number" && Number.isFinite(raw.bindingExpiresAt)
+      ? raw.bindingExpiresAt
+      : undefined
+  return {
+    ...(kind ? { kind } : {}),
+    ...(payload ? { payload } : {}),
+    ...(accountId ? { accountId } : {}),
+    ...(actorScope ? { actorScope } : {}),
+    ...(allowedActions && allowedActions.length > 0 ? { allowedActions } : {}),
+    ...(expiresAt !== undefined ? { expiresAt } : {}),
+  }
 }
 
 export async function recordCallbackBinding(input: {

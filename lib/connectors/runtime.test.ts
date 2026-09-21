@@ -34,6 +34,8 @@ import {
   insertInboundMessage,
   resolveRecoveryExecutionSpec,
   shouldEmbedInboundText,
+  recentGroupContextBlock,
+  withConversationContext,
   type RunAndCaptureFn,
 } from "./runtime"
 import { hasNoLeakingPii } from "@cognia/redact"
@@ -41,6 +43,7 @@ import { notifyConversationOverIM } from "@/lib/notifications/conversation-notif
 import { registerRunningAdapter, __resetLifecycleForTesting } from "./lifecycle"
 import { getBus, __resetBusForTesting } from "./bus"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
+import type { MessageSegment } from "@/types/connectors/segment"
 import type { RouteDecision } from "./mode-router"
 import type { ResolvedBinding } from "./policy-resolve"
 import type { AgentExecutionSendSpec } from "@cognia/agent-config-types/agent-execution"
@@ -2758,6 +2761,142 @@ describe("installRuntime — ai-run reply quoting (ADR-0009 §3A.3)", () => {
   })
 })
 
+describe("installRuntime — ai-run Lark result card", () => {
+  const larkEvent = (over: Partial<NormalizedInboundEvent> = {}) =>
+    makeEvent({
+      platform: "lark",
+      adapterId: "adapter_lark",
+      conversationKey: "lark:adapter_lark:oc_9",
+      conversationRef: { platform: "lark", adapterId: "adapter_lark" },
+      sender: {
+        id: "u_alice",
+        platform: "lark",
+        adapterId: "adapter_lark",
+        remoteUserId: "ou_alice",
+        displayName: "Alice",
+      },
+      channel: { id: "oc_9", name: "Ops group", kind: "group" },
+      messageId: "om_group_trigger",
+      ...over,
+    })
+
+  const seedLark = (patch: Partial<AdapterInstanceRow> = {}) =>
+    putInstance("adapter_lark", { type: "lark", ...patch })
+
+  type CardPayload = {
+    schema?: string
+    config?: { update_multi?: boolean; summary?: { content?: string }; width_mode?: string }
+    header?: unknown
+    body?: { elements: Record<string, unknown>[] }
+  }
+
+  function cardPayloadOf(job: { request: { segments: MessageSegment[] } }): CardPayload {
+    const seg = job.request.segments[0]
+    expect(seg.type).toBe("card")
+    if (seg.type !== "card") throw new Error("expected card segment")
+    expect(seg.card.kind).toBe("lark")
+    return seg.card.payload as CardPayload
+  }
+
+  it("ships the completed answer as a standalone Card 2.0 segment", async () => {
+    await seedLark({ settings: { webEntryBaseUrl: "https://app.example.com" } })
+    await callHandler(larkEvent(), "ai-run")
+
+    const jobs = await getDb().outboundQueue.toArray()
+    expect(jobs).toHaveLength(1)
+    const payload = cardPayloadOf(jobs[0])
+    expect(payload.schema).toBe("2.0")
+    expect(payload.config?.update_multi).toBe(true)
+    expect(payload.config?.summary?.content).toBe("Hello back from Claude!")
+    // A terminal card carries no state header.
+    expect(payload.header).toBeUndefined()
+
+    const elements = payload.body?.elements ?? []
+    const md = elements.filter((el) => el.tag === "markdown").map((el) => String(el.content))
+    expect(md).toContain("Hello back from Claude!")
+
+    // Footer: initiator at-mention + run-details link + elapsed readout.
+    const note = elements.find((el) => el.tag === "note") as
+      { elements: { content: string }[] } | undefined
+    const footer = note?.elements[0]?.content ?? ""
+    expect(footer).toContain("<at id=ou_alice></at>")
+    expect(footer).toContain("https://app.example.com/agent-runs?run=")
+    expect(footer).toContain("耗时")
+
+    // Native reply quoting is on by default in a group → the request carries
+    // replyTo and the card has no redundant blockquote.
+    expect(jobs[0].request.replyTo).toEqual({ messageId: "om_group_trigger" })
+    expect(elements.some((el) => el.element_id === "quote")).toBe(false)
+  })
+
+  it("renders the card's blockquote when reply quoting is opted out", async () => {
+    await seedLark({ replyQuoting: false })
+    await callHandler(larkEvent({ plainText: "deploy the build" }), "ai-run")
+
+    const [job] = await getDb().outboundQueue.toArray()
+    expect(job.request.replyTo).toBeUndefined()
+    const payload = cardPayloadOf(job)
+    const quote = (payload.body?.elements ?? []).find((el) => el.element_id === "quote")
+    expect(quote?.content).toBe("> 回复：deploy the build")
+  })
+
+  it("never renders a quote element in a private chat", async () => {
+    await seedLark({ replyQuoting: false })
+    await callHandler(
+      larkEvent({
+        conversationKey: "lark:adapter_lark:oc_priv",
+        channel: { id: "oc_priv", name: "DM", kind: "private" },
+        plainText: "hello there",
+      }),
+      "ai-run"
+    )
+
+    const [job] = await getDb().outboundQueue.toArray()
+    expect(job.request.replyTo).toBeUndefined()
+    const payload = cardPayloadOf(job)
+    expect((payload.body?.elements ?? []).some((el) => el.element_id === "quote")).toBe(false)
+  })
+
+  it("enqueues each card as its own request when other segments surround it", async () => {
+    jest.mocked(DEFAULT_RUN_AND_CAPTURE).mockResolvedValueOnce({
+      text: `Summary\n\`\`\`a2ui\n${JSON.stringify({
+        surface: { id: "reply-card", type: "inline" },
+        components: [{ id: "root", component: "Text", text: "Project overview" }],
+      })}\n\`\`\``,
+      messageId: "a2ui-reply",
+      a2uiSurfaces: {},
+      a2uiSurfaceOrder: [],
+    })
+    await seedLark()
+    await callHandler(larkEvent(), "ai-run")
+
+    const jobs = await getDb().outboundQueue.toArray()
+    expect(jobs).toHaveLength(2)
+    // `[markdown, a2ui]` → `[card, a2ui]` → grouped `[[card], [a2ui]]` so the
+    // card never reaches the multi-segment combiner (which degrades it).
+    expect(jobs[0].request.segments[0].type).toBe("card")
+    expect(jobs[0].request.segments).toHaveLength(1)
+    expect(jobs[1].request.segments[0].type).toBe("a2ui")
+    // Multi-part turns get distinct idempotency keys — the runner dedupes
+    // delivered keys.
+    expect(jobs[0].idempotencyKey).toBe("airun:a2ui-reply:part:0")
+    expect(jobs[1].idempotencyKey).toBe("airun:a2ui-reply:part:1")
+    // The reply anchor rides only on the first message of the turn.
+    expect(jobs[0].request.replyTo).toEqual({ messageId: "om_group_trigger" })
+    expect(jobs[1].request.replyTo).toBeUndefined()
+  })
+
+  it("keeps raw segments on the draft path — the card transform never applies", async () => {
+    await seedLark()
+    await callHandler(larkEvent(), "draft-prepare")
+
+    const [draft] = await getDb().connectorDrafts.toArray()
+    expect(draft.segments).toEqual([{ type: "markdown", md: "Hello back from Claude!" }])
+    expect(draft.outboundPreview?.segments[0]?.type).toBe("markdown")
+    expect(await getDb().outboundQueue.count()).toBe(0)
+  })
+})
+
 describe("installRuntime — ai-run respond-via rule", () => {
   it("delivers the reply through the rule's respondViaAdapterId sibling", async () => {
     await seedAdapter("adapter_1", {
@@ -3141,5 +3280,162 @@ describe("inbound shared unread state", () => {
     ])
     expect(a.id).toBe(b.id)
     expect((await getDb().sessionState.get(session.id))?.unreadCount).toBe(previous + 1)
+  })
+})
+
+// ── group conversation context ────────────────────────────────────────────────
+
+const GROUP_KEY = "telegram:adapter_1:group_ctx"
+
+function groupEvent(overrides: Partial<NormalizedInboundEvent> = {}): NormalizedInboundEvent {
+  return makeEvent({
+    conversationKey: GROUP_KEY,
+    channel: { id: "g_ctx", kind: "group" },
+    ...overrides,
+  })
+}
+
+async function seedGroupSession(id: string): Promise<void> {
+  await getDb().sessions.add({
+    id,
+    title: "g",
+    kind: "direct",
+    platformConversationKey: GROUP_KEY,
+    platformBinding: { platform: "telegram", adapterId: "adapter_1", conversationKey: GROUP_KEY },
+    createdAt: 0,
+    updatedAt: 0,
+  } as never)
+}
+
+function storedMsgRow(
+  id: string,
+  sessionId: string,
+  role: "user" | "assistant",
+  text: string,
+  createdAt: number,
+  senderName = "Ada"
+) {
+  return {
+    id,
+    sessionId,
+    role,
+    parts: [{ type: "text", text }],
+    createdAt,
+    updatedAt: createdAt,
+    metadata:
+      role === "user"
+        ? {
+            platformMessage: {
+              messageId: `pm_${id}`,
+              platform: "telegram",
+              adapterId: "adapter_1",
+              conversationKey: GROUP_KEY,
+              sender: {
+                id: `pid_${id}`,
+                platform: "telegram",
+                adapterId: "adapter_1",
+                remoteUserId: `u_${id}`,
+                displayName: senderName,
+                kind: "human",
+              },
+            },
+          }
+        : undefined,
+  } as never
+}
+
+describe("recentGroupContextBlock", () => {
+  it("returns undefined for a private conversation", async () => {
+    await expect(
+      recentGroupContextBlock({ event: makeEvent({}), excludeMessageId: "x" })
+    ).resolves.toBeUndefined()
+  })
+
+  it("collects group user messages newer than the last assistant reply", async () => {
+    await seedGroupSession("s_ctx")
+    const now = Date.now()
+    await getDb().messages.bulkAdd([
+      storedMsgRow("m_old", "s_ctx", "user", "already handled", now - 3_000),
+      storedMsgRow("a_1", "s_ctx", "assistant", "bot reply", now - 2_000),
+      storedMsgRow("m_new", "s_ctx", "user", "unseen ambient", now - 1_000),
+      storedMsgRow("m_now", "s_ctx", "user", "current turn", now),
+    ])
+
+    const block = await recentGroupContextBlock({
+      event: groupEvent(),
+      excludeMessageId: "m_now",
+      now,
+    })
+
+    expect(block).toContain("unseen ambient")
+    expect(block).toContain("Ada")
+    // `m_old` predates the assistant watermark — the model already saw it.
+    expect(block).not.toContain("already handled")
+    expect(block).not.toContain("current turn")
+  })
+
+  it("reaches into an earlier bound session when the active one is new", async () => {
+    await seedGroupSession("s_old")
+    await seedGroupSession("s_new")
+    const now = Date.now()
+    await getDb().messages.bulkAdd([
+      storedMsgRow("m_prev", "s_old", "user", "from before the /new", now - 1_000),
+    ])
+
+    const block = await recentGroupContextBlock({
+      event: groupEvent(),
+      excludeMessageId: "m_now",
+      now,
+    })
+
+    expect(block).toContain("from before the /new")
+  })
+
+  it("drops messages older than the context window", async () => {
+    await seedGroupSession("s_ctx")
+    const now = Date.now()
+    await getDb().messages.bulkAdd([
+      storedMsgRow("m_stale", "s_ctx", "user", "two days ago", now - 48 * 60 * 60 * 1000),
+    ])
+
+    await expect(
+      recentGroupContextBlock({ event: groupEvent(), excludeMessageId: "x", now })
+    ).resolves.toBeUndefined()
+  })
+})
+
+describe("withConversationContext", () => {
+  it("prepends the replied-to preview as a bracketed header", async () => {
+    const stored = {
+      id: "m_now",
+      metadata: { replyTo: { messageId: "m_1", preview: "the earlier words" } },
+    } as never
+    const out = await withConversationContext("body text", {
+      event: makeEvent({}),
+      stored,
+    })
+    expect(out).toBe("[replying-to: the earlier words]\nbody text")
+  })
+
+  it("prepends context as a leading text block on structured prompts", async () => {
+    const stored = {
+      id: "m_now",
+      metadata: { replyTo: { messageId: "m_1", preview: "quoted" } },
+    } as never
+    const out = await withConversationContext([{ type: "text", text: "body" }], {
+      event: makeEvent({}),
+      stored,
+    })
+    expect(out).toEqual([
+      { type: "text", text: "[replying-to: quoted]" },
+      { type: "text", text: "body" },
+    ])
+  })
+
+  it("returns the prompt untouched when there is nothing to add", async () => {
+    const stored = { id: "m_now" } as never
+    await expect(withConversationContext("body", { event: makeEvent({}), stored })).resolves.toBe(
+      "body"
+    )
   })
 })

@@ -13,14 +13,31 @@ const input = {
   state: "approved" as const,
 }
 beforeEach(() => jest.clearAllMocks())
-it.each(["approved", "denied", "expired", "processed", "failed"] as const)(
-  "removes every action in a %s card",
-  (state) => {
-    const segment = approvalStateSegment(state)
-    expect(JSON.stringify(segment)).not.toContain('"button"')
-    expect(JSON.stringify(segment)).toContain('"schema":"2.0"')
-  }
-)
+it.each([
+  "approved",
+  "denied",
+  "expired",
+  "processed",
+  "failed",
+  "answered",
+  "skipped",
+  "cancelled",
+] as const)("removes every action in a %s card", (state) => {
+  const segment = approvalStateSegment(state)
+  expect(JSON.stringify(segment)).not.toContain('"button"')
+  expect(JSON.stringify(segment)).toContain('"schema":"2.0"')
+})
+it("renders the ask_user terminal states bilingually", () => {
+  expect(JSON.stringify(approvalStateSegment("answered"))).toContain("已回答 / Answered")
+  expect(JSON.stringify(approvalStateSegment("skipped"))).toContain("已跳过 / Skipped")
+  expect(JSON.stringify(approvalStateSegment("cancelled"))).toContain("已停止 / Stopped")
+})
+it("includes the optional detail above the closed notice", () => {
+  const withDetail = JSON.stringify(approvalStateSegment("answered", "**Q**\n> Selected: A"))
+  expect(withDetail).toContain("Selected: A")
+  const blank = JSON.stringify(approvalStateSegment("answered", "   "))
+  expect(blank).not.toContain("> ")
+})
 it("edits the original delivered message through the durable queue", async () => {
   jest.mocked(waitForOutboundTerminal).mockResolvedValue({
     adapterId: "lark-1",

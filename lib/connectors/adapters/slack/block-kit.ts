@@ -475,6 +475,10 @@ export async function buildSlackA2UIBlocks(input: SlackA2UIMapperInput): Promise
           surfaceId: input.surfaceId,
           componentId: node.id,
           conversationKey: input.conversationKey,
+          // Text inputs may carry binding hints too (e.g. an `ask_user`
+          // free-text field must resolve its pending prompt, not a digest
+          // turn). Same seam as the Button case.
+          ...bindingHintFields(node.raw),
         })
         const label = stringValue(node.raw.label) || "Input"
         out.push({

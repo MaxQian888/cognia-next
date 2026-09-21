@@ -242,6 +242,15 @@ export type ConnectorCallbackBindingKind =
   // the handler's business and some notification actions genuinely repeat.
   // See `lib/notifications/im-card.ts`.
   | "notification_action"
+  // A2UI `ask_user` elicitation card (control-plane HITL). A connector-initiated
+  // turn that calls the `ask_user` tool projects a question card; every button /
+  // input carries `{ sessionId, toolUseId, op, value? }` in `payload`, where `op`
+  // is `select` | `toggle` | `submit` | `submit_text` | `skip`. A press resolves
+  // (or mutates, for `toggle`) the in-process pending prompt in
+  // `lib/connectors/hitl/ask-user-registry.ts` — never a model turn. NOT
+  // consume-once: a multi-select card legitimately takes several presses before
+  // its Submit. See `lib/connectors/hitl/ask-user-question.ts`.
+  | "ask_user"
 
 /**
  * Persisted association between an outbound A2UI surface and the
